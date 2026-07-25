@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 (2026-07-25)
+
+- Repository moved to the [`RHINO-Experiment`](https://github.com/RHINO-Experiment)
+  GitHub organization; package metadata URLs (Homepage, Repository, Changelog)
+  now point there. Publishing continues via Trusted Publishing under the new
+  owner. No code or API changes.
+
 ## 0.1.2 (2026-07-25)
 
 - `__version__` is now read from the installed distribution metadata
