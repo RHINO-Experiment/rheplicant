@@ -94,7 +94,7 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
 ```bash
 pip install rheplicant
 # or, for development:
-git clone https://github.com/zzhang0123/rheplicant
+git clone https://github.com/RHINO-Experiment/rheplicant
 cd rheplicant && uv sync          # extras: uv sync --extra numpyro
 ```
 

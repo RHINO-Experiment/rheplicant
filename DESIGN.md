@@ -9,8 +9,8 @@ differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
 numbered decisions (D1–D13), each with the constraint that forced it. New
-here? Read the [README](https://github.com/zzhang0123/rheplicant#readme) for
-the philosophy and the [guided tour](https://github.com/zzhang0123/rheplicant/blob/main/docs/tour.md)
+here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
+the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
 and for future-us wondering "why is it like this".
 

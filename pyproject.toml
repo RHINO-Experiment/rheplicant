@@ -39,10 +39,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zzhang0123/rheplicant"
+Homepage = "https://github.com/RHINO-Experiment/rheplicant"
 Documentation = "https://rheplicant.readthedocs.io"
-Repository = "https://github.com/zzhang0123/rheplicant"
-Changelog = "https://github.com/zzhang0123/rheplicant/blob/main/CHANGELOG.md"
+Repository = "https://github.com/RHINO-Experiment/rheplicant"
+Changelog = "https://github.com/RHINO-Experiment/rheplicant/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

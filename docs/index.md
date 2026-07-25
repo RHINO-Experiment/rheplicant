@@ -29,7 +29,7 @@ itself.
 8. **The core is domain-agnostic** — radio astronomy is the first
    application, not the design center (a test enforces the layering).
 
-The [README](https://github.com/zzhang0123/rheplicant#readme) expands
+The [README](https://github.com/RHINO-Experiment/rheplicant#readme) expands
 each principle; start reading the docs with the [guided tour](tour.md).
 
 ```{toctree}

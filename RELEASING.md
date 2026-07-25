@@ -5,27 +5,36 @@
 mints a short-lived identity that PyPI verifies against a trusted-publisher
 config you set once.
 
-## One-time PyPI setup
+## PyPI trusted-publisher setup
 
-Before the first release, register the trusted publisher at
-<https://pypi.org/manage/account/publishing/> (the "pending publisher" form,
-since the project does not exist on PyPI yet):
+Publishing is authorized by a PyPI **trusted publisher** matched against the
+workflow's OIDC identity. Manage it under the project's publishing settings
+(<https://pypi.org/manage/project/rheplicant/settings/publishing/>):
 
 | Field | Value |
 |---|---|
 | PyPI Project Name | `rheplicant` |
-| Owner | `zzhang0123` |
+| Owner | `RHINO-Experiment` |
 | Repository name | `rheplicant` |
 | Workflow name | `publish.yml` |
 | Environment name | `pypi` |
 
+**If the GitHub repo is transferred or renamed, add a new trusted publisher
+for the new `owner/repo` before the next release.** The OIDC identity carries
+the *current* owner, so a stale publisher entry makes publishing fail even
+though old GitHub URLs redirect. (This repo moved `zzhang0123` →
+`RHINO-Experiment`; the `zzhang0123` publisher can be deleted once the
+`RHINO-Experiment` one is added.)
+
 The `pypi` GitHub Environment is created automatically on the first run; add
-protection rules to it under **Settings → Environments** if you want a manual
-approval gate before each publish.
+protection rules under **Settings → Environments** for a manual approval gate.
 
 ## Cutting a release
 
-1. Bump `version` in `pyproject.toml`, update `CHANGELOG.md`, commit.
+1. Bump `version` in `pyproject.toml` — the **single source of truth**. The
+   package's `__version__` is read back from the installed distribution
+   metadata (`importlib.metadata.version`), so never hardcode a version string
+   anywhere else in the source. Update `CHANGELOG.md`, then commit.
 2. Tag it: `git tag -a vX.Y.Z -m "rheplicant X.Y.Z" && git push origin vX.Y.Z`.
 3. Publish a **GitHub Release** for that tag (Releases → Draft a new release →
    choose the tag → Publish). This triggers `publish.yml`, which builds the
