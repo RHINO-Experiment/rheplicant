@@ -8,14 +8,14 @@ numpyro = pytest.importorskip("numpyro", reason="numpyro not installed")
 import numpyro.distributions as dist  # noqa: E402
 from numpyro.handlers import seed, trace  # noqa: E402
 
-from dirt.core.errors import StateValidationError  # noqa: E402
-from dirt.inference import (  # noqa: E402
+from replicant.core.errors import StateValidationError  # noqa: E402
+from replicant.inference import (  # noqa: E402
     predict_from_samples,
     prior_template,
     set_prior,
     to_numpyro_model,
 )
-from dirt.radio import GainOperator, SkyOperator, assemble  # noqa: E402
+from replicant.radio import GainOperator, SkyOperator, assemble  # noqa: E402
 
 TRUE_GAIN = 1.1
 SKY = 100.0

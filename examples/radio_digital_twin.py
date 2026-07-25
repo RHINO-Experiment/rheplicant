@@ -3,7 +3,7 @@
 Composition is implicit in the canonical signal-path graph: provide the
 operators, and ``assemble`` lights up the connected sub-path they induce and
 compiles it to the equivalent Pipeline/SumOperator nesting (see
-``dirt/radio/graph.py`` for the topology and DESIGN.md D11 for the rules).
+``replicant/radio/graph.py`` for the topology and DESIGN.md D11 for the rules).
 
 Then the inference seam works unchanged: gradient calibration of the gain
 against "observed" data, without touching the forward model's internals.
@@ -15,9 +15,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from dirt import Coordinates, Environment, State
-from dirt.inference import GradientCalibrator, build_forward_fn
-from dirt.radio import (
+from replicant import Coordinates, Environment, State
+from replicant.inference import GradientCalibrator, build_forward_fn
+from replicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,

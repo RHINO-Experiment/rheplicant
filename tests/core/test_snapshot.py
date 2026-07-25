@@ -3,9 +3,9 @@
 import jax.numpy as jnp
 import pytest
 
-from dirt import Pipeline, SnapshotOperator, State
-from dirt.core.errors import StateValidationError
-from dirt.core.operator import LambdaOperator
+from replicant import Pipeline, SnapshotOperator, State
+from replicant.core.errors import StateValidationError
+from replicant.core.operator import LambdaOperator
 
 
 class TestCheckpoint:

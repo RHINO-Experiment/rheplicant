@@ -1,9 +1,9 @@
-# DIRT Architecture
+# REPLICANT Architecture
 
 The design record: **why** the framework is shaped the way it is, as
 numbered decisions (D1–D13), each with the constraint that forced it. New
-here? Read the [README](https://github.com/zzhang0123/dirt-telescope#readme) for
-the philosophy and the [guided tour](https://github.com/zzhang0123/dirt-telescope/blob/main/docs/tour.md)
+here? Read the [README](https://github.com/zzhang0123/replicant-telescope#readme) for
+the philosophy and the [guided tour](https://github.com/zzhang0123/replicant-telescope/blob/main/docs/tour.md)
 for the API — this document is for contributors
 and for future-us wondering "why is it like this".
 
@@ -27,13 +27,13 @@ Contents: [Layering](#layering) ·
 ## Layering
 
 ```
-dirt.core        State / Operator / Pipeline / SumOperator   (domain-agnostic)
-dirt.radio       single-antenna operators, organized by element  (placeholder physics)
+replicant.core        State / Operator / Pipeline / SumOperator   (domain-agnostic)
+replicant.radio       single-antenna operators, organized by element  (placeholder physics)
                    taxonomy: sky / environment / instrument / backend
-dirt.inference   likelihood / calibration        (treats pipelines as data)
+replicant.inference   likelihood / calibration        (treats pipelines as data)
 ```
 
-**Hard rule:** `dirt.core` never imports from `radio` or `inference`. If the
+**Hard rule:** `replicant.core` never imports from `radio` or `inference`. If the
 framework proves reusable beyond radio astronomy, `core` graduates to its own
 package by moving one directory.
 
@@ -155,7 +155,7 @@ as MomentRFI's `prior_mask` so flaggers compose instead of clobbering.
 
 ### D11 — Composition is implicit in the signal path: graph-guided assembly
 
-The canonical signal-path graph (`dirt/radio/graph.py`, rendered by
+The canonical signal-path graph (`replicant/radio/graph.py`, rendered by
 `Assembly.to_mermaid`) makes explicit composition unnecessary:
 `assemble(*operators)` compiles a *set* of operator instances into the
 Pipeline/SumOperator nesting induced on the graph — absent sources are
@@ -286,7 +286,7 @@ numerical change to existing twins.
 
 ## Element taxonomy → module map
 
-`dirt.radio` mirrors the element taxonomy of a single-antenna global-signal
+`replicant.radio` mirrors the element taxonomy of a single-antenna global-signal
 experiment (source: `assets/elements.rtf`, local reference material — the
 `assets/` folder is gitignored because it contains an unpublished draft).
 
@@ -326,7 +326,7 @@ Graph-guided assembly (D11)
 ```
 
 Composition follows the physics, per the canonical signal-path graph
-(`dirt/radio/graph.py`, D11): astrophysical components sum
+(`replicant/radio/graph.py`, D11): astrophysical components sum
 (`SumOperator`), the ionosphere distorts that sum, RFI joins as a *pre-beam
 field* (it enters through the sidelobes and is convolved by the shared beam
 node), ground pickup joins as a *post-beam effective temperature*, and the

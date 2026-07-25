@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt import Pipeline, SnapshotOperator, State
-from dirt.core.errors import StateValidationError
-from dirt.radio import (
+from replicant import Pipeline, SnapshotOperator, State
+from replicant.core.errors import StateValidationError
+from replicant.radio import (
     ApplyCalibrationOperator,
     FourierBandFilter,
     GainOperator,

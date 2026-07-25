@@ -9,9 +9,9 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt import Pipeline, State, SumOperator
-from dirt.inference import build_forward_fn, mean_squared_error
-from dirt.radio import (
+from replicant import Pipeline, State, SumOperator
+from replicant.inference import build_forward_fn, mean_squared_error
+from replicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,

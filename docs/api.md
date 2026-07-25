@@ -1,180 +1,180 @@
 # API reference
 
-Generated from the source docstrings. Layering rule: `dirt.core` is
-domain-agnostic; `dirt.radio` and `dirt.inference` build on it.
+Generated from the source docstrings. Layering rule: `replicant.core` is
+domain-agnostic; `replicant.radio` and `replicant.inference` build on it.
 
-## dirt.core
+## replicant.core
 
 ```{eval-rst}
-.. automodule:: dirt.core.state
+.. automodule:: replicant.core.state
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.coordinates
+.. automodule:: replicant.core.coordinates
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.environment
+.. automodule:: replicant.core.environment
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.frozen
+.. automodule:: replicant.core.frozen
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.operator
+.. automodule:: replicant.core.operator
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.pipeline
+.. automodule:: replicant.core.pipeline
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.combinators
+.. automodule:: replicant.core.combinators
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.graph
+.. automodule:: replicant.core.graph
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.core.render
+.. automodule:: replicant.core.render
    :members:
 
-.. automodule:: dirt.core.errors
+.. automodule:: replicant.core.errors
    :members:
    :show-inheritance:
 ```
 
-## dirt.radio
+## replicant.radio
 
 ```{eval-rst}
-.. automodule:: dirt.radio.graph
+.. automodule:: replicant.radio.graph
    :members:
 
-.. automodule:: dirt.radio.sky.model
-   :members:
-   :show-inheritance:
-
-.. automodule:: dirt.radio.sky.projection
+.. automodule:: replicant.radio.sky.model
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.native
+.. automodule:: replicant.radio.sky.projection
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.source
+.. automodule:: replicant.radio.sky.native
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.uniform
+.. automodule:: replicant.radio.sky.source
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.global_signal
+.. automodule:: replicant.radio.sky.uniform
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.foregrounds
+.. automodule:: replicant.radio.sky.global_signal
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.sky.point_sources
+.. automodule:: replicant.radio.sky.foregrounds
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.environment.ionosphere
+.. automodule:: replicant.radio.sky.point_sources
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.environment.ground
+.. automodule:: replicant.radio.environment.ionosphere
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.environment.rfi
+.. automodule:: replicant.radio.environment.ground
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.beam
+.. automodule:: replicant.radio.environment.rfi
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.receiver
+.. automodule:: replicant.radio.instrument.beam
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.noise_wave
+.. automodule:: replicant.radio.instrument.receiver
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.calibration
+.. automodule:: replicant.radio.instrument.noise_wave
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.gain
+.. automodule:: replicant.radio.instrument.calibration
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.noise
+.. automodule:: replicant.radio.instrument.gain
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.emi
+.. automodule:: replicant.radio.instrument.noise
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.instrument.adc
+.. automodule:: replicant.radio.instrument.emi
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.backend.flagging
+.. automodule:: replicant.radio.instrument.adc
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.backend.averaging
+.. automodule:: replicant.radio.backend.flagging
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.filters.base
+.. automodule:: replicant.radio.backend.averaging
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.filters.sidereal
+.. automodule:: replicant.radio.filters.base
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.filters.skyspace
+.. automodule:: replicant.radio.filters.sidereal
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.filters.fourier
+.. automodule:: replicant.radio.filters.skyspace
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.radio.surrogate
+.. automodule:: replicant.radio.filters.fourier
+   :members:
+   :show-inheritance:
+
+.. automodule:: replicant.radio.surrogate
    :members:
    :show-inheritance:
 ```
 
-## dirt.inference
+## replicant.inference
 
 ```{eval-rst}
-.. automodule:: dirt.inference.forward
+.. automodule:: replicant.inference.forward
    :members:
 
-.. automodule:: dirt.inference.calibrate
-   :members:
-   :show-inheritance:
-
-.. automodule:: dirt.inference.likelihood
+.. automodule:: replicant.inference.calibrate
    :members:
    :show-inheritance:
 
-.. automodule:: dirt.inference.numpyro_bridge
+.. automodule:: replicant.inference.likelihood
+   :members:
+   :show-inheritance:
+
+.. automodule:: replicant.inference.numpyro_bridge
    :members:
 
-.. automodule:: dirt.inference.uncertainty
+.. automodule:: replicant.inference.uncertainty
    :members:
    :show-inheritance:
 ```

@@ -11,7 +11,7 @@ import pathlib
 
 import jax.numpy as jnp
 
-from dirt.radio import (
+from replicant.radio import (
     BeamOperator,
     ForegroundOperator,
     GainOperator,

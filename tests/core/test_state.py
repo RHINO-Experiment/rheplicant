@@ -1,14 +1,14 @@
-"""Tests for State: the immutable pytree container at the heart of dirt."""
+"""Tests for State: the immutable pytree container at the heart of replicant."""
 
 import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt.core.coordinates import Coordinates
-from dirt.core.environment import Environment
-from dirt.core.errors import MissingKeyError, StateValidationError
-from dirt.core.frozen import FrozenMapping
-from dirt.core.state import State
+from replicant.core.coordinates import Coordinates
+from replicant.core.environment import Environment
+from replicant.core.errors import MissingKeyError, StateValidationError
+from replicant.core.frozen import FrozenMapping
+from replicant.core.state import State
 
 
 @pytest.fixture

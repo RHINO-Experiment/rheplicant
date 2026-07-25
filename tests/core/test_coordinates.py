@@ -5,9 +5,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from dirt.core.coordinates import Coordinates
-from dirt.core.environment import Environment
-from dirt.core.errors import StateValidationError
+from replicant.core.coordinates import Coordinates
+from replicant.core.environment import Environment
+from replicant.core.errors import StateValidationError
 
 
 class TestCoordinatesConstruction:

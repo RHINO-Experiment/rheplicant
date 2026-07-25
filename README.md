@@ -1,13 +1,13 @@
-# DIRT
+# REPLICANT
 
-[![Documentation Status](https://readthedocs.org/projects/dirt-telescope/badge/?version=latest)](https://dirt-telescope.readthedocs.io/en/latest/)
+[![Documentation Status](https://readthedocs.org/projects/replicant-telescope/badge/?version=latest)](https://replicant-telescope.readthedocs.io/en/latest/)
 
-**Differentiable Instrument Response Twin** — a JAX + [Equinox](https://github.com/patrick-kidger/equinox)
-framework for building *differentiable digital twins* of single-antenna radio
+A **REPLIC**a of an **ANT**enna — a JAX + [Equinox](https://github.com/patrick-kidger/equinox)
+framework for building *differentiable replicas* of single-antenna radio
 telescopes: horns, dipoles, and dishes alike.
-**Documentation: [dirt-telescope.readthedocs.io](https://dirt-telescope.readthedocs.io/en/latest/)**
+**Documentation: [replicant-telescope.readthedocs.io](https://replicant-telescope.readthedocs.io/en/latest/)**
 
-A DIRT twin is one pure function from sky and instrument parameters to raw
+A REPLICANT twin is one pure function from sky and instrument parameters to raw
 data. Because every stage — foregrounds, ionosphere, beam, receiver
 reflections, gain drifts, digitisation — is differentiable, the same twin
 that *simulates* an observation also *calibrates* it: gradients, Bayesian
@@ -15,7 +15,7 @@ posteriors, Fisher forecasts, and neural surrogates all run through the
 instrument model itself, with no re-implementation.
 
 ```python
-from dirt.radio import assemble, GlobalSignalOperator, ForegroundOperator, GainOperator
+from replicant.radio import assemble, GlobalSignalOperator, ForegroundOperator, GainOperator
 
 twin = assemble(GlobalSignalOperator(...), ForegroundOperator(...), GainOperator(...))
 observation = twin(state)          # simulate — and differentiate, fit, sample
@@ -23,6 +23,21 @@ observation = twin(state)          # simulate — and differentiate, fit, sample
 
 First deployed for RHINO (a horn antenna targeting the 21 cm global signal);
 the core is domain-agnostic by construction.
+
+## The name
+
+**REPLICANT** is a portmanteau of **REPLIC**a and **ANT**enna — a digital twin
+*is* a replica, and this one is of a radio antenna. The two source words
+overlap on their shared `A`, so the blend is exactly nine letters:
+
+```
+R E P L I C A            replica
+            A N T         antenna
+─────────────────
+R E P L I C A N T        replicant
+```
+
+One-line gloss: *a differentiable replica of a radio antenna.*
 
 ## Philosophy
 
@@ -65,29 +80,29 @@ the core is domain-agnostic by construction.
    covariance matrices, assembly-time graph errors. In a framework built to
    chase 0.1 % systematics, a wrong number is worse than an exception.
 
-8. **The core is domain-agnostic.** `dirt.core` never imports the radio
+8. **The core is domain-agnostic.** `replicant.core` never imports the radio
    layer (a test enforces it). Radio astronomy is the first application,
    not the design center.
 
 ## Install
 
 ```bash
-pip install dirt-telescope            # import name: dirt
+pip install replicant-telescope            # import name: replicant
 # or, for development:
-git clone https://github.com/zzhang0123/dirt-telescope
-cd dirt-telescope && uv sync          # extras: uv sync --extra numpyro
+git clone https://github.com/zzhang0123/replicant-telescope
+cd replicant-telescope && uv sync          # extras: uv sync --extra numpyro
 ```
 
-Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. (An unrelated,
-abandoned package owns the name `dirt` on PyPI — install `dirt-telescope`.)
+Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. (A PyPA packaging
+sample owns the bare name `replicant` on PyPI — install `replicant-telescope`.)
 
-## Sixty seconds of DIRT
+## Sixty seconds of REPLICANT
 
 ```python
 import jax, jax.numpy as jnp, equinox as eqx
-from dirt import State, Coordinates
-from dirt.radio import assemble, SkyOperator, GainOperator, NoiseOperator
-from dirt.inference import build_forward_fn, GradientCalibrator
+from replicant import State, Coordinates
+from replicant.radio import assemble, SkyOperator, GainOperator, NoiseOperator
+from replicant.inference import build_forward_fn, GradientCalibrator
 
 state = State(
     coords=Coordinates(time=jnp.linspace(0, 60, 128),
@@ -138,7 +153,7 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
 
 ## Documentation
 
-Rendered docs: **[dirt-telescope.readthedocs.io](https://dirt-telescope.readthedocs.io)**
+Rendered docs: **[replicant-telescope.readthedocs.io](https://replicant-telescope.readthedocs.io)**
 (Sphinx + furo; build locally with
 `uv run sphinx-build -b html docs docs/_build/html`).
 
@@ -146,7 +161,7 @@ Rendered docs: **[dirt-telescope.readthedocs.io](https://dirt-telescope.readthed
 |---|---|
 | [Guided tour](docs/tour.md) | The complete API, top to bottom, with runnable snippets |
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
-| [Architecture](DESIGN.md) | Design decisions D1–D12, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D13, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Four end-to-end runnable demos |
 

@@ -5,14 +5,14 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt import Pipeline
-from dirt.inference import (
+from replicant import Pipeline
+from replicant.inference import (
     GaussianLikelihood,
     GradientCalibrator,
     build_forward_fn,
     mean_squared_error,
 )
-from dirt.radio import GainOperator, NoiseOperator, SkyOperator
+from replicant.radio import GainOperator, NoiseOperator, SkyOperator
 
 
 @pytest.fixture

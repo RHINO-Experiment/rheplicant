@@ -8,7 +8,7 @@ One twin, three uncertainty routes through the same seam:
 3. delta-method prediction band + Monte Carlo posterior predictive.
 
 Run:  uv run python examples/bayesian_and_uncertainty.py
-(requires the numpyro extra: pip install 'dirt[numpyro]')
+(requires the numpyro extra: pip install 'replicant[numpyro]')
 """
 
 import equinox as eqx
@@ -17,8 +17,8 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 
-from dirt import Coordinates, State
-from dirt.inference import (
+from replicant import Coordinates, State
+from replicant.inference import (
     build_forward_fn,
     fisher_information,
     parameter_covariance,
@@ -28,7 +28,7 @@ from dirt.inference import (
     set_prior,
     to_numpyro_model,
 )
-from dirt.radio import GainOperator, SkyOperator, assemble
+from replicant.radio import GainOperator, SkyOperator, assemble
 
 TRUE_GAIN, TRUE_SKY, SIGMA = 1.1, 100.0, 0.5
 

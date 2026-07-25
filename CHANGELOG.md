@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+### Renamed: DIRT -> REPLICANT (a portmanteau of REPLICa + ANTenna)
+
+A digital twin *is* a replica, and this one is of a radio antenna — so the
+package is now **REPLICANT** (`REPLIC`a ⊕ `ANT`enna, overlapping the shared
+`A`). Distribution name: `replicant-telescope`; import name: `replicant`
+(was `dirt` / `dirt-telescope`). A PyPA packaging sample owns the bare
+`replicant` name on PyPI, hence the `-telescope` suffix. Old `dirt-telescope`
+GitHub/RTD URLs redirect after the rename.
+
 ### Rendering: embeddable SVG + documented lit/dim examples
 
 `Assembly.to_svg()` / `SignalGraph.to_svg()` return a self-contained
@@ -16,7 +25,7 @@ The `atmosphere` node moved from a trunk transform (between `t_ant_sum` and
 the receiver-input switch) to a **source leaf** of `t_ant_sum`, parallel to
 `ground_pickup`/`t_sys_extra`: `SystemTemperatureOperator` (transform,
 `t_sys`) is replaced by `AtmosphericEmissionOperator` (source, `t_atm`, in
-`dirt.radio.environment`). A reserved `atmosphere_field` transform on the
+`replicant.radio.environment`). A reserved `atmosphere_field` transform on the
 astro branch (between `ionosphere` and `field_sum`) marks the strict
 radiative-transfer entrance — opacity acts on the astro sky alone, never on
 ground pickup. Numerically identical for the additive placeholder; see

@@ -9,9 +9,9 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt import AbstractOperator, State
-from dirt.core.errors import StateValidationError
-from dirt.radio import (
+from replicant import AbstractOperator, State
+from replicant.core.errors import StateValidationError
+from replicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,

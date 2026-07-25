@@ -6,10 +6,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from dirt import State
-from dirt.core.errors import StateValidationError
-from dirt.inference import GaussianLikelihood, MaskedGaussianLikelihood
-from dirt.radio import MomentRFIFlaggingOperator
+from replicant import State
+from replicant.core.errors import StateValidationError
+from replicant.inference import GaussianLikelihood, MaskedGaussianLikelihood
+from replicant.radio import MomentRFIFlaggingOperator
 
 
 class TestMaskedGaussianLikelihood:
