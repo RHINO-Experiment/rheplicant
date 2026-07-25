@@ -182,6 +182,13 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
 No CI yet — run `uv run pytest` and `uv run ruff check` before pushing.
 
+## Developers and maintainers
+
+- Zheng Zhang
+- Phil Bull
+- Jordan Norris
+- Rashi Srivastava
+
 ## License
 
 MIT
