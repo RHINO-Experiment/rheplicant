@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/RHINO-Experiment/rheplicant/main/docs/_static/rheplicant-banner.png"
+       alt="rheplicant — digital twin for the RHINO experiment" width="640">
+</p>
+
 # RHEPLICANT
 
 [![Documentation Status](https://readthedocs.org/projects/rheplicant/badge/?version=latest)](https://rheplicant.readthedocs.io/en/latest/)

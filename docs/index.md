@@ -1,5 +1,11 @@
 # RHEPLICANT
 
+```{image} _static/rheplicant-banner.png
+:alt: rheplicant — digital twin for the RHINO experiment
+:align: center
+:width: 560px
+```
+
 A **REPLIC**a of an **ANT**enna — a JAX + Equinox framework for building
 differentiable replicas of single-antenna radio telescopes: horns, dipoles,
 and dishes alike.

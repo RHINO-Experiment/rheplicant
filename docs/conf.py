@@ -44,6 +44,10 @@ intersphinx_mapping = {
 
 html_theme = "furo"
 html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
+html_static_path = ["_static"]
+html_logo = "_static/rheplicant-logo.png"
+# The logo already carries the "rheplicant" wordmark, so don't repeat the name.
+html_theme_options = {"sidebar_hide_name": True}
 
 exclude_patterns = ["_build"]
 
