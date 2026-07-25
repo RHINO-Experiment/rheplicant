@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 (2026-07-25)
+
+- `__version__` is now read from the installed distribution metadata
+  (`importlib.metadata.version`) instead of a hardcoded string, so
+  `pyproject.toml` is the single source of truth for the version. Falls back
+  to `0.0.0+unknown` when run from an uninstalled source tree.
+
 ## 0.1.1 (2026-07-25)
 
 - Credit the developers and maintainers (Zheng Zhang, Phil Bull, Jordan

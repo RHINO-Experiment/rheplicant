@@ -8,6 +8,8 @@ Core principle: **everything is an Operator acting on a State.**
 - ``rheplicant.inference`` — likelihood / calibration layer, separate from forward models.
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from rheplicant.core import (
     AbstractOperator,
     Assembly,
@@ -29,7 +31,12 @@ from rheplicant.core import (
     SumOperator,
 )
 
-__version__ = "0.1.1"
+# Single source of truth is pyproject.toml; read it back from the installed
+# distribution metadata rather than duplicating the string here.
+try:
+    __version__ = version("rheplicant")
+except PackageNotFoundError:  # running from a source tree with no install
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "AbstractOperator",
