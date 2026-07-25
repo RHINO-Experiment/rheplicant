@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant.core.operator import AbstractOperator, LambdaOperator
-from replicant.core.state import State
+from rheplicant.core.operator import AbstractOperator, LambdaOperator
+from rheplicant.core.state import State
 
 
 class Scaler(AbstractOperator):

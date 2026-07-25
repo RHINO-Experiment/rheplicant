@@ -5,10 +5,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant import Pipeline, State
-from replicant.core.errors import StateValidationError
-from replicant.radio import GainOperator
-from replicant.radio.sky import (
+from rheplicant import Pipeline, State
+from rheplicant.core.errors import StateValidationError
+from rheplicant.radio import GainOperator
+from rheplicant.radio.sky import (
     LimTODProjector,
     MatrixProjector,
     MModeProjector,
@@ -204,7 +204,7 @@ class TestLimTODProjector:
 class TestNativeLimTODProjector:
     """The port-contract endpoint: pure-JAX, differentiable, exact adjoint.
 
-    replicant-telescope's suite runs in default float32, so oracle/adjoint tolerances
+    rheplicant's suite runs in default float32, so oracle/adjoint tolerances
     here are f32-scale (1e-4); the float64 1e-6 guarantees live in the
     limtod_jax package's own suite (which enables x64).
     """
@@ -302,7 +302,7 @@ class TestNativeLimTODProjector:
     def test_oracle_x64_subprocess(self):
         """Full-precision end-to-end wiring proof: 1e-6 vs the oracle in x64.
 
-        replicant-telescope's suite runs float32 (and flipping jax_enable_x64 mid-
+        rheplicant's suite runs float32 (and flipping jax_enable_x64 mid-
         process is global), so the float64 acceptance criterion of the port
         contract is checked in a fresh interpreter with JAX_ENABLE_X64=1.
         Covers the whole adapter path: coords -> zyz angles -> quadrature
@@ -321,8 +321,8 @@ import healpy as hp
 import jax
 import jax.numpy as jnp
 import numpy as np
-from replicant import Coordinates
-from replicant.radio.sky import NativeLimTODProjector
+from rheplicant import Coordinates
+from rheplicant.radio.sky import NativeLimTODProjector
 from limTOD.simulator import generate_TOD_sky
 
 assert jax.config.read("jax_enable_x64")
@@ -409,8 +409,8 @@ print(f"X64 OK worst_rel={{worst:.3e}}")
     def test_skyspace_filter_composition(self, obs_coords, key):
         """The adjoint consumer: CG map-making runs and stays finite."""
         pytest.importorskip("limtod_jax")
-        from replicant import State
-        from replicant.radio.filters import SkySpaceFilter
+        from rheplicant import State
+        from rheplicant.radio.filters import SkySpaceFilter
 
         k1, k2 = jax.random.split(key)
         proj = self._random_projector(k1)

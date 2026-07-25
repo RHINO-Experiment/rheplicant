@@ -1,15 +1,16 @@
-# REPLICANT Architecture
+# RHEPLICANT Architecture
 
-The name is a portmanteau of **REPLIC**a + **ANT**enna: a digital twin *is* a
-replica, and this one is of a radio antenna — differentiable enough that the
-same replica that simulates an instrument can also be fit to it. Everything
+The name is **REPLIC**a + **ANT**enna (a digital twin *is* a replica, and this
+one is of a radio antenna) with the **RH** of **RH**INO in front — the horn
+antenna the framework was first built for. A replica differentiable enough that
+the same model which simulates an instrument can also be fit to it. Everything
 below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
 numbered decisions (D1–D13), each with the constraint that forced it. New
-here? Read the [README](https://github.com/zzhang0123/replicant-telescope#readme) for
-the philosophy and the [guided tour](https://github.com/zzhang0123/replicant-telescope/blob/main/docs/tour.md)
+here? Read the [README](https://github.com/zzhang0123/rheplicant#readme) for
+the philosophy and the [guided tour](https://github.com/zzhang0123/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
 and for future-us wondering "why is it like this".
 
@@ -33,13 +34,13 @@ Contents: [Layering](#layering) ·
 ## Layering
 
 ```
-replicant.core        State / Operator / Pipeline / SumOperator   (domain-agnostic)
-replicant.radio       single-antenna operators, organized by element  (placeholder physics)
+rheplicant.core        State / Operator / Pipeline / SumOperator   (domain-agnostic)
+rheplicant.radio       single-antenna operators, organized by element  (placeholder physics)
                    taxonomy: sky / environment / instrument / backend
-replicant.inference   likelihood / calibration        (treats pipelines as data)
+rheplicant.inference   likelihood / calibration        (treats pipelines as data)
 ```
 
-**Hard rule:** `replicant.core` never imports from `radio` or `inference`. If the
+**Hard rule:** `rheplicant.core` never imports from `radio` or `inference`. If the
 framework proves reusable beyond radio astronomy, `core` graduates to its own
 package by moving one directory.
 
@@ -161,7 +162,7 @@ as MomentRFI's `prior_mask` so flaggers compose instead of clobbering.
 
 ### D11 — Composition is implicit in the signal path: graph-guided assembly
 
-The canonical signal-path graph (`replicant/radio/graph.py`, rendered by
+The canonical signal-path graph (`rheplicant/radio/graph.py`, rendered by
 `Assembly.to_mermaid`) makes explicit composition unnecessary:
 `assemble(*operators)` compiles a *set* of operator instances into the
 Pipeline/SumOperator nesting induced on the graph — absent sources are
@@ -292,7 +293,7 @@ numerical change to existing twins.
 
 ## Element taxonomy → module map
 
-`replicant.radio` mirrors the element taxonomy of a single-antenna global-signal
+`rheplicant.radio` mirrors the element taxonomy of a single-antenna global-signal
 experiment (source: `assets/elements.rtf`, local reference material — the
 `assets/` folder is gitignored because it contains an unpublished draft).
 
@@ -332,7 +333,7 @@ Graph-guided assembly (D11)
 ```
 
 Composition follows the physics, per the canonical signal-path graph
-(`replicant/radio/graph.py`, D11): astrophysical components sum
+(`rheplicant/radio/graph.py`, D11): astrophysical components sum
 (`SumOperator`), the ionosphere distorts that sum, RFI joins as a *pre-beam
 field* (it enters through the sidelobes and is convolved by the shared beam
 node), ground pickup joins as a *post-beam effective temperature*, and the

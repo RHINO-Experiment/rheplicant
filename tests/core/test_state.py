@@ -1,14 +1,14 @@
-"""Tests for State: the immutable pytree container at the heart of replicant."""
+"""Tests for State: the immutable pytree container at the heart of rheplicant."""
 
 import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant.core.coordinates import Coordinates
-from replicant.core.environment import Environment
-from replicant.core.errors import MissingKeyError, StateValidationError
-from replicant.core.frozen import FrozenMapping
-from replicant.core.state import State
+from rheplicant.core.coordinates import Coordinates
+from rheplicant.core.environment import Environment
+from rheplicant.core.errors import MissingKeyError, StateValidationError
+from rheplicant.core.frozen import FrozenMapping
+from rheplicant.core.state import State
 
 
 @pytest.fixture

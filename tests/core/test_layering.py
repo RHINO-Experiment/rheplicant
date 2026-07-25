@@ -1,21 +1,21 @@
-"""Guard the architectural hard rule: replicant.core is domain-agnostic.
+"""Guard the architectural hard rule: rheplicant.core is domain-agnostic.
 
-DESIGN.md: "replicant.core never imports from radio or inference. If the
+DESIGN.md: "rheplicant.core never imports from radio or inference. If the
 framework proves reusable beyond radio astronomy, core graduates to its own
 package by moving one directory." This test makes that promise mechanical.
 """
 
 import pathlib
 
-import replicant.core
+import rheplicant.core
 
-CORE_DIR = pathlib.Path(replicant.core.__file__).parent
+CORE_DIR = pathlib.Path(rheplicant.core.__file__).parent
 # Match actual import statements, not prose mentions in docstrings.
 FORBIDDEN = (
-    "from replicant.radio",
-    "import replicant.radio",
-    "from replicant.inference",
-    "import replicant.inference",
+    "from rheplicant.radio",
+    "import rheplicant.radio",
+    "from rheplicant.inference",
+    "import rheplicant.inference",
 )
 
 
@@ -27,6 +27,6 @@ def test_core_never_imports_domain_layers():
             if banned in source:
                 offenders.append(f"{path.name}: contains {banned!r}")
     assert not offenders, (
-        "replicant.core must stay domain-agnostic (extractable), but:\n"
+        "rheplicant.core must stay domain-agnostic (extractable), but:\n"
         + "\n".join(offenders)
     )

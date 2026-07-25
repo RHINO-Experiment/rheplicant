@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant import AbstractOperator, Environment, Pipeline, State, SumOperator
-from replicant.core.errors import StateValidationError
-from replicant.radio import (
+from rheplicant import AbstractOperator, Environment, Pipeline, State, SumOperator
+from rheplicant.core.errors import StateValidationError
+from rheplicant.radio import (
     CWCalibrationOperator,
     EMIOperator,
     FlaggingOperator,

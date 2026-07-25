@@ -5,11 +5,11 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant import State
-from replicant.core.errors import StateValidationError
-from replicant.core.graph import At
-from replicant.inference import AdamCalibrator, build_forward_fn
-from replicant.radio import (
+from rheplicant import State
+from rheplicant.core.errors import StateValidationError
+from rheplicant.core.graph import At
+from rheplicant.inference import AdamCalibrator, build_forward_fn
+from rheplicant.radio import (
     GainOperator,
     NeuralOperator,
     ReceiverOperator,

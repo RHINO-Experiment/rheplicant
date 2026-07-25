@@ -6,10 +6,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant import State
-from replicant.core.errors import StateValidationError
-from replicant.inference import GaussianLikelihood, MaskedGaussianLikelihood
-from replicant.radio import MomentRFIFlaggingOperator
+from rheplicant import State
+from rheplicant.core.errors import StateValidationError
+from rheplicant.inference import GaussianLikelihood, MaskedGaussianLikelihood
+from rheplicant.radio import MomentRFIFlaggingOperator
 
 
 class TestMaskedGaussianLikelihood:

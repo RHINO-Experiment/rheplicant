@@ -5,10 +5,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from replicant.core.errors import PipelineError
-from replicant.core.operator import AbstractOperator, LambdaOperator
-from replicant.core.pipeline import Pipeline
-from replicant.core.state import State
+from rheplicant.core.errors import PipelineError
+from rheplicant.core.operator import AbstractOperator, LambdaOperator
+from rheplicant.core.pipeline import Pipeline
+from rheplicant.core.state import State
 
 
 class AddOne(AbstractOperator):

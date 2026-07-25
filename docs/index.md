@@ -1,10 +1,10 @@
-# REPLICANT
+# RHEPLICANT
 
 A **REPLIC**a of an **ANT**enna — a JAX + Equinox framework for building
 differentiable replicas of single-antenna radio telescopes: horns, dipoles,
 and dishes alike.
 
-A REPLICANT twin is one pure function from sky and instrument parameters to raw
+A RHEPLICANT twin is one pure function from sky and instrument parameters to raw
 data. Because every stage is differentiable, the same twin that *simulates*
 an observation also *calibrates* it: gradients, Bayesian posteriors, Fisher
 forecasts, and neural surrogates all run through the instrument model
@@ -29,7 +29,7 @@ itself.
 8. **The core is domain-agnostic** — radio astronomy is the first
    application, not the design center (a test enforces the layering).
 
-The [README](https://github.com/zzhang0123/replicant-telescope#readme) expands
+The [README](https://github.com/zzhang0123/rheplicant#readme) expands
 each principle; start reading the docs with the [guided tour](tour.md).
 
 ```{toctree}

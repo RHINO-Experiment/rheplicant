@@ -5,10 +5,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-import replicant.radio as radio
-from replicant import Pipeline, SumOperator
-from replicant.core.graph import AssemblyError, At
-from replicant.radio import (
+import rheplicant.radio as radio
+from rheplicant import Pipeline, SumOperator
+from rheplicant.core.graph import AssemblyError, At
+from rheplicant.radio import (
     RADIO_GRAPH,
     ADCOperator,
     BeamOperator,
@@ -133,7 +133,7 @@ class TestCanonicalTopology:
         assert jnp.array_equal(asm(template_state).data, hand(template_state).data)
 
     def test_processing_segment_rides_along(self, template_state):
-        from replicant.radio import FlaggingOperator, SiderealFilter
+        from rheplicant.radio import FlaggingOperator, SiderealFilter
 
         o = ops()
         asm = assemble(
@@ -155,8 +155,8 @@ class TestSwitchedCalibration:
         assert jnp.allclose(asm(template_state).data, 110.0)
 
     def test_switching_cycle_selects_antenna_or_load(self, template_state):
-        from replicant import SelectOperator
-        from replicant.radio import CalLoadOperator
+        from rheplicant import SelectOperator
+        from rheplicant.radio import CalLoadOperator
 
         switch = jnp.array([0, 1, 0, 0, 1, 0, 0, 1])
         state = template_state.replace(
@@ -178,8 +178,8 @@ class TestSwitchedCalibration:
 
     def test_cal_load_shapes(self, template_state):
         """Regression: per-frequency t_load broadcasts along freq, with validation."""
-        from replicant.core.errors import StateValidationError
-        from replicant.radio import CalLoadOperator
+        from rheplicant.core.errors import StateValidationError
+        from rheplicant.radio import CalLoadOperator
 
         t_load = jnp.arange(1.0, N_FREQ + 1.0)
         out = CalLoadOperator(t_load=t_load)(template_state)
@@ -191,13 +191,13 @@ class TestSwitchedCalibration:
 
     def test_load_only_observation(self, template_state):
         """Only the load provided: selector passes it through (all samples load)."""
-        from replicant.radio import CalLoadOperator
+        from rheplicant.radio import CalLoadOperator
 
         asm = assemble(CalLoadOperator(t_load=jnp.array(300.0)))
         assert jnp.allclose(asm(template_state).data, 300.0)
 
     def test_switching_is_differentiable_wrt_both_branches(self, template_state):
-        from replicant.radio import CalLoadOperator
+        from rheplicant.radio import CalLoadOperator
 
         switch = jnp.array([0, 1] * 4)
         state = template_state.replace(
@@ -221,7 +221,7 @@ class TestRegistryCompleteness:
         """Every exported radio operator class has a valid graph_node."""
         import inspect
 
-        from replicant.core.operator import AbstractOperator
+        from rheplicant.core.operator import AbstractOperator
 
         # Surrogates deliberately require explicit At(...) placement.
         explicit_placement = {"NeuralOperator"}

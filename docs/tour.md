@@ -1,6 +1,6 @@
 # The guided tour
 
-Everything REPLICANT can do, in order, with runnable snippets. Each block builds
+Everything RHEPLICANT can do, in order, with runnable snippets. Each block builds
 on the previous ones; pasted top to bottom they form a working script.
 
 - [1. State — the scientific context](#1-state)
@@ -21,7 +21,7 @@ immutable JAX pytree, so the whole thing jits, vmaps, and differentiates.
 
 ```python
 import jax, jax.numpy as jnp, equinox as eqx
-from replicant import State, Coordinates, Environment
+from rheplicant import State, Coordinates, Environment
 
 state = State(
     coords=Coordinates(time=jnp.linspace(0.0, 60.0, 8),      # seconds
@@ -55,8 +55,8 @@ callable, implemented as an `equinox.Module`. Array-valued fields are
 automatically differentiable parameters; there is no registration machinery.
 
 ```python
-from replicant import LambdaOperator
-from replicant.radio import GainOperator
+from rheplicant import LambdaOperator
+from rheplicant.radio import GainOperator
 
 gain = GainOperator(gain=jnp.array(1.1))          # gain is a differentiable leaf
 clip = LambdaOperator.on_data(lambda d: jnp.clip(d, 0.0, jnp.inf))
@@ -79,8 +79,8 @@ operators, so they nest arbitrarily.
 **`Pipeline` — sequential effects:**
 
 ```python
-from replicant import Pipeline
-from replicant.radio import SkyOperator, NoiseOperator
+from rheplicant import Pipeline
+from rheplicant.radio import SkyOperator, NoiseOperator
 
 pipe = Pipeline(
     SkyOperator(amplitude=jnp.array(100.0)),
@@ -97,8 +97,8 @@ pipe2 = pipe.replace_stage("gain", GainOperator(gain=jnp.array(2.0)))
 PRNG subkey; outputs sum leafwise (structure/shape mismatches fail loudly):
 
 ```python
-from replicant import SumOperator
-from replicant.radio import GlobalSignalOperator, ForegroundOperator
+from rheplicant import SumOperator
+from rheplicant.radio import GlobalSignalOperator, ForegroundOperator
 
 sky = SumOperator(
     GlobalSignalOperator(depth=jnp.array(0.2), centre=jnp.array(72e6),
@@ -117,12 +117,12 @@ parameter) — how switched calibration loads replace the antenna signal.
 
 Explicit composition is always available — but composition is *implicit in
 the signal path*. The canonical single-antenna graph
-(`replicant.radio.RADIO_GRAPH`, 29 nodes) knows how every element connects, so
+(`rheplicant.radio.RADIO_GRAPH`, 29 nodes) knows how every element connects, so
 you provide a **set** of operators and `assemble` compiles the sub-path they
 induce:
 
 ```python
-from replicant.radio import assemble, IonosphereOperator, BeamOperator
+from rheplicant.radio import assemble, IonosphereOperator, BeamOperator
 
 part = assemble(
     SkyOperator(amplitude=jnp.array(1e3)),
@@ -164,7 +164,7 @@ pre-beam field (`ground_field`) or a post-beam effective temperature
 Switched calibration is one more provided operator:
 
 ```python
-from replicant.radio import CalLoadOperator
+from rheplicant.radio import CalLoadOperator
 
 cal_state = state.replace(coords=state.coords.replace(
     extra={"receiver_input": jnp.array([0, 1, 0, 0, 1, 0, 0, 1])}))
@@ -197,7 +197,7 @@ maps → time-ordered data, with an exact `adjoint` for linear engines).
 Either half swaps independently.
 
 ```python
-from replicant.radio import SkySourceOperator, PowerLawSkyModel, MatrixProjector
+from rheplicant.radio import SkySourceOperator, PowerLawSkyModel, MatrixProjector
 
 projector = MatrixProjector(                        # e.g. from limTOD, offline
     matrix=jax.random.normal(jax.random.key(1), (8, 6)))
@@ -226,8 +226,8 @@ filter is a linear projection with `mode="extract"` (keep it) or
 `mode="remove"` (subtract it):
 
 ```python
-from replicant import SnapshotOperator
-from replicant.radio import ApplyCalibrationOperator, SiderealFilter, SkySpaceFilter
+from rheplicant import SnapshotOperator
+from rheplicant.radio import ApplyCalibrationOperator, SiderealFilter, SkySpaceFilter
 
 analysis = Pipeline(
     SnapshotOperator(name="raw"),                   # aux["snapshot/raw"]
@@ -254,7 +254,7 @@ into (trainable parameters, frozen structure) and closes over the input
 state:
 
 ```python
-from replicant.inference import build_forward_fn
+from rheplicant.inference import build_forward_fn
 
 model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
 spec = jax.tree.map(lambda _: False, model)         # freeze everything...
@@ -266,7 +266,7 @@ forward, params0 = build_forward_fn(model, state, filter_spec=spec)
 parameters, Adam for the rest (neural surrogates especially):
 
 ```python
-from replicant.inference import GradientCalibrator, AdamCalibrator
+from rheplicant.inference import GradientCalibrator, AdamCalibrator
 
 params_fit, losses = GradientCalibrator(learning_rate=2e-7, n_steps=200).fit(
     forward, params0, observation.data)
@@ -278,7 +278,7 @@ likelihood (hand the bridge a twin *without* stochastic operators):
 
 ```python
 import numpyro, numpyro.distributions as dist
-from replicant.inference import prior_template, set_prior, to_numpyro_model, predict_from_samples
+from rheplicant.inference import prior_template, set_prior, to_numpyro_model, predict_from_samples
 
 bayes_twin = assemble(SkyOperator(amplitude=jnp.array(100.0)),
                       GainOperator(gain=jnp.array(1.0)))
@@ -299,7 +299,7 @@ flattened against, so a covariance from the wrong parameterization is
 rejected instead of silently misused:
 
 ```python
-from replicant.inference import (fisher_information, parameter_covariance,
+from rheplicant.inference import (fisher_information, parameter_covariance,
                             propagate_covariance, push_forward)
 
 F = fisher_information(forward, params0, noise_std=0.5)     # J^T N^-1 J
@@ -311,8 +311,8 @@ band = propagate_covariance(forward, params0, cov)          # prediction std map
 at any graph node and train only its weights through the same seam:
 
 ```python
-from replicant import At
-from replicant.radio import NeuralOperator
+from rheplicant import At
+from rheplicant.radio import NeuralOperator
 
 hybrid = assemble(
     SkyOperator(amplitude=jnp.array(1.0)),
@@ -336,7 +336,7 @@ A new physical effect is one small class:
 
 ```python
 from typing import ClassVar
-from replicant import AbstractOperator, State
+from rheplicant import AbstractOperator, State
 
 class CableReflectionOperator(AbstractOperator):
     """Sinusoidal ripple from a cable standing wave (example)."""
@@ -372,4 +372,4 @@ placeholder says what the real model should be.
 | Updates | functional only — `replace`, `with_data`, `replace_stage/branch/node`, `eqx.tree_at` |
 | Validation | structural only inside `__call__` (jit-safe); loud errors over silent breakage |
 | Noise in Bayes | stochastic operators stay OUT of twins handed to `to_numpyro_model` |
-| Layering | `replicant.core` never imports `replicant.radio` / `replicant.inference` (enforced by test) |
+| Layering | `rheplicant.core` never imports `rheplicant.radio` / `rheplicant.inference` (enforced by test) |

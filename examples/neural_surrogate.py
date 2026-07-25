@@ -14,9 +14,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from replicant import At, Coordinates, State
-from replicant.inference import AdamCalibrator, build_forward_fn
-from replicant.radio import (
+from rheplicant import At, Coordinates, State
+from rheplicant.inference import AdamCalibrator, build_forward_fn
+from rheplicant.radio import (
     GainOperator,
     NeuralOperator,
     ReceiverOperator,

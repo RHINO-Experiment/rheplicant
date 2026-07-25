@@ -1,4 +1,4 @@
-"""Sphinx configuration for the REPLICANT documentation (furo + MyST + autodoc)."""
+"""Sphinx configuration for the RHEPLICANT documentation (furo + MyST + autodoc)."""
 
 import pathlib
 import sys
@@ -6,12 +6,12 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-project = "REPLICANT"
+project = "RHEPLICANT"
 author = "Zheng Zhang"
 copyright = "2026, Zheng Zhang"
 
 try:
-    from replicant import __version__ as release
+    from rheplicant import __version__ as release
 except ImportError:  # pragma: no cover - docs build without the package
     release = "0.0.0"
 
@@ -43,7 +43,7 @@ intersphinx_mapping = {
 }
 
 html_theme = "furo"
-html_title = "REPLICANT — a differentiable replica of a radio antenna"
+html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
 
 exclude_patterns = ["_build"]
 
@@ -57,7 +57,7 @@ _SIGNAL_PATH_PAGE = _DOCS_DIR / "signal-path.md"
 def _example_svgs() -> None:
     import jax.numpy as jnp
 
-    from replicant.radio import (
+    from rheplicant.radio import (
         AtmosphericEmissionOperator,
         BeamOperator,
         CalLoadOperator,
@@ -107,14 +107,14 @@ def _example_svgs() -> None:
 
 
 try:
-    from replicant.radio import RADIO_GRAPH
+    from rheplicant.radio import RADIO_GRAPH
 
     _mermaid = RADIO_GRAPH.to_mermaid()
     _example_svgs()
     _SIGNAL_PATH_PAGE.write_text(
         "# The canonical signal path\n\n"
         "The single-antenna template every assembly lights up — generated "
-        "from `replicant.radio.RADIO_GRAPH` at documentation build time. `(+)` "
+        "from `rheplicant.radio.RADIO_GRAPH` at documentation build time. `(+)` "
         "nodes are sum junctions, `(sw)` the antenna/cal-load selector; see "
         "the [tour](tour.md#4-graph-assembly) for the assembly rules and "
         "[the operator catalog](operators.md) for what lives at each node.\n\n"
@@ -145,6 +145,6 @@ try:
     )
 except ImportError:  # pragma: no cover
     _SIGNAL_PATH_PAGE.write_text(
-        "# The canonical signal path\n\n(replicant is not importable in this "
+        "# The canonical signal path\n\n(rheplicant is not importable in this "
         "build environment; graph rendering skipped.)\n"
     )

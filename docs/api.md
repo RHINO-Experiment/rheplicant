@@ -1,180 +1,180 @@
 # API reference
 
-Generated from the source docstrings. Layering rule: `replicant.core` is
-domain-agnostic; `replicant.radio` and `replicant.inference` build on it.
+Generated from the source docstrings. Layering rule: `rheplicant.core` is
+domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
 
-## replicant.core
+## rheplicant.core
 
 ```{eval-rst}
-.. automodule:: replicant.core.state
+.. automodule:: rheplicant.core.state
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.coordinates
+.. automodule:: rheplicant.core.coordinates
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.environment
+.. automodule:: rheplicant.core.environment
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.frozen
+.. automodule:: rheplicant.core.frozen
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.operator
+.. automodule:: rheplicant.core.operator
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.pipeline
+.. automodule:: rheplicant.core.pipeline
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.combinators
+.. automodule:: rheplicant.core.combinators
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.graph
+.. automodule:: rheplicant.core.graph
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.core.render
+.. automodule:: rheplicant.core.render
    :members:
 
-.. automodule:: replicant.core.errors
+.. automodule:: rheplicant.core.errors
    :members:
    :show-inheritance:
 ```
 
-## replicant.radio
+## rheplicant.radio
 
 ```{eval-rst}
-.. automodule:: replicant.radio.graph
+.. automodule:: rheplicant.radio.graph
    :members:
 
-.. automodule:: replicant.radio.sky.model
-   :members:
-   :show-inheritance:
-
-.. automodule:: replicant.radio.sky.projection
+.. automodule:: rheplicant.radio.sky.model
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.native
+.. automodule:: rheplicant.radio.sky.projection
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.source
+.. automodule:: rheplicant.radio.sky.native
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.uniform
+.. automodule:: rheplicant.radio.sky.source
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.global_signal
+.. automodule:: rheplicant.radio.sky.uniform
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.foregrounds
+.. automodule:: rheplicant.radio.sky.global_signal
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.sky.point_sources
+.. automodule:: rheplicant.radio.sky.foregrounds
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.environment.ionosphere
+.. automodule:: rheplicant.radio.sky.point_sources
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.environment.ground
+.. automodule:: rheplicant.radio.environment.ionosphere
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.environment.rfi
+.. automodule:: rheplicant.radio.environment.ground
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.beam
+.. automodule:: rheplicant.radio.environment.rfi
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.receiver
+.. automodule:: rheplicant.radio.instrument.beam
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.noise_wave
+.. automodule:: rheplicant.radio.instrument.receiver
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.calibration
+.. automodule:: rheplicant.radio.instrument.noise_wave
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.gain
+.. automodule:: rheplicant.radio.instrument.calibration
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.noise
+.. automodule:: rheplicant.radio.instrument.gain
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.emi
+.. automodule:: rheplicant.radio.instrument.noise
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.instrument.adc
+.. automodule:: rheplicant.radio.instrument.emi
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.backend.flagging
+.. automodule:: rheplicant.radio.instrument.adc
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.backend.averaging
+.. automodule:: rheplicant.radio.backend.flagging
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.filters.base
+.. automodule:: rheplicant.radio.backend.averaging
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.filters.sidereal
+.. automodule:: rheplicant.radio.filters.base
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.filters.skyspace
+.. automodule:: rheplicant.radio.filters.sidereal
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.filters.fourier
+.. automodule:: rheplicant.radio.filters.skyspace
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.radio.surrogate
+.. automodule:: rheplicant.radio.filters.fourier
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.radio.surrogate
    :members:
    :show-inheritance:
 ```
 
-## replicant.inference
+## rheplicant.inference
 
 ```{eval-rst}
-.. automodule:: replicant.inference.forward
+.. automodule:: rheplicant.inference.forward
    :members:
 
-.. automodule:: replicant.inference.calibrate
-   :members:
-   :show-inheritance:
-
-.. automodule:: replicant.inference.likelihood
+.. automodule:: rheplicant.inference.calibrate
    :members:
    :show-inheritance:
 
-.. automodule:: replicant.inference.numpyro_bridge
+.. automodule:: rheplicant.inference.likelihood
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.numpyro_bridge
    :members:
 
-.. automodule:: replicant.inference.uncertainty
+.. automodule:: rheplicant.inference.uncertainty
    :members:
    :show-inheritance:
 ```

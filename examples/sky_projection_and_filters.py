@@ -14,8 +14,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from replicant import Coordinates, Pipeline, SnapshotOperator, State
-from replicant.radio import (
+from rheplicant import Coordinates, Pipeline, SnapshotOperator, State
+from rheplicant.radio import (
     ApplyCalibrationOperator,
     GainOperator,
     MatrixProjector,

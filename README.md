@@ -1,13 +1,13 @@
-# REPLICANT
+# RHEPLICANT
 
-[![Documentation Status](https://readthedocs.org/projects/replicant-telescope/badge/?version=latest)](https://replicant-telescope.readthedocs.io/en/latest/)
+[![Documentation Status](https://readthedocs.org/projects/rheplicant/badge/?version=latest)](https://rheplicant.readthedocs.io/en/latest/)
 
 A **REPLIC**a of an **ANT**enna — a JAX + [Equinox](https://github.com/patrick-kidger/equinox)
 framework for building *differentiable replicas* of single-antenna radio
 telescopes: horns, dipoles, and dishes alike.
-**Documentation: [replicant-telescope.readthedocs.io](https://replicant-telescope.readthedocs.io/en/latest/)**
+**Documentation: [rheplicant.readthedocs.io](https://rheplicant.readthedocs.io/en/latest/)**
 
-A REPLICANT twin is one pure function from sky and instrument parameters to raw
+A RHEPLICANT twin is one pure function from sky and instrument parameters to raw
 data. Because every stage — foregrounds, ionosphere, beam, receiver
 reflections, gain drifts, digitisation — is differentiable, the same twin
 that *simulates* an observation also *calibrates* it: gradients, Bayesian
@@ -15,7 +15,7 @@ posteriors, Fisher forecasts, and neural surrogates all run through the
 instrument model itself, with no re-implementation.
 
 ```python
-from replicant.radio import assemble, GlobalSignalOperator, ForegroundOperator, GainOperator
+from rheplicant.radio import assemble, GlobalSignalOperator, ForegroundOperator, GainOperator
 
 twin = assemble(GlobalSignalOperator(...), ForegroundOperator(...), GainOperator(...))
 observation = twin(state)          # simulate — and differentiate, fit, sample
@@ -26,18 +26,23 @@ the core is domain-agnostic by construction.
 
 ## The name
 
-**REPLICANT** is a portmanteau of **REPLIC**a and **ANT**enna — a digital twin
-*is* a replica, and this one is of a radio antenna. The two source words
-overlap on their shared `A`, so the blend is exactly nine letters:
+**RHEPLICANT** is **REPLICANT** wearing RHINO's horn. **REPLICANT** is itself a
+portmanteau of **REPLIC**a and **ANT**enna — a digital twin *is* a replica, and
+this one is of a radio antenna — the two words overlapping on their shared `A`.
+Slip an `H` in behind the first letter and `R…` becomes `RH…`, the mark of
+**RH**INO, the horn antenna the framework was first built for:
 
 ```
 R E P L I C A            replica
             A N T         antenna
 ─────────────────
 R E P L I C A N T        replicant
+  + H  →  RH…            (for RHINO)
+─────────────────
+R H E P L I C A N T      rheplicant
 ```
 
-One-line gloss: *a differentiable replica of a radio antenna.*
+One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO.*
 
 ## Philosophy
 
@@ -80,29 +85,29 @@ One-line gloss: *a differentiable replica of a radio antenna.*
    covariance matrices, assembly-time graph errors. In a framework built to
    chase 0.1 % systematics, a wrong number is worse than an exception.
 
-8. **The core is domain-agnostic.** `replicant.core` never imports the radio
+8. **The core is domain-agnostic.** `rheplicant.core` never imports the radio
    layer (a test enforces it). Radio astronomy is the first application,
    not the design center.
 
 ## Install
 
 ```bash
-pip install replicant-telescope            # import name: replicant
+pip install rheplicant
 # or, for development:
-git clone https://github.com/zzhang0123/replicant-telescope
-cd replicant-telescope && uv sync          # extras: uv sync --extra numpyro
+git clone https://github.com/zzhang0123/rheplicant
+cd rheplicant && uv sync          # extras: uv sync --extra numpyro
 ```
 
-Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. (A PyPA packaging
-sample owns the bare name `replicant` on PyPI — install `replicant-telescope`.)
+Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
+name are the same: `rheplicant`.
 
-## Sixty seconds of REPLICANT
+## Sixty seconds of RHEPLICANT
 
 ```python
 import jax, jax.numpy as jnp, equinox as eqx
-from replicant import State, Coordinates
-from replicant.radio import assemble, SkyOperator, GainOperator, NoiseOperator
-from replicant.inference import build_forward_fn, GradientCalibrator
+from rheplicant import State, Coordinates
+from rheplicant.radio import assemble, SkyOperator, GainOperator, NoiseOperator
+from rheplicant.inference import build_forward_fn, GradientCalibrator
 
 state = State(
     coords=Coordinates(time=jnp.linspace(0, 60, 128),
@@ -153,7 +158,7 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
 
 ## Documentation
 
-Rendered docs: **[replicant-telescope.readthedocs.io](https://replicant-telescope.readthedocs.io)**
+Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)**
 (Sphinx + furo; build locally with
 `uv run sphinx-build -b html docs docs/_build/html`).
 

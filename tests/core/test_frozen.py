@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import pytest
 
-from replicant.core.frozen import FrozenMapping
+from rheplicant.core.frozen import FrozenMapping
 
 
 class TestConstruction:

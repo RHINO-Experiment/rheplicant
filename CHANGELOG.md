@@ -2,6 +2,16 @@
 
 ## 0.1.0 (unreleased)
 
+### Renamed: REPLICANT -> RHEPLICANT (RHino + REPLICa + ANTenna)
+
+Same portmanteau (REPLICa + ANTenna = a differentiable replica of a radio
+antenna), now with the **RH** of RHINO in front — the horn antenna the
+framework was first built for. Distribution *and* import name are now both
+`rheplicant` (the bare name is free on PyPI, so the earlier `-telescope`
+suffix is dropped); import path `replicant.*` -> `rheplicant.*`; source dir
+`src/replicant` -> `src/rheplicant`. GitHub repo and RTD project renamed to
+`rheplicant`; old URLs redirect.
+
 ### Renamed: DIRT -> REPLICANT (a portmanteau of REPLICa + ANTenna)
 
 A digital twin *is* a replica, and this one is of a radio antenna — so the
