@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1 (2026-07-25)
+
+- Credit the developers and maintainers (Zheng Zhang, Phil Bull, Jordan
+  Norris, Rashi Srivastava) in the package metadata (`authors`) and README.
+  First release carrying the full author list on the PyPI page.
+
+## 0.1.0 (2026-07-25)
+
+First PyPI release (`pip install rheplicant`), published via Trusted
+Publishing (OIDC). Highlights of the 0.1.0 development line:
 
 ### Renamed: REPLICANT -> RHEPLICANT (RHino + REPLICa + ANTenna)
 
