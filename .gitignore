@@ -34,3 +34,6 @@ htmlcov/
 
 # Local reference material (contains unpublished draft; repo is public)
 assets/
+
+# Local reproduction study vs RHINO-TODsim (independent, not part of the package)
+repro-todsim/
