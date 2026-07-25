@@ -1,0 +1,53 @@
+name: Publish to PyPI
+
+# Tokenless publishing via PyPI Trusted Publishing (OIDC). No secrets stored:
+# GitHub mints a short-lived OIDC identity that PyPI verifies against the
+# trusted-publisher config (owner/repo/workflow/environment). See the repo's
+# README/CHANGELOG for the one-time PyPI setup.
+#
+# Publish a release by either:
+#   - creating a GitHub Release (recommended: tag the commit, publish the release), or
+#   - running this workflow manually (Actions -> Publish to PyPI -> Run workflow).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check metadata
+        run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.whl
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/rheplicant/
+    permissions:
+      id-token: write        # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
