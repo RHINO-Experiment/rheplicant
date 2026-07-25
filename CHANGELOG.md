@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 (2026-07-25)
+
+- Add project logos (a rhino dissolving into digital pixels — the
+  differentiable digital-twin motif): a banner heads the README and the docs
+  landing page, and the single-rhino mark is the docs sidebar logo.
+
 ## 0.1.3 (2026-07-25)
 
 - Repository moved to the [`RHINO-Experiment`](https://github.com/RHINO-Experiment)
