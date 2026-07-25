@@ -1,5 +1,11 @@
 # REPLICANT Architecture
 
+The name is a portmanteau of **REPLIC**a + **ANT**enna: a digital twin *is* a
+replica, and this one is of a radio antenna — differentiable enough that the
+same replica that simulates an instrument can also be fit to it. Everything
+below is in service of making that replica faithful, composable, and cheap to
+differentiate.
+
 The design record: **why** the framework is shaped the way it is, as
 numbered decisions (D1–D13), each with the constraint that forced it. New
 here? Read the [README](https://github.com/zzhang0123/replicant-telescope#readme) for
