@@ -8,6 +8,7 @@ from rheplicant.inference.likelihood import (
     MaskedGaussianLikelihood,
     mean_squared_error,
 )
+from rheplicant.inference.linear import LinearBlock, check_linearity, linear_operator
 from rheplicant.inference.numpyro_bridge import (
     predict_from_samples,
     prior_template,
@@ -28,11 +29,14 @@ __all__ = [
     "GaussianLikelihood",
     "GradientCalibrator",
     "Latent",
+    "LinearBlock",
     "Likelihood",
     "MaskedGaussianLikelihood",
     "ParameterSpace",
     "build_forward_fn",
+    "check_linearity",
     "fisher_information",
+    "linear_operator",
     "mean_squared_error",
     "parameter_covariance",
     "predict_from_samples",
