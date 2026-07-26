@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from rheplicant import Coordinates
 from rheplicant.core.errors import StateValidationError
 from rheplicant.radio.sky import DriftScanProjector, NativeLimTODProjector
 
@@ -637,6 +638,59 @@ class TestDriftScanProjector:
 
         g = jax.grad(lambda s: jnp.sum(fast.forward(s, uniform_coords) ** 2))(sky)
         assert bool(jnp.all(jnp.isfinite(g)))
+
+    @pytest.mark.parametrize("n_t", [4 * (LMAX + 1), 2 * LMAX + 1, 257])
+    @pytest.mark.parametrize("lst0", [0.0, 12.0, 237.5])
+    def test_uniform_lst_grid_satisfies_the_contract(self, key, n_t, lst0):
+        """The helper's whole reason to exist: whatever it returns must be
+        accepted by the FFT path, and the endpoint-inclusive grid people reach
+        for instead must be rejected. Odd and even n_t, at the Nyquist
+        boundary, and with a nonzero first LST."""
+        import dataclasses
+
+        import limtod_jax as ltj
+        import numpy as np
+
+        grid = DriftScanProjector.uniform_lst_grid(n_t, lst0)
+        assert grid.shape == (n_t,)
+        assert float(grid[0]) == pytest.approx(lst0)
+        # a FULL turn: the excluded endpoint means the last sample is one step
+        # short of lst0 + 360, so the wrap-around gap equals every other gap.
+        # Tolerance follows the GRID's dtype, not float64: this suite runs in
+        # float32, where a ~360-degree grid carries ~360*eps of representation
+        # error and steps like 360/23 are not representable at all (360/48 is,
+        # which is why an f64-shaped rtol passes for some n_t and not others).
+        eps = float(np.finfo(np.asarray(grid).dtype).eps)
+        atol = 8.0 * eps * 360.0
+        steps = np.diff(np.asarray(grid, dtype=np.float64))
+        wrap = lst0 + 360.0 - float(grid[-1])
+        np.testing.assert_allclose(steps, 360.0 / n_t, atol=atol, rtol=0)
+        assert wrap == pytest.approx(360.0 / n_t, abs=atol)
+
+        # limtod_jax must accept it, and reject linspace's endpoint-inclusive
+        # sibling — the regression this helper exists to prevent
+        ltj.check_uniform_grid(np.deg2rad(np.asarray(grid) - lst0))
+        endpoint_inclusive = np.linspace(lst0, lst0 + 360.0, n_t)
+        with pytest.raises(ValueError, match="uniform grid"):
+            ltj.check_uniform_grid(np.deg2rad(endpoint_inclusive - lst0))
+
+        # and end to end through the projector, where 2*lmax < n_t allows it
+        if 2 * self.LMAX < n_t:
+            fft = dataclasses.replace(
+                self._projector(key, lst_ref_deg=lst0), uniform_sampling=True
+            )
+            plain = dataclasses.replace(fft, uniform_sampling=False)
+            coords = Coordinates(
+                time=jnp.arange(n_t, dtype=float),
+                freq=jnp.array([60e6, 70e6]),
+                extra={"lst_deg": grid},
+            )
+            sky = jax.random.uniform(jax.random.key(40), (N_FREQ, self.N_PIX_HP))
+            a, b = fft.forward(sky, coords), plain.forward(sky, coords)
+            assert float(jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(b))) < 1e-4
+            bad = coords.replace(extra={"lst_deg": jnp.asarray(endpoint_inclusive)})
+            with pytest.raises(ValueError, match="uniform grid"):
+                fft.forward(sky, bad)
 
     def test_uniform_sampling_requires_limtod_17(self, key, uniform_coords, monkeypatch):
         """An outdated limTOD must fail at the boundary with a clear message,
