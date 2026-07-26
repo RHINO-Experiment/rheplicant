@@ -6,16 +6,17 @@ beam rotation for every single sample; the m-mode engine rotates ONCE and
 turns the rest of the sidereal day into per-m phases. Same numbers to
 float64 roundoff, a fraction of the work.
 
-Five things happen below:
+Six things happen below:
 
 1. build a drift-scan twin from a HEALPix beam MAP (no healpy needed);
 2. check it against the general engine — this is an optimization, not an
    approximation;
 3. turn on the two fast-path opt-ins and time all three;
 4. read off the m-modes, which is what a drift scan actually measures;
-5. take a gradient through the whole twin — the reason any of this is in JAX.
+5. hoist the sky analysis out of the loop, for when the twin is being fitted;
+6. take a gradient through the whole twin — the reason any of this is in JAX.
 
-Needs the sky engine:  pip install "rheplicant[limtod]"   (limTOD >= 1.7)
+Needs the sky engine:  pip install "rheplicant[limtod]"   (limTOD >= 1.8)
 Run:  uv run python examples/driftscan_mmode.py
 """
 

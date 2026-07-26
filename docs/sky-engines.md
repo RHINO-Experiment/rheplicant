@@ -295,13 +295,14 @@ Both engines are backed by the `limtod_jax` package that ships with
 pip install "rheplicant[limtod]"
 ```
 
-`GeneralPointingProjector` works with any version that provides `limtod_jax`;
-`DriftScanProjector` needs **limTOD ≥ 1.6**; `uniform_sampling=True` needs the
-FFT fast path from **1.7**; and the hoisted Wigner plane comes from **1.8**,
-which the projector uses when present and quietly does without otherwise —
-it is an optimization, not a contract. The first two are checked at the
-boundary, so an outdated install says so instead of failing inside a traced
-call.
+The extra pins **limTOD ≥ 1.8**, so a fresh install gets every fast path. The
+individual floors, if you are pinning by hand: `GeneralPointingProjector`
+needs any version providing `limtod_jax`; `DriftScanProjector` needs **1.6**;
+`uniform_sampling=True` the FFT synthesis from **1.7**; and the hoisted Wigner
+plane comes from **1.8**. The first two are checked at the boundary, so an
+outdated install says so instead of failing inside a traced call; the last is
+detected at runtime and skipped when absent, because it is an optimization,
+not a contract.
 
 Enable `jax_enable_x64` for quantitative work — the map↔alm transforms inherit
 s2fft's float32 limitation.

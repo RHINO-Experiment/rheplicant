@@ -31,10 +31,11 @@ classifiers = [
 [project.optional-dependencies]
 numpyro = ["numpyro"]
 # The sky engines (GeneralPointingProjector, DriftScanProjector) are wired to
-# limTOD's JAX package. The floor is the true minimum, not the preferred
-# version: 1.7 runs everything, and 1.8's hoistable Wigner plane is detected
-# at runtime and skipped when absent, costing only the speed-up.
-limtod = ["limTOD[jax]>=1.7"]
+# limTOD's JAX package. Floored at 1.8 for its hoistable Wigner plane (15.6x
+# on the rotation): a fresh install has no reason to take less. The runtime
+# feature check stays, so an environment already holding 1.7 keeps working —
+# it only forgoes that speed-up.
+limtod = ["limTOD[jax]>=1.8"]
 docs = [
     "sphinx>=7",
     "myst-parser",

@@ -12,11 +12,12 @@ build-it-yourself instruction:
 pip install "rheplicant[limtod]"
 ```
 
-The floor is `limTOD[jax]>=1.7` — the true minimum, not the preferred
-version. 1.8's hoistable Wigner plane is detected at runtime and skipped when
-absent, so 1.7 runs everything and only forgoes that speed-up. Every
-`pip install -e '<limTOD>[jax]'` in the docs, examples and error messages is
-updated accordingly.
+The extra floors at `limTOD[jax]>=1.8`, so a fresh install gets every fast
+path including the hoisted Wigner plane. The runtime feature check stays, so
+an environment already holding 1.7 keeps working and only forgoes that
+speed-up — the floor expresses what a new install *should* take, not the
+bare minimum the code tolerates. Every `pip install -e '<limTOD>[jax]'` in the
+docs, examples and error messages is updated accordingly.
 
 ### Performance: the drift-scan engine stops repeating itself
 
