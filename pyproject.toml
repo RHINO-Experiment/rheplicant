@@ -30,6 +30,11 @@ classifiers = [
 
 [project.optional-dependencies]
 numpyro = ["numpyro"]
+# The sky engines (GeneralPointingProjector, DriftScanProjector) are wired to
+# limTOD's JAX package. The floor is the true minimum, not the preferred
+# version: 1.7 runs everything, and 1.8's hoistable Wigner plane is detected
+# at runtime and skipped when absent, costing only the speed-up.
+limtod = ["limTOD[jax]>=1.7"]
 docs = [
     "sphinx>=7",
     "myst-parser",

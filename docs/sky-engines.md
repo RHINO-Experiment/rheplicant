@@ -288,16 +288,20 @@ pointing that agrees passes, because reusing a general projector's coords is
 the expected way to switch engines.
 :::
 
-Both engines are backed by the `limtod_jax` package that ships with limTOD:
+Both engines are backed by the `limtod_jax` package that ships with
+[limTOD](https://pypi.org/project/limTOD/), available as an extra:
 
 ```bash
-pip install -e '<path-to-limTOD>[jax]'
+pip install "rheplicant[limtod]"
 ```
 
 `GeneralPointingProjector` works with any version that provides `limtod_jax`;
-`DriftScanProjector` needs **limTOD ≥ 1.6**, and `uniform_sampling=True` the
-FFT fast path added in **1.7**. Each requirement is checked at the boundary,
-so an outdated install says so instead of failing inside a traced call.
+`DriftScanProjector` needs **limTOD ≥ 1.6**; `uniform_sampling=True` needs the
+FFT fast path from **1.7**; and the hoisted Wigner plane comes from **1.8**,
+which the projector uses when present and quietly does without otherwise —
+it is an optimization, not a contract. The first two are checked at the
+boundary, so an outdated install says so instead of failing inside a traced
+call.
 
 Enable `jax_enable_x64` for quantitative work — the map↔alm transforms inherit
 s2fft's float32 limitation.

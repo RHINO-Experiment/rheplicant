@@ -46,8 +46,8 @@ def _limtod_jax():
         import limtod_jax
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "GeneralPointingProjector needs the limtod_jax package: install the "
-            "limTOD repo with its jax extra (pip install -e '<limTOD>[jax]'). "
+            "GeneralPointingProjector needs the limtod_jax package: install "
+            "limTOD with its jax extra (pip install 'limTOD[jax]'). "
             "Without it, MatrixProjector takes a precomputed sky->TOD matrix "
             "and needs no optional dependency (fixed pointing and beam only)."
         ) from exc

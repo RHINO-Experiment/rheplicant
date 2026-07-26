@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added: a `limtod` extra — the sky engines install from PyPI
+
+limTOD is [published on PyPI](https://pypi.org/project/limTOD/), so the
+engine it backs is now a declared optional dependency rather than a
+build-it-yourself instruction:
+
+```bash
+pip install "rheplicant[limtod]"
+```
+
+The floor is `limTOD[jax]>=1.7` — the true minimum, not the preferred
+version. 1.8's hoistable Wigner plane is detected at runtime and skipped when
+absent, so 1.7 runs everything and only forgoes that speed-up. Every
+`pip install -e '<limTOD>[jax]'` in the docs, examples and error messages is
+updated accordingly.
+
 ### Performance: the drift-scan engine stops repeating itself
 
 Three hoists, none of which change a number. Measured at nside 64 / lmax 191

@@ -223,7 +223,7 @@ projector = DriftScanProjector.from_beam_maps(
     beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0, lmax=191)
 ```
 
-Both need `pip install -e '<limTOD>[jax]'`. The third engine takes the
+Both need the limTOD engine: `pip install "rheplicant[limtod]"`. The third engine takes the
 projection as data instead of computing it: `MatrixProjector` (a precomputed
 sky→TOD matrix — pure einsum, no optional dependency, valid while pointing
 and beam are fixed). See [sky engines](sky-engines.md) for the comparison,

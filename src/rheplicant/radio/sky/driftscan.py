@@ -84,9 +84,8 @@ def _limtod_jax(uniform: bool = False):
         import limtod_jax
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "DriftScanProjector needs the limtod_jax package with drift-scan "
-            "support (limTOD >= 1.6): install the limTOD repo with its jax "
-            "extra (pip install -e '<limTOD>[jax]')."
+            "DriftScanProjector needs the limtod_jax package: install limTOD "
+            "with its jax extra (pip install 'limTOD[jax]')."
         ) from exc
     if not hasattr(limtod_jax, "driftscan"):  # pragma: no cover
         raise ImportError(

@@ -15,7 +15,7 @@ Five things happen below:
 4. read off the m-modes, which is what a drift scan actually measures;
 5. take a gradient through the whole twin — the reason any of this is in JAX.
 
-Needs the drift-scan engine:  pip install -e '<limTOD>[jax]'  (limTOD >= 1.7)
+Needs the sky engine:  pip install "rheplicant[limtod]"   (limTOD >= 1.7)
 Run:  uv run python examples/driftscan_mmode.py
 """
 

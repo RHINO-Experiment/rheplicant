@@ -98,13 +98,16 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
 
 ```bash
 pip install rheplicant
+pip install "rheplicant[limtod]"  # + the differentiable sky engines
 # or, for development:
 git clone https://github.com/RHINO-Experiment/rheplicant
-cd rheplicant && uv sync          # extras: uv sync --extra numpyro
+cd rheplicant && uv sync          # extras: uv sync --extra numpyro --extra limtod
 ```
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
-name are the same: `rheplicant`.
+name are the same: `rheplicant`. The `limtod` extra pulls in
+[limTOD](https://pypi.org/project/limTOD/)`[jax]`, which the two real sky
+engines are built on; everything else works without it.
 
 ## Sixty seconds of RHEPLICANT
 
