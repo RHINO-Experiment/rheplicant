@@ -343,6 +343,18 @@ class TestCheckLinearity:
         errors = check_linearity(space, twin, template_state, scales=(1e-3,))
         assert all(err < 1e-4 for err in errors.values())
 
+    def test_roundoff_at_a_tiny_probe_is_not_mistaken_for_curvature(
+        self, twin, linear_space, template_state
+    ):
+        """Regression: an exactly-linear block probed at 1e-9 of its own scale.
+
+        The relative measure (departure / variation) explodes there — the
+        variation is vanishing but roundoff is not — so a relative test alone
+        rejects a perfectly linear block. That false positive is worse than no
+        check, because the cure users reach for is to switch the check off.
+        """
+        check_linearity(linear_space, twin, template_state, scales=(1e-9, 1e-6, 1.0))
+
     def test_unknown_latent_name_is_refused(self, twin, linear_space, template_state):
         with pytest.raises(ParameterSpaceError, match="No latent named"):
             check_linearity(linear_space, twin, template_state, name="nope")

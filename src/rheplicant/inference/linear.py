@@ -177,7 +177,17 @@ def check_linearity(
     if magnitude == 0.0:
         magnitude = 1.0
 
+    # A departure smaller than the arithmetic's own noise floor is not evidence
+    # of curvature. Without this the relative measure below explodes for SMALL
+    # probes — where the variation is tiny but roundoff is not — and rejects
+    # perfectly linear blocks. That false positive is worse than no check at
+    # all, because the cure users reach for is to switch the check off.
+    noise_floor = 1e4 * float(jnp.finfo(baseline.dtype).eps) * float(
+        jnp.maximum(jnp.max(jnp.abs(baseline)), 1.0)
+    )
+
     errors: dict[float, float] = {}
+    departures: dict[float, float] = {}
     for index, scale in enumerate(scales):
         probe = magnitude * scale * jax.random.normal(
             jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
@@ -188,16 +198,22 @@ def check_linearity(
         # would otherwise hide a completely nonlinear response.
         variation = jnp.max(jnp.abs(actual - baseline))
         departure = jnp.max(jnp.abs(actual - predicted))
+        departures[scale] = float(departure)
         errors[scale] = float(departure / jnp.maximum(variation, 1e-30))
 
-    failed = {scale: err for scale, err in errors.items() if err > rtol}
+    failed = {
+        scale: err
+        for scale, err in errors.items()
+        if err > rtol and departures[scale] > noise_floor
+    }
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise ParameterSpaceError(
             f"Latent {name!r} is declared linear=True, but the prediction is not affine in "
-            f"it: relative departure from its own linearization exceeds rtol={rtol:.2e} at "
-            f"{sorted(failed)} times the latent's scale ({detail}). Either drop the "
-            "declaration, or re-parameterize so the model really is linear in this block."
+            f"it: departure from its own linearization exceeds rtol={rtol:.2e} (and the "
+            f"{noise_floor:.2e} roundoff floor) at {sorted(failed)} times the latent's scale "
+            f"({detail}). Either drop the declaration, or re-parameterize so the model really "
+            "is linear in this block."
         )
     return errors
 
