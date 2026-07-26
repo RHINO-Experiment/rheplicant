@@ -47,6 +47,52 @@ itself passing overhead.
 
 ---
 
+## What a drift scan actually measures
+
+That waterfall repeats every sidereal day, so along the time axis it *is* a
+Fourier series. The coefficients are the m-modes: the same observation, in the
+coordinates the instrument naturally works in. The beam band-limits them, so
+past `m ≈ lmax` there is nothing left to measure — a handful of numbers per
+channel stands in for the whole day.
+
+:::{seealso}
+m-mode analysis is the standard harmonic treatment of drift-scan (transit)
+observations. This engine follows the conventions of
+[***M-mode RIME explicit in beam, fringe and sky modes***](https://zh-zhang.com/myNotes/MmodeNote.pdf),
+whose Eq. (13) — its last line — is the identity the fast path rests on:
+rotate the beam into the celestial frame **once**, at a reference LST, and the
+rest of the sidereal day is a per-`m` phase `e^{-i m Δφ}` — no further
+rotations, which is exactly why the cost stops scaling with the number of
+samples.
+:::
+
+:::{figure} _static/engine-mmodes-light.svg
+:figclass: only-light
+:alt: m-mode amplitude spectrum of a drift scan
+:width: 100%
+
+The harmonic view of the waterfall above. `mmodes()` returns these directly —
+a far smaller object than the TOD it summarizes.
+:::
+
+:::{figure} _static/engine-mmodes-dark.svg
+:figclass: only-dark
+:alt: m-mode amplitude spectrum of a drift scan
+:width: 100%
+
+The harmonic view of the waterfall above. `mmodes()` returns these directly —
+a far smaller object than the TOD it summarizes.
+:::
+
+Once you have built a drift-scan projector — the next section — reading them
+off is one call:
+
+```python
+mmodes = projector.mmodes(sky, coords)   # (n_freq, lmax + 1) complex
+```
+
+---
+
 ## Two engines, one contract
 
 Both are `AbstractSkyProjector`s: maps in, `(n_time, n_freq)` out, with an
@@ -213,47 +259,6 @@ Two opt-ins sharpen it further, both preserving `jit`/`vmap`/`grad`:
   `DriftScanProjector.uniform_lst_grid(n_time)`; the natural
   `jnp.linspace(0, 360, n_time)` includes the endpoint and is a turn *plus one
   step*, which the projector rejects rather than silently mis-synthesizing.
-
----
-
-## What a drift scan actually measures
-
-A drift scan repeats every sidereal day, so its time-ordered data *is* a
-Fourier series. The coefficients are the m-modes, and the beam band-limits
-them: past `m ≈ lmax` there is nothing left to measure.
-
-:::{seealso}
-m-mode analysis is the standard harmonic treatment of drift-scan (transit)
-observations. This engine follows the conventions of
-[***M-mode RIME explicit in beam, fringe and sky modes***](https://zh-zhang.com/myNotes/MmodeNote.pdf),
-whose Eq. (13) — its last line — is the identity the fast path rests on:
-rotate the beam into the celestial frame **once**, at a reference LST, and the
-rest of the sidereal day is a per-`m` phase `e^{-i m Δφ}` — no further
-rotations, which is exactly why the cost stops scaling with the number of
-samples.
-:::
-
-:::{figure} _static/engine-mmodes-light.svg
-:figclass: only-light
-:alt: m-mode amplitude spectrum of a drift scan
-:width: 100%
-
-`mmodes()` returns these directly — the natural coordinates for drift-scan
-analysis, and a far smaller object than the TOD it summarizes.
-:::
-
-:::{figure} _static/engine-mmodes-dark.svg
-:figclass: only-dark
-:alt: m-mode amplitude spectrum of a drift scan
-:width: 100%
-
-`mmodes()` returns these directly — the natural coordinates for drift-scan
-analysis, and a far smaller object than the TOD it summarizes.
-:::
-
-```python
-mmodes = projector.mmodes(sky, coords)   # (n_freq, lmax + 1) complex
-```
 
 ---
 
