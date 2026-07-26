@@ -180,10 +180,14 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(330+ tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
+(384 tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder pending ports from limTOD and friends
-— except the native differentiable sky engine, which is real. Conventions:
+— except the sky engines, which are real: a general differentiable limTOD
+port and a drift-scan m-mode fast path that agrees with it to float64
+roundoff while running ~1000x faster on RHINO's geometry (see
+[sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)).
+Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 

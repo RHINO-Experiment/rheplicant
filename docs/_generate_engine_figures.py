@@ -215,10 +215,12 @@ def figure_agreement(lst, freqs_mhz, tod_generic, tod_mmode) -> None:
             for i in range(resid.shape[1]):
                 ax1.semilogy(lst_h, np.maximum(resid[:, i], 1e-18), lw=0.9,
                              color=c["accent"], alpha=0.75)
-            ax1.axhline(2.22e-16, ls="--", lw=1.0, color=c["warm"])
-            ax1.text(lst_h[-1], 2.6e-16, " float64 eps", color=c["warm"],
-                     va="bottom", ha="right", fontsize=8)
-            ax1.set_ylim(1e-18, 1e-12)
+            # A legend entry, not floating text: the residual band spans the
+            # whole panel width, so any in-plot label lands on top of data.
+            ax1.axhline(2.22e-16, ls="--", lw=1.0, color=c["warm"],
+                        label="float64 eps")
+            ax1.legend(loc="upper right", fontsize=8)
+            ax1.set_ylim(1e-18, 1e-11)
             ax1.set_ylabel("$|\\Delta| / \\max|T|$")
             ax1.set_xlabel("local sidereal time  [hours]")
             ax1.set_xlim(lst_h[0], lst_h[-1])

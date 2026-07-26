@@ -10,9 +10,11 @@
   wall-clock scaling, and the m-mode spectrum. Every figure ships in light
   and dark variants and is theme-switched by furo. Measured at nside 64
   (lmax 191), 512 samples, 32 channels: the engines agree to **1.4e-15**
-  relative, and one forward evaluation costs **68.0 s** on the general
-  engine against **61 ms** with the cached beam and FFT synthesis — a
-  **1111x** speed-up. `sphinx-design` is a new docs dependency.
+  relative, and one forward evaluation costs **70.4 s** on the general
+  engine against **64 ms** with the cached beam and FFT synthesis — a
+  **1105x** speed-up. `sphinx-design` is a new docs dependency.
+  `--replot` redraws every figure from a cached run, so a purely visual
+  change never costs another 20-minute generic-engine sweep.
 - `examples/driftscan_mmode.py`: the end-to-end drift-scan demo — build a
   twin from a beam map, cross-check it against the general engine, time all
   three configurations, read off the m-modes, differentiate w.r.t. the beam.

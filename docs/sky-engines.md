@@ -173,6 +173,29 @@ One forward evaluation of a full sidereal day. Left: absolute cost. Right:
 speed-up over the general engine.
 :::
 
+At the band-limit a real RHINO run uses — `nside` 64, `lmax` 191, a full
+sidereal day of 512 samples across 32 channels — that gap is the difference
+between waiting and not:
+
+::::{grid} 1 3 3 3
+:gutter: 2
+
+:::{grid-item-card} 70.4 s
+:text-align: center
+general engine, one evaluation
+:::
+
+:::{grid-item-card} 64 ms
+:text-align: center
+m-mode, cached beam + FFT
+:::
+
+:::{grid-item-card} 1.4 × 10⁻¹⁵
+:text-align: center
+relative disagreement
+:::
+::::
+
 Two opt-ins sharpen it further, both preserving `jit`/`vmap`/`grad`:
 
 `to_reference_frame()`
@@ -244,18 +267,24 @@ mmodes = projector.mmodes(sky, coords)   # (n_freq, lmax + 1) complex
 | Validating a port | `LimTODProjector` | numpy limTOD oracle through `pure_callback` |
 
 :::{warning}
-The drift-scan engine ignores `coords.pointing` by design — the pointing is
-projector configuration. Handing it coords whose pointing *disagrees* would
-silently simulate a different observation, so it raises instead. Constant
-pointing that agrees passes: reusing a general projector's coords is the
-expected way to switch engines.
+The drift-scan engine does not consume `coords.pointing` — the pointing is
+projector configuration. It is not silently discarded either: coords whose
+pointing *disagrees* would otherwise simulate a different observation and
+return a perfectly finite, perfectly wrong answer, so they raise. Constant
+pointing that agrees passes, because reusing a general projector's coords is
+the expected way to switch engines.
 :::
 
-Both engines need the JAX drift-scan backend:
+Both engines are backed by the `limtod_jax` package that ships with limTOD:
 
 ```bash
-pip install -e '<path-to-limTOD>[jax]'    # limTOD >= 1.7
+pip install -e '<path-to-limTOD>[jax]'
 ```
+
+`NativeLimTODProjector` works with any version that provides `limtod_jax`;
+`DriftScanProjector` needs **limTOD ≥ 1.6**, and `uniform_sampling=True` the
+FFT fast path added in **1.7**. Each requirement is checked at the boundary,
+so an outdated install says so instead of failing inside a traced call.
 
 Enable `jax_enable_x64` for quantitative work — the map↔alm transforms inherit
 s2fft's float32 limitation.

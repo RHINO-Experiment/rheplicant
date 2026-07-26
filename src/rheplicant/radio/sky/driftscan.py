@@ -23,9 +23,13 @@ general projector.
 Where the general projectors read the pointing from ``coords.pointing``
 per call, here the pointing IS the projector configuration: az/el/selfrot
 are static fields, and ``coords`` only supplies
-``coords.extra["lst_deg"]``. ``coords.pointing``, if present, is ignored
-by design — a drift scan that needs a per-sample pointing is not a drift
-scan.
+``coords.extra["lst_deg"]``. A drift scan that needs a per-sample pointing
+is not a drift scan. ``coords.pointing`` is therefore not consumed — but it
+is not silently discarded either: pointing that AGREES with the projector's
+own passes (reusing a general projector's coords is the expected way to
+switch engines), while pointing that disagrees raises, because using this
+projector's value instead would simulate a different observation and return
+a perfectly finite, perfectly wrong answer.
 
 Two static opt-ins turn the projector from "correct" into "fast for
 inference", both preserving full jit/vmap/grad behaviour:
@@ -105,8 +109,12 @@ class DriftScanProjector(AbstractSkyProjector):
     Coordinate conventions (degrees, per the RHINO family):
 
         * ``coords.extra["lst_deg"]`` — ``(n_time,)`` local sidereal times.
-        * ``coords.pointing`` is IGNORED: the drift pointing is projector
-          configuration (static fields below), not per-sample data.
+        * ``coords.pointing`` / ``coords.extra["selfrot_deg"]`` are not
+          consumed — the drift pointing is projector configuration (the
+          static fields below), not per-sample data. They may agree with it
+          (so a general projector's coords can be reused verbatim); if they
+          disagree, the call is rejected rather than quietly simulating the
+          projector's pointing instead.
 
     Attributes:
         beam_alms: ``(n_freq, n_alm)`` packed healpy beam alms in the
