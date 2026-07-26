@@ -19,9 +19,7 @@ from rheplicant.radio.sky.model import AbstractSkyModel, PowerLawSkyModel, Unifo
 from rheplicant.radio.sky.point_sources import PointSourceOperator
 from rheplicant.radio.sky.projection import (
     AbstractSkyProjector,
-    LimTODProjector,
     MatrixProjector,
-    MModeProjector,
 )
 from rheplicant.radio.sky.source import SkySourceOperator
 from rheplicant.radio.sky.uniform import SkyOperator
@@ -32,8 +30,6 @@ __all__ = [
     "DriftScanProjector",
     "ForegroundOperator",
     "GlobalSignalOperator",
-    "LimTODProjector",
-    "MModeProjector",
     "MatrixProjector",
     "GeneralPointingProjector",
     "PointSourceOperator",

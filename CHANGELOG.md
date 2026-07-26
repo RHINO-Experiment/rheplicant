@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Removed: `MModeProjector` and `LimTODProjector`
+
+**Breaking.** Three sky engines remain, no placeholders: two that compute the
+physics (`GeneralPointingProjector`, `DriftScanProjector`, named for the
+observation geometry) and `MatrixProjector`, which takes the projection as
+data. `rheplicant.radio.sky.projection` is down from five classes to two.
+
+`MModeProjector` was a placeholder that took m-mode transfer matrices as
+given. `DriftScanProjector` computes them from the beam, so the placeholder's
+only remaining job was explaining that it was not the one to use — which four
+separate docs had to say. It could not have grown into the real thing either:
+its `(n_freq, n_m, n_pix)` layout is ~6.4 GB at nside 64 / 32 channels / 512
+samples, and it required `n_m == n_time`, whereas m-mode pipelines store
+`(n_freq, n_m, n_alm)` with `n_m = 2*lmax+1` independent of the sampling.
+
+`LimTODProjector` bridged to numpy limTOD through `jax.pure_callback`: not
+differentiable, not vmappable, no adjoint — so it could feed neither
+calibration, nor Fisher forecasts, nor sky-space map-making, which is most of
+what this framework is for. Now that both real engines are native JAX, anyone
+wanting a numpy reference should call `limTOD.simulator.generate_TOD_sky`
+directly, which is also the more trustworthy comparison: XLA runs callback
+threads with FTZ/DAZ set, so healpy inside one lands ~1e-7 relative from the
+same numpy code on the main thread. (This also retires the
+`truncate_frac_thres` knob added moments earlier in this same Unreleased
+cycle.) D10's host-callback policy is narrowed to match: callbacks are for
+inherently non-differentiable steps such as RFI flagging, not for borrowing
+numpy physics.
+
 ### Renamed: `NativeLimTODProjector` -> `GeneralPointingProjector`
 
 **Breaking, no alias.** The two real sky engines were named on different
@@ -14,28 +42,11 @@ observation geometry they serve, which is the question a user actually asks:
 |---|---|---|
 | `GeneralPointingProjector` | observation geometry | pointing varies per sample |
 | `DriftScanProjector` | observation geometry | pointing is fixed; the Earth scans |
-| `LimTODProjector` | what it bridges to | numpy-limTOD features not yet ported |
-| `MatrixProjector` / `MModeProjector` | the data you supply | precomputed operators |
+| `MatrixProjector` | the data you supply | the projection is already built |
 
 Module `rheplicant.radio.sky.native` -> `rheplicant.radio.sky.general_pointing`.
 No compatibility alias: the old name is gone, so a stale import fails loudly
 at import time rather than silently working until it does not.
-
-`LimTODProjector` is re-documented accordingly. Its billed role — "the oracle
-that validates the JAX port" — was never what the suite actually did (the
-oracle tests call `limTOD.simulator.generate_TOD_sky` directly), and it is
-poorly suited to it: `jax.pure_callback` runs host code on XLA threads with
-FTZ/DAZ set, so healpy inside it lands ~1e-7 relative from the same numpy
-code on the main thread. Its real value is as an escape hatch for
-numpy-limTOD features `limtod_jax` has not ported (full Stokes, `nside_hires`,
-the map-space `horizontal_mask`), and that is now what it says.
-
-- `LimTODProjector` gained `truncate_frac_thres` (static, default limTOD's own
-  `1e-10`). Previously hardcoded, which left the bridge stuck on numpy
-  limTOD's nonlinear beam-truncation cleanup while `GeneralPointingProjector`
-  contracts to the linear `0.0` chain — the two engines could not be compared
-  on identical inputs at all, differing by ~1e-4 relative for that reason
-  alone.
 
 - **Docs: [sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)**
   — a new page comparing the general and drift-scan engines side by side,
@@ -81,12 +92,11 @@ the map-space `horizontal_mask`), and that is now what it says.
   error message, `MatrixProjector`, and `GeneralPointingProjector` now all point
   at the drift-scan engine, and `rheplicant.radio.sky.driftscan` was added to
   the API reference — its ~200 lines of contract documentation were missing
-  from the rendered docs entirely. The stale four-engine ladders in
-  `docs/tour.md`, `README.md`, and `DESIGN.md` (D8), which offered the
-  `MModeProjector` placeholder as the drift-scan answer, are corrected.
+  from the rendered docs entirely. The stale engine ladders in
+  `docs/tour.md`, `README.md`, and `DESIGN.md` (D8), which pointed at a
+  placeholder as the drift-scan answer, are corrected.
 - `DriftScanProjector` (`rheplicant.radio.sky.driftscan`): the m-mode fast
-  path for drift scans — the "real version" the `MModeProjector` placeholder
-  promised. Derives the m-mode projection from the beam alms on the fly via
+  path for drift scans. Derives the m-mode projection from the beam alms via
   `limtod_jax.driftscan` (one Wigner rotation for the whole scan plus per-m
   phases): equal to `GeneralPointingProjector` with constant pointing to float64
   roundoff at O(lmax^3 + n_time*lmax) instead of O(n_time*lmax^3). The drift

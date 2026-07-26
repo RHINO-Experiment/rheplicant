@@ -8,7 +8,7 @@ Composes the two halves of the sky abstraction::
     )
 
 Either half swaps independently — e.g. replace the projector with
-``eqx.tree_at(lambda p: p["t_ant"]["sky"].projector, twin, MModeProjector(B))``
+``eqx.tree_at(lambda p: p["t_ant"]["sky"].projector, twin, DriftScanProjector(...))``
 without touching the sky parameters, or infer sky parameters through any
 engine via ``rheplicant.inference.build_forward_fn``.
 """

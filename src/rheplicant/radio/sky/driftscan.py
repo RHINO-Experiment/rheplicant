@@ -8,10 +8,8 @@ rotate the beam into the celestial frame ONCE at a reference LST, and the
 remainder of the sidereal day reduces to a per-m phase ``e^{-i m dphi}``.
 That is the whole reason the cost stops scaling with the number of samples.
 
-:class:`DriftScanProjector` is the "real version" that the
-:class:`~rheplicant.radio.sky.projection.MModeProjector` placeholder
-promised: instead of taking precomputed transfer matrices, it derives the
-m-mode projection on the fly from the beam alms via
+:class:`DriftScanProjector` needs no precomputed transfer matrices: it
+derives the m-mode projection on the fly from the beam alms via
 ``limtod_jax.driftscan`` (one Wigner rotation for the whole scan plus
 per-m phases). For a genuine drift scan — fixed azimuth/elevation/
 self-rotation, only LST advancing — it reproduces

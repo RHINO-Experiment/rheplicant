@@ -22,9 +22,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `SkySourceOperator` | operator | composes `sky_model × projector`; output is already beam-convolved |
 | `UniformSkyModel`, `PowerLawSkyModel` *(P)* | `AbstractSkyModel` | parameters → `(n_freq, n_pix)` maps |
 | `MatrixProjector` | `AbstractSkyProjector` | precomputed sky→TOD matrix (limTOD `generate_sky2sys_projection`); differentiable, exact adjoint |
-| `MModeProjector` *(P)* | `AbstractSkyProjector` | m-mode transfer matrices taken as given; the minimal statement of the contract — superseded for real work by `DriftScanProjector` below |
-| `LimTODProjector` | `AbstractSkyProjector` | numpy-limTOD oracle via `pure_callback` (not differentiable) |
-| `GeneralPointingProjector` | `AbstractSkyProjector` | pure-JAX limTOD port (`limtod_jax`): general pointing, differentiable in sky and beam, exact adjoint |
+| `GeneralPointingProjector` | `AbstractSkyProjector` | pure-JAX (`limtod_jax`): any pointing, one rotation per sample, differentiable in sky and beam, exact adjoint |
 | `DriftScanProjector` | `AbstractSkyProjector` | m-mode fast path for drift scans (`limtod_jax.driftscan`): one Wigner rotation per scan (cacheable via `to_reference_frame()`), optional FFT synthesis on uniform LST grids, optional horizon mask, exact adjoint |
 
 ## Environment

@@ -223,12 +223,11 @@ projector = DriftScanProjector.from_beam_maps(
     beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0, lmax=191)
 ```
 
-Both need `pip install -e '<limTOD>[jax]'`. Three supporting engines round
-out the set: `MatrixProjector` (precomputed projection matrix — pure einsum),
-`LimTODProjector` (numpy-limTOD oracle via `pure_callback` — validation only,
-not differentiable), and `MModeProjector` (a placeholder kept as the minimal
-m-mode contract; `DriftScanProjector` supersedes it). See
-[sky engines](sky-engines.md) for the comparison, benchmarks, and figures.
+Both need `pip install -e '<limTOD>[jax]'`. The third engine takes the
+projection as data instead of computing it: `MatrixProjector` (a precomputed
+sky→TOD matrix — pure einsum, no optional dependency, valid while pointing
+and beam are fixed). See [sky engines](sky-engines.md) for the comparison,
+benchmarks, and figures.
 
 `SkySourceOperator` enters the graph at `observed_astro_sky` (post-beam: its
 output is already convolved).

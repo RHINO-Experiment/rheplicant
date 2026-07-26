@@ -180,7 +180,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(385 tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
+(379 tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder pending ports from limTOD and friends
 — except the sky engines, which are real: a general differentiable limTOD

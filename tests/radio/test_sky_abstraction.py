@@ -10,9 +10,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.radio import GainOperator
 from rheplicant.radio.sky import (
     GeneralPointingProjector,
-    LimTODProjector,
     MatrixProjector,
-    MModeProjector,
     PowerLawSkyModel,
     SkySourceOperator,
     UniformSkyModel,
@@ -88,32 +86,6 @@ class TestMatrixProjector:
             MatrixProjector(matrix=jnp.ones(N_PIX))
 
 
-class TestMModeProjector:
-    @pytest.fixture
-    def transfer(self, key):
-        re, im = jax.random.normal(key, (2, N_FREQ, N_TIME, N_PIX))
-        return re + 1j * im
-
-    def test_forward_real_and_shaped(self, transfer, coords):
-        out = MModeProjector(transfer=transfer).forward(jnp.ones((N_FREQ, N_PIX)), coords)
-        assert out.shape == (N_TIME, N_FREQ)
-        assert jnp.isrealobj(out)
-
-    def test_adjoint_dot_identity(self, transfer, key, coords):
-        proj = MModeProjector(transfer=transfer)
-        k1, k2 = jax.random.split(key)
-        x = jax.random.normal(k1, (N_FREQ, N_PIX))
-        y = jax.random.normal(k2, (N_TIME, N_FREQ))
-        lhs = dot(proj.forward(x, coords), y)
-        rhs = dot(x, proj.adjoint(y, coords))
-        assert jnp.allclose(lhs, rhs, rtol=1e-4)
-
-    def test_nm_mismatch_raises(self, transfer, coords):
-        bad = MModeProjector(transfer=transfer[:, :-1, :])
-        with pytest.raises(StateValidationError, match="n_m"):
-            bad.forward(jnp.ones((N_FREQ, N_PIX)), coords)
-
-
 class TestSkySourceOperator:
     @pytest.fixture
     def source(self, key):
@@ -143,14 +115,20 @@ class TestSkySourceOperator:
         assert jnp.all(jnp.isfinite(g_amp)) and jnp.any(g_amp != 0)
 
     def test_projector_swaps_independently(self, source, template_state, key):
-        """The modularity contract: same sky model, different engine."""
-        re, im = jax.random.normal(key, (2, N_FREQ, N_TIME, N_PIX))
+        """The modularity contract: same sky model, different engine.
+
+        Swapped for a chromatic MatrixProjector — a different engine AND a
+        different matrix rank than the fixture's, so a swap that silently
+        kept the old projector would not produce this output.
+        """
+        chromatic = jax.random.normal(key, (N_FREQ, N_TIME, N_PIX))
         swapped = eqx.tree_at(
-            lambda s: s.projector, source, MModeProjector(transfer=re + 1j * im)
+            lambda s: s.projector, source, MatrixProjector(matrix=chromatic)
         )
         out = swapped(template_state)
         assert out.data.shape == (N_TIME, N_FREQ)
         assert isinstance(swapped.sky_model, PowerLawSkyModel)  # sky untouched
+        assert not jnp.allclose(out.data, source(template_state).data)
 
     def test_type_validation(self, key):
         with pytest.raises(StateValidationError, match="sky_model"):
@@ -167,81 +145,6 @@ class TestSkySourceOperator:
     def test_requires_coords(self, source):
         with pytest.raises(StateValidationError, match="coords"):
             source(State())
-
-
-class TestLimTODProjector:
-    def test_validates_coordinate_requirements(self, template_state):
-        proj = LimTODProjector(beam_maps=jnp.ones((N_FREQ, N_PIX)), lat_deg=53.2)
-        with pytest.raises(StateValidationError, match="pointing"):
-            proj.forward(jnp.ones((N_FREQ, N_PIX)), template_state.coords)
-
-    def test_oracle_matches_limtod(self, template_state):
-        """End-to-end oracle test — runs only where limTOD is installed."""
-        limtod = pytest.importorskip("limTOD.simulator")
-        import numpy as np
-
-        nside = 4
-        n_pix = 12 * nside**2
-        rng = np.random.default_rng(0)
-        beam = jnp.asarray(rng.random((2, n_pix)))
-        sky = jnp.asarray(rng.random((2, n_pix)))
-        coords = template_state.coords.replace(
-            freq=template_state.coords.freq[:2],
-            pointing=jnp.tile(jnp.array([[0.0, 90.0]]), (N_TIME, 1)),
-            extra={"lst_deg": jnp.linspace(0.0, 30.0, N_TIME)},
-        )
-        proj = LimTODProjector(beam_maps=beam, lat_deg=53.2)
-        out = proj.forward(sky, coords)
-        direct = limtod.generate_TOD_sky(
-            np.asarray(beam[0]), np.asarray(sky[0]),
-            np.linspace(0.0, 30.0, N_TIME), 53.2,
-            np.zeros(N_TIME), np.full(N_TIME, 90.0), np.zeros(N_TIME),
-        )
-        assert out.shape == (N_TIME, 2)
-        assert jnp.allclose(out[:, 0], jnp.asarray(direct), rtol=1e-5)
-
-    def test_truncate_frac_thres_is_forwarded(self, template_state):
-        """The knob that lets this bridge compute the LINEAR chain.
-
-        Without it the escape hatch is stuck on numpy limTOD's nonlinear
-        default while GeneralPointingProjector contracts to 0.0, so the two
-        could not be compared on identical inputs at all.
-        """
-        limtod = pytest.importorskip("limTOD.simulator")
-        import numpy as np
-
-        nside = 8
-        n_pix = 12 * nside**2
-        theta, _ = np.array(
-            [np.arccos(1 - 2 * (np.arange(n_pix) + 0.5) / n_pix), np.zeros(n_pix)]
-        )
-        # A beam with a wide dynamic range, so the truncation has something to
-        # bite on: a flat beam would make both settings identical.
-        beam = jnp.asarray(np.exp(-0.5 * (theta / 0.25) ** 2)[None, :])
-        sky = jnp.asarray(np.random.default_rng(1).random((1, n_pix)))
-        coords = template_state.coords.replace(
-            freq=template_state.coords.freq[:1],
-            pointing=jnp.tile(jnp.array([[0.0, 90.0]]), (N_TIME, 1)),
-            extra={"lst_deg": jnp.linspace(0.0, 30.0, N_TIME)},
-        )
-        args = (np.asarray(beam[0]), np.asarray(sky[0]),
-                np.linspace(0.0, 30.0, N_TIME), 53.2,
-                np.zeros(N_TIME), np.full(N_TIME, 90.0), np.zeros(N_TIME))
-
-        for thres in (0.0, 1e-2):
-            out = LimTODProjector(
-                beam_maps=beam, lat_deg=53.2, truncate_frac_thres=thres
-            ).forward(sky, coords)
-            ref = limtod.generate_TOD_sky(*args, truncate_frac_thres=thres)
-            assert jnp.allclose(out[:, 0], jnp.asarray(ref), rtol=1e-5), (
-                f"truncate_frac_thres={thres} not forwarded to numpy limTOD"
-            )
-
-        # ... and the two settings genuinely differ, so the test above is not
-        # vacuously comparing a knob that does nothing.
-        linear = limtod.generate_TOD_sky(*args, truncate_frac_thres=0.0)
-        truncated = limtod.generate_TOD_sky(*args, truncate_frac_thres=1e-2)
-        assert not np.allclose(linear, truncated, rtol=1e-6)
 
 
 class TestGeneralPointingProjector:

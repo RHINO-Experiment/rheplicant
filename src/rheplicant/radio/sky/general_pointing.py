@@ -48,9 +48,8 @@ def _limtod_jax():
         raise ImportError(
             "GeneralPointingProjector needs the limtod_jax package: install the "
             "limTOD repo with its jax extra (pip install -e '<limTOD>[jax]'). "
-            "Alternatives without it: MatrixProjector (a precomputed matrix, "
-            "fixed pointing) or LimTODProjector (numpy limTOD through a host "
-            "callback, not differentiable)."
+            "Without it, MatrixProjector takes a precomputed sky->TOD matrix "
+            "and needs no optional dependency (fixed pointing and beam only)."
         ) from exc
     return limtod_jax
 
@@ -65,8 +64,7 @@ class GeneralPointingProjector(AbstractSkyProjector):
     returns the same numbers to float64 roundoff for a single rotation over
     the whole scan (``O(lmax³ + n_time·lmax)`` vs ``O(n_time·lmax³)``).
 
-    Coordinate conventions (degrees, per the RHINO family — identical to
-    :class:`~rheplicant.radio.sky.projection.LimTODProjector`):
+    Coordinate conventions (degrees, per the RHINO family):
 
         * ``coords.extra["lst_deg"]`` — ``(n_time,)`` local sidereal times.
         * ``coords.pointing`` — ``(n_time, 2)`` azimuth/elevation [deg].
@@ -83,9 +81,8 @@ class GeneralPointingProjector(AbstractSkyProjector):
         lat_deg: site latitude [deg] (static).
         lmax: harmonic band-limit; must match ``beam_alms`` length (static).
         nside: HEALPix nside of the sky maps, RING ordering (static).
-        normalize_beam: numpy limTOD's ``normalize_beam`` — divide each
-            sample by the rotated beam's pixel sum (static; same name as on
-            ``LimTODProjector``).
+        normalize_beam: numpy limTOD's ``normalize_beam`` semantics — divide
+            each sample by the rotated beam's pixel sum (static).
     """
 
     beam_alms: jax.Array

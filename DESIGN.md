@@ -124,10 +124,11 @@ maps → `(n_time, n_freq)`; `forward` + `adjoint` for linear engines),
 composed by `SkySourceOperator`. Either half swaps independently, so the
 same sky can be observed through limTOD beam convolution, a precomputed
 projection matrix, or drift-scan m-modes — and the same engine serves
-different skies. The engines form a maturity ladder, now complete:
-`LimTODProjector` (pure_callback oracle — jit-safe, not differentiable) →
+different skies. Three engines, no placeholders left. Two compute the
+physics and are named for the observation geometry they serve; the third
+takes the projection as data:
 `MatrixProjector` (offline `generate_sky2sys_projection` matrix — fully
-differentiable for fixed pointing/beam) →
+differentiable for fixed pointing/beam, no optional dependency) →
 `GeneralPointingProjector` (**delivered**: pure JAX via the `limtod_jax`
 package in the limTOD repo, general pointing, differentiable w.r.t. both
 sky and beam alms, exact adjoint; the oracle-equivalence and adjoint
@@ -163,12 +164,18 @@ raw data beforehand (zero-copy — JAX arrays are immutable).
 
 ### D10 — Host-callback boundary policy
 
-`jax.pure_callback` into numpy packages is used in exactly two situations:
-(a) *permanently*, for inherently non-differentiable steps — RFI flagging via
-MomentRFI (`MomentRFIFlaggingOperator`), where the output is boolean and a
-gradient is meaningless; and (b) *temporarily*, as a correctness oracle for
-physics awaiting a native port (`LimTODProjector`). Callbacks must never sit
-inside a gradient path; the flags they produce flow to inference through
+`jax.pure_callback` into numpy packages is reserved for inherently
+non-differentiable steps — RFI flagging via MomentRFI
+(`MomentRFIFlaggingOperator`), where the output is boolean and a gradient is
+meaningless. It is NOT a way to borrow numpy physics: a callback bridge to
+numpy limTOD shipped through 0.1.4 and was removed once both sky engines were
+native, because a bridge that cannot be differentiated, vmapped or transposed
+is dead weight in a framework whose point is all three — and it made a poor
+reference besides, since XLA runs callback threads with FTZ/DAZ set, putting
+healpy inside one ~1e-7 away from the same numpy code on the main thread. Use
+numpy limTOD directly when a numpy reference is what you want. Callbacks must
+never sit inside a gradient path; the flags they produce flow to inference
+through
 `MaskedGaussianLikelihood` (zero weight on flagged samples) and to
 `SkySpaceFilter` noise weighting. Existing `aux["flags"]` are always passed
 as MomentRFI's `prior_mask` so flaggers compose instead of clobbering.

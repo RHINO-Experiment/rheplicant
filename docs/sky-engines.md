@@ -269,7 +269,6 @@ Two opt-ins sharpen it further, both preserving `jit`/`vmap`/`grad`:
 | Fixed pointing, Earth scans | `DriftScanProjector` | Same answer, orders of magnitude cheaper |
 | Tracking or scanning | `GeneralPointingProjector` | Pointing genuinely varies per sample |
 | Fixed pointing *and* fixed beam, matrix already built | `MatrixProjector` | Pure einsum; no engine dependency |
-| Validating a port | `LimTODProjector` | numpy limTOD oracle through `pure_callback` |
 
 :::{warning}
 The drift-scan engine does not consume `coords.pointing` — the pointing is
