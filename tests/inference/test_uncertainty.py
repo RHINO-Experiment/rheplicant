@@ -149,3 +149,71 @@ class TestEndToEndWithPipeline:
         assert jnp.allclose(F.matrix[0, 0], n_samples * 1e4 / 0.25, rtol=1e-4)
         sigma_gain = jnp.sqrt(parameter_covariance(F).matrix[0, 0])
         assert sigma_gain < 1e-2  # sub-percent gain forecast
+
+
+class TestNamedParameters:
+    """A Fisher matrix over a ParameterSpace has rows that mean something."""
+
+    @pytest.fixture
+    def named_problem(self):
+        """forward({'a': scalar, 'b': (2,)}) — deliberately NOT alphabetical in
+        declaration order, so the name->slice mapping is doing real work."""
+        key = jax.random.key(1)
+        A = jax.random.normal(key, (N_DATA, 3))
+
+        def forward(values):
+            return A @ jnp.concatenate([jnp.atleast_1d(values["z_scalar"]),
+                                        values["a_vector"]])
+
+        return forward, {"z_scalar": jnp.array(1.0), "a_vector": jnp.array([2.0, 3.0])}
+
+    def test_slices_follow_the_actual_flattening(self, named_problem):
+        from jax.flatten_util import ravel_pytree
+
+        forward, params = named_problem
+        cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
+        flat, _ = ravel_pytree(params)
+        for name in cov.names:
+            start, stop = cov.span(name)
+            assert jnp.allclose(flat[start:stop], jnp.ravel(params[name]))
+
+    def test_sigma_is_shaped_like_the_parameter(self, named_problem):
+        forward, params = named_problem
+        cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
+        assert cov.sigma("z_scalar").shape == ()
+        assert cov.sigma("a_vector").shape == (2,)
+
+    def test_sigma_matches_the_diagonal(self, named_problem):
+        forward, params = named_problem
+        cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
+        start, stop = cov.span("a_vector")
+        assert jnp.allclose(
+            cov.sigma("a_vector"), jnp.sqrt(jnp.diag(cov.matrix)[start:stop])
+        )
+
+    def test_block_extracts_a_cross_covariance(self, named_problem):
+        forward, params = named_problem
+        cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
+        assert cov.block("z_scalar", "a_vector").shape == (1, 2)
+        assert cov.block("a_vector").shape == (2, 2)
+
+    def test_sigma_of_a_fisher_matrix_is_refused(self, named_problem):
+        """sqrt(diag(F)) is not an error bar — inverting is the whole point."""
+        forward, params = named_problem
+        fisher = fisher_information(forward, params, noise_std=1.0)
+        with pytest.raises(StateValidationError, match="parameter_covariance"):
+            fisher.sigma("z_scalar")
+
+    def test_unknown_name_is_refused(self, named_problem):
+        forward, params = named_problem
+        cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
+        with pytest.raises(StateValidationError, match="no parameter named"):
+            cov.sigma("nope")
+
+    def test_unnamed_parameters_still_work(self, linear_problem):
+        """A plain array pytree from build_forward_fn has no names, and says so."""
+        forward, theta0, _ = linear_problem
+        cov = parameter_covariance(fisher_information(forward, theta0, noise_std=1.0))
+        assert cov.names is None
+        with pytest.raises(StateValidationError, match="not named"):
+            cov.sigma("anything")

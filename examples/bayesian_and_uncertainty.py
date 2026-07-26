@@ -69,7 +69,7 @@ forward, params0 = space.forward_fn(twin, state)
 
 F = fisher_information(forward, params0, noise_std=SIGMA)
 cov = parameter_covariance(F)
-print(f"Fisher forecast:  sigma(gain) = {float(jnp.sqrt(cov.matrix[0, 0])):.4f}  "
+print(f"Fisher forecast:  sigma(gain) = {float(cov.sigma('gain')):.4f}  "
       "(Cramer-Rao — matches the posterior width for this near-linear model)")
 
 # ------------------------------------------------- prediction uncertainty --
