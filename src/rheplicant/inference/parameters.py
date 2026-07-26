@@ -69,6 +69,30 @@ def _as_tuple(x: Any) -> tuple:
     return tuple(x) if isinstance(x, (tuple, list)) else (x,)
 
 
+def _dtype_kind(dtype: Any) -> str:
+    """Coarse dtype class — strict enough to catch complex-into-real, loose
+    enough to survive JAX's float32/float64 promotion rules."""
+    if jnp.issubdtype(dtype, jnp.complexfloating):
+        return "complex"
+    if jnp.issubdtype(dtype, jnp.floating):
+        return "float"
+    if jnp.issubdtype(dtype, jnp.integer):
+        return "integer"
+    if jnp.issubdtype(dtype, jnp.bool_):
+        return "boolean"
+    return str(dtype)  # pragma: no cover - defensive
+
+
+def _tag_leaves_with_paths(pipeline: AbstractOperator) -> AbstractOperator:
+    """A copy of ``pipeline`` in which every leaf holds its own tree path.
+
+    Running a selector against this tells us *which* leaf the selector picked,
+    by identity of position rather than of value — so two stages sharing the
+    same array object are still recognised as two distinct targets.
+    """
+    return jax.tree_util.tree_map_with_path(lambda path, _: path, pipeline)
+
+
 class Latent(eqx.Module):
     """A named quantity to infer — the unit a sampler or optimizer works on.
 
@@ -100,6 +124,15 @@ class Latent(eqx.Module):
     def __check_init__(self):
         if not isinstance(self.name, str) or not self.name:
             raise ParameterSpaceError(f"Latent name must be a non-empty string, got {self.name!r}.")
+        # Duck-typed so that declaring a space costs no numpyro import.
+        prior_shape = getattr(self.prior, "shape", None) if self.prior is not None else None
+        if callable(prior_shape):
+            declared = tuple(prior_shape())
+            if declared != self.init.shape:
+                raise ParameterSpaceError(
+                    f"Latent {self.name!r}: prior has shape {declared} but init has shape "
+                    f"{self.init.shape}. The prior describes the latent, so the two must agree."
+                )
 
 
 class Bind(eqx.Module):
@@ -258,6 +291,92 @@ class ParameterSpace(eqx.Module):
         return {latent.name: latent.init for latent in self.latents}
 
     # ------------------------------------------------------------ applying --
+
+    def _abstract_values(self) -> dict[str, jax.ShapeDtypeStruct]:
+        """The latents as shapes only — enough for every check, costs no compute."""
+        return {
+            latent.name: jax.ShapeDtypeStruct(latent.init.shape, latent.init.dtype)
+            for latent in self.latents
+        }
+
+    def _resolve_targets(self, pipeline: AbstractOperator) -> list[tuple[Bind, int, tuple, Any]]:
+        """Resolve every ``into`` selector to (binding, slot, tree path, leaf)."""
+        tagged = _tag_leaves_with_paths(pipeline)
+        leaves = dict(jax.tree_util.tree_flatten_with_path(pipeline)[0])
+        resolved = []
+        for binding in self.bindings:
+            for slot, selector in enumerate(binding.into):
+                try:
+                    path = selector(tagged)
+                except Exception as exc:
+                    raise ParameterSpaceError(
+                        f"Bind for {binding.latents}: `into` selector {slot} failed against the "
+                        f"pipeline ({exc}). Selectors may only walk attributes and indices."
+                    ) from exc
+                if not isinstance(path, tuple) or path not in leaves:
+                    raise ParameterSpaceError(
+                        f"Bind for {binding.latents}: `into` selector {slot} does not reach an "
+                        "array leaf of the pipeline. It landed on static configuration "
+                        f"({path!r}), which inference cannot touch."
+                    )
+                if not eqx.is_array(leaves[path]):
+                    raise ParameterSpaceError(
+                        f"Bind for {binding.latents}: `into` selector {slot} reaches "
+                        f"{type(leaves[path]).__name__}, not an array leaf."
+                    )
+                resolved.append((binding, slot, path, leaves[path]))
+        return resolved
+
+    def validate(self, pipeline: AbstractOperator) -> None:
+        """Check this space against a pipeline. Raises, or returns ``None``.
+
+        Every check runs on shapes alone (``jax.eval_shape``), so validation is
+        free — no array is ever computed. It is called for you by
+        :meth:`forward_fn` and by the Bayesian bridge.
+
+        The failure modes it exists to prevent all share a shape: they produce a
+        finite, correctly-shaped, **wrong** inference rather than an exception.
+        """
+        abstract = self._abstract_values()
+
+        if self.raw_bind is None:
+            resolved = self._resolve_targets(pipeline)
+
+            seen: dict[tuple, Bind] = {}
+            for binding, _, path, _ in resolved:
+                if path in seen:
+                    raise ParameterSpaceError(
+                        f"Pipeline leaf {jax.tree_util.keystr(path)} is written by more than one "
+                        f"binding ({seen[path].latents} and {binding.latents}); one would "
+                        "silently win. Give each leaf a single binding."
+                    )
+                seen[path] = binding
+
+            for binding in self.bindings:
+                produced = jax.eval_shape(binding.evaluate, abstract)
+                for slot, value in enumerate(produced):
+                    target = next(
+                        leaf for b, s, _, leaf in resolved if b is binding and s == slot
+                    )
+                    if value.shape != target.shape:
+                        raise ParameterSpaceError(
+                            f"Bind for {binding.latents} produces shape {value.shape} for "
+                            f"`into` selector {slot}, but that leaf has shape {target.shape}."
+                        )
+                    if _dtype_kind(value.dtype) != _dtype_kind(target.dtype):
+                        raise ParameterSpaceError(
+                            f"Bind for {binding.latents} produces "
+                            f"{_dtype_kind(value.dtype)} values for `into` selector {slot}, "
+                            f"but that leaf is {_dtype_kind(target.dtype)}."
+                        )
+
+        bound = jax.eval_shape(lambda values: self.bind(pipeline, values), abstract)
+        if jax.tree_util.tree_structure(bound) != jax.tree_util.tree_structure(pipeline):
+            raise ParameterSpaceError(
+                "Binding changed the pipeline's pytree structure. Bindings may only replace "
+                "leaf VALUES — posterior-predictive vmapping, Fisher flattening and jit all "
+                "assume a fixed treedef."
+            )
 
     def bind(
         self, pipeline: AbstractOperator, values: dict[str, jax.Array]

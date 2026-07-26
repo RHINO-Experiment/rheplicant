@@ -15,6 +15,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.radio import GainOperator, SkyOperator
@@ -157,6 +158,114 @@ class TestBinding:
             return space.bind(twin, values)["gain_a"].gain
 
         assert float(run({"log_g": jnp.array(0.0)})) == pytest.approx(1.0)
+
+
+class TestDeclarationValidation:
+    """Checks that need nothing but the declaration itself."""
+
+    def test_duplicate_names_rejected(self):
+        with pytest.raises(ParameterSpaceError, match="unique"):
+            ParameterSpace(
+                latents=[Latent("g", init=1.0), Latent("g", init=2.0)],
+                bindings=[Bind("g", into=lambda p: p["gain_a"].gain)],
+            )
+
+    def test_undeclared_latent_rejected(self):
+        with pytest.raises(ParameterSpaceError, match="undeclared"):
+            ParameterSpace(
+                latents=[Latent("g", init=1.0)],
+                bindings=[Bind("typo", into=lambda p: p["gain_a"].gain)],
+            )
+
+    def test_unbound_latent_rejected(self):
+        """A latent nothing binds would sample happily and return the prior."""
+        with pytest.raises(ParameterSpaceError, match="never bound"):
+            ParameterSpace(
+                latents=[Latent("g", init=1.0), Latent("orphan", init=0.0)],
+                bindings=[Bind("g", into=lambda p: p["gain_a"].gain)],
+            )
+
+    def test_identity_bind_needs_exactly_one_latent(self):
+        with pytest.raises(ParameterSpaceError, match="exactly one latent"):
+            Bind(("a", "b"), into=lambda p: p["gain_a"].gain)
+
+    def test_prior_shape_must_match_init(self):
+        prior = pytest.importorskip("numpyro.distributions")
+        with pytest.raises(ParameterSpaceError, match="shape"):
+            Latent("g", init=1.0, prior=prior.Normal(jnp.zeros(3), 1.0))
+
+
+class TestPipelineValidation:
+    """Checks that need the pipeline — all via jax.eval_shape, so they cost nothing."""
+
+    def test_valid_space_passes(self, twin):
+        space = ParameterSpace(
+            latents=[Latent("log_g", init=0.0)],
+            bindings=[Bind("log_g", into=lambda p: p["gain_a"].gain, fn=jnp.exp)],
+        )
+        space.validate(twin)  # must not raise
+
+    def test_selector_must_reach_a_real_leaf(self, twin):
+        """`graph_node` is static configuration, not an inferable array."""
+        space = ParameterSpace(
+            latents=[Latent("g", init=1.0)],
+            bindings=[Bind("g", into=lambda p: p["gain_a"].graph_node)],
+        )
+        with pytest.raises(ParameterSpaceError, match="array leaf"):
+            space.validate(twin)
+
+    def test_two_bindings_cannot_write_the_same_leaf(self, twin):
+        space = ParameterSpace(
+            latents=[Latent("a", init=1.0), Latent("b", init=2.0)],
+            bindings=[
+                Bind("a", into=lambda p: p["gain_a"].gain),
+                Bind("b", into=lambda p: p["gain_a"].gain),
+            ],
+        )
+        with pytest.raises(ParameterSpaceError, match="written by more than one"):
+            space.validate(twin)
+
+    def test_produced_shape_must_match_the_leaf(self, twin):
+        space = ParameterSpace(
+            latents=[Latent("g", init=jnp.zeros(3))],
+            bindings=[Bind("g", into=lambda p: p["gain_a"].gain)],
+        )
+        with pytest.raises(ParameterSpaceError, match="shape"):
+            space.validate(twin)
+
+    def test_produced_dtype_kind_must_match_the_leaf(self, twin):
+        """Writing a complex value into a real leaf is a modelling error, not a cast."""
+        space = ParameterSpace(
+            latents=[Latent("g", init=1.0)],
+            bindings=[Bind("g", into=lambda p: p["gain_a"].gain, fn=lambda x: x + 0j)],
+        )
+        with pytest.raises(ParameterSpaceError, match="complex"):
+            space.validate(twin)
+
+    def test_raw_bind_changing_the_structure_is_caught(self, twin):
+        space = ParameterSpace.raw(
+            latents=[Latent("g", init=1.0)],
+            bind=lambda pipeline, values: Pipeline(
+                SkyOperator(amplitude=values["g"]), names=("sky",)
+            ),
+        )
+        with pytest.raises(ParameterSpaceError, match="structure"):
+            space.validate(twin)
+
+    def test_derived_binding_validates_against_the_target(self, twin):
+        n_time = 8
+        twin = eqx.tree_at(lambda p: p["gain_a"].gain, twin, jnp.ones(n_time))
+        space = ParameterSpace(
+            latents=[Latent("g0", init=1.0), Latent("slope", init=0.0)],
+            bindings=[
+                Bind(
+                    ("g0", "slope"),
+                    into=lambda p: p["gain_a"].gain,
+                    fn=lambda g0, slope: g0 + slope * jnp.arange(n_time, dtype=float),
+                )
+            ],
+        )
+        space.validate(twin)  # must not raise
 
 
 class TestEscapeHatch:
