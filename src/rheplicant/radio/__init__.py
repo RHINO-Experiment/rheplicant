@@ -62,6 +62,7 @@ from rheplicant.radio.instrument import (
 from rheplicant.radio.sky import (
     AbstractSkyModel,
     AbstractSkyProjector,
+    DriftScanProjector,
     ForegroundOperator,
     GlobalSignalOperator,
     LimTODProjector,
@@ -86,6 +87,7 @@ __all__ = [
     "BeamOperator",
     "CWCalibrationOperator",
     "CalLoadOperator",
+    "DriftScanProjector",
     "EMIOperator",
     "FlaggingOperator",
     "ForegroundOperator",

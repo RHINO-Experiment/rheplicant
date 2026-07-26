@@ -5,7 +5,10 @@ Completes the maturity ladder of :mod:`rheplicant.radio.sky.projection`
 (fixed pointing) -> :class:`NativeLimTODProjector` — pure JAX, general
 pointing, differentiable w.r.t. BOTH the sky maps and the beam alms, with
 the exact transpose that :class:`~rheplicant.radio.filters.SkySpaceFilter`
-map-making requires.
+map-making requires. For genuine drift scans,
+:class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` reproduces this
+projector to roundoff at a fraction of the cost (one Wigner rotation for
+the whole scan).
 
 The heavy lifting lives in the ``limtod_jax`` package (shipped with the
 limTOD repo: ``pip install "limTOD[jax]"``); this adapter only wires it to

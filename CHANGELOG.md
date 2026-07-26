@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `DriftScanProjector` (`rheplicant.radio.sky.driftscan`): the m-mode fast
+  path for drift scans — the "real version" the `MModeProjector` placeholder
+  promised. Derives the m-mode projection from the beam alms on the fly via
+  `limtod_jax.driftscan` (one Wigner rotation for the whole scan plus per-m
+  phases): equal to `NativeLimTODProjector` with constant pointing to float64
+  roundoff at O(lmax^3 + n_time*lmax) instead of O(n_time*lmax^3). The drift
+  pointing (az/el/selfrot) is static projector configuration; `coords` only
+  supplies `lst_deg`. Ships the exact sky-slot adjoint, an `mmodes` accessor
+  (per-frequency Fourier coefficients of the sidereal TOD), and the optional
+  horizon mask with cosine apodization (see the limTOD ringing study).
+  Requires limTOD >= 1.6 (`limtod_jax.driftscan`); guarded lazy import.
+
 ## 0.1.4 (2026-07-25)
 
 - Add project logos (a rhino dissolving into digital pixels — the

@@ -99,10 +99,11 @@ class MModeProjector(AbstractSkyProjector):
 
     For a periodic drift scan the antenna temperature is a Fourier series in
     LST: ``T(lst, f) = Re sum_m [B_m(f, :) . sky(f, :)] e^(i m lst)``. The
-    real version derives the transfer matrices ``B_m`` from the beam alms
-    (Wigner rotation); the placeholder takes them as a given complex array and
-    demonstrates the contract — including an exact adjoint (unitary FFT,
-    ``norm="ortho"``), verified by dot-product tests.
+    real version — :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector`
+    — derives the m-mode projection from the beam alms on the fly (via
+    ``limtod_jax.driftscan``); this placeholder takes transfer matrices as a
+    given complex array and demonstrates the contract — including an exact
+    adjoint (unitary FFT, ``norm="ortho"``), verified by dot-product tests.
 
     Attributes:
         transfer: ``(n_freq, n_m, n_pix)`` complex m-mode transfer matrices;

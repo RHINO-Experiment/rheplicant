@@ -25,6 +25,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `MModeProjector` *(P)* | `AbstractSkyProjector` | drift-scan m-mode transfer; differentiable, exact adjoint |
 | `LimTODProjector` | `AbstractSkyProjector` | numpy-limTOD oracle via `pure_callback` (not differentiable) |
 | `NativeLimTODProjector` | `AbstractSkyProjector` | pure-JAX limTOD port (`limtod_jax`): general pointing, differentiable in sky and beam, exact adjoint |
+| `DriftScanProjector` | `AbstractSkyProjector` | m-mode fast path for drift scans (`limtod_jax.driftscan`): one Wigner rotation per scan, optional horizon mask, exact adjoint |
 
 ## Environment
 

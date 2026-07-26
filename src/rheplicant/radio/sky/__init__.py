@@ -11,6 +11,7 @@ Compose additively with :class:`~rheplicant.core.combinators.SumOperator`::
 placeholder for quick tests and demos.
 """
 
+from rheplicant.radio.sky.driftscan import DriftScanProjector
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
 from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 from rheplicant.radio.sky.model import AbstractSkyModel, PowerLawSkyModel, UniformSkyModel
@@ -28,6 +29,7 @@ from rheplicant.radio.sky.uniform import SkyOperator
 __all__ = [
     "AbstractSkyModel",
     "AbstractSkyProjector",
+    "DriftScanProjector",
     "ForegroundOperator",
     "GlobalSignalOperator",
     "LimTODProjector",
