@@ -226,12 +226,12 @@ between waiting and not:
 ::::{grid} 1 3 3 3
 :gutter: 2
 
-:::{grid-item-card} 70.4 s
+:::{grid-item-card} 66 s
 :text-align: center
 general engine, one evaluation
 :::
 
-:::{grid-item-card} 64 ms
+:::{grid-item-card} 60 ms
 :text-align: center
 m-mode, cached beam + FFT
 :::
@@ -241,6 +241,12 @@ m-mode, cached beam + FFT
 relative disagreement
 :::
 ::::
+
+Both timings are one `forward()` on sky **maps**, so they include analysing
+the sky into harmonic space — see `forward_alms()` below, which removes that
+from a fitting loop and takes the 60 ms to about 1 ms. The general engine's
+number carries a few per cent of run-to-run scatter; treat the ratio as
+"about a thousandfold", not as four significant figures.
 
 Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
 
@@ -255,10 +261,14 @@ Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
 
 `to_reference_frame()`
 : Pays the `O(lmax³)` rotation **once** and returns an equivalent projector
-  that skips it forever after. Call it outside the inference loop — this is
-  the difference between rotating the beam once and rotating it on every
-  likelihood evaluation. Gradients through the result are with respect to the
-  reference-frame alms; keep the original if you need beam-local ones.
+  that skips it forever after. Its margin used to be large; it is now small,
+  because the per-call rotation reuses a Wigner plane built at trace time and
+  costs about 2 ms of the 63 ms an un-cached forward takes at `lmax` 191 —
+  4 %, where it was 81 %. Still free to use, and still the right default
+  outside a fit. Gradients through the result are with respect to the
+  reference-frame alms, so keep the original when the **beam** is what you
+  are fitting; that case is why the rotation was made cheap rather than
+  merely skippable.
 
 `uniform_sampling=True`
 : Routes the time synthesis and its adjoint through real FFTs,

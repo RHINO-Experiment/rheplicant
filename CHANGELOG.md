@@ -51,6 +51,20 @@ Three hoists, none of which change a number. Measured at nside 64 / lmax 191
 Requires the matching limTOD (`dl_array` / `dl_plane_for_pointing`) for the
 second item only; the others are self-contained.
 
+The docs benchmark was re-timed afterwards, and the split is exactly where the
+optimizations predict. The **general** engine is untouched (its per-sample
+rotation cannot hoist a plane, and it never enters the m-mode synthesis):
+176.4 / 1354.8 / 10150.6 / 65569 ms across lmax 23 / 47 / 95 / 191, all within
+the ±7 % run-to-run scatter of the previous run. The **un-cached m-mode** path
+gained 1.2–1.8x (115.2 -> 62.6 ms at lmax 191), and the **fully optimized**
+path barely moved (63.7 -> 60.4 ms) because its rotation was already cached
+and it was already on the FFT synthesis.
+
+One consequence worth knowing: plain m-mode now runs within **4 %** of the
+cached-beam + FFT path at lmax 191, where it used to be 81 % slower. What is
+left in those 60 ms is the sky analysis, not the rotation — which is precisely
+what `forward_alms()` removes.
+
 ### Fixed: the normalization denominator was recomputed on every call
 
 `_ones_alm` — the quadrature alms of the ones map, used when
@@ -128,9 +142,12 @@ at import time rather than silently working until it does not.
   wall-clock scaling, and the m-mode spectrum. Every figure ships in light
   and dark variants and is theme-switched by furo. Measured at nside 64
   (lmax 191), 512 samples, 32 channels: the engines agree to **1.4e-15**
-  relative, and one forward evaluation costs **70.4 s** on the general
-  engine against **64 ms** with the cached beam and FFT synthesis — a
-  **1105x** speed-up. `sphinx-design` is a new docs dependency.
+  relative, and one forward evaluation costs **66 s** on the general engine
+  against **60 ms** with the cached beam and FFT synthesis — about a
+  thousandfold. (Both are `forward()` on sky maps, so they include the sky
+  analysis; the general engine's timing carries a few per cent of
+  run-to-run scatter, so the ratio is not four significant figures.)
+  `sphinx-design` is a new docs dependency.
   `--replot` redraws every figure from a cached run, so a purely visual
   change never costs another 20-minute generic-engine sweep.
 - `examples/driftscan_mmode.py`: the end-to-end drift-scan demo — build a
