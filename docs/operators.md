@@ -79,10 +79,13 @@ that will replace the body. Graph topology and assembly rules: see
 
 | Component | Role |
 |---|---|
-| `build_forward_fn` | the seam: twin → `f(params) -> prediction` (filter_spec selects trainables) |
+| `Latent`, `Bind`, `ParameterSpace` | what is inferred, and how it reaches the model — named, validated, re-parameterizable |
+| `ParameterSpace.forward_fn` | the seam over NAMED parameters: `f(dict) -> prediction` |
+| `build_forward_fn` | the seam over a whole subtree: `f(params) -> prediction` (filter_spec selects trainables) |
 | `GradientCalibrator` / `AdamCalibrator` | fixed-step GD / Adam (pure JAX), `lax.scan`-driven |
 | `GaussianLikelihood` / `MaskedGaussianLikelihood` | (masked) independent Gaussian log-density |
-| `to_numpyro_model`, `prior_template`, `set_prior` | Bayesian bridge with positional pytree priors, semantic site names |
+| `to_numpyro_model` | Bayesian bridge; sample sites named by their latents |
 | `predict_from_samples` | posterior predictive over MCMC samples |
-| `fisher_information`, `parameter_covariance` | Fisher matrix (exact Jacobians), Cramér-Rao — provenance-tagged (`FlatMatrix`) |
+| `fisher_information`, `parameter_covariance` | Fisher matrix (exact Jacobians), Cramér-Rao — provenance-tagged (`FlatMatrix`), rows named (`cov.sigma("fwhm")`) |
+| `check_linearity`, `linear_operator`, `wiener_solve` | verify a `linear=True` claim, export `A`/`Aᵀ` without forming a matrix, solve in closed form |
 | `propagate_covariance`, `push_forward` | delta-method prediction bands; Monte Carlo pushforward |

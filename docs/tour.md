@@ -263,14 +263,28 @@ existing flags compose via `prior_mask`).
 
 ## 8. Inference
 
-Everything connects through one seam. `build_forward_fn` partitions a twin
-into (trainable parameters, frozen structure) and closes over the input
-state:
+Everything connects through one seam: `forward(params) -> prediction`, with
+the twin closed over. Two ways to say which parameters, for two different
+questions.
+
+Declare them — named, transformable, shareable. This is the usual one, and
+what [Inferring anything](inference.md) is about:
+
+```python
+from rheplicant.inference import ParameterSpace
+
+model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
+space = ParameterSpace.direct("log_gain", init=0.0,
+                              into=lambda p: p["gain"].gain, fn=jnp.exp)
+forward, params0 = space.forward_fn(model, state)   # params0: {"log_gain": 0.0}
+```
+
+Or partition a whole subtree, when "train everything under here" is the actual
+intent — a neural surrogate's weights, say:
 
 ```python
 from rheplicant.inference import build_forward_fn
 
-model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
 spec = jax.tree.map(lambda _: False, model)         # freeze everything...
 spec = eqx.tree_at(lambda p: p["gain"].gain, spec, replace=True)  # ...except this
 forward, params0 = build_forward_fn(model, state, filter_spec=spec)
@@ -287,25 +301,29 @@ params_fit, losses = GradientCalibrator(learning_rate=2e-7, n_steps=200).fit(
 ```
 
 **Bayesian posteriors** — priors attach to pipeline leaves positionally;
-sample sites get semantic names (`"gain.gain"`); noise lives in the
-likelihood (hand the bridge a twin *without* stochastic operators):
+sample sites are named by their latents; noise lives in the likelihood (hand
+the bridge a twin *without* stochastic operators):
 
 ```python
 import numpyro, numpyro.distributions as dist
-from rheplicant.inference import prior_template, set_prior, to_numpyro_model, predict_from_samples
+from rheplicant.inference import ParameterSpace, to_numpyro_model, predict_from_samples
 
 bayes_twin = assemble(SkyOperator(amplitude=jnp.array(100.0)),
                       GainOperator(gain=jnp.array(1.0)))
-priors = set_prior(prior_template(bayes_twin),
-                   lambda p: p["gain"].gain, dist.Normal(1.0, 0.3))
-numpyro_model = to_numpyro_model(bayes_twin, state, priors, noise_std=0.5)
+space = ParameterSpace.direct("gain", init=1.0, into=lambda p: p["gain"].gain,
+                              prior=dist.Normal(1.0, 0.3))
+numpyro_model = to_numpyro_model(bayes_twin, state, space, noise_std=0.5)
 
 mcmc = numpyro.infer.MCMC(numpyro.infer.NUTS(numpyro_model),
                           num_warmup=100, num_samples=100, progress_bar=False)
 mcmc.run(jax.random.key(0), observed=observation.data)
-posterior_predictive = predict_from_samples(bayes_twin, state, priors,
+posterior_predictive = predict_from_samples(bayes_twin, state, space,
                                             mcmc.get_samples())
 ```
+
+A space is not limited to one prior per leaf: `Bind` can derive a leaf from
+several latents, drive several leaves from one, or transform on the way — see
+[Inferring anything](inference.md).
 
 **Uncertainty propagation** — Fisher forecasts from exact Jacobians, and
 Monte Carlo pushforward. Matrices carry the parameter structure they were

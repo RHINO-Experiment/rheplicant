@@ -73,11 +73,14 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
    entire run), and operators have no hidden side effects. This is what
    makes the whole twin safe to transform.
 
-5. **Forward models never contain inference.** A single seam —
-   `build_forward_fn` — turns any twin into `f(params) -> prediction`.
-   Gradient and Adam calibrators, NumPyro posteriors, Fisher forecasts, and
-   surrogate training all connect there; calibration never contaminates the
-   instrument description.
+5. **Forward models never contain inference.** A single seam turns any twin
+   into `f(params) -> prediction`. Gradient and Adam calibrators, NumPyro
+   posteriors, Fisher forecasts, conjugate-Gaussian solves and surrogate
+   training all connect there; calibration never contaminates the instrument
+   description. A `ParameterSpace` says *what* is inferred and *how* it
+   reaches the model, so re-parameterizing — two scalars driving a whole
+   beam, one gain tied across three stages — never means editing an
+   operator.
 
 6. **Interfaces first, physics second.** Every operator ships as a
    trivial-but-runnable placeholder whose *contract* (shapes, PRNG

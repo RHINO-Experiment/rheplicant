@@ -2,6 +2,111 @@
 
 ## Unreleased
 
+### Added: parameter spaces — infer anything, however it is parameterized
+
+The inference seam could already fit any pipeline leaf. It could only fit a
+*leaf*: priors attached positionally and had to match that leaf's shape
+exactly. So the models it could express were the models whose parameters
+happened to already be stored numbers. A beam described by a width and a
+pointing offset, a gain tied across three stages, a positive quantity explored
+in its logarithm — each of those required writing a new operator whose leaves
+were your parameters, which is exactly the "calibration contaminates the
+instrument description" the design exists to prevent.
+
+Two objects now carry the two ideas that were conflated:
+
+- **`Latent`** — a named quantity you infer. Name, initial value (which fixes
+  shape and dtype), optional prior, optional `linear=True`. Knows nothing
+  about the pipeline.
+- **`Bind`** — a rule turning latents into pipeline leaf values. Which latents,
+  which leaves, and the function between them. Knows nothing about priors.
+
+`ParameterSpace` holds both. It covers the three shapes a parameterization
+takes — direct, tied (one latent to several leaves), derived (several latents
+to one leaf) — and `ParameterSpace.raw` takes a bind function outright for
+anything they cannot express.
+
+```python
+space = ParameterSpace(
+    latents=[Latent("fwhm", init=0.5, prior=dist.Uniform(0.15, 0.70)),
+             Latent("offset", init=0.0, prior=dist.Normal(0.0, 0.4))],
+    bindings=[Bind(("fwhm", "offset"),
+                   into=lambda p: p["sky"].projector.matrix, fn=beam_matrix)],
+)
+forward, start = space.forward_fn(twin, state)   # {"fwhm": ..., "offset": ...}
+```
+
+Neither calibrator needed a single change — a dict is a pytree — and posterior
+predictive still `filter_vmap`s over the posterior, because bindings are
+required to preserve the pipeline's treedef.
+
+**Validation, because every failure mode here is silent.** Duplicate names, a
+binding naming an undeclared latent, a latent nothing binds (it samples
+happily and returns the prior), two bindings on one leaf, a selector landing
+on static configuration, a produced shape or dtype-kind that does not fit its
+target, a prior sized differently from its latent, a bind function that
+changes the treedef. Each of those otherwise yields a finite,
+correctly-shaped, wrong inference. All are caught, all run on
+`jax.eval_shape`, so validation costs nothing and is never optional.
+
+### Added: declared-linear blocks, checked and then exploited
+
+`linear=True` asserts the prediction is affine in one latent — the case that
+matters for sky alms and noise-wave amplitudes, ~1e6 real degrees of freedom
+where gradient samplers are hopeless and a conjugate-Gaussian solve is exactly
+right.
+
+The assertion is checked before anything uses it. `check_linearity` compares
+the model against its own linearization at probes spanning 1e-3 to 1e3 times
+the latent's magnitude; the span is the point, since `x + eps*x^2` is
+indistinguishable from linear near the origin and grossly nonlinear far from
+it. A block fails only if it exceeds a relative tolerance AND an absolute
+roundoff floor — without the floor the relative measure explodes at small
+probes and rejects correct blocks, and the cure a user reaches for on a
+spuriously-failing check is to switch it off.
+
+`linear_operator` exports `A`, `A^T` and the offset without forming a matrix
+(`jax.linearize` + `jax.vjp`), so applying a 1e6-dimensional block costs one
+forward evaluation. `wiener_solve` gives the posterior mean by CG. GCR
+sampling adds a fluctuation term to the same right-hand side and is what this
+operator is for next.
+
+Two facts measured rather than assumed. `jax.vjp` returns the conjugate
+gradient for complex latents, so the identity that holds is
+`Re sum(x * adjoint(y)) == sum(forward(x) * y)` — the adjoint of the REAL
+inner product, which is the pairing a Gaussian likelihood forms. And
+`wiener_solve` carries complex latents as `(real, imag)`, because a real
+prediction makes the map R-linear but not C-linear and a Krylov method over C
+would be solving a different problem.
+
+### Changed: Fisher and covariance matrices carry named rows
+
+`cov.sigma("fwhm")` instead of `cov.matrix[0, 0]`; `cov.block("fwhm",
+"log_gain")` for a cross-covariance. Spans come from the actual flattening,
+not from an assumption about dict ordering. `FlatMatrix.kind` also
+distinguishes Fisher from covariance, and `sigma()` refuses on a Fisher
+matrix: `sqrt(diag(F))` looks exactly like an error bar and ignores every
+parameter degeneracy.
+
+### Removed: `prior_template` / `set_prior` (breaking)
+
+`to_numpyro_model` and `predict_from_samples` take a `ParameterSpace` where
+they took a positional prior pytree. Sample sites are named by their latents,
+which deleted `_site_name` outright — 50 lines that walked pytree paths and
+recognised Assembly/Pipeline/SumOperator containers to reconstruct a readable
+name for a parameter that never had one. Once parameters have their own
+namespace, the problem does not exist. Net ~90 lines removed from the bridge.
+
+`build_forward_fn` is NOT removed and is not deprecated: it answers "train
+everything under this subtree", which is what a neural surrogate's weights
+want, while `ParameterSpace.forward_fn` answers "these specific quantities,
+possibly transformed or shared".
+
+New: [`docs/inference.md`](https://rheplicant.readthedocs.io/en/latest/inference.html),
+[`examples/inferring_anything.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/inferring_anything.py), and
+`docs/_generate_inference_figures.py`, which produces the page's figures by
+running the code rather than illustrating it.
+
 ### Added: a `limtod` extra — the sky engines install from PyPI
 
 limTOD is [published on PyPI](https://pypi.org/project/limTOD/), so the

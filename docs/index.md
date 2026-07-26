@@ -26,8 +26,9 @@ itself.
    sums, and switches assemble themselves from the canonical graph.
 4. **Purity everywhere** — immutable states, randomness as data, one seed
    reproduces a run.
-5. **Forward models never contain inference** — one seam
-   (`build_forward_fn`) serves every inference engine.
+5. **Forward models never contain inference** — one seam serves every
+   inference engine, and a `ParameterSpace` re-parameterizes freely without
+   ever editing the instrument description.
 6. **Interfaces first, physics second** — placeholder bodies, real tested
    contracts; ports replace functions, never structure.
 7. **Loud failure over silent wrongness** — trace-time validation,
@@ -45,6 +46,7 @@ tour
 operators
 signal-path
 sky-engines
+inference
 api
 design
 changelog

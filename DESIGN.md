@@ -28,6 +28,7 @@ Contents: [Layering](#layering) ·
 [D11 graph assembly](#d11--composition-is-implicit-in-the-signal-path-graph-guided-assembly) ·
 [D12 inference layer](#d12--bayesian-bridge-uncertainty-propagation-neural-surrogates) ·
 [D13 atmosphere entries](#d13--atmosphere-is-an-equivalent-entry-pair-not-a-trunk-stage) ·
+[D14 parameter spaces](#d14--parameter-spaces-what-is-inferred-vs-how-it-enters) ·
 [Element taxonomy → modules](#element-taxonomy--module-map) ·
 [Physics roadmap](#roadmap-physics-to-port-into-the-placeholder-contracts)
 
@@ -114,6 +115,11 @@ pipeline into (trainable params, static skeleton) and closes over the
 template, exposing `f(params) -> prediction`. Gradient calibrators, NumPyro,
 and future neural surrogates all connect through this one seam; calibration
 never contaminates the instrument description.
+
+The seam has a second entry point, `ParameterSpace.forward_fn` (D14), over
+*named* parameters rather than a partitioned subtree. Both survive: partition
+answers "train everything under here" (surrogate weights), naming answers
+"these specific quantities, possibly transformed or shared" (physical fits).
 
 ### D8 — Modular sky: SkyModel × SkyProjector
 
@@ -252,12 +258,12 @@ reflects the actual graph (`examples/render_signal_path.py`).
 All three complete the inference layer through the D7 seam, adding no new
 runtime concepts:
 
-- **NumPyro bridge** (`inference/numpyro_bridge.py`): priors attach to
-  pipeline leaves *positionally* — `prior_template(pipeline)` +
-  `set_prior(priors, where, dist)` build a pytree with a distribution at
-  every leaf to infer. Sample sites get *semantic* names from composite
-  stage/branch names (`Assembly[...]["gain"].gain` → site `"gain_gain"`),
-  stable across fold nesting. The likelihood is masked Gaussian (RFI flags →
+- **NumPyro bridge** (`inference/numpyro_bridge.py`): priors ride on a
+  `ParameterSpace` (D14), so sample sites are named by their latents. The
+  earlier scheme attached priors to pipeline leaves *positionally* and
+  reconstructed site names by walking pytree paths through
+  Assembly/Pipeline/SumOperator containers; D14 deleted both the scheme and
+  the 50-line walker. The likelihood is masked Gaussian (RFI flags →
   zero weight); `noise_std` may itself be a distribution.
   Cardinal rule, documented loudly: in a Bayesian model the noise lives in
   the LIKELIHOOD — hand the bridge a pipeline *without* stochastic operators.
@@ -280,6 +286,78 @@ runtime concepts:
   optax) joins `GradientCalibrator` because fixed-step GD demonstrably
   stalls/collapses on MLP weights (the `exp` parametrization has a
   vanishing-gradient region) while Adam recovers a rippled bandpass to <1%.
+
+### D14 — Parameter spaces: what is inferred vs how it enters
+
+The positional-prior scheme (D12) could only infer a quantity the pipeline
+already held, with a prior matching that leaf's shape exactly. Every
+re-parameterization worth having therefore required *editing the instrument
+description*: two scalars determining a beam's harmonic expansion, one gain
+tied across three stages, a positive quantity explored in its logarithm. That
+is precisely what D7 exists to prevent, so the fix belongs in the inference
+layer.
+
+Two objects, each with one job:
+
+- **`Latent`** — a named quantity you infer: name, initial value (which fixes
+  shape and dtype), optional prior, optional `linear=True`. Knows nothing
+  about the pipeline.
+- **`Bind`** — a rule turning latents into pipeline leaf values: which latents,
+  which leaves (`eqx.tree_at` selectors), and the function between. Knows
+  nothing about priors.
+
+`ParameterSpace` holds both and compiles the bindings into **one** `tree_at`
+call, so two bindings targeting a leaf raise instead of one silently winning.
+`ParameterSpace.raw` takes a bind function outright for what the blocks cannot
+express. Design choice among (a) a free-form bind function, (b) declarative
+blocks, (c) blocks compiling to a function: (c), because a free-form function
+is opaque to validation and to the linear-block export — and validation is
+most of the value here, since every failure mode in this area yields a finite,
+correctly-shaped, *wrong* inference rather than an exception. The checks: unique
+names, every binding names a declared latent, **every latent is bound by
+something** (an unbound latent samples happily and returns the prior), no leaf
+written twice, every selector reaches a real array leaf, produced shape and
+dtype-kind match the target, prior shape matches init, and binding preserves
+the pipeline's treedef — the invariant `filter_vmap`, `jit` and `ravel_pytree`
+all rest on. All of it runs on `jax.eval_shape`, so validation is free and
+never optional.
+
+Binding preserving the treedef is what let every consumer stay unchanged: the
+calibrators needed no edit at all (a dict is a pytree), and posterior
+predictive still `filter_vmap`s a stack of structurally identical pipelines.
+
+**Linear blocks** (`inference/linear.py`). `linear=True` asserts the prediction
+is affine in one latent — the case that matters for sky `alm`s and noise-wave
+amplitudes, ~10⁶ real degrees of freedom where gradient samplers are hopeless
+and a conjugate-Gaussian solve is exactly right. The assertion is *checked*
+before it is exploited (`check_linearity` compares the model against its own
+linearization), because a false declaration would otherwise produce a
+confident, wrong posterior. Probes span 10⁻³–10³ times the latent's magnitude:
+`x + εx²` is indistinguishable from linear near the origin, so a
+moderate-probe suite signs off on exactly the blocks that fail in a sampler's
+tails. A block fails only if it exceeds a relative tolerance **and** an
+absolute roundoff floor — without the floor the relative measure explodes at
+small probes and rejects correct blocks, and a spuriously-failing check gets
+switched off, which is worse than no check.
+
+`linear_operator` exports `A`, `Aᵀ` and the offset without forming a matrix
+(`jax.linearize` + `jax.vjp`). `wiener_solve` gives the posterior mean by CG;
+GCR sampling adds a fluctuation term to the same right-hand side and is the
+next thing this operator is for. Two details that were measured rather than
+assumed: `jax.vjp` returns the *conjugate* gradient for complex latents, so
+the identity that holds is `Re Σ x·adjoint(y) == Σ (Ax)·y` (the real inner
+product — the pairing a Gaussian likelihood forms); and `wiener_solve` carries
+complex latents as `(real, imag)`, because a real prediction makes the map
+ℝ-linear but not ℂ-linear and a Krylov method over ℂ would solve a different
+problem. Its normal operator comes from gradients of the objective itself, so
+it is SPD by construction with no adjoint-convention arithmetic left to
+mis-handle.
+
+Fisher matrices over a space carry their rows' names (`cov.sigma("fwhm")`,
+`cov.block("fwhm", "log_gain")`), with spans derived from the actual
+flattening rather than an assumed dict ordering. `FlatMatrix.kind`
+distinguishes Fisher from covariance so `sigma()` refuses on the former:
+`sqrt(diag(F))` looks exactly like an error bar and ignores every degeneracy.
 
 ### D13 — Atmosphere is an equivalent-entry pair, not a trunk stage
 
