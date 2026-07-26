@@ -244,3 +244,107 @@ def linear_operator(
         forward=tangent,
         adjoint=lambda y: pullback(y)[0],
     )
+
+
+def _real_parts(block: LinearBlock) -> tuple[Callable, Callable]:
+    """Convert between a latent and its real degrees of freedom.
+
+    A complex latent is carried as ``(real, imag)``. This is not bookkeeping
+    pedantry: ``prediction`` is real, so the map from complex coefficients to
+    data is **ℝ-linear but not ℂ-linear**, and a Krylov method run over ℂ
+    would be solving a different problem. Splitting makes the vector space the
+    one the objective actually lives on.
+    """
+    is_complex = jnp.issubdtype(block.dtype, jnp.complexfloating)
+    if is_complex:
+        return (
+            lambda x: (jnp.real(x), jnp.imag(x)),
+            lambda parts: parts[0] + 1j * parts[1],
+        )
+    return (lambda x: x, lambda parts: parts)
+
+
+def wiener_solve(
+    block: LinearBlock,
+    observed: jax.Array,
+    *,
+    noise_std: Any,
+    prior_std: Any,
+    tol: float = 1e-6,
+    maxiter: int | None = None,
+) -> tuple[jax.Array, jax.Array]:
+    """Posterior mean of a linear-Gaussian block — the Wiener filter, by CG.
+
+    With ``d = A x + offset + n``, ``n ~ N(0, N)`` and ``x ~ N(0, S)``::
+
+        x̂ = (AᵀN⁻¹A + S⁻¹)⁻¹ AᵀN⁻¹ (d - offset)
+
+    solved with conjugate gradients, so the normal operator is only ever
+    *applied*, never formed. Each iteration costs one JVP and one VJP through
+    the forward model — which is why a block with 10⁶ degrees of freedom is
+    tractable at all.
+
+    The normal operator and the right-hand side are both obtained as gradients
+    of the objective itself rather than assembled from ``A`` and ``Aᵀ`` by
+    hand. That is not a shortcut: it makes the operator symmetric positive
+    definite *by construction* over the real degrees of freedom, with no
+    adjoint-convention arithmetic left to get wrong for complex latents.
+
+    This is the posterior **mean**, not a sample. Drawing constrained
+    realizations adds a fluctuation term to the right-hand side; that sampler
+    is the next thing this operator is for.
+
+    Args:
+        block: from :func:`linear_operator`.
+        observed: the data, shaped like ``block.offset``.
+        noise_std: noise standard deviation — scalar or broadcastable to the
+            data.
+        prior_std: prior standard deviation on the latent — scalar or
+            broadcastable to it. Required: without a prior the normal operator
+            can be singular, and CG would return a finite, arbitrary answer
+            instead of complaining.
+        tol: CG tolerance.
+        maxiter: CG iteration cap. ``None`` lets JAX choose.
+
+    Returns:
+        ``(x̂, relative_residual)``. The residual is
+        ``‖M x̂ - b‖ / ‖b‖`` over the real degrees of freedom — check it, since
+        CG reports no convergence status of its own.
+    """
+    if prior_std is None:
+        raise ParameterSpaceError(
+            "wiener_solve needs prior_std: with no prior the normal operator "
+            "AᵀN⁻¹A can be singular, and CG would return a finite, arbitrary answer rather "
+            "than fail. Pass a large prior_std for an effectively flat prior."
+        )
+    if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
+        raise ParameterSpaceError(
+            "wiener_solve expects a real-valued prediction; this block's offset is complex."
+        )
+
+    split, join = _real_parts(block)
+    weight = 1.0 / jnp.asarray(noise_std) ** 2
+    inverse_prior = 1.0 / jnp.asarray(prior_std) ** 2
+    residual_data = observed - block.offset
+    zero = split(jnp.zeros(block.shape, dtype=block.dtype))
+
+    def half_chi2(parts):
+        return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
+
+    def cross_term(parts):
+        return jnp.sum(weight * block.forward(join(parts)) * residual_data)
+
+    normal_from_data = jax.grad(half_chi2)
+
+    def normal(parts):
+        curvature = normal_from_data(parts)
+        return jax.tree.map(lambda c, p: c + inverse_prior * p, curvature, parts)
+
+    rhs = jax.grad(cross_term)(zero)
+    solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
+
+    def norm(parts):
+        return jnp.sqrt(sum(jnp.sum(leaf**2) for leaf in jax.tree.leaves(parts)))
+
+    misfit = jax.tree.map(lambda a, b: a - b, normal(solution), rhs)
+    return join(solution), norm(misfit) / jnp.maximum(norm(rhs), 1e-30)

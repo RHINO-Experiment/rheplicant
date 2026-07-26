@@ -9,6 +9,7 @@ the model's linear part, and that a false declaration is caught.
 
 from typing import ClassVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
@@ -23,6 +24,7 @@ from rheplicant.inference import (
     ParameterSpace,
     check_linearity,
     linear_operator,
+    wiener_solve,
 )
 from rheplicant.radio import GainOperator, SkyOperator
 
@@ -177,6 +179,130 @@ class TestComplexLatents:
         assert float(jnp.real(jnp.sum(jnp.conj(x) * block.adjoint(y)))) != pytest.approx(
             paired, rel=1e-3
         )
+
+
+def _dense_reference(block, observed, noise_std, prior_std):
+    """The same solve, done the expensive, obviously-correct way.
+
+    Builds A column by column over the block's REAL degrees of freedom (real
+    and imaginary parts separately when the latent is complex, since the map
+    is R-linear but not C-linear), then solves the normal equations densely.
+    """
+    is_complex = jnp.issubdtype(block.dtype, jnp.complexfloating)
+    n = int(jnp.prod(jnp.array(block.shape))) if block.shape else 1
+
+    columns = []
+    for index in range(n):
+        for unit in (1.0, 1j) if is_complex else (1.0,):
+            basis = jnp.zeros(n, dtype=block.dtype).at[index].set(unit)
+            columns.append(jnp.ravel(block.forward(basis.reshape(block.shape))))
+    A = jnp.stack(columns, axis=1)
+
+    weight = 1.0 / jnp.asarray(noise_std) ** 2
+    residual = jnp.ravel(observed - block.offset)
+    normal = A.T @ (weight * A) + jnp.eye(A.shape[1]) / jnp.asarray(prior_std) ** 2
+    solution = jnp.linalg.solve(normal, A.T @ (weight * residual))
+    if is_complex:
+        return (solution[0::2] + 1j * solution[1::2]).reshape(block.shape)
+    return solution.reshape(block.shape)
+
+
+class TestWienerSolve:
+    """The MAP/Wiener solve the exported operator makes possible.
+
+    The block used here is a per-sample gain: ``A`` is then full column rank,
+    so the dense reference is a fair comparison. A block that maps several
+    latents into ONE scalar leaf (say via ``jnp.sum``) is rank-one by
+    construction — its normal operator is a rank-one matrix plus the prior
+    ridge, and the dense solve becomes the unstable one, not CG.
+    """
+
+    @pytest.fixture
+    def gain_block(self, twin, template_state):
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        space = ParameterSpace.direct(
+            "gains", init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain, linear=True,
+        )
+        return linear_operator(space, wide, template_state)
+
+    @pytest.fixture
+    def gain_truth(self, template_state):
+        n_time = template_state.coords.time.shape[0]
+        return GAIN + 0.1 * jnp.arange(n_time, dtype=float)
+
+    def test_matches_a_dense_solve(self, gain_block, gain_truth):
+        observed = gain_block.offset + gain_block.forward(gain_truth)
+        solved, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
+        expected = _dense_reference(gain_block, observed, 1.0, 5.0)
+        assert jnp.allclose(solved, expected, rtol=1e-3, atol=1e-3)
+
+    def test_recovers_a_noiseless_signal_under_a_weak_prior(self, gain_block, gain_truth):
+        observed = gain_block.offset + gain_block.forward(gain_truth)
+        solved, _ = wiener_solve(gain_block, observed, noise_std=1e-2, prior_std=1e3)
+        assert jnp.allclose(solved, gain_truth, rtol=1e-3)
+
+    def test_matches_a_dense_solve_for_a_complex_block(self, template_state):
+        n_row = template_state.coords.time.shape[0] * template_state.coords.freq.shape[0]
+        key = jax.random.key(3)
+        matrix = jax.random.normal(key, (n_row, 3)) + 1j * jax.random.normal(
+            jax.random.fold_in(key, 1), (n_row, 3)
+        )
+        complex_twin = Pipeline(
+            ComplexCoeffOperator(coeffs=jnp.zeros(3, dtype=matrix.dtype), matrix=matrix),
+            names=("sky",),
+        )
+        space = ParameterSpace.direct(
+            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            into=lambda p: p["sky"].coeffs, linear=True,
+        )
+        block = linear_operator(space, complex_twin, template_state)
+        truth = jnp.array([1.0 + 2.0j, -0.5 + 0.25j, 3.0 - 1.0j])
+        observed = block.offset + block.forward(truth)
+        solved, _ = wiener_solve(block, observed, noise_std=0.1, prior_std=10.0)
+        expected = _dense_reference(block, observed, 0.1, 10.0)
+        assert jnp.allclose(solved, expected, rtol=1e-3, atol=1e-3)
+
+    def test_a_complex_block_recovers_a_noiseless_signal(self, template_state):
+        n_row = template_state.coords.time.shape[0] * template_state.coords.freq.shape[0]
+        matrix = jax.random.normal(jax.random.key(5), (n_row, 3)).astype(float) + 0j
+        complex_twin = Pipeline(
+            ComplexCoeffOperator(coeffs=jnp.zeros(3, dtype=matrix.dtype), matrix=matrix),
+            names=("sky",),
+        )
+        space = ParameterSpace.direct(
+            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            into=lambda p: p["sky"].coeffs, linear=True,
+        )
+        block = linear_operator(space, complex_twin, template_state)
+        truth = jnp.array([1.0 + 0j, -0.5 + 0j, 3.0 + 0j])
+        observed = block.offset + block.forward(truth)
+        solved, _ = wiener_solve(block, observed, noise_std=1e-3, prior_std=1e4)
+        assert jnp.allclose(jnp.real(solved), jnp.real(truth), atol=1e-2)
+
+    def test_a_strong_prior_shrinks_towards_zero(self, gain_block, gain_truth):
+        observed = gain_block.offset + gain_block.forward(gain_truth)
+        loose, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=1e3)
+        tight, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=1e-3)
+        assert jnp.linalg.norm(tight) < jnp.linalg.norm(loose)
+
+    def test_the_relative_residual_is_reported(self, gain_block, gain_truth):
+        observed = gain_block.offset + gain_block.forward(gain_truth)
+        _, residual = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
+        assert float(residual) < 1e-4
+
+    def test_a_prior_is_required(self, gain_block):
+        """Without one the normal operator can be singular, and CG would return
+        a finite, arbitrary answer rather than complain."""
+        with pytest.raises(ParameterSpaceError, match="prior_std"):
+            wiener_solve(gain_block, gain_block.offset, noise_std=1.0, prior_std=None)
+
+    def test_solving_is_jittable(self, gain_block, gain_truth):
+        observed = gain_block.offset + gain_block.forward(gain_truth)
+        run = jax.jit(lambda d: wiener_solve(gain_block, d, noise_std=1.0, prior_std=5.0)[0])
+        direct, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
+        assert jnp.allclose(run(observed), direct, rtol=1e-4)
 
 
 class TestCheckLinearity:

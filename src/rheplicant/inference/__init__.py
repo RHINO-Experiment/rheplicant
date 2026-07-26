@@ -8,7 +8,12 @@ from rheplicant.inference.likelihood import (
     MaskedGaussianLikelihood,
     mean_squared_error,
 )
-from rheplicant.inference.linear import LinearBlock, check_linearity, linear_operator
+from rheplicant.inference.linear import (
+    LinearBlock,
+    check_linearity,
+    linear_operator,
+    wiener_solve,
+)
 from rheplicant.inference.numpyro_bridge import (
     predict_from_samples,
     prior_template,
@@ -45,4 +50,5 @@ __all__ = [
     "push_forward",
     "set_prior",
     "to_numpyro_model",
+    "wiener_solve",
 ]
