@@ -242,7 +242,16 @@ relative disagreement
 :::
 ::::
 
-Two opt-ins sharpen it further, both preserving `jit`/`vmap`/`grad`:
+Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
+
+`forward_alms()` / `sky_to_alms()`
+: Analyse a **fixed sky** into harmonic space once, outside the loop, instead
+  of on every call. Once the beam rotation is cached this is the whole
+  remaining cost — 91 % of the runtime and 99.5 % of the peak memory — so
+  hoisting it takes one forward from **163 ms / 122 MB to 1.1 ms / 11 MB**
+  (agreeing to 5e-16). `forward()` is now a thin wrapper that calls
+  `sky_to_alms()` for you; reach past it whenever the sky is not the thing
+  you are fitting. `mmodes_alms()` is the same idea for the m-mode path.
 
 `to_reference_frame()`
 : Pays the `O(lmax³)` rotation **once** and returns an equivalent projector

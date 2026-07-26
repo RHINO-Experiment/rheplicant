@@ -161,6 +161,14 @@ class DriftScanProjector(AbstractSkyProjector):
             timing parameter that keeps the grid a uniform full turn, and
             undefined for per-sample perturbations, which are rejected or
             NaN-poisoned rather than fitted.
+        freq_chunk: process the frequency axis in batches of this size
+            instead of all at once (static; ``None`` = all at once). Peak
+            memory is linear in ``n_freq`` — 3.4 MB per channel at nside 64 /
+            lmax 191, so 114 MB at 32 channels but ~1.8 GB at nside 256.
+            Chunking trades time for that ceiling: measured at nside 64,
+            chunk 8 cut the peak 3.2x for 1.7x the time, chunk 1 cut it 9.4x
+            for 7.9x. Leave it ``None`` unless memory is the binding
+            constraint; below the ceiling it is a pure loss.
         beam_ref_lst_deg: set only by :meth:`to_reference_frame` — the LST the
             cached beam was actually rotated to (static). In
             ``"reference"`` mode it must equal ``lst_ref_deg``; the pair is
@@ -183,6 +191,7 @@ class DriftScanProjector(AbstractSkyProjector):
     beam_frame: str = eqx.field(static=True, default="local")
     uniform_sampling: bool = eqx.field(static=True, default=False)
     beam_ref_lst_deg: float | None = eqx.field(static=True, default=None)
+    freq_chunk: int | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
         n_alm = (self.lmax + 1) * (self.lmax + 2) // 2
@@ -423,6 +432,20 @@ class DriftScanProjector(AbstractSkyProjector):
                     iterations=self.mask_iterations,
                 )
             )(beam)
+        # The Wigner-d plane depends on the pointing alone — LST shifts psi,
+        # never the polar angle — so it is a pure function of static fields.
+        # limtod_jax rebuilds it per call unless handed one, which costs 15.6x
+        # on the rotation (measured at lmax=127: 44.0 -> 2.8 ms). This is the
+        # only amortization available when the beam is FITTED, since
+        # to_reference_frame() would move the gradient to the wrong frame.
+        # Purely an optimization, so an older limtod_jax simply goes without.
+        extra = {}
+        if hasattr(ltj, "dl_plane_for_pointing"):
+            with jax.ensure_compile_time_eval():
+                extra["dl_array"] = ltj.dl_plane_for_pointing(
+                    self.lat_deg, self.az_deg, self.el_deg, self.selfrot_deg,
+                    lmax=self.lmax,
+                )
         return jax.vmap(
             lambda b: ltj.beam_alm_at_reference(
                 b,
@@ -432,6 +455,7 @@ class DriftScanProjector(AbstractSkyProjector):
                 self.el_deg,
                 self.selfrot_deg,
                 lmax=self.lmax,
+                **extra,
             )
         )(beam)
 
@@ -459,24 +483,87 @@ class DriftScanProjector(AbstractSkyProjector):
                 f"n_pix={n_pix}) for nside={self.nside}, got {sky.shape}."
             )
 
+    def _map_freqs(self, fn, *arrays):
+        """Apply ``fn`` across the frequency axis, vmapped or chunked.
+
+        ``vmap`` runs every channel at once, so peak memory is linear in
+        ``n_freq`` — measured 3.4 MB per channel at nside 64 / lmax 191, i.e.
+        114 MB at 32 channels (fine) but ~1.8 GB at nside 256 (not). With
+        ``freq_chunk`` set, ``lax.map`` walks the channels in batches
+        instead: at nside 64 a chunk of 8 cut the peak 3.2x for 1.7x the
+        time, and a chunk of 1 cut it 9.4x for 7.9x. Off by default because
+        below the accelerator's memory ceiling that trade is simply a loss.
+        """
+        if self.freq_chunk is None:
+            return jax.vmap(fn)(*arrays)
+        return jax.lax.map(lambda xs: fn(*xs), arrays, batch_size=self.freq_chunk)
+
+    def _validate_sky_alms(self, sky_alms: jax.Array) -> None:
+        n_alm = (self.lmax + 1) * (self.lmax + 2) // 2
+        if sky_alms.ndim != 2 or sky_alms.shape != (self.beam_alms.shape[0], n_alm):
+            raise StateValidationError(
+                f"sky_alms must be (n_freq={self.beam_alms.shape[0]}, "
+                f"n_alm={n_alm}) QUADRATURE alms for lmax={self.lmax}, got "
+                f"{sky_alms.shape}. Build them with sky_to_alms(), not with a "
+                f"true-alm transform: the two differ by npix/4pi."
+            )
+
+    def sky_to_alms(self, sky: jax.Array) -> jax.Array:
+        """Analyse sky maps into the quadrature alms the engine consumes.
+
+        Pure JAX and differentiable, so this is a hoist, not an escape from
+        the trace: a fixed sky can be analysed ONCE outside an inference loop
+        and fed to :meth:`forward_alms` on every evaluation.
+
+        This matters more than it looks. At nside 64 / lmax 191 / 32 channels
+        the analysis is **176 ms of a 193 ms forward and 114 MB of its 114 MB
+        peak** — the engine's entire cost, once the beam rotation is cached.
+        Fitting a beam against a fixed sky therefore repays this call every
+        single step for nothing.
+
+        Note the transform is the QUADRATURE one (``map2alm_quad``), matching
+        what numpy limTOD's pixel-space beam-weighted sum implies — not the
+        true-alm transform :meth:`from_beam_maps` uses for the BEAM. The two
+        differ by ``npix/4pi``; that is why this helper exists rather than a
+        line in the docstring telling you which to call.
+        """
+        self._validate_sky(sky)
+        ltj = _limtod_jax(self.uniform_sampling)
+        return jax.vmap(
+            lambda m: ltj.map2alm_quad(m, nside=self.nside, lmax=self.lmax)
+        )(sky)
+
     # ------------------------------------------------------------- interface
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
+        """Observe sky MAPS — the ``AbstractSkyProjector`` contract.
+
+        A thin wrapper over :meth:`forward_alms`; when the sky is fixed,
+        analyse it once with :meth:`sky_to_alms` and call that directly.
+        """
+        return self.forward_alms(self.sky_to_alms(sky), coords)
+
+    def forward_alms(self, sky_alms: jax.Array, coords: Coordinates) -> jax.Array:
+        """Observe pre-analysed sky alms — the engine's native input.
+
+        Args:
+            sky_alms: ``(n_freq, n_alm)`` quadrature alms from
+                :meth:`sky_to_alms`.
+        """
         self._validate_coords(coords)
-        self._validate_sky(sky)
+        self._validate_sky_alms(sky_alms)
         ltj = _limtod_jax(self.uniform_sampling)
         dphi, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
         ones_alm = self._ones_alm(ltj)
 
-        def one_freq(beam_ref, sky_map):
-            sky_alm = ltj.map2alm_quad(sky_map, nside=self.nside, lmax=self.lmax)
+        def one_freq(beam_ref, sky_alm):
             return ltj.driftscan_tod(
                 beam_ref, sky_alm, dphi,
                 lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
                 uniform=self.uniform_sampling,
             )
 
-        return jax.vmap(one_freq)(beam_refs, sky).T
+        return self._map_freqs(one_freq, beam_refs, sky_alms).T
 
     def adjoint(self, tod: jax.Array, coords: Coordinates) -> jax.Array:
         self._validate_coords(coords)
@@ -498,7 +585,7 @@ class DriftScanProjector(AbstractSkyProjector):
             )
             return ltj.alm2map(alm, nside=self.nside, lmax=self.lmax)
 
-        return jax.vmap(one_freq)(beam_refs, tod.T)
+        return self._map_freqs(one_freq, beam_refs, tod.T)
 
     def mmodes(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
         """m-modes ``Ṽ_m`` of the drift-scan TOD, per frequency.
@@ -516,7 +603,14 @@ class DriftScanProjector(AbstractSkyProjector):
         :meth:`forward` returns (measured ~18x off). Rejected rather than
         silently mismatched — the same policy as the ``"reference"``/mask
         combination above.
+
+        Takes MAPS, for symmetry with :meth:`forward`; with a fixed sky use
+        :meth:`sky_to_alms` once and call :meth:`mmodes_alms`.
         """
+        return self.mmodes_alms(self.sky_to_alms(sky), coords)
+
+    def mmodes_alms(self, sky_alms: jax.Array, coords: Coordinates) -> jax.Array:
+        """m-modes from pre-analysed sky alms — see :meth:`mmodes`."""
         if self.normalize_beam:
             raise StateValidationError(
                 "mmodes() is defined for the UN-normalized sky TOD, but this "
@@ -529,16 +623,15 @@ class DriftScanProjector(AbstractSkyProjector):
                 "is an overall scale you can divide out yourself)."
             )
         self._validate_coords(coords)
-        self._validate_sky(sky)
+        self._validate_sky_alms(sky_alms)
         ltj = _limtod_jax(self.uniform_sampling)
         _, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
 
-        def one_freq(beam_ref, sky_map):
-            sky_alm = ltj.map2alm_quad(sky_map, nside=self.nside, lmax=self.lmax)
+        def one_freq(beam_ref, sky_alm):
             return ltj.mmodes_from_sky(beam_ref, sky_alm, lmax=self.lmax)
 
-        return jax.vmap(one_freq)(beam_refs, sky)
+        return self._map_freqs(one_freq, beam_refs, sky_alms)
 
     def to_reference_frame(
         self, lst_ref_deg: float | None = None

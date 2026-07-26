@@ -125,14 +125,31 @@ power = jnp.abs(mmodes[0])
 print(f"m-modes: {mmodes.shape}, "
       f"|V_m|/|V_0| falls to {power[5] / power[0]:.1e} by m=5")
 
-# ------------------------------------------------- 5. why it is all JAX ---
+# ----------------------------------------- 5. hoist the sky out of the loop ---
+# forward() analyses the sky maps into alms on every call. With a FIXED sky
+# that becomes the dominant cost as resolution grows — at nside 64 / lmax 191
+# / 32 channels it is 91 % of the runtime and 99.5 % of the peak memory, and
+# skipping it takes a forward from 163 ms to 1.1 ms. At THIS example's toy
+# size the analysis is cheap and the hoist buys nothing measurable; it is the
+# call to reach for when the twin is inside a fit, not a free win everywhere.
+sky_alms = eqx.filter_jit(drift.sky_to_alms)(sky_maps)
+tod_from_alms = eqx.filter_jit(lambda p, a: p.forward_alms(a, coords))(fastest, sky_alms)
+agree = jnp.max(jnp.abs(tod_from_alms - observation.data)) / jnp.max(
+    jnp.abs(observation.data)
+)
+print(f"forward_alms agrees with forward to {agree:.0e} "
+      f"(same operator, sky analysed once)")
+
+# ------------------------------------------------- 6. why it is all JAX ---
 # The beam map is a differentiable leaf: this gradient is what a beam-model
-# fit descends, and it costs one m-mode evaluation, not n_time rotations.
+# fit descends. Note it stays on the BEAM-LOCAL projector — to_reference_frame()
+# would move the gradient to the reference-frame alms — so the beam rotation
+# cannot be cached here, which is exactly why the sky hoist above matters.
 def loss(maps: jax.Array) -> jax.Array:
     projector = DriftScanProjector.from_beam_maps(
         maps, lat_deg=LAT_DEG, az_deg=AZ_DEG, el_deg=EL_DEG, lmax=LMAX,
     )
-    return jnp.sum((projector.forward(sky_maps, coords) - reference) ** 2)
+    return jnp.sum((projector.forward_alms(sky_alms, coords) - reference) ** 2)
 
 
 grad_fn = eqx.filter_jit(jax.grad(loss))

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Performance: the drift-scan engine stops repeating itself
+
+Three hoists, none of which change a number. Measured at nside 64 / lmax 191
+/ 512 samples / 32 channels in x64, on the cached-beam projector.
+
+- **`forward_alms()` / `sky_to_alms()` / `mmodes_alms()`** — the sky may now
+  enter as pre-analysed quadrature alms. `AbstractSkyProjector`'s contract is
+  maps-in, so `forward()` re-ran the analysis on every call; once the beam
+  rotation is cached that IS the engine — **176 ms of a 193 ms forward and
+  114 MB of its 114 MB peak**. Analysed once instead, a forward drops from
+  **163 ms / 122 MB to 1.1 ms / 11 MB** (153x), agreeing to 5e-16.
+  `forward()` and `mmodes()` are now thin wrappers, so the map-based contract
+  is unchanged. Note `sky_to_alms` uses the QUADRATURE transform, not the
+  true-alm one `from_beam_maps` uses for the beam — the two differ by
+  `npix/4pi`, which is why this is a method rather than a docstring.
+- **The Wigner-d plane is built once per projector.** It depends on the
+  pointing alone — LST enters the zyz composition in the first-applied slot,
+  so it moves `psi` and never the plane — but `limtod_jax` rebuilt it on every
+  call. Hoisted through limTOD's new `dl_array` parameter: **44.0 ms -> 2.8 ms
+  (15.6x)** on the rotation at lmax 127, bit-for-bit identical. This is the
+  only amortization available when the BEAM is the fitted parameter, where
+  `to_reference_frame()` cannot be used because gradients must reach the
+  beam-local alms. Skipped gracefully on a limTOD without the parameter.
+- **`freq_chunk`** (static, default `None`) walks the frequency axis in
+  batches instead of all at once. Peak memory is linear in `n_freq` — 3.4 MB
+  per channel, so 114 MB at 32 channels but ~1.8 GB at nside 256. Chunk 8 cut
+  the peak 3.2x for 1.7x the time; chunk 1, 9.4x for 7.9x. Off by default
+  because below the memory ceiling it is a pure loss.
+
+Requires the matching limTOD (`dl_array` / `dl_plane_for_pointing`) for the
+second item only; the others are self-contained.
+
 ### Fixed: the normalization denominator was recomputed on every call
 
 `_ones_alm` — the quadrature alms of the ones map, used when

@@ -773,3 +773,79 @@ print("x64 drift-scan projector: OK")
         )
         assert result.returncode == 0, result.stderr
         assert "OK" in result.stdout
+
+    # ------------------------------------------------- pre-analysed sky alms
+    def test_forward_alms_equals_forward(self, key, drift_coords):
+        """The alm entry point must be the same operator, not a variant.
+
+        forward() is now a wrapper over it, so a discrepancy here would mean
+        the hoist changed the physics rather than just when the analysis runs.
+        """
+        proj = self._projector(key)
+        sky = jax.random.uniform(jax.random.key(20), (N_FREQ, self.N_PIX_HP))
+        alms = proj.sky_to_alms(sky)
+        assert alms.shape == (N_FREQ, self.N_ALM)
+        assert jnp.allclose(
+            proj.forward_alms(alms, drift_coords),
+            proj.forward(sky, drift_coords),
+            rtol=1e-6,
+        )
+        assert jnp.allclose(
+            proj.mmodes_alms(alms, drift_coords),
+            proj.mmodes(sky, drift_coords),
+            rtol=1e-6,
+        )
+
+    def test_forward_alms_is_differentiable_in_the_alms(self, key, drift_coords):
+        """The point of the entry point: fit against a sky held in harmonic
+        space without paying the analysis on every evaluation."""
+        proj = self._projector(key)
+        sky = jax.random.uniform(jax.random.key(21), (N_FREQ, self.N_PIX_HP))
+        alms = proj.sky_to_alms(sky)
+
+        def loss(a):
+            return jnp.sum(jnp.abs(proj.forward_alms(a, drift_coords)) ** 2)
+
+        grad = jax.grad(loss)(alms)
+        assert grad.shape == alms.shape
+        assert bool(jnp.all(jnp.isfinite(jnp.abs(grad)))) and bool(jnp.any(grad != 0))
+
+    def test_sky_alms_shape_is_validated(self, key, drift_coords):
+        """Quadrature alms of the wrong length must not be silently broadcast."""
+        proj = self._projector(key)
+        with pytest.raises(StateValidationError, match="sky_alms"):
+            proj.forward_alms(
+                jnp.zeros((N_FREQ, self.N_ALM + 1), dtype=jnp.complex64), drift_coords
+            )
+        with pytest.raises(StateValidationError, match="sky_alms"):
+            proj.mmodes_alms(
+                jnp.zeros((N_FREQ + 1, self.N_ALM), dtype=jnp.complex64), drift_coords
+            )
+
+    # ------------------------------------------------------ frequency chunking
+    @pytest.mark.parametrize("chunk", [1, 2])
+    def test_freq_chunk_changes_nothing_but_the_schedule(self, key, drift_coords, chunk):
+        """Chunking is a memory/time trade; the numbers must be untouched —
+        forward, adjoint and mmodes alike, since a map-making iteration mixes
+        the first two and would otherwise drift.
+
+        Compared on the scale of the array, as everywhere else in this file:
+        vmap and lax.map reduce in different orders, so elements near zero
+        differ at f32 roundoff without anything being wrong.
+        """
+        import dataclasses
+
+        proj = self._projector(key)
+        chunked = dataclasses.replace(proj, freq_chunk=chunk)
+        sky = jax.random.uniform(jax.random.key(30), (N_FREQ, self.N_PIX_HP))
+        tod = jax.random.normal(jax.random.key(31), (N_TIME, N_FREQ))
+        alms = proj.sky_to_alms(sky)
+        for a, b in (
+            (chunked.forward_alms(alms, drift_coords),
+             proj.forward_alms(alms, drift_coords)),
+            (chunked.adjoint(tod, drift_coords), proj.adjoint(tod, drift_coords)),
+            (chunked.mmodes_alms(alms, drift_coords),
+             proj.mmodes_alms(alms, drift_coords)),
+        ):
+            rel = jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(b))
+            assert rel < 1e-5, f"freq_chunk={chunk} moved values by {rel:.2e}"
