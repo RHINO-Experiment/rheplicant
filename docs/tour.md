@@ -210,7 +210,7 @@ source = SkySourceOperator(
 tod = source(state).data                            # (n_time, n_freq)
 ```
 
-Two engines do real work. `NativeLimTODProjector` is the general one — pure
+Two engines do real work. `GeneralPointingProjector` is the general one — pure
 JAX, arbitrary pointing, differentiable in sky *and* beam. For a drift scan
 (fixed pointing, only LST advancing) `DriftScanProjector` returns the same
 numbers to float64 roundoff while rotating the beam once for the whole scan

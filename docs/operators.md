@@ -24,7 +24,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `MatrixProjector` | `AbstractSkyProjector` | precomputed sky→TOD matrix (limTOD `generate_sky2sys_projection`); differentiable, exact adjoint |
 | `MModeProjector` *(P)* | `AbstractSkyProjector` | m-mode transfer matrices taken as given; the minimal statement of the contract — superseded for real work by `DriftScanProjector` below |
 | `LimTODProjector` | `AbstractSkyProjector` | numpy-limTOD oracle via `pure_callback` (not differentiable) |
-| `NativeLimTODProjector` | `AbstractSkyProjector` | pure-JAX limTOD port (`limtod_jax`): general pointing, differentiable in sky and beam, exact adjoint |
+| `GeneralPointingProjector` | `AbstractSkyProjector` | pure-JAX limTOD port (`limtod_jax`): general pointing, differentiable in sky and beam, exact adjoint |
 | `DriftScanProjector` | `AbstractSkyProjector` | m-mode fast path for drift scans (`limtod_jax.driftscan`): one Wigner rotation per scan (cacheable via `to_reference_frame()`), optional FFT synthesis on uniform LST grids, optional horizon mask, exact adjoint |
 
 ## Environment

@@ -13,9 +13,9 @@ placeholder for quick tests and demos.
 
 from rheplicant.radio.sky.driftscan import DriftScanProjector
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
+from rheplicant.radio.sky.general_pointing import GeneralPointingProjector
 from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 from rheplicant.radio.sky.model import AbstractSkyModel, PowerLawSkyModel, UniformSkyModel
-from rheplicant.radio.sky.native import NativeLimTODProjector
 from rheplicant.radio.sky.point_sources import PointSourceOperator
 from rheplicant.radio.sky.projection import (
     AbstractSkyProjector,
@@ -35,7 +35,7 @@ __all__ = [
     "LimTODProjector",
     "MModeProjector",
     "MatrixProjector",
-    "NativeLimTODProjector",
+    "GeneralPointingProjector",
     "PointSourceOperator",
     "PowerLawSkyModel",
     "SkyOperator",

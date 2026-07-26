@@ -1,8 +1,8 @@
-"""DriftScanProjector: the m-mode fast path vs the general native projector.
+"""DriftScanProjector: the m-mode fast path vs the general-pointing projector.
 
-Tolerance strategy mirrors ``TestNativeLimTODProjector``: this suite runs in
-default float32, but the drift-vs-native comparison is TIGHTER than the
-native-vs-numpy oracle one (1e-3 vs 5e-2) because both projectors share the
+Tolerance strategy mirrors ``TestGeneralPointingProjector``: this suite runs in
+default float32, but the drift-vs-general comparison is TIGHTER than the
+general-vs-numpy oracle one (1e-3 vs 5e-2) because both projectors share the
 same s2fft map<->alm transforms — the f32 transform error cancels and only
 the rotation kernels differ (Risbo, f32-stable). The float64 roundoff
 statement (1e-6 vs numpy limTOD) lives in ``test_x64_subprocess`` and in the
@@ -15,7 +15,7 @@ import pytest
 
 from rheplicant import Coordinates
 from rheplicant.core.errors import StateValidationError
-from rheplicant.radio.sky import DriftScanProjector, NativeLimTODProjector
+from rheplicant.radio.sky import DriftScanProjector, GeneralPointingProjector
 
 N_TIME, N_FREQ = 8, 2
 
@@ -60,14 +60,14 @@ class TestDriftScanProjector:
             **kwargs,
         )
 
-    def _native_twin(self, proj, **kwargs):
-        """NativeLimTODProjector with the same beams (the ground truth here)."""
-        return NativeLimTODProjector(
+    def _general_twin(self, proj, **kwargs):
+        """GeneralPointingProjector with the same beams (the ground truth here)."""
+        return GeneralPointingProjector(
             beam_alms=proj.beam_alms, lat_deg=self.LAT,
             lmax=self.LMAX, nside=self.NSIDE, **kwargs,
         )
 
-    def _native_coords(self, drift_coords):
+    def _general_coords(self, drift_coords):
         """The drift pointing expressed in the general projector's contract."""
         lst = drift_coords.extra["lst_deg"]
         n_t = lst.shape[0]
@@ -82,13 +82,13 @@ class TestDriftScanProjector:
     @pytest.mark.parametrize("normalize", [False, True])
     def test_matches_native_projector(self, key, drift_coords, normalize):
         proj = self._projector(key, normalize_beam=normalize)
-        native = self._native_twin(proj, normalize_beam=normalize)
+        general = self._general_twin(proj, normalize_beam=normalize)
         sky = jax.random.uniform(jax.random.key(1), (N_FREQ, self.N_PIX_HP))
         out = proj.forward(sky, drift_coords)
-        ref = native.forward(sky, self._native_coords(drift_coords))
+        ref = general.forward(sky, self._general_coords(drift_coords))
         assert out.shape == ref.shape == (N_TIME, N_FREQ)
         rel = jnp.max(jnp.abs(out - ref)) / jnp.max(jnp.abs(ref))
-        assert rel < 1e-3, f"drift vs native rel err {rel:.2e}"
+        assert rel < 1e-3, f"drift vs general rel err {rel:.2e}"
 
     def test_explicit_lst_ref_changes_nothing(self, key, drift_coords):
         """The reference LST only re-anchors phases; the TOD is invariant.
@@ -117,13 +117,13 @@ class TestDriftScanProjector:
 
     def test_adjoint_matches_native(self, key, drift_coords):
         proj = self._projector(key)
-        native = self._native_twin(proj)
+        general = self._general_twin(proj)
         tod = jax.random.normal(jax.random.key(5), (N_TIME, N_FREQ))
         ours = proj.adjoint(tod, drift_coords)
-        ref = native.adjoint(tod, self._native_coords(drift_coords))
+        ref = general.adjoint(tod, self._general_coords(drift_coords))
         assert ours.shape == ref.shape == (N_FREQ, self.N_PIX_HP)
         rel = jnp.max(jnp.abs(ours - ref)) / jnp.max(jnp.abs(ref))
-        assert rel < 1e-3, f"adjoint drift vs native rel err {rel:.2e}"
+        assert rel < 1e-3, f"adjoint drift vs general rel err {rel:.2e}"
 
     # -------------------------------------------------------------- m-modes
     def test_mmodes_shape_and_forward_consistency(self, key, drift_coords):
@@ -208,7 +208,7 @@ class TestDriftScanProjector:
         proj = self._projector(key)
         sky = jnp.ones((N_FREQ, self.N_PIX_HP))
         assert jnp.allclose(
-            proj.forward(sky, self._native_coords(drift_coords)),
+            proj.forward(sky, self._general_coords(drift_coords)),
             proj.forward(sky, drift_coords),
         )
 
@@ -226,7 +226,7 @@ class TestDriftScanProjector:
         proj = self._projector(key)
         sky = jnp.ones((N_FREQ, self.N_PIX_HP))
         n_t = drift_coords.extra["lst_deg"].shape[0]
-        base = self._native_coords(drift_coords)
+        base = self._general_coords(drift_coords)
         if kind == "scanning_az":
             bad = base.replace(pointing=base.pointing.at[:, 0].set(
                 jnp.linspace(0.0, 90.0, n_t)))
@@ -375,7 +375,7 @@ class TestDriftScanProjector:
 
         Run at a reference LST equal to AND far from the first sample: the TOD
         is reference-independent, so both must also match the general
-        NativeLimTODProjector, which knows nothing about m-mode references."""
+        GeneralPointingProjector, which knows nothing about m-mode references."""
         proj = self._projector(key, lst_ref_deg=lst_ref)
         cached = proj.to_reference_frame()
         assert cached.beam_frame == "reference" and proj.beam_frame == "local"
@@ -393,8 +393,8 @@ class TestDriftScanProjector:
 
         # independent ground truth: the reference choice is a gauge, so both
         # the local and the cached projector must reproduce the general path
-        native = self._native_twin(proj)
-        ref_tod = native.forward(sky, self._native_coords(drift_coords))
+        general = self._general_twin(proj)
+        ref_tod = general.forward(sky, self._general_coords(drift_coords))
         for got in (proj.forward(sky, drift_coords), cached.forward(sky, drift_coords)):
             rel = jnp.max(jnp.abs(got - ref_tod)) / jnp.max(jnp.abs(ref_tod))
             assert rel < 1e-3, f"lst_ref={lst_ref} broke the gauge: {rel:.2e}"
@@ -715,7 +715,7 @@ class TestDriftScanProjector:
     def test_x64_subprocess(self):
         """Roundoff-level statement in a fresh x64 interpreter: forward ==
         numpy limTOD generate_TOD_sky on the drift scan to 1e-6, and the
-        adjoint dot identity to 1e-10 (mirrors the native projector's
+        adjoint dot identity to 1e-10 (mirrors the general projector's
         subprocess test; x64 cannot be flipped mid-process)."""
         import os
         import subprocess

@@ -30,7 +30,7 @@ import jax.numpy as jnp  # noqa: E402
 
 from rheplicant import Coordinates, State  # noqa: E402
 from rheplicant.radio import SkySourceOperator, assemble  # noqa: E402
-from rheplicant.radio.sky import DriftScanProjector, NativeLimTODProjector  # noqa: E402
+from rheplicant.radio.sky import DriftScanProjector, GeneralPointingProjector  # noqa: E402
 from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 NSIDE, N_FREQ = 16, 4
@@ -79,7 +79,7 @@ print(f"drift-scan waterfall: {observation.data.shape}  "
 
 # ------------------------------------- 2. the same physics, cross-checked ---
 # The general engine reads the pointing per sample, so hand it a constant one.
-generic = NativeLimTODProjector(beam_alms=drift.beam_alms, lat_deg=LAT_DEG,
+generic = GeneralPointingProjector(beam_alms=drift.beam_alms, lat_deg=LAT_DEG,
                                 lmax=LMAX, nside=NSIDE)
 generic_coords = coords.replace(
     pointing=jnp.stack([jnp.full(N_TIME, AZ_DEG), jnp.full(N_TIME, EL_DEG)], -1),

@@ -15,7 +15,7 @@ m-mode projection on the fly from the beam alms via
 ``limtod_jax.driftscan`` (one Wigner rotation for the whole scan plus
 per-m phases). For a genuine drift scan — fixed azimuth/elevation/
 self-rotation, only LST advancing — it reproduces
-:class:`~rheplicant.radio.sky.native.NativeLimTODProjector` to roundoff
+:class:`~rheplicant.radio.sky.general_pointing.GeneralPointingProjector` to roundoff
 at O(lmax³ + n_time·lmax) instead of O(n_time·lmax³), with the same
 exact sky-slot adjoint. Tracking or scanning strategies still need the
 general projector.
@@ -99,7 +99,7 @@ def _limtod_jax(uniform: bool = False):
 class DriftScanProjector(AbstractSkyProjector):
     """m-mode sky projector for drift scans: one beam rotation, per-m phases.
 
-    Equal to :class:`~rheplicant.radio.sky.native.NativeLimTODProjector`
+    Equal to :class:`~rheplicant.radio.sky.general_pointing.GeneralPointingProjector`
     with constant pointing, to float64 roundoff — but the whole scan costs
     a single Wigner rotation. Pure JAX (jit/vmap/grad-safe), exact
     transpose in :meth:`adjoint`, and :meth:`mmodes` exposes the m-mode
@@ -346,7 +346,7 @@ class DriftScanProjector(AbstractSkyProjector):
                     f"Simulating them would silently use the projector's value. "
                     f"Either drop the disagreeing entry from coords, rebuild "
                     f"this projector with the pointing you meant, or use "
-                    f"NativeLimTODProjector, which tracks per-sample pointing."
+                    f"GeneralPointingProjector, which tracks per-sample pointing."
                 )
 
     def _validate_uniform_grid(self, coords: Coordinates) -> None:

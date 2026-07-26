@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Renamed: `NativeLimTODProjector` -> `GeneralPointingProjector`
+
+**Breaking, no alias.** The two real sky engines were named on different
+axes: one for its provenance (`NativeLimTOD`), one for its applicability
+(`DriftScan`). Since BOTH are ports of `limtod_jax`, provenance does not
+distinguish them — it just spent the name. Engines are now named for the
+observation geometry they serve, which is the question a user actually asks:
+
+| engine | named for | when |
+|---|---|---|
+| `GeneralPointingProjector` | observation geometry | pointing varies per sample |
+| `DriftScanProjector` | observation geometry | pointing is fixed; the Earth scans |
+| `LimTODProjector` | what it bridges to | numpy-limTOD features not yet ported |
+| `MatrixProjector` / `MModeProjector` | the data you supply | precomputed operators |
+
+Module `rheplicant.radio.sky.native` -> `rheplicant.radio.sky.general_pointing`.
+No compatibility alias: the old name is gone, so a stale import fails loudly
+at import time rather than silently working until it does not.
+
+`LimTODProjector` is re-documented accordingly. Its billed role — "the oracle
+that validates the JAX port" — was never what the suite actually did (the
+oracle tests call `limTOD.simulator.generate_TOD_sky` directly), and it is
+poorly suited to it: `jax.pure_callback` runs host code on XLA threads with
+FTZ/DAZ set, so healpy inside it lands ~1e-7 relative from the same numpy
+code on the main thread. Its real value is as an escape hatch for
+numpy-limTOD features `limtod_jax` has not ported (full Stokes, `nside_hires`,
+the map-space `horizontal_mask`), and that is now what it says.
+
+- `LimTODProjector` gained `truncate_frac_thres` (static, default limTOD's own
+  `1e-10`). Previously hardcoded, which left the bridge stuck on numpy
+  limTOD's nonlinear beam-truncation cleanup while `GeneralPointingProjector`
+  contracts to the linear `0.0` chain — the two engines could not be compared
+  on identical inputs at all, differing by ~1e-4 relative for that reason
+  alone.
+
 - **Docs: [sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)**
   — a new page comparing the general and drift-scan engines side by side,
   with figures generated from live code by `docs/_generate_engine_figures.py`
@@ -35,7 +70,7 @@
   configuration here, not data, so a scan handed to the drift engine used to
   be silently discarded and a different observation simulated: finite,
   correctly shaped, and wrong. Constant pointing that agrees still passes —
-  reusing a `NativeLimTODProjector`'s coords is the expected way to switch
+  reusing a `GeneralPointingProjector`'s coords is the expected way to switch
   engines — and traced values, which carry nothing to compare, are left
   alone. Uniform-grid violations are also re-raised as `StateValidationError`
   so the whole boundary is catchable as one family.
@@ -43,7 +78,7 @@
   fringe and sky modes*) in the module and the docs; the last line of its
   Eq. (13) is the identity the fast path implements.
 - Projector cross-references: the `projection` module ladder, the `adjoint`
-  error message, `MatrixProjector`, and `NativeLimTODProjector` now all point
+  error message, `MatrixProjector`, and `GeneralPointingProjector` now all point
   at the drift-scan engine, and `rheplicant.radio.sky.driftscan` was added to
   the API reference — its ~200 lines of contract documentation were missing
   from the rendered docs entirely. The stale four-engine ladders in
@@ -53,7 +88,7 @@
   path for drift scans — the "real version" the `MModeProjector` placeholder
   promised. Derives the m-mode projection from the beam alms on the fly via
   `limtod_jax.driftscan` (one Wigner rotation for the whole scan plus per-m
-  phases): equal to `NativeLimTODProjector` with constant pointing to float64
+  phases): equal to `GeneralPointingProjector` with constant pointing to float64
   roundoff at O(lmax^3 + n_time*lmax) instead of O(n_time*lmax^3). The drift
   pointing (az/el/selfrot) is static projector configuration; `coords` only
   supplies `lst_deg`. Ships the exact sky-slot adjoint, an `mmodes` accessor
@@ -94,7 +129,7 @@
   FFT test now also runs with a reference LST far from `lst_deg[0]` (they
   were all degenerate at 12.0, so a "use lst[0] regardless" bug was
   invisible — mutation-verified as killed now), compared against the
-  general `NativeLimTODProjector` as an independent oracle; and the
+  general `GeneralPointingProjector` as an independent oracle; and the
   `to_reference_frame` gradient is compared for equality with the uncached
   projector's rather than only checked finite.
 - `DriftScanProjector.mmodes()` now rejects `normalize_beam=True`: the

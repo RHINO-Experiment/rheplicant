@@ -60,7 +60,7 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
-.. automodule:: rheplicant.radio.sky.native
+.. automodule:: rheplicant.radio.sky.general_pointing
    :members:
    :show-inheritance:
 

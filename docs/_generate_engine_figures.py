@@ -38,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from rheplicant import Coordinates  # noqa: E402
-from rheplicant.radio.sky import DriftScanProjector, NativeLimTODProjector  # noqa: E402
+from rheplicant.radio.sky import DriftScanProjector, GeneralPointingProjector  # noqa: E402
 
 STATIC = Path(__file__).parent / "_static"
 CACHE = Path(__file__).parent / "_engine-figure-data.npz"  # git-ignored
@@ -115,7 +115,7 @@ def gsm_sky(nside: int, freqs_mhz: np.ndarray) -> tuple[jnp.ndarray, str]:
 
 def projectors(alms, nside, lmax, *, uniform: bool):
     common = dict(lat_deg=LAT_DEG, lmax=lmax, nside=nside)
-    generic = NativeLimTODProjector(beam_alms=alms, **common)
+    generic = GeneralPointingProjector(beam_alms=alms, **common)
     mmode = DriftScanProjector(beam_alms=alms, az_deg=AZ_DEG, el_deg=EL_DEG, **common)
     cached = mmode.to_reference_frame(lst_ref_deg=0.0)
     fast = dataclasses.replace(cached, uniform_sampling=True) if uniform else cached
@@ -203,7 +203,7 @@ def figure_agreement(lst, freqs_mhz, tod_generic, tod_mmode) -> None:
             step = max(1, len(lst_h) // 26)  # sparse enough to read as markers
             for i in range(tod_generic.shape[1]):
                 ax0.plot(lst_h, tod_generic[:, i], lw=1.6, color=c["muted"],
-                         label="generic engine" if i == 0 else None, zorder=1)
+                         label="general-pointing engine" if i == 0 else None, zorder=1)
                 ax0.plot(lst_h[::step], tod_mmode[::step, i], ls="none", marker="o",
                          ms=4.5, mfc="none", mew=1.3, color=c["accent"],
                          label="m-mode engine" if i == 0 else None, zorder=2)
@@ -242,7 +242,7 @@ def figure_scaling(bench: list[dict]) -> None:
             fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(8.2, 3.5),
                                            constrained_layout=True)
             ax0.loglog(lmax, gen, "o-", color=c["warm"], lw=1.8, ms=5,
-                       label="generic  $O(n_t\\,\\ell_{\\max}^3)$")
+                       label="general pointing  $O(n_t\\,\\ell_{\\max}^3)$")
             ax0.loglog(lmax, mm, "s-", color=c["accent"], lw=1.8, ms=5,
                        label="m-mode  $O(\\ell_{\\max}^3 + n_t\\ell_{\\max})$")
             ax0.loglog(lmax, fast, "^--", color=c["good"], lw=1.6, ms=5,
@@ -265,7 +265,7 @@ def figure_scaling(bench: list[dict]) -> None:
                          fontsize=8, color=c["fg"])
             ax1.set_xticks(x, [str(v) for v in lmax])
             ax1.set_xlabel("harmonic band-limit  $\\ell_{\\max}$")
-            ax1.set_ylabel("speed-up over the generic engine")
+            ax1.set_ylabel("speed-up over the general engine")
             ax1.set_title("Same numbers, a fraction of the work", loc="left")
             ax1.margins(y=0.18)
             ax1.grid(True, axis="y")
@@ -341,7 +341,7 @@ def main() -> None:
 
     print("  running the m-mode engine ...")
     tod_mmode = np.asarray(fwd_drift(fast, sky))
-    print("  running the generic engine (the slow one) ...")
+    print("  running the general-pointing engine (the slow one) ...")
     tod_generic = np.asarray(fwd_generic(generic, sky))
     worst = np.max(np.abs(tod_mmode - tod_generic)) / np.max(np.abs(tod_generic))
     print(f"  agreement: {worst:.3e}")

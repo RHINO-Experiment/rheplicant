@@ -6,7 +6,7 @@ beam-weighted sum over the sky — and how expensive it is depends entirely on
 what the engine is allowed to assume about the observation.
 
 RHEPLICANT ships two engines that compute exactly the same thing.
-[`NativeLimTODProjector`](api.md) assumes nothing: the beam can point anywhere
+[`GeneralPointingProjector`](api.md) assumes nothing: the beam can point anywhere
 at any time, so it rotates the beam onto the sky once per sample.
 [`DriftScanProjector`](api.md) assumes the one thing a drift scan guarantees —
 that the telescope never moves and the Earth does the scanning — and rotates
@@ -101,15 +101,15 @@ exact `adjoint` for map-making. They differ in where the pointing lives.
 ::::{grid} 1 1 2 2
 :gutter: 3
 
-:::{grid-item-card} General — `NativeLimTODProjector`
+:::{grid-item-card} General — `GeneralPointingProjector`
 :class-header: sd-font-weight-bold
 
 Pointing is **data**: one az/el per sample.
 ^^^
 ```python
-from rheplicant.radio.sky import NativeLimTODProjector
+from rheplicant.radio.sky import GeneralPointingProjector
 
-projector = NativeLimTODProjector(
+projector = GeneralPointingProjector(
     beam_alms=beam_alms,      # (n_freq, n_alm)
     lat_deg=53.2, lmax=191, nside=64,
 )
@@ -267,7 +267,7 @@ Two opt-ins sharpen it further, both preserving `jit`/`vmap`/`grad`:
 | Your observation | Engine | Why |
 |---|---|---|
 | Fixed pointing, Earth scans | `DriftScanProjector` | Same answer, orders of magnitude cheaper |
-| Tracking or scanning | `NativeLimTODProjector` | Pointing genuinely varies per sample |
+| Tracking or scanning | `GeneralPointingProjector` | Pointing genuinely varies per sample |
 | Fixed pointing *and* fixed beam, matrix already built | `MatrixProjector` | Pure einsum; no engine dependency |
 | Validating a port | `LimTODProjector` | numpy limTOD oracle through `pure_callback` |
 
@@ -286,7 +286,7 @@ Both engines are backed by the `limtod_jax` package that ships with limTOD:
 pip install -e '<path-to-limTOD>[jax]'
 ```
 
-`NativeLimTODProjector` works with any version that provides `limtod_jax`;
+`GeneralPointingProjector` works with any version that provides `limtod_jax`;
 `DriftScanProjector` needs **limTOD ≥ 1.6**, and `uniform_sampling=True` the
 FFT fast path added in **1.7**. Each requirement is checked at the boundary,
 so an outdated install says so instead of failing inside a traced call.

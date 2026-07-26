@@ -1,14 +1,19 @@
-"""Native differentiable limTOD projector — the port-contract endpoint.
+"""The general-pointing sky engine: any pointing, one rotation per sample.
 
-Completes the maturity ladder of :mod:`rheplicant.radio.sky.projection`
-(D8/D10): ``LimTODProjector`` (pure_callback oracle) -> ``MatrixProjector``
-(fixed pointing) -> :class:`NativeLimTODProjector` — pure JAX, general
-pointing, differentiable w.r.t. BOTH the sky maps and the beam alms, with
-the exact transpose that :class:`~rheplicant.radio.filters.SkySpaceFilter`
-map-making requires. For genuine drift scans,
-:class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` reproduces this
-projector to roundoff at a fraction of the cost (one Wigner rotation for
-the whole scan).
+:class:`GeneralPointingProjector` assumes nothing about the observation —
+azimuth, elevation and self-rotation are per-sample DATA, so tracking,
+raster scans and transits all work — and pays for that generality with one
+O(lmax³) Wigner rotation per time sample. Pure JAX, differentiable w.r.t.
+BOTH the sky maps and the beam alms, with the exact transpose that
+:class:`~rheplicant.radio.filters.SkySpaceFilter` map-making requires.
+
+Its sibling :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector`
+covers the one geometry this engine cannot exploit: a drift scan, where the
+pointing never moves. There the rotation happens ONCE for the whole scan,
+reproducing this projector to float64 roundoff for a fraction of the cost.
+Naming follows that split — the two real engines are named for the
+observation geometry they serve, not for the package they were ported from
+(both come from ``limtod_jax``).
 
 The heavy lifting lives in the ``limtod_jax`` package (shipped with the
 limTOD repo: ``pip install "limTOD[jax]"``); this adapter only wires it to
@@ -41,15 +46,16 @@ def _limtod_jax():
         import limtod_jax
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "NativeLimTODProjector needs the limtod_jax package: install the "
+            "GeneralPointingProjector needs the limtod_jax package: install the "
             "limTOD repo with its jax extra (pip install -e '<limTOD>[jax]'). "
-            "Alternatives: LimTODProjector (numpy oracle, not differentiable) "
-            "or MatrixProjector (fixed pointing)."
+            "Alternatives without it: MatrixProjector (a precomputed matrix, "
+            "fixed pointing) or LimTODProjector (numpy limTOD through a host "
+            "callback, not differentiable)."
         ) from exc
     return limtod_jax
 
 
-class NativeLimTODProjector(AbstractSkyProjector):
+class GeneralPointingProjector(AbstractSkyProjector):
     """Pure-JAX limTOD sky projector: jit/vmap/grad-safe with exact adjoint.
 
     Handles ARBITRARY pointing, one Wigner rotation per time sample. If the
@@ -102,12 +108,12 @@ class NativeLimTODProjector(AbstractSkyProjector):
     def _validate_coords(self, coords: Coordinates) -> None:
         if coords is None or coords.pointing is None:
             raise StateValidationError(
-                "NativeLimTODProjector requires coords.pointing (n_time, 2) "
+                "GeneralPointingProjector requires coords.pointing (n_time, 2) "
                 "az/el in degrees."
             )
         if coords.extra.get("lst_deg") is None:
             raise StateValidationError(
-                'NativeLimTODProjector requires coords.extra["lst_deg"] '
+                'GeneralPointingProjector requires coords.extra["lst_deg"] '
                 "(n_time,) in degrees."
             )
 

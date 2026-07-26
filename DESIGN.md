@@ -128,7 +128,7 @@ different skies. The engines form a maturity ladder, now complete:
 `LimTODProjector` (pure_callback oracle — jit-safe, not differentiable) →
 `MatrixProjector` (offline `generate_sky2sys_projection` matrix — fully
 differentiable for fixed pointing/beam) →
-`NativeLimTODProjector` (**delivered**: pure JAX via the `limtod_jax`
+`GeneralPointingProjector` (**delivered**: pure JAX via the `limtod_jax`
 package in the limTOD repo, general pointing, differentiable w.r.t. both
 sky and beam alms, exact adjoint; the oracle-equivalence and adjoint
 acceptance tests live in the `limtod_jax` test suite) →

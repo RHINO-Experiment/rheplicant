@@ -10,7 +10,7 @@ map-making / sky-space filtering.
 
 Five engines. The two REAL ones live in sibling modules — look there first:
 
-- :class:`~rheplicant.radio.sky.native.NativeLimTODProjector` — pure JAX,
+- :class:`~rheplicant.radio.sky.general_pointing.GeneralPointingProjector` — pure JAX,
   general pointing, differentiable in sky *and* beam. The default choice.
 - :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` — the same
   physics for a drift scan (fixed pointing, only LST advancing) at
@@ -24,9 +24,9 @@ and three supporting ones, defined here:
 - :class:`MatrixProjector` — a precomputed sky->TOD matrix (e.g. from
   ``limTOD.simulator.generate_sky2sys_projection``). Fully differentiable
   TODAY: the matrix is built offline once, the JAX side is pure einsum.
-- :class:`LimTODProjector` — oracle bridge to numpy limTOD via
-  ``jax.pure_callback``: jit-compatible, NOT differentiable. For forward
-  simulation and validation of the native JAX port.
+- :class:`LimTODProjector` — escape hatch to numpy limTOD via
+  ``jax.pure_callback``: jit-compatible, NOT differentiable. For the
+  numpy-only features ``limtod_jax`` has yet to port.
 - :class:`MModeProjector` — PLACEHOLDER m-mode transfer matrices, kept as
   the minimal statement of the m-mode contract;
   :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` supersedes it
@@ -58,7 +58,7 @@ class AbstractSkyProjector(eqx.Module):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not implement adjoint; sky-space filtering "
-            "needs a linear projector: NativeLimTODProjector (general pointing), "
+            "needs a linear projector: GeneralPointingProjector (general pointing), "
             "DriftScanProjector (drift scans, much cheaper), or MatrixProjector "
             "(precomputed matrix)."
         )
@@ -161,12 +161,26 @@ class MModeProjector(AbstractSkyProjector):
 
 
 class LimTODProjector(AbstractSkyProjector):
-    """Oracle bridge to numpy limTOD (``generate_TOD_sky``) via ``jax.pure_callback``.
+    """Escape hatch to numpy limTOD (``generate_TOD_sky``) via ``jax.pure_callback``.
 
-    Jit-compatible but NOT differentiable and not vmappable — use for forward
-    simulation and as the ground-truth oracle that the native JAX port
-    (:class:`~rheplicant.radio.sky.native.NativeLimTODProjector`) is tested
-    against. Requires the ``limTOD`` package to be importable.
+    Named for what it bridges to, because bridging IS its identity — unlike
+    the two real engines, which are named for the observation geometry they
+    serve. Use it for the numpy-limTOD features ``limtod_jax`` has not
+    ported yet (full Stokes IQUV, ``nside_hires`` upgrading, the map-space
+    ``horizontal_mask``): they keep working inside a rheplicant pipeline
+    without waiting for a port. Requires the ``limTOD`` package.
+
+    What you give up: it is NOT differentiable, NOT vmappable, and has no
+    ``adjoint``, so it cannot feed calibration, Fisher forecasts or sky-space
+    map-making. Reach for
+    :class:`~rheplicant.radio.sky.general_pointing.GeneralPointingProjector`
+    unless you specifically need something only numpy limTOD has.
+
+    NOT a bit-exact reference. ``jax.pure_callback`` runs the host code on XLA
+    worker threads, which have FTZ/DAZ set (subnormals flushed to zero), so
+    healpy's harmonic recursions land ~1e-7 relative away from the SAME numpy
+    code called on the main thread. For a true oracle comparison, call
+    ``limTOD.simulator.generate_TOD_sky`` directly, as the test suite does.
 
     Coordinate conventions (degrees, per the RHINO family):
 
@@ -180,11 +194,19 @@ class LimTODProjector(AbstractSkyProjector):
             through the callback).
         lat_deg: site latitude [deg] (static configuration).
         normalize_beam: forwarded to ``generate_TOD_sky`` (static).
+        truncate_frac_thres: numpy limTOD's beam-truncation threshold (static).
+            Defaults to limTOD's own ``1e-10``, a NONLINEAR cleanup that zeroes
+            rotated-beam pixels below that fraction of the peak. Pass ``0.0``
+            for the purely linear chain — the contract
+            :class:`~rheplicant.radio.sky.general_pointing.GeneralPointingProjector`
+            implements; at the default the two engines differ by ~1e-4
+            relative on identical inputs, which is the truncation, not a bug.
     """
 
     beam_maps: jax.Array
     lat_deg: float = eqx.field(static=True)
     normalize_beam: bool = eqx.field(static=True, default=False)
+    truncate_frac_thres: float = eqx.field(static=True, default=1e-10)
 
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
         if coords is None or coords.pointing is None:
@@ -223,6 +245,7 @@ class LimTODProjector(AbstractSkyProjector):
                     np.asarray(pointing_np[:, 1]),
                     np.asarray(selfrot_np),
                     normalize_beam=self.normalize_beam,
+                    truncate_frac_thres=self.truncate_frac_thres,
                 )
                 for f in range(sky_np.shape[0])
             ]

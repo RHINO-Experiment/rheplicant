@@ -9,10 +9,10 @@ from rheplicant import Pipeline, State
 from rheplicant.core.errors import StateValidationError
 from rheplicant.radio import GainOperator
 from rheplicant.radio.sky import (
+    GeneralPointingProjector,
     LimTODProjector,
     MatrixProjector,
     MModeProjector,
-    NativeLimTODProjector,
     PowerLawSkyModel,
     SkySourceOperator,
     UniformSkyModel,
@@ -200,8 +200,51 @@ class TestLimTODProjector:
         assert out.shape == (N_TIME, 2)
         assert jnp.allclose(out[:, 0], jnp.asarray(direct), rtol=1e-5)
 
+    def test_truncate_frac_thres_is_forwarded(self, template_state):
+        """The knob that lets this bridge compute the LINEAR chain.
 
-class TestNativeLimTODProjector:
+        Without it the escape hatch is stuck on numpy limTOD's nonlinear
+        default while GeneralPointingProjector contracts to 0.0, so the two
+        could not be compared on identical inputs at all.
+        """
+        limtod = pytest.importorskip("limTOD.simulator")
+        import numpy as np
+
+        nside = 8
+        n_pix = 12 * nside**2
+        theta, _ = np.array(
+            [np.arccos(1 - 2 * (np.arange(n_pix) + 0.5) / n_pix), np.zeros(n_pix)]
+        )
+        # A beam with a wide dynamic range, so the truncation has something to
+        # bite on: a flat beam would make both settings identical.
+        beam = jnp.asarray(np.exp(-0.5 * (theta / 0.25) ** 2)[None, :])
+        sky = jnp.asarray(np.random.default_rng(1).random((1, n_pix)))
+        coords = template_state.coords.replace(
+            freq=template_state.coords.freq[:1],
+            pointing=jnp.tile(jnp.array([[0.0, 90.0]]), (N_TIME, 1)),
+            extra={"lst_deg": jnp.linspace(0.0, 30.0, N_TIME)},
+        )
+        args = (np.asarray(beam[0]), np.asarray(sky[0]),
+                np.linspace(0.0, 30.0, N_TIME), 53.2,
+                np.zeros(N_TIME), np.full(N_TIME, 90.0), np.zeros(N_TIME))
+
+        for thres in (0.0, 1e-2):
+            out = LimTODProjector(
+                beam_maps=beam, lat_deg=53.2, truncate_frac_thres=thres
+            ).forward(sky, coords)
+            ref = limtod.generate_TOD_sky(*args, truncate_frac_thres=thres)
+            assert jnp.allclose(out[:, 0], jnp.asarray(ref), rtol=1e-5), (
+                f"truncate_frac_thres={thres} not forwarded to numpy limTOD"
+            )
+
+        # ... and the two settings genuinely differ, so the test above is not
+        # vacuously comparing a knob that does nothing.
+        linear = limtod.generate_TOD_sky(*args, truncate_frac_thres=0.0)
+        truncated = limtod.generate_TOD_sky(*args, truncate_frac_thres=1e-2)
+        assert not np.allclose(linear, truncated, rtol=1e-6)
+
+
+class TestGeneralPointingProjector:
     """The port-contract endpoint: pure-JAX, differentiable, exact adjoint.
 
     rheplicant's suite runs in default float32, so oracle/adjoint tolerances
@@ -237,7 +280,7 @@ class TestNativeLimTODProjector:
         # Arbitrary imaginary parts there fall outside the representable
         # space and forward/adjoint are only each other's transpose on it.
         im = im.at[:, : self.LMAX + 1].set(0.0)
-        return NativeLimTODProjector(
+        return GeneralPointingProjector(
             beam_alms=re + 1j * im,
             lat_deg=self.LAT,
             lmax=self.LMAX,
@@ -252,7 +295,7 @@ class TestNativeLimTODProjector:
 
     def test_validates_shapes(self, key):
         with pytest.raises(StateValidationError, match="beam_alms"):
-            NativeLimTODProjector(
+            GeneralPointingProjector(
                 beam_alms=jnp.zeros((2, self.N_ALM + 1), dtype=jnp.complex64),
                 lat_deg=self.LAT, lmax=self.LMAX, nside=self.NSIDE,
             )
@@ -260,7 +303,7 @@ class TestNativeLimTODProjector:
     def test_oracle_matches_limtod_linear_chain(self, obs_coords):
         """forward == numpy generate_TOD_sky with truncate_frac_thres=0.
 
-        The native port is the linear chain; numpy limTOD's default
+        This engine implements the linear chain; numpy limTOD's default
         ``truncate_frac_thres=1e-10`` is a nonlinear cleanup outside the
         port contract, so the oracle disables it.
 
@@ -281,7 +324,7 @@ class TestNativeLimTODProjector:
         beam_alms = jnp.asarray(
             np.stack([hp.map2alm(b, lmax=self.LMAX) for b in beam_maps])
         )
-        proj = NativeLimTODProjector(
+        proj = GeneralPointingProjector(
             beam_alms=beam_alms, lat_deg=self.LAT, lmax=self.LMAX, nside=self.NSIDE
         )
         out = proj.forward(jnp.asarray(sky_maps), obs_coords)
@@ -322,7 +365,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from rheplicant import Coordinates
-from rheplicant.radio.sky import NativeLimTODProjector
+from rheplicant.radio.sky import GeneralPointingProjector
 from limTOD.simulator import generate_TOD_sky
 
 assert jax.config.read("jax_enable_x64")
@@ -340,7 +383,7 @@ coords = Coordinates(
     pointing=jnp.stack([jnp.asarray(az), jnp.asarray(el)], axis=-1),
     extra={{"lst_deg": jnp.asarray(lst)}},
 )
-proj = NativeLimTODProjector(
+proj = GeneralPointingProjector(
     beam_alms=jnp.asarray(np.stack([hp.map2alm(b, lmax=lmax) for b in beam_maps])),
     lat_deg=lat, lmax=lmax, nside=nside,
 )
