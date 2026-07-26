@@ -13,6 +13,28 @@
   (per-frequency Fourier coefficients of the sidereal TOD), and the optional
   horizon mask with cosine apodization (see the limTOD ringing study).
   Requires limTOD >= 1.6 (`limtod_jax.driftscan`); guarded lazy import.
+- `DriftScanProjector.to_reference_frame()` pays the O(lmax^3) Wigner
+  rotation once and returns an equivalent projector (new static
+  `beam_frame="reference"`) that skips it on every later
+  forward/adjoint/mmodes — the difference between rotating once and
+  rotating per likelihood evaluation (measured 73-878x fewer per-evaluation
+  FLOPs depending on lmax and n_time). A configured horizon mask is folded
+  into the cached alms and its flag cleared, so it can be neither lost nor
+  applied twice. The precompute is itself pure JAX, so a caller who wants
+  beam-LOCAL gradients can still differentiate through it; keeping the
+  `"local"` projector remains the way to get gradients w.r.t. pointing.
+- `DriftScanProjector(uniform_sampling=True)` routes the time synthesis and
+  its adjoint through real FFTs (limTOD's new `uniform=` fast path):
+  O(n_time*log n_time) independent of lmax, 19-51x faster than the direct
+  phase sum, identical to roundoff. Static by design — dispatching on the
+  values of the LST grid is impossible under jit. The projector validates
+  the RAW `lst_deg` per call, which stays concrete even inside a jit trace
+  (deriving `dphi` there would not), so a bad grid is a clear ValueError at
+  trace time rather than limTOD's NaN-poisoned fallback.
+- `DriftScanProjector.mmodes()` now rejects `normalize_beam=True`: the
+  normalization divides by the ones-map denominator, which is not part of
+  the m-mode expansion, so the returned coefficients would silently not be
+  the spectrum of `forward()` (~18x off).
 
 ## 0.1.4 (2026-07-25)
 

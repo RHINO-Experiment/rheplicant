@@ -197,6 +197,227 @@ class TestDriftScanProjector:
                 lmax=self.LMAX, nside=self.NSIDE,
             )
 
+    # ------------------------------------- cached reference beam + FFT sampling
+    @pytest.fixture
+    def uniform_coords(self, coords):
+        """A uniform full-turn LST grid with 2*lmax < n_time (FFT contract)."""
+        n_t = 4 * (self.LMAX + 1)
+        return coords.replace(
+            freq=coords.freq[:N_FREQ],
+            extra={"lst_deg": jnp.asarray(
+                12.0 + 360.0 * jnp.arange(n_t) / n_t
+            )},
+        )
+
+    def test_to_reference_frame_is_equivalent(self, key, drift_coords):
+        """Caching the rotation must not change any output, and must actually
+        remove the rotation (the cached alms differ from the beam-local ones)."""
+        proj = self._projector(key, lst_ref_deg=12.0)
+        cached = proj.to_reference_frame()
+        assert cached.beam_frame == "reference" and proj.beam_frame == "local"
+        assert not jnp.allclose(cached.beam_alms, proj.beam_alms)  # rotation baked in
+
+        sky = jax.random.uniform(jax.random.key(20), (N_FREQ, self.N_PIX_HP))
+        tod = jax.random.normal(jax.random.key(21), (N_TIME, N_FREQ))
+        for a, b in (
+            (proj.forward(sky, drift_coords), cached.forward(sky, drift_coords)),
+            (proj.adjoint(tod, drift_coords), cached.adjoint(tod, drift_coords)),
+            (proj.mmodes(sky, drift_coords), cached.mmodes(sky, drift_coords)),
+        ):
+            rel = jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(a))
+            assert rel < 1e-5, f"cached path diverged: {rel:.2e}"
+
+    def test_to_reference_frame_folds_in_the_mask(self, key, drift_coords):
+        """A masked local projector must cache the MASKED beam (and clear the
+        flag so the mask is not applied twice)."""
+        import dataclasses
+
+        masked = dataclasses.replace(
+            self._projector(key), el_deg=10.0, horizon_mask=True, apod_deg=5.0,
+            lst_ref_deg=12.0,
+        )
+        cached = masked.to_reference_frame()
+        assert cached.horizon_mask is False  # folded into the alms
+        sky = jax.random.uniform(jax.random.key(22), (N_FREQ, self.N_PIX_HP))
+        rel = jnp.max(
+            jnp.abs(masked.forward(sky, drift_coords) - cached.forward(sky, drift_coords))
+        ) / jnp.max(jnp.abs(masked.forward(sky, drift_coords)))
+        assert rel < 1e-5, f"mask lost or double-applied: {rel:.2e}"
+
+    def test_to_reference_frame_is_differentiable(self, key, drift_coords):
+        """Full-JAX principle: the precompute is itself traceable, so a caller
+        that DOES want beam-local gradients can differentiate through it."""
+        import dataclasses
+
+        proj = self._projector(key, lst_ref_deg=12.0)
+        sky = jax.random.uniform(jax.random.key(23), (N_FREQ, self.N_PIX_HP))
+
+        def loss(beams):
+            p = dataclasses.replace(proj, beam_alms=beams)
+            return jnp.sum(p.to_reference_frame().forward(sky, drift_coords) ** 2)
+
+        g = jax.grad(loss, holomorphic=False)(proj.beam_alms)
+        assert bool(jnp.all(jnp.isfinite(jnp.abs(g))))
+        assert float(jnp.max(jnp.abs(g))) > 0.0
+
+    def test_reference_frame_validation(self, key):
+        import dataclasses
+
+        proj = self._projector(key)
+        with pytest.raises(StateValidationError, match="lst_ref_deg"):
+            dataclasses.replace(proj, beam_frame="reference")
+        with pytest.raises(StateValidationError, match="horizon_mask"):
+            dataclasses.replace(
+                proj, beam_frame="reference", lst_ref_deg=12.0, horizon_mask=True
+            )
+        with pytest.raises(StateValidationError, match="beam_frame"):
+            dataclasses.replace(proj, beam_frame="celestial")
+        with pytest.raises(StateValidationError, match="reference LST"):
+            proj.to_reference_frame()  # no lst_ref_deg anywhere
+        cached = proj.to_reference_frame(lst_ref_deg=12.0)
+        assert cached.to_reference_frame() is cached  # idempotent
+        with pytest.raises(StateValidationError, match="already cached"):
+            cached.to_reference_frame(lst_ref_deg=99.0)
+
+    @pytest.mark.parametrize("normalize", [False, True])
+    def test_uniform_sampling_matches_direct(self, key, uniform_coords, normalize):
+        """The FFT route must agree with the direct sum, forward and adjoint."""
+        import dataclasses
+
+        proj = self._projector(key, normalize_beam=normalize, lst_ref_deg=12.0)
+        fft = dataclasses.replace(proj, uniform_sampling=True)
+        n_t = uniform_coords.extra["lst_deg"].shape[0]
+        sky = jax.random.uniform(jax.random.key(24), (N_FREQ, self.N_PIX_HP))
+        tod = jax.random.normal(jax.random.key(25), (n_t, N_FREQ))
+        for a, b in (
+            (proj.forward(sky, uniform_coords), fft.forward(sky, uniform_coords)),
+            (proj.adjoint(tod, uniform_coords), fft.adjoint(tod, uniform_coords)),
+        ):
+            rel = jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(a))
+            assert rel < 1e-4, f"FFT route diverged: {rel:.2e}"
+
+    def test_uniform_sampling_adjoint_dot_identity(self, key, uniform_coords):
+        import dataclasses
+
+        fft = dataclasses.replace(
+            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
+        )
+        n_t = uniform_coords.extra["lst_deg"].shape[0]
+        sky = jax.random.uniform(jax.random.key(26), (N_FREQ, self.N_PIX_HP))
+        tod = jax.random.normal(jax.random.key(27), (n_t, N_FREQ))
+        lhs = dot(fft.forward(sky, uniform_coords), tod)
+        rhs = dot(sky, fft.adjoint(tod, uniform_coords))
+        assert jnp.abs(lhs - rhs) / jnp.abs(lhs) < 1e-3
+
+    def test_uniform_sampling_rejects_irregular_grid(self, key, uniform_coords):
+        """An irregular grid must fail loudly rather than silently return a
+        wrong TOD. Long enough (2*lmax < n_time) that the Nyquist guard is not
+        what fires — this is the uniformity check itself."""
+        import dataclasses
+
+        fft = dataclasses.replace(
+            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
+        )
+        lst = uniform_coords.extra["lst_deg"]
+        jittered = uniform_coords.replace(
+            extra={"lst_deg": lst.at[len(lst) // 3].add(3.0)}  # one bad sample
+        )
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        with pytest.raises(ValueError, match="uniform grid"):
+            fft.forward(sky, jittered)
+        # a uniform grid covering only HALF a turn is equally invalid
+        half = uniform_coords.replace(
+            extra={"lst_deg": 12.0 + 180.0 * jnp.arange(len(lst)) / len(lst)}
+        )
+        with pytest.raises(ValueError, match="uniform grid"):
+            fft.forward(sky, half)
+
+    def test_uniform_sampling_rejects_bad_grid_under_jit(self, key, uniform_coords):
+        """The regression that matters most: an eager-only guard was bypassed
+        by ANY jit wrapping — including a compile-time-constant grid, because
+        deriving dphi inside a trace produces a tracer — and a uniform
+        HALF-turn grid (the normal shape of a real observation) then returned
+        a silently 74%-wrong TOD. The adapter now validates the RAW lst_deg,
+        which is still concrete there, so this raises at trace time."""
+        import dataclasses
+        import equinox as eqx
+
+        proj = self._projector(key, lst_ref_deg=12.0)
+        fft = dataclasses.replace(proj, uniform_sampling=True)
+        n_t = uniform_coords.extra["lst_deg"].shape[0]
+        half = uniform_coords.replace(
+            extra={"lst_deg": 12.0 + 180.0 * jnp.arange(n_t) / n_t}
+        )
+        sky = jax.random.uniform(jax.random.key(30), (N_FREQ, self.N_PIX_HP))
+
+        # Layer 1 — coords closed over (the normal likelihood pattern): the
+        # RAW lst_deg is still concrete inside the trace, so this is a clear
+        # error at trace time, before anything compiles.
+        with pytest.raises(ValueError, match="uniform grid"):
+            jax.jit(lambda s: fft.forward(s, half))(sky)
+        with pytest.raises(ValueError, match="uniform grid"):
+            jax.jit(lambda t: fft.adjoint(t, half))(jnp.ones((n_t, N_FREQ)))
+
+        # Layer 2 — coords passed as a TRACED argument: the values genuinely
+        # cannot be read, so no exception is possible. limtod_jax's pure-JAX
+        # guard makes the result NaN instead of a plausible wrong TOD.
+        out_bad = eqx.filter_jit(lambda p, s, c: p.forward(s, c))(fft, sky, half)
+        assert bool(jnp.all(jnp.isnan(out_bad))), "traced violation must poison"
+
+        # the valid grid still compiles and matches the direct sum, both ways
+        ref = proj.forward(sky, uniform_coords)
+        for out in (
+            jax.jit(lambda s: fft.forward(s, uniform_coords))(sky),
+            eqx.filter_jit(lambda p, s, c: p.forward(s, c))(fft, sky, uniform_coords),
+        ):
+            assert float(jnp.max(jnp.abs(out - ref)) / jnp.max(jnp.abs(ref))) < 1e-4
+
+    def test_mmodes_rejects_normalize_beam(self, key, drift_coords):
+        """mmodes() is the spectrum of the UN-normalized TOD; combined with
+        normalize_beam=True it would silently not be the spectrum of
+        forward() (measured ~18x off), so the combination is rejected."""
+        proj = self._projector(key, normalize_beam=True)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        with pytest.raises(StateValidationError, match="normalize_beam"):
+            proj.mmodes(sky, drift_coords)
+        # and forward/adjoint still work with normalization
+        assert jnp.all(jnp.isfinite(proj.forward(sky, drift_coords)))
+
+    def test_fast_combo_jit_vmap_grad(self, key, uniform_coords):
+        """Both opt-ins together must stay jit/vmap/grad-safe (the rheplicant
+        full-JAX guarantee) and still match the plain projector."""
+        import dataclasses
+        import equinox as eqx
+
+        plain = self._projector(key, lst_ref_deg=12.0)
+        fast = dataclasses.replace(
+            plain, uniform_sampling=True
+        ).to_reference_frame()
+        sky = jax.random.uniform(jax.random.key(28), (N_FREQ, self.N_PIX_HP))
+
+        # Max-norm relative comparisons throughout: a TOD crosses zero, and an
+        # ELEMENTWISE rtol (jnp.allclose) is unsatisfiable there — the error
+        # floor follows the array scale, not the individual element.
+        def relmax(a, b):
+            return float(jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(b)))
+
+        ref = plain.forward(sky, uniform_coords)
+        rel = relmax(fast.forward(sky, uniform_coords), ref)
+        assert rel < 1e-4, f"fast combo diverged: {rel:.2e}"  # measured 7e-7 in f32
+
+        out_jit = eqx.filter_jit(lambda p, s: p.forward(s, uniform_coords))(fast, sky)
+        # measured 1e-7 in f32 — identical to the plain projector's jit delta,
+        # i.e. ordinary fusion noise, nothing FFT-specific
+        assert relmax(out_jit, fast.forward(sky, uniform_coords)) < 1e-5
+
+        skies = jnp.stack([sky, 2.0 * sky])
+        batched = jax.vmap(lambda s: fast.forward(s, uniform_coords))(skies)
+        assert batched.shape == (2,) + ref.shape
+        assert relmax(batched[1], 2.0 * batched[0]) < 1e-5
+
+        g = jax.grad(lambda s: jnp.sum(fast.forward(s, uniform_coords) ** 2))(sky)
+        assert bool(jnp.all(jnp.isfinite(g)))
+
     # ------------------------------------------------------ float64 statement
     def test_x64_subprocess(self):
         """Roundoff-level statement in a fresh x64 interpreter: forward ==

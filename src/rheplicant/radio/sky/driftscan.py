@@ -19,6 +19,17 @@ are static fields, and ``coords`` only supplies
 by design — a drift scan that needs a per-sample pointing is not a drift
 scan.
 
+Two static opt-ins turn the projector from "correct" into "fast for
+inference", both preserving full jit/vmap/grad behaviour:
+
+* :meth:`DriftScanProjector.to_reference_frame` pays the O(lmax³) Wigner
+  rotation ONCE and returns an equivalent projector that skips it on every
+  later call — the difference between rotating once and rotating per
+  likelihood evaluation;
+* ``uniform_sampling=True`` routes the time synthesis (and its adjoint)
+  through real FFTs, O(n_time·log n_time) independent of lmax, when the LST
+  grid is uniform over a full sidereal turn.
+
 The optional horizon mask (``horizon_mask=True``) applies the physical
 below-ground cut to the beam in the horizontal frame before projecting,
 with cosine apodization (``apod_deg``) to tame the Gibbs ringing of a
@@ -29,6 +40,8 @@ beams need it *and* 2–5° of apodization.
 PRECISION: enable ``jax_enable_x64`` for quantitative work (the map<->alm
 steps inherit s2fft's float32 limitation; see ``limtod_jax.hpx``).
 """
+
+import dataclasses
 
 import equinox as eqx
 import jax
@@ -94,6 +107,16 @@ class DriftScanProjector(AbstractSkyProjector):
         lst_ref_deg: reference LST [deg] of the m-mode expansion (static);
             ``None`` uses the first sample of ``coords.extra["lst_deg"]``.
             Any value gives the same TOD — it only re-anchors the phases.
+        beam_frame: ``"local"`` (default) — ``beam_alms`` are beam-local and
+            the reference rotation happens on every call, keeping gradients
+            w.r.t. the beam-local alms; ``"reference"`` — they are already
+            the celestial-frame alms at ``lst_ref_deg``, so the rotation is
+            skipped. Build the latter with :meth:`to_reference_frame`
+            (static).
+        uniform_sampling: use the FFT synthesis/adjoint (static). Requires
+            ``coords.extra["lst_deg"]`` to be a uniform grid over a full
+            sidereal turn with ``2·lmax < n_time``; validated by
+            ``limtod_jax`` whenever the values are concrete.
     """
 
     beam_alms: jax.Array
@@ -108,6 +131,8 @@ class DriftScanProjector(AbstractSkyProjector):
     apod_deg: float = eqx.field(static=True, default=0.0)
     mask_iterations: int = eqx.field(static=True, default=3)
     lst_ref_deg: float | None = eqx.field(static=True, default=None)
+    beam_frame: str = eqx.field(static=True, default="local")
+    uniform_sampling: bool = eqx.field(static=True, default=False)
 
     def __check_init__(self):
         n_alm = (self.lmax + 1) * (self.lmax + 2) // 2
@@ -116,6 +141,27 @@ class DriftScanProjector(AbstractSkyProjector):
                 f"beam_alms must be (n_freq, n_alm={n_alm}) packed alms for "
                 f"lmax={self.lmax}, got shape {self.beam_alms.shape}."
             )
+        if self.beam_frame not in ("local", "reference"):
+            raise StateValidationError(
+                f'beam_frame must be "local" or "reference", got '
+                f"{self.beam_frame!r}."
+            )
+        if self.beam_frame == "reference":
+            if self.lst_ref_deg is None:
+                raise StateValidationError(
+                    'beam_frame="reference" requires an explicit lst_ref_deg: '
+                    "the cached beam was rotated to ONE specific reference LST, "
+                    "which must not silently depend on the coords passed later. "
+                    "Use to_reference_frame() to build this state correctly."
+                )
+            if self.horizon_mask:
+                raise StateValidationError(
+                    'beam_frame="reference" is incompatible with '
+                    "horizon_mask=True: the mask must be applied in the "
+                    "horizontal frame, i.e. BEFORE the reference rotation. "
+                    "Build the projector with beam_frame='local' and "
+                    "horizon_mask=True, then call to_reference_frame()."
+                )
 
     # ------------------------------------------------------------------ utils
     def _validate_coords(self, coords: Coordinates) -> None:
@@ -125,6 +171,32 @@ class DriftScanProjector(AbstractSkyProjector):
                 "(n_time,) in degrees. (coords.pointing is ignored: the "
                 "drift pointing lives on the projector.)"
             )
+        if self.uniform_sampling:
+            self._validate_uniform_grid(coords)
+
+    def _validate_uniform_grid(self, coords: Coordinates) -> None:
+        """Check the FFT contract at THIS boundary, where it can still be seen.
+
+        The opt-in lives on the projector but the grid arrives per call, so
+        this is the only place a clear error is possible. It matters that the
+        check happens on the RAW ``lst_deg``: once inside a ``jit`` trace,
+        deriving ``dphi`` (``jnp.deg2rad(lst - ref)``) yields a tracer even
+        when the grid is a compile-time constant, so limtod_jax's own eager
+        check would silently skip. The raw closure constant is usually still
+        concrete here, which turns "silently NaN at runtime" into "clear
+        ValueError at trace time". When it genuinely is traced, limtod_jax's
+        pure-JAX guard still poisons a violated contract with NaN.
+        """
+        import numpy as np
+
+        ltj = _limtod_jax()
+        lst = coords.extra["lst_deg"]
+        try:
+            raw = np.asarray(lst)
+        except jax.errors.TracerArrayConversionError:
+            return  # genuinely traced: the NaN guard downstream covers it
+        ref = self.lst_ref_deg if self.lst_ref_deg is not None else float(raw[0])
+        ltj.check_uniform_grid(np.deg2rad(raw.astype(np.float64) - ref))
 
     def _dphi_and_ref(self, coords: Coordinates):
         lst = coords.extra["lst_deg"]
@@ -132,7 +204,14 @@ class DriftScanProjector(AbstractSkyProjector):
         return jnp.deg2rad(lst - ref), ref
 
     def _beam_ref_alms(self, ltj, ref) -> jax.Array:
-        """Per-frequency celestial-frame beam alms at the reference LST."""
+        """Per-frequency celestial-frame beam alms at the reference LST.
+
+        With ``beam_frame="reference"`` the stored alms already ARE that, so
+        the O(lmax³) rotation is skipped entirely — the point of
+        :meth:`to_reference_frame` for repeated (inference-loop) evaluation.
+        """
+        if self.beam_frame == "reference":
+            return self.beam_alms
         beam = self.beam_alms
         if self.horizon_mask:
             beam = jax.vmap(
@@ -187,6 +266,7 @@ class DriftScanProjector(AbstractSkyProjector):
             return ltj.driftscan_tod(
                 beam_ref, sky_alm, dphi,
                 lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                uniform=self.uniform_sampling,
             )
 
         return jax.vmap(one_freq)(beam_refs, sky).T
@@ -207,6 +287,7 @@ class DriftScanProjector(AbstractSkyProjector):
             alm = ltj.driftscan_tod_adjoint(
                 tod_t, beam_ref, dphi,
                 lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                uniform=self.uniform_sampling,
             )
             return ltj.alm2map(alm, nside=self.nside, lmax=self.lmax)
 
@@ -221,7 +302,25 @@ class DriftScanProjector(AbstractSkyProjector):
         the reference LST anchoring the phases (first sample unless
         ``lst_ref_deg`` is set); the coefficients' magnitudes are
         sampling-independent.
+
+        Requires ``normalize_beam=False``: normalization divides the TOD by
+        the ones-map denominator, which is not part of the m-mode expansion,
+        so these coefficients would no longer be the spectrum of what
+        :meth:`forward` returns (measured ~18x off). Rejected rather than
+        silently mismatched — the same policy as the ``"reference"``/mask
+        combination above.
         """
+        if self.normalize_beam:
+            raise StateValidationError(
+                "mmodes() is defined for the UN-normalized sky TOD, but this "
+                "projector has normalize_beam=True: forward() additionally "
+                "divides by the ones-map denominator (the beam integral), "
+                "which is not representable in the m-mode expansion, so the "
+                "returned coefficients would not be the spectrum of "
+                "forward(). Use a normalize_beam=False projector for m-mode "
+                "analysis (the denominator is constant along a drift, so it "
+                "is an overall scale you can divide out yourself)."
+            )
         self._validate_coords(coords)
         self._validate_sky(sky)
         ltj = _limtod_jax()
@@ -233,3 +332,53 @@ class DriftScanProjector(AbstractSkyProjector):
             return ltj.mmodes_from_sky(beam_ref, sky_alm, lmax=self.lmax)
 
         return jax.vmap(one_freq)(beam_refs, sky)
+
+    def to_reference_frame(
+        self, lst_ref_deg: float | None = None
+    ) -> "DriftScanProjector":
+        """Precompute the beam rotation once; return an equivalent projector.
+
+        The returned projector holds the celestial-frame beam alms at
+        ``lst_ref_deg`` (mask already applied if it was configured) and
+        skips the O(lmax³) Wigner rotation on every subsequent
+        ``forward``/``adjoint``/``mmodes`` — the difference between paying
+        the rotation once and paying it per likelihood evaluation. Call it
+        OUTSIDE the inference loop.
+
+        Fully functional: ``self`` is unchanged, and this is pure JAX, so it
+        is itself differentiable and jit-safe. Gradients through the RESULT
+        are with respect to the reference-frame alms; if you need gradients
+        w.r.t. the beam-local alms (or w.r.t. pointing), keep the
+        ``"local"`` projector — which is exactly the compute-vs-flexibility
+        trade this method exposes rather than hides.
+
+        Args:
+            lst_ref_deg: reference LST [deg]; defaults to this projector's
+                ``lst_ref_deg``, which must then be set (a cached rotation
+                cannot depend on coords supplied later).
+        """
+        if self.beam_frame == "reference":
+            if lst_ref_deg is not None and lst_ref_deg != self.lst_ref_deg:
+                raise StateValidationError(
+                    f"this projector's beam is already cached at "
+                    f"lst_ref_deg={self.lst_ref_deg}; re-anchoring to "
+                    f"{lst_ref_deg} would need the beam-local alms. Rebuild "
+                    'from the "local" projector instead.'
+                )
+            return self
+        ref = lst_ref_deg if lst_ref_deg is not None else self.lst_ref_deg
+        if ref is None:
+            raise StateValidationError(
+                "to_reference_frame() needs a reference LST: pass "
+                "lst_ref_deg=... or set it on the projector. It cannot "
+                "default to coords.extra['lst_deg'][0] here, because the "
+                "rotation is baked in before any coords are seen."
+            )
+        ltj = _limtod_jax()
+        return dataclasses.replace(
+            self,
+            beam_alms=self._beam_ref_alms(ltj, ref),
+            lst_ref_deg=float(ref),
+            beam_frame="reference",
+            horizon_mask=False,  # already applied into the cached alms
+        )
