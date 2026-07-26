@@ -484,6 +484,25 @@ class TestDriftScanProjector:
         g = jax.grad(lambda s: jnp.sum(fast.forward(s, uniform_coords) ** 2))(sky)
         assert bool(jnp.all(jnp.isfinite(g)))
 
+    def test_uniform_sampling_requires_limtod_17(self, key, uniform_coords, monkeypatch):
+        """An outdated limTOD must fail at the boundary with a clear message,
+        not with an AttributeError deep inside a traced call: the FFT path and
+        the public grid check only exist from limTOD 1.7."""
+        import dataclasses
+
+        import limtod_jax
+
+        fft = dataclasses.replace(
+            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
+        )
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        monkeypatch.delattr(limtod_jax, "check_uniform_grid", raising=False)
+        with pytest.raises(ImportError, match="limTOD 1.7"):
+            fft.forward(sky, uniform_coords)
+        # the plain path is unaffected by the missing 1.7 symbol
+        plain = dataclasses.replace(fft, uniform_sampling=False)
+        assert jnp.all(jnp.isfinite(plain.forward(sky, uniform_coords)))
+
     # ------------------------------------------------------ float64 statement
     def test_x64_subprocess(self):
         """Roundoff-level statement in a fresh x64 interpreter: forward ==

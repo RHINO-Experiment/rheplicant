@@ -52,7 +52,14 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.radio.sky.projection import AbstractSkyProjector
 
 
-def _limtod_jax():
+def _limtod_jax(uniform: bool = False):
+    """The limtod_jax module, gated on the symbols this adapter actually calls.
+
+    Two feature levels, so an outdated install fails with a clear message at
+    the boundary instead of an AttributeError deep inside a traced call:
+    the drift-scan path needs limTOD >= 1.6, and ``uniform_sampling`` needs
+    the FFT fast path plus the public grid check added in 1.7.
+    """
     try:
         import limtod_jax
     except ImportError as exc:  # pragma: no cover
@@ -65,6 +72,13 @@ def _limtod_jax():
         raise ImportError(
             "The installed limtod_jax predates the drift-scan m-mode path "
             "(limtod_jax.driftscan); upgrade the limTOD installation."
+        )
+    if uniform and not hasattr(limtod_jax, "check_uniform_grid"):
+        raise ImportError(
+            "uniform_sampling=True needs the uniform-grid FFT fast path added "
+            "in limTOD 1.7 (limtod_jax.check_uniform_grid and the uniform= "
+            "argument); the installed limtod_jax is older. Upgrade limTOD, or "
+            "drop the flag to use the exact direct sum."
         )
     return limtod_jax
 
@@ -215,7 +229,7 @@ class DriftScanProjector(AbstractSkyProjector):
         """
         import numpy as np
 
-        ltj = _limtod_jax()
+        ltj = _limtod_jax(self.uniform_sampling)
         lst = coords.extra["lst_deg"]
         try:
             raw = np.asarray(lst)
@@ -286,7 +300,7 @@ class DriftScanProjector(AbstractSkyProjector):
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
         self._validate_coords(coords)
         self._validate_sky(sky)
-        ltj = _limtod_jax()
+        ltj = _limtod_jax(self.uniform_sampling)
         dphi, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
         ones_alm = self._ones_alm(ltj)
@@ -308,7 +322,7 @@ class DriftScanProjector(AbstractSkyProjector):
             raise StateValidationError(
                 f"tod must be (n_time={n_time}, n_freq={n_freq}), got {tod.shape}."
             )
-        ltj = _limtod_jax()
+        ltj = _limtod_jax(self.uniform_sampling)
         dphi, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
         ones_alm = self._ones_alm(ltj)
@@ -353,7 +367,7 @@ class DriftScanProjector(AbstractSkyProjector):
             )
         self._validate_coords(coords)
         self._validate_sky(sky)
-        ltj = _limtod_jax()
+        ltj = _limtod_jax(self.uniform_sampling)
         _, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
 
@@ -404,7 +418,7 @@ class DriftScanProjector(AbstractSkyProjector):
                 "default to coords.extra['lst_deg'][0] here, because the "
                 "rotation is baked in before any coords are seen."
             )
-        ltj = _limtod_jax()
+        ltj = _limtod_jax(self.uniform_sampling)
         return dataclasses.replace(
             self,
             beam_alms=self._beam_ref_alms(ltj, ref),

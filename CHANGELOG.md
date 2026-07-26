@@ -12,7 +12,11 @@
   supplies `lst_deg`. Ships the exact sky-slot adjoint, an `mmodes` accessor
   (per-frequency Fourier coefficients of the sidereal TOD), and the optional
   horizon mask with cosine apodization (see the limTOD ringing study).
-  Requires limTOD >= 1.6 (`limtod_jax.driftscan`); guarded lazy import.
+  Requires limTOD >= 1.6 (`limtod_jax.driftscan`); guarded lazy import,
+  with a second feature level for `uniform_sampling=True`, which needs
+  the FFT fast path and public grid check added in limTOD 1.7 — an
+  outdated install now fails at the boundary with a clear message
+  instead of an AttributeError inside a traced call.
 - `DriftScanProjector.to_reference_frame()` pays the O(lmax^3) Wigner
   rotation once and returns an equivalent projector (new static
   `beam_frame="reference"`) that skips it on every later
