@@ -37,3 +37,6 @@ assets/
 
 # Local reproduction study vs RHINO-TODsim (independent, not part of the package)
 repro-todsim/
+
+# Cached data behind the docs sky-engine figures (regenerate with the script)
+docs/_engine-figure-data.npz

@@ -52,6 +52,13 @@ def _limtod_jax():
 class NativeLimTODProjector(AbstractSkyProjector):
     """Pure-JAX limTOD sky projector: jit/vmap/grad-safe with exact adjoint.
 
+    Handles ARBITRARY pointing, one Wigner rotation per time sample. If the
+    observation is a drift scan — fixed azimuth/elevation/self-rotation, only
+    LST advancing — use
+    :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` instead: it
+    returns the same numbers to float64 roundoff for a single rotation over
+    the whole scan (``O(lmax³ + n_time·lmax)`` vs ``O(n_time·lmax³)``).
+
     Coordinate conventions (degrees, per the RHINO family — identical to
     :class:`~rheplicant.radio.sky.projection.LimTODProjector`):
 

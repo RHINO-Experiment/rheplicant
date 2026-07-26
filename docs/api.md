@@ -64,6 +64,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.radio.sky.driftscan
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.radio.sky.source
    :members:
    :show-inheritance:

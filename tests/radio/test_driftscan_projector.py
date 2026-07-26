@@ -197,6 +197,158 @@ class TestDriftScanProjector:
                 lmax=self.LMAX, nside=self.NSIDE,
             )
 
+    # ------------------------------------------------ ignored-input guard
+    def test_accepts_agreeing_native_coords(self, key, drift_coords):
+        """Reusing the general projector's coords is THE way to switch engines.
+
+        The guard must not punish it: constant pointing that agrees with the
+        projector's own is exactly the legitimate case.
+        """
+        proj = self._projector(key)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        assert jnp.allclose(
+            proj.forward(sky, self._native_coords(drift_coords)),
+            proj.forward(sky, drift_coords),
+        )
+
+    @pytest.mark.parametrize(
+        "kind, match",
+        [("scanning_az", "azimuth"), ("wrong_el", "elevation"),
+         ("varying_selfrot", "selfrot")],
+    )
+    def test_rejects_disagreeing_pointing(self, key, drift_coords, kind, match):
+        """Coords carrying a pointing this projector would DISCARD must fail.
+
+        Otherwise a scan handed to the drift engine silently simulates a
+        different observation: finite, correctly shaped, and wrong.
+        """
+        proj = self._projector(key)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        n_t = drift_coords.extra["lst_deg"].shape[0]
+        base = self._native_coords(drift_coords)
+        if kind == "scanning_az":
+            bad = base.replace(pointing=base.pointing.at[:, 0].set(
+                jnp.linspace(0.0, 90.0, n_t)))
+        elif kind == "wrong_el":
+            bad = base.replace(pointing=base.pointing.at[:, 1].set(self.EL + 20.0))
+        else:
+            bad = base.replace(extra={**base.extra,
+                                      "selfrot_deg": jnp.linspace(0.0, 30.0, n_t)})
+        with pytest.raises(StateValidationError, match=match):
+            proj.forward(sky, bad)
+        with pytest.raises(StateValidationError, match=match):
+            proj.adjoint(jnp.ones((n_t, N_FREQ)), bad)
+
+    def test_traced_pointing_is_not_inspected(self, key, drift_coords):
+        """Tracers carry no values, so the guard steps aside instead of crashing."""
+        import equinox as eqx
+
+        proj = self._projector(key)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        n_t = drift_coords.extra["lst_deg"].shape[0]
+
+        @eqx.filter_jit
+        def run(pointing):
+            return proj.forward(sky, drift_coords.replace(pointing=pointing))
+
+        scanning = jnp.stack(
+            [jnp.linspace(0.0, 90.0, n_t), jnp.full(n_t, self.EL)], axis=-1
+        )
+        assert bool(jnp.all(jnp.isfinite(run(scanning))))
+
+    # ------------------------------------------------------ friendly builders
+    def test_from_beam_maps_uses_the_true_alm_transform(self, key, drift_coords):
+        """from_beam_maps must analyse the beam the way healpy does.
+
+        The footgun it exists to remove: the quadrature transform the SKY uses
+        is off by npix/4pi for the beam, so the wrong choice is silently
+        wrong rather than loudly broken.
+        """
+        import numpy as np
+
+        hp = pytest.importorskip("healpy")
+        ltj = pytest.importorskip("limtod_jax")
+        rng = jax.random.normal(key, (N_FREQ, self.N_PIX_HP))
+        beam_maps = jnp.exp(-0.5 * rng**2)  # positive, beam-like
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+
+        proj = DriftScanProjector.from_beam_maps(
+            beam_maps, lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
+            lmax=self.LMAX, selfrot_deg=self.SELFROT,
+        )
+        assert proj.nside == self.NSIDE  # inferred from the map length
+
+        healpy_alms = jnp.asarray(
+            [hp.map2alm(b, lmax=self.LMAX, iter=3) for b in np.asarray(beam_maps)]
+        )
+        reference = DriftScanProjector(
+            beam_alms=healpy_alms, lat_deg=self.LAT, az_deg=self.AZ,
+            el_deg=self.EL, lmax=self.LMAX, nside=self.NSIDE,
+            selfrot_deg=self.SELFROT,
+        )
+        assert jnp.allclose(proj.forward(sky, drift_coords),
+                            reference.forward(sky, drift_coords), rtol=5e-2)
+
+        # ... and the transform the sky uses would NOT have done (npix/4pi).
+        quad = DriftScanProjector(
+            beam_alms=jax.vmap(
+                lambda m: ltj.map2alm_quad(m, nside=self.NSIDE, lmax=self.LMAX)
+            )(beam_maps),
+            lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
+            lmax=self.LMAX, nside=self.NSIDE, selfrot_deg=self.SELFROT,
+        )
+        assert not jnp.allclose(quad.forward(sky, drift_coords),
+                                proj.forward(sky, drift_coords), rtol=0.5)
+
+    def test_from_beam_maps_is_differentiable_in_the_map(self, key, drift_coords):
+        """The point of doing the analysis in JAX: gradients reach the beam MAP."""
+        pytest.importorskip("limtod_jax")
+        beam_maps = jnp.exp(-0.5 * jax.random.normal(key, (N_FREQ, self.N_PIX_HP)) ** 2)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+
+        def loss(maps):
+            proj = DriftScanProjector.from_beam_maps(
+                maps, lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
+                lmax=self.LMAX,
+            )
+            return jnp.sum(proj.forward(sky, drift_coords) ** 2)
+
+        grad = jax.grad(loss)(beam_maps)
+        assert grad.shape == beam_maps.shape
+        assert bool(jnp.all(jnp.isfinite(grad))) and bool(jnp.any(grad != 0.0))
+
+    def test_from_beam_maps_validation(self):
+        with pytest.raises(StateValidationError, match="n_freq, n_pix"):
+            DriftScanProjector.from_beam_maps(
+                jnp.ones(self.N_PIX_HP), lat_deg=self.LAT, az_deg=self.AZ,
+                el_deg=self.EL, lmax=self.LMAX,
+            )
+        with pytest.raises(StateValidationError, match="HEALPix"):
+            DriftScanProjector.from_beam_maps(
+                jnp.ones((N_FREQ, 100)), lat_deg=self.LAT, az_deg=self.AZ,
+                el_deg=self.EL, lmax=self.LMAX,
+            )
+
+    def test_uniform_lst_grid_satisfies_the_fft_contract(self, key):
+        """The helper's grid is accepted; the natural linspace mistake is not."""
+        from rheplicant import Coordinates
+
+        pytest.importorskip("limtod_jax")
+        n_t = 4 * (self.LMAX + 1)
+        proj = self._projector(key, uniform_sampling=True)
+        sky = jnp.ones((N_FREQ, self.N_PIX_HP))
+        base = Coordinates(time=jnp.arange(float(n_t)), freq=jnp.ones(N_FREQ))
+
+        good = DriftScanProjector.uniform_lst_grid(n_t, lst0_deg=12.0)
+        assert good.shape == (n_t,)
+        out = proj.forward(sky, base.replace(extra={"lst_deg": good}))
+        assert bool(jnp.all(jnp.isfinite(out)))
+
+        # linspace INCLUDES the endpoint: a turn plus one step, not a turn.
+        endpoint = jnp.linspace(12.0, 372.0, n_t)
+        with pytest.raises(StateValidationError, match="uniform_lst_grid"):
+            proj.forward(sky, base.replace(extra={"lst_deg": endpoint}))
+
     # ------------------------------------- cached reference beam + FFT sampling
     @pytest.fixture
     def uniform_coords(self, coords):
@@ -406,6 +558,7 @@ class TestDriftScanProjector:
         a silently 74%-wrong TOD. The adapter now validates the RAW lst_deg,
         which is still concrete there, so this raises at trace time."""
         import dataclasses
+
         import equinox as eqx
 
         proj = self._projector(key, lst_ref_deg=12.0)
@@ -453,6 +606,7 @@ class TestDriftScanProjector:
         """Both opt-ins together must stay jit/vmap/grad-safe (the rheplicant
         full-JAX guarantee) and still match the plain projector."""
         import dataclasses
+
         import equinox as eqx
 
         plain = self._projector(key, lst_ref_deg=12.0)

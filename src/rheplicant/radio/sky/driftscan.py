@@ -1,5 +1,13 @@
 """Drift-scan m-mode projector — the fast path for RHINO's actual geometry.
 
+m-mode analysis is the standard harmonic treatment of drift-scan (transit)
+observations. This engine rests on one identity from it, in the conventions
+of *M-mode RIME explicit in beam, fringe and sky modes*
+(https://zh-zhang.com/myNotes/MmodeNote.pdf) — the last line of its Eq. (13):
+rotate the beam into the celestial frame ONCE at a reference LST, and the
+remainder of the sidereal day reduces to a per-m phase ``e^{-i m dphi}``.
+That is the whole reason the cost stops scaling with the number of samples.
+
 :class:`DriftScanProjector` is the "real version" that the
 :class:`~rheplicant.radio.sky.projection.MModeProjector` placeholder
 promised: instead of taking precomputed transfer matrices, it derives the
@@ -42,6 +50,7 @@ steps inherit s2fft's float32 limitation; see ``limtod_jax.hpx``).
 """
 
 import dataclasses
+import math
 
 import equinox as eqx
 import jax
@@ -203,6 +212,83 @@ class DriftScanProjector(AbstractSkyProjector):
                     "horizon_mask=True, then call to_reference_frame()."
                 )
 
+    # ------------------------------------------------------------ constructors
+    @classmethod
+    def from_beam_maps(
+        cls,
+        beam_maps: jax.Array,
+        *,
+        lat_deg: float,
+        az_deg: float,
+        el_deg: float,
+        lmax: int,
+        iterations: int = 3,
+        **kwargs,
+    ) -> "DriftScanProjector":
+        """Build from HEALPix beam MAPS, the form a beam model actually has.
+
+        The sky enters this projector as maps; the beam otherwise has to enter
+        as alms, leaving the user to run the analysis transform themselves —
+        with two inequivalent transforms to choose between. ``map2alm_quad``
+        (what :meth:`forward` uses on the SKY) returns quadrature alms; the
+        beam needs TRUE alms, i.e. healpy's ``hp.map2alm(beam, lmax, iter=3)``.
+        Picking the visible one silently rescales the beam by ``npix/4π``, so
+        this constructor makes the correct choice the easy one.
+
+        It is pure JAX (``limtod_jax.map2alm_iter``, the oracle-locked healpy
+        equivalent), so unlike an external ``hp.map2alm`` call it stays inside
+        the trace: gradients flow to the beam MAP, which is what a beam model
+        is parameterized in. ``nside`` is inferred from the map length.
+
+        Args:
+            beam_maps: ``(n_freq, n_pix)`` HEALPix RING beam maps in the
+                beam-local frame.
+            lat_deg / az_deg / el_deg: site latitude and the fixed drift
+                pointing [deg].
+            lmax: harmonic band-limit of the analysis.
+            iterations: healpy ``iter`` equivalent for the analysis (static).
+            **kwargs: forwarded to the constructor (``selfrot_deg``,
+                ``normalize_beam``, ``horizon_mask``, ``uniform_sampling``...).
+        """
+        if beam_maps.ndim != 2:
+            raise StateValidationError(
+                f"beam_maps must be (n_freq, n_pix) HEALPix maps, got shape "
+                f"{beam_maps.shape}."
+            )
+        n_pix = beam_maps.shape[-1]
+        nside = math.isqrt(n_pix // 12)
+        if 12 * nside**2 != n_pix:
+            raise StateValidationError(
+                f"beam_maps has {n_pix} pixels, which is not a valid HEALPix "
+                f"map length (12·nside²)."
+            )
+        ltj = _limtod_jax(bool(kwargs.get("uniform_sampling", False)))
+        alms = jax.vmap(
+            lambda m: ltj.map2alm_iter(m, nside=nside, lmax=lmax, iterations=iterations)
+        )(beam_maps)
+        return cls(
+            beam_alms=alms, lat_deg=lat_deg, az_deg=az_deg, el_deg=el_deg,
+            lmax=lmax, nside=nside, **kwargs,
+        )
+
+    @staticmethod
+    def uniform_lst_grid(n_time: int, lst0_deg: float = 0.0) -> jax.Array:
+        """The LST grid ``uniform_sampling=True`` requires: a FULL sidereal turn.
+
+        ``lst0 + 360·t/n_time`` — note the excluded endpoint. The natural
+        ``jnp.linspace(0, 360, n_time)`` INCLUDES it, which makes the grid a
+        turn-plus-one-step and silently invalidates the FFT synthesis; that is
+        a real regression this package has already been bitten by, so the
+        correct grid is provided rather than described.
+
+        Args:
+            n_time: number of samples per sidereal day; the FFT path needs
+                ``2·lmax < n_time`` (sampling theorem — ``m = lmax`` must stay
+                off the Nyquist bin).
+            lst0_deg: LST of the first sample [deg].
+        """
+        return lst0_deg + 360.0 * jnp.arange(n_time, dtype=float) / n_time
+
     # ------------------------------------------------------------------ utils
     def _validate_coords(self, coords: Coordinates) -> None:
         if coords is None or coords.extra.get("lst_deg") is None:
@@ -211,8 +297,49 @@ class DriftScanProjector(AbstractSkyProjector):
                 "(n_time,) in degrees. (coords.pointing is ignored: the "
                 "drift pointing lives on the projector.)"
             )
+        self._reject_disagreeing_pointing(coords)
         if self.uniform_sampling:
             self._validate_uniform_grid(coords)
+
+    def _reject_disagreeing_pointing(self, coords: Coordinates) -> None:
+        """Refuse coords whose pointing is not the one this projector applies.
+
+        Handing a general projector's coords to this one is the expected way
+        to switch engines, and then ``coords.pointing`` agrees and nothing
+        happens. But az/el/selfrot are projector CONFIGURATION here, so coords
+        that disagree would be silently discarded and a different observation
+        simulated — finite, correctly shaped, and wrong. Principle 7: make it
+        loud. Traced pointing cannot be inspected, and is left to the user.
+        """
+        import numpy as np
+
+        checks = []
+        if coords.pointing is not None:
+            checks.append(("coords.pointing[:, 0] (azimuth)", coords.pointing[:, 0],
+                           self.az_deg))
+            checks.append(("coords.pointing[:, 1] (elevation)", coords.pointing[:, 1],
+                           self.el_deg))
+        if coords.extra.get("selfrot_deg") is not None:
+            checks.append(('coords.extra["selfrot_deg"]',
+                           coords.extra["selfrot_deg"], self.selfrot_deg))
+        for label, values, expected in checks:
+            try:
+                got = np.asarray(values)
+            except jax.errors.TracerArrayConversionError:
+                continue  # traced: no values to compare against
+            # 1e-3 deg is far below any pointing accuracy that matters, and far
+            # above the float32 representation error of a constant array.
+            if not np.allclose(got, expected, rtol=0.0, atol=1e-3):
+                raise StateValidationError(
+                    f"{label} carries a pointing this projector would ignore: "
+                    f"it applies a FIXED {expected} deg (drift-scan geometry is "
+                    f"projector configuration, not per-sample data), but the "
+                    f"coords range over [{got.min():.6g}, {got.max():.6g}]. "
+                    f"Simulating them would silently use the projector's value. "
+                    f"Either drop the disagreeing entry from coords, rebuild "
+                    f"this projector with the pointing you meant, or use "
+                    f"NativeLimTODProjector, which tracks per-sample pointing."
+                )
 
     def _validate_uniform_grid(self, coords: Coordinates) -> None:
         """Check the FFT contract at THIS boundary, where it can still be seen.
@@ -240,7 +367,17 @@ class DriftScanProjector(AbstractSkyProjector):
         # hide the real precision, and limtod_jax's tolerance is dtype-scaled:
         # a legitimate float32 degree grid deviates ~3e-7 rad, which the f64
         # bound (~9e-14) rejects outright.
-        ltj.check_uniform_grid(np.deg2rad(raw - np.asarray(ref, raw.dtype)))
+        try:
+            ltj.check_uniform_grid(np.deg2rad(raw - np.asarray(ref, raw.dtype)))
+        except ValueError as exc:
+            # Re-raise in the framework's family: every other failure at this
+            # boundary is a StateValidationError, and `except DirtError` is the
+            # advertised way to catch them all.
+            raise StateValidationError(
+                f"{exc} — build the grid with "
+                f"DriftScanProjector.uniform_lst_grid(n_time, lst0_deg), or "
+                f"drop uniform_sampling to use the exact direct sum."
+            ) from exc
 
     def _dphi_and_ref(self, coords: Coordinates):
         lst = coords.extra["lst_deg"]

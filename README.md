@@ -153,9 +153,11 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
   a single-antenna experiment: sky components, ionosphere, RFI, shared
   chromatic beam, noise-wave/reflection terms, CW tone and switched
   calibration loads, gain, thermal noise, EMI, ADC, flagging, averaging —
-  plus a modular sky engine (limTOD bridge / projection matrices / m-mode /
-  native differentiable limTOD) and linear analysis filters (sidereal,
-  sky-space map-making, fringe-rate/delay).
+  plus a modular sky engine — a general differentiable limTOD port and a
+  drift-scan m-mode fast path that returns the same numbers orders of
+  magnitude cheaper, alongside projection matrices and a numpy-limTOD
+  validation bridge — and linear analysis filters (sidereal, sky-space
+  map-making, fringe-rate/delay).
 - **Inference** — gradient & Adam calibrators, NumPyro bridge with pytree
   priors and posterior predictive, Fisher / Cramér-Rao / delta-method
   uncertainty propagation, Monte Carlo pushforward, `NeuralOperator`

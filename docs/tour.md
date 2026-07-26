@@ -210,13 +210,28 @@ source = SkySourceOperator(
 tod = source(state).data                            # (n_time, n_freq)
 ```
 
-Engines form a ladder: `LimTODProjector` (numpy-limTOD oracle via
-`pure_callback` — validation), `MatrixProjector` (precomputed projection
-matrix — differentiable today for fixed pointing), `MModeProjector`
-(drift-scan m-modes), and `NativeLimTODProjector` (pure JAX, general
-pointing, differentiable in sky *and* beam — install the engine with
-`pip install -e '<limTOD>[jax]'`). `SkySourceOperator` enters the graph at
-`observed_astro_sky` (post-beam: its output is already convolved).
+Two engines do real work. `NativeLimTODProjector` is the general one — pure
+JAX, arbitrary pointing, differentiable in sky *and* beam. For a drift scan
+(fixed pointing, only LST advancing) `DriftScanProjector` returns the same
+numbers to float64 roundoff while rotating the beam once for the whole scan
+instead of once per sample:
+
+```python
+from rheplicant.radio.sky import DriftScanProjector
+
+projector = DriftScanProjector.from_beam_maps(
+    beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0, lmax=191)
+```
+
+Both need `pip install -e '<limTOD>[jax]'`. Three supporting engines round
+out the set: `MatrixProjector` (precomputed projection matrix — pure einsum),
+`LimTODProjector` (numpy-limTOD oracle via `pure_callback` — validation only,
+not differentiable), and `MModeProjector` (a placeholder kept as the minimal
+m-mode contract; `DriftScanProjector` supersedes it). See
+[sky engines](sky-engines.md) for the comparison, benchmarks, and figures.
+
+`SkySourceOperator` enters the graph at `observed_astro_sky` (post-beam: its
+output is already convolved).
 
 ## 7. Analysis
 

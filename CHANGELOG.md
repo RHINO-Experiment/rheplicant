@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+- **Docs: [sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)**
+  — a new page comparing the general and drift-scan engines side by side,
+  with figures generated from live code by `docs/_generate_engine_figures.py`
+  (one sidereal day of GSM sky through a zenith beam at latitude 53.2°):
+  the waterfall the twin produces, the engine-to-engine agreement, the
+  wall-clock scaling, and the m-mode spectrum. Every figure ships in light
+  and dark variants and is theme-switched by furo. Measured at nside 64
+  (lmax 191), 512 samples, 32 channels: the engines agree to **1.4e-15**
+  relative, and one forward evaluation costs **68.0 s** on the general
+  engine against **61 ms** with the cached beam and FFT synthesis — a
+  **1111x** speed-up. `sphinx-design` is a new docs dependency.
+- `examples/driftscan_mmode.py`: the end-to-end drift-scan demo — build a
+  twin from a beam map, cross-check it against the general engine, time all
+  three configurations, read off the m-modes, differentiate w.r.t. the beam.
+- `DriftScanProjector.from_beam_maps(...)`: build the projector from HEALPix
+  beam **maps** rather than alms, with `nside` inferred from the map length.
+  The analysis runs in JAX (`limtod_jax.map2alm_iter`), so gradients reach
+  the beam map — and it removes a genuine footgun: the quadrature transform
+  the *sky* uses (`map2alm_quad`, the one visible in `forward`) silently
+  rescales a beam by `npix/4pi`, and nothing previously said which transform
+  the beam wanted.
+- `DriftScanProjector.uniform_lst_grid(n_time, lst0_deg)`: the LST grid
+  `uniform_sampling=True` requires. The natural `jnp.linspace(0, 360,
+  n_time)` includes the endpoint and is a turn *plus one step* — a mistake
+  this package has already been bitten by — so the correct grid is now
+  provided rather than described in an error message.
+- `DriftScanProjector` now REJECTS coords whose `pointing` or
+  `selfrot_deg` disagrees with its own fixed pointing. Those entries are
+  configuration here, not data, so a scan handed to the drift engine used to
+  be silently discarded and a different observation simulated: finite,
+  correctly shaped, and wrong. Constant pointing that agrees still passes —
+  reusing a `NativeLimTODProjector`'s coords is the expected way to switch
+  engines — and traced values, which carry nothing to compare, are left
+  alone. Uniform-grid violations are also re-raised as `StateValidationError`
+  so the whole boundary is catchable as one family.
+- Documented the m-mode formalism's source (*M-mode RIME explicit in beam,
+  fringe and sky modes*) in the module and the docs; the last line of its
+  Eq. (13) is the identity the fast path implements.
+- Projector cross-references: the `projection` module ladder, the `adjoint`
+  error message, `MatrixProjector`, and `NativeLimTODProjector` now all point
+  at the drift-scan engine, and `rheplicant.radio.sky.driftscan` was added to
+  the API reference — its ~200 lines of contract documentation were missing
+  from the rendered docs entirely. The stale four-engine ladders in
+  `docs/tour.md`, `README.md`, and `DESIGN.md` (D8), which offered the
+  `MModeProjector` placeholder as the drift-scan answer, are corrected.
 - `DriftScanProjector` (`rheplicant.radio.sky.driftscan`): the m-mode fast
   path for drift scans — the "real version" the `MModeProjector` placeholder
   promised. Derives the m-mode projection from the beam alms on the fly via

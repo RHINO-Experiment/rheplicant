@@ -123,15 +123,28 @@ indices / moment coefficients) and *how it is seen* (`AbstractSkyProjector`:
 maps → `(n_time, n_freq)`; `forward` + `adjoint` for linear engines),
 composed by `SkySourceOperator`. Either half swaps independently, so the
 same sky can be observed through limTOD beam convolution, a precomputed
-projection matrix, or m-mode transfer matrices — and the same engine serves
-different skies. Three engines form a maturity ladder, now complete:
+projection matrix, or drift-scan m-modes — and the same engine serves
+different skies. The engines form a maturity ladder, now complete:
 `LimTODProjector` (pure_callback oracle — jit-safe, not differentiable) →
 `MatrixProjector` (offline `generate_sky2sys_projection` matrix — fully
-differentiable for fixed pointing/beam, RHINO's drift-scan case) →
+differentiable for fixed pointing/beam) →
 `NativeLimTODProjector` (**delivered**: pure JAX via the `limtod_jax`
 package in the limTOD repo, general pointing, differentiable w.r.t. both
 sky and beam alms, exact adjoint; the oracle-equivalence and adjoint
-acceptance tests live in the `limtod_jax` test suite).
+acceptance tests live in the `limtod_jax` test suite) →
+`DriftScanProjector` (**delivered**: the specialization for RHINO's actual
+geometry — fixed pointing, only LST advancing — via `limtod_jax.driftscan`.
+One Wigner rotation for the whole scan instead of one per sample,
+`O(lmax³ + n_time·lmax)` against `O(n_time·lmax³)`, equal to the general
+engine to float64 roundoff. It is an OPTIMIZATION, not a physical
+approximation, which is what makes the general engine usable as its test
+oracle. Two further opt-ins — `to_reference_frame()` (pay the rotation once,
+outside the inference loop) and `uniform_sampling=True` (FFT synthesis on a
+uniform full-turn LST grid) — trade flexibility for speed explicitly rather
+than silently. Because the pointing is projector *configuration* here rather
+than per-sample data, coords carrying a disagreeing pointing are rejected:
+silently substituting the projector's own would produce a finite,
+correctly-shaped, wrong observation (D-principle 7)).
 Linear projectors expose `adjoint` (verified by dot-product tests) because
 map-making reuses it (D9).
 

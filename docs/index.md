@@ -44,6 +44,7 @@ each principle; start reading the docs with the [guided tour](tour.md).
 tour
 operators
 signal-path
+sky-engines
 api
 design
 changelog

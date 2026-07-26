@@ -8,17 +8,29 @@ touching the sky model — and *linear* projectors additionally expose
 ``adjoint``, which :class:`~rheplicant.radio.filters.SkySpaceFilter` reuses for
 map-making / sky-space filtering.
 
-Three engines, three maturity levels:
+Five engines. The two REAL ones live in sibling modules — look there first:
+
+- :class:`~rheplicant.radio.sky.native.NativeLimTODProjector` — pure JAX,
+  general pointing, differentiable in sky *and* beam. The default choice.
+- :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` — the same
+  physics for a drift scan (fixed pointing, only LST advancing) at
+  ``O(lmax³ + n_time·lmax)`` instead of ``O(n_time·lmax³)``. Equal to the
+  general engine to float64 roundoff — an optimization, not an
+  approximation — so on RHINO's static zenith pointing it is simply the
+  right engine.
+
+and three supporting ones, defined here:
 
 - :class:`MatrixProjector` — a precomputed sky->TOD matrix (e.g. from
   ``limTOD.simulator.generate_sky2sys_projection``). Fully differentiable
   TODAY: the matrix is built offline once, the JAX side is pure einsum.
 - :class:`LimTODProjector` — oracle bridge to numpy limTOD via
   ``jax.pure_callback``: jit-compatible, NOT differentiable. For forward
-  simulation and validation alongside the delivered native JAX port
-  (:class:`~rheplicant.radio.sky.native.NativeLimTODProjector`).
-- :class:`MModeProjector` — m-mode transfer matrices for drift scans
-  (RHINO's static zenith pointing is the ideal case). Fully differentiable.
+  simulation and validation of the native JAX port.
+- :class:`MModeProjector` — PLACEHOLDER m-mode transfer matrices, kept as
+  the minimal statement of the m-mode contract;
+  :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector` supersedes it
+  for real work.
 """
 
 import abc
@@ -46,8 +58,9 @@ class AbstractSkyProjector(eqx.Module):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not implement adjoint; sky-space filtering "
-            "needs a linear projector (MatrixProjector, MModeProjector, or a native "
-            "limTOD port exposing the transpose)."
+            "needs a linear projector: NativeLimTODProjector (general pointing), "
+            "DriftScanProjector (drift scans, much cheaper), or MatrixProjector "
+            "(precomputed matrix)."
         )
 
 
@@ -58,8 +71,13 @@ class MatrixProjector(AbstractSkyProjector):
     produces (beam-weighted pointing rows over selected sky pixels): build it
     once offline with the existing numpy limTOD, load it here, and the whole
     sky term is differentiable (w.r.t. the *sky*) with zero porting work.
-    Valid while pointing and beam are fixed — RHINO's static zenith-pointing
-    drift scan is precisely that case.
+    Valid while pointing and beam are fixed.
+
+    For a drift scan specifically, prefer
+    :class:`~rheplicant.radio.sky.driftscan.DriftScanProjector`: no offline
+    matrix to build or store, differentiable in the beam as well as the sky,
+    and it derives the projection on the fly for less than the matrix costs
+    to apply.
 
     Attributes:
         matrix: ``(n_time, n_pix)`` shared across frequency (achromatic beam),
