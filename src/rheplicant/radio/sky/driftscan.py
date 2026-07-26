@@ -116,7 +116,17 @@ class DriftScanProjector(AbstractSkyProjector):
         uniform_sampling: use the FFT synthesis/adjoint (static). Requires
             ``coords.extra["lst_deg"]`` to be a uniform grid over a full
             sidereal turn with ``2·lmax < n_time``; validated by
-            ``limtod_jax`` whenever the values are concrete.
+            ``limtod_jax`` whenever the values are concrete. Gradients w.r.t.
+            the LST grid then live on a one-parameter family (a global
+            shift), so ``dphi``'s Jacobian is a single column — exact for any
+            timing parameter that keeps the grid a uniform full turn, and
+            undefined for per-sample perturbations, which are rejected or
+            NaN-poisoned rather than fitted.
+        beam_ref_lst_deg: set only by :meth:`to_reference_frame` — the LST the
+            cached beam was actually rotated to (static). In
+            ``"reference"`` mode it must equal ``lst_ref_deg``; the pair is
+            what makes an attempt to re-anchor the phases against a stale
+            cached rotation fail loudly instead of silently.
     """
 
     beam_alms: jax.Array
@@ -133,6 +143,7 @@ class DriftScanProjector(AbstractSkyProjector):
     lst_ref_deg: float | None = eqx.field(static=True, default=None)
     beam_frame: str = eqx.field(static=True, default="local")
     uniform_sampling: bool = eqx.field(static=True, default=False)
+    beam_ref_lst_deg: float | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
         n_alm = (self.lmax + 1) * (self.lmax + 2) // 2
@@ -153,6 +164,21 @@ class DriftScanProjector(AbstractSkyProjector):
                     "the cached beam was rotated to ONE specific reference LST, "
                     "which must not silently depend on the coords passed later. "
                     "Use to_reference_frame() to build this state correctly."
+                )
+            # beam_ref_lst_deg records the LST the cached beam was ACTUALLY
+            # rotated to, and only to_reference_frame() sets it. Without the
+            # pair, dataclasses.replace(cached, lst_ref_deg=...) would re-anchor
+            # the phases against a stale rotation and return a silently wrong
+            # TOD — the invariant is what makes that combination loud.
+            if self.beam_ref_lst_deg != self.lst_ref_deg:
+                raise StateValidationError(
+                    f"cached beam is anchored at lst_ref_deg="
+                    f"{self.beam_ref_lst_deg}, but lst_ref_deg is now "
+                    f"{self.lst_ref_deg}: the phases would be measured from a "
+                    f"reference the cached rotation does not correspond to. "
+                    f"Re-anchor from the beam-local projector via "
+                    f"to_reference_frame(lst_ref_deg=...) instead of editing "
+                    f"the field."
                 )
             if self.horizon_mask:
                 raise StateValidationError(
@@ -196,7 +222,11 @@ class DriftScanProjector(AbstractSkyProjector):
         except jax.errors.TracerArrayConversionError:
             return  # genuinely traced: the NaN guard downstream covers it
         ref = self.lst_ref_deg if self.lst_ref_deg is not None else float(raw[0])
-        ltj.check_uniform_grid(np.deg2rad(raw.astype(np.float64) - ref))
+        # Check at the grid's NATIVE dtype. Upcasting to float64 first would
+        # hide the real precision, and limtod_jax's tolerance is dtype-scaled:
+        # a legitimate float32 degree grid deviates ~3e-7 rad, which the f64
+        # bound (~9e-14) rejects outright.
+        ltj.check_uniform_grid(np.deg2rad(raw - np.asarray(ref, raw.dtype)))
 
     def _dphi_and_ref(self, coords: Coordinates):
         lst = coords.extra["lst_deg"]
@@ -381,4 +411,5 @@ class DriftScanProjector(AbstractSkyProjector):
             lst_ref_deg=float(ref),
             beam_frame="reference",
             horizon_mask=False,  # already applied into the cached alms
+            beam_ref_lst_deg=float(ref),  # the invariant __check_init__ checks
         )

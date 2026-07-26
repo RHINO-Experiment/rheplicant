@@ -209,10 +209,21 @@ class TestDriftScanProjector:
             )},
         )
 
-    def test_to_reference_frame_is_equivalent(self, key, drift_coords):
+    # A reference LST deliberately UNLIKE lst_deg[0] (= 12.0 in both fixtures):
+    # with ref == lst[0] the projector cannot distinguish self.lst_ref_deg from
+    # coords lst[0], so a "use lst[0] regardless" bug is invisible — the exact
+    # degeneracy that let an equivalent mutation survive limTOD's suite once.
+    REF_OFF = 237.5
+
+    @pytest.mark.parametrize("lst_ref", [12.0, REF_OFF])
+    def test_to_reference_frame_is_equivalent(self, key, drift_coords, lst_ref):
         """Caching the rotation must not change any output, and must actually
-        remove the rotation (the cached alms differ from the beam-local ones)."""
-        proj = self._projector(key, lst_ref_deg=12.0)
+        remove the rotation (the cached alms differ from the beam-local ones).
+
+        Run at a reference LST equal to AND far from the first sample: the TOD
+        is reference-independent, so both must also match the general
+        NativeLimTODProjector, which knows nothing about m-mode references."""
+        proj = self._projector(key, lst_ref_deg=lst_ref)
         cached = proj.to_reference_frame()
         assert cached.beam_frame == "reference" and proj.beam_frame == "local"
         assert not jnp.allclose(cached.beam_alms, proj.beam_alms)  # rotation baked in
@@ -226,6 +237,14 @@ class TestDriftScanProjector:
         ):
             rel = jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(a))
             assert rel < 1e-5, f"cached path diverged: {rel:.2e}"
+
+        # independent ground truth: the reference choice is a gauge, so both
+        # the local and the cached projector must reproduce the general path
+        native = self._native_twin(proj)
+        ref_tod = native.forward(sky, self._native_coords(drift_coords))
+        for got in (proj.forward(sky, drift_coords), cached.forward(sky, drift_coords)):
+            rel = jnp.max(jnp.abs(got - ref_tod)) / jnp.max(jnp.abs(ref_tod))
+            assert rel < 1e-3, f"lst_ref={lst_ref} broke the gauge: {rel:.2e}"
 
     def test_to_reference_frame_folds_in_the_mask(self, key, drift_coords):
         """A masked local projector must cache the MASKED beam (and clear the
@@ -246,19 +265,29 @@ class TestDriftScanProjector:
 
     def test_to_reference_frame_is_differentiable(self, key, drift_coords):
         """Full-JAX principle: the precompute is itself traceable, so a caller
-        that DOES want beam-local gradients can differentiate through it."""
+        that DOES want beam-local gradients can differentiate through it — and
+        gets the SAME gradient as the uncached projector. Asserting only
+        finite-and-nonzero would pass for any wrong-but-finite gradient, so the
+        equality against the local path is the load-bearing check."""
         import dataclasses
 
-        proj = self._projector(key, lst_ref_deg=12.0)
+        proj = self._projector(key, lst_ref_deg=self.REF_OFF)
         sky = jax.random.uniform(jax.random.key(23), (N_FREQ, self.N_PIX_HP))
 
-        def loss(beams):
+        def loss_cached(beams):
             p = dataclasses.replace(proj, beam_alms=beams)
             return jnp.sum(p.to_reference_frame().forward(sky, drift_coords) ** 2)
 
-        g = jax.grad(loss, holomorphic=False)(proj.beam_alms)
+        def loss_local(beams):
+            p = dataclasses.replace(proj, beam_alms=beams)
+            return jnp.sum(p.forward(sky, drift_coords) ** 2)
+
+        g = jax.grad(loss_cached, holomorphic=False)(proj.beam_alms)
+        g_local = jax.grad(loss_local, holomorphic=False)(proj.beam_alms)
         assert bool(jnp.all(jnp.isfinite(jnp.abs(g))))
         assert float(jnp.max(jnp.abs(g))) > 0.0
+        rel = jnp.max(jnp.abs(g - g_local)) / jnp.max(jnp.abs(g_local))
+        assert rel < 1e-4, f"beam-local gradient changed by caching: {rel:.2e}"
 
     def test_reference_frame_validation(self, key):
         import dataclasses
@@ -266,9 +295,12 @@ class TestDriftScanProjector:
         proj = self._projector(key)
         with pytest.raises(StateValidationError, match="lst_ref_deg"):
             dataclasses.replace(proj, beam_frame="reference")
+        # isolate the horizon_mask guard: give a CONSISTENT anchor so the
+        # (earlier, more fundamental) anchor invariant does not fire instead
         with pytest.raises(StateValidationError, match="horizon_mask"):
             dataclasses.replace(
-                proj, beam_frame="reference", lst_ref_deg=12.0, horizon_mask=True
+                proj, beam_frame="reference", lst_ref_deg=12.0,
+                beam_ref_lst_deg=12.0, horizon_mask=True,
             )
         with pytest.raises(StateValidationError, match="beam_frame"):
             dataclasses.replace(proj, beam_frame="celestial")
@@ -279,12 +311,46 @@ class TestDriftScanProjector:
         with pytest.raises(StateValidationError, match="already cached"):
             cached.to_reference_frame(lst_ref_deg=99.0)
 
-    @pytest.mark.parametrize("normalize", [False, True])
-    def test_uniform_sampling_matches_direct(self, key, uniform_coords, normalize):
-        """The FFT route must agree with the direct sum, forward and adjoint."""
+    def test_cached_beam_cannot_be_re_anchored_by_field_edit(self, key, drift_coords):
+        """Editing lst_ref_deg on a cached projector would measure the phases
+        from a reference the baked-in rotation does not correspond to — a
+        silently wrong TOD. The beam_ref_lst_deg pair makes it loud, and
+        going through to_reference_frame on the LOCAL projector is the way."""
         import dataclasses
 
-        proj = self._projector(key, normalize_beam=normalize, lst_ref_deg=12.0)
+        proj = self._projector(key, lst_ref_deg=12.0)
+        cached = proj.to_reference_frame()
+        assert cached.beam_ref_lst_deg == cached.lst_ref_deg == 12.0
+
+        with pytest.raises(StateValidationError, match="anchored at"):
+            dataclasses.replace(cached, lst_ref_deg=self.REF_OFF)
+        # dropping the reference entirely trips the earlier explicit-ref guard
+        with pytest.raises(StateValidationError, match="requires an explicit"):
+            dataclasses.replace(cached, lst_ref_deg=None, beam_frame="reference")
+        # a hand-built "reference" projector without the anchor is rejected too
+        with pytest.raises(StateValidationError, match="anchored at"):
+            dataclasses.replace(proj, beam_frame="reference", lst_ref_deg=12.0)
+
+        # the legitimate route works and agrees with the local path
+        re_anchored = proj.to_reference_frame(lst_ref_deg=self.REF_OFF)
+        sky = jax.random.uniform(jax.random.key(31), (N_FREQ, self.N_PIX_HP))
+        local = dataclasses.replace(proj, lst_ref_deg=self.REF_OFF)
+        a, b = re_anchored.forward(sky, drift_coords), local.forward(sky, drift_coords)
+        assert float(jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(b))) < 1e-5
+
+    @pytest.mark.parametrize("lst_ref", [12.0, REF_OFF])
+    @pytest.mark.parametrize("normalize", [False, True])
+    def test_uniform_sampling_matches_direct(
+        self, key, uniform_coords, normalize, lst_ref
+    ):
+        """The FFT route must agree with the direct sum, forward and adjoint.
+
+        Also run with a reference LST far from the first sample: shifting the
+        reference only shifts phase0, so the grid stays uniform and the result
+        must be unchanged — otherwise phase0 is being mishandled."""
+        import dataclasses
+
+        proj = self._projector(key, normalize_beam=normalize, lst_ref_deg=lst_ref)
         fft = dataclasses.replace(proj, uniform_sampling=True)
         n_t = uniform_coords.extra["lst_deg"].shape[0]
         sky = jax.random.uniform(jax.random.key(24), (N_FREQ, self.N_PIX_HP))

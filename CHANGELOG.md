@@ -31,6 +31,21 @@
   the RAW `lst_deg` per call, which stays concrete even inside a jit trace
   (deriving `dphi` there would not), so a bad grid is a clear ValueError at
   trace time rather than limTOD's NaN-poisoned fallback.
+- `DriftScanProjector` gained a `beam_ref_lst_deg` invariant: it records the
+  LST the cached beam was actually rotated to and only `to_reference_frame()`
+  sets it, so `dataclasses.replace(cached, lst_ref_deg=...)` — which would
+  measure the phases from a reference the baked-in rotation does not
+  correspond to, silently — now fails validation instead. The uniform-grid
+  check also stopped upcasting the LST grid to float64 before validating:
+  the cast hid the grid's real precision, and limTOD's dtype-scaled
+  tolerance rejects a legitimate float32 grid when checked at the f64 bound.
+- Test coverage strengthened after adversarial review: every cached-beam and
+  FFT test now also runs with a reference LST far from `lst_deg[0]` (they
+  were all degenerate at 12.0, so a "use lst[0] regardless" bug was
+  invisible — mutation-verified as killed now), compared against the
+  general `NativeLimTODProjector` as an independent oracle; and the
+  `to_reference_frame` gradient is compared for equality with the uncached
+  projector's rather than only checked finite.
 - `DriftScanProjector.mmodes()` now rejects `normalize_beam=True`: the
   normalization divides by the ones-map denominator, which is not part of
   the m-mode expansion, so the returned coefficients would silently not be
