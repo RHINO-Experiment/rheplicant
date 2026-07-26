@@ -28,3 +28,14 @@ class MissingKeyError(DirtError, RuntimeError):
 
 class PipelineError(DirtError, ValueError):
     """A Pipeline was misconfigured (empty, bad stage type, name collision...)."""
+
+
+class ParameterSpaceError(DirtError, ValueError):
+    """A parameter space was declared inconsistently.
+
+    Covers both halves of the declaration: latents that nothing binds, a
+    binding naming a latent that was never declared, two bindings writing the
+    same leaf, a produced value whose shape does not fit its target leaf.
+    Every one of these would otherwise yield a finite, correctly-shaped, wrong
+    inference — so they are errors, not warnings.
+    """

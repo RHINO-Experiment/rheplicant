@@ -14,6 +14,7 @@ from rheplicant.inference.numpyro_bridge import (
     set_prior,
     to_numpyro_model,
 )
+from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.inference.uncertainty import (
     fisher_information,
     parameter_covariance,
@@ -23,10 +24,13 @@ from rheplicant.inference.uncertainty import (
 
 __all__ = [
     "AdamCalibrator",
+    "Bind",
     "GaussianLikelihood",
     "GradientCalibrator",
+    "Latent",
     "Likelihood",
     "MaskedGaussianLikelihood",
+    "ParameterSpace",
     "build_forward_fn",
     "fisher_information",
     "mean_squared_error",
