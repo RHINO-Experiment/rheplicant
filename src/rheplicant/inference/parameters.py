@@ -62,6 +62,7 @@ import jax.numpy as jnp
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
+from rheplicant.core.state import State
 
 
 def _as_tuple(x: Any) -> tuple:
@@ -397,3 +398,35 @@ class ParameterSpace(eqx.Module):
         return eqx.tree_at(
             lambda p: tuple(selector(p) for selector in selectors), pipeline, tuple(produced)
         )
+
+    def forward_fn(
+        self, pipeline: AbstractOperator, state_template: State
+    ) -> tuple[Callable[[dict[str, jax.Array]], jax.Array], dict[str, jax.Array]]:
+        """Build ``forward(values) -> prediction`` and the starting values.
+
+        The D7 seam, re-expressed over *named* parameters:
+        :func:`~rheplicant.inference.forward.build_forward_fn` hands back a
+        ghost pipeline whose leaves are the trainables, which is right when
+        the answer is "train this whole subtree"; this hands back a plain
+        ``dict`` of named arrays, which is right when the parameters are
+        chosen, transformed, or shared. Both feed the same calibrators, Fisher
+        tooling and posterior-predictive machinery — a dict is a pytree.
+
+        The space is validated against the pipeline first; validation reads
+        shapes only, so it costs nothing and there is no reason to skip it.
+
+        Args:
+            pipeline: the forward model.
+            state_template: the state it is evaluated on. Closed over, fixed.
+
+        Returns:
+            ``(forward, values0)``. ``values0`` is
+            :meth:`initial_values`, so ``forward(values0)`` is the model at its
+            declared starting point.
+        """
+        self.validate(pipeline)
+
+        def forward(values: dict[str, jax.Array]) -> jax.Array:
+            return self.bind(pipeline, values)(state_template).data
+
+        return forward, self.initial_values()

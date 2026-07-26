@@ -17,7 +17,7 @@ import pytest
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.pipeline import Pipeline
-from rheplicant.inference import Bind, Latent, ParameterSpace
+from rheplicant.inference import AdamCalibrator, Bind, Latent, ParameterSpace
 from rheplicant.radio import GainOperator, SkyOperator
 
 SKY_K = 100.0
@@ -266,6 +266,82 @@ class TestPipelineValidation:
             ],
         )
         space.validate(twin)  # must not raise
+
+
+class TestForwardSeam:
+    """The seam every inference engine reads: dict of named arrays -> prediction."""
+
+    def test_forward_matches_bind_then_run(self, twin, template_state):
+        space = ParameterSpace.direct(
+            "log_g", init=0.0, into=lambda p: p["gain_a"].gain, fn=jnp.exp
+        )
+        forward, values0 = space.forward_fn(twin, template_state)
+        values = {"log_g": jnp.array(jnp.log(2.0))}
+        assert jnp.allclose(forward(values), space.bind(twin, values)(template_state).data)
+
+    def test_initial_values_are_returned(self, twin, template_state):
+        space = ParameterSpace.direct("g", init=1.5, into=lambda p: p["gain_a"].gain)
+        _, values0 = space.forward_fn(twin, template_state)
+        assert float(values0["g"]) == pytest.approx(1.5)
+
+    def test_an_invalid_space_is_caught_at_build_time(self, twin, template_state):
+        space = ParameterSpace.direct(
+            "g", init=jnp.zeros(3), into=lambda p: p["gain_a"].gain
+        )
+        with pytest.raises(ParameterSpaceError, match="shape"):
+            space.forward_fn(twin, template_state)
+
+    def test_gradients_reach_every_latent_of_a_derived_binding(self, twin, template_state):
+        n_time = template_state.coords.time.shape[0]
+        twin = eqx.tree_at(lambda p: p["gain_a"].gain, twin, jnp.ones(n_time))
+        space = ParameterSpace(
+            latents=[Latent("g0", init=1.0), Latent("slope", init=0.0)],
+            bindings=[
+                Bind(
+                    ("g0", "slope"),
+                    into=lambda p: p["gain_a"].gain,
+                    fn=lambda g0, slope: g0 + slope * jnp.arange(n_time, dtype=float),
+                )
+            ],
+        )
+        forward, values0 = space.forward_fn(twin, template_state)
+        grads = jax.grad(lambda v: jnp.sum(forward(v) ** 2))(values0)
+        assert abs(float(grads["g0"])) > 0.0
+        assert abs(float(grads["slope"])) > 0.0
+
+    def test_forward_is_jittable(self, twin, template_state):
+        space = ParameterSpace.direct(
+            "log_g", init=0.0, into=lambda p: p["gain_a"].gain, fn=jnp.exp
+        )
+        forward, values0 = space.forward_fn(twin, template_state)
+        assert jnp.allclose(eqx.filter_jit(forward)(values0), forward(values0))
+
+
+class TestCalibratorIntegration:
+    """The optimizers need no changes at all: a dict of arrays is a pytree."""
+
+    def test_adam_recovers_a_tied_nonlinear_reparameterization(self, twin, template_state):
+        true_gain = 1.1
+        truth = eqx.tree_at(
+            lambda p: (p["gain_a"].gain, p["gain_b"].gain),
+            twin,
+            (jnp.array(true_gain), jnp.array(true_gain)),
+        )
+        observed = truth(template_state).data
+
+        # ONE latent, sampled in log space, driving BOTH gain stages.
+        space = ParameterSpace.direct(
+            "log_gain",
+            init=0.0,
+            into=(lambda p: p["gain_a"].gain, lambda p: p["gain_b"].gain),
+            fn=jnp.exp,
+        )
+        forward, values0 = space.forward_fn(twin, template_state)
+        fitted, losses = AdamCalibrator(learning_rate=0.01, n_steps=1500).fit(
+            forward, values0, observed
+        )
+        assert float(fitted["log_gain"]) == pytest.approx(float(jnp.log(true_gain)), abs=1e-3)
+        assert float(losses[-1]) < float(losses[0])
 
 
 class TestEscapeHatch:
