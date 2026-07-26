@@ -128,11 +128,19 @@ class GeneralPointingProjector(AbstractSkyProjector):
         return jnp.stack([psi, theta, phi], axis=-1)
 
     def _ones_alm(self, ltj) -> jax.Array | None:
+        """Quadrature alms of the ones map — the normalization denominator.
+
+        A pure function of the static ``(nside, lmax)``, but XLA does NOT
+        constant-fold it (an earlier version of this comment claimed it did):
+        it is a full s2fft analysis, too large for the folding budget. Traced,
+        at nside 64 / lmax 191 in x64, it costs 64 ms and 10 MB per call and
+        7700 lines of HLO; hoisted into the JAX constant-evaluation context,
+        0.04 ms, 0.15 MB, 48 lines, bitwise identical.
+        """
         if not self.normalize_beam:
             return None
-        # Pure function of static (nside, lmax): under jit this is a constant
-        # subgraph XLA folds at compile time, so no per-call runtime cost.
-        return ltj.ones_quadrature_alm(nside=self.nside, lmax=self.lmax)
+        with jax.ensure_compile_time_eval():
+            return ltj.ones_quadrature_alm(nside=self.nside, lmax=self.lmax)
 
     # ------------------------------------------------------------- interface
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:

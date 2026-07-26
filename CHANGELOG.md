@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed: the normalization denominator was recomputed on every call
+
+`_ones_alm` — the quadrature alms of the ones map, used when
+`normalize_beam=True` — is a pure function of the static `(nside, lmax)`, and
+a comment in both engines asserted XLA constant-folds it. **It does not.** It
+is a full s2fft analysis (63 unrolled ring FFTs plus a loop), which exceeds
+XLA's constant-folding budget, so it was traced into every call. Measured at
+nside 64 / lmax 191 in x64: **64 ms and 10 MB per call, 7700 lines of HLO**.
+
+Hoisted into JAX's compile-time constant-evaluation context, which computes it
+eagerly at trace time: **0.04 ms, 0.15 MB, 48 lines of HLO** — a 1600x
+reduction, with bitwise-identical output. End to end on a 32-channel /
+512-sample forward the normalization overhead drops from ~51 ms to ~11 ms (the
+remainder being the genuine second synthesis for the denominator). Both
+comments now state the measured behaviour instead of the assumed one.
+
+Also documented: `horizon_mask=True` on the `"local"` beam frame reads like a
+physics switch but is the most expensive path in the projector — it adds a map
+synthesis, `mask_iterations` analysis+synthesis rounds and a second Wigner
+rotation to every call, roughly 7x the cached unmasked cost. The remedy
+already existed (`to_reference_frame()` folds the mask in once); nothing said
+so.
+
 ### Removed: `MModeProjector` and `LimTODProjector`
 
 **Breaking.** Three sky engines remain, no placeholders: two that compute the

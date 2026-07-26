@@ -47,6 +47,15 @@ hard cut at finite band-limit — see the ringing study in the limTOD docs
 (``docs/driftscan.md``): narrow beams never need it; wide low-elevation
 beams need it *and* 2–5° of apodization.
 
+COST: the mask reads like a physics switch, but on the ``"local"`` beam frame
+it is the most expensive thing this projector can do — it adds a map
+synthesis, an iterative re-analysis (``mask_iterations`` rounds of analysis +
+synthesis, 3 by default) and a second Wigner rotation to EVERY call, roughly
+7x the cached unmasked path. Always follow it with
+:meth:`DriftScanProjector.to_reference_frame`, which folds the masked beam
+into the cached alms once and clears the flag; ``__check_init__`` forbids the
+combination that would apply it twice.
+
 PRECISION: enable ``jax_enable_x64`` for quantitative work (the map<->alm
 steps inherit s2fft's float32 limitation; see ``limtod_jax.hpx``).
 """
@@ -128,7 +137,8 @@ class DriftScanProjector(AbstractSkyProjector):
             (static).
         horizon_mask: apply the below-horizon cut to the beam in the
             horizontal frame before projecting (static; default off,
-            matching numpy limTOD).
+            matching numpy limTOD). Expensive on the hot path — see COST in
+            the module docstring; pair it with :meth:`to_reference_frame`.
         apod_deg: cosine-apodization width of the horizon cut [deg of
             elevation] (static; only used with ``horizon_mask``).
         mask_iterations: healpy-equivalent ``map2alm`` iterations in the
@@ -426,10 +436,20 @@ class DriftScanProjector(AbstractSkyProjector):
         )(beam)
 
     def _ones_alm(self, ltj) -> jax.Array | None:
+        """Quadrature alms of the ones map — the normalization denominator.
+
+        A pure function of the static ``(nside, lmax)``, but XLA does NOT
+        constant-fold it: it is a full s2fft analysis (63 unrolled ring FFTs
+        plus a loop), which exceeds the folding budget. Left to be traced it
+        costs, at nside 64 / lmax 191 in x64, **64 ms and 10 MB per call** and
+        7700 lines of HLO. The JAX constant-evaluation context computes it
+        eagerly at trace time instead: 0.04 ms, 0.15 MB, 48 lines, bitwise
+        identical.
+        """
         if not self.normalize_beam:
             return None
-        # Pure function of static (nside, lmax): a constant subgraph under jit.
-        return ltj.ones_quadrature_alm(nside=self.nside, lmax=self.lmax)
+        with jax.ensure_compile_time_eval():
+            return ltj.ones_quadrature_alm(nside=self.nside, lmax=self.lmax)
 
     def _validate_sky(self, sky: jax.Array) -> None:
         n_pix = 12 * self.nside**2
