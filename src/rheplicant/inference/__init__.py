@@ -14,12 +14,7 @@ from rheplicant.inference.linear import (
     linear_operator,
     wiener_solve,
 )
-from rheplicant.inference.numpyro_bridge import (
-    predict_from_samples,
-    prior_template,
-    set_prior,
-    to_numpyro_model,
-)
+from rheplicant.inference.numpyro_bridge import predict_from_samples, to_numpyro_model
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.inference.uncertainty import (
     fisher_information,
@@ -45,10 +40,8 @@ __all__ = [
     "mean_squared_error",
     "parameter_covariance",
     "predict_from_samples",
-    "prior_template",
     "propagate_covariance",
     "push_forward",
-    "set_prior",
     "to_numpyro_model",
     "wiener_solve",
 ]

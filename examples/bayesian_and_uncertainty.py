@@ -11,7 +11,6 @@ Run:  uv run python examples/bayesian_and_uncertainty.py
 (requires the numpyro extra: pip install 'rheplicant[numpyro]')
 """
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -19,13 +18,11 @@ import numpyro.distributions as dist
 
 from rheplicant import Coordinates, State
 from rheplicant.inference import (
-    build_forward_fn,
+    ParameterSpace,
     fisher_information,
     parameter_covariance,
     predict_from_samples,
-    prior_template,
     propagate_covariance,
-    set_prior,
     to_numpyro_model,
 )
 from rheplicant.radio import GainOperator, SkyOperator, assemble
@@ -51,9 +48,10 @@ twin = assemble(
     SkyOperator(amplitude=jnp.array(TRUE_SKY)),   # fixed (no prior attached)
     GainOperator(gain=jnp.array(1.0)),
 )
-priors = set_prior(prior_template(twin), lambda p: p["gain"].gain,
-                   dist.Normal(1.0, 0.3))
-model = to_numpyro_model(twin, state, priors, noise_std=SIGMA)
+space = ParameterSpace.direct(
+    "gain", init=1.0, into=lambda p: p["gain"].gain, prior=dist.Normal(1.0, 0.3),
+)
+model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
 
 mcmc = numpyro.infer.MCMC(
     numpyro.infer.NUTS(model), num_warmup=300, num_samples=300,
@@ -61,15 +59,13 @@ mcmc = numpyro.infer.MCMC(
 )
 mcmc.run(jax.random.key(0), observed=observed)
 samples = mcmc.get_samples()
-gain_mean = float(samples["gain.gain"].mean())
-gain_std = float(samples["gain.gain"].std())
+gain_mean = float(samples["gain"].mean())
+gain_std = float(samples["gain"].std())
 print(f"NUTS posterior:   gain = {gain_mean:.4f} +/- {gain_std:.4f}  "
       f"(truth {TRUE_GAIN})")
 
 # --------------------------------------------------------- Fisher forecast --
-spec = jax.tree.map(lambda _: False, twin)
-spec = eqx.tree_at(lambda p: p["gain"].gain, spec, replace=True)
-forward, params0 = build_forward_fn(twin, state, filter_spec=spec)
+forward, params0 = space.forward_fn(twin, state)
 
 F = fisher_information(forward, params0, noise_std=SIGMA)
 cov = parameter_covariance(F)
@@ -78,7 +74,7 @@ print(f"Fisher forecast:  sigma(gain) = {float(jnp.sqrt(cov.matrix[0, 0])):.4f} 
 
 # ------------------------------------------------- prediction uncertainty --
 band = propagate_covariance(forward, params0, cov)
-predictive = predict_from_samples(twin, state, priors, samples)
+predictive = predict_from_samples(twin, state, space, samples)
 print(f"delta-method prediction std (first channel): {float(band[0, 0]):.4f}")
 print(f"posterior-predictive std   (first channel): "
       f"{float(predictive[:, 0, 0].std()):.4f}")
