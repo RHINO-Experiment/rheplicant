@@ -292,6 +292,14 @@ class TestWienerSolve:
         _, residual = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
         assert float(residual) < 1e-4
 
+
+    def test_mismatched_data_shape_is_refused(self, gain_block, template_state):
+        """Broadcasting a differently-shaped observation would solve a different
+        problem and return a perfectly finite answer."""
+        wrong = jnp.zeros((gain_block.offset.shape[0],))
+        with pytest.raises(ParameterSpaceError, match="different"):
+            wiener_solve(gain_block, wrong, noise_std=1.0, prior_std=5.0)
+
     def test_a_prior_is_required(self, gain_block):
         """Without one the normal operator can be singular, and CG would return
         a finite, arbitrary answer rather than complain."""

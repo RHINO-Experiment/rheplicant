@@ -185,7 +185,8 @@ cov.block("fwhm", "log_gain")  # the cross-covariance, by name
 Every one of these failure modes produces a **finite, correctly-shaped, wrong**
 inference rather than an exception. So they are all errors, and all of them are
 caught at declaration or build time — `validate()` runs on shapes alone
-(`jax.eval_shape`), so it costs nothing and is never optional.
+(`jax.eval_shape`), once per build rather than per evaluation, so there is no
+reason to make it skippable.
 
 | Checked | Without the check |
 |---|---|

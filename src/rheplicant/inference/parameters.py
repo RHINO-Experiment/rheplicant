@@ -331,9 +331,11 @@ class ParameterSpace(eqx.Module):
     def validate(self, pipeline: AbstractOperator) -> None:
         """Check this space against a pipeline. Raises, or returns ``None``.
 
-        Every check runs on shapes alone (``jax.eval_shape``), so validation is
-        free — no array is ever computed. It is called for you by
-        :meth:`forward_fn` and by the Bayesian bridge.
+        Every check runs on shapes alone (``jax.eval_shape``): no array is
+        ever computed. It still *traces* the bindings, so a derived ``fn``
+        doing real work costs one trace — negligible against a fit, but not
+        literally zero. Called for you by :meth:`forward_fn` and by the
+        Bayesian bridge, once per build rather than per evaluation.
 
         The failure modes it exists to prevent all share a shape: they produce a
         finite, correctly-shaped, **wrong** inference rather than an exception.
@@ -412,8 +414,9 @@ class ParameterSpace(eqx.Module):
         chosen, transformed, or shared. Both feed the same calibrators, Fisher
         tooling and posterior-predictive machinery — a dict is a pytree.
 
-        The space is validated against the pipeline first; validation reads
-        shapes only, so it costs nothing and there is no reason to skip it.
+        The space is validated against the pipeline first. Validation reads
+        shapes only and happens once per build, not per evaluation, so there
+        is no reason to make it skippable.
 
         Args:
             pipeline: the forward model.

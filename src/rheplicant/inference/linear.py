@@ -141,9 +141,14 @@ def check_linearity(
     Args:
         space, pipeline, state_template: the model under test.
         name: which latent. Optional when exactly one is declared linear.
-        scales: probe magnitudes, as multiples of the latent's own scale.
-            The default spans six orders of magnitude on purpose — see the
-            module docstring.
+        scales: probe magnitudes, as multiples of the latent's own scale,
+            taken from ``max|init|``. The default spans six orders of
+            magnitude on purpose — see the module docstring. NOTE: an
+            all-zero ``init`` has no scale to take, so it falls back to 1.0
+            and the probes become absolute. If your latent lives at 1e6 (sky
+            alms in kelvin, say), give a representative ``init`` or pass
+            ``scales`` explicitly — otherwise the sweep never reaches the
+            regime the sampler will actually explore.
         rtol: tolerance on the relative departure from affinity. Default:
             ``1e4 * eps`` of the prediction dtype, which leaves room for
             accumulated roundoff in a long reduction without admitting real
@@ -327,6 +332,12 @@ def wiener_solve(
         ``‖M x̂ - b‖ / ‖b‖`` over the real degrees of freedom — check it, since
         CG reports no convergence status of its own.
     """
+    if jnp.shape(observed) != jnp.shape(block.offset):
+        raise ParameterSpaceError(
+            f"observed has shape {jnp.shape(observed)} but this block predicts "
+            f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
+            "problem and return a perfectly finite answer."
+        )
     if prior_std is None:
         raise ParameterSpaceError(
             "wiener_solve needs prior_std: with no prior the normal operator "
