@@ -631,3 +631,69 @@ class TestConditioningOnOtherLatents:
 
         assert float(values["alpha"]) == pytest.approx(true_alpha, abs=0.02)
         assert float(values["amp"]) == pytest.approx(true_amp, rel=0.02)
+
+
+class TestPriorMean:
+    """A zero-mean prior is wrong for most physical quantities: a noise-wave
+    temperature sits near 250 K, not near zero. The prior mean belongs on the
+    prior, not smuggled into the model through an affine binding."""
+
+    @pytest.fixture
+    def gain_block(self, twin, template_state):
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        space = ParameterSpace.direct(
+            "gains", init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain, linear=True,
+        )
+        return linear_operator(space, wide, template_state)
+
+    def test_with_no_data_the_mean_is_the_prior_mean(self, gain_block):
+        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
+                               prior_std=1.0, prior_mean=3.0)
+        assert jnp.allclose(mean, 3.0, rtol=1e-3)
+
+    def test_with_no_data_draws_centre_on_the_prior_mean(self, gain_block):
+        keys = jax.random.split(jax.random.key(2), 4000)
+        draws = jax.vmap(
+            lambda k: gcr_sample(gain_block, gain_block.offset, noise_std=1e8,
+                                 prior_std=2.0, prior_mean=3.0, key=k)[0]
+        )(keys)
+        assert float(draws.mean()) == pytest.approx(3.0, abs=0.15)
+        assert float(draws.std()) == pytest.approx(2.0, rel=0.05)
+
+    def test_it_matches_the_affine_binding_workaround(self, twin, template_state):
+        """Shifting the PRIOR and shifting the MODEL are the same Gaussian, so
+        the two routes must agree — pinned so they cannot drift apart."""
+        n_time = template_state.coords.time.shape[0]
+        offset_value = 1.2
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        observed = wide(template_state).data
+
+        shifted_prior = linear_operator(
+            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
+                                  into=lambda p: p["gain"].gain, linear=True),
+            wide, template_state,
+        )
+        direct, _ = wiener_solve(shifted_prior, observed, noise_std=0.5,
+                                 prior_std=0.3, prior_mean=offset_value)
+
+        shifted_model = linear_operator(
+            ParameterSpace.direct("delta", init=jnp.zeros(n_time),
+                                  into=lambda p: p["gain"].gain,
+                                  fn=lambda d: offset_value + d, linear=True),
+            wide, template_state,
+        )
+        via_fn, _ = wiener_solve(shifted_model, observed, noise_std=0.5, prior_std=0.3)
+        assert jnp.allclose(direct, offset_value + via_fn, rtol=1e-4, atol=1e-5)
+
+    def test_a_scalar_prior_mean_broadcasts(self, gain_block):
+        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
+                               prior_std=1.0, prior_mean=jnp.zeros(()) + 2.0)
+        assert mean.shape == gain_block.shape
+        assert jnp.allclose(mean, 2.0, rtol=1e-3)
+
+    def test_default_is_still_zero_mean(self, gain_block):
+        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
+                               prior_std=1.0)
+        assert jnp.allclose(mean, 0.0, atol=1e-6)

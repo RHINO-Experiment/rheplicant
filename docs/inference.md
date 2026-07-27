@@ -289,6 +289,11 @@ sample, residual = gcr_sample(block, observed, noise_std=0.02,
                               prior_std=1.0, key=jax.random.key(0))
 ```
 
+Both take `prior_mean=`, which defaults to zero — wrong for most physical
+quantities, since a noise-wave temperature sits near 250 K, not near zero. An
+affine binding that adds the same offset gives the identical Gaussian, but
+putting it on the prior says what it means.
+
 This is a constrained realization, not a Markov chain: every call is an
 independent draw, with no burn-in and no convergence to diagnose. It costs the
 same single CG solve as the mean, because the fluctuation enters the

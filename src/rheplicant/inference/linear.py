@@ -231,11 +231,7 @@ def check_linearity(
         departures[scale] = float(departure)
         errors[scale] = float(departure / jnp.maximum(variation, 1e-30))
 
-    failed = {
-        scale: err
-        for scale, err in errors.items()
-        if err > rtol and departures[scale] > noise_floor
-    }
+    failed = {scale: err for scale, err in errors.items() if err > rtol}
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise ParameterSpaceError(
@@ -343,14 +339,15 @@ def wiener_solve(
     *,
     noise_std: Any,
     prior_std: Any,
+    prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """Posterior mean of a linear-Gaussian block — the Wiener filter, by CG.
 
-    With ``d = A x + offset + n``, ``n ~ N(0, N)`` and ``x ~ N(0, S)``::
+    With ``d = A x + offset + n``, ``n ~ N(0, N)`` and ``x ~ N(m, S)``::
 
-        x̂ = (AᵀN⁻¹A + S⁻¹)⁻¹ AᵀN⁻¹ (d - offset)
+        x̂ = (AᵀN⁻¹A + S⁻¹)⁻¹ [AᵀN⁻¹ (d - offset) + S⁻¹m]
 
     solved with conjugate gradients, so the normal operator is only ever
     *applied*, never formed. Each iteration costs one JVP and one VJP through
@@ -376,6 +373,10 @@ def wiener_solve(
             broadcastable to it. Required: without a prior the normal operator
             can be singular, and CG would return a finite, arbitrary answer
             instead of complaining.
+        prior_mean: centre of the prior. Defaults to zero, which is wrong for
+            most physical quantities — a noise-wave temperature sits near
+            250 K. Equivalent to an affine binding that adds the same offset,
+            but says what it means.
         tol: CG tolerance.
         maxiter: CG iteration cap. ``None`` lets JAX choose.
 
@@ -387,7 +388,8 @@ def wiener_solve(
     _check_solve_arguments(block, observed, prior_std, "wiener_solve")
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
-        tol=tol, maxiter=maxiter, key=None,
+        prior_mean=prior_mean, tol=tol, maxiter=maxiter,
+        key=None,
     )
 
 
@@ -401,6 +403,7 @@ def _conjugate_solve(
     *,
     noise_std: Any,
     prior_std: Any,
+    prior_mean: Any,
     tol: float,
     maxiter: int | None,
     key: jax.Array | None,
@@ -416,6 +419,13 @@ def _conjugate_solve(
     prior_variance = jnp.asarray(prior_std) ** 2
     residual_data = observed - block.offset
     zero = split(jnp.zeros(block.shape, dtype=block.dtype))
+    centre = split(
+        jnp.zeros(block.shape, dtype=block.dtype)
+        if prior_mean is None
+        else jnp.broadcast_to(
+            jnp.asarray(prior_mean, dtype=block.dtype), block.shape
+        )
+    )
 
     def half_chi2(parts):
         return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
@@ -434,7 +444,15 @@ def _conjugate_solve(
         curvature = jax.grad(half_chi2)(parts)
         return jax.tree.map(lambda c, p: c + p / prior_variance, curvature, parts)
 
-    rhs = pair_with(weight * residual_data)
+    # S^-1 m: a zero-mean prior is wrong for most physical quantities (a
+    # noise-wave temperature sits near 250 K, not near zero), and shifting the
+    # prior is not the same act as shifting the model even though the two give
+    # the same Gaussian.
+    rhs = jax.tree.map(
+        lambda base, m: base + m / prior_variance,
+        pair_with(weight * residual_data),
+        centre,
+    )
 
     if key is not None:
         # Constrained realization: the two fluctuation terms whose covariances
@@ -477,6 +495,7 @@ def gcr_sample(
     noise_std: Any,
     prior_std: Any,
     key: jax.Array,
+    prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
 ) -> tuple[jax.Array, jax.Array]:
@@ -486,11 +505,11 @@ def gcr_sample(
     :func:`wiener_solve` does, but with two white-noise terms added to the
     right-hand side::
 
-        (AᵀN⁻¹A + S⁻¹) x = AᵀN⁻¹(d - offset) + AᵀN⁻¹ᐟ² ω₁ + S⁻¹ᐟ² ω₂
+        (AᵀN⁻¹A + S⁻¹) x = AᵀN⁻¹(d - offset) + S⁻¹m + AᵀN⁻¹ᐟ² ω₁ + S⁻¹ᐟ² ω₂
 
     with ``ω₁``, ``ω₂`` standard normal on the data and on the latent. The
-    right-hand side then has mean ``AᵀN⁻¹(d - offset)`` and covariance
-    ``AᵀN⁻¹A + S⁻¹`` — the operator itself — so ``x = M⁻¹b`` has the posterior
+    right-hand side then has the posterior-mean numerator as its mean and
+    covariance ``AᵀN⁻¹A + S⁻¹`` — the operator itself — so ``x = M⁻¹b`` has the posterior
     mean and covariance ``M⁻¹M M⁻¹ = M⁻¹`` exactly. Not an approximation and
     not a Markov chain: every call is an independent draw, with no burn-in and
     nothing to diagnose for convergence.
@@ -512,6 +531,9 @@ def gcr_sample(
             :func:`wiener_solve`. For a complex latent this is the width of the
             real and imaginary parts independently.
         key: PRNG key. ``vmap`` over split keys for many independent draws.
+        prior_mean: centre of the prior; defaults to zero. With uninformative
+            data the draws fall back to ``N(prior_mean, prior_std²)``, which is
+            the check that it is wired in correctly.
         tol: CG tolerance.
         maxiter: CG iteration cap.
 
@@ -522,5 +544,6 @@ def gcr_sample(
     _check_solve_arguments(block, observed, prior_std, "gcr_sample")
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
-        tol=tol, maxiter=maxiter, key=key,
+        prior_mean=prior_mean, tol=tol, maxiter=maxiter,
+        key=key,
     )
