@@ -229,12 +229,12 @@ solved, residual = wiener_solve(block, observed, noise_std=0.02, prior_std=1.0)
 :alt: A sky map recovered in closed form from a declared-linear block
 :width: 100%
 
-Left: the recovered map against the truth and the prior mean. The small-scale
-ripple is real and worth seeing: the beam is ~20° wide, so structure finer than
-that is not in the data and no estimator can invent it — the prior is what
-holds those modes down. Right: RMS error per channel, before and after. Closed-form
-conjugate gradients, not sampling; the same call takes sky alms, where sampling
-is not an option.
+Left: the posterior mean against the truth, inside a 68% band from 400 exact
+GCR draws. The band is the honest part — it widens exactly where the ~20°-wide
+beam stops constraining the sky, and the mean's small-scale ripple lives inside
+it rather than being mistaken for signal. Right: RMS error per channel, before
+and after. Both the mean and the draws are conjugate-gradient solves; the same
+calls take sky alms, where a gradient sampler is not an option.
 :::
 
 :::{figure} _static/inference-linear-dark.svg
@@ -242,12 +242,12 @@ is not an option.
 :alt: A sky map recovered in closed form from a declared-linear block
 :width: 100%
 
-Left: the recovered map against the truth and the prior mean. The small-scale
-ripple is real and worth seeing: the beam is ~20° wide, so structure finer than
-that is not in the data and no estimator can invent it — the prior is what
-holds those modes down. Right: RMS error per channel, before and after. Closed-form
-conjugate gradients, not sampling; the same call takes sky alms, where sampling
-is not an option.
+Left: the posterior mean against the truth, inside a 68% band from 400 exact
+GCR draws. The band is the honest part — it widens exactly where the ~20°-wide
+beam stops constraining the sky, and the mean's small-scale ripple lives inside
+it rather than being mistaken for signal. Right: RMS error per channel, before
+and after. Both the mean and the draws are conjugate-gradient solves; the same
+calls take sky alms, where a gradient sampler is not an option.
 :::
 
 :::{admonition} Probe at extreme scales, not reasonable ones

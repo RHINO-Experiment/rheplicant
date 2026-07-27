@@ -9,9 +9,9 @@ Two figures:
 * ``inference-posterior`` — the beam fit. A NUTS posterior over the two beam
   latents, with the truth marked and the Fisher forecast overlaid, so the
   claim "the posterior recovers the truth" is a picture of real numbers.
-* ``inference-linear`` — the sky block. Truth, prior mean and the CG solution
-  on one axis, plus the per-mode shrinkage that shows WHY the closed-form
-  solve is the right tool.
+* ``inference-linear`` — the sky block. Truth, prior mean, the CG posterior
+  mean and a 68% band from exact GCR draws on one axis, plus the per-channel
+  shrinkage that shows what the data actually constrained.
 
 Run:  uv run python docs/_generate_inference_figures.py
       uv run python docs/_generate_inference_figures.py --replot   (cached)
@@ -38,6 +38,7 @@ from rheplicant.inference import (  # noqa: E402
     Latent,
     ParameterSpace,
     fisher_information,
+    gcr_sample,
     linear_operator,
     parameter_covariance,
     wiener_solve,
@@ -169,8 +170,8 @@ def run_beam_posterior(state, observed, true_maps):
     )
 
 
-def run_linear_block(state, observed, true_maps):
-    """Declare the sky linear, check it, solve it in closed form."""
+def run_linear_block(state, observed, true_maps, n_draws=400):
+    """Declare the sky linear, check it, solve it AND sample it exactly."""
     calibrated = build_twin(true_maps, TRUE_FWHM, TRUE_OFFSET, TRUE_GAIN)
     space = ParameterSpace.direct(
         "sky_delta", init=jnp.zeros((N_FREQ, N_PIX)),
@@ -179,7 +180,16 @@ def run_linear_block(state, observed, true_maps):
     )
     block = linear_operator(space, calibrated, state)
     solved, _ = wiener_solve(block, observed, noise_std=NOISE, prior_std=SKY_SCALE)
-    return np.asarray(MEAN_SKY + solved), np.asarray(true_maps)
+    keys = jax.random.split(jax.random.key(21), n_draws)
+    draws = jax.vmap(
+        lambda k: gcr_sample(block, observed, noise_std=NOISE,
+                             prior_std=SKY_SCALE, key=k)[0]
+    )(keys)
+    return (
+        np.asarray(MEAN_SKY + solved),
+        np.asarray(true_maps),
+        np.asarray(MEAN_SKY + draws),
+    )
 
 
 # ------------------------------------------------------------------- plots --
@@ -230,23 +240,29 @@ def plot_posterior(fwhm, offset, sigma_fwhm, sigma_offset):
             save(fig, "inference-posterior", theme)
 
 
-def plot_linear(recovered, truth):
+def plot_linear(recovered, truth, draws):
     for theme in THEMES:
         c = THEMES[theme]
         with plt.rc_context(styled(theme)):
             fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.2))
 
             angle = np.degrees(np.asarray(pixel_angle))
-            ax.plot(angle, truth[0], color=c["muted"], lw=2.4, alpha=0.55,
+            lo, hi = np.percentile(draws[:, 0, :], [16, 84], axis=0)
+            ax.fill_between(angle, lo, hi, color=c["accent"], alpha=0.22, lw=0,
+                            label=f"posterior 68% ({draws.shape[0]} exact draws)")
+            ax.plot(angle, truth[0], color=c["muted"], lw=2.4, alpha=0.6,
                     label="true sky")
             ax.plot(angle, recovered[0], color=c["accent"], lw=1.3,
-                    label="Wiener solution (CG)")
+                    label="posterior mean (CG)")
             ax.axhline(MEAN_SKY, color=c["warm"], lw=1.0, ls="--",
                        label="prior mean")
             ax.set_xlabel("sky pixel  [deg]")
             ax.set_ylabel("brightness  [K]")
-            ax.set_title(f"{truth.size} degrees of freedom, solved not sampled")
-            ax.legend(loc="upper right", fontsize=8)
+            ax.set_title(f"{truth.size} degrees of freedom, solved AND sampled")
+            # headroom so the legend does not sit on the posterior band
+            low, high = ax.get_ylim()
+            ax.set_ylim(low, high + 0.30 * (high - low))
+            ax.legend(loc="upper right", fontsize=7.5)
             ax.grid(True)
 
             before = np.sqrt(((truth - MEAN_SKY) ** 2).mean(axis=1))
@@ -279,7 +295,7 @@ def main() -> None:
         cache = np.load(CACHE)
         plot_posterior(cache["fwhm"], cache["offset"],
                        float(cache["sigma_fwhm"]), float(cache["sigma_offset"]))
-        plot_linear(cache["recovered"], cache["truth"])
+        plot_linear(cache["recovered"], cache["truth"], cache["draws"])
         return
 
     true_maps, state, observed = make_world()
@@ -292,15 +308,15 @@ def main() -> None:
           f"(truth {TRUE_OFFSET})")
 
     print("solving the linear sky block ...")
-    recovered, truth = run_linear_block(state, observed, true_maps)
+    recovered, truth, draws = run_linear_block(state, observed, true_maps)
     print(f"  RMS vs truth: {np.sqrt(((truth - MEAN_SKY)**2).mean()):.3f} K -> "
           f"{np.sqrt(((truth - recovered)**2).mean()):.3f} K")
 
     plot_posterior(fwhm, offset, sigma_fwhm, sigma_offset)
-    plot_linear(recovered, truth)
+    plot_linear(recovered, truth, draws)
     np.savez_compressed(
         CACHE, fwhm=fwhm, offset=offset, sigma_fwhm=sigma_fwhm,
-        sigma_offset=sigma_offset, recovered=recovered, truth=truth,
+        sigma_offset=sigma_offset, recovered=recovered, truth=truth, draws=draws,
     )
     print(f"  wrote {CACHE.name} (redraw with --replot)")
 
