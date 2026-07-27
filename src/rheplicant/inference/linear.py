@@ -19,8 +19,14 @@ confident, wrong posterior instead of an error.
 Second, ``A`` and ``Aᵀ`` are available without ever forming a matrix:
 ``jax.linearize`` gives the forward action and ``jax.vjp`` the adjoint, at the
 cost of one trace. :func:`linear_operator` packages them as a
-:class:`LinearBlock`, which is the whole interface a conjugate-Gaussian
-sampler needs.
+:class:`LinearBlock`, which is the whole interface the conjugate-Gaussian
+routines here need: :func:`wiener_solve` for the posterior mean and
+:func:`gcr_sample` for an exact posterior draw.
+
+Because the block is affine only *given* the other latents, both take ``at=``
+to rebuild it wherever those currently are — which is what makes a Gibbs
+sweep possible: draw the linear block exactly, update the nonlinear ones
+however you like, repeat.
 
 **Probe at extreme scales.** :func:`check_linearity` probes at 10⁻³, 1 and 10³
 times the latent's own magnitude, because near-linearity is scale-dependent:
@@ -357,9 +363,9 @@ def wiener_solve(
     definite *by construction* over the real degrees of freedom, with no
     adjoint-convention arithmetic left to get wrong for complex latents.
 
-    This is the posterior **mean**, not a sample. Drawing constrained
-    realizations adds a fluctuation term to the right-hand side; that sampler
-    is the next thing this operator is for.
+    This is the posterior **mean**, not a sample. For a draw, see
+    :func:`gcr_sample`, which adds a fluctuation term to this same right-hand
+    side and costs exactly the same solve.
 
     Args:
         block: from :func:`linear_operator`.

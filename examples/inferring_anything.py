@@ -11,9 +11,9 @@ and how they reach the model.
      two leaves through a positivity transform — and joining it to the beam
      block exposes a real degeneracy, which is the honest reason to fit them
      together rather than in sequence.
-  3. **A sky map as a linear block.** Declared `linear=True`, checked, and
-     then solved in closed form by conjugate gradients instead of sampled —
-     the pattern that scales to sky alms, where sampling is hopeless.
+  3. **A sky map as a linear block.** Declared `linear=True`, checked, then
+     both solved in closed form AND sampled exactly by conjugate gradients —
+     the pattern that scales to sky alms, where a gradient sampler is hopeless.
 
 None of this required a new operator class. That is the point: a
 re-parameterization is an inference decision, so it lives in the inference
@@ -37,6 +37,7 @@ from rheplicant.inference import (  # noqa: E402
     ParameterSpace,
     check_linearity,
     fisher_information,
+    gcr_sample,
     linear_operator,
     parameter_covariance,
     wiener_solve,
@@ -218,8 +219,27 @@ before = jnp.sqrt(jnp.mean((MEAN_SKY - true_maps) ** 2))
 after = jnp.sqrt(jnp.mean((recovered - true_maps) ** 2))
 print(f"   CG solved {solved.size} degrees of freedom, residual {float(residual):.1e}")
 print(f"   RMS vs truth: {float(before):.3f} K (prior mean) -> {float(after):.3f} K")
-print("   -> closed form, not sampled. The same call takes sky alms, where "
-      "sampling\n      1e6 coefficients is not an option.\n")
+
+# ...and the posterior is not just its mean. gcr_sample adds a fluctuation term
+# to the SAME right-hand side, which makes each solve an exact, independent
+# posterior draw — no chain, no burn-in, same cost as the mean.
+keys = jax.random.split(jax.random.key(9), 200)
+draws = jax.vmap(
+    lambda k: gcr_sample(block, observed, noise_std=NOISE, prior_std=SKY_SCALE, key=k)[0]
+)(keys)
+spread = draws.std(axis=0)
+print(f"   {keys.shape[0]} exact posterior draws: per-pixel sigma spans "
+      f"{float(spread.min()):.3f}-{float(spread.max()):.3f} K")
+# Compare like with like: the RMS of the mean's error against the standard
+# error of the mean. (Comparing the WORST element to a per-element sigma would
+# fail for a perfectly correct sampler -- the max over 384 draws sits near 3
+# sigma by construction.)
+mean_error = jnp.sqrt(jnp.mean((draws.mean(axis=0) - solved) ** 2))
+sem = jnp.sqrt(jnp.mean(spread**2) / keys.shape[0])
+print(f"   their mean matches the Wiener mean: RMS error {float(mean_error):.4f} K "
+      f"vs expected {float(sem):.4f} K")
+print("   -> closed form and exactly samplable. The same calls take sky alms,\n"
+      "      where a gradient sampler on 1e6 coefficients is not an option.\n")
 
 # ----------------------------------------------------- the model, unchanged ---
 print("instrument description edited across all three fits:",

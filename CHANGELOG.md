@@ -79,6 +79,34 @@ inner product, which is the pairing a Gaussian likelihood forms. And
 prediction makes the map R-linear but not C-linear and a Krylov method over C
 would be solving a different problem.
 
+### Added: exact posterior draws from a linear block (GCR)
+
+`gcr_sample` turns the Wiener solve into a constrained realization by adding
+two white-noise terms to the same right-hand side:
+
+```
+(A^T N^-1 A + S^-1) x = A^T N^-1 (d - offset) + A^T N^-1/2 w1 + S^-1/2 w2
+```
+
+The right-hand side then has covariance equal to the normal operator itself, so
+`x = M^-1 b` carries the posterior mean AND covariance `M^-1 M M^-1 = M^-1`
+exactly. Every call is an independent draw — no chain, no burn-in, nothing to
+diagnose — for the same single CG solve the mean costs, because the fluctuation
+enters the right-hand side and never the operator. That is what makes a
+1e6-dimensional block samplable at all.
+
+Both moments are tested against a densely-constructed posterior: 6000 draws
+reproduce the covariance to 12% in Frobenius norm, and with uninformative data
+the draws reproduce the PRIOR width to 5%. Testing the mean alone would not
+have been enough — a sampler that gets the mean right and the covariance wrong
+looks entirely healthy.
+
+`linear_operator` and `check_linearity` also gained `at=`, which fixes the
+OTHER latents. A block is linear only *given* them, so a Gibbs sweep must
+rebuild it wherever they currently are; without `at=` the block silently kept
+describing the model at its declared starting point, which is right for exactly
+one sweep.
+
 ### Changed: Fisher and covariance matrices carry named rows
 
 `cov.sigma("fwhm")` instead of `cov.matrix[0, 0]`; `cov.block("fwhm",

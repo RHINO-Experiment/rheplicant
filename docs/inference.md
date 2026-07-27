@@ -268,9 +268,51 @@ the check off.
 
 `linear_operator` never forms a matrix: `A` comes from `jax.linearize` and `Aᵀ`
 from `jax.vjp`, so applying a 10⁶-dimensional block costs one forward
-evaluation. `wiener_solve` gives the posterior **mean**; drawing constrained
-realizations adds a fluctuation term to the right-hand side, and that sampler
-is the next thing this operator is for.
+evaluation.
+
+### Sampling it, exactly
+
+`wiener_solve` gives the posterior **mean**. `gcr_sample` gives a posterior
+**draw** — by adding two white-noise terms to that same right-hand side:
+
+```text
+(AᵀN⁻¹A + S⁻¹) x  =  AᵀN⁻¹(d − offset)  +  AᵀN⁻¹ᐟ² ω₁  +  S⁻¹ᐟ² ω₂
+```
+
+with `ω₁`, `ω₂` standard normal on the data and on the latent. The right-hand
+side then has mean `AᵀN⁻¹(d − offset)` and covariance equal to the operator
+itself, so `x = M⁻¹b` carries the posterior mean **and** covariance
+`M⁻¹ M M⁻¹ = M⁻¹` — exactly.
+
+```python
+sample, residual = gcr_sample(block, observed, noise_std=0.02,
+                              prior_std=1.0, key=jax.random.key(0))
+```
+
+This is a constrained realization, not a Markov chain: every call is an
+independent draw, with no burn-in and no convergence to diagnose. It costs the
+same single CG solve as the mean, because the fluctuation enters the
+right-hand side and never the operator — which is what makes a 10⁶-dimensional
+block samplable at all.
+
+:::{tip}
+**Gibbs.** A block is only linear *given* the other latents, so pass `at=` to
+rebuild it wherever they currently are, and check the linearity claim once
+outside the loop:
+
+```python
+check_linearity(space, twin, state, "sky_alms")        # once
+for _ in range(n_sweeps):
+    block = linear_operator(space, twin, state, "sky_alms",
+                            at=values, check=False)     # every sweep
+    values["sky_alms"], _ = gcr_sample(block, observed, noise_std=sigma,
+                                       prior_std=s, key=next(keys))
+    values = update_the_nonlinear_ones(values)          # NUTS, MH, optimize...
+```
+
+Omitting `at=` is silent, not loud: the block keeps describing the model at its
+declared starting point, which is right for exactly one sweep.
+:::
 
 ---
 
@@ -310,14 +352,17 @@ cov.sigma("fwhm")
 Rows carry their names.
 :::
 
-:::{grid-item-card} Solve
+:::{grid-item-card} Solve or sample exactly
 ```python
 block = linear_operator(space, twin, state)
-solved, resid = wiener_solve(
+mean, _ = wiener_solve(
     block, data, noise_std=0.02, prior_std=1.0)
+draw, _ = gcr_sample(
+    block, data, noise_std=0.02, prior_std=1.0,
+    key=jax.random.key(0))
 ```
 +++
-For blocks too big to sample.
+For blocks too big for a gradient sampler.
 :::
 ::::
 

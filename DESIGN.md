@@ -341,9 +341,15 @@ small probes and rejects correct blocks, and a spuriously-failing check gets
 switched off, which is worse than no check.
 
 `linear_operator` exports `A`, `Aᵀ` and the offset without forming a matrix
-(`jax.linearize` + `jax.vjp`). `wiener_solve` gives the posterior mean by CG;
-GCR sampling adds a fluctuation term to the same right-hand side and is the
-next thing this operator is for. Two details that were measured rather than
+(`jax.linearize` + `jax.vjp`). `wiener_solve` gives the posterior mean by CG, and `gcr_sample`
+an exact posterior draw, by adding two white-noise terms to that same
+right-hand side: its covariance is then the normal operator itself, so the
+solve is distributed as the posterior rather than merely centred on it. One
+CG solve either way — the fluctuation never touches the operator. Both take
+`at=` to rebuild the block at the other latents' current values, because
+linearity is a claim *given* them; that is the operation a Gibbs sweep is made
+of, and omitting it would silently keep describing the model at its declared
+starting point. Two details that were measured rather than
 assumed: `jax.vjp` returns the *conjugate* gradient for complex latents, so
 the identity that holds is `Re Σ x·adjoint(y) == Σ (Ax)·y` (the real inner
 product — the pairing a Gaussian likelihood forms); and `wiener_solve` carries
