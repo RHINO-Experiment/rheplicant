@@ -192,8 +192,10 @@ reason to make it skippable.
 |---|---|
 | Latent names are unique | NumPyro sites silently overwrite each other |
 | Every `Bind` names a declared latent | `KeyError` from deep inside a trace |
-| **Every latent is bound by something** | It samples happily and returns the prior |
-| No leaf is written twice | One binding silently wins |
+| **Every latent reaches the model** — named in a binding, or (for a raw bind) shown to move it | It samples happily and returns the prior |
+| No leaf is written twice | `eqx.tree_at` lets the last write win, silently |
+| A raw bind is not combined with declarative bindings | `bind()` would apply only the raw one |
+| Binding preserves every leaf's shape and dtype kind | A treedef encodes neither; the value is broadcast |
 | Every selector reaches a real array leaf | Confusing failure inside `tree_at` |
 | Produced shape matches its target | A broadcast that is shaped right and means nothing |
 | Produced dtype *kind* matches | Complex into a real leaf is a modelling error, not a cast |
@@ -253,10 +255,16 @@ calls take sky alms, where a gradient sampler is not an option.
 :::{admonition} Probe at extreme scales, not reasonable ones
 :class: important
 
-`check_linearity` probes at 10⁻³, 1 and 10³ times the latent's own magnitude.
-The span is the point: `x + εx²` is indistinguishable from linear near the
-origin and grossly nonlinear far from it, so a suite of "reasonable" probes
-signs off on exactly the blocks that fail in a sampler's tails.
+`check_linearity` probes at 10⁻³, 1 and 10³ times the latent's own magnitude,
+taken from `max|init|`. The span is the point: a knee, a saturation, or a small
+quadratic is indistinguishable from linear below some scale and grossly
+nonlinear above it, so a suite of "reasonable" probes signs off on exactly the
+blocks that fail in a sampler's tails.
+
+One sharp edge, since the examples above walk straight into it: an **all-zero
+`init` has no scale to take**, so the probes fall back to absolute. If the
+latent lives at 10⁶ — sky alms in kelvin — give a representative `init` or pass
+`scales=` explicitly, or the sweep never reaches the regime a sampler will.
 
 A block fails only if it exceeds both a relative tolerance *and* an absolute
 floor set by the arithmetic's own roundoff. Without that floor the relative

@@ -307,20 +307,26 @@ Two objects, each with one job:
   nothing about priors.
 
 `ParameterSpace` holds both and compiles the bindings into **one** `tree_at`
-call, so two bindings targeting a leaf raise instead of one silently winning.
+call. `eqx.tree_at` itself lets the last write to a leaf win silently, so the
+no-double-write guarantee comes from `validate()`, which every entry point runs
+first — not from the `tree_at` call.
 `ParameterSpace.raw` takes a bind function outright for what the blocks cannot
 express. Design choice among (a) a free-form bind function, (b) declarative
 blocks, (c) blocks compiling to a function: (c), because a free-form function
 is opaque to validation and to the linear-block export — and validation is
 most of the value here, since every failure mode in this area yields a finite,
 correctly-shaped, *wrong* inference rather than an exception. The checks: unique
-names, every binding names a declared latent, **every latent is bound by
-something** (an unbound latent samples happily and returns the prior), no leaf
-written twice, every selector reaches a real array leaf, produced shape and
+names, every binding names a declared latent, **every latent reaches the
+model** (declaratively by being named in a binding; for a raw bind, by probing
+that perturbing it changes the bound pipeline — an unreached latent samples
+happily and returns the prior), a raw bind and declarative bindings are never
+both supplied, no leaf written twice, every selector reaches a real array leaf, produced shape and
 dtype-kind match the target, prior shape matches init, and binding preserves
-the pipeline's treedef — the invariant `filter_vmap`, `jit` and `ravel_pytree`
-all rest on. All of it runs on `jax.eval_shape`, so validation is free and
-never optional.
+the pipeline's treedef *and* every leaf's shape and dtype kind — a treedef
+alone encodes neither, so the structure check by itself would let a scalar be
+broadcast into an array leaf. Almost all of it runs on `jax.eval_shape`, so
+validation computes nothing and happens once per build rather than per
+evaluation, which is why it is not made skippable.
 
 Binding preserving the treedef is what let every consumer stay unchanged: the
 calibrators needed no edit at all (a dict is a pytree), and posterior

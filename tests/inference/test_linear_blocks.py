@@ -1,5 +1,9 @@
 """Tests for declared-linear parameter blocks.
 
+Verified under BOTH float32 and JAX_ENABLE_X64=1: the project documents x64 for
+quantitative work, so a suite that only holds at the default precision would
+not be testing the mode that matters.
+
 `linear=True` is a claim about the model, and a claim that gets exploited
 (conjugate-Gaussian solves and, later, GCR sampling) has to be checkable —
 otherwise a wrong declaration returns a confident, wrong posterior rather than
@@ -143,7 +147,7 @@ class TestComplexLatents:
     @pytest.fixture
     def complex_space(self):
         return ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            "coeffs", init=jnp.ones(3) + 0j,
             into=lambda p: p["sky"].coeffs, linear=True,
         )
 
@@ -255,7 +259,7 @@ class TestWienerSolve:
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            "coeffs", init=jnp.ones(3) + 0j,
             into=lambda p: p["sky"].coeffs, linear=True,
         )
         block = linear_operator(space, complex_twin, template_state)
@@ -266,21 +270,33 @@ class TestWienerSolve:
         assert jnp.allclose(solved, expected, rtol=1e-3, atol=1e-3)
 
     def test_a_complex_block_recovers_a_noiseless_signal(self, template_state):
+        """Both halves of the complex latent, not just the real one.
+
+        An earlier version built the operator from a purely REAL matrix, which
+        makes the imaginary half an exact null direction — it could not have
+        asserted anything about it, and did not.
+        """
         n_row = template_state.coords.time.shape[0] * template_state.coords.freq.shape[0]
-        matrix = jax.random.normal(jax.random.key(5), (n_row, 3)).astype(float) + 0j
+        key = jax.random.key(5)
+        matrix = jax.random.normal(key, (n_row, 3)) + 1j * jax.random.normal(
+            jax.random.fold_in(key, 1), (n_row, 3)
+        )
         complex_twin = Pipeline(
             ComplexCoeffOperator(coeffs=jnp.zeros(3, dtype=matrix.dtype), matrix=matrix),
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            "coeffs", init=jnp.ones(3) + 0j,
             into=lambda p: p["sky"].coeffs, linear=True,
         )
         block = linear_operator(space, complex_twin, template_state)
-        truth = jnp.array([1.0 + 0j, -0.5 + 0j, 3.0 + 0j])
+        truth = jnp.array([1.0 + 2.0j, -0.5 - 1.25j, 3.0 + 0.75j])
         observed = block.offset + block.forward(truth)
         solved, _ = wiener_solve(block, observed, noise_std=1e-3, prior_std=1e4)
-        assert jnp.allclose(jnp.real(solved), jnp.real(truth), atol=1e-2)
+        assert jnp.allclose(jnp.real(solved), jnp.real(truth), atol=2e-2)
+        assert jnp.allclose(jnp.imag(solved), jnp.imag(truth), atol=2e-2), (
+            "the imaginary half is what the R-linear/C-linear split exists for"
+        )
 
     def test_a_strong_prior_shrinks_towards_zero(self, gain_block, gain_truth):
         observed = gain_block.offset + gain_block.forward(gain_truth)
@@ -327,42 +343,158 @@ class TestCheckLinearity:
         with pytest.raises(ParameterSpaceError, match="not affine"):
             check_linearity(space, twin, template_state)
 
-    def test_a_block_linear_only_at_small_scale_is_caught(self, twin, template_state):
+    @pytest.fixture
+    def saturating_space(self):
+        """EXACTLY linear below a knee, grossly nonlinear above it.
+
+        Saturation rather than a tiny quadratic, deliberately. A small
+        quadratic's visibility depends on the working precision — float64 sees
+        it at probes float32 cannot — so a test built on one enshrines a
+        float32 artifact. A knee is exactly linear below it in ANY precision,
+        and it is the more realistic failure anyway: ADC compression, amplifier
+        saturation, a clipped model.
+        """
+        knee = 20.0 * SKY_A
+
+        def clip(x):
+            over = jnp.abs(x) > knee
+            return jnp.where(over, jnp.sign(x) * knee + 0.02 * (x - jnp.sign(x) * knee), x)
+
+        return ParameterSpace.direct(
+            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=clip, linear=True,
+        )
+
+    def test_a_block_linear_only_at_small_scale_is_caught(
+        self, twin, saturating_space, template_state
+    ):
         """The reason probes must span extreme scales, not just moderate ones.
 
-        A quadratic with a tiny coefficient is indistinguishable from linear
-        near the origin and grossly nonlinear far from it. A probe suite that
-        only samples "reasonable" values would sign this off.
+        Swept over MANY keys, not one: an earlier version of this test asserted
+        the default key(0) catches it, which held for only about a third of
+        keys. A detection that depends on the seed is not a detection.
         """
+        for seed in range(25):
+            with pytest.raises(ParameterSpaceError, match="not affine"):
+                check_linearity(saturating_space, twin, template_state,
+                                scales=(1e2, 1e3, 1e4), key=jax.random.key(seed))
+
+    def test_the_same_block_passes_when_only_small_scales_are_probed(
+        self, twin, saturating_space, template_state
+    ):
+        """Companion: it is the EXTREME probe that catches it.
+
+        Asserted as a PAIR on the same block and the same key — small probe
+        passes, extreme probe raises — rather than on a numeric threshold. At
+        the small probe the departure is float32 roundoff, so any threshold
+        tight enough to be meaningful is also flaky.
+        """
+        for seed in range(25):
+            key = jax.random.key(seed)
+            check_linearity(saturating_space, twin, template_state,
+                            scales=(1e-3, 1e-2), key=key)     # below the knee
+            with pytest.raises(ParameterSpaceError, match="not affine"):
+                check_linearity(saturating_space, twin, template_state,
+                                scales=(1e2, 1e3, 1e4), key=key)
+
+    def test_roundoff_at_a_tiny_probe_is_not_mistaken_for_curvature(
+        self, twin, template_state
+    ):
+        """Regression: a linear block whose arithmetic genuinely rounds.
+
+        The earlier version of this test used a block whose departure was
+        EXACTLY 0.0 at every scale, so the relative measure never exploded and
+        the absolute floor it claimed to pin never gated anything. This block
+        adds and subtracts a large constant, so the departure is real roundoff
+        — non-zero, and below the floor — which is what the guard is for.
+        """
+        # `big` need not track the precision: the departure is ~eps*big and the
+        # floor is ~1e4*eps*|prediction|, so eps CANCELS from the comparison and
+        # any big between ~1e-2 and ~3e5 exercises the floor in both float32 and
+        # float64. Verified in both.
+        big = 1e4
         space = ParameterSpace.direct(
             "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: x + 1e-8 * x**2, linear=True,
+            fn=lambda x: (x + big) - big, linear=True,
+        )
+        errors = check_linearity(space, twin, template_state,
+                                 scales=(1e-9, 1e-7, 1e-5))
+        # The point is that the RELATIVE measure alone would have rejected this
+        # perfectly linear block — the floor is what saves it. Asserted against
+        # the same rtol check_linearity uses, so it holds in both precisions
+        # (the float32 cancellation is total and the float64 one is mild, so an
+        # absolute threshold cannot serve both).
+        rtol = 1e4 * float(jnp.finfo(jnp.zeros(()).dtype).eps)
+        assert max(errors.values()) > 10 * rtol, (
+            f"probe too benign to exercise the floor: {errors} vs rtol {rtol:.1e}"
+        )
+
+    def test_a_small_prediction_is_still_checked(self, template_state):
+        """Regression: the floor must not be an absolute constant.
+
+        With `noise_floor = 1e4*eps*max(|baseline|, 1.0)` the `1.0` clamp made
+        the floor absolute, so ANY block whose prediction is small in the
+        pipeline's units passed no matter how nonlinear it was.
+        """
+        tiny = Pipeline(
+            SumOperator(
+                SkyOperator(amplitude=jnp.array(1e-6)),
+                SkyOperator(amplitude=jnp.array(2e-7)),
+                names=("sky_a", "sky_b"),
+            ),
+            GainOperator(gain=jnp.array(1.0)),
+            names=("sum", "gain"),
+        )
+        space = ParameterSpace.direct(
+            "amp", init=1e-6, into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + 1e6 * x**2, linear=True,   # wildly nonlinear
+        )
+        with pytest.raises(ParameterSpaceError, match="not affine"):
+            check_linearity(space, tiny, template_state)
+
+    def test_a_bright_unrelated_component_does_not_disable_the_check(
+        self, template_state
+    ):
+        """The floor must not be set by the BASELINE alone: the baseline is what
+        the other latents contribute, so scaling it up would otherwise exempt
+        a nonlinear latent that contributes a small fraction of the signal."""
+        space = ParameterSpace.direct(
+            "amp", init=1.0, into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + 0.05 * x**2, linear=True,
+        )
+        for bright in (1.0, 1e3, 1e6):
+            loud = Pipeline(
+                SumOperator(
+                    SkyOperator(amplitude=jnp.array(1.0)),
+                    SkyOperator(amplitude=jnp.array(bright)),
+                    names=("sky_a", "sky_b"),
+                ),
+                GainOperator(gain=jnp.array(1.0)),
+                names=("sum", "gain"),
+            )
+            with pytest.raises(ParameterSpaceError, match="not affine"):
+                check_linearity(space, loud, template_state)
+
+    def test_a_nan_probe_counts_as_a_failure(self, twin, template_state):
+        """`nan > rtol` is False, so a naive filter reads an unusable probe as
+        evidence OF linearity. It must read as failure instead."""
+        space = ParameterSpace.direct(
+            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + jnp.where(jnp.abs(x) > 1e4, jnp.nan, 0.0), linear=True,
         )
         with pytest.raises(ParameterSpaceError, match="not affine"):
             check_linearity(space, twin, template_state)
 
-    def test_the_same_block_passes_when_only_small_scales_are_probed(
-        self, twin, template_state
-    ):
-        """Companion to the test above: it is the extreme probe that catches it."""
+    def test_probes_are_absolute_when_init_is_zero(self, twin, template_state):
+        """The documented sharp edge: max|init| = 0 has no scale to take, so the
+        probes fall back to absolute. Pinned because the docs' own examples use
+        init=zeros."""
         space = ParameterSpace.direct(
-            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: x + 1e-8 * x**2, linear=True,
+            "amp", init=0.0, into=lambda p: p["sum"]["sky_a"].amplitude,
+            linear=True,
         )
-        errors = check_linearity(space, twin, template_state, scales=(1e-3,))
-        assert all(err < 1e-4 for err in errors.values())
-
-    def test_roundoff_at_a_tiny_probe_is_not_mistaken_for_curvature(
-        self, twin, linear_space, template_state
-    ):
-        """Regression: an exactly-linear block probed at 1e-9 of its own scale.
-
-        The relative measure (departure / variation) explodes there — the
-        variation is vanishing but roundoff is not — so a relative test alone
-        rejects a perfectly linear block. That false positive is worse than no
-        check, because the cure users reach for is to switch the check off.
-        """
-        check_linearity(linear_space, twin, template_state, scales=(1e-9, 1e-6, 1.0))
+        errors = check_linearity(space, twin, template_state)
+        assert set(errors) == set((1e-3, 1.0, 1e3))
 
     def test_unknown_latent_name_is_refused(self, twin, linear_space, template_state):
         with pytest.raises(ParameterSpaceError, match="No latent named"):
@@ -499,7 +631,7 @@ class TestGCRSample:
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            "coeffs", init=jnp.ones(3) + 0j,
             into=lambda p: p["sky"].coeffs, linear=True,
         )
         block = linear_operator(space, twin, template_state)

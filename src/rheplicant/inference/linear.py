@@ -39,8 +39,10 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
@@ -207,17 +209,9 @@ def check_linearity(
     if magnitude == 0.0:
         magnitude = 1.0
 
-    # A departure smaller than the arithmetic's own noise floor is not evidence
-    # of curvature. Without this the relative measure below explodes for SMALL
-    # probes — where the variation is tiny but roundoff is not — and rejects
-    # perfectly linear blocks. That false positive is worse than no check at
-    # all, because the cure users reach for is to switch the check off.
-    noise_floor = 1e4 * float(jnp.finfo(baseline.dtype).eps) * float(
-        jnp.maximum(jnp.max(jnp.abs(baseline)), 1.0)
-    )
-
+    epsilon = float(jnp.finfo(baseline.dtype).eps)
     errors: dict[float, float] = {}
-    departures: dict[float, float] = {}
+    verdicts: dict[float, bool] = {}
     for index, scale in enumerate(scales):
         probe = magnitude * scale * jax.random.normal(
             jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
@@ -226,18 +220,33 @@ def check_linearity(
         predicted = baseline + tangent(probe)
         # Measure against the VARIATION, not the total: a large constant offset
         # would otherwise hide a completely nonlinear response.
-        variation = jnp.max(jnp.abs(actual - baseline))
-        departure = jnp.max(jnp.abs(actual - predicted))
-        departures[scale] = float(departure)
-        errors[scale] = float(departure / jnp.maximum(variation, 1e-30))
+        variation = float(jnp.max(jnp.abs(actual - baseline)))
+        departure = float(jnp.max(jnp.abs(actual - predicted)))
+        errors[scale] = departure / max(variation, 1e-300)
 
-    failed = {scale: err for scale, err in errors.items() if err > rtol}
+        # A departure smaller than the arithmetic's OWN noise floor is not
+        # evidence of curvature; without this the relative measure explodes at
+        # small probes, where the variation is vanishing but roundoff is not,
+        # and rejects perfectly linear blocks. The floor is set by the magnitudes
+        # actually being differenced AT THIS PROBE — not by a constant, and not
+        # by the baseline alone. A constant floor would silently exempt every
+        # model whose prediction is small in its own units, and a baseline-only
+        # floor would let an unrelated bright component disable the check.
+        floor = 1e4 * epsilon * max(
+            float(jnp.max(jnp.abs(actual))), float(jnp.max(jnp.abs(baseline)))
+        )
+        # NaN must count as a FAILURE, not a pass: `nan > rtol` is False, so a
+        # naive comparison treats an unusable probe as evidence of linearity.
+        finite = np.isfinite(errors[scale]) and np.isfinite(departure)
+        verdicts[scale] = (not finite) or (errors[scale] > rtol and departure > floor)
+
+    failed = sorted(scale for scale, bad in verdicts.items() if bad)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise ParameterSpaceError(
             f"Latent {name!r} is declared linear=True, but the prediction is not affine in "
-            f"it: departure from its own linearization exceeds rtol={rtol:.2e} (and the "
-            f"{noise_floor:.2e} roundoff floor) at {sorted(failed)} times the latent's scale "
+            f"it: departure from its own linearization exceeds rtol={rtol:.2e} (above the "
+            f"per-probe roundoff floor) at {failed} times the latent's scale "
             f"({detail}). Either drop the declaration, or re-parameterize so the model really "
             "is linear in this block."
         )
@@ -342,6 +351,7 @@ def wiener_solve(
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
+    require_convergence: float | None = 1e-3,
 ) -> tuple[jax.Array, jax.Array]:
     """Posterior mean of a linear-Gaussian block — the Wiener filter, by CG.
 
@@ -379,22 +389,38 @@ def wiener_solve(
             but says what it means.
         tol: CG tolerance.
         maxiter: CG iteration cap. ``None`` lets JAX choose.
+        require_convergence: raise if the relative residual exceeds this.
+            Defaults to ``1e-3``; ``None`` disables the guard and returns
+            whatever CG produced. On by default because jax's ``cg`` reports no
+            convergence status, so an unconverged solve otherwise comes back
+            looking exactly like a converged one.
 
     Returns:
-        ``(x̂, relative_residual)``. The residual is
-        ``‖M x̂ - b‖ / ‖b‖`` over the real degrees of freedom — check it, since
-        CG reports no convergence status of its own.
+        ``(x̂, relative_residual)``, the residual being ``‖M x̂ - b‖ / ‖b‖``
+        over the real degrees of freedom.
     """
     _check_solve_arguments(block, observed, prior_std, "wiener_solve")
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
-        prior_mean=prior_mean, tol=tol, maxiter=maxiter,
-        key=None,
+        prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=None,
+        require_convergence=require_convergence,
     )
 
 
 def _norm(parts) -> jax.Array:
-    return jnp.sqrt(sum(jnp.sum(leaf**2) for leaf in jax.tree.leaves(parts)))
+    """Euclidean norm, scaled so it survives float32.
+
+    Squaring first overflows for entries beyond ~1.8e19, which turns the only
+    convergence signal these solvers give into inf/inf = NaN exactly when the
+    problem is badly scaled and the answer is most likely wrong.
+    """
+    leaves = [leaf for leaf in jax.tree.leaves(parts) if eqx.is_array(leaf)]
+    if not leaves:  # pragma: no cover - defensive
+        return jnp.array(0.0)
+    biggest = jnp.max(jnp.stack([jnp.max(jnp.abs(leaf)) for leaf in leaves]))
+    biggest = jnp.where(biggest > 0, biggest, 1.0)
+    total = sum(jnp.sum((leaf / biggest) ** 2) for leaf in leaves)
+    return biggest * jnp.sqrt(total)
 
 
 def _conjugate_solve(
@@ -407,6 +433,7 @@ def _conjugate_solve(
     tol: float,
     maxiter: int | None,
     key: jax.Array | None,
+    require_convergence: float | None,
 ) -> tuple[jax.Array, jax.Array]:
     """Shared machinery for the posterior mean and for a posterior draw.
 
@@ -479,7 +506,19 @@ def _conjugate_solve(
 
     solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
     misfit = jax.tree.map(lambda a, b: a - b, normal(solution), rhs)
-    return join(solution), _norm(misfit) / jnp.maximum(_norm(rhs), 1e-30)
+    residual = _norm(misfit) / jnp.maximum(_norm(rhs), 1e-30)
+    if require_convergence is not None:
+        # jax's cg reports no convergence status of its own, so an unconverged
+        # solve otherwise comes back looking like any other answer. eqx.error_if
+        # fires under jit, where a Python `if` on a traced value cannot.
+        solution = eqx.error_if(
+            solution,
+            jnp.logical_or(~jnp.isfinite(residual), residual > require_convergence),
+            "wiener_solve/gcr_sample did not converge: the relative residual exceeds "
+            "require_convergence. Raise maxiter, loosen tol, or condition the problem "
+            "(a stronger prior is usually the honest fix).",
+        )
+    return join(solution), residual
 
 
 def _split_like(key: jax.Array, template) -> Any:
@@ -498,6 +537,7 @@ def gcr_sample(
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
+    require_convergence: float | None = 1e-3,
 ) -> tuple[jax.Array, jax.Array]:
     """Draw an EXACT posterior sample of a linear-Gaussian block.
 
@@ -536,14 +576,16 @@ def gcr_sample(
             the check that it is wired in correctly.
         tol: CG tolerance.
         maxiter: CG iteration cap.
+        require_convergence: as for :func:`wiener_solve`.
 
     Returns:
-        ``(x, relative_residual)``. Check the residual: an unconverged CG
-        returns a draw from the wrong distribution, and says nothing about it.
+        ``(x, relative_residual)``. An unconverged CG returns a draw from the
+        WRONG distribution, so ``require_convergence`` is on by default here
+        too — see :func:`wiener_solve`.
     """
     _check_solve_arguments(block, observed, prior_std, "gcr_sample")
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
-        prior_mean=prior_mean, tol=tol, maxiter=maxiter,
-        key=key,
+        prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=key,
+        require_convergence=require_convergence,
     )

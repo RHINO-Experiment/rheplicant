@@ -46,8 +46,9 @@ happily and returns the prior), two bindings on one leaf, a selector landing
 on static configuration, a produced shape or dtype-kind that does not fit its
 target, a prior sized differently from its latent, a bind function that
 changes the treedef. Each of those otherwise yields a finite,
-correctly-shaped, wrong inference. All are caught, all run on
-`jax.eval_shape`, so validation costs nothing and is never optional.
+correctly-shaped, wrong inference. All are caught, almost all on
+`jax.eval_shape` — so validation computes nothing and happens once per build
+rather than per evaluation, which is why it is not made skippable.
 
 ### Added: declared-linear blocks, checked and then exploited
 

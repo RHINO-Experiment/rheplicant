@@ -37,6 +37,7 @@ from typing import Any
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
@@ -144,6 +145,20 @@ def predict_from_samples(
             raise StateValidationError(
                 f"samples is missing site {name!r}; available: {sorted(samples)}"
             )
+        # Checking only the NAME lets a wrong-shaped stack broadcast into the
+        # leaf and return a finite, correctly-shaped, wrong predictive.
+        expected = space.latent(name).init.shape
+        got = jnp.shape(samples[name])[1:]
+        if got != expected:
+            raise StateValidationError(
+                f"samples[{name!r}] has per-sample shape {got}, but the latent is "
+                f"{expected}. The leading axis must be the sample axis."
+            )
+    lengths = {jnp.shape(samples[name])[0] for name in space.names}
+    if len(lengths) != 1:
+        raise StateValidationError(
+            f"samples have differing numbers of draws across sites: {sorted(lengths)}."
+        )
     stacked = {name: samples[name] for name in space.names}
 
     def run(values: dict[str, jax.Array]) -> jax.Array:

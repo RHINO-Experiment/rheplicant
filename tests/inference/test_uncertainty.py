@@ -217,3 +217,17 @@ class TestNamedParameters:
         assert cov.names is None
         with pytest.raises(StateValidationError, match="not named"):
             cov.sigma("anything")
+
+    def test_a_complex_parameter_is_refused_with_guidance(self):
+        """jax.jacfwd cannot differentiate a real output wrt a complex input, so
+        the Fisher routines have to say so rather than die inside JAX."""
+        key = jax.random.key(2)
+        A = jax.random.normal(key, (N_DATA, 3)) + 1j * jax.random.normal(
+            jax.random.fold_in(key, 1), (N_DATA, 3)
+        )
+
+        def forward(values):
+            return jnp.real(A @ values["coeffs"])
+
+        with pytest.raises(StateValidationError, match="Complex parameters"):
+            fisher_information(forward, {"coeffs": jnp.ones(3) + 0j}, noise_std=1.0)

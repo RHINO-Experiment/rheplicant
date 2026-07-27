@@ -140,6 +140,21 @@ def _flat_forward(
     forward: Callable[[Any], jax.Array], params: Any
 ) -> tuple[Callable[[jax.Array], jax.Array], jax.Array, jax.Array]:
     """Flatten the parameter pytree: return (f_flat, x0, prediction0)."""
+    complex_leaves = [
+        path
+        for path, leaf in jax.tree_util.tree_flatten_with_path(params)[0]
+        if jnp.issubdtype(jnp.result_type(leaf), jnp.complexfloating)
+    ]
+    if complex_leaves:
+        where = ", ".join(jax.tree_util.keystr(p) for p in complex_leaves)
+        raise StateValidationError(
+            f"Complex parameters ({where}) cannot go through jax.jacfwd, which is what the "
+            "Fisher and delta-method routines are built on. A real prediction makes the map "
+            "R-linear but not C-linear, so the Jacobian is only defined over the real degrees "
+            "of freedom: split the latent into real and imaginary parts, or use "
+            "rheplicant.inference.linear (linear_operator / wiener_solve / gcr_sample), which "
+            "does that split internally."
+        )
     x0, unravel = ravel_pytree(params)
     if x0.size == 0:
         raise StateValidationError(
@@ -248,6 +263,18 @@ def propagate_covariance(
                 f"{param_cov.structure}, but params has structure {expected} — "
                 "the flattened orderings differ and the numbers would be wrong."
             )
+        # For a dict-based space the treedef encodes the KEY NAMES only, so two
+        # spaces with the same latent names and different per-latent shapes pass
+        # the structure check and produce finite, wrong error bars.
+        names, _, shapes = _named_spans(params)
+        if param_cov.shapes is not None and shapes is not None:
+            if param_cov.names != names or param_cov.shapes != shapes:
+                was = dict(zip(param_cov.names, param_cov.shapes, strict=True))
+                now = dict(zip(names, shapes, strict=True))
+                raise StateValidationError(
+                    f"param_cov was computed for {was} but params is {now} — the "
+                    "flattened orderings differ and the numbers would be wrong."
+                )
         param_cov = param_cov.matrix
     if param_cov.shape != (x0.size, x0.size):
         raise StateValidationError(

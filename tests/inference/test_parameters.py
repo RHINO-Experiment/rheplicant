@@ -185,6 +185,27 @@ class TestDeclarationValidation:
                 bindings=[Bind("g", into=lambda p: p["gain_a"].gain)],
             )
 
+    def test_bind_needs_at_least_one_selector(self):
+        """Untested guard. Nothing downstream covers it: the dead-latent rule is
+        satisfied because the latent IS named in a binding, so a Bind with no
+        selectors would validate and quietly reach nothing."""
+        with pytest.raises(ParameterSpaceError, match="`into` selector"):
+            Bind("g", into=())
+
+    def test_fn_returning_the_wrong_number_of_values_is_caught(self, twin):
+        """Untested guard, and the only defence against one binding's values
+        landing in another binding's selectors when the mismatches cancel."""
+        space = ParameterSpace(
+            latents=[Latent("x", init=1.0)],
+            bindings=[
+                Bind("x",
+                     into=(lambda p: p["gain_a"].gain, lambda p: p["gain_b"].gain),
+                     fn=lambda x: (x, 2.0 * x, 3.0 * x)),   # 3 values, 2 selectors
+            ],
+        )
+        with pytest.raises(ParameterSpaceError, match="returned 3 values"):
+            space.bind(twin, {"x": jnp.array(1.0)})
+
     def test_identity_bind_needs_exactly_one_latent(self):
         with pytest.raises(ParameterSpaceError, match="exactly one latent"):
             Bind(("a", "b"), into=lambda p: p["gain_a"].gain)
@@ -356,6 +377,66 @@ class TestEscapeHatch:
         bound = space.bind(twin, {"g": jnp.array(4.0)})
         assert float(bound["gain_a"].gain) == pytest.approx(4.0)
         assert space.names == ("g",)
+
+    def test_the_constructor_rejects_bindings_alongside_a_raw_bind(self, twin):
+        """Regression. This combination used to CONSTRUCT and VALIDATE cleanly
+        while bind() silently ignored every declared Bind — so a latent only
+        those bindings reached was sampled without entering the model, and its
+        posterior came back as its prior."""
+        with pytest.raises(ParameterSpaceError, match="INSTEAD of bindings"):
+            ParameterSpace(
+                latents=[Latent("a", init=1.0), Latent("b", init=1.0)],
+                bindings=[Bind("a", into=lambda p: p["gain_a"].gain),
+                          Bind("b", into=lambda p: p["gain_b"].gain)],
+                raw_bind=lambda pipeline, values: eqx.tree_at(
+                    lambda p: p["gain_a"].gain, pipeline, values["a"]
+                ),
+            )
+
+    def test_a_raw_bind_that_ignores_a_latent_is_caught(self, twin):
+        """The dead-latent rule has to hold for raw binds too. It cannot be read
+        off the declaration there, so it is probed: perturb the latent and see
+        whether the bound model moves at all."""
+        space = ParameterSpace.raw(
+            latents=[Latent("used", init=1.0), Latent("forgotten", init=1.0)],
+            bind=lambda pipeline, values: eqx.tree_at(
+                lambda p: p["gain_a"].gain, pipeline, values["used"]
+            ),
+        )
+        with pytest.raises(ParameterSpaceError, match="does not reach the pipeline"):
+            space.validate(twin)
+
+    def test_a_raw_bind_writing_the_wrong_shape_is_caught(self, twin):
+        """A treedef encodes neither shape nor dtype, so the structure check
+        alone let a scalar be broadcast into an (n_time,) leaf."""
+        wide = eqx.tree_at(lambda p: p["gain_a"].gain, twin, jnp.ones(8))
+        space = ParameterSpace.raw(
+            latents=[Latent("g", init=1.0)],
+            bind=lambda pipeline, values: eqx.tree_at(
+                lambda p: p["gain_a"].gain, pipeline, values["g"]  # scalar into (8,)
+            ),
+        )
+        with pytest.raises(ParameterSpaceError, match="shape"):
+            space.validate(wide)
+
+    def test_a_raw_bind_writing_the_wrong_dtype_kind_is_caught(self, twin):
+        space = ParameterSpace.raw(
+            latents=[Latent("g", init=1.0)],
+            bind=lambda pipeline, values: eqx.tree_at(
+                lambda p: p["gain_a"].gain, pipeline, values["g"] + 0j
+            ),
+        )
+        with pytest.raises(ParameterSpaceError, match="complex"):
+            space.validate(twin)
+
+    def test_a_correct_raw_bind_still_validates(self, twin):
+        space = ParameterSpace.raw(
+            latents=[Latent("g", init=1.0)],
+            bind=lambda pipeline, values: eqx.tree_at(
+                lambda p: p["gain_a"].gain, pipeline, values["g"]
+            ),
+        )
+        space.validate(twin)  # must not raise
 
     def test_raw_rejects_bindings(self):
         with pytest.raises(Exception, match="bindings"):

@@ -218,6 +218,13 @@ class ParameterSpace(eqx.Module):
                 "A ParameterSpace needs bindings — otherwise its latents reach nothing. "
                 "Use ParameterSpace.raw(...) to supply a bind function instead."
             )
+        if self.raw_bind is not None and self.bindings:
+            raise ParameterSpaceError(
+                "A ParameterSpace takes a raw bind function INSTEAD of bindings, not as well: "
+                "bind() would call raw_bind and never apply the declared Bind(s), so any latent "
+                "only those bindings reach would be sampled without entering the model. Pass one "
+                "or the other."
+            )
         declared = set(names)
         for binding in self.bindings:
             unknown = [name for name in binding.latents if name not in declared]
@@ -381,14 +388,76 @@ class ParameterSpace(eqx.Module):
                 "assume a fixed treedef."
             )
 
+        # A treedef encodes neither shape nor dtype, so the structure check above
+        # lets a scalar written into an (n_time,) leaf — or a complex value into a
+        # real one — through to be broadcast by the operator. Compare the leaves.
+        for (path, before), after in zip(
+            jax.tree_util.tree_flatten_with_path(pipeline)[0],
+            jax.tree_util.tree_leaves(bound),
+            strict=True,
+        ):
+            if not eqx.is_array(before):
+                continue
+            where = jax.tree_util.keystr(path)
+            if jnp.shape(after) != jnp.shape(before):
+                raise ParameterSpaceError(
+                    f"Binding changed the shape of leaf {where} from {jnp.shape(before)} to "
+                    f"{jnp.shape(after)}. The operator would broadcast it into a finite, "
+                    "correctly-shaped, wrong model."
+                )
+            if _dtype_kind(jnp.result_type(after)) != _dtype_kind(jnp.result_type(before)):
+                raise ParameterSpaceError(
+                    f"Binding changed leaf {where} from {_dtype_kind(jnp.result_type(before))} "
+                    f"to {_dtype_kind(jnp.result_type(after))}."
+                )
+
+        if self.raw_bind is not None:
+            self._reject_latents_the_raw_bind_ignores(pipeline)
+
+    def _reject_latents_the_raw_bind_ignores(self, pipeline: AbstractOperator) -> None:
+        """The dead-latent check, for spaces whose bind function is opaque.
+
+        The declarative path can see that a latent is named by no binding. A raw
+        bind function cannot be read, so probe it: perturb one latent at a time
+        and look for any change in the bound pipeline. Two perturbations, because
+        a single one could land on a genuine null of a legitimate binding.
+        """
+        base = self.initial_values()
+        reference = jax.tree.leaves(self.bind(pipeline, base))
+        for latent in self.latents:
+            scale = jnp.maximum(jnp.max(jnp.abs(latent.init)), 1.0)
+            moved = False
+            for step in (0.37, -1.61):
+                probe = {**base, latent.name: latent.init + step * scale}
+                candidate = jax.tree.leaves(self.bind(pipeline, probe))
+                if any(
+                    not jnp.array_equal(a, b)
+                    for a, b in zip(reference, candidate, strict=True)
+                    if eqx.is_array(a)
+                ):
+                    moved = True
+                    break
+            if not moved:
+                raise ParameterSpaceError(
+                    f"Latent {latent.name!r} does not reach the pipeline: perturbing it leaves "
+                    "the bound model bitwise unchanged. It would be sampled without entering "
+                    "the model, and its posterior would just be its prior. Check the bind "
+                    "function passed to ParameterSpace.raw."
+                )
+
     def bind(
         self, pipeline: AbstractOperator, values: dict[str, jax.Array]
     ) -> AbstractOperator:
         """Return a copy of ``pipeline`` carrying ``values``.
 
         Pure: ``pipeline`` is untouched. All bindings are applied in a single
-        ``eqx.tree_at`` call, so two bindings targeting the same leaf raise
-        instead of one silently winning.
+        ``eqx.tree_at`` call.
+
+        Note what that does NOT give you: ``eqx.tree_at`` resolves replacements
+        by leaf identity and lets the LAST write to a leaf win, silently. The
+        guarantee that no leaf is written twice comes from :meth:`validate`,
+        which every entry point (:meth:`forward_fn`, the Bayesian bridge) runs
+        first. Calling ``bind`` directly on an unvalidated space skips it.
         """
         if self.raw_bind is not None:
             return self.raw_bind(pipeline, values)

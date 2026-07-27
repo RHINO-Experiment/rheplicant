@@ -200,6 +200,37 @@ class TestMCMCRecovery:
         preds = predict_from_samples(twin, template_state, space, samples)
         assert preds.shape == (5, n_time, 4)
 
+    def test_predict_wrong_per_sample_shape_rejected(self, template_state):
+        """Checking only the NAME let a wrong-shaped stack broadcast into the
+        leaf and return a finite, correctly-shaped, wrong predictive."""
+        n_time = template_state.coords.time.shape[0]
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(SKY)),
+            GainOperator(gain=jnp.ones(n_time)),
+        )
+        space = ParameterSpace.direct(
+            "gains", init=jnp.ones(n_time), into=lambda p: p["gain"].gain,
+            prior=dist.Normal(jnp.ones(n_time), 0.1),
+        )
+        with pytest.raises(StateValidationError, match="per-sample shape"):
+            predict_from_samples(twin, template_state, space,
+                                 {"gains": jnp.ones((5,))})    # scalar per draw
+
+    def test_predict_mismatched_draw_counts_rejected(self, template_state):
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(SKY)),
+            GainOperator(gain=jnp.array(1.0)),
+        )
+        space = ParameterSpace(
+            latents=[Latent("a", init=1.0, prior=dist.Normal(1.0, 0.1)),
+                     Latent("b", init=1.0, prior=dist.Normal(1.0, 0.1))],
+            bindings=[Bind(("a", "b"), into=lambda p: p["gain"].gain,
+                           fn=lambda a, b: a * b)],
+        )
+        with pytest.raises(StateValidationError, match="differing numbers of draws"):
+            predict_from_samples(twin, template_state, space,
+                                 {"a": jnp.ones(5), "b": jnp.ones(7)})
+
     def test_predict_missing_site_rejected(self, twin, space, template_state):
         with pytest.raises(StateValidationError, match="missing site"):
             predict_from_samples(twin, template_state, space, {"wrong": jnp.zeros(3)})

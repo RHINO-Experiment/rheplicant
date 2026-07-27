@@ -187,11 +187,13 @@ correlation = float(
 stuck, _, _, _ = fit(beam_space, twin)
 bias = float((stuck["fwhm"] - TRUE_FWHM) / cov.sigma("fwhm"))
 print(f"   fwhm/log_gain correlation {correlation:+.2f} — nearly independent")
-print(f"   but holding the gain at the WRONG value biases fwhm to "
-      f"{float(stuck['fwhm']):.4f} ({bias:+.0f} sigma):")
-print("   a narrower beam partly mimics a smaller gain. That is model")
-print("   mis-specification, not degeneracy — freeing the gain removes it")
-print("   entirely, and the named cross-block is how you tell the two apart.\n")
+print(f"   but holding the gain at the WRONG value drives fwhm to "
+      f"{float(stuck['fwhm']):.4f} ({bias:+.0f} sigma).")
+print("   The beam matrix is row-normalised, so NO fwhm changes the level at")
+print("   all; the model is short 21 % of signal and its only lever is contrast,")
+print("   which narrowing buys about 7 % of. So the fit runs to the boundary")
+print("   rather than finding a compensating optimum — model mis-specification,")
+print("   not degeneracy, which the near-zero cross-block is how you tell.\n")
 
 # ------------------------------------------- 3. the sky as a linear block ---
 # The map enters linearly, so it needs no sampler at all: declare it, let the

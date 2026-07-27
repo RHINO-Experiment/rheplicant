@@ -300,7 +300,7 @@ params_fit, losses = GradientCalibrator(learning_rate=2e-7, n_steps=200).fit(
     forward, params0, observation.data)
 ```
 
-**Bayesian posteriors** — priors attach to pipeline leaves positionally;
+**Bayesian posteriors** — priors ride on a ParameterSpace;
 sample sites are named by their latents; noise lives in the likelihood (hand
 the bridge a twin *without* stochastic operators):
 
