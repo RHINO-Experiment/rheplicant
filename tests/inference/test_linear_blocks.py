@@ -23,6 +23,7 @@ from rheplicant.inference import (
     Latent,
     ParameterSpace,
     check_linearity,
+    gcr_sample,
     linear_operator,
     wiener_solve,
 )
@@ -383,3 +384,250 @@ class TestCheckLinearity:
         # naming one is enough
         block = linear_operator(space, twin, template_state, name="amp_a")
         assert jnp.allclose(block.offset, SKY_B * GAIN)
+
+
+def _dense_posterior(block, noise_std, prior_std):
+    """(mean-operator, covariance) built explicitly, for checking the sampler.
+
+    The posterior of a linear-Gaussian block is N(C A^T N^-1 r, C) with
+    C = (A^T N^-1 A + S^-1)^-1. Both are formed densely here so the sampler's
+    FIRST TWO MOMENTS can be checked, not just its mean — a sampler that gets
+    the mean right and the covariance wrong looks perfectly healthy otherwise.
+    """
+    is_complex = jnp.issubdtype(block.dtype, jnp.complexfloating)
+    n = int(jnp.prod(jnp.array(block.shape))) if block.shape else 1
+    columns = []
+    for index in range(n):
+        for unit in (1.0, 1j) if is_complex else (1.0,):
+            basis = jnp.zeros(n, dtype=block.dtype).at[index].set(unit)
+            columns.append(jnp.ravel(block.forward(basis.reshape(block.shape))))
+    A = jnp.stack(columns, axis=1)
+    weight = 1.0 / jnp.asarray(noise_std) ** 2
+    normal = A.T @ (weight * A) + jnp.eye(A.shape[1]) / jnp.asarray(prior_std) ** 2
+    return A, weight, jnp.linalg.inv(normal)
+
+
+class TestGCRSample:
+    """A constrained realization is an EXACT posterior draw, so both moments check."""
+
+    @pytest.fixture
+    def gain_block(self, twin, template_state):
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        space = ParameterSpace.direct(
+            "gains", init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain, linear=True,
+        )
+        return linear_operator(space, wide, template_state)
+
+    @pytest.fixture
+    def observed(self, gain_block, template_state):
+        n_time = template_state.coords.time.shape[0]
+        truth = GAIN + 0.1 * jnp.arange(n_time, dtype=float)
+        return gain_block.offset + gain_block.forward(truth)
+
+    def test_a_sample_is_not_the_mean(self, gain_block, observed):
+        mean, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
+        draw, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
+                             key=jax.random.key(0))
+        assert not jnp.allclose(draw, mean, atol=1e-3)
+
+    def test_the_draw_is_deterministic_given_a_key(self, gain_block, observed):
+        kwargs = dict(noise_std=1.0, prior_std=5.0, key=jax.random.key(3))
+        first, _ = gcr_sample(gain_block, observed, **kwargs)
+        second, _ = gcr_sample(gain_block, observed, **kwargs)
+        assert jnp.allclose(first, second)
+
+    def test_different_keys_give_different_draws(self, gain_block, observed):
+        a, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
+                          key=jax.random.key(0))
+        b, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
+                          key=jax.random.key(1))
+        assert not jnp.allclose(a, b)
+
+    def test_the_sample_mean_converges_to_the_wiener_mean(self, gain_block, observed):
+        mean, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
+        keys = jax.random.split(jax.random.key(0), 4000)
+        draws = jax.vmap(
+            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
+                                 key=k)[0]
+        )(keys)
+        _, _, cov = _dense_posterior(gain_block, 1.0, 5.0)
+        # standard error of the mean, per component
+        sem = jnp.sqrt(jnp.diag(cov) / keys.shape[0])
+        assert jnp.all(jnp.abs(draws.mean(axis=0) - mean) < 4.0 * sem)
+
+    def test_the_sample_covariance_matches_the_posterior_covariance(
+        self, gain_block, observed
+    ):
+        """The test that distinguishes a real constrained realization from a
+        mean-plus-arbitrary-noise: the second moment has to be right too."""
+        _, _, cov = _dense_posterior(gain_block, 1.0, 5.0)
+        keys = jax.random.split(jax.random.key(7), 6000)
+        draws = jax.vmap(
+            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
+                                 key=k)[0]
+        )(keys)
+        empirical = jnp.cov(draws.T)
+        relative = jnp.linalg.norm(empirical - cov) / jnp.linalg.norm(cov)
+        assert float(relative) < 0.12, f"covariance off by {float(relative):.3f}"
+
+    def test_a_vanishing_prior_pins_the_draw_at_zero(self, gain_block, observed):
+        draw, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=1e-6,
+                             key=jax.random.key(0))
+        assert jnp.allclose(draw, 0.0, atol=1e-4)
+
+    def test_with_no_data_the_draw_follows_the_PRIOR(self, gain_block):
+        """Given data that carries no information (infinite noise), the posterior
+        IS the prior — the cleanest check that the fluctuation term is scaled right."""
+        keys = jax.random.split(jax.random.key(11), 4000)
+        draws = jax.vmap(
+            lambda k: gcr_sample(gain_block, gain_block.offset, noise_std=1e8,
+                                 prior_std=2.0, key=k)[0]
+        )(keys)
+        assert float(draws.std()) == pytest.approx(2.0, rel=0.05)
+        assert abs(float(draws.mean())) < 0.15
+
+    def test_a_complex_block_draws_correctly(self, template_state):
+        n_row = template_state.coords.time.shape[0] * template_state.coords.freq.shape[0]
+        key = jax.random.key(3)
+        matrix = jax.random.normal(key, (n_row, 3)) + 1j * jax.random.normal(
+            jax.random.fold_in(key, 1), (n_row, 3)
+        )
+        twin = Pipeline(
+            ComplexCoeffOperator(coeffs=jnp.zeros(3, dtype=matrix.dtype), matrix=matrix),
+            names=("sky",),
+        )
+        space = ParameterSpace.direct(
+            "coeffs", init=jnp.ones(3, dtype=jnp.complex64),
+            into=lambda p: p["sky"].coeffs, linear=True,
+        )
+        block = linear_operator(space, twin, template_state)
+        observed = block.offset + block.forward(jnp.array([1.0 + 2j, -0.5 + 0.25j, 3.0 - 1j]))
+        mean, _ = wiener_solve(block, observed, noise_std=0.5, prior_std=4.0)
+        keys = jax.random.split(jax.random.key(5), 4000)
+        draws = jax.vmap(
+            lambda k: gcr_sample(block, observed, noise_std=0.5, prior_std=4.0, key=k)[0]
+        )(keys)
+        assert draws.dtype == block.dtype
+        _, _, cov = _dense_posterior(block, 0.5, 4.0)
+        sem = jnp.sqrt(jnp.diag(cov)[0::2] / keys.shape[0])
+        assert jnp.all(jnp.abs(jnp.real(draws.mean(axis=0) - mean)) < 4.0 * sem)
+
+    def test_a_prior_is_required(self, gain_block, observed):
+        with pytest.raises(ParameterSpaceError, match="prior_std"):
+            gcr_sample(gain_block, observed, noise_std=1.0, prior_std=None,
+                       key=jax.random.key(0))
+
+
+class SpectralTiltOperator(AbstractOperator):
+    """Multiply by (nu/nu0)^(-alpha) — a spectral SHAPE, not a scale.
+
+    Test double. It exists because a linear amplitude and a multiplicative gain
+    are exactly degenerate, so a Gibbs test built on those two would wander
+    along the degeneracy and land nowhere in particular. A tilt separates
+    amplitude from shape, which is also the real situation (foreground
+    amplitude vs spectral index).
+    """
+
+    requires: ClassVar[tuple[str, ...]] = ("data",)
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+
+    alpha: jax.Array
+
+    def __call__(self, state):
+        nu = state.coords.freq
+        return state.with_data(state.data * (nu / nu[0]) ** (-self.alpha))
+
+
+class TestConditioningOnOtherLatents:
+    """A linear block is only linear GIVEN the other parameters, so it has to be
+    buildable at their current values — the operation a Gibbs sweep is made of."""
+
+    @pytest.fixture
+    def tilted(self):
+        return Pipeline(
+            SumOperator(
+                SkyOperator(amplitude=jnp.array(SKY_A)),
+                SkyOperator(amplitude=jnp.array(SKY_B)),
+                names=("sky_a", "sky_b"),
+            ),
+            SpectralTiltOperator(alpha=jnp.array(0.0)),
+            names=("sum", "tilt"),
+        )
+
+    @pytest.fixture
+    def mixed_space(self):
+        return ParameterSpace(
+            latents=[
+                Latent("amp", init=SKY_A, linear=True),
+                Latent("alpha", init=0.0),
+            ],
+            bindings=[
+                Bind("amp", into=lambda p: p["sum"]["sky_a"].amplitude),
+                Bind("alpha", into=lambda p: p["tilt"].alpha),
+            ],
+        )
+
+    def test_default_uses_the_declared_initial_values(
+        self, tilted, mixed_space, template_state
+    ):
+        block = linear_operator(mixed_space, tilted, template_state, "amp")
+        # alpha init = 0 -> no tilt, so offset is sky_b flat across frequency
+        assert jnp.allclose(block.offset, SKY_B)
+
+    def test_at_rebuilds_the_block_elsewhere(self, tilted, mixed_space, template_state):
+        nu = template_state.coords.freq
+        block = linear_operator(mixed_space, tilted, template_state, "amp",
+                                at={"alpha": jnp.array(2.0)})
+        expected = SKY_B * (nu / nu[0]) ** (-2.0)
+        assert jnp.allclose(block.offset, jnp.broadcast_to(expected, block.offset.shape))
+
+    def test_at_may_be_partial(self, tilted, mixed_space, template_state):
+        """Latents absent from `at` keep their declared init."""
+        block = linear_operator(mixed_space, tilted, template_state, "amp", at={})
+        assert jnp.allclose(block.offset, SKY_B)
+
+    def test_at_rejects_an_unknown_name(self, tilted, mixed_space, template_state):
+        with pytest.raises(ParameterSpaceError, match="not a latent"):
+            linear_operator(mixed_space, tilted, template_state, "amp",
+                            at={"nope": jnp.array(1.0)})
+
+    def test_check_linearity_honours_at(self, tilted, mixed_space, template_state):
+        errors = check_linearity(mixed_space, tilted, template_state, "amp",
+                                 at={"alpha": jnp.array(2.0)})
+        assert all(err < 1e-4 for err in errors.values())
+
+    def test_a_gibbs_sweep_recovers_both_blocks(self, tilted, mixed_space, template_state):
+        """The pattern this exists for: alternate an exact conjugate draw of the
+        linear block with a conditional update of the nonlinear one."""
+        true_amp, true_alpha = 60.0, 1.8
+        truth = eqx.tree_at(
+            lambda p: (p["sum"]["sky_a"].amplitude, p["tilt"].alpha),
+            tilted, (jnp.array(true_amp), jnp.array(true_alpha)),
+        )
+        observed = truth(template_state).data
+        forward, _ = mixed_space.forward_fn(tilted, template_state)
+
+        # Check the linearity claim ONCE, outside the loop.
+        check_linearity(mixed_space, tilted, template_state, "amp")
+
+        values = {"amp": jnp.array(1.0), "alpha": jnp.array(0.0)}
+        grid = jnp.linspace(-1.0, 4.0, 600)
+        key = jax.random.key(0)
+        for _ in range(25):
+            key, draw_key = jax.random.split(key)
+            block = linear_operator(mixed_space, tilted, template_state, "amp",
+                                    at=values, check=False)
+            amp, _ = gcr_sample(block, observed, noise_std=0.02, prior_std=500.0,
+                                key=draw_key)
+            values = {**values, "amp": amp}
+            chi2 = jax.vmap(
+                lambda a, current=values: jnp.sum(
+                    (forward({**current, "alpha": a}) - observed) ** 2
+                )
+            )(grid)
+            values = {**values, "alpha": grid[jnp.argmin(chi2)]}
+
+        assert float(values["alpha"]) == pytest.approx(true_alpha, abs=0.02)
+        assert float(values["amp"]) == pytest.approx(true_amp, rel=0.02)

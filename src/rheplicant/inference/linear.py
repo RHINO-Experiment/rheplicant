@@ -111,9 +111,24 @@ def _isolate(
     pipeline: AbstractOperator,
     state_template: State,
     name: str,
+    at: dict[str, jax.Array] | None = None,
 ) -> tuple[Callable[[jax.Array], jax.Array], jax.Array]:
-    """``g(x) = prediction with latent `name` set to x``, plus a zero of its shape."""
+    """``g(x) = prediction with latent `name` set to x``, plus a zero of its shape.
+
+    ``at`` fixes the OTHER latents. A block is only linear *given* them, so a
+    Gibbs sweep has to rebuild it wherever they currently are; without ``at``
+    the block would silently keep describing the model at its declared starting
+    point, which is right exactly once.
+    """
     forward, values0 = space.forward_fn(pipeline, state_template)
+    if at:
+        unknown = [key for key in at if key not in space.names]
+        if unknown:
+            raise ParameterSpaceError(
+                f"`at` names {unknown}, which is not a latent of this space; declared: "
+                f"{list(space.names)}."
+            )
+        values0 = {**values0, **at}
     latent = space.latent(name)
 
     def g(x: jax.Array) -> jax.Array:
@@ -128,6 +143,7 @@ def check_linearity(
     state_template: State,
     name: str | None = None,
     *,
+    at: dict[str, jax.Array] | None = None,
     scales: Sequence[float] = DEFAULT_SCALES,
     rtol: float | None = None,
     key: jax.Array | None = None,
@@ -141,6 +157,9 @@ def check_linearity(
     Args:
         space, pipeline, state_template: the model under test.
         name: which latent. Optional when exactly one is declared linear.
+        at: values for the OTHER latents. Linearity is a claim *given* them, so
+            check it where the sampler will actually be. Defaults to the
+            declared initial values.
         scales: probe magnitudes, as multiples of the latent's own scale,
             taken from ``max|init|``. The default spans six orders of
             magnitude on purpose — see the module docstring. NOTE: an
@@ -165,7 +184,7 @@ def check_linearity(
             than ``rtol``.
     """
     name = _resolve_name(space, name)
-    g, zero = _isolate(space, pipeline, state_template, name)
+    g, zero = _isolate(space, pipeline, state_template, name, at)
     latent = space.latent(name)
     if not jnp.issubdtype(latent.init.dtype, jnp.inexact):
         raise ParameterSpaceError(
@@ -229,6 +248,7 @@ def linear_operator(
     state_template: State,
     name: str | None = None,
     *,
+    at: dict[str, jax.Array] | None = None,
     check: bool = True,
     scales: Sequence[float] = DEFAULT_SCALES,
     rtol: float | None = None,
@@ -243,6 +263,9 @@ def linear_operator(
     Args:
         space, pipeline, state_template: the model.
         name: which latent. Optional when exactly one is declared linear.
+        at: values for the OTHER latents, fixing where the block is built.
+            Defaults to the declared initial values — right exactly once, so a
+            Gibbs sweep must pass the current values here every sweep.
         check: verify the linearity claim first (:func:`check_linearity`).
             Leave it on. Turning it off costs three forward evaluations less
             and buys a class of silent, confident errors.
@@ -250,8 +273,9 @@ def linear_operator(
     """
     name = _resolve_name(space, name)
     if check:
-        check_linearity(space, pipeline, state_template, name, scales=scales, rtol=rtol)
-    g, zero = _isolate(space, pipeline, state_template, name)
+        check_linearity(space, pipeline, state_template, name, at=at,
+                        scales=scales, rtol=rtol)
+    g, zero = _isolate(space, pipeline, state_template, name, at)
     latent = space.latent(name)
 
     offset, tangent = jax.linearize(g, zero)
@@ -283,6 +307,28 @@ def _real_parts(block: LinearBlock) -> tuple[Callable, Callable]:
             lambda parts: parts[0] + 1j * parts[1],
         )
     return (lambda x: x, lambda parts: parts)
+
+
+def _check_solve_arguments(
+    block: LinearBlock, observed: jax.Array, prior_std: Any, caller: str
+) -> None:
+    """Shared preconditions for the mean and the draw."""
+    if jnp.shape(observed) != jnp.shape(block.offset):
+        raise ParameterSpaceError(
+            f"observed has shape {jnp.shape(observed)} but this block predicts "
+            f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
+            "problem and return a perfectly finite answer."
+        )
+    if prior_std is None:
+        raise ParameterSpaceError(
+            f"{caller} needs prior_std: with no prior the normal operator AᵀN⁻¹A can be "
+            "singular, and CG would return a finite, arbitrary answer rather than fail. "
+            "Pass a large prior_std for an effectively flat prior."
+        )
+    if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
+        raise ParameterSpaceError(
+            f"{caller} expects a real-valued prediction; this block's offset is complex."
+        )
 
 
 def wiener_solve(
@@ -332,46 +378,143 @@ def wiener_solve(
         ``‖M x̂ - b‖ / ‖b‖`` over the real degrees of freedom — check it, since
         CG reports no convergence status of its own.
     """
-    if jnp.shape(observed) != jnp.shape(block.offset):
-        raise ParameterSpaceError(
-            f"observed has shape {jnp.shape(observed)} but this block predicts "
-            f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
-            "problem and return a perfectly finite answer."
-        )
-    if prior_std is None:
-        raise ParameterSpaceError(
-            "wiener_solve needs prior_std: with no prior the normal operator "
-            "AᵀN⁻¹A can be singular, and CG would return a finite, arbitrary answer rather "
-            "than fail. Pass a large prior_std for an effectively flat prior."
-        )
-    if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
-        raise ParameterSpaceError(
-            "wiener_solve expects a real-valued prediction; this block's offset is complex."
-        )
+    _check_solve_arguments(block, observed, prior_std, "wiener_solve")
+    return _conjugate_solve(
+        block, observed, noise_std=noise_std, prior_std=prior_std,
+        tol=tol, maxiter=maxiter, key=None,
+    )
 
+
+def _norm(parts) -> jax.Array:
+    return jnp.sqrt(sum(jnp.sum(leaf**2) for leaf in jax.tree.leaves(parts)))
+
+
+def _conjugate_solve(
+    block: LinearBlock,
+    observed: jax.Array,
+    *,
+    noise_std: Any,
+    prior_std: Any,
+    tol: float,
+    maxiter: int | None,
+    key: jax.Array | None,
+) -> tuple[jax.Array, jax.Array]:
+    """Shared machinery for the posterior mean and for a posterior draw.
+
+    Both solve ``(AᵀN⁻¹A + S⁻¹) x = b`` by CG over the latent's real degrees of
+    freedom. They differ only in ``b``: the mean uses ``AᵀN⁻¹(d - offset)``,
+    a draw adds the two fluctuation terms. ``key=None`` selects the mean.
+    """
     split, join = _real_parts(block)
     weight = 1.0 / jnp.asarray(noise_std) ** 2
-    inverse_prior = 1.0 / jnp.asarray(prior_std) ** 2
+    prior_variance = jnp.asarray(prior_std) ** 2
     residual_data = observed - block.offset
     zero = split(jnp.zeros(block.shape, dtype=block.dtype))
 
     def half_chi2(parts):
         return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
 
-    def cross_term(parts):
-        return jnp.sum(weight * block.forward(join(parts)) * residual_data)
+    def pair_with(vector):
+        """``Aᵀ vector`` in real coordinates, as the gradient of a real pairing.
 
-    normal_from_data = jax.grad(half_chi2)
+        Taking it as a gradient rather than calling ``block.adjoint`` is what
+        keeps the real/complex conventions from ever entering: ``jax.grad`` of a
+        real scalar is by construction the adjoint of the real inner product,
+        which is the pairing every term here lives in.
+        """
+        return jax.grad(lambda parts: jnp.sum(block.forward(join(parts)) * vector))(zero)
 
     def normal(parts):
-        curvature = normal_from_data(parts)
-        return jax.tree.map(lambda c, p: c + inverse_prior * p, curvature, parts)
+        curvature = jax.grad(half_chi2)(parts)
+        return jax.tree.map(lambda c, p: c + p / prior_variance, curvature, parts)
 
-    rhs = jax.grad(cross_term)(zero)
+    rhs = pair_with(weight * residual_data)
+
+    if key is not None:
+        # Constrained realization: the two fluctuation terms whose covariances
+        # sum to the normal operator itself, which is exactly why the solve
+        # comes out distributed as the posterior rather than merely centred on
+        # its mean.  b = AᵀN⁻¹(d-offset) + AᵀN⁻¹ᐟ²ω₁ + S⁻¹ᐟ²ω₂
+        data_key, prior_key = jax.random.split(key)
+        omega_data = jax.random.normal(
+            data_key, jnp.shape(residual_data), dtype=jnp.result_type(residual_data)
+        )
+        omega_prior = jax.tree.map(
+            lambda leaf, k: jax.random.normal(k, leaf.shape, dtype=leaf.dtype),
+            zero,
+            _split_like(prior_key, zero),
+        )
+        rhs = jax.tree.map(
+            lambda base, from_data, from_prior: (
+                base + from_data + from_prior / jnp.sqrt(prior_variance)
+            ),
+            rhs,
+            pair_with(jnp.sqrt(weight) * omega_data),
+            omega_prior,
+        )
+
     solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
-
-    def norm(parts):
-        return jnp.sqrt(sum(jnp.sum(leaf**2) for leaf in jax.tree.leaves(parts)))
-
     misfit = jax.tree.map(lambda a, b: a - b, normal(solution), rhs)
-    return join(solution), norm(misfit) / jnp.maximum(norm(rhs), 1e-30)
+    return join(solution), _norm(misfit) / jnp.maximum(_norm(rhs), 1e-30)
+
+
+def _split_like(key: jax.Array, template) -> Any:
+    """One independent key per leaf of ``template``, same structure."""
+    leaves, treedef = jax.tree.flatten(template)
+    return jax.tree.unflatten(treedef, list(jax.random.split(key, len(leaves))))
+
+
+def gcr_sample(
+    block: LinearBlock,
+    observed: jax.Array,
+    *,
+    noise_std: Any,
+    prior_std: Any,
+    key: jax.Array,
+    tol: float = 1e-6,
+    maxiter: int | None = None,
+) -> tuple[jax.Array, jax.Array]:
+    """Draw an EXACT posterior sample of a linear-Gaussian block.
+
+    The constrained-realization (GCR) identity: solve the same system
+    :func:`wiener_solve` does, but with two white-noise terms added to the
+    right-hand side::
+
+        (AᵀN⁻¹A + S⁻¹) x = AᵀN⁻¹(d - offset) + AᵀN⁻¹ᐟ² ω₁ + S⁻¹ᐟ² ω₂
+
+    with ``ω₁``, ``ω₂`` standard normal on the data and on the latent. The
+    right-hand side then has mean ``AᵀN⁻¹(d - offset)`` and covariance
+    ``AᵀN⁻¹A + S⁻¹`` — the operator itself — so ``x = M⁻¹b`` has the posterior
+    mean and covariance ``M⁻¹M M⁻¹ = M⁻¹`` exactly. Not an approximation and
+    not a Markov chain: every call is an independent draw, with no burn-in and
+    nothing to diagnose for convergence.
+
+    This is what makes a 10⁶-dimensional block samplable at all. It costs one
+    CG solve — the same as the mean — because the fluctuation enters the
+    right-hand side, never the operator.
+
+    In a Gibbs scheme, this draws the linear block conditional on the nonlinear
+    parameters; rebuild the block with
+    :func:`linear_operator(..., check=False)` each sweep, having checked the
+    linearity claim once outside the loop.
+
+    Args:
+        block: from :func:`linear_operator`.
+        observed: the data, shaped like ``block.offset``.
+        noise_std: noise standard deviation — scalar or broadcastable to the data.
+        prior_std: prior standard deviation on the latent. Required, as for
+            :func:`wiener_solve`. For a complex latent this is the width of the
+            real and imaginary parts independently.
+        key: PRNG key. ``vmap`` over split keys for many independent draws.
+        tol: CG tolerance.
+        maxiter: CG iteration cap.
+
+    Returns:
+        ``(x, relative_residual)``. Check the residual: an unconverged CG
+        returns a draw from the wrong distribution, and says nothing about it.
+    """
+    _check_solve_arguments(block, observed, prior_std, "gcr_sample")
+    return _conjugate_solve(
+        block, observed, noise_std=noise_std, prior_std=prior_std,
+        tol=tol, maxiter=maxiter, key=key,
+    )
