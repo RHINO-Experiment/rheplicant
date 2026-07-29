@@ -937,6 +937,17 @@ def system_temperature(
     Every temperature broadcasts against the coupling shape, so a scalar, a
     ``(n_freq,)`` spectrum and a ``(n_time, n_freq)`` field are all accepted.
 
+    **Convention for time variation.** A bare 1-D temperature is always read as
+    per-*frequency*. To vary a temperature with time instead, pass an explicit
+    ``(n_time, 1)`` column. This is not a limitation that could be checked away:
+    against a ``(n_time, n_freq)`` coupling a bare ``(n_time,)`` array is
+    indistinguishable in shape from the legitimate and far more common
+    ``(n_freq,)`` spectrum, so no runtime guard can tell a per-time vector from
+    a per-frequency one when ``n_time == n_freq``. It would broadcast along
+    frequency and return a finite, correctly-shaped, wrong ``T_sys``. Lengths
+    that match neither axis already raise, so the column form is the only thing
+    a caller has to remember.
+
     Returns:
         ``T_sys`` with the broadcast shape.
     """
@@ -1067,10 +1078,16 @@ class TestCableGamma:
         np.testing.assert_allclose(lossy, 0.25 * lossless, rtol=1e-13)
 
     def test_the_velocity_factor_stretches_the_phase(self):
+        """A slow cable is electrically LONGER: length L at vf matches L/vf in vacuum.
+
+        The phase is ``-2 pi L nu / (vf c)``, so vf < 1 *divides* and the phase
+        grows. Getting this backwards (asserting ``vf * L``) is off by 1.98 in
+        the coefficient here, not by round-off.
+        """
         term = termination_gamma("open", FREQ.size)
         slow = cable_gamma(term, FREQ, length=3.0, velocity_factor=0.66)
-        fast = cable_gamma(term, FREQ, length=3.0 * 0.66, velocity_factor=1.0)
-        np.testing.assert_allclose(np.asarray(slow), np.asarray(fast), rtol=1e-13)
+        vacuum = cable_gamma(term, FREQ, length=3.0 / 0.66, velocity_factor=1.0)
+        np.testing.assert_allclose(np.asarray(slow), np.asarray(vacuum), rtol=1e-13)
 
 
 class TestContainers:
@@ -2661,14 +2678,48 @@ cd /Users/zzhang/projects/e-RHINO && python -m pytest tests/radio/test_noise_wav
 
 Expected: all pass.
 
-- [ ] **Step 5: Run the full rheplicant suite to catch fallout**
+- [ ] **Step 5: Update the four call sites this breaks**
 
-Run: `cd /Users/zzhang/projects/e-RHINO && python -m pytest -q`
+The old placeholder had a `t_zero` field and a scalar `gamma_re`/`gamma_im` pair.
+Do not add back-compat shims — the class was documented as a placeholder and the
+package is 0.1.x. The complete list, already audited:
 
-The old placeholder had a `t_zero` field and a scalar `gamma_re`/`gamma_im`
-pair. Any test or example constructing it that way now fails. Update each call
-site to the new signature; do not add back-compat shims — the class was
-documented as a placeholder and the package is 0.1.x.
+1. **`tests/radio/test_components.py:136-144`** — `test_noise_wave_linear_in_parameters`.
+   Rename the `build` parameter `t_zero` → `t_rx`, and replace the two scalar
+   gammas with `gamma_src_re=jnp.full((1, 4), 0.1)`, `gamma_src_im=jnp.full((1, 4), 0.05)`,
+   `gamma_rec_re=jnp.zeros(4)`, `gamma_rec_im=jnp.zeros(4)`. (`data_state`'s
+   freq axis is `linspace(60e6, 85e6, 4)`, so `n_freq = 4`.) One source means no
+   `receiver_input` array is needed. The linearity assertion itself still holds —
+   the real Eq. 1 is exactly linear in all four temperatures, which is the whole
+   premise of this plan.
+
+2. **`tests/radio/test_components.py:154-159`** — `test_noise_wave_reflection_loss`
+   asserts `out.data == 10.0 * (1 - 0.25)` for `|Gamma|^2 = 0.25` under the
+   placeholder's `F -> 1` limit. **Set `gamma_rec` to zero** and the assertion
+   survives unchanged: `Gamma_rec = 0` gives `F = 1` exactly, so
+   `c_src = (1 - 0.25) * 1 = 0.75` and the output is still `7.5`. Verified. That
+   is a genuine continuity check between placeholder and real model — keep the
+   assertion and note in the docstring that it now holds because `Gamma_rec = 0`
+   recovers the `F -> 1` limit, rather than because the model assumes it.
+
+3. **`examples/radio_digital_twin.py:67-69`** — same field renames. This example
+   uses `assemble` with no `CalLoadOperator` and no `coords.extra`, i.e. the
+   single-source path, so it needs no switch array; just make the gammas
+   `(1, N_FREQ)` and `(N_FREQ,)`.
+
+4. **`docs/operators.md:46`** — the table's field list still reads
+   `t_unc, t_cos, t_sin, t_zero, gamma_re, gamma_im`; update it, and drop the
+   *(P)* placeholder marker.
+
+Also update **`DESIGN.md:492`**, whose table lists "full Eq. 1 with F factor;
+T/Γ per frequency" as *pending* work against `NoiseWaveOperator` — that row is
+what this task delivers.
+
+**Do not touch `CHANGELOG.md:552`.** It is a historical entry describing the
+placeholder as it was; house rule is that historical changelog entries stay
+verbatim. Record the change as a new `## [Unreleased]` entry instead (Task 11).
+
+Then run the full suite: `cd /Users/zzhang/projects/e-RHINO && python -m pytest -q`
 
 - [ ] **Step 6: Commit**
 
