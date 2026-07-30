@@ -51,6 +51,7 @@ Report D1–D3 to the draft's author (Jordan Norris) once the tests pin them; do
 
 **House rules that apply.**
 - A failure mode that produces a finite, correctly-shaped, **wrong** answer must raise, not warn. `NaN`/`Inf` are loud and therefore acceptable; a silently-zeroed `κ_sin` is not.
+- **But structural checks only — shapes and dtypes, never traced values.** `eqx.Module`s get constructed inside jitted functions, so a value test (`gain < 0`, `|Γ| > 1`) either fails to trace or silently no-ops. Where a wrong *value* cannot be caught safely, say so in the docstring instead of pretending to guard it. The recurring silent-broadcast bug in this package — a length-1 or otherwise mismatched axis stretching across a band — *is* a shape question and therefore always catchable; every such site should have a guard. Three were found and closed in Tasks 2 and 4 (`gamma_rec` vs `gamma_src`, `freq` vs `gamma_termination`, `t_src` vs `gamma_src`), which is enough of a pattern to check for it deliberately in each new module.
 - Structural validation only inside `__call__` (shapes, dtypes) — never traced values, or it breaks under `jit`.
 - All comments, docstrings and commit messages in English.
 - Commit format: `<type>: <description>` (feat, fix, refactor, docs, test, chore).
@@ -67,6 +68,7 @@ Report D1–D3 to the draft's author (Jordan Norris) once the tests pin them; do
 | `tests/conftest.py` | Enable float64 once for the whole suite. |
 | `rhino_cal_jax/__init__.py` | Public API surface. |
 | `rhino_cal_jax/errors.py` | `RhinoCalError` / `ValidationError`. |
+| `rhino_cal_jax/_validation.py` | Shared structural guards (`require_complex`), so wording and behaviour cannot drift between modules. Added during Task 4 once the second copy appeared. |
 | `rhino_cal_jax/reflection.py` | Draft Eqs. 2–6: `F`, and the `Couplings` container. |
 | `rhino_cal_jax/loads.py` | `Γ` construction (termination type, cable phase) + `Load` / `Receiver`. |
 | `rhino_cal_jax/switching.py` | Draft Eqs. 11–12: `SwitchCycle` (`θ`), gather per-source → per-time. |
@@ -1503,7 +1505,13 @@ class SwitchCycle(eqx.Module):
     """
 
     source_index: jax.Array = eqx.field(converter=jnp.asarray)
-    labels: tuple[str, ...] = eqx.field(static=True, converter=tuple)
+    # Normalise to plain str, not just tuple(): numpy.str_ subclasses
+    # numpy.generic, which Equinox's static-field check treats as array-like, so
+    # a tuple of numpy strings warns "A JAX array is being set as static!". The
+    # path in is realistic -- labels built from the numpy pipeline's own arrays.
+    labels: tuple[str, ...] = eqx.field(
+        static=True, converter=lambda labels: tuple(str(name) for name in labels)
+    )
 
     def __check_init__(self):
         if not jnp.issubdtype(self.source_index.dtype, jnp.integer):
