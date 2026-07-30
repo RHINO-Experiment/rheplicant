@@ -43,7 +43,7 @@ that will replace the body. Graph topology and assembly rules: see
 |---|---|---|---|
 | `BeamOperator` *(P)* | `beam` | shared chromatic beam — the single marginalisation target | `solid_angle` |
 | `CalLoadOperator` *(P)* | `cal_loads` | switched calibration load (via `receiver_input` selector) | `t_load` |
-| `NoiseWaveOperator` *(P)* | `noise_wave` | reflection loss + noise-wave T terms (linear in `t_nw` — the GCR structure) | `t_unc`, `t_cos`, `t_sin`, `t_zero`, `gamma_re`, `gamma_im` |
+| `NoiseWaveOperator` | `noise_wave` | full Eq. 1 (noise-wave GCR note) via `rhino_cal_jax`: reflection couplings + noise-wave temperatures, linear in `t_nw = (t_unc, t_cos, t_sin)` — the GCR structure | `t_unc`, `t_cos`, `t_sin`, `t_rx`, `gamma_src_re`, `gamma_src_im`, `gamma_rec_re`, `gamma_rec_im` |
 | `CWCalibrationOperator` *(P)* | `cw_tone` | CW tone injected before bandpass/gain (tracks gain drift) | `amplitude` |
 | `ReceiverOperator` *(P)* | `bandpass` | frequency-dependent bandpass | `bandpass` |
 | `GainOperator` *(P)* | `gain` | multiplicative gain, scalar or per-time | `gain` |
@@ -51,6 +51,18 @@ that will replace the body. Graph topology and assembly rules: see
 | `EMIOperator` *(P)* | `emi` | self-generated EMI frequency comb | `amplitude` |
 | `ADCOperator` *(P)* | `adc` | scale + clip digitisation | `scale` |
 | `NeuralOperator` | *(explicit `At(...)`)* | learned positive spectral response `exp(MLP(freq))` — hybrid physics+ML | MLP weights |
+
+`NoiseWaveOperator` requires the optional `rhino_cal_jax` package — see
+`noise_wave.py`'s import guard for the install command, since it is not yet on
+PyPI. It carries `Γ` **per source** (`gamma_src_re`/`gamma_src_im`, shape
+`(n_source, n_freq)`) rather than one `Γ` for the whole TOD, and reads which
+source is connected sample-by-sample from
+`coords.extra["receiver_input"]`; with more than one source that array is
+required, since defaulting to the first would return a finite,
+correctly-shaped, wrong answer. See `examples/noise_wave_gcr.py` for the model
+exercised as a checked linear block (Wiener mean and exact GCR draws) and D15
+in `DESIGN.md` for why the per-source placement is what makes per-channel
+noise-wave temperatures identifiable at all.
 
 ## Processing segment
 

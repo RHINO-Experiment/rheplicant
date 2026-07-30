@@ -77,7 +77,7 @@ html_theme_options = {
     ],
 }
 
-exclude_patterns = ["_build"]
+exclude_patterns = ["_build", "superpowers"]
 
 # The signal-path page is generated from the live template at build time,
 # so the rendered graph can never drift from the code. Two example

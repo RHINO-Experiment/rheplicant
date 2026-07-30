@@ -11,6 +11,7 @@ from rheplicant.inference.likelihood import (
 from rheplicant.inference.linear import (
     LinearBlock,
     check_linearity,
+    condition_estimate,
     gcr_sample,
     linear_operator,
     wiener_solve,
@@ -36,6 +37,7 @@ __all__ = [
     "ParameterSpace",
     "build_forward_fn",
     "check_linearity",
+    "condition_estimate",
     "fisher_information",
     "gcr_sample",
     "linear_operator",

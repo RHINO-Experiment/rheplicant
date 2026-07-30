@@ -33,6 +33,17 @@ times the latent's own magnitude, because near-linearity is scale-dependent:
 ``x + εx²`` is indistinguishable from linear near the origin and grossly
 nonlinear far from it. A probe suite that only samples "reasonable" values
 signs off on exactly the blocks that will fail in a sampler's tails.
+
+**A residual is not an accuracy.** The solvers here are iterative, and what an
+iterative method can cheaply report is ``‖M x - b‖``, not ``‖x - x*‖``. The two
+differ by the condition number of ``M = AᵀN⁻¹A + S⁻¹``, and κ is large here by
+*design*: whenever the data does not fully identify the block — which is the
+case the prior is for — ``λ_min(M)`` is exactly ``1/prior_std²`` and κ runs to
+1e6 and beyond. A solve can then sit at a relative residual of 1e-7 with the
+prior-dominated directions untouched, and a draw comes back with almost no
+scatter where it should have carried the whole prior width. So the guard on
+these solves bounds the *error*, ``κ · residual``, and :func:`condition_estimate`
+exposes κ for choosing ``tol``.
 """
 
 import dataclasses
@@ -47,9 +58,15 @@ import numpy as np
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
+
+#: Power-iteration steps per end of the spectrum in :func:`condition_estimate`.
+#: Both ends typically settle within three; this leaves margin at a fixed cost
+#: of ``2 * POWER_ITERATIONS`` operator applications per guarded solve.
+POWER_ITERATIONS: int = 12
 
 
 @dataclasses.dataclass(frozen=True)
@@ -387,17 +404,52 @@ def wiener_solve(
             most physical quantities — a noise-wave temperature sits near
             250 K. Equivalent to an affine binding that adds the same offset,
             but says what it means.
-        tol: CG tolerance.
+        tol: CG tolerance — a bound on the relative RESIDUAL, which is not the
+            same as accuracy. See the note on conditioning below.
         maxiter: CG iteration cap. ``None`` lets JAX choose.
-        require_convergence: raise if the relative residual exceeds this.
-            Defaults to ``1e-3``; ``None`` disables the guard and returns
+        require_convergence: raise unless the relative ERROR can be bounded by
+            this. Defaults to ``1e-3``; ``None`` disables the guard and returns
             whatever CG produced. On by default because jax's ``cg`` reports no
             convergence status, so an unconverged solve otherwise comes back
             looking exactly like a converged one.
 
+            The bound is ``κ · relative_residual``, with ``κ`` estimated by
+            :func:`condition_estimate`. Guarding on the residual alone would
+            certify nothing in the regime that matters — see below — so this
+            costs ``2 · POWER_ITERATIONS`` extra operator applications. That is
+            not free: on a well-conditioned block, where CG itself converges in
+            a few iterations, it roughly DOUBLES the solve. In a Gibbs sweep,
+            where the conditioning barely moves from sweep to sweep, call
+            :func:`condition_estimate` once outside the loop, choose ``tol``
+            from it, and pass ``require_convergence=None`` inside — the same
+            bargain :func:`linear_operator`'s ``check`` offers.
+
     Returns:
         ``(x̂, relative_residual)``, the residual being ``‖M x̂ - b‖ / ‖b‖``
-        over the real degrees of freedom.
+        over the real degrees of freedom. Note that this is the residual, not
+        the error; multiply by :func:`condition_estimate` for the error bound.
+
+    Note:
+        **Conditioning, and why ``tol`` is not accuracy.** Residual and error
+        differ by the condition number of ``M = AᵀN⁻¹A + S⁻¹``::
+
+            ‖x̂ - x*‖ / ‖x*‖  ≤  κ(M) · ‖M x̂ - b‖ / ‖b‖
+
+        For a block the data does not fully identify — one calibration load
+        against three unknowns, a flagged channel, a short integration — the
+        prior is the only thing holding the blind directions down, so
+        ``λ_min(M)`` is exactly ``1/prior_std²`` and ``κ ≈ ‖AᵀN⁻¹A‖ · prior_std²``
+        runs to 1e6 and beyond. At κ=1e7 the default ``tol=1e-6`` bounds the
+        relative error by 10: no digits at all. CG stops on a residual that
+        looks converged, having left the prior-dominated directions at their
+        starting value, and the draw comes back with far too little scatter.
+
+        This is exactly the regime these solvers exist for, so the guard is on
+        by default and the accuracy target is stated as an error, not a
+        residual. To solve rather than refuse, pass ``tol ≈
+        require_convergence / κ`` with a ``maxiter`` to match. Past ``κ · eps``
+        no tolerance helps and only precision does; the guard says so in its
+        own words.
     """
     _check_solve_arguments(block, observed, prior_std, "wiener_solve")
     return _conjugate_solve(
@@ -407,20 +459,85 @@ def wiener_solve(
     )
 
 
-def _norm(parts) -> jax.Array:
-    """Euclidean norm, scaled so it survives float32.
+def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
+    """``x -> (AᵀN⁻¹A + S⁻¹) x`` over the latent's real degrees of freedom.
 
-    Squaring first overflows for entries beyond ~1.8e19, which turns the only
-    convergence signal these solvers give into inf/inf = NaN exactly when the
-    problem is badly scaled and the answer is most likely wrong.
+    The curvature half is taken as a gradient rather than assembled from
+    ``A`` and ``Aᵀ``, which makes it symmetric positive definite by
+    construction with no adjoint convention left to get wrong.
     """
-    leaves = [leaf for leaf in jax.tree.leaves(parts) if eqx.is_array(leaf)]
-    if not leaves:  # pragma: no cover - defensive
-        return jnp.array(0.0)
-    biggest = jnp.max(jnp.stack([jnp.max(jnp.abs(leaf)) for leaf in leaves]))
-    biggest = jnp.where(biggest > 0, biggest, 1.0)
-    total = sum(jnp.sum((leaf / biggest) ** 2) for leaf in leaves)
-    return biggest * jnp.sqrt(total)
+    split, join = _real_parts(block)
+
+    def half_chi2(parts):
+        return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
+
+    def normal(parts):
+        curvature = jax.grad(half_chi2)(parts)
+        return jax.tree.map(lambda c, p: c + p / prior_variance, curvature, parts)
+
+    return normal
+
+
+def _condition_number(
+    block: LinearBlock, weight, prior_variance, key, iterations: int
+) -> jax.Array:
+    """Estimated ``κ`` of ``AᵀN⁻¹A + S⁻¹``."""
+    split, _ = _real_parts(block)
+    template = split(jnp.zeros(block.shape, dtype=block.dtype))
+    largest, smallest = extreme_eigenvalues(
+        _normal_operator(block, weight, prior_variance), template, key, iterations
+    )
+    # AᵀN⁻¹A is positive semi-definite, so λ_min can never fall below the
+    # prior's own curvature however rank-deficient the data is.
+    floor = 1.0 / jnp.max(jnp.asarray(prior_variance))
+    return largest / jnp.maximum(smallest, floor)
+
+
+def condition_estimate(
+    block: LinearBlock,
+    *,
+    noise_std: Any,
+    prior_std: Any,
+    iterations: int = POWER_ITERATIONS,
+    key: jax.Array | None = None,
+) -> jax.Array:
+    """Condition number of the normal operator this block would be solved with.
+
+    ``κ(AᵀN⁻¹A + S⁻¹)`` is the number that says how much a solver's residual
+    understates its error: for a solution ``x`` with relative residual ``r``,
+
+        ‖x - x*‖ / ‖x*‖  ≤  κ · r
+
+    so a residual of 1e-6 against κ=1e7 certifies nothing at all. Use it to
+    pick ``tol`` for :func:`wiener_solve` and :func:`gcr_sample`: for a target
+    relative accuracy ``a``, ask for roughly ``tol = a / κ``.
+
+    Large κ is not a defect here, it is the design: for a block the data does
+    not fully identify, ``λ_min`` is exactly ``1/prior_std²`` while ``λ_max``
+    is set by the data, so κ grows with how much better the data constrains
+    one direction than the prior constrains another.
+
+    Costs ``2 · iterations`` applications of the normal operator — each the
+    same JVP-plus-VJP a CG iteration costs — and no matrix is ever formed.
+
+    Args:
+        block: from :func:`linear_operator`.
+        noise_std, prior_std: as for :func:`wiener_solve`.
+        iterations: power-iteration steps per end of the spectrum. The default
+            is comfortable; the estimate typically settles within three.
+        key: PRNG key for the starting vectors. Fixed by default, so the
+            estimate is reproducible.
+
+    Returns:
+        The estimated condition number, as a scalar array.
+    """
+    return _condition_number(
+        block,
+        1.0 / jnp.asarray(noise_std) ** 2,
+        jnp.asarray(prior_std) ** 2,
+        jax.random.key(0) if key is None else key,
+        iterations,
+    )
 
 
 def _conjugate_solve(
@@ -454,9 +571,6 @@ def _conjugate_solve(
         )
     )
 
-    def half_chi2(parts):
-        return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
-
     def pair_with(vector):
         """``Aᵀ vector`` in real coordinates, as the gradient of a real pairing.
 
@@ -467,9 +581,7 @@ def _conjugate_solve(
         """
         return jax.grad(lambda parts: jnp.sum(block.forward(join(parts)) * vector))(zero)
 
-    def normal(parts):
-        curvature = jax.grad(half_chi2)(parts)
-        return jax.tree.map(lambda c, p: c + p / prior_variance, curvature, parts)
+    normal = _normal_operator(block, weight, prior_variance)
 
     # S^-1 m: a zero-mean prior is wrong for most physical quantities (a
     # noise-wave temperature sits near 250 K, not near zero), and shifting the
@@ -506,17 +618,54 @@ def _conjugate_solve(
 
     solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
     misfit = jax.tree.map(lambda a, b: a - b, normal(solution), rhs)
-    residual = _norm(misfit) / jnp.maximum(_norm(rhs), 1e-30)
+    residual = tree_norm(misfit) / jnp.maximum(tree_norm(rhs), 1e-30)
     if require_convergence is not None:
         # jax's cg reports no convergence status of its own, so an unconverged
         # solve otherwise comes back looking like any other answer. eqx.error_if
         # fires under jit, where a Python `if` on a traced value cannot.
+        #
+        # The residual ALONE cannot decide this. Error and residual differ by
+        # the condition number, and for a block the data does not fully
+        # identify κ is enormous by construction — λ_min is exactly the prior's
+        # 1/prior_std² — so CG stops on a tiny residual with the prior-dominated
+        # directions still at their starting value, and hands back a draw whose
+        # posterior scatter there is orders of magnitude too small. Guarding on
+        # the residual certifies precisely nothing in the one regime these
+        # solvers exist to serve.
+        kappa = _condition_number(
+            block, weight, prior_variance, jax.random.key(0), POWER_ITERATIONS
+        )
+        error_bound = residual * kappa
+        bad = jnp.logical_or(~jnp.isfinite(residual), error_bound > require_convergence)
+
+        # Below κ·eps no tolerance can help: the arithmetic itself cannot
+        # represent the answer that accurately. Worth its own message, because
+        # the remedy is precision, and the natural response to the other
+        # message — tighten tol, raise maxiter — burns a great many iterations
+        # here to arrive at an equally wrong answer.
+        epsilon = float(jnp.finfo(jnp.asarray(block.offset).dtype).eps)
+        unreachable = kappa * epsilon > require_convergence
+
         solution = eqx.error_if(
             solution,
-            jnp.logical_or(~jnp.isfinite(residual), residual > require_convergence),
-            "wiener_solve/gcr_sample did not converge: the relative residual exceeds "
-            "require_convergence. Raise maxiter, loosen tol, or condition the problem "
-            "(a stronger prior is usually the honest fix).",
+            jnp.logical_and(bad, unreachable),
+            "wiener_solve/gcr_sample cannot reach require_convergence at this "
+            "precision: the normal operator's condition number times the machine "
+            "epsilon already exceeds it, so no tol or maxiter will help. This is "
+            "the usual signature of a block the data does not identify. Enable "
+            "jax_enable_x64, or strengthen the prior (prior_std bounds the "
+            "conditioning: κ ≈ ‖AᵀN⁻¹A‖·prior_std²). condition_estimate() reports "
+            "the number.",
+        )
+        solution = eqx.error_if(
+            solution,
+            jnp.logical_and(bad, ~unreachable),
+            "wiener_solve/gcr_sample did not converge: the relative residual times "
+            "the normal operator's condition number — the bound on the RELATIVE "
+            "ERROR, which is what require_convergence limits — exceeds it. The "
+            "residual alone looks converged; it is not, along the directions the "
+            "prior dominates. Pass tol ≈ require_convergence/κ with a maxiter to "
+            "match, or strengthen the prior. condition_estimate() reports κ.",
         )
     return join(solution), residual
 
@@ -561,7 +710,11 @@ def gcr_sample(
     In a Gibbs scheme, this draws the linear block conditional on the nonlinear
     parameters; rebuild the block with
     :func:`linear_operator(..., check=False)` each sweep, having checked the
-    linearity claim once outside the loop.
+    linearity claim once outside the loop. The conditioning guard is worth
+    hoisting the same way: :func:`condition_estimate` once to fix ``tol``, then
+    ``require_convergence=None`` in the loop. What you must NOT do is leave
+    ``tol`` at its default and the guard off — that is the combination this
+    module returned a silently over-confident posterior for.
 
     Args:
         block: from :func:`linear_operator`.
@@ -574,14 +727,22 @@ def gcr_sample(
         prior_mean: centre of the prior; defaults to zero. With uninformative
             data the draws fall back to ``N(prior_mean, prior_std²)``, which is
             the check that it is wired in correctly.
-        tol: CG tolerance.
+        tol: CG tolerance — a bound on the residual, not on the accuracy.
         maxiter: CG iteration cap.
-        require_convergence: as for :func:`wiener_solve`.
+        require_convergence: as for :func:`wiener_solve`, including the
+            conditioning note there, which a draw is MORE exposed to than the
+            mean. The fluctuation term ``S⁻¹ᐟ²ω₂`` puts weight on every
+            direction of the latent by construction, including the ones the
+            data is blind to — so a draw always has something to resolve where
+            the operator is worst conditioned, whereas the mean does only when
+            ``prior_mean`` is nonzero.
 
     Returns:
         ``(x, relative_residual)``. An unconverged CG returns a draw from the
-        WRONG distribution, so ``require_convergence`` is on by default here
-        too — see :func:`wiener_solve`.
+        WRONG distribution — and a distribution that is too NARROW, since the
+        directions left unresolved are the prior-dominated ones that should
+        have carried the most scatter — so ``require_convergence`` is on by
+        default here too.
     """
     _check_solve_arguments(block, observed, prior_std, "gcr_sample")
     return _conjugate_solve(

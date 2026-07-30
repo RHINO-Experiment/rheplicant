@@ -370,6 +370,74 @@ at import time rather than silently working until it does not.
   the m-mode expansion, so the returned coefficients would silently not be
   the spectrum of `forward()` (~18x off).
 
+### Changed: `NoiseWaveOperator` implements the full Eq. 1 (breaking)
+
+`NoiseWaveOperator` now runs Eq. 1 of the noise-wave GCR note through
+`rhino_cal_jax` (see D15 in `DESIGN.md`) instead of the `F -> 1` placeholder
+that summed one scalar `Gamma` straight into the sky-side temperature.
+`t_zero` is renamed `t_rx`; the scalar `gamma_re`/`gamma_im` pair is replaced
+by per-source `gamma_src_re`/`gamma_src_im` of shape `(n_source, n_freq)` plus
+`gamma_rec_re`/`gamma_rec_im` of shape `(n_freq,)` — reflection coefficients
+belong to *sources*, and the `receiver_input` selector discards source
+identity before this node sees the data, which the old single-`Gamma` shape
+could not represent. The operator now reads which source is connected from
+`coords.extra["receiver_input"]` and raises if it carries more than one source
+and that array is absent, rather than silently defaulting to the first.
+
+### Added: the noise-wave temperatures as a checked linear block (worked example)
+
+`examples/noise_wave_gcr.py`: the per-channel noise-wave temperatures
+(`t_unc`, `t_cos`, `t_sin`) declared as ONE `linear=True` latent, solved in
+closed form (`wiener_solve`, GCR note Eq. 30) and sampled exactly
+(`gcr_sample`, Eq. 31). A `--one-source` mode shows what switching buys: with
+one load the per-channel design matrix is deficient by a factor of three and
+two of every three directions fall back to the prior; with three genuinely
+different loads it is square and every direction is data-constrained.
+
+### Fixed: `wiener_solve`/`gcr_sample`'s convergence guard now certifies the ERROR, not the residual
+
+`require_convergence` bounded the relative *residual* of the CG solve, but
+what a caller needs bounded is the *solution* error, and jax's `cg` gives no
+other convergence signal to check. The two differ by the condition number of
+the normal operator `M = AᵀN⁻¹A + S⁻¹`, and κ is large by *design* in exactly
+the case these solvers exist for: whenever the data does not fully identify
+the block, `λ_min(M)` is exactly `1/prior_std²` and κ runs past 1e6. On a
+48-dimensional calibration block (two of every three directions
+prior-dominated, `cond(M) ~ 4e8`) CG stopped on a residual dominated by the
+one well-constrained direction, having left the prior-dominated directions at
+their starting value of zero — `gcr_sample` reported a posterior sigma of
+0.026 K where 81 K was correct, understating the width by a factor of ~3000,
+always toward false confidence, while the residual sat at ~1e-7 and
+`require_convergence`'s old default of `1e-3` never fired.
+
+Tightening `tol` alone would only have moved the threshold at which this same
+failure mode recurs — it does not detect anything, so a block conditioned a
+few orders of magnitude worse would again pass silently. `require_convergence`
+now bounds `κ · relative_residual` instead, with κ estimated by two power
+iterations on the operator the solver already applies (`λ_min` measured, not
+assumed worst-case, since the rigorous bound `λ_min ≥ 1/prior_std²` would flag
+every healthy full-rank block as ill-conditioned). A second, separate error
+covers the case where `κ · eps` already exceeds the target: no tolerance or
+iteration count helps there, only precision, and the natural response to the
+first message — tighten `tol`, raise `maxiter` — would burn iterations to
+arrive at an equally wrong answer.
+
+- **`condition_estimate(block, noise_std=..., prior_std=...)`** is new and
+  public: it reports κ, which is what a caller needs to choose `tol`
+  (`tol ≈ require_convergence / κ`) — matrix-free, like everything else here.
+- **`rheplicant.inference.conditioning`** is new: `tree_norm`,
+  `largest_eigenvalue`, and `extreme_eigenvalues`, matrix-free spectral
+  diagnostics over pytrees with no dependency on the block machinery above
+  them.
+- **`require_convergence` changed meaning**, from a bound on the relative
+  residual to a bound on the relative error. For a well-conditioned block
+  κ≈1 and the two coincide, so healthy solves are unaffected; a block the
+  data does not identify, which used to return silently wrong, now raises
+  and names the remedy (tighten `tol`, or strengthen the prior). `tol`'s
+  default is unchanged at `1e-6` — it is the guard that changed, not the
+  starting point it checks. `require_convergence=None` still disables the
+  guard entirely, and also skips its cost.
+
 ## 0.1.4 (2026-07-25)
 
 - Add project logos (a rhino dissolving into digital pixels — the

@@ -401,6 +401,61 @@ For a purely additive emission term the leaf form is mathematically identical
 to the old trunk form (sum commutativity), so this is a semantic fix with no
 numerical change to existing twins.
 
+### D15 — The noise-wave data model is an imported package, not a rheplicant module
+
+`NoiseWaveOperator` is an adapter over `rhino_cal_jax`, the JAX/Equinox
+implementation of the Noise-Wave GCR note's Eq. 1 that lives in the
+`RHINO-Experiment/rhino-cal` repository beside the numpy pipeline it was
+verified against — 256 parameter cells agreeing to `1e-13` relative. The
+dependency runs one way (`rhino_cal_jax` knows nothing about `State`,
+`Pipeline` or operators) for the same reason `limtod_jax` does: the calibration
+model has a life outside this framework, and a physics change should be
+reviewable next to the reference implementation it must keep agreeing with.
+
+The one thing the adapter adds is placement. Reflection coefficients belong to
+*sources*, and the `receiver_input` selector discards source identity before the
+`noise_wave` node sees the data. The operator therefore carries `Γ` per source
+and re-reads the switch array — which the previous placeholder, holding one
+scalar `Γ` for every sample, could not do.
+
+Why that placement is the whole game: count equations **per frequency channel**,
+since the noise-wave temperatures are functions of frequency and nothing ties
+channels together a priori. Each switch position contributes exactly one
+equation per channel, so the design matrix has rank `min(n_src, 3) × n_freq` —
+one load leaves it deficient threefold, three distinct loads make it square.
+That is why EDGES and REACH switch between four or five calibrators.
+
+The sharp edge worth recording, because the loose version of this claim is
+false: frequency structure in `Γ` **does** identify *scalar*,
+frequency-independent noise-wave temperatures from a single load. It is the
+per-channel case — the physical one — that requires switching. The bridge
+between the two regimes is exactly the note's basis matrices `U_unc`, `U_cos`,
+`U_sin` (Eqs. 13–15): they tie channels together and so lower the number of
+calibrators needed.
+
+**A decision worth flagging rather than burying in a code comment**: `Γ` is
+stored on the operator as two real leaves per source/receiver
+(`gamma_src_re`/`gamma_src_im`, `gamma_rec_re`/`gamma_rec_im`) rather than one
+complex leaf. The reason is `jax.jacfwd`:
+`rheplicant.inference.uncertainty.fisher_information` flattens the parameter
+pytree and explicitly rejects any complex leaf before differentiating,
+because a real-valued prediction makes the map R-linear but not C-linear, so
+the Jacobian is only defined over the real degrees of freedom — confirmed by
+reading `_flat_forward` and reproducing the raise on a toy complex parameter.
+That is in tension with D14's whole point: D14 exists precisely so a
+re-parameterization like "split a complex latent into real and imaginary
+parts" is a `Bind` in the inference layer (`ParameterSpace`), not a shape
+baked into the instrument description. The natural D14-respecting
+alternative is one complex `gamma` leaf plus
+`Bind(("gamma_re", "gamma_im"), into=..., fn=lambda re, im: re + 1j * im)`.
+The split is also **preemptive**: nothing in this codebase currently calls
+`fisher_information` on `NoiseWaveOperator`'s `Γ` — the only thing exercised
+against it is `jax.grad` (`tests/radio/test_noise_wave.py`), which handles
+complex leaves without issue. The cheapest time to undo the split, if D14's
+principle is judged to matter more here than the two-line jacfwd guard, is
+now, while the operator is still marked BREAKING (see CHANGELOG) — every
+release after this one adds a migration cost.
+
 ## Element taxonomy → module map
 
 `rheplicant.radio` mirrors the element taxonomy of a single-antenna global-signal
@@ -489,7 +544,7 @@ upstream.
 | BeamOperator | primary-beam convolution (harmonic alm rotation, ZYZ) | limTOD (TIBEC for full-Stokes); |
 | AtmosphericEmissionOperator | opacity x ambient temperature, beam-weighted airmass (receiver temp lives in noise-wave T_0 / post-gain noise); strict RT reserved at `atmosphere_field` (D13) | instrument configs |
 | ReceiverOperator | bandpass; reflection/impedance effects | instrument configs |
-| NoiseWaveOperator | full Eq. 1 with F factor; T/Γ per frequency | noise-wave GCR draft |
+| NoiseWaveOperator | full Eq. 1 with F factor; T/Γ per frequency — **delivered** via `rhino_cal_jax` (D15) | noise-wave GCR draft |
 | CWCalibrationOperator | tone shape/stability, switched reference loads | RHINO paper Sect. 4 |
 | GainOperator | g(t) with 1/f flicker fluctuations | limTOD, hydra-tod |
 | NoiseOperator | radiometer equation, 1/f covariance | limTOD, hydra-tod |
@@ -500,8 +555,9 @@ upstream.
 
 Plus (delivered): NumPyro bridge, Fisher/delta-method uncertainty
 propagation, Monte Carlo pushforward, neural surrogate operators, Adam
-calibrator. Still ahead: GCR sampling of noise-wave parameters (draft
-Eq. 28), optax integration for exotic optimizers, multi-experiment configs.
+calibrator, GCR sampling of noise-wave parameters (D15,
+`examples/noise_wave_gcr.py`). Still ahead: optax integration for exotic
+optimizers, multi-experiment configs.
 
 ## Known deferred issues
 

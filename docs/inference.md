@@ -329,6 +329,84 @@ declared starting point, which is right for exactly one sweep.
 
 ---
 
+## Conditioning: why a residual is not an accuracy
+
+CG only ever reports on itself: `‖M x̂ - b‖`, the **residual** — how well `x̂`
+satisfies the equation it was asked to solve. What a caller actually needs
+bounded is `‖x̂ - x*‖`, the **error** — how close `x̂` is to the truth. The two
+are related through the condition number of the normal operator
+`M = AᵀN⁻¹A + S⁻¹`:
+
+```text
+‖x̂ - x*‖ / ‖x*‖  ≤  κ(M) · ‖M x̂ - b‖ / ‖b‖
+```
+
+For a well-conditioned block (κ ≈ 1) the two coincide and a small residual is
+a small error — no further thought required. But κ is large **by design**
+exactly when these solvers matter most: whenever the data does not fully
+identify some direction in the block — one calibration load against three
+per-channel unknowns, a flagged channel, a short integration — the prior is
+the only thing holding that direction down, so `λ_min(M)` is exactly
+`1 / prior_std²` and κ runs past `1e6`. CG happily converges its residual on
+the well-constrained directions, which dominate the aggregate norm, while the
+prior-dominated directions sit at their starting value: a residual that
+*looks* converged is not, and a draw built from it comes back with far too
+little scatter. That is exactly what used to happen before this fix:
+`gcr_sample` on a badly-conditioned block reported a posterior σ three
+orders of magnitude too narrow, while its residual sat comfortably under the
+old, residual-only guard.
+
+`condition_estimate(block, noise_std=..., prior_std=...)` reports κ,
+matrix-free — the same two power iterations `wiener_solve`/`gcr_sample`
+already run internally to guard themselves, exposed so a caller can choose
+`tol` instead of guessing it:
+
+```python
+kappa = condition_estimate(block, noise_std=0.5, prior_std=100.0)
+target_error = 1e-3
+solved, residual = wiener_solve(block, observed, noise_std=0.5, prior_std=100.0,
+                                tol=target_error / kappa, maxiter=4000)
+```
+
+`require_convergence` (default `1e-3`) already bounds `κ · relative_residual`
+rather than the residual alone, so a block the data does not identify raises
+instead of returning a silently wrong answer, and names the remedy in the
+error. [`examples/noise_wave_gcr.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/noise_wave_gcr.py)
+shows both ends: its three-load block (κ ≈ 2.69e1) passes at the library's
+default `tol=1e-6`; its `--one-source` variant (κ ≈ 4.35e6 — one load
+against three per-channel unknowns, so two of every three directions are
+prior-dominated) raises at that same default, and needs `tol=1e-10,
+maxiter=4000` to converge — which then reports per-channel σ ≈ 71–106 K
+against the 100 K prior, i.e. the prior width recovered *honestly* where the
+data says nothing, rather than the ≈0.03 K a residual-only guard used to let
+through.
+
+:::{admonition} The guard is not free
+:class: note
+
+Estimating κ costs `2 · POWER_ITERATIONS` operator applications — two power
+iterations per end of the spectrum — on top of the CG solve itself, which
+roughly **doubles** a well-conditioned solve where CG converges in a handful
+of iterations. In a Gibbs loop, where the conditioning barely moves sweep to
+sweep, estimate κ once outside the loop and pass `require_convergence=None`
+inside, the same bargain `linear_operator`'s `check` argument offers for
+`check_linearity`:
+
+```python
+kappa = condition_estimate(block, noise_std=sigma, prior_std=s)  # once
+tol = target_error / kappa
+for _ in range(n_sweeps):
+    block = linear_operator(space, twin, state, "sky_alms",
+                            at=values, check=False)
+    values["sky_alms"], _ = gcr_sample(block, observed, noise_std=sigma,
+                                       prior_std=s, tol=tol, maxiter=4000,
+                                       require_convergence=None,
+                                       key=next(keys))
+```
+:::
+
+---
+
 ## One space, every engine
 
 ::::{grid} 1 2 2 2

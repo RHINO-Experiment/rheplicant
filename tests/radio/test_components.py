@@ -131,18 +131,22 @@ class TestEnvironmentComponents:
 
 class TestInstrumentComponents:
     def test_noise_wave_linear_in_parameters(self, data_state):
-        """The GCR-critical property: output is linear in (T_unc, T_cos, T_sin, T_0)."""
+        """The GCR-critical property: output is linear in (T_unc, T_cos, T_sin, T_rx)."""
+        assert data_state.coords.freq.shape[0] == N_FREQ
 
-        def build(t_unc, t_cos, t_sin, t_zero):
+        def build(t_unc, t_cos, t_sin, t_rx):
             return NoiseWaveOperator(
                 t_unc=jnp.array(t_unc),
                 t_cos=jnp.array(t_cos),
                 t_sin=jnp.array(t_sin),
-                t_zero=jnp.array(t_zero),
-                gamma_re=jnp.array(0.1),
-                gamma_im=jnp.array(0.05),
+                t_rx=jnp.array(t_rx),
+                gamma_src_re=jnp.full((1, N_FREQ), 0.1),
+                gamma_src_im=jnp.full((1, N_FREQ), 0.05),
+                gamma_rec_re=jnp.zeros(N_FREQ),
+                gamma_rec_im=jnp.zeros(N_FREQ),
             )
 
+        # One source, so no coords.extra["receiver_input"] switch array is needed.
         base = build(0.0, 0.0, 0.0, 0.0)(data_state).data
         # doubling each T doubles its (isolated) contribution
         for i, one in enumerate([(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)]):
@@ -151,12 +155,23 @@ class TestInstrumentComponents:
             assert jnp.allclose(d2, 2.0 * d1), f"nonlinear in T component {i}"
 
     def test_noise_wave_reflection_loss(self, data_state):
+        """|Gamma_src|^2 = 0.25 with a matched receiver (Gamma_rec = 0).
+
+        Gamma_rec = 0 gives the reflection factor F = 1 exactly (draft Eq. 3),
+        which is the placeholder's old F -> 1 limit — so the expected 7.5
+        survives as a special case of the real model rather than an assumption
+        it makes.
+        """
         op = NoiseWaveOperator(
             t_unc=jnp.array(0.0), t_cos=jnp.array(0.0), t_sin=jnp.array(0.0),
-            t_zero=jnp.array(0.0), gamma_re=jnp.array(0.3), gamma_im=jnp.array(0.4),
+            t_rx=jnp.array(0.0),
+            gamma_src_re=jnp.full((1, N_FREQ), 0.3),
+            gamma_src_im=jnp.full((1, N_FREQ), 0.4),
+            gamma_rec_re=jnp.zeros(N_FREQ),
+            gamma_rec_im=jnp.zeros(N_FREQ),
         )
         out = op(data_state)
-        assert jnp.allclose(out.data, 10.0 * (1 - 0.25))  # |Gamma|^2 = 0.25
+        assert jnp.allclose(out.data, 10.0 * (1 - 0.25))  # |Gamma_src|^2 = 0.25
 
     def test_cw_tone_hits_nearest_channel(self, data_state):
         freq = data_state.coords.freq  # linspace(60e6, 85e6, 4)

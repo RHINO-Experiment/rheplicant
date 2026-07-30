@@ -27,6 +27,7 @@ from rheplicant.inference import (
     Latent,
     ParameterSpace,
     check_linearity,
+    condition_estimate,
     gcr_sample,
     linear_operator,
     wiener_solve,
@@ -829,3 +830,208 @@ class TestPriorMean:
         mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
                                prior_std=1.0)
         assert jnp.allclose(mean, 0.0, atol=1e-6)
+
+
+class OneLoadOperator(AbstractOperator):
+    """Three unknowns, of which the data sees only ONE combination.
+
+    The geometry of a single calibration load against ``(T_unc, T_cos,
+    T_sin)``: one direction in ℝ³ is pinned by the data and the other two are
+    left entirely to the prior. Test double, not physics — it exists to put
+    the normal operator ``AᵀN⁻¹A + S⁻¹`` in the deliberately near-singular
+    regime that these solvers are advertised to handle.
+    """
+
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+
+    coeffs: jax.Array
+    direction: jax.Array
+
+    def __call__(self, state):
+        n_time = state.coords.time.shape[0]
+        n_freq = state.coords.freq.shape[0]
+        return state.with_data(
+            jnp.full((n_time, n_freq), jnp.sum(self.direction * self.coeffs))
+        )
+
+
+# The one combination the data constrains, and one it is blind to.
+SEEN = jnp.array([0.6, 0.8, 0.0])
+BLIND = jnp.array([-0.8, 0.6, 0.0])
+LOAD_NOISE, LOAD_PRIOR = 0.1, 100.0
+
+
+class TestUnderDeterminedBlocks:
+    """A block the data does not fully identify — the case the prior is for.
+
+    ``AᵀN⁻¹A`` is rank one here, so ``λ_min(M)`` is exactly ``1/prior_std²``
+    while ``λ_max(M) ≈ ‖AᵀN⁻¹A‖``: the normal operator's condition number is
+    ~3e7 BY DESIGN, not by accident. That matters because CG's stopping rule
+    and the ``require_convergence`` guard both measure a relative RESIDUAL,
+    and residual and error are related by ``rel_err ≤ κ · rel_residual``. At
+    κ=3e7 a residual of 1e-6 certifies nothing whatsoever.
+
+    The failure this pins is silent: the returned draw has a tiny residual, no
+    warning, and posterior scatter in the blind directions that is orders of
+    magnitude too small — a confidently under-reported uncertainty, which is
+    the worst thing a sampler can hand back.
+    """
+
+    @pytest.fixture
+    def one_load_block(self, template_state):
+        pipeline = Pipeline(
+            OneLoadOperator(coeffs=jnp.zeros(3), direction=SEEN), names=("load",)
+        )
+        space = ParameterSpace.direct(
+            "coeffs", init=jnp.array([250.0, 5.0, -3.0]),
+            into=lambda p: p["load"].coeffs, linear=True,
+        )
+        return linear_operator(space, pipeline, template_state)
+
+    @pytest.fixture
+    def one_load_observed(self, one_load_block):
+        truth = jnp.array([250.0, 5.0, -3.0])
+        return one_load_block.offset + one_load_block.forward(truth)
+
+    def test_the_default_tolerance_is_refused_rather_than_trusted(
+        self, one_load_block, one_load_observed
+    ):
+        """The reported bug. CG stops at a relative residual of ~1e-7 with the
+        blind directions still unresolved; the guard has to notice that a
+        residual that small means nothing when κ is this large."""
+        with pytest.raises(RuntimeError, match="condition number"):
+            gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
+                       prior_std=LOAD_PRIOR, key=jax.random.key(0))
+
+    def test_the_mean_is_refused_once_the_prior_has_something_to_say(
+        self, one_load_block, one_load_observed
+    ):
+        """Not a sampling-only fault — but it takes a nonzero prior mean to show.
+
+        With the default zero-centred prior the right-hand side has NO
+        component along the blind directions (``AᵀN⁻¹(d-offset)`` lies in the
+        row space, and ``S⁻¹·0`` vanishes), so the answer there is exactly
+        zero and CG's untouched zero is exactly right. Give the prior a centre
+        — a noise-wave temperature near 250 K, the case ``prior_mean`` exists
+        for — and the blind directions must come back at 250; the unguarded
+        solve returns ~1e-5 instead.
+        """
+        with pytest.raises(RuntimeError, match="condition number"):
+            wiener_solve(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
+                         prior_std=LOAD_PRIOR, prior_mean=250.0)
+
+    def test_the_zero_centred_mean_is_not_refused(
+        self, one_load_block, one_load_observed
+    ):
+        """The other half of that: κ being large is not itself a failure.
+
+        The guard bounds the error by ``κ · residual``, and here the residual
+        is exactly zero because there is nothing in the blind directions to
+        resolve. A guard that fired on κ alone would reject this correct
+        answer.
+        """
+        mean, _ = wiener_solve(one_load_block, one_load_observed,
+                               noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR)
+        assert float(mean @ BLIND) == pytest.approx(0.0, abs=1e-3)
+
+    def test_float32_is_refused_however_tight_the_tolerance(
+        self, one_load_block, one_load_observed
+    ):
+        """κ·eps ≈ 4 at single precision, so NO tolerance can make this solve
+        accurate. Saying so is the point: the honest answer is a refusal, not
+        four thousand iterations that end up equally wrong."""
+        if jax.config.read("jax_enable_x64"):
+            pytest.skip("this is the single-precision floor")
+        with pytest.raises(RuntimeError, match="precision|condition number"):
+            gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
+                       prior_std=LOAD_PRIOR, key=jax.random.key(0),
+                       tol=1e-12, maxiter=5000)
+
+    def test_a_well_conditioned_block_is_not_refused(self, twin, template_state):
+        """The guard must not fire on healthy solves.
+
+        A bound that assumed the worst about ``λ_min`` (all it is entitled to
+        assume without measuring is ``λ_min ≥ 1/prior_std²``) would report
+        κ~5e7 for THIS block, whose true κ is ~1, and would reject every solve
+        in the suite. The conditioning has to be measured, not bounded.
+        """
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        block = linear_operator(
+            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
+                                  into=lambda p: p["gain"].gain, linear=True),
+            wide, template_state,
+        )
+        observed = block.offset + block.forward(jnp.full((n_time,), GAIN))
+        drawn, _ = gcr_sample(block, observed, noise_std=1.0, prior_std=5.0,
+                              key=jax.random.key(0))
+        assert jnp.all(jnp.isfinite(drawn))
+
+    def test_the_condition_estimate_matches_a_dense_eigenvalue_computation(
+        self, one_load_block
+    ):
+        """The number the guard turns on, checked against LAPACK.
+
+        Also the number a caller needs to pick a tolerance, which is why it is
+        public rather than buried in the guard.
+        """
+        columns = [one_load_block.forward(jnp.zeros(3).at[i].set(1.0)) for i in range(3)]
+        A = jnp.stack([jnp.ravel(c) for c in columns], axis=1)
+        dense = A.T @ A / LOAD_NOISE**2 + jnp.eye(3) / LOAD_PRIOR**2
+        expected = jnp.linalg.cond(dense)
+
+        estimated = condition_estimate(one_load_block, noise_std=LOAD_NOISE,
+                                       prior_std=LOAD_PRIOR)
+        assert float(estimated) == pytest.approx(float(expected), rel=0.1)
+
+    def test_the_condition_estimate_is_near_one_for_a_healthy_block(
+        self, twin, template_state
+    ):
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        block = linear_operator(
+            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
+                                  into=lambda p: p["gain"].gain, linear=True),
+            wide, template_state,
+        )
+        assert float(condition_estimate(block, noise_std=1.0, prior_std=5.0)) < 10.0
+
+    def test_x64_subprocess_recovers_the_prior_in_the_blind_directions(self):
+        """The quantitative claim, at the precision that can support it.
+
+        Along a direction the data does not constrain the posterior IS the
+        prior, so the scatter of independent draws must come back at
+        ``prior_std`` — not at the ~0.03 the unguarded solve reported. Run in a
+        fresh interpreter because the suite runs float32 and ``jax_enable_x64``
+        is process-global.
+        """
+        import os
+        import subprocess
+        import sys
+
+        script = """
+import jax, jax.numpy as jnp
+assert jax.config.read("jax_enable_x64")
+from rheplicant.inference.linear import LinearBlock, gcr_sample
+
+n_row = 32
+seen = jnp.array([0.6, 0.8, 0.0])
+blind = jnp.array([-0.8, 0.6, 0.0])
+forward = lambda x: jnp.full((n_row,), jnp.sum(seen * x))
+block = LinearBlock("coeffs", (3,), jnp.float64, jnp.zeros(n_row), forward,
+                    lambda y: jax.vjp(forward, jnp.zeros(3))[1](y)[0])
+observed = block.forward(jnp.array([250.0, 5.0, -3.0]))
+
+keys = jax.random.split(jax.random.key(0), 600)
+draws = jax.vmap(lambda k: gcr_sample(
+    block, observed, noise_std=0.1, prior_std=100.0, key=k,
+    tol=1e-13, maxiter=5000)[0])(keys)
+
+scatter = float(jnp.std(draws @ blind))
+print("blind-direction scatter:", scatter)
+assert 80.0 < scatter < 120.0, scatter
+"""
+        env = {**os.environ, "JAX_ENABLE_X64": "1"}
+        done = subprocess.run([sys.executable, "-c", script], env=env,
+                              capture_output=True, text=True)
+        assert done.returncode == 0, done.stdout + done.stderr

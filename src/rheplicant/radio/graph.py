@@ -77,7 +77,12 @@ RADIO_GRAPH = register_graph(
             ),
             "atmosphere": NodeSpec(_S, "beam-averaged atmospheric emission"),
             "t_ant_sum": NodeSpec(_J, "antenna-temperature assembly"),
-            "cal_loads": NodeSpec(_S, "switched calibration loads"),
+            "cal_loads": NodeSpec(
+                _S,
+                "switched calibration loads (single instance only — no "
+                "many=True; multi-load switching bypasses assemble() and "
+                "sets coords.extra directly, see CalLoadOperator)",
+            ),
             "receiver_input": NodeSpec(
                 "selector", "antenna/load switch (cycle in coords.extra)"
             ),
