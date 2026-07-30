@@ -45,6 +45,15 @@ code):
 Plus a mermaid diagram of the assembled path showing all three structures at
 once, and the three unguarded joins kept as call-outs where a reader meets them.
 
+The diagram labels each box with what its operator *does*, and does **not**
+label the edges: a cascade is a run of arrows, while a sum and a switch are
+properties of the node that collects them, so writing all three as edge labels
+implied a relationship between two boxes that does not exist. It read as though
+`beam_spill` were a contribution added to the sky rather than a transform of it
+— which it is not, and a call-out now says why (a mixture whose weights add to
+one, tested by the isothermal invariant, versus the atmosphere's independent
+contribution).
+
 ### Changed: the horizon physics moved to limTOD, where it belongs
 
 `horizon_truncated_beam` and `DriftScanProjector.horizon_fraction()` were
