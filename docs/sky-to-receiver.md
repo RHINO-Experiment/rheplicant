@@ -48,28 +48,29 @@ answer when you get it wrong. They are called out as you reach them.
 
 ## The path, as the graph builds it
 
-Six operators, and one call. This is where
-[the three structures](index.md#a-twin-is-operators-plus-three-structures) all
-appear at once — cascade, sum and switch — so it is worth seeing them together:
+Six operators, and one call. All three composition structures appear here at
+once, and the picture shows each of them differently because they *are*
+different kinds of thing — a **cascade** is a run of arrows, a **sum** and a
+**switch** are properties of the node that collects them:
 
 ```{mermaid}
 flowchart LR
-  sky["SkySourceOperator<br/>observed_astro_sky"]
-  spill["BeamSpillOperator<br/>beam_spill"]
-  atm["AtmosphericEmissionOperator<br/>atmosphere"]
+  sky["SkySourceOperator<br/>the beam-convolved sky<br/>observed_astro_sky"]
+  spill["BeamSpillOperator<br/>mixes ground into it<br/>beam_spill"]
+  atm["AtmosphericEmissionOperator<br/>its own emission<br/>atmosphere"]
   tsum(("+"))
-  loss["AntennaLossOperator<br/>antenna_loss"]
+  loss["AntennaLossOperator<br/>attenuates, and emits<br/>antenna_loss"]
   sw(("sw"))
-  amb["CalLoadOperator<br/>cal_loads"]
-  hot["CalLoadOperator<br/>cal_loads_2"]
-  nw["NoiseWaveOperator<br/>noise_wave"]
+  amb["CalLoadOperator<br/>ambient load, 300 K<br/>cal_loads"]
+  hot["CalLoadOperator<br/>hot load, 400 K<br/>cal_loads_2"]
+  nw["NoiseWaveOperator<br/>Eq. 1<br/>noise_wave"]
   out["T_sys"]
-  sky -- cascade --> spill
+  sky --> spill
   spill --> tsum
-  atm -- sum --> tsum
+  atm --> tsum
   tsum --> loss
   loss --> sw
-  amb -- switch --> sw
+  amb --> sw
   hot --> sw
   sw --> nw
   nw --> out
@@ -79,10 +80,34 @@ flowchart LR
   class tsum,sw,out wire;
 ```
 
-`beam_spill` **cascades** after the sky; `atmosphere` **sums** with it at
-`t_ant_sum`; `antenna_loss` is the trunk stage after that sum; the two loads are
-sibling **switch** positions that *replace* the antenna. Not one line of the
-`assemble()` call says so — the
+Read it structure by structure:
+
+- **cascade** — `sky → beam_spill`, and again `t_ant_sum → antenna_loss →
+  receiver_input`. Each stage transforms what the last produced.
+- **sum** at the `(+)`: the sky branch and the atmosphere are *independent
+  contributions*, and they add.
+- **switch** at the `(sw)`: the antenna and the two loads are *alternatives*.
+  One is connected per sample; the loads **replace** the antenna rather than
+  adding to it.
+
+:::{admonition} Why the spill cascades and the atmosphere sums
+:class: tip
+`BeamSpillOperator` looks like it should be a sum — sky *plus* ground — and it
+is not. It computes a **mixture**,
+$f_\mathrm{sky} T_\mathrm{sky} + (1 - f_\mathrm{sky}) T_\mathrm{ground}$,
+whose two weights add to one by construction. The test is the isothermal one: a
+sky and a ground at the same $T$ must give $T$, and addition cannot do that
+($T + T = 2T$). So the spill *transforms* the sky — one input, one output, a
+`transform` node — while `AtmosphericEmissionOperator` contributes something
+independent that nothing constrains against the sky, and is a `source` leaf into
+the junction.
+
+The mixture could have been split into a scaling and a separate ground leaf.
+That is exactly what it must not be: two objects holding two numbers that have
+to satisfy $f + (1-f) = 1$, with nothing enforcing it. See D17.
+:::
+
+Not one line of the `assemble()` call says any of this — the
 [canonical path](signal-path.md#rhinos-template) does.
 
 ---
