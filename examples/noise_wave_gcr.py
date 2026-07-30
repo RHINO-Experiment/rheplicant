@@ -32,6 +32,7 @@ from rheplicant.inference import (  # noqa: E402
     Latent,
     ParameterSpace,
     check_linearity,
+    condition_estimate,
     gcr_sample,
     linear_operator,
     wiener_solve,
@@ -42,18 +43,22 @@ N_TIME, N_FREQ = 96, 16
 T_RX, T_SRC, NOISE, PRIOR = 290.0, 300.0, 0.5, 100.0
 
 # --one-source deliberately makes the per-channel normal operator (AtN^-1A +
-# S^-1) severely ill-conditioned (2 of 3 directions carry no data at all, so
-# its condition number runs to ~1e7). jax's cg default tol=1e-6 stops there
-# LONG before the near-null directions are resolved: the aggregate relative
-# residual is dominated by the one well-constrained direction and looks
-# converged (~1e-7, comfortably under require_convergence's 1e-3 guard) while
-# the solution along the other two is essentially arbitrary. Concretely: at
-# the default tol, gcr_sample's reported posterior sigma for --one-source came
-# out ~0.03 K (0.0% of the prior) instead of the ~75 K (75% of the prior) a
-# tighter solve gives and the math (S dominates where A contributes nothing)
-# demands. Tightening tol here is what makes this script's own numbers
-# trustworthy for the ill-conditioned run; see
-# rheplicant/inference/linear.py for the underlying convergence-check gap.
+# S^-1) severely ill-conditioned: 2 of 3 directions carry no data at all, and
+# condition_estimate() below reports kappa ~ 4e6 for this run (kappa ~ 27 for
+# the default, well-conditioned three-load run). wiener_solve/gcr_sample's
+# guard (require_convergence, default 1e-3) bounds kappa * relative_residual,
+# not the residual alone -- because a residual that LOOKS converged (CG
+# settles on the one well-constrained direction, which dominates the
+# aggregate residual, while the other two sit unresolved at their starting
+# value) is not evidence the solution is right. At the library's own default
+# tol=1e-6, kappa * residual is order-unity here, nowhere near 1e-3, so the
+# guard correctly RAISES rather than silently handing back the badly-wrong
+# posterior this script used to print for --one-source (~0.03 K reported
+# instead of the ~75-100 K the physics demands). Tightening tol here -- to
+# roughly require_convergence / kappa -- is what makes --one-source's numbers
+# trustworthy without disabling the guard; see condition_estimate()'s
+# docstring in rheplicant/inference/linear.py for how to choose it for a new
+# block rather than guessing.
 CG_TOL, CG_MAXITER = 1e-10, 4000
 
 parser = argparse.ArgumentParser()
@@ -135,6 +140,10 @@ errors = check_linearity(space, start, state)
 print(f"linearity check: worst relative departure {max(errors.values()):.1e}")
 
 block = linear_operator(space, start, state)
+kappa = condition_estimate(block, noise_std=NOISE, prior_std=PRIOR)
+print(f"condition_estimate: kappa = {float(kappa):.2e} "
+      f"(what require_convergence's guard multiplies the residual by)")
+
 solved, residual = wiener_solve(
     block, observed, noise_std=NOISE, prior_std=PRIOR, tol=CG_TOL, maxiter=CG_MAXITER
 )
