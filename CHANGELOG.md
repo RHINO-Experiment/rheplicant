@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Changed: the horizon physics moved to limTOD, where it belongs
+
+`horizon_truncated_beam` and `DriftScanProjector.horizon_fraction()` were
+implemented here. They should not have been: how a beam weights the sky, where
+the horizon falls in it and what share of its solid angle survives are limTOD's
+subject — exactly as the noise-wave data model is `rhino_cal_jax`'s (D15).
+
+Now in **limTOD 1.9** (`limtod_jax.driftscan`): `horizon_partition_weights`,
+`horizon_truncated_beam`, `horizon_beam_fraction`, with 25 tests including the
+painted-ground closure that decides the conventions. `horizon_weights` is
+unchanged — its masking semantics were never wrong; the partition is a
+different object and now says so.
+
+What stays here is **placement**. `BeamSpillOperator` consumes `f_sky` and puts
+it at the `beam_spill` node; it does not compute it.
+`rheplicant.radio.beams.horizon_truncated_beam` and
+`DriftScanProjector.horizon_fraction()` are pass-throughs whose only added value
+is inferring `nside` from maps the caller already has, and both feature-gate on
+the upstream symbol so an outdated install is named at the boundary rather than
+raising `AttributeError` midway. The `limtod` extra is floored at **1.9**.
+
+The tests moved with the physics: this side no longer re-asserts the partition,
+the half-counted horizon ring or the zenith-only exactness. Duplicating them
+would be two copies of a moving target. What is tested here is the seam. See
+D20.
+
 ### Changed: the graph knows how switches compose, and a fixed mask is a constant
 
 Two claims in the previous entry were wrong, and both were wrong in the same
