@@ -71,10 +71,13 @@ input state, draw randomness only via `state.next_key()` (returning the
 advanced state), and validate structure only (shapes/dtypes — value checks
 would break under jit).
 
-## 3. Composition
+## 3. Composition: the three structures
 
-Three combinators mirror how physics composes. All three are themselves
-operators, so they nest arbitrarily.
+Operators are one ingredient; composing them is the other, and there are
+exactly **three** structures — cascade, sum, switch. Each is itself an
+operator, so they nest arbitrarily, and each corresponds to one node kind in a
+[canonical signal path](signal-path.md): a chain of `transform` nodes, a
+`junction`, a `selector`. Nothing else composes anything.
 
 **`Pipeline` — sequential effects:**
 
@@ -112,14 +115,25 @@ sky = SumOperator(
 **`SelectOperator` — switched paths.** One branch per time sample, chosen by
 an integer cycle in `coords.extra` (observation configuration, not a model
 parameter) — how switched calibration loads replace the antenna signal.
+Alternatives *replace*, they do not add; that is the whole difference from
+`SumOperator`, and it is why the two are different node kinds rather than a
+flag.
 
 ## 4. Graph assembly
 
 Explicit composition is always available — but composition is *implicit in
-the signal path*. The canonical single-antenna graph
-(`rheplicant.radio.RADIO_GRAPH`, 32 nodes) knows how every element connects, so
-you provide a **set** of operators and `assemble` compiles the sub-path they
-induce:
+the signal path*. A canonical graph is a template of **operator slots plus the
+structure joining them**: `source` nodes create data, `transform` nodes
+cascade, `junction` nodes sum, `selector` nodes switch. You provide a **set** of
+operators and `assemble` compiles the sub-path they induce, folding it into
+exactly the three combinators of §3.
+
+The default template, `rheplicant.radio.RADIO_GRAPH` (32 nodes), is **RHINO's**
+structure — a single-antenna, switched-load, drift-scanning horn. It is not the
+framework: `SignalGraph`/`register_graph` are public and domain-agnostic, and
+another instrument is another template. See
+[the canonical signal path](signal-path.md) for the node kinds, the two rules
+that follow from them, and the custom-graph sketch.
 
 ```python
 from rheplicant.radio import assemble, IonosphereOperator, BeamOperator
