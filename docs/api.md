@@ -171,6 +171,9 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
 ```{eval-rst}
 .. automodule:: rheplicant.inference.linear
    :members:
+
+.. automodule:: rheplicant.inference.conditioning
+   :members:
 ```
 
 ```{eval-rst}
