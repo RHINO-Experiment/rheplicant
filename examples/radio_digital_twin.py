@@ -65,8 +65,11 @@ twin = assemble(
                          t_ground=jnp.array(300.0)),
     AtmosphericEmissionOperator(t_atm=jnp.array(150.0)),       # t_ant_sum branch
     NoiseWaveOperator(t_unc=jnp.array(1.0), t_cos=jnp.array(0.5),
-                      t_sin=jnp.array(0.2), t_zero=jnp.array(2.0),
-                      gamma_re=jnp.array(0.05), gamma_im=jnp.array(0.02)),
+                      t_sin=jnp.array(0.2), t_rx=jnp.array(2.0),
+                      gamma_src_re=jnp.full((1, N_FREQ), 0.05),
+                      gamma_src_im=jnp.full((1, N_FREQ), 0.02),
+                      gamma_rec_re=jnp.zeros(N_FREQ),
+                      gamma_rec_im=jnp.zeros(N_FREQ)),
     CWCalibrationOperator(amplitude=jnp.array(500.0), tone_freq=80e6),
     ReceiverOperator(bandpass=jnp.ones(N_FREQ)),
     GainOperator(gain=jnp.array(1.1)),                         # the "true" gain
