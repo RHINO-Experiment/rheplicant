@@ -361,20 +361,47 @@ class TestAssembly:
         assert isinstance(selector.branches[0], SkySourceOperator)
         assert isinstance(selector.branches[1], CalLoadOperator)
 
-    def test_a_second_cal_load_is_refused_by_assemble(self, sky_maps, freq):
-        """The documented ``cal_loads`` limit: no ``many=True``, so the
-        three-load configuration an identifiable per-channel fit needs cannot be
-        expressed through ``assemble()``. ``TestCalibrationClosure`` builds it
-        with ``SelectOperator`` directly, which is the documented workaround."""
-        from rheplicant import AssemblyError
+    def test_each_extra_cal_load_becomes_its_own_switch_position(
+        self, sky_maps, freq
+    ):
+        """``cal_loads`` is ``many=True`` and feeds only the selector, so its
+        instances fan out into sibling SELECTOR branches rather than being
+        summed. Three sources -- the minimum for an identifiable per-channel
+        noise-wave fit -- therefore come straight out of ``assemble()``, in the
+        order they were provided."""
+        g_src, g_rec = make_gammas(freq)
+        three = jnp.stack([g_src[0], g_src[1], g_src[1] * 0.5])
+        twin = assemble(
+            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+            CalLoadOperator(t_load=jnp.array(400.0)),
+            make_noise_wave(freq, gamma_src=three),
+        )
+        selector = twin["receiver_input"]
+        assert selector.names == ("observed_astro_sky", "cal_loads", "cal_loads_2")
+        assert [float(b.t_load) for b in selector.branches[1:]] == [300.0, 400.0]
 
-        with pytest.raises(AssemblyError, match="single instance"):
-            assemble(
-                SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
-                CalLoadOperator(t_load=jnp.array(300.0)),
-                CalLoadOperator(t_load=jnp.array(400.0)),
-                make_noise_wave(freq),
-            )
+    def test_the_loads_are_switched_between_not_added_together(
+        self, sky_maps, freq
+    ):
+        """The distinction ``many`` now makes: at a junction the instances would
+        sum to 700 K, at a selector each takes its own samples. Summing them
+        would be finite, correctly shaped, and a different instrument."""
+        g_src, g_rec = make_gammas(freq)
+        three = jnp.stack([g_src[0], g_src[1], g_src[1]])
+        switch = jnp.arange(N_TIME) % 3
+        twin = assemble(
+            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+            CalLoadOperator(t_load=jnp.array(400.0)),
+            make_noise_wave(freq, gamma_src=three, zero_temps=True),
+        )
+        out = twin(State(coords=make_coords(freq, switch))).data
+        c_src = rcj.couplings(three, g_rec).c_src
+        assert jnp.allclose(out[switch == 1], 300.0 * c_src[1][None, :],
+                            rtol=RTOL, atol=1e-3)
+        assert jnp.allclose(out[switch == 2], 400.0 * c_src[2][None, :],
+                            rtol=RTOL, atol=1e-3)
 
 
 class TestTheAntennaChain:
@@ -407,13 +434,14 @@ class TestTheAntennaChain:
     def test_a_hand_built_branch_must_reproduce_what_assemble_builds(
         self, sky_maps, freq
     ):
-        """Multi-load switching bypasses assemble(), which means hand-wiring the
-        antenna branch -- and a Pipeline of SOURCE operators REPLACES the data at
-        each stage rather than summing it, so a hand-built
-        ``Pipeline(sky, ground, atmosphere)`` silently keeps only the atmosphere.
-        Finite, correctly shaped, and missing the sky entirely. The graph's
-        t_ant_sum junction is what makes them add; this is the check that a
-        hand-wired branch actually agrees with it."""
+        """Hand-wiring is no longer forced on anyone -- ``cal_loads`` is
+        ``many=True`` and ``assemble()`` builds the multi-load selector -- but
+        anyone who does it still meets this: a Pipeline of SOURCE operators
+        REPLACES the data at each stage rather than summing it, so
+        ``Pipeline(sky, ground, atmosphere)`` silently keeps only the
+        atmosphere. Finite, correctly shaped, and missing the sky entirely. The
+        graph's t_ant_sum junction is what makes them add; this is the check
+        that a hand-wired branch actually agrees with it."""
         antenna_only = jnp.zeros(N_TIME, dtype=int)
         coords = make_coords(freq, antenna_only)
         sources = (
@@ -469,6 +497,7 @@ class TestCalibrationClosure:
     N_SOURCE = 3  # antenna + two loads -- the minimum for a per-channel fit
 
     def three_branch_twin(self, sky_maps, freq, t_nw):
+        """Straight out of ``assemble()`` -- no hand-wired selector."""
         g_ant = rcj.cable_gamma(
             rcj.termination_gamma("open", N_FREQ), freq, length=2.0, loss=0.92
         )
@@ -478,20 +507,15 @@ class TestCalibrationClosure:
         )
         g_src = jnp.stack([g_ant, g_ambient, g_short])
         g_rec = rcj.termination_gamma("resistive", N_FREQ, impedance=45.0)
-        return Pipeline(
-            SelectOperator(
-                SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
-                CalLoadOperator(t_load=jnp.array(300.0)),
-                CalLoadOperator(t_load=jnp.array(400.0)),
-                names=("antenna", "ambient", "short"),
-                switch_key="receiver_input",
-            ),
+        return assemble(
+            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+            CalLoadOperator(t_load=jnp.array(400.0)),
             NoiseWaveOperator(
                 t_unc=t_nw[0], t_cos=t_nw[1], t_sin=t_nw[2], t_rx=jnp.array(290.0),
                 gamma_src_re=g_src.real, gamma_src_im=g_src.imag,
                 gamma_rec_re=g_rec.real, gamma_rec_im=g_rec.imag,
             ),
-            names=("receiver_input", "noise_wave"),
         )
 
     def test_three_sources_make_the_per_channel_system_full_rank(

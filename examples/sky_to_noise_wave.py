@@ -40,13 +40,7 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 import rhino_cal_jax as rcj  # noqa: E402
 
-from rheplicant import (  # noqa: E402
-    Coordinates,
-    Pipeline,
-    SelectOperator,
-    State,
-    SumOperator,
-)
+from rheplicant import Coordinates, State  # noqa: E402
 from rheplicant.inference import (  # noqa: E402
     Bind,
     Latent,
@@ -65,6 +59,7 @@ from rheplicant.radio import (  # noqa: E402
     SkySourceOperator,
     assemble,
     cst_beam_maps,
+    horizon_truncated_beam,
 )
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
 from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
@@ -120,17 +115,18 @@ sky_maps = jnp.stack([
 # the beam map by hand instead leaves a percent-level bias, because the
 # band-limit truncates the denominator too — see docs/sky-engines.md.
 #
-# horizon_mask=True cuts the beam at the local horizon, so the output is the
-# average over the VISIBLE sky. The rest of the beam is looking at ground, and
-# f_sky — the above-horizon share of the beam's solid angle — is what says how
-# much. It has to be read off the beam BEFORE to_reference_frame() folds the
-# mask into the cached alms.
-local = DriftScanProjector.from_beam_maps(
+# The beam does not stop at the horizon; what is below it sees ground. For a
+# drift scan the pointing is FIXED, so the horizon is fixed too and the masked
+# beam is a constant — one elementwise multiply on the map, done once, and
+# f_sky (the surviving share of the solid angle) falls out of the same sum.
+# The projector's own horizon_mask=True would instead mask the alms on every
+# call, at 8.2x the cost of an unmasked evaluation, for the same answer.
+beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=EL_DEG, apod_deg=3.0)
+beam_maps = jnp.asarray(beam_maps)
+projector = DriftScanProjector.from_beam_maps(
     beam_maps, lat_deg=LAT_DEG, az_deg=AZ_DEG, el_deg=EL_DEG,
-    lmax=LMAX, normalize_beam=True, horizon_mask=True, apod_deg=3.0,
-)
-f_sky = local.horizon_fraction()
-projector = local.to_reference_frame(lst_ref_deg=0.0)   # Wigner rotation once
+    lmax=LMAX, normalize_beam=True,
+).to_reference_frame(lst_ref_deg=0.0)          # pay the Wigner rotation once
 
 lst_deg = 360.0 * jnp.arange(N_TIME) / N_TIME
 switch = jnp.arange(N_TIME) % 3                # 0 antenna, 1 ambient, 2 hot
@@ -146,8 +142,8 @@ print(f"      peak {peak_dbi.min():.2f}..{peak_dbi.max():.2f} dBi over "
       f"{float(freq[0]) / 1e6:.0f}-{float(freq[-1]) / 1e6:.0f} MHz, "
       f"{100 * below.min():.1f}-{100 * below.max():.1f}% of the response "
       "below the horizon")
-print(f"      f_sky = {float(f_sky.min()):.4f}..{float(f_sky.max()):.4f} "
-      "(above-horizon share of the beam; the rest sees ground)")
+print(f"      f_sky = {f_sky.min():.4f}..{f_sky.max():.4f} "
+      "(above-horizon share; the rest sees ground)")
 
 # A uniform sky is the one case whose beam average is known by definition.
 uniform = jnp.full((N_FREQ, N_PIX), 200.0)
@@ -194,24 +190,21 @@ def antenna_chain():
     )
 
 
-def antenna_branch():
-    """The same chain, hand-wired — what assemble() builds for it.
+def twin(t_nw):
+    """The whole instrument, from the canonical graph.
 
-    The split is a TRANSFORM on the astro branch, so it chains after the sky;
-    the atmosphere is a separate leaf that SUMS at t_ant_sum; the ohmic loss is
-    the trunk stage after that sum. Getting any of those three relationships
-    wrong is shape-legal, which is why the assertion below compares this against
-    assemble() rather than trusting it.
+    Nothing here says what connects to what: the graph does. The sky and the
+    atmosphere are leaves that SUM at t_ant_sum, beam_spill CHAINS after the
+    sky on the astro branch, antenna_loss is the trunk stage after the sum, and
+    receiver_input is a SELECTOR — so the two loads REPLACE the antenna rather
+    than adding to it, one switch position each, because cal_loads is many=True
+    and feeds only the selector.
     """
-    sky, spill, atmosphere, loss = antenna_chain()
-    return Pipeline(
-        SumOperator(
-            Pipeline(sky, spill, names=("sky", "beam_spill")),
-            atmosphere,
-            names=("astro", "atmosphere"),
-        ),
-        loss,
-        names=("t_ant_sum", "antenna_loss"),
+    return assemble(
+        *antenna_chain(),
+        CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
+        CalLoadOperator(t_load=jnp.array(T_HOT)),
+        receiver(t_nw, jnp.stack([gamma_ant, gamma_ambient, gamma_hot])),
     )
 
 
@@ -277,39 +270,11 @@ print(f"   c_s per source: antenna {float(coup.c_src[0].mean()):.3f}   "
       f"hot {float(coup.c_src[2].mean()):.3f}\n")
 
 # ======================================= 4. a real switching cycle ---------
-# Three sources: the antenna and two loads. assemble() cannot express this yet
-# (the cal_loads node has no many=True), so the selector is built directly —
-# the documented workaround, and the same operator assemble() would have made.
-def twin(t_nw):
-    return Pipeline(
-        SelectOperator(
-            antenna_branch(),
-            CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
-            CalLoadOperator(t_load=jnp.array(T_HOT)),
-            names=("antenna", "ambient", "hot"),
-            switch_key="receiver_input",
-        ),
-        receiver(t_nw, jnp.stack([gamma_ant, gamma_ambient, gamma_hot])),
-        names=("receiver_input", "noise_wave"),
-    )
-
-
+# Three sources: the antenna and two loads. `cal_loads` is many=True and feeds
+# only the selector, so each CalLoadOperator becomes its own switch position
+# rather than being summed with its sibling — assemble() expresses the whole
+# switching cycle, and twin() above is the entire wiring.
 state = State(coords=coords, meta={"telescope": "RHINO"})
-
-# The hand-built selector must reproduce what assemble() builds, on the samples
-# the two configurations share (source 0, the antenna). Cheap, and it is the
-# only thing standing between a hand-wired branch and a silent mis-assembly.
-shared = eqx.filter_jit(twin(TRUE_T))(
-    State(coords=coords.replace(extra={"lst_deg": lst_deg,
-                                       "receiver_input": jnp.zeros(N_TIME, int)}))
-).data
-antenna_only = eqx.filter_jit(two_branch)(
-    State(coords=coords.replace(extra={"lst_deg": lst_deg,
-                                       "receiver_input": jnp.zeros(N_TIME, int)}))
-).data
-assert jnp.allclose(shared, antenna_only, rtol=1e-12), (
-    "hand-built antenna branch disagrees with assemble()"
-)
 
 truth = eqx.filter_jit(twin(TRUE_T))(state).data
 observed = rcj.add_radiometer_noise(truth, jax.random.key(1),
@@ -368,15 +333,12 @@ for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
 # From the HEALPix sky map through the beam convolution, the ohmic loss, the
 # switch and Eq. 1 — one gradient, no finite differences anywhere.
 def total_power(maps, efficiency):
-    pipeline = twin(TRUE_T)
+    # Reach any parameter by its GRAPH NODE, wherever assemble() folded it.
     pipeline = eqx.tree_at(
-        lambda p: (p["receiver_input"].branches[0]["t_ant_sum"]["astro"]["sky"]
-                   .sky_model.maps),
-        pipeline, maps,
+        lambda t: t["observed_astro_sky"].sky_model.maps, twin(TRUE_T), maps
     )
     pipeline = eqx.tree_at(
-        lambda p: p["receiver_input"].branches[0]["antenna_loss"].efficiency,
-        pipeline, efficiency,
+        lambda t: t["antenna_loss"].efficiency, pipeline, efficiency
     )
     return jnp.sum(pipeline(state).data ** 2)
 

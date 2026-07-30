@@ -6,12 +6,13 @@ import jax.numpy as jnp
 import pytest
 
 import rheplicant.radio as radio
-from rheplicant import Pipeline, SumOperator
+from rheplicant import Pipeline, SelectOperator, SumOperator
 from rheplicant.core.graph import AssemblyError, At
 from rheplicant.radio import (
     RADIO_GRAPH,
     ADCOperator,
     BeamOperator,
+    CalLoadOperator,
     ForegroundOperator,
     GainOperator,
     GlobalSignalOperator,
@@ -293,3 +294,91 @@ class TestRendering:
         # opacity classes are styled INSIDE the svg (survives <img> embedding)
         assert "<style>" in svg and ".dim{opacity:.22}" in svg
         assert svg in asm.to_html()  # the page embeds the same figure
+
+
+class TestManyInstancesComposeLikeTheirConsumer:
+    """``many`` at a source folds as its CONSUMER folds: summed into a junction,
+    switched at a selector."""
+
+    def test_several_cal_loads_become_several_switch_positions(self, template_state):
+        switch = jnp.arange(8) % 3
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(100.0)),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+            CalLoadOperator(t_load=jnp.array(400.0)),
+        )
+        selector = twin["receiver_input"]
+        assert isinstance(selector, SelectOperator)
+        assert selector.names == ("uniform_sky", "cal_loads", "cal_loads_2")
+
+        out = twin(template_state.replace(
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
+        )).data
+        assert jnp.allclose(out[switch == 0], 100.0)
+        assert jnp.allclose(out[switch == 1], 300.0)
+        assert jnp.allclose(out[switch == 2], 400.0)
+
+    def test_the_loads_are_not_summed(self, template_state):
+        """Summing them would be the junction rule, and would give 700 K on
+        every load sample: finite, correctly shaped, a different instrument."""
+        switch = jnp.ones(8, dtype=int)
+        out = assemble(
+            SkyOperator(amplitude=jnp.array(100.0)),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+            CalLoadOperator(t_load=jnp.array(400.0)),
+        )(template_state.replace(
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
+        )).data
+        assert jnp.allclose(out, 300.0)
+        assert not jnp.allclose(out, 700.0)
+
+    def test_a_many_source_into_a_junction_still_sums(self, template_state):
+        """The unchanged path. ``foregrounds`` is ``many`` and feeds a junction,
+        so its instances add -- and keep folding as a nested SumOperator, which
+        is not cosmetic: SumOperator splits the PRNG key per branch, so a
+        flatter tree would be a different seeded run."""
+        twin = assemble(
+            ForegroundOperator(amplitude=jnp.array(10.0),
+                               spectral_index=jnp.array(-2.5),
+                               ref_freq=jnp.array(70e6)),
+            ForegroundOperator(amplitude=jnp.array(20.0),
+                               spectral_index=jnp.array(-2.5),
+                               ref_freq=jnp.array(70e6)),
+        )
+        assert isinstance(twin["foregrounds"], SumOperator)
+        out = twin(template_state).data
+        one = assemble(
+            ForegroundOperator(amplitude=jnp.array(30.0),
+                               spectral_index=jnp.array(-2.5),
+                               ref_freq=jnp.array(70e6))
+        )(template_state).data
+        assert jnp.allclose(out, one)
+
+    def test_a_selector_with_one_live_branch_is_not_a_switch_at_all(
+        self, template_state
+    ):
+        """The other half of the rule. A selector materializes only when it has
+        something to choose between; with one live upstream it is traversed as
+        identity, needs no switch array in coords, and leaves no SelectOperator
+        behind. That is what makes the load-free antenna chain cost nothing."""
+        twin = assemble(SkyOperator(amplitude=jnp.array(100.0)),
+                        GainOperator(gain=jnp.array(2.0)))
+        assert "receiver_input" in twin.skipped
+        is_sel = lambda x: isinstance(x, SelectOperator)  # noqa: E731
+        assert not any(map(is_sel, jax.tree.leaves(twin, is_leaf=is_sel)))
+        out = twin(template_state).data          # no coords.extra["receiver_input"]
+        assert jnp.allclose(out, 200.0)
+
+    def test_one_cal_load_still_gives_a_two_position_switch(self, template_state):
+        """And one load is a switch again -- the antenna and it."""
+        switch = jnp.arange(8) % 2
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(100.0)),
+            CalLoadOperator(t_load=jnp.array(300.0)),
+        )
+        assert twin["receiver_input"].names == ("uniform_sky", "cal_loads")
+        out = twin(template_state.replace(
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
+        )).data
+        assert jnp.allclose(out[switch == 0], 100.0)
+        assert jnp.allclose(out[switch == 1], 300.0)

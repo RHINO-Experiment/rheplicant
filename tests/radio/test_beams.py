@@ -13,7 +13,12 @@ import numpy as np
 import pytest
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.radio import cst_beam_maps, cst_frequency_table, read_cst_farfield
+from rheplicant.radio import (
+    cst_beam_maps,
+    cst_frequency_table,
+    horizon_truncated_beam,
+    read_cst_farfield,
+)
 
 hp = pytest.importorskip("healpy", reason="healpy comes with rheplicant[limtod]")
 pytest.importorskip("scipy")
@@ -243,3 +248,100 @@ class TestTheRhinoHorn:
             float((m * theta_hp).sum() / m.sum()) for m in maps
         ]
         assert widths[1] < widths[0], f"85 MHz should be narrower, got {widths}"
+
+
+class TestHorizonTruncation:
+    """The cheap horizon cut: one multiply on the map, done once."""
+
+    NSIDE = 16
+    LMAX = 47
+
+    def beam(self):
+        theta, _ = hp.pix2ang(self.NSIDE, np.arange(hp.nside2npix(self.NSIDE)))
+        return (np.exp(-0.5 * (theta / np.deg2rad(35.0)) ** 2) + 0.02)[None, :]
+
+    def test_it_agrees_with_the_projectors_own_masking(self):
+        """The same beam, two routes: truncate the MAP once, or let the
+        projector mask the ALMS on every call. They must describe the same
+        instrument -- the residual is only the alm->map->alm round trip the
+        masking path takes before it masks, which this one does not."""
+        jax = pytest.importorskip("jax")
+        if not jax.config.read("jax_enable_x64"):
+            pytest.skip("the s2fft transforms need x64 for a meaningful comparison")
+        import jax.numpy as jnp
+
+        from rheplicant import Coordinates
+        from rheplicant.radio.sky import DriftScanProjector
+
+        n_time = 12
+        coords = Coordinates(
+            time=jnp.arange(float(n_time)), freq=jnp.array([70e6]),
+            extra={"lst_deg": 360.0 * jnp.arange(n_time) / n_time},
+        )
+        sky = jnp.asarray(
+            200.0 + 40.0 * np.random.default_rng(0).normal(
+                size=hp.nside2npix(self.NSIDE)
+            )
+        )[None, :]
+
+        def project(maps, mask):
+            return DriftScanProjector.from_beam_maps(
+                jnp.asarray(maps), lat_deg=53.2, az_deg=0.0, el_deg=90.0,
+                lmax=self.LMAX, normalize_beam=True, horizon_mask=mask,
+            ).forward(sky, coords)
+
+        truncated, _ = horizon_truncated_beam(self.beam())
+        by_alm = project(self.beam(), True)
+        by_map = project(truncated, False)
+        worst = float(jnp.max(jnp.abs(by_alm - by_map)) / jnp.max(jnp.abs(by_alm)))
+        assert worst < 1e-3
+
+    def test_the_fraction_matches_the_projectors_own(self):
+        jax = pytest.importorskip("jax")
+        if not jax.config.read("jax_enable_x64"):
+            pytest.skip("the horizon mask needs x64")
+        import jax.numpy as jnp
+
+        from rheplicant.radio.sky import DriftScanProjector
+
+        _, fraction = horizon_truncated_beam(self.beam())
+        harmonic = DriftScanProjector.from_beam_maps(
+            jnp.asarray(self.beam()), lat_deg=53.2, az_deg=0.0, el_deg=90.0,
+            lmax=self.LMAX, normalize_beam=True,
+        ).horizon_fraction()
+        assert abs(float(fraction[0]) - float(harmonic[0])) < 1e-4
+
+    def test_an_isotropic_beam_splits_the_sphere_in_half(self):
+        ones = np.ones((1, hp.nside2npix(self.NSIDE)))
+        _, fraction = horizon_truncated_beam(ones)
+        assert abs(float(fraction[0]) - 0.5) < 1e-12
+
+    def test_apodization_tapers_the_maps_but_not_the_fraction(self):
+        """The fraction is a partition of the sphere; a tapered region is not
+        one. apod_deg belongs to the maps."""
+        sharp_maps, sharp_f = horizon_truncated_beam(self.beam(), apod_deg=0.0)
+        soft_maps, soft_f = horizon_truncated_beam(self.beam(), apod_deg=5.0)
+        assert np.allclose(sharp_f, soft_f)
+        assert not np.allclose(sharp_maps, soft_maps)
+
+    def test_it_zeroes_everything_below_the_horizon(self):
+        truncated, _ = horizon_truncated_beam(self.beam())
+        theta, _ = hp.pix2ang(self.NSIDE, np.arange(hp.nside2npix(self.NSIDE)))
+        assert np.all(truncated[0][theta > np.pi / 2] == 0.0)
+        assert np.any(truncated[0][theta < np.pi / 2] > 0.0)
+
+    def test_a_tilted_pointing_is_refused_rather_than_guessed(self):
+        """Away from zenith the beam-local and horizontal charts stop sharing a
+        pole, so a pure-elevation mask no longer applies unrotated. Refusing
+        beats a hand-derived rotation nobody checked."""
+        with pytest.raises(StateValidationError, match="zenith"):
+            horizon_truncated_beam(self.beam(), el_deg=45.0)
+
+    def test_an_invalid_map_length_is_refused(self):
+        with pytest.raises(StateValidationError, match="HEALPix"):
+            horizon_truncated_beam(np.ones((1, 100)))
+
+    def test_a_single_map_is_accepted(self):
+        maps, fraction = horizon_truncated_beam(self.beam()[0])
+        assert maps.shape == (1, hp.nside2npix(self.NSIDE))
+        assert fraction.shape == (1,)

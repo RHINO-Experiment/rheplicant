@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+### Changed: the graph knows how switches compose, and a fixed mask is a constant
+
+Two claims in the previous entry were wrong, and both were wrong in the same
+direction — treating a limitation as a fact about the physics.
+
+**`many` instances now compose the way their CONSUMER composes.** `many=True`
+at a source folded its instances into a `SumOperator`, always. That is right for
+a junction and wrong for a selector: a switch picks one source per sample, it
+does not add them up. So multi-load switching — three distinct sources, the
+minimum for an identifiable per-channel noise-wave fit — could not be expressed
+through `assemble()`, and the documented workaround was to hand-build the
+`SelectOperator`. That workaround is how a `Pipeline`-instead-of-`SumOperator`
+bug got into an example and survived until a gradient came back exactly zero.
+
+`cal_loads` is `many=True` now, and the whole switching cycle comes out of
+`assemble()`:
+
+```python
+twin = assemble(SkySourceOperator(...), BeamSpillOperator(...),
+                AtmosphericEmissionOperator(...), AntennaLossOperator(...),
+                CalLoadOperator(t_load=...), CalLoadOperator(t_load=...),
+                NoiseWaveOperator(...))
+twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads', 'cal_loads_2')
+```
+
+Six operators, four different composition relationships (sum, chain, trunk,
+switch), and not one line saying what connects to what. The other half of the
+rule already held and is now pinned: a selector with one live branch is
+traversed as identity — no switch array required, no `SelectOperator` left
+behind. A source feeding both a selector and a junction keeps the Sum (no
+single right answer; no shipped graph has one), and the fan-out is kept beside
+the fold state so every other path folds bit-for-bit as before — `SumOperator`
+splits the PRNG key per branch, so a flatter tree would be a different seeded
+run, not just a different shape. See D18.
+
+`Assembly.__getitem__` was fixed alongside: a branch spanning
+`observed_astro_sky → beam_spill` is labelled by its first node, so the lookup
+returned the *fold rooted at* the node instead of the operator *at* it —
+contradicting its own documented contract and making
+`eqx.tree_at(lambda a: a["observed_astro_sky"].sky_model.maps, ...)` fail on an
+attribute the caller could see in the source. Reaching any parameter by its
+graph node now works wherever the fold put it.
+
+**The horizon mask does not cost 8×; masking the alms per call does.**
+`DriftScanProjector(horizon_mask=True)` rotates into the horizontal frame,
+synthesizes, multiplies, re-analyzes three times and rotates back — on every
+call. Measured at nside 16 / lmax 47: **14.6 ms against 1.79 ms unmasked, 8.2×**
+(the previous entry called it 7× and treated it as the price of asking for the
+horizon).
+
+It is not. The horizon is static in the horizontal frame and a drift scan's
+pointing is fixed by definition, so the masked beam is a **constant**.
+`rheplicant.radio.beams.horizon_truncated_beam` truncates the beam MAP once,
+before analysis:
+
+```python
+beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
+```
+
+**1.04×** — free — and the same instrument to 2.8e-5, the residual being the
+alm→map→alm round trip the masking path takes *before* it masks. At a zenith
+pointing no rotation is needed at all, and that is provable rather than assumed:
+`horizon_weights` is a pure function of elevation, limTOD's horizontal chart
+puts the zenith at the pole and the beam-local chart the boresight, so at zenith
+they share a pole and a pure-elevation mask is invariant under the rotation that
+still separates them. Away from zenith the function refuses rather than
+hand-derive the rotation, and `horizon_mask=True` keeps its place for that case.
+It returns `f_sky` with the maps because they are the same sum. See D19.
+
+`examples/sky_to_noise_wave.py` uses both, and lost its entire hand-wired
+selector as a result.
+
 ### Added: RHINO's horn on the sky, feeding the noise-wave receiver
 
 The two halves were already there — limTOD says what the antenna sees, the

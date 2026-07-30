@@ -53,9 +53,12 @@ class NodeSpec:
             sample via ``coords.extra[<node_id>]``). Junctions and selectors
             have in-degree >= 2 and are never operator slots.
         doc: one-line description shown in renderings.
-        many: sources only — allow multiple instances (folded as sibling
-            Sum branches). For the sink-side ``filters``-style transform
-            chain use ``many`` on a transform: instances chain in call order.
+        many: sources only — allow multiple instances. They compose the way
+            their CONSUMER composes: sibling Sum branches into a junction,
+            sibling *selector* branches into a selector (one switch position
+            each, in the order they were provided). For the sink-side
+            ``filters``-style transform chain use ``many`` on a transform:
+            instances chain in call order.
         segment: grouping label for rendering (e.g. "forward", "processing").
         reserved: node exists in the physics but has no shipped operator yet
             (an equivalent-entry placeholder leaf).
@@ -320,10 +323,25 @@ def _find_named(op: AbstractOperator, name: str) -> AbstractOperator | None:
                 parts = current.stages if isinstance(current, Pipeline) else current.branches
                 for part_name, part in zip(current.names, parts, strict=True):
                     if part_name == name:
-                        return part
+                        return _descend_to_own_stage(part, name)
                     next_level.append(part)
         queue = next_level
     return None
+
+
+def _descend_to_own_stage(part: AbstractOperator, name: str) -> AbstractOperator:
+    """Resolve a name that labels a FOLD rooted at a node to the node itself.
+
+    A branch spanning ``sky -> spill`` is labelled by its first node, so a
+    sibling Sum names it ``sky`` while the Pipeline inside it also has a stage
+    named ``sky``. ``assembly["sky"]`` must be the operator AT that node, not
+    the fold that starts there — otherwise ``eqx.tree_at(lambda a: a["sky"].amp,
+    ...)`` reaches a Pipeline and fails on an attribute the caller can see in
+    the source. Descending while the match keeps re-naming itself resolves it.
+    """
+    while isinstance(part, Pipeline) and name in part.names:
+        part = part.stages[part.names.index(name)]
+    return part
 
 
 @dataclasses.dataclass
@@ -343,6 +361,19 @@ class _Branch:
     @property
     def label(self) -> str:
         return self.stages[0][0]
+
+
+def _feeds_only_selectors(graph: SignalGraph, node: str) -> bool:
+    """Does every consumer of ``node`` switch between its inputs rather than sum?
+
+    Decides how multiple instances at a ``many`` source fold. A node feeding
+    both a selector and a junction has no single answer, so it keeps the Sum —
+    the conservative reading, and no shipped graph has such a node.
+    """
+    consumers = graph._out[node]
+    return bool(consumers) and all(
+        graph.nodes[c].kind == "selector" for c in consumers
+    )
 
 
 def _dedup(names: list[str]) -> list[str]:
@@ -465,11 +496,27 @@ def assemble(
     region_entry: dict[int, _Branch | None] = {}
 
     exprs: dict[str, _Branch | None] = {}
+    # A `many` source whose consumers are all selectors contributes one branch
+    # PER INSTANCE rather than one summed branch — a switch picks a source per
+    # sample, it does not add them up. Kept beside `exprs` rather than widening
+    # it so that every other path folds bit-for-bit as before (SumOperator's
+    # per-branch PRNG splitting makes a flatter tree a different run, not just
+    # a different shape).
+    fan: dict[str, list[_Branch]] = {}
     skipped: list[str] = []
+
+    def upstream_of(nid: str) -> list[_Branch]:
+        out: list[_Branch] = []
+        for parent in graph._in[nid]:
+            if parent in fan:
+                out.extend(fan[parent])
+            elif exprs[parent] is not None:
+                out.append(exprs[parent])
+        return out
     for nid in graph._topo:
         spec = graph.nodes[nid]
         instances = placement.get(nid, [])
-        upstream = [e for e in (exprs[p] for p in graph._in[nid]) if e is not None]
+        upstream = upstream_of(nid)
 
         if nid in region_of:
             idx = region_of[nid]
@@ -525,6 +572,9 @@ def assemble(
                 exprs[nid] = None
             elif len(instances) == 1:
                 exprs[nid] = _Branch([(nid, instances[0])], sourced=True)
+            elif _feeds_only_selectors(graph, nid):
+                fan[nid] = [_Branch([(nid, op)], sourced=True) for op in instances]
+                exprs[nid] = fan[nid][0]  # liveness marker; consumers read `fan`
             else:
                 names = _dedup([nid] * len(instances))
                 exprs[nid] = _Branch(

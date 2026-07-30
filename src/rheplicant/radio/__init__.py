@@ -38,6 +38,7 @@ from rheplicant.radio.backend import BackendOperator, FlaggingOperator, MomentRF
 from rheplicant.radio.beams import (
     cst_beam_maps,
     cst_frequency_table,
+    horizon_truncated_beam,
     read_cst_farfield,
 )
 from rheplicant.radio.environment import (
@@ -122,7 +123,12 @@ __all__ = [
 from rheplicant.radio.graph import RADIO_GRAPH, assemble  # noqa: E402  (needs operators above)
 
 __all__ += ["RADIO_GRAPH", "assemble"]
-__all__ += ["cst_beam_maps", "cst_frequency_table", "read_cst_farfield"]
+__all__ += [
+    "cst_beam_maps",
+    "cst_frequency_table",
+    "horizon_truncated_beam",
+    "read_cst_farfield",
+]
 
 from rheplicant.radio.graph import _validate_registrations as _v  # noqa: E402
 

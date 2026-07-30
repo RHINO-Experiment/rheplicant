@@ -40,8 +40,13 @@ Switched calibration loads (elements taxonomy "calibration signals ...
 switched in and out on a pre-defined cycle") enter through the
 ``receiver_input`` *selector* node: with only the antenna chain provided it
 passes through; provide ``CalLoadOperator`` too and each time sample takes
-the branch chosen by ``coords.extra["receiver_input"]`` (0 = antenna,
-1 = load — the edge declaration order).
+the branch chosen by ``coords.extra["receiver_input"]``. ``cal_loads`` is
+``many=True`` and feeds only the selector, so each instance becomes its OWN
+switch position rather than being summed with its siblings: with two loads the
+switch indexes 0 = antenna, 1 = first load, 2 = second load — the edge
+declaration order, then the order the loads were provided. Three distinct
+sources is what an identifiable per-channel noise-wave fit needs, and
+``assemble()`` expresses it directly.
 
 ``beam_spill`` (v1.4) is the horizon split of a beam that does not stop at the
 horizon: the part below it sees ground, not sky. It is the trunk stage of the
@@ -104,9 +109,8 @@ RADIO_GRAPH = register_graph(
             ),
             "cal_loads": NodeSpec(
                 _S,
-                "switched calibration loads (single instance only — no "
-                "many=True; multi-load switching bypasses assemble() and "
-                "sets coords.extra directly, see CalLoadOperator)",
+                "switched calibration loads; one switch position per instance",
+                many=True,
             ),
             "receiver_input": NodeSpec(
                 "selector", "antenna/load switch (cycle in coords.extra)"

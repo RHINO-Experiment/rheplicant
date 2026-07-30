@@ -82,9 +82,11 @@ joins that carry no structural guard, in short:
   `(n_source, n_freq)`, so swapping them is shape-legal; it moves the answer by
   tens of kelvin. Read the order off the assembly:
   `twin["receiver_input"].names`.
-- a hand-wired antenna branch needs `SumOperator`, not `Pipeline`: a `Pipeline`
-  of *source-type* operators replaces the data at each stage, so only the last
-  source survives. Check any hand-wiring against `assemble()`.
+- if you hand-wire a branch at all, it needs `SumOperator`, not `Pipeline`: a
+  `Pipeline` of *source-type* operators replaces the data at each stage, so only
+  the last source survives. `assemble()` gets this right by construction — the
+  graph is what knows that leaves into a junction add — so the safest advice is
+  not to hand-wire, and to check it against `assemble()` when you must.
 
 An out-of-range switch value used to be a fourth: the eager range check in
 `SwitchCycle` is skipped under tracing, and JAX's gather would clamp the coupling
@@ -92,9 +94,24 @@ lookup to a neighbouring source while the selector selected nothing.
 `SwitchCycle.gather` now fills those samples with NaN instead, so the two
 consumers of the switch array can no longer disagree in silence.
 
-Multi-load switching (three sources — the minimum for an identifiable
-per-channel fit) still bypasses `assemble()`, since the `cal_loads` node has no
-`many=True`; build the `SelectOperator` directly, as the example does.
+**Multi-load switching comes out of `assemble()`.** `cal_loads` is `many=True`
+and feeds only the `receiver_input` selector, so its instances compose the way
+that consumer composes — one switch position each, not a sum:
+
+```python
+twin = assemble(SkySourceOperator(...), CalLoadOperator(t_load=...),
+                CalLoadOperator(t_load=...), NoiseWaveOperator(...))
+twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads', 'cal_loads_2')
+```
+
+Three distinct sources is the minimum for an identifiable per-channel
+noise-wave fit, so nothing about that configuration needs hand-wiring. The rule
+generalizes: `many` instances fold as sibling **Sum** branches into a junction
+and as sibling **selector** branches into a selector, and a selector with only
+one live branch is traversed as identity — no switch array required.
+
+Reach any parameter by its graph node, wherever the fold put it:
+`eqx.tree_at(lambda t: t["observed_astro_sky"].sky_model.maps, twin, new_maps)`.
 
 **Three losses on the antenna path, none standing in for another.** They
 compose in this order, and each has a distinct signature:

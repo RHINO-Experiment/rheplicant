@@ -72,16 +72,16 @@ class CalLoadOperator(AbstractOperator):
     Real physics to come (GCR draft): warm/hot loads with their own
     reflection coefficients and physical-temperature telemetry.
 
-    Current limitation: the ``cal_loads`` node is declared without
-    ``many=True`` (see ``radio/graph.py``), so ``assemble()`` accepts only one
-    ``CalLoadOperator`` instance — a second raises ``AssemblyError`` ("this
-    node accepts a single instance"), giving a two-branch ``receiver_input``
-    selector (antenna, one load) at most. Multi-load switching — which
-    ``NoiseWaveOperator`` needs for an identifiable per-channel fit (three
-    distinct loads, not one) — is not yet expressible through ``assemble()``.
-    Until that graph change lands, supply ``coords.extra["receiver_input"]``
-    directly, as ``examples/noise_wave_gcr.py`` does, bypassing
-    ``CalLoadOperator`` entirely for the multi-load case.
+    ``cal_loads`` is ``many=True`` and feeds only the ``receiver_input``
+    selector, so instances compose the way that consumer composes: each one
+    becomes its OWN switch position rather than being summed with its siblings.
+    Provide two loads alongside the antenna chain and the switch indexes
+    0 = antenna, 1 = first load, 2 = second load — the graph's in-edge order,
+    then the order they were given. Three distinct sources is exactly what
+    ``NoiseWaveOperator`` needs for an identifiable per-channel fit, so
+    ``assemble()`` expresses the whole switching cycle with no hand-wiring.
+    Read the order off the assembly (``twin["receiver_input"].names``) rather
+    than assuming it: it is the order ``gamma_src``'s rows must match.
 
     Attributes:
         t_load: load temperature [K] — differentiable scalar or ``(n_freq,)``.
