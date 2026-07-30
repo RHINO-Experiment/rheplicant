@@ -42,6 +42,7 @@ that will replace the body. Graph topology and assembly rules: see
 | Operator | Node | Role | Differentiable parameters |
 |---|---|---|---|
 | `BeamOperator` *(P)* | `beam` | shared chromatic beam — the single marginalisation target | `solid_angle` |
+| `BeamSpillOperator` | `beam_spill` | horizon split of the astro branch: `f_sky T + (1−f_sky) T_ground` | `sky_fraction`, `t_ground` |
 | `AntennaLossOperator` | `antenna_loss` | antenna ohmic loss: `η T + (1−η) T_phys`, on the whole `t_ant_sum`, before the switch | `efficiency`, `t_physical` |
 | `CalLoadOperator` *(P)* | `cal_loads` | switched calibration load (via `receiver_input` selector) | `t_load` |
 | `NoiseWaveOperator` | `noise_wave` | full Eq. 1 (noise-wave GCR note) via `rhino_cal_jax`: reflection couplings + noise-wave temperatures, linear in `t_nw = (t_unc, t_cos, t_sin)` — the GCR structure | `t_unc`, `t_cos`, `t_sin`, `t_rx`, `gamma_src_re`, `gamma_src_im`, `gamma_rec_re`, `gamma_rec_im` |
@@ -95,13 +96,36 @@ Multi-load switching (three sources — the minimum for an identifiable
 per-channel fit) still bypasses `assemble()`, since the `cal_loads` node has no
 `many=True`; build the `SelectOperator` directly, as the example does.
 
+**Three losses on the antenna path, none standing in for another.** They
+compose in this order, and each has a distinct signature:
+
+| stage | what it is | signature |
+|---|---|---|
+| `BeamSpillOperator` | part of the beam is looking at ground, not sky | **mixing, no loss** — sky and ground at the same temperature give that temperature |
+| `AntennaLossOperator` | ohmic dissipation inside the antenna | loss **and** its own emission `(1−η) T_phys` |
+| `c_s = (1−\|Γ\|²)\|F\|²` in `NoiseWaveOperator` | impedance mismatch at the receiver input | loss, nothing added |
+
+The first two share the arithmetic `a x + (1−a) b` and are deliberately not one
+operator: merging them would make an efficiency and a spill fraction
+indistinguishable in a fit. Get `f_sky` from
+`DriftScanProjector.horizon_fraction()`, or let
+`BeamSpillOperator.from_projector(projector, t_ground=...)` read it off the same
+beam that supplies the sky — that is the one call the weight and the sky average
+cannot get out of step. Note that `BeamSpillOperator` already supplies the
+below-horizon ground term, so a `GroundPickupOperator` alongside it is a
+*second*, additional one.
+
 `AntennaLossOperator` is a *different* loss from `NoiseWaveOperator`'s
 `c_s = (1−|Γ|²)|F|²`: ohmic dissipation inside the antenna versus impedance
 mismatch at the receiver input. They multiply, and only the ohmic one adds
 emission of its own (`(1−η) T_phys`). The node sits on the trunk between
 `t_ant_sum` and `receiver_input`, so it acts on everything the beam collected
 and on nothing that connects downstream — the calibration loads arrive
-unattenuated. See D16 in `DESIGN.md`.
+unattenuated. `beam_spill` instead sits on the ASTRO branch
+(`beam | observed_astro_sky → astro_ant_sum → beam_spill → t_ant_sum`), because
+the split applies to the thing that genuinely is a beam integral over the
+celestial sphere and not to the effective temperatures that join at `t_ant_sum`.
+See D16 and D17 in `DESIGN.md`.
 
 ## Beam data
 

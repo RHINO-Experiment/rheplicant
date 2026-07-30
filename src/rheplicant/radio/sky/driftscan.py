@@ -295,6 +295,99 @@ class DriftScanProjector(AbstractSkyProjector):
             lmax=lmax, nside=nside, **kwargs,
         )
 
+    def horizon_fraction(self) -> jax.Array:
+        """Fraction of the beam's solid angle that is above the local horizon.
+
+        ``f_sky = int_above B dOmega / int_4pi B dOmega``, per frequency -- the
+        weight that turns a horizon-masked sky average into its share of the
+        antenna temperature. With ``horizon_mask=True`` a projector returns
+        ``<T_sky>_masked``, the average over the VISIBLE beam; the rest of the
+        beam is looking at ground, so the antenna actually collects::
+
+            f_sky * <T_sky>_masked + (1 - f_sky) * T_ground
+
+        and this supplies the ``f_sky``. Feed it to
+        :class:`~rheplicant.radio.instrument.beam_spill.BeamSpillOperator`,
+        which applies both halves at once so they cannot disagree -- or use
+        :meth:`BeamSpillOperator.from_projector`, which calls this for you.
+
+        f_sky is the horizon cut, measured on the beam: limTOD's own rotation
+        into the horizontal frame, then the equal-area pixel partition
+        ``sum(B*H) / sum(B)``. Three choices, each of which was measured rather
+        than reasoned about, against a projector run on a sky map with the
+        ground painted in at a latitude where the horizon is fixed in celestial
+        coordinates (the residual spill bias, on a 193 K effect):
+
+        * **Pixel space, not the masked beam's harmonic integral.** The
+          band-limited masked beam that ``horizon_mask=True`` builds is a Gibbs
+          approximation to a discontinuous target, and its solid-angle integral
+          is wrong by ~0.7% at nside 16 / lmax 47, because ``map2alm`` of a
+          sharply cut map does not preserve the mean. ``f_sky`` and the masked
+          average are different objects: one is how the beam's solid angle
+          divides, the other is how the visible part weights the sky.
+        * **The horizon ring counts HALF.** ``limtod_jax.horizon_weights`` uses
+          a strict ``el > 0``, so the pixels centred exactly on the horizon --
+          a whole ring, 64 of 3072 at nside 16 -- get weight 0. A pixel centred
+          on the horizon is half sky and half ground. Counting it as neither
+          costs -8.6 K at nside 16, counting it as all sky +8.7 K, and counting
+          it half **+0.005 K**; the two one-sided errors are symmetric and halve
+          with nside, which is the signature of a miscounted ring rather than
+          anything harmonic. (The half-weight comes from the RING-ordering
+          identity ``strict_below == strict_above[::-1]``, checked in the tests.)
+        * **Hard cut, regardless of ``apod_deg``.** Apodization is a mitigation
+          for ringing in the masked beam used for the sky AVERAGE. A tapered
+          region does not partition the sphere, so it has no business in a
+          partition -- and empirically ``apod_deg`` moves this number not at all.
+
+        The beam itself is band-limited at ``lmax`` -- that is the beam the
+        forward model uses, so its partition is the right one to take.
+
+        Returns:
+            ``(n_freq,)`` above-horizon beam fraction.
+
+        Raises:
+            StateValidationError: on a ``beam_frame="reference"`` projector.
+                :meth:`to_reference_frame` folds the mask into the cached alms
+                and clears the flag, so the unmasked beam this needs is gone.
+                Call ``horizon_fraction()`` on the local-frame projector first,
+                then cache.
+        """
+        if self.beam_frame == "reference":
+            raise StateValidationError(
+                "horizon_fraction() needs the unmasked beam, but this projector "
+                "has beam_frame='reference': to_reference_frame() already folded "
+                "the mask into its cached alms, so the denominator int_4pi B is "
+                "no longer recoverable. Call horizon_fraction() on the "
+                "local-frame projector, then call to_reference_frame()."
+            )
+        ltj = _limtod_jax(self.uniform_sampling)
+        # limTOD's own rotation into the horizontal frame -- the same
+        # (az, el, selfrot) sub-chain horizon_masked_beam_alm uses, taken from
+        # it rather than re-derived, because a hand-derived handedness here is
+        # exactly the kind of error only a numerical test catches.
+        psi, theta, phi = ltj.zyzyz2zyz(
+            0.0, 0.0, -jnp.asarray(self.az_deg),
+            jnp.asarray(self.el_deg) - 90.0, jnp.asarray(self.selfrot_deg),
+        )
+        with jax.ensure_compile_time_eval():
+            above = jnp.asarray(ltj.horizon_weights(self.nside, 0.0))
+            # horizon_weights is a strict el > 0, so the ring of pixels centred
+            # exactly ON the horizon is dropped. It is half sky and half ground.
+            # In RING ordering the southern hemisphere is the northern one
+            # reversed, so above[::-1] is the strict-below indicator and this
+            # averages the two one-sided cuts.
+            weights = 0.5 * (above + 1.0 - above[::-1])
+
+        def one_freq(beam_alm):
+            beam_h = ltj.alm2map(
+                ltj.rotate_alm(beam_alm, psi, theta, phi, lmax=self.lmax),
+                nside=self.nside, lmax=self.lmax,
+            )
+            # HEALPix pixels are equal-area, so a plain sum IS the integral.
+            return jnp.sum(beam_h * weights) / jnp.sum(beam_h)
+
+        return jax.vmap(one_freq)(self.beam_alms)
+
     @staticmethod
     def uniform_lst_grid(n_time: int, lst0_deg: float = 0.0) -> jax.Array:
         """The LST grid ``uniform_sampling=True`` requires: a FULL sidereal turn.
@@ -471,6 +564,10 @@ class DriftScanProjector(AbstractSkyProjector):
         """
         if not self.normalize_beam:
             return None
+        return self._quadrature_ones(ltj)
+
+    def _quadrature_ones(self, ltj) -> jax.Array:
+        """The ones-map quadrature alms themselves, computed at trace time."""
         with jax.ensure_compile_time_eval():
             return ltj.ones_quadrature_alm(nside=self.nside, lmax=self.lmax)
 

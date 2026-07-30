@@ -84,13 +84,50 @@ load samples never see it and antenna samples never see the load:
   to the sky map came back exactly zero. Whenever `assemble()` could have built
   the branch, check the hand-wiring against it.
 
-**Known gap, stated rather than fudged:** 1–3 % of RHINO's horn response is
-below the horizon and this configuration lets it see celestial sky rather than
-ground. The correct split needs the sky branch weighted by the above-horizon
-beam fraction; `GroundPickupOperator` supplies the ground term and
-`DriftScanProjector(horizon_mask=True)` the masked sky average, but no node
-applies the weight — so masking alone is no better than not masking, and at a
-3000 K sky either choice is a ~90 K bias. It needs its own node (D16).
+**The horizon split (`BeamSpillOperator`, `beam_spill`, graph v1.4).** 1–3 % of
+RHINO's horn response is below the horizon and sees ground, not sky, so the
+antenna collects `f_sky <T_sky>_masked + (1 - f_sky) T_ground`.
+`DriftScanProjector(horizon_mask=True)` supplied the masked average and
+`GroundPickupOperator` could supply the ground term, but nothing applied the
+`f_sky` weight to the sky branch — which made masking, on its own, no better
+than not masking: at a 3000 K sky either choice is a ~200 K bias.
+
+`BeamSpillOperator` applies both halves, so the weights sum to one by
+construction, and `BeamSpillOperator.from_projector(projector, t_ground=...)`
+reads `f_sky` off the same beam that will supply the sky —  the one call that
+cannot get the two out of step. `DriftScanProjector.horizon_fraction()` computes
+it; call it before `to_reference_frame()`, which folds the mask into the cached
+alms and leaves no unmasked denominator (it raises if asked afterwards).
+
+Every decision here was settled by measurement, against a projector run on a sky
+map with the ground painted in at latitude 90, where the local horizon coincides
+with the celestial equator and stops moving with LST. Residual on the ~200 K
+effect, at nside 16:
+
+| `f_sky` from | residual |
+|---|---|
+| the masked beam's harmonic integral | −17 K |
+| pixel partition, horizon ring dropped (`horizon_weights` as shipped) | −8.6 K |
+| pixel partition, horizon ring counted as all sky | +8.7 K |
+| **pixel partition, horizon ring counted half** | **+0.005 K** |
+
+Two findings in that table. The band-limited masked beam's solid-angle integral
+is not `f_sky` — `map2alm` of a sharply cut map does not preserve the mean, so
+it is off by ~0.7 %. And `limtod_jax.horizon_weights` uses a strict `el > 0`,
+dropping the whole ring of pixels centred exactly on the horizon (64 of 3072 at
+nside 16); a pixel centred on the horizon is half sky and half ground, and the
+two one-sided alternatives are symmetric and halve with nside — a miscounted
+ring, not anything harmonic. The first implementation used the strict cut and
+looked entirely reasonable.
+
+`beam_spill` sits on the ASTRO branch (`beam | observed_astro_sky →
+astro_ant_sum → beam_spill → t_ant_sum`), not the trunk: the split applies to
+the thing that genuinely is a beam integral over the celestial sphere, while the
+other `t_ant_sum` leaves are effective temperatures by D13's construction and
+`ground_pickup` in particular IS a below-horizon share. It shares the arithmetic
+`a x + (1-a) b` with `AntennaLossOperator` and is deliberately not the same
+operator: a spill is a *mixture* (sky and ground at one temperature give that
+temperature — no loss), ohmic loss dissipates and re-emits. See D17.
 
 ### Added: parameter spaces — infer anything, however it is parameterized
 

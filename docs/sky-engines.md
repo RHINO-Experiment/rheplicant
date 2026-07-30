@@ -352,6 +352,57 @@ refuses the normalized projector for exactly that reason.
 
 ---
 
+## Where does the beam stop?
+
+Not at the horizon. A real beam has response below it — 1–3 % of RHINO's horn,
+depending on frequency — and that part is looking at ground, not sky. Two
+switches deal with it, and they answer different questions.
+
+`horizon_mask=True` cuts the beam at the local horizon before projecting, so
+`forward` returns the beam average over the **visible** sky. A sharp cut is not
+band-limited, so the masked beam rings; `apod_deg` (2–5° of elevation) tames it,
+and `mask_iterations` sets the healpy-equivalent re-analysis depth. The mask is
+the most expensive thing this projector can do on the `"local"` beam frame —
+roughly 7× the cached unmasked path — so always follow it with
+`to_reference_frame()`, which folds the masked beam into the cached alms once
+and clears the flag.
+
+`horizon_fraction()` answers the other question: **how much** of the beam that
+is. It returns
+
+$$f_\mathrm{sky} = \frac{\int_\mathrm{above} B\,d\Omega}{\int_{4\pi} B\,d\Omega}$$
+
+per frequency, so that the antenna temperature is
+
+$$T_\mathrm{collected} = f_\mathrm{sky}\,\langle T_\mathrm{sky}\rangle_\mathrm{masked}
+  + (1 - f_\mathrm{sky})\,T_\mathrm{ground}.$$
+
+Masking without that weight is no better than not masking at all: at a 3000 K
+sky both are a ~200 K bias. `BeamSpillOperator` applies both halves —
+`BeamSpillOperator.from_projector(projector, t_ground=...)` calls
+`horizon_fraction()` for you, which is the only way the weight and the sky
+average cannot get out of step. Read it **before** `to_reference_frame()`: that
+call leaves no unmasked denominator to divide by, and `horizon_fraction()`
+raises if asked afterwards.
+
+```python
+local  = DriftScanProjector.from_beam_maps(..., horizon_mask=True, apod_deg=3.0)
+spill  = BeamSpillOperator.from_projector(local, t_ground=jnp.array(290.0))
+cached = local.to_reference_frame(lst_ref_deg=0.0)
+```
+
+$f_\mathrm{sky}$ is an equal-area **pixel** partition of the beam, with the ring
+of pixels centred exactly on the horizon counted as half. Neither choice is
+cosmetic — the alternatives cost 17 K and 8.6 K of a 200 K effect, measured
+against a directly computable reference. The derivation and the table are in
+[From the sky to the receiver](sky-to-receiver.md#the-horizon-split-measured).
+
+Note that `mmodes()` refuses a `normalize_beam=True` projector, and
+`horizon_mask` composes with everything else here — but a masked beam is a
+different beam, so a cached masked projector cannot be un-masked afterwards.
+
+---
+
 ## Run it
 
 [`examples/driftscan_mmode.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/driftscan_mmode.py)

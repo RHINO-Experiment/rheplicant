@@ -11,12 +11,13 @@ and compiles it to the equivalent ``Pipeline``/``SumOperator`` nesting::
     print(twin)                # lit nodes + skipped-as-identity nodes
     print(twin.to_mermaid())   # lit/dim signal-path rendering
 
-Topology (v1.3; sum junctions marked ``(+)``)::
+Topology (v1.4; sum junctions marked ``(+)``)::
 
     global_signal | foregrounds | point_sources | uniform_sky
         -> (+) astro_sum -> ionosphere -> atmosphere_field* --\\
     ground_field* | rfi_field ----------------------> (+) field_sum -> beam --\\
-    observed_astro_sky | ground_pickup | t_sys_extra* | atmosphere -------------> (+) t_ant_sum
+    beam | observed_astro_sky -> (+) astro_ant_sum -> beam_spill --------------\\
+    ground_pickup | t_sys_extra* | atmosphere ---------------------------------> (+) t_ant_sum
         -> antenna_loss -> (SW) receiver_input <- cal_loads
         -> noise_wave -> cw_tone -> bandpass -> gain
         -> noise -> emi -> adc
@@ -41,6 +42,16 @@ switched in and out on a pre-defined cycle") enter through the
 passes through; provide ``CalLoadOperator`` too and each time sample takes
 the branch chosen by ``coords.extra["receiver_input"]`` (0 = antenna,
 1 = load — the edge declaration order).
+
+``beam_spill`` (v1.4) is the horizon split of a beam that does not stop at the
+horizon: the part below it sees ground, not sky. It is the trunk stage of the
+ASTRO branch — the two equivalent astro entrances (``beam``,
+``observed_astro_sky``) meet at ``astro_ant_sum`` first — because the split
+applies to the thing that genuinely is a beam integral over the celestial
+sphere and to nothing else. The other ``t_ant_sum`` leaves are *effective*
+temperatures by D13's construction, already carrying whatever beam weighting
+their author intended, and ``ground_pickup`` in particular IS a below-horizon
+share; running them through the split would weight them twice.
 
 ``antenna_loss`` (v1.3) is the antenna's own ohmic dissipation, on the trunk
 between ``t_ant_sum`` and the switch: it acts on everything the beam
@@ -83,6 +94,10 @@ RADIO_GRAPH = register_graph(
                 _S, "generic effective T_sys contribution", many=True, reserved=True
             ),
             "atmosphere": NodeSpec(_S, "beam-averaged atmospheric emission"),
+            "astro_ant_sum": NodeSpec(_J, "beam-convolved astro sky, either entrance"),
+            "beam_spill": NodeSpec(
+                _T, "horizon split: f_sky * sky + (1-f_sky) * ground"
+            ),
             "t_ant_sum": NodeSpec(_J, "antenna-temperature assembly"),
             "antenna_loss": NodeSpec(
                 _T, "antenna ohmic loss: eta T + (1-eta) T_phys (before the switch)"
@@ -122,8 +137,10 @@ RADIO_GRAPH = register_graph(
             ("ground_field", "field_sum"),
             ("rfi_field", "field_sum"),
             ("field_sum", "beam"),
-            ("beam", "t_ant_sum"),
-            ("observed_astro_sky", "t_ant_sum"),
+            ("beam", "astro_ant_sum"),
+            ("observed_astro_sky", "astro_ant_sum"),
+            ("astro_ant_sum", "beam_spill"),
+            ("beam_spill", "t_ant_sum"),
             ("ground_pickup", "t_ant_sum"),
             ("t_sys_extra", "t_ant_sum"),
             ("atmosphere", "t_ant_sum"),

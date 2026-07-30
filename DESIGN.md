@@ -594,15 +594,59 @@ multiply, and only the ohmic one contributes emission of its own. Folding an
 efficiency into the noise-wave couplings would be indistinguishable from a
 mismatch in the fit while silently dropping the `(1 - eta) T_phys` term.
 
-Still missing at this node: the **beam-spill split**. 1–3 % of RHINO's horn
-response is below the horizon and sees ground, not sky. The correct antenna
-temperature is `f_sky <T_sky>_masked + (1 - f_sky) T_ground`;
-`GroundPickupOperator` supplies the second term and
-`DriftScanProjector(horizon_mask=True)` the first, but no node applies the
-`f_sky` weight to the sky branch — so masking on its own is no better than not
-masking, and at a 3000 K sky either choice is a ~90 K bias. It needs its own
-node; it is not `antenna_loss` wearing a different hat, and expressing it as one
-would conflate two independent physical parameters in a single leaf.
+### D17 — The horizon split is the astro branch's own stage, and f_sky is measured
+
+1–3 % of RHINO's horn response is below the horizon and sees ground, not sky, so
+the antenna collects `f_sky <T_sky>_masked + (1 - f_sky) T_ground`.
+`DriftScanProjector(horizon_mask=True)` supplies the masked average and
+`GroundPickupOperator` could supply the ground term, but nothing applied the
+`f_sky` weight to the sky branch — which made masking, on its own, no better
+than not masking: at a 3000 K sky either choice is a ~200 K bias.
+
+`BeamSpillOperator` at the `beam_spill` node (graph v1.4) applies both halves.
+Three decisions, each measured against a projector run on a sky map with the
+ground painted in, at latitude 90 where the local horizon coincides with the
+celestial equator and stops moving with LST — so the answer can be computed
+directly rather than argued about. Residual on a ~200 K effect:
+
+- **One operator, not a weight plus a separate ground leaf.** Split across two
+  objects the two numbers can drift apart, and a sky branch weighted by `f`
+  against a ground branch using `1 - f'` is a bias nothing structural can see.
+  Here they sum to one by construction, and `BeamSpillOperator.from_projector`
+  reads `f_sky` off the same beam that will supply the sky.
+- **`f_sky` is a PIXEL-space partition of the beam, not the masked beam's
+  harmonic integral.** The band-limited masked beam is a Gibbs approximation to
+  a discontinuous target and its solid-angle integral is off by ~0.7 % at
+  nside 16 / lmax 47, because `map2alm` of a sharply cut map does not preserve
+  the mean. Using it leaves −17 K; the pixel partition leaves ~0. They are
+  different objects: one is how the beam's solid angle divides, the other is
+  how the visible part weights the sky.
+- **The horizon ring counts HALF.** `limtod_jax.horizon_weights` uses a strict
+  `el > 0`, so the pixels centred exactly on the horizon — a whole ring, 64 of
+  3072 at nside 16 — get weight 0. A pixel centred on the horizon is half sky
+  and half ground. Counting it as neither costs −8.6 K at nside 16, as all sky
+  +8.7 K, and half **+0.005 K**; the two one-sided errors are symmetric and
+  halve with nside, the signature of a miscounted ring rather than of anything
+  harmonic. This one was found only by measuring: the first implementation used
+  the strict cut and looked entirely reasonable.
+
+Placement is the astro branch, not the trunk: `beam | observed_astro_sky ->
+astro_ant_sum -> beam_spill -> t_ant_sum`. The split applies to the thing that
+genuinely is a beam integral over the celestial sphere. The other `t_ant_sum`
+leaves are *effective* temperatures by D13's construction, already carrying
+whatever beam weighting their author intended, and `ground_pickup` in particular
+IS a below-horizon share — running them through the split would weight them
+twice. For the same reason `BeamSpillOperator` and `GroundPickupOperator`
+together double-count the same spill; nothing forbids it, since a second ground
+term can be legitimate (a building, a ground screen), so it is a choice to make
+deliberately.
+
+`beam_spill` and `antenna_loss` share the arithmetic `a x + (1 - a) b` and are
+deliberately NOT one operator. A spill is a *mixture* — sky and ground at the
+same temperature give that temperature, no loss — while ohmic loss dissipates
+and re-emits at the antenna's own temperature. They carry independent physical
+parameters at different points on the path, and merging them would make an
+efficiency and a spill fraction indistinguishable in a fit.
 
 ## Known deferred issues
 

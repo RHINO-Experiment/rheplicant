@@ -112,6 +112,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.radio.instrument.beam_spill
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.radio.instrument.receiver
    :members:
    :show-inheritance:
