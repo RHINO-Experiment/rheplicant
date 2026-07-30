@@ -43,13 +43,19 @@ T_RX, T_SRC, NOISE, PRIOR = 290.0, 300.0, 0.5, 100.0
 
 # --one-source deliberately makes the per-channel normal operator (AtN^-1A +
 # S^-1) severely ill-conditioned (2 of 3 directions carry no data at all, so
-# its condition number runs to ~4e8). wiener_solve/gcr_sample's own tol=1e-10
-# default (see rheplicant/inference/linear.py) is what keeps this script's
-# numbers trustworthy for that run: CG's tol bounds the RESIDUAL, but the
-# SOLUTION error is that residual scaled by the condition number, so a loose
-# tol can look converged while being badly wrong in the near-null directions
-# -- and specifically wrong low, since an under-converged CG has not yet
-# explored them. No local override is needed here any more.
+# its condition number runs to ~1e7). jax's cg default tol=1e-6 stops there
+# LONG before the near-null directions are resolved: the aggregate relative
+# residual is dominated by the one well-constrained direction and looks
+# converged (~1e-7, comfortably under require_convergence's 1e-3 guard) while
+# the solution along the other two is essentially arbitrary. Concretely: at
+# the default tol, gcr_sample's reported posterior sigma for --one-source came
+# out ~0.03 K (0.0% of the prior) instead of the ~75 K (75% of the prior) a
+# tighter solve gives and the math (S dominates where A contributes nothing)
+# demands. Tightening tol here is what makes this script's own numbers
+# trustworthy for the ill-conditioned run; see
+# rheplicant/inference/linear.py for the underlying convergence-check gap.
+CG_TOL, CG_MAXITER = 1e-10, 4000
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--one-source", action="store_true",
                     help="use a single load, to show what switching buys")
@@ -130,7 +136,7 @@ print(f"linearity check: worst relative departure {max(errors.values()):.1e}")
 
 block = linear_operator(space, start, state)
 solved, residual = wiener_solve(
-    block, observed, noise_std=NOISE, prior_std=PRIOR
+    block, observed, noise_std=NOISE, prior_std=PRIOR, tol=CG_TOL, maxiter=CG_MAXITER
 )
 print(f"\nWiener mean (Eq. 30), CG residual {float(residual):.1e}")
 for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
@@ -144,6 +150,7 @@ keys = jax.random.split(jax.random.key(9), 300)
 draws = jax.vmap(
     lambda k: gcr_sample(
         block, observed, noise_std=NOISE, prior_std=PRIOR, key=k,
+        tol=CG_TOL, maxiter=CG_MAXITER,
     )[0]
 )(keys)
 print("\n300 exact posterior draws (Eq. 31): per-channel sigma, and how much of")

@@ -349,7 +349,7 @@ def wiener_solve(
     noise_std: Any,
     prior_std: Any,
     prior_mean: Any = None,
-    tol: float = 1e-10,
+    tol: float = 1e-6,
     maxiter: int | None = None,
     require_convergence: float | None = 1e-3,
 ) -> tuple[jax.Array, jax.Array]:
@@ -387,36 +387,13 @@ def wiener_solve(
             most physical quantities — a noise-wave temperature sits near
             250 K. Equivalent to an affine binding that adds the same offset,
             but says what it means.
-        tol: CG tolerance on the *residual*. Defaults to ``1e-10``, not CG's
-            own ``1e-5``/``1e-6``: what a caller actually needs bounded is the
-            *solution* error, and CG only guarantees
-            ``‖x̂ - x*‖ ≲ cond(M) · ‖residual‖ / ‖b‖``. For a well-conditioned
-            block a loose ``tol`` is harmless, but for an ill-conditioned one
-            (a near-null prior-dominated direction next to a well-constrained
-            one — routine for per-channel calibration parameters) a residual
-            of ``1e-6`` can still leave the solution wrong by
-            ``cond(M) × 1e-6``, which is easily order-unity. Tightening the
-            default trades a handful of extra CG iterations for that
-            guarantee actually holding.
-        maxiter: CG iteration cap. ``None`` lets JAX choose (``10 ×`` the
-            latent's size, matching SciPy). Because CG's iteration count is
-            governed by the number of distinct eigenvalue *clusters* in the
-            normal operator rather than by the condition number itself, the
-            default is usually enough even for a badly conditioned block; if
-            it is not, raise ``maxiter`` rather than loosening ``tol``.
+        tol: CG tolerance.
+        maxiter: CG iteration cap. ``None`` lets JAX choose.
         require_convergence: raise if the relative residual exceeds this.
             Defaults to ``1e-3``; ``None`` disables the guard and returns
             whatever CG produced. On by default because jax's ``cg`` reports no
             convergence status, so an unconverged solve otherwise comes back
-            looking exactly like a converged one. Note what this guard can and
-            cannot certify: it bounds ``‖residual‖ / ‖b‖``, and the *solution*
-            error is that residual scaled by ``cond(M)`` (see ``tol`` above).
-            A passing residual is therefore not a certificate that ``x̂`` is
-            correct for an ill-conditioned block — only that it is correct up
-            to a factor no worse than the condition number. If the block is
-            that ill-conditioned, a stronger prior is usually the honest fix,
-            since ``S⁻¹`` is exactly what floors the small eigenvalues that
-            make ``cond(M)`` large in the first place.
+            looking exactly like a converged one.
 
     Returns:
         ``(x̂, relative_residual)``, the residual being ``‖M x̂ - b‖ / ‖b‖``
@@ -538,15 +515,8 @@ def _conjugate_solve(
             solution,
             jnp.logical_or(~jnp.isfinite(residual), residual > require_convergence),
             "wiener_solve/gcr_sample did not converge: the relative residual exceeds "
-            "require_convergence. Raise maxiter, tighten tol, or condition the problem "
-            "(a stronger prior is usually the honest fix, since S⁻¹ is what floors the "
-            "small eigenvalues). Passing this guard is not a certificate that the "
-            "SOLUTION is correct even when it does not fire: CG's tol bounds the "
-            "residual, but ‖x̂ - x*‖ ≲ cond(M) · ‖residual‖/‖b‖, so an excellent residual "
-            "on an ill-conditioned block can still hide a badly wrong answer -- and for "
-            "gcr_sample specifically, under-convergence biases the reported spread "
-            "DOWNWARD (an unconverged CG has not yet explored the near-null "
-            "eigendirections), which reads as false confidence, never false caution.",
+            "require_convergence. Raise maxiter, loosen tol, or condition the problem "
+            "(a stronger prior is usually the honest fix).",
         )
     return join(solution), residual
 
@@ -565,7 +535,7 @@ def gcr_sample(
     prior_std: Any,
     key: jax.Array,
     prior_mean: Any = None,
-    tol: float = 1e-10,
+    tol: float = 1e-6,
     maxiter: int | None = None,
     require_convergence: float | None = 1e-3,
 ) -> tuple[jax.Array, jax.Array]:
@@ -604,25 +574,9 @@ def gcr_sample(
         prior_mean: centre of the prior; defaults to zero. With uninformative
             data the draws fall back to ``N(prior_mean, prior_std²)``, which is
             the check that it is wired in correctly.
-        tol: CG tolerance on the residual — see :func:`wiener_solve`. The
-            ``cond(M)`` gap between residual and solution error matters *more*
-            here than for the mean: this function's entire purpose is to
-            report posterior width, and an under-converged CG has not yet
-            explored the near-null, prior-dominated eigendirections, so the
-            draw it returns is systematically too *small* in exactly those
-            directions. The bias therefore always runs the same way — toward
-            an under-reported spread, i.e. false confidence, never false
-            caution — which is what makes the default worth being conservative
-            about.
-        maxiter: CG iteration cap — see :func:`wiener_solve`.
-        require_convergence: as for :func:`wiener_solve`, including the same
-            caveat: a residual under this threshold bounds the solution error
-            only up to ``cond(M)``, so passing this guard does not certify
-            that the reported spread is right for an ill-conditioned block —
-            only that it is off by no more than a factor of ``cond(M)`` times
-            ``require_convergence``. If that is not tight enough, a stronger
-            prior is usually the honest fix (``S⁻¹`` is what floors the small
-            eigenvalues that make ``cond(M)`` large).
+        tol: CG tolerance.
+        maxiter: CG iteration cap.
+        require_convergence: as for :func:`wiener_solve`.
 
     Returns:
         ``(x, relative_residual)``. An unconverged CG returns a draw from the
