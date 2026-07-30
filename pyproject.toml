@@ -31,11 +31,13 @@ classifiers = [
 [project.optional-dependencies]
 numpyro = ["numpyro"]
 # The sky engines (GeneralPointingProjector, DriftScanProjector) are wired to
-# limTOD's JAX package. Floored at 1.8 for its hoistable Wigner plane (15.6x
-# on the rotation): a fresh install has no reason to take less. The runtime
-# feature check stays, so an environment already holding 1.7 keeps working —
-# it only forgoes that speed-up.
-limtod = ["limTOD[jax]>=1.8"]
+# limTOD's JAX package. Floored at 1.9, which is where the horizon partition
+# lives (horizon_truncated_beam / horizon_beam_fraction / the half-counted
+# horizon ring) — beam-weighted-sky physics is limTOD's subject and this
+# package only places the result on a signal path. The runtime feature checks
+# stay, so an environment on an older limTOD keeps working for everything that
+# does not touch the horizon, and says so at the boundary for what does.
+limtod = ["limTOD[jax]>=1.9"]
 docs = [
     "sphinx>=7",
     "myst-parser",

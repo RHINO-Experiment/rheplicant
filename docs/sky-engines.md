@@ -378,6 +378,13 @@ from rheplicant.radio import horizon_truncated_beam
 beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
 ```
 
+That is a thin pass-through to `limtod_jax.horizon_truncated_beam` (limTOD ≥
+1.9), and deliberately so: how a beam weights the sky, where the horizon falls
+in it and what share survives are limTOD's subject, the same way the noise-wave
+data model is `rhino_cal_jax`'s (D15). This package's job is to place the
+result on a signal path. The conventions and their numerical locks — including
+the painted-ground closure that decides them — live upstream.
+
 **1.04×** — free — and the same instrument, to 2.8e-5 (the residual is the
 alm→map→alm round trip the masking path takes *before* it masks, which this one
 does not). At a zenith pointing this needs no rotation at all: limTOD's
@@ -389,8 +396,9 @@ rotation; that is where `horizon_mask=True` earns its keep. Either way, follow
 it with `to_reference_frame()`.
 
 `horizon_truncated_beam` returns `f_sky` alongside the maps because they are the
-same sum. `DriftScanProjector.horizon_fraction()` computes it for the
-`horizon_mask=True` path instead. Either way it answers the other question the
+same sum. `DriftScanProjector.horizon_fraction()` — also a pass-through, to
+`limtod_jax.horizon_beam_fraction` — computes it for the `horizon_mask=True`
+path instead, and works at any fixed pointing. Either way it answers the other question the
 horizon raises: **how much** of the beam is above it. It is
 
 $$f_\mathrm{sky} = \frac{\int_\mathrm{above} B\,d\Omega}{\int_{4\pi} B\,d\Omega}$$
@@ -421,10 +429,13 @@ call leaves no unmasked denominator to divide by, and `horizon_fraction()`
 raises if asked afterwards.
 
 $f_\mathrm{sky}$ is an equal-area **pixel** partition of the beam, with the ring
-of pixels centred exactly on the horizon counted as half. Neither choice is
-cosmetic — the alternatives cost 17 K and 8.6 K of a 200 K effect, measured
-against a directly computable reference. The derivation and the table are in
-[From the sky to the receiver](sky-to-receiver.md#the-horizon-split-measured).
+of pixels centred exactly on the horizon counted as half — `limtod_jax`'s
+`horizon_partition_weights`, which is a different object from the
+`horizon_weights` mask and says so. Neither choice is cosmetic: the
+alternatives cost 17 K and 8.6 K of a 200 K effect, measured against a directly
+computable reference. The table is in
+[From the sky to the receiver](sky-to-receiver.md#the-horizon-split-measured);
+the locks are in limTOD's `tests/limtod_jax/test_horizon_partition.py`.
 
 Note that `mmodes()` refuses a `normalize_beam=True` projector, and
 `horizon_mask` composes with everything else here — but a masked beam is a

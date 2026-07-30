@@ -181,7 +181,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
 | [Sky engines](docs/sky-engines.md) | The limTOD ports: m-mode drift scan, beam normalization, the horizon |
 | [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
-| [Architecture](DESIGN.md) | Design decisions D1–D19, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D20, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Nine end-to-end runnable demos |
 

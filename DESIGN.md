@@ -712,6 +712,48 @@ same principle as `BeamSpillOperator.from_projector` (D17): a weight that
 disagrees with the beam it was supposed to describe is a bias nothing structural
 can catch.
 
+### D20 — Beam-weighted-sky physics belongs to limTOD, not here
+
+D19's `horizon_truncated_beam` and D17's `horizon_fraction()` were implemented
+in this package. They should not have been. How a beam weights the sky, where
+the horizon falls in it and what share of its solid angle survives are limTOD's
+subject — exactly as the noise-wave data model is `rhino_cal_jax`'s (D15) — and
+splitting that physics across two repos means two places to keep in step, two
+test suites asserting the same conventions, and a downstream package quietly
+accruing a beam library. (Raised by Zheng: "尽量让 rheplicant 模块化，跟 beam
+weighted sky 有关的都交给 limTOD".)
+
+Moved to limTOD 1.9 (`limtod_jax.driftscan`):
+
+- `horizon_partition_weights(nside)` — the solid-angle partition, horizon ring
+  counted half; a *different object* from the `horizon_weights` mask, which is
+  unchanged because its masking semantics were never wrong;
+- `horizon_truncated_beam(beam_map, ...)` — the map-space cut, returning the
+  surviving fraction with it;
+- `horizon_beam_fraction(beam_alm, az, el, selfrot, ...)` — the same fraction
+  for any fixed pointing, from alms.
+
+What stays here is **placement**: `BeamSpillOperator` consumes `f_sky` and puts
+it at the `beam_spill` node; it does not compute it.
+`rheplicant.radio.beams.horizon_truncated_beam` and
+`DriftScanProjector.horizon_fraction()` are now pass-throughs whose only added
+value is inferring `nside` from maps the caller already has, and both
+feature-gate on the upstream symbol so an outdated install is named at the
+boundary. The `limtod` extra is floored at 1.9.
+
+The tests moved with the physics. rheplicant's beam suite no longer re-asserts
+the partition, the half-counted ring or the zenith-only exactness — those are
+locked in limTOD's `tests/limtod_jax/test_horizon_partition.py`, and duplicating
+them here would be two copies of a moving target. What this side tests is the
+seam: that the call arrives, that `nside` is inferred, and that a stale install
+says so.
+
+Still on this side and arguably on the same line: `cst_beam_maps` /
+`read_cst_farfield`, the CST far-field reader. It is beam *ingestion* rather
+than beam-weighted-sky computation, and limTOD has the natural slot for it
+(`limTOD.uvbeam` does the same job for pyuvdata) — a follow-up, not a
+distinction worth defending.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

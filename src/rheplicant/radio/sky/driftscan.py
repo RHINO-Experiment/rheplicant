@@ -306,11 +306,11 @@ class DriftScanProjector(AbstractSkyProjector):
         )
 
     def horizon_fraction(self) -> jax.Array:
-        """Fraction of the beam's solid angle that is above the local horizon.
+        """Above-horizon share of this beam's solid angle, per frequency.
 
-        ``f_sky = int_above B dOmega / int_4pi B dOmega``, per frequency -- the
-        weight that turns a horizon-masked sky average into its share of the
-        antenna temperature. With ``horizon_mask=True`` a projector returns
+        ``f_sky = int_above B dOmega / int_4pi B dOmega`` -- the weight that
+        turns a horizon-masked sky average into its share of the antenna
+        temperature. With ``horizon_mask=True`` a projector returns
         ``<T_sky>_masked``, the average over the VISIBLE beam; the rest of the
         beam is looking at ground, so the antenna actually collects::
 
@@ -318,39 +318,21 @@ class DriftScanProjector(AbstractSkyProjector):
 
         and this supplies the ``f_sky``. Feed it to
         :class:`~rheplicant.radio.instrument.beam_spill.BeamSpillOperator`,
-        which applies both halves at once so they cannot disagree -- or use
+        which applies both halves so they cannot disagree -- or use
         :meth:`BeamSpillOperator.from_projector`, which calls this for you.
 
-        f_sky is the horizon cut, measured on the beam: limTOD's own rotation
-        into the horizontal frame, then the equal-area pixel partition
-        ``sum(B*H) / sum(B)``. Three choices, each of which was measured rather
-        than reasoned about, against a projector run on a sky map with the
-        ground painted in at a latitude where the horizon is fixed in celestial
-        coordinates (the residual spill bias, on a 193 K effect):
+        A thin adapter over :func:`limtod_jax.horizon_beam_fraction` (limTOD >=
+        1.9). Everything that makes the number right -- that it is a pixel-space
+        partition rather than the band-limited masked beam's own integral, and
+        that the ring of pixels centred exactly on the horizon counts HALF --
+        is decided and numerically locked there, where the beam physics lives.
+        The two choices are worth 17 K and 8.6 K of a 200 K spill bias
+        respectively; neither is a detail.
 
-        * **Pixel space, not the masked beam's harmonic integral.** The
-          band-limited masked beam that ``horizon_mask=True`` builds is a Gibbs
-          approximation to a discontinuous target, and its solid-angle integral
-          is wrong by ~0.7% at nside 16 / lmax 47, because ``map2alm`` of a
-          sharply cut map does not preserve the mean. ``f_sky`` and the masked
-          average are different objects: one is how the beam's solid angle
-          divides, the other is how the visible part weights the sky.
-        * **The horizon ring counts HALF.** ``limtod_jax.horizon_weights`` uses
-          a strict ``el > 0``, so the pixels centred exactly on the horizon --
-          a whole ring, 64 of 3072 at nside 16 -- get weight 0. A pixel centred
-          on the horizon is half sky and half ground. Counting it as neither
-          costs -8.6 K at nside 16, counting it as all sky +8.7 K, and counting
-          it half **+0.005 K**; the two one-sided errors are symmetric and halve
-          with nside, which is the signature of a miscounted ring rather than
-          anything harmonic. (The half-weight comes from the RING-ordering
-          identity ``strict_below == strict_above[::-1]``, checked in the tests.)
-        * **Hard cut, regardless of ``apod_deg``.** Apodization is a mitigation
-          for ringing in the masked beam used for the sky AVERAGE. A tapered
-          region does not partition the sphere, so it has no business in a
-          partition -- and empirically ``apod_deg`` moves this number not at all.
-
-        The beam itself is band-limited at ``lmax`` -- that is the beam the
-        forward model uses, so its partition is the right one to take.
+        For a zenith drift scan prefer
+        :func:`rheplicant.radio.beams.horizon_truncated_beam`, which returns the
+        fraction alongside a beam already cut, needs no rotation, and makes the
+        mask free rather than 8.2x.
 
         Returns:
             ``(n_freq,)`` above-horizon beam fraction.
@@ -371,32 +353,17 @@ class DriftScanProjector(AbstractSkyProjector):
                 "local-frame projector, then call to_reference_frame()."
             )
         ltj = _limtod_jax(self.uniform_sampling)
-        # limTOD's own rotation into the horizontal frame -- the same
-        # (az, el, selfrot) sub-chain horizon_masked_beam_alm uses, taken from
-        # it rather than re-derived, because a hand-derived handedness here is
-        # exactly the kind of error only a numerical test catches.
-        psi, theta, phi = ltj.zyzyz2zyz(
-            0.0, 0.0, -jnp.asarray(self.az_deg),
-            jnp.asarray(self.el_deg) - 90.0, jnp.asarray(self.selfrot_deg),
-        )
-        with jax.ensure_compile_time_eval():
-            above = jnp.asarray(ltj.horizon_weights(self.nside, 0.0))
-            # horizon_weights is a strict el > 0, so the ring of pixels centred
-            # exactly ON the horizon is dropped. It is half sky and half ground.
-            # In RING ordering the southern hemisphere is the northern one
-            # reversed, so above[::-1] is the strict-below indicator and this
-            # averages the two one-sided cuts.
-            weights = 0.5 * (above + 1.0 - above[::-1])
-
-        def one_freq(beam_alm):
-            beam_h = ltj.alm2map(
-                ltj.rotate_alm(beam_alm, psi, theta, phi, lmax=self.lmax),
-                nside=self.nside, lmax=self.lmax,
+        if not hasattr(ltj, "horizon_beam_fraction"):
+            raise StateValidationError(
+                "DriftScanProjector.horizon_fraction() needs limTOD >= 1.9, "
+                "which is where horizon_beam_fraction() lives; the installed "
+                f"limtod_jax ({getattr(ltj, '__version__', 'unknown')}) does not "
+                "have it."
             )
-            # HEALPix pixels are equal-area, so a plain sum IS the integral.
-            return jnp.sum(beam_h * weights) / jnp.sum(beam_h)
-
-        return jax.vmap(one_freq)(self.beam_alms)
+        return ltj.horizon_beam_fraction(
+            self.beam_alms, self.az_deg, self.el_deg, self.selfrot_deg,
+            nside=self.nside, lmax=self.lmax,
+        )
 
     @staticmethod
     def uniform_lst_grid(n_time: int, lst0_deg: float = 0.0) -> jax.Array:

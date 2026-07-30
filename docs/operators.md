@@ -151,6 +151,13 @@ See D16 and D17 in `DESIGN.md`.
 | `read_cst_farfield` | one CST Studio far-field ASCII export → `(theta_deg, phi_deg, directivity)` on its regular grid, dBi converted to linear power |
 | `cst_frequency_table` | a directory of per-frequency exports → `{frequency [Hz]: path}` |
 | `cst_beam_maps` | those exports → `(n_freq, npix)` HEALPix beam maps in limTOD's beam-local convention, linearly interpolated in frequency (extrapolation refused) |
+| `horizon_truncated_beam` | pass-through to `limtod_jax.horizon_truncated_beam`: cut the maps at the horizon, and get `f_sky` back with them |
+
+Where the line falls: what a beam IS and how it weights the sky belongs to
+limTOD, so `horizon_truncated_beam` here is a pass-through and
+`DriftScanProjector.horizon_fraction()` is another. What stays is placement —
+`BeamSpillOperator` consumes `f_sky` but does not compute it. Beam *ingestion*
+(the CST reader below) is the one piece still on this side.
 
 Nothing is normalized on the way out: pass `normalize_beam=True` to the
 projector and let it divide by its own quadrature, which is the only way the

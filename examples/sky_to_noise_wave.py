@@ -35,7 +35,6 @@ import jax
 jax.config.update("jax_enable_x64", True)  # limTOD's map<->alm steps want it
 
 import equinox as eqx  # noqa: E402
-import healpy as hp  # noqa: E402  (a limTOD dependency; here only for pix2ang)
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 import rhino_cal_jax as rcj  # noqa: E402
@@ -134,16 +133,12 @@ coords = Coordinates(time=jnp.arange(float(N_TIME)) * T_INT, freq=freq,
                      extra={"lst_deg": lst_deg, "receiver_input": switch})
 
 peak_dbi = 10.0 * np.log10(np.asarray(beam_maps).max(axis=1))
-theta_pix, _ = hp.pix2ang(NSIDE, np.arange(N_PIX))
-maps_np = np.asarray(beam_maps)
-below = maps_np[:, theta_pix > np.pi / 2].sum(axis=1) / maps_np.sum(axis=1)
 print(f"beam: {beam_label}")
 print(f"      peak {peak_dbi.min():.2f}..{peak_dbi.max():.2f} dBi over "
-      f"{float(freq[0]) / 1e6:.0f}-{float(freq[-1]) / 1e6:.0f} MHz, "
-      f"{100 * below.min():.1f}-{100 * below.max():.1f}% of the response "
-      "below the horizon")
-print(f"      f_sky = {f_sky.min():.4f}..{f_sky.max():.4f} "
-      "(above-horizon share; the rest sees ground)")
+      f"{float(freq[0]) / 1e6:.0f}-{float(freq[-1]) / 1e6:.0f} MHz")
+print(f"      f_sky = {f_sky.min():.4f}..{f_sky.max():.4f}  -> "
+      f"{100 * (1 - f_sky.max()):.1f}-{100 * (1 - f_sky.min()):.1f}% of the "
+      "response is below the horizon and sees ground")
 
 # A uniform sky is the one case whose beam average is known by definition.
 uniform = jnp.full((N_FREQ, N_PIX), 200.0)
