@@ -5,7 +5,7 @@ on the previous ones; pasted top to bottom they form a working script.
 
 - [1. State — the scientific context](#1-state)
 - [2. Operators — the one contract](#2-operators)
-- [3. Composition — chain, sum, switch](#3-composition)
+- [3. Composition — cascade, sum, switch](#3-composition-the-three-structures)
 - [4. Graph assembly — the signal path knows](#4-graph-assembly)
 - [5. Seeing the signal path](#5-rendering)
 - [6. The modular sky engine](#6-sky-engine)
