@@ -648,6 +648,70 @@ and re-emits at the antenna's own temperature. They carry independent physical
 parameters at different points on the path, and merging them would make an
 efficiency and a spill fraction indistinguishable in a fit.
 
+### D18 — `many` instances compose the way their consumer composes
+
+`many=True` at a source folded its instances into a `SumOperator`, always. That
+is right for a junction and wrong for a selector: a switch picks one source per
+sample, it does not add them up. So the graph could not express multi-load
+switching — three distinct sources, the minimum for an identifiable per-channel
+noise-wave fit — and the workaround was to hand-build the `SelectOperator`,
+which is how a `Pipeline`-instead-of-`SumOperator` bug got into an example and
+survived until a gradient came back exactly zero.
+
+The rule is now: **`many` instances fold as sibling Sum branches into a
+junction, and as sibling selector branches into a selector.** `cal_loads` is
+`many=True`, and the whole switching cycle comes out of `assemble()`. The
+existing half of the rule — a junction or selector with one live upstream is
+traversed as identity, so a load-free antenna chain needs no switch array and
+leaves no `SelectOperator` behind — already held and is now pinned by a test.
+
+Two deliberate limits. A source feeding BOTH a selector and a junction keeps
+the Sum: there is no single right answer, and no shipped graph has such a node.
+And the fan-out is kept beside `exprs` rather than widening it, so every other
+path folds bit-for-bit as before — `SumOperator` splits the PRNG key per branch,
+so a flatter tree would be a different seeded run, not merely a different shape.
+
+`Assembly.__getitem__` was fixed alongside. A branch spanning
+`observed_astro_sky -> beam_spill` is labelled by its first node, so a sibling
+Sum named it `observed_astro_sky` while the Pipeline inside it had a stage of
+the same name — and the breadth-first lookup returned the *fold rooted at* the
+node instead of the operator *at* it, contradicting the documented contract and
+making `eqx.tree_at(lambda a: a["observed_astro_sky"].sky_model.maps, ...)` fail
+on an attribute the caller could see in the source. The lookup now descends
+while the match keeps re-naming itself.
+
+### D19 — A fixed pointing means a constant masked beam, so mask the map
+
+`DriftScanProjector(horizon_mask=True)` masks the ALMS on every call: Wigner
+rotation into the horizontal frame, synthesis, multiply, three rounds of
+re-analysis, rotation back. Measured at nside 16 / lmax 47, that is **14.6 ms
+against 1.79 ms unmasked — 8.2x**, and it was documented as an unavoidable cost
+of asking for the horizon.
+
+It is not. The horizon is static in the horizontal frame and a drift scan's
+pointing is fixed by definition, so the masked beam is a CONSTANT.
+`rheplicant.radio.beams.horizon_truncated_beam` truncates the beam MAP once,
+before analysis: **1.04x**, and the same instrument to 2.8e-5 — the residual
+being the alm->map->alm round trip the masking path takes *before* it masks,
+which this one does not. (Spotted by Zheng: "horizon mask 在 horizontal
+coordinate system 里是静止的 ... 不过是一个被 horizon truncate 的 beam".)
+
+At a zenith pointing it needs no rotation at all, and that is provable rather
+than assumed: `limtod_jax.horizon_weights` is a pure function of elevation,
+limTOD's horizontal chart puts the ZENITH at the pole, and the beam-local chart
+puts the BORESIGHT there. At zenith those poles coincide, so the charts differ
+only by a rotation ABOUT that shared pole — which a pure-elevation mask is
+invariant under. Azimuth and self-rotation are therefore irrelevant and the mask
+applies to the beam-local map unchanged. Away from zenith the poles part and the
+horizon becomes a tilted great circle in the beam-local chart;
+`horizon_truncated_beam` refuses rather than hand-derive that rotation, and
+`horizon_mask=True` keeps its place for exactly that case.
+
+The function returns `f_sky` with the maps because they are the same sum, on the
+same principle as `BeamSpillOperator.from_projector` (D17): a weight that
+disagrees with the beam it was supposed to describe is a bias nothing structural
+can catch.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

@@ -34,6 +34,7 @@ Needs ``healpy`` and ``scipy``, both already required by ``limTOD``, so the
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -45,6 +46,17 @@ from rheplicant.core.errors import StateValidationError
 _CST_DIRECTIVITY_COLUMN = 2
 #: Trailing frequency in MHz of a CST filename, e.g. ``HornDry70.5.txt``.
 _FREQ_IN_NAME = re.compile(r"([0-9]+(?:\.[0-9]+)?)$")
+
+
+def _require_limtod_jax():
+    try:
+        import limtod_jax
+    except ImportError as exc:  # pragma: no cover - exercised by the import guard
+        raise ImportError(
+            "rheplicant.radio.beams.horizon_truncated_beam needs limTOD's JAX "
+            'package: pip install "rheplicant[limtod]"'
+        ) from exc
+    return limtod_jax
 
 
 def _require_healpy():
@@ -210,6 +222,91 @@ def cst_beam_maps(
     grid = np.asarray(needed)
     stack = np.stack([sampled[f] for f in needed])
     return np.stack([_interp_frequency(f, grid, stack) for f in freq_hz])
+
+
+def horizon_truncated_beam(
+    beam_maps,
+    *,
+    el_deg: float = 90.0,
+    apod_deg: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cut beam maps at the horizon, and report the fraction that survives.
+
+    For a drift scan the pointing is fixed, so the horizon is fixed too: the
+    masked beam is a CONSTANT, and truncating it is one elementwise multiply on
+    the map, done once. That is worth saying because the alternative --
+    ``DriftScanProjector(horizon_mask=True)``, which masks the ALMS on every
+    call -- costs 8.2x an unmasked evaluation (14.6 ms vs 1.79 ms at nside 16 /
+    lmax 47), all of it in a Wigner rotation into the horizontal frame, a
+    synthesis, three rounds of re-analysis and a rotation back. Truncating the
+    map instead costs 1.04x. Both paths agree to 2.8e-5 relative; the residual
+    is the alm->map->alm round trip the masking path takes BEFORE it masks,
+    which this one does not.
+
+    Returns the fraction alongside the maps because they are the same
+    computation, and because a weight that disagrees with the beam it was
+    supposed to describe is a bias nothing structural can catch. Hand it
+    straight to :class:`~rheplicant.radio.instrument.beam_spill.BeamSpillOperator`.
+
+    WHY ``el_deg = 90`` IS EXACT AND ANYTHING ELSE IS REFUSED. The mask is a
+    pure function of elevation (``limtod_jax.horizon_weights``), and limTOD's
+    horizontal chart puts the ZENITH at the pole; the beam-local chart puts the
+    BORESIGHT at the pole. At a zenith pointing those poles coincide, and the
+    two charts can then differ only by a rotation ABOUT that shared pole --
+    which a pure-elevation mask is invariant under. So azimuth and self-rotation
+    are irrelevant and no rotation is needed at all: the mask applies to the
+    beam-local map unchanged. Away from zenith the poles differ and the horizon
+    is a tilted great circle in the beam-local chart; rather than hand-derive
+    that rotation, this refuses and points at ``horizon_mask=True``, which does
+    it with limTOD's own machinery.
+
+    Args:
+        beam_maps: ``(n_freq, npix)`` or ``(npix,)`` HEALPix RING beam maps in
+            the beam-local frame.
+        el_deg: boresight elevation [deg]; only 90 is supported (see above).
+        apod_deg: cosine-apodization width of the cut [deg of elevation]. The
+            returned fraction always uses the HARD cut -- a tapered region does
+            not partition a sphere -- while the maps carry the taper.
+
+    Returns:
+        ``(masked_maps, sky_fraction)``, shapes ``(n_freq, npix)`` and
+        ``(n_freq,)``.
+
+    Raises:
+        StateValidationError: for a non-zenith ``el_deg``, or maps that are not
+            a valid HEALPix length.
+    """
+    ltj = _require_limtod_jax()
+    if abs(float(el_deg) - 90.0) > 1e-9:
+        raise StateValidationError(
+            f"horizon_truncated_beam supports a zenith pointing (el_deg=90), got "
+            f"{el_deg}. Only there do the beam-local and horizontal charts share "
+            "a pole, which is what makes a pure-elevation mask applicable to the "
+            "beam-local map without any rotation. For a tilted pointing use "
+            "DriftScanProjector(horizon_mask=True), which rotates with limTOD's "
+            "own machinery."
+        )
+    maps = np.atleast_2d(np.asarray(beam_maps, dtype=float))
+    n_pix = maps.shape[-1]
+    nside = int(round(math.sqrt(n_pix / 12.0)))
+    if 12 * nside**2 != n_pix:
+        raise StateValidationError(
+            f"beam_maps has {n_pix} pixels, which is not a valid HEALPix map "
+            "length (12*nside**2)."
+        )
+    hard = np.asarray(ltj.horizon_weights(nside, 0.0))
+    # horizon_weights is a strict el > 0, so the ring of pixels centred exactly
+    # ON the horizon is dropped. It is half sky and half ground. In RING
+    # ordering the southern hemisphere is the northern one reversed, so
+    # hard[::-1] is the strict-below indicator and this averages the two
+    # one-sided cuts. Getting this wrong is the dominant error in the fraction
+    # -- see DriftScanProjector.horizon_fraction and D17.
+    partition = 0.5 * (hard + 1.0 - hard[::-1])
+    taper = hard if apod_deg == 0.0 else np.asarray(
+        ltj.horizon_weights(nside, apod_deg)
+    )
+    total = maps.sum(axis=-1)
+    return maps * taper, (maps * partition).sum(axis=-1) / total
 
 
 def _interp_frequency(f: float, grid: np.ndarray, maps: np.ndarray) -> np.ndarray:

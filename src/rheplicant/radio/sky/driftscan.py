@@ -47,13 +47,23 @@ hard cut at finite band-limit — see the ringing study in the limTOD docs
 (``docs/driftscan.md``): narrow beams never need it; wide low-elevation
 beams need it *and* 2–5° of apodization.
 
-COST: the mask reads like a physics switch, but on the ``"local"`` beam frame
-it is the most expensive thing this projector can do — it adds a map
-synthesis, an iterative re-analysis (``mask_iterations`` rounds of analysis +
-synthesis, 3 by default) and a second Wigner rotation to EVERY call, roughly
-7x the cached unmasked path. Always follow it with
-:meth:`DriftScanProjector.to_reference_frame`, which folds the masked beam
-into the cached alms once and clears the flag; ``__check_init__`` forbids the
+COST, and how to not pay it: on the ``"local"`` beam frame the mask is the most
+expensive thing this projector can do. It adds a Wigner rotation into the
+horizontal frame, a map synthesis, an iterative re-analysis (``mask_iterations``
+rounds, 3 by default) and a rotation back — to EVERY call. Measured at nside 16
+/ lmax 47: **14.6 ms against 1.79 ms unmasked, 8.2x**.
+
+None of that is inherent. The horizon is fixed in the horizontal frame, and a
+drift scan's pointing is fixed by definition, so the masked beam is a CONSTANT:
+truncating the beam MAP once, before analysis, gives the same instrument for
+1.04x (:func:`rheplicant.radio.beams.horizon_truncated_beam`; the two agree to
+2.8e-5, the residual being the alm->map->alm round trip this path takes before
+it masks). Prefer that. ``horizon_mask=True`` earns its keep when the pointing
+is not zenith — there the beam-local and horizontal charts stop sharing a pole
+and the cut is a tilted great circle, which limTOD's rotation handles and a
+map-space multiply does not. Either way, follow it with
+:meth:`DriftScanProjector.to_reference_frame`, which folds the masked beam into
+the cached alms once and clears the flag; ``__check_init__`` forbids the
 combination that would apply it twice.
 
 PRECISION: enable ``jax_enable_x64`` for quantitative work (the map<->alm

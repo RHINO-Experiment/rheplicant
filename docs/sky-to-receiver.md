@@ -182,46 +182,46 @@ what happens to the sky, in order:
 ## 4. A real switching cycle
 
 An identifiable per-channel noise-wave fit needs three sources with genuinely
-different $\Gamma$ — see [D15](design.md) for the equation counting. That is one
-more calibration load than `assemble()` can currently express (the `cal_loads`
-node has no `many=True`), so the selector is built directly. It is the same
-operator `assemble()` would have produced:
+different $\Gamma$ — see [D15](design.md) for the equation counting. That is
+one more calibration load than a two-position switch, and `assemble()` expresses
+it directly: `cal_loads` is `many=True` and feeds only the selector, so each
+`CalLoadOperator` becomes its own switch position rather than being summed with
+its sibling.
 
 ```python
-from rheplicant import Pipeline, SelectOperator, SumOperator
-
-twin = Pipeline(
-    SelectOperator(
-        Pipeline(                                     # the antenna branch
-            SumOperator(
-                Pipeline(sky, spill, names=("sky", "beam_spill")),
-                atmosphere,
-                names=("astro", "atmosphere"),
-            ),
-            antenna_loss,
-            names=("t_ant_sum", "antenna_loss"),
-        ),
-        CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
-        CalLoadOperator(t_load=jnp.array(T_HOT)),
-        names=("antenna", "ambient", "hot"),
-        switch_key="receiver_input",
-    ),
+twin = assemble(
+    SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
+    BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(T_GROUND)),
+    AtmosphericEmissionOperator(t_atm=jnp.array(T_ATM)),
+    AntennaLossOperator(efficiency=jnp.array(ETA), t_physical=jnp.array(T_PHYS)),
+    CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
+    CalLoadOperator(t_load=jnp.array(T_HOT)),
     receiver(t_nw, jnp.stack([gamma_ant, gamma_ambient, gamma_hot])),
-    names=("receiver_input", "noise_wave"),
 )
 ```
 
-:::{admonition} Join 3 — `SumOperator`, not `Pipeline`, for the sources
-:class: warning
-A `Pipeline` of *source-type* operators **replaces** the data at each stage; only
-the last one survives. `Pipeline(sky, ground, atmosphere)` therefore returns the
-atmosphere alone — the sky silently gone, the result finite and correctly
-shaped. Summing is what the `t_ant_sum` junction does, and `SumOperator` is how
-you say it by hand. This bug was in the first draft of the example and was caught
-only because the gradient with respect to the sky map came back exactly zero.
+That is the entire wiring. Six operators and a switch cycle, and not one line
+saying what connects to what — the graph holds four different relationships at
+once here, and gets each right:
 
-Whenever you hand-wire a branch that `assemble()` could otherwise have built,
-check it against `assemble()`. The example does, in one assertion.
+| | |
+|---|---|
+| sky, atmosphere | leaves that **sum** at `t_ant_sum` |
+| `beam_spill` | **chains** after the sky, on the astro branch |
+| `antenna_loss` | the **trunk** stage after the sum |
+| the two loads | sibling **selector** branches — they *replace* the antenna |
+
+:::{admonition} If you hand-wire it anyway
+:class: warning
+A `Pipeline` of *source-type* operators **replaces** the data at each stage;
+only the last one survives. `Pipeline(sky, ground, atmosphere)` therefore
+returns the atmosphere alone — the sky silently gone, the result finite and
+correctly shaped. Summing is what the `t_ant_sum` junction does, and
+`SumOperator` is how you say it by hand. This bug was in an earlier draft of
+this example, back when multi-load switching *did* require hand-wiring, and it
+was caught only because the gradient with respect to the sky map came back
+exactly zero. The graph knowing the composition rules is what removed the
+opportunity.
 :::
 
 Noise is the draft's Eq. 8 — fractional, $\sigma = T_\mathrm{sys}/\sqrt{\Delta\nu\,\tau}$:

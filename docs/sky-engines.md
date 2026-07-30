@@ -361,14 +361,37 @@ switches deal with it, and they answer different questions.
 `horizon_mask=True` cuts the beam at the local horizon before projecting, so
 `forward` returns the beam average over the **visible** sky. A sharp cut is not
 band-limited, so the masked beam rings; `apod_deg` (2–5° of elevation) tames it,
-and `mask_iterations` sets the healpy-equivalent re-analysis depth. The mask is
-the most expensive thing this projector can do on the `"local"` beam frame —
-roughly 7× the cached unmasked path — so always follow it with
-`to_reference_frame()`, which folds the masked beam into the cached alms once
-and clears the flag.
+and `mask_iterations` sets the healpy-equivalent re-analysis depth.
 
-`horizon_fraction()` answers the other question: **how much** of the beam that
-is. It returns
+It is also the most expensive thing this projector can do — **14.6 ms against
+1.79 ms unmasked at nside 16 / lmax 47, 8.2×** — because it masks the *alms* on
+every call: rotate into the horizontal frame, synthesize, multiply, re-analyze
+three times, rotate back.
+
+None of that is inherent, and for a drift scan none of it is necessary. The
+horizon is fixed in the horizontal frame and a drift scan's pointing is fixed by
+definition, so the masked beam is a **constant**: truncate the beam map once,
+before analysis, and the whole thing is one elementwise multiply.
+
+```python
+from rheplicant.radio import horizon_truncated_beam
+beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
+```
+
+**1.04×** — free — and the same instrument, to 2.8e-5 (the residual is the
+alm→map→alm round trip the masking path takes *before* it masks, which this one
+does not). At a zenith pointing this needs no rotation at all: limTOD's
+horizontal chart puts the zenith at the pole and the beam-local chart puts the
+boresight there, so the two coincide, and a pure-elevation mask is invariant
+under the rotation about that shared pole that still separates them.
+`horizon_truncated_beam` refuses a tilted pointing rather than guess the
+rotation; that is where `horizon_mask=True` earns its keep. Either way, follow
+it with `to_reference_frame()`.
+
+`horizon_truncated_beam` returns `f_sky` alongside the maps because they are the
+same sum. `DriftScanProjector.horizon_fraction()` computes it for the
+`horizon_mask=True` path instead. Either way it answers the other question the
+horizon raises: **how much** of the beam is above it. It is
 
 $$f_\mathrm{sky} = \frac{\int_\mathrm{above} B\,d\Omega}{\int_{4\pi} B\,d\Omega}$$
 
@@ -378,18 +401,24 @@ $$T_\mathrm{collected} = f_\mathrm{sky}\,\langle T_\mathrm{sky}\rangle_\mathrm{m
   + (1 - f_\mathrm{sky})\,T_\mathrm{ground}.$$
 
 Masking without that weight is no better than not masking at all: at a 3000 K
-sky both are a ~200 K bias. `BeamSpillOperator` applies both halves —
-`BeamSpillOperator.from_projector(projector, t_ground=...)` calls
-`horizon_fraction()` for you, which is the only way the weight and the sky
-average cannot get out of step. Read it **before** `to_reference_frame()`: that
-call leaves no unmasked denominator to divide by, and `horizon_fraction()`
-raises if asked afterwards.
+sky both are a ~200 K bias. `BeamSpillOperator` applies both halves, and the
+two routes to it each hand over the fraction and the beam together, which is
+what stops them describing different beams:
 
 ```python
+# truncate the map (preferred for a drift scan)
+beam_maps, f_sky = horizon_truncated_beam(beam_maps, apod_deg=3.0)
+spill = BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(290.0))
+
+# or mask the alms (a tilted pointing)
 local  = DriftScanProjector.from_beam_maps(..., horizon_mask=True, apod_deg=3.0)
 spill  = BeamSpillOperator.from_projector(local, t_ground=jnp.array(290.0))
-cached = local.to_reference_frame(lst_ref_deg=0.0)
+cached = local.to_reference_frame(lst_ref_deg=0.0)   # AFTER reading the fraction
 ```
+
+On the second route, read the fraction **before** `to_reference_frame()`: that
+call leaves no unmasked denominator to divide by, and `horizon_fraction()`
+raises if asked afterwards.
 
 $f_\mathrm{sky}$ is an equal-area **pixel** partition of the beam, with the ring
 of pixels centred exactly on the horizon counted as half. Neither choice is
