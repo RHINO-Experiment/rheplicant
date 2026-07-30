@@ -370,6 +370,42 @@ at import time rather than silently working until it does not.
   the m-mode expansion, so the returned coefficients would silently not be
   the spectrum of `forward()` (~18x off).
 
+### Changed: `NoiseWaveOperator` implements the full Eq. 1 (breaking)
+
+`NoiseWaveOperator` now runs Eq. 1 of the noise-wave GCR note through
+`rhino_cal_jax` (see D15 in `DESIGN.md`) instead of the `F -> 1` placeholder
+that summed one scalar `Gamma` straight into the sky-side temperature.
+`t_zero` is renamed `t_rx`; the scalar `gamma_re`/`gamma_im` pair is replaced
+by per-source `gamma_src_re`/`gamma_src_im` of shape `(n_source, n_freq)` plus
+`gamma_rec_re`/`gamma_rec_im` of shape `(n_freq,)` — reflection coefficients
+belong to *sources*, and the `receiver_input` selector discards source
+identity before this node sees the data, which the old single-`Gamma` shape
+could not represent. The operator now reads which source is connected from
+`coords.extra["receiver_input"]` and raises if it carries more than one source
+and that array is absent, rather than silently defaulting to the first.
+
+### Added: the noise-wave temperatures as a checked linear block (worked example)
+
+`examples/noise_wave_gcr.py`: the per-channel noise-wave temperatures
+(`t_unc`, `t_cos`, `t_sin`) declared as ONE `linear=True` latent, solved in
+closed form (`wiener_solve`, GCR note Eq. 30) and sampled exactly
+(`gcr_sample`, Eq. 31). A `--one-source` mode shows what switching buys: with
+one load the per-channel design matrix is deficient by a factor of three and
+two of every three directions fall back to the prior; with three genuinely
+different loads it is square and every direction is data-constrained.
+
+### Fixed: `wiener_solve`/`gcr_sample` under-reported posterior width on an ill-conditioned block
+
+Both defaulted to a CG tolerance that bounds the *residual*, not the
+*solution* error — the two differ by roughly the condition number, and jax's
+`cg` gives no other convergence signal. On a 48-dimensional calibration block
+(two of every three directions prior-dominated, `cond(M) ~ 4e8`) the old
+default reported a posterior sigma of 0.026 K where 81 K was correct —
+understating the width by a factor of ~3000, always in the direction of false
+confidence, while the convergence guard (`require_convergence`, unchanged at
+`1e-3`) saw an excellent residual throughout and stayed silent. `tol` now
+defaults to `1e-10`.
+
 ## 0.1.4 (2026-07-25)
 
 - Add project logos (a rhino dissolving into digital pixels — the
