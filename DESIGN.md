@@ -559,6 +559,51 @@ calibrator, GCR sampling of noise-wave parameters (D15,
 `examples/noise_wave_gcr.py`). Still ahead: optax integration for exotic
 optimizers, multi-experiment configs.
 
+### D16 — Antenna ohmic loss is a trunk stage, exactly where the atmosphere was not
+
+Graph v1.3 adds `antenna_loss` between `t_ant_sum` and the `receiver_input`
+switch — the position D13 emptied. That is not a reversal: the two effects
+differ in precisely the property that decided D13.
+
+D13 moved the atmosphere off the trunk because opacity applied to the whole
+antenna-temperature sum would attenuate `ground_pickup`, which never crosses the
+atmosphere. Provenance matters there: the attenuation happens *during*
+collection, and different branches were collected along different paths. Ohmic
+loss happens in the antenna's conductors and dielectric, *after* collection.
+Every photon the beam gathered — sky, ground spill, atmospheric emission alike —
+passes through the same lossy structure, so provenance no longer matters and the
+trunk is the correct position.
+
+The other boundary is the switch. Calibration loads connect at the receiver
+input, downstream of the antenna, so they must not see this loss;
+`antenna_loss → receiver_input` puts it on the antenna side of the switch. A
+loss placed after the switch would attenuate the loads too and bias every
+noise-wave solution built on them.
+
+The form is Kirchhoff, not an arbitrary blend: `T_out = eta T_in + (1 - eta)
+T_phys`, so an antenna at temperature `T` looking at a sky at the same `T`
+delivers `T` for any efficiency. That isothermal fixed point is what
+distinguishes the correct coefficient pairing from `(eta, eta)`, `(eta, 1)` or
+`(1, 1 - eta)`, and it is asserted directly in
+`tests/radio/test_antenna_loss.py`.
+
+Finally, this is a **different loss** from `NoiseWaveOperator`'s
+`c_s = (1 - |Gamma|^2)|F|^2`. That one is the impedance mismatch at the
+antenna–receiver interface; this one is dissipation inside the antenna. They
+multiply, and only the ohmic one contributes emission of its own. Folding an
+efficiency into the noise-wave couplings would be indistinguishable from a
+mismatch in the fit while silently dropping the `(1 - eta) T_phys` term.
+
+Still missing at this node: the **beam-spill split**. 1–3 % of RHINO's horn
+response is below the horizon and sees ground, not sky. The correct antenna
+temperature is `f_sky <T_sky>_masked + (1 - f_sky) T_ground`;
+`GroundPickupOperator` supplies the second term and
+`DriftScanProjector(horizon_mask=True)` the first, but no node applies the
+`f_sky` weight to the sky branch — so masking on its own is no better than not
+masking, and at a 3000 K sky either choice is a ~90 K bias. It needs its own
+node; it is not `antenna_loss` wearing a different hat, and expressing it as one
+would conflate two independent physical parameters in a single leaf.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

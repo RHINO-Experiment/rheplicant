@@ -155,10 +155,10 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
 - **Core** — `State` (immutable pytree context), `Pipeline` / `SumOperator` /
   `SelectOperator` composition, `SignalGraph` + `assemble` (graph-guided
   auto-composition with lit/dim mermaid & HTML rendering).
-- **Radio** — a 29-node canonical signal-path graph covering every element of
+- **Radio** — a 30-node canonical signal-path graph covering every element of
   a single-antenna experiment: sky components, ionosphere, RFI, shared
-  chromatic beam, noise-wave/reflection terms, CW tone and switched
-  calibration loads, gain, thermal noise, EMI, ADC, flagging, averaging —
+  chromatic beam, antenna ohmic loss, noise-wave/reflection terms, CW tone
+  and switched calibration loads, gain, thermal noise, EMI, ADC, flagging, averaging —
   plus a modular sky engine — a general differentiable limTOD port and a
   drift-scan m-mode fast path that returns the same numbers orders of
   magnitude cheaper, alongside projection matrices and a numpy-limTOD
@@ -179,14 +179,14 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 |---|---|
 | [Guided tour](docs/tour.md) | The complete API, top to bottom, with runnable snippets |
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
-| [Architecture](DESIGN.md) | Design decisions D1–D13, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D16, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
-| `examples/` | Four end-to-end runnable demos |
+| `examples/` | Nine end-to-end runnable demos |
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(384 tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
+(570 tests, ~96 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder pending ports from limTOD and friends
 — except the sky engines, which are real: a general differentiable limTOD

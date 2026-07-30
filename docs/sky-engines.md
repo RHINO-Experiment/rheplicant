@@ -319,6 +319,39 @@ s2fft's float32 limitation.
 
 ---
 
+## Is the output a temperature?
+
+Not by default. Both engines take `normalize_beam` from numpy limTOD, where it
+defaults to **`False`** — the forward model then returns `∫B(n,t) T(n) dΩ`, the
+beam-weighted *integral*. An antenna temperature is the beam-weighted *average*,
+`∫BT dΩ / ∫B dΩ`. The two differ by the beam's solid angle, which is a per-
+frequency constant: invisible in a shape check, invisible in a plot of the
+waterfall's structure, and fatal the moment the number is used as a temperature
+— fed to `NoiseWaveOperator` as `T_src`, compared against a load, or fitted for
+a global signal.
+
+Checked against the one sky whose beam average is known by definition, a
+uniform 200 K one:
+
+| beam map | `normalize_beam` | result | error |
+|---|---|---|---|
+| any | `True` | 200.0000 K | exact |
+| raw Gaussian | `False` | 32838 K | ×164 |
+| normalized to unit pixel sum | `False` | 200.4113 K | **+0.21 %** |
+
+The third row is the dangerous one. Normalizing the beam map by hand looks like
+it fixes the problem and does not: the band-limit truncates `∫B` away from 1 as
+well, so a residual percent-level bias survives — 0.21 % at nside 16 / lmax 47
+with a wide beam, ~4 % at nside 8 with a 20° beam, growing as the beam narrows
+towards the pixel scale. `normalize_beam=True` divides by the *same* truncated
+integral, so the error cancels exactly at any band-limit.
+
+Use `normalize_beam=True` whenever the output is a temperature. Leave it
+`False` when you want the unnormalized TOD — `mmodes()` is defined on it and
+refuses the normalized projector for exactly that reason.
+
+---
+
 ## Run it
 
 [`examples/driftscan_mmode.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/driftscan_mmode.py)
@@ -328,4 +361,13 @@ m-modes, and differentiate the result with respect to the beam.
 
 ```bash
 uv run python examples/driftscan_mmode.py
+```
+
+[`examples/sky_to_noise_wave.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/sky_to_noise_wave.py)
+takes it one stage further: the drift-scan TOD becomes the noise-wave model's
+`T_src`, switched against two calibration loads, and the noise-wave temperatures
+are recovered in closed form with the sky treated as known data.
+
+```bash
+uv run python examples/sky_to_noise_wave.py
 ```
