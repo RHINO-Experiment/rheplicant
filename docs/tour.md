@@ -117,7 +117,7 @@ parameter) — how switched calibration loads replace the antenna signal.
 
 Explicit composition is always available — but composition is *implicit in
 the signal path*. The canonical single-antenna graph
-(`rheplicant.radio.RADIO_GRAPH`, 30 nodes) knows how every element connects, so
+(`rheplicant.radio.RADIO_GRAPH`, 32 nodes) knows how every element connects, so
 you provide a **set** of operators and `assemble` compiles the sub-path they
 induce:
 

@@ -5,7 +5,8 @@ Typical ordering in a forward model (RHINO paper Eq. 6:
 bandpass and gain so it tracks gain drift; the antenna/cal-load switch sits
 between the sky-side temperatures and the receiver terms)::
 
-    Beam -> (+ sky-side temperatures) -> AntennaLoss -> [switch <- CalLoad]
+    Beam -> BeamSpill -> (+ sky-side temperatures) -> AntennaLoss
+         -> [switch <- CalLoad]
          -> NoiseWave -> CWCalibration -> Receiver(bandpass) -> Gain
          -> Noise -> EMI -> ADC
 """
@@ -13,6 +14,7 @@ between the sky-side temperatures and the receiver terms)::
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
 from rheplicant.radio.instrument.beam import BeamOperator
+from rheplicant.radio.instrument.beam_spill import BeamSpillOperator
 from rheplicant.radio.instrument.calibration import (
     ApplyCalibrationOperator,
     CalLoadOperator,
@@ -29,6 +31,7 @@ __all__ = [
     "AntennaLossOperator",
     "ApplyCalibrationOperator",
     "BeamOperator",
+    "BeamSpillOperator",
     "CalLoadOperator",
     "CWCalibrationOperator",
     "EMIOperator",

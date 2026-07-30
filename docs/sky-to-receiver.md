@@ -46,10 +46,12 @@ beam_maps = jnp.asarray(cst_beam_maps(
     "~/Dataspace/RHINO/CST_beams/HornDryGround", freq, nside=NSIDE,
 ))
 
-projector = DriftScanProjector.from_beam_maps(
+local = DriftScanProjector.from_beam_maps(
     beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0,
-    lmax=LMAX, normalize_beam=True,
-).to_reference_frame(lst_ref_deg=0.0)          # pay the Wigner rotation once
+    lmax=LMAX, normalize_beam=True, horizon_mask=True, apod_deg=3.0,
+)
+f_sky = local.horizon_fraction()               # read it BEFORE caching
+projector = local.to_reference_frame(lst_ref_deg=0.0)   # Wigner rotation once
 ```
 
 :::{admonition} Join 1 — `normalize_beam` decides whether `T_src` is a temperature
@@ -69,6 +71,7 @@ beam average is known by definition — a uniform one:
 ```text
 beam: RHINO horn, HornDryGround
       peak 12.14..14.38 dBi over 60-85 MHz, 1.0-3.1% of the response below the horizon
+      f_sky = 0.9661..0.9896 (above-horizon share of the beam; the rest sees ground)
       uniform 200 K sky -> 200.0000 K  (this is what makes it a temperature)
 drift-scan sky: (96, 8)  1869 .. 4682 K
 ```
@@ -86,13 +89,13 @@ three at once:
 
 ```python
 from rheplicant.radio import (
-    AntennaLossOperator, AtmosphericEmissionOperator, CalLoadOperator,
-    GroundPickupOperator, NoiseWaveOperator, SkySourceOperator, assemble,
+    AntennaLossOperator, AtmosphericEmissionOperator, BeamSpillOperator,
+    CalLoadOperator, NoiseWaveOperator, SkySourceOperator, assemble,
 )
 
 twin = assemble(
     SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
-    GroundPickupOperator(coupling=jnp.array(0.02), t_ground=jnp.array(290.0)),
+    BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(290.0)),
     AtmosphericEmissionOperator(t_atm=jnp.array(3.0)),
     AntennaLossOperator(efficiency=jnp.array(0.97), t_physical=jnp.array(293.0)),
     CalLoadOperator(t_load=jnp.array(300.0)),
@@ -105,16 +108,17 @@ twin = assemble(
 ```
 
 ```text
-Assembly(graph='single-antenna', lit=['observed_astro_sky', 'ground_pickup',
-  'atmosphere', 'antenna_loss', 'cal_loads', 'noise_wave'],
-  skipped-as-identity=[])
+Assembly(graph='single-antenna', lit=['observed_astro_sky', 'atmosphere',
+  'beam_spill', 'antenna_loss', 'cal_loads', 'noise_wave'],
+  skipped-as-identity=['astro_ant_sum'])
 switch order: ('t_ant_sum', 'cal_loads') <- gamma_src rows must be stacked in THIS order
 ```
 
-Nothing above says what connects to what. The graph does: the three sources are
-leaves into the `t_ant_sum` junction, `antenna_loss` is the trunk stage after
-it, and `receiver_input` is a *selector*, which is why the load **replaces** the
-antenna rather than adding to it.
+Nothing above says what connects to what — the graph does, and the relationships
+are not all the same. `beam_spill` **chains after** the sky, on the astro branch;
+`atmosphere` is a separate leaf that **sums** at `t_ant_sum`; `antenna_loss` is
+the trunk stage after that sum; `receiver_input` is a *selector*, which is why
+the load **replaces** the antenna rather than adding to it.
 
 :::{admonition} Join 2 — `gamma_src`'s row order is the selector's branch order
 :class: warning
@@ -130,7 +134,8 @@ The example then checks the assembled twin against Eq. 1 written out by hand,
 with the antenna chain in $T_\mathrm{src}$'s place:
 
 ```python
-t_collected = projector.forward(sky_maps, coords) + 0.02 * 290.0 + 3.0
+t_visible = projector.forward(sky_maps, coords)              # masked sky average
+t_collected = f_sky * t_visible + (1.0 - f_sky) * T_GROUND + T_ATM
 t_ant = ETA * t_collected + (1.0 - ETA) * T_PHYS
 by_hand = rcj.system_temperature(
     rcj.Couplings.from_stacked(rcj.couplings(gamma_src, gamma_rec).stacked[switch]),
@@ -140,33 +145,35 @@ by_hand = rcj.system_temperature(
 ```
 
 ```text
-assembled twin vs Eq. 1 by hand: 4.0e-16 relative — roundoff
+assembled twin vs Eq. 1 by hand: 2.7e-16 relative — roundoff
 ```
 
 ---
 
-## 3. Two different losses
+## 3. Three effects, none standing in for another
 
-The sky is attenuated twice on its way to the receiver, by two effects that are
-easy to confuse and must not be merged:
+The sky is modified three times on its way to the receiver. They are easy to
+confuse, they compose, and each has a distinct signature:
 
-| | what it is | what it does |
+| | what it is | signature |
 |---|---|---|
-| $\eta$ (`AntennaLossOperator`) | ohmic dissipation **inside** the horn | attenuates **and adds** $(1-\eta)T_\mathrm{phys}$ |
-| $c_s = (1-\lvert\Gamma_\mathrm{src}\rvert^2)\lvert F\rvert^2$ | impedance **mismatch** at the receiver input | attenuates, adds nothing |
+| $f_\mathrm{sky}$ (`BeamSpillOperator`) | part of the beam is looking at **ground**, not sky | **mixing, no loss** — sky and ground at the same $T$ give $T$ |
+| $\eta$ (`AntennaLossOperator`) | ohmic dissipation **inside** the horn | loss **and** its own emission $(1-\eta)T_\mathrm{phys}$ |
+| $c_s = (1-\lvert\Gamma_\mathrm{src}\rvert^2)\lvert F\rvert^2$ | impedance **mismatch** at the receiver input | loss, nothing added |
 
-They multiply. Folding an efficiency into the noise-wave couplings would be
-indistinguishable from a mismatch *in the fit* while silently dropping the
-additive term — the antenna's own thermal emission, which a mismatch does not
-produce. The invariant that pins the pairing is thermodynamic: an antenna at
-temperature $T$ looking at a sky at the same $T$ must deliver $T$, whatever its
-efficiency. `AntennaLossOperator` is tested against exactly that.
+The first two share the arithmetic $a x + (1-a) b$ and are deliberately not one
+operator: merging them would make an efficiency and a spill fraction
+indistinguishable in a fit. Each pairing is pinned by an invariant rather than
+by inspection — for the ohmic loss, an antenna at $T$ looking at a sky at $T$
+delivers $T$ for any efficiency; for the spill, the same statement with ground
+in place of the antenna.
 
 ```text
 what happens to the sky, in order:
-   collected by the beam          3026.0 K
-   after ohmic loss (eta=0.97)    2944.0 K   (-82 K, and +9 K of the horn's own emission)
-   after mismatch (c_s=0.264)      778.4 K
+   visible-sky beam average       3026.0 K
+   after horizon spill            2975.1 K   (f_sky ~ 0.981; the rest sees 290 K ground)
+   after ohmic loss (eta=0.97)    2894.7 K   (+9 K of the horn's own emission)
+   after mismatch (c_s=0.264)      765.3 K
    c_s per source: antenna 0.264   ambient 0.595   hot 0.080
 ```
 
@@ -185,9 +192,13 @@ from rheplicant import Pipeline, SelectOperator, SumOperator
 
 twin = Pipeline(
     SelectOperator(
-        Pipeline(
-            SumOperator(*antenna_sources(), names=("sky", "ground", "atmosphere")),
-            antenna_loss(),
+        Pipeline(                                     # the antenna branch
+            SumOperator(
+                Pipeline(sky, spill, names=("sky", "beam_spill")),
+                atmosphere,
+                names=("astro", "atmosphere"),
+            ),
+            antenna_loss,
             names=("t_ant_sum", "antenna_loss"),
         ),
         CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
@@ -225,8 +236,8 @@ Because the noise is multiplicative it is ~2× larger on antenna samples than on
 the loads. A scalar $\sigma$ would weight them equally and throw that away.
 
 ```text
-simulated waterfall: (96, 8), 781.3 K mean, sigma 0.201..0.674 K (Eq. 8, fractional)
-   antenna   32 samples    1234.54 K mean   235.21 K rms
+simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (Eq. 8, fractional)
+   antenna   32 samples    1220.02 K mean   232.68 K rms
    ambient   32 samples     586.66 K mean    21.42 K rms
    hot       32 samples     522.62 K mean    14.20 K rms
 ```
@@ -258,12 +269,12 @@ solved, residual = wiener_solve(block, observed, noise_std=noise_std,
 
 ```text
 linearity check: worst relative departure 6.7e-13
-condition_estimate: kappa = 4.04e+01
+condition_estimate: kappa = 4.00e+01
 
-Wiener mean (Eq. 30), CG residual 5.6e-11:
-   T_unc  RMS error   0.135 K   ( 0.34% of its 40 K spread)
-   T_cos  RMS error   0.114 K   ( 0.19% of its 60 K spread)
-   T_sin  RMS error   0.110 K   ( 1.41% of its  8 K spread)
+Wiener mean (Eq. 30), CG residual 5.1e-11:
+   T_unc  RMS error   0.134 K   ( 0.33% of its 40 K spread)
+   T_cos  RMS error   0.113 K   ( 0.19% of its 60 K spread)
+   T_sin  RMS error   0.110 K   ( 1.40% of its  8 K spread)
 ```
 
 $\kappa \approx 40$ is a well-conditioned system: three distinct $\Gamma$ make the
@@ -285,28 +296,62 @@ d_maps, d_eta = jax.grad(total_power, argnums=(0, 1))(sky_maps, jnp.array(ETA))
 ```
 
 ```text
-d(sum P^2)/d(sky pixel):  4.074e+01  (nonzero on 24576/24576 pixels)
-d(sum P^2)/d(eta):        4.906e+08
+d(sum P^2)/d(sky pixel):  4.042e+01  (nonzero on 24576/24576 pixels)
+d(sum P^2)/d(eta):        4.752e+08
 ```
 
 ---
 
-## Known gap
+## The horizon split, measured
 
-1–3 % of the horn's response (frequency-dependent) is below the horizon, and this
-configuration lets that fraction see celestial sky rather than ground. The
-correct split is
+1–3 % of the horn's response (frequency-dependent) is below the horizon and sees
+ground, not sky. `horizon_mask=True` gives the beam average over the *visible*
+sky, and the rest of the antenna temperature is ground:
 
-$$T_\mathrm{ant} = f_\mathrm{sky}\,\langle T_\mathrm{sky}\rangle_\mathrm{masked}
+$$T_\mathrm{collected} = f_\mathrm{sky}\,\langle T_\mathrm{sky}\rangle_\mathrm{masked}
   + (1 - f_\mathrm{sky})\,T_\mathrm{ground}$$
 
-with $f_\mathrm{sky}$ the above-horizon beam fraction. `GroundPickupOperator`
-supplies the second term, and `DriftScanProjector(horizon_mask=True)` supplies
-$\langle T_\mathrm{sky}\rangle_\mathrm{masked}$, but **no node applies the
-$f_\mathrm{sky}$ weight to the sky branch** — so using the mask on its own is no
-better than not using it, and at a 3000 K sky either choice is a ~90 K bias. The
-missing piece is a beam-spill split on the antenna-temperature sum; it is not
-the ohmic loss wearing a different hat, and should not be expressed as one.
+`BeamSpillOperator` applies **both** halves, so the weights sum to one by
+construction — split across a weight here and a `GroundPickupOperator` there,
+the two numbers can drift apart and nothing structural would notice.
+
+$f_\mathrm{sky}$ *is* the horizon cut, measured on the beam. Three choices go
+into it, and each was decided by measurement rather than argument, against a
+projector run on a sky map with the ground painted in at latitude 90 — where the
+local horizon coincides with the celestial equator and stops moving with LST, so
+the right answer can simply be computed. Residual on a ~200 K effect:
+
+| choice | residual at nside 16 |
+|---|---|
+| the masked beam's harmonic integral | −17 K |
+| pixel partition, horizon ring dropped (`horizon_weights` as shipped) | −8.6 K |
+| pixel partition, horizon ring counted as all sky | +8.7 K |
+| **pixel partition, horizon ring counted half** | **+0.005 K** |
+
+Two things fall out of that table. The band-limited masked beam's solid-angle
+integral is *not* $f_\mathrm{sky}$: `map2alm` of a sharply cut map does not
+preserve the mean, so it is off by ~0.7 %. And `limtod_jax.horizon_weights` uses
+a strict `el > 0`, which drops the whole ring of pixels centred exactly on the
+horizon — 64 of 3072 at nside 16. A pixel centred on the horizon is half sky and
+half ground; the two one-sided alternatives are symmetric and halve with nside,
+which is the signature of a miscounted ring rather than of anything harmonic.
+
+The first implementation used the strict cut and looked entirely reasonable.
+
+```python
+local  = DriftScanProjector.from_beam_maps(..., horizon_mask=True, apod_deg=3.0)
+spill  = BeamSpillOperator.from_projector(local, t_ground=jnp.array(290.0))
+cached = local.to_reference_frame(lst_ref_deg=0.0)
+```
+
+`from_projector` is the one call that cannot get the weight and the sky average
+out of step, because it reads the fraction off the same beam. Read it *before*
+`to_reference_frame()`, which folds the mask into the cached alms and leaves no
+unmasked denominator to divide by (it raises if you ask afterwards).
+
+Note that `apod_deg` does not move $f_\mathrm{sky}$ at all, and should not: it
+is a mitigation for the ringing in the masked beam used for the sky *average*,
+and a tapered region does not partition a sphere.
 
 ---
 
@@ -316,4 +361,5 @@ the ohmic loss wearing a different hat, and should not be expressed as one.
 |---|---|
 | `tests/radio/test_sky_noise_wave_integration.py` | the sky really is `T_src`: a matched antenna passes it through untouched, a mismatched one attenuates it by exactly $c_s$, the receiver terms do not scale with it, load samples never see it, and the hand-wired branch reproduces `assemble()` |
 | `tests/radio/test_antenna_loss.py` | the isothermal fixed point, the $\eta=0$ and $\eta=1$ limits, and that the calibration loads are downstream of the loss |
+| `tests/radio/test_beam_spill.py` | the painted-ground closure above, the horizon-ring convention (including the RING-ordering identity the half-weight rests on), that a spill mixes without losing, and that the split reaches the astro branch and nothing else |
 | `tests/radio/test_beams.py` | the CST reader against synthetic files with a known answer, plus RHINO's own horn: a directivity still integrates to $4\pi$, its boresight lands on the pole, and the below-horizon fraction survives resampling |

@@ -59,8 +59,8 @@ from rheplicant.inference import (  # noqa: E402
 from rheplicant.radio import (  # noqa: E402
     AntennaLossOperator,
     AtmosphericEmissionOperator,
+    BeamSpillOperator,
     CalLoadOperator,
-    GroundPickupOperator,
     NoiseWaveOperator,
     SkySourceOperator,
     assemble,
@@ -78,7 +78,7 @@ N_TIME = 96
 LAT_DEG, AZ_DEG, EL_DEG = 53.2, 0.0, 90.0      # RHINO's latitude, zenith drift
 ETA, T_PHYS = 0.97, 293.0                      # radiation efficiency, horn temperature
 T_RX, T_AMBIENT, T_HOT = 290.0, 300.0, 400.0
-T_GROUND, GROUND_COUPLING, T_ATM = 290.0, 0.02, 3.0
+T_GROUND, T_ATM = 290.0, 3.0
 DELTA_NU, T_INT = 25e6 / N_FREQ, 2.0           # channel bandwidth [Hz], dump [s]
 
 parser = argparse.ArgumentParser()
@@ -119,10 +119,18 @@ sky_maps = jnp.stack([
 # output is a TEMPERATURE: it returns int(B T)/int(B), not int(B T). Normalizing
 # the beam map by hand instead leaves a percent-level bias, because the
 # band-limit truncates the denominator too — see docs/sky-engines.md.
-projector = DriftScanProjector.from_beam_maps(
+#
+# horizon_mask=True cuts the beam at the local horizon, so the output is the
+# average over the VISIBLE sky. The rest of the beam is looking at ground, and
+# f_sky — the above-horizon share of the beam's solid angle — is what says how
+# much. It has to be read off the beam BEFORE to_reference_frame() folds the
+# mask into the cached alms.
+local = DriftScanProjector.from_beam_maps(
     beam_maps, lat_deg=LAT_DEG, az_deg=AZ_DEG, el_deg=EL_DEG,
-    lmax=LMAX, normalize_beam=True,
-).to_reference_frame(lst_ref_deg=0.0)          # pay the Wigner rotation once
+    lmax=LMAX, normalize_beam=True, horizon_mask=True, apod_deg=3.0,
+)
+f_sky = local.horizon_fraction()
+projector = local.to_reference_frame(lst_ref_deg=0.0)   # Wigner rotation once
 
 lst_deg = 360.0 * jnp.arange(N_TIME) / N_TIME
 switch = jnp.arange(N_TIME) % 3                # 0 antenna, 1 ambient, 2 hot
@@ -138,6 +146,8 @@ print(f"      peak {peak_dbi.min():.2f}..{peak_dbi.max():.2f} dBi over "
       f"{float(freq[0]) / 1e6:.0f}-{float(freq[-1]) / 1e6:.0f} MHz, "
       f"{100 * below.min():.1f}-{100 * below.max():.1f}% of the response "
       "below the horizon")
+print(f"      f_sky = {float(f_sky.min()):.4f}..{float(f_sky.max()):.4f} "
+      "(above-horizon share of the beam; the rest sees ground)")
 
 # A uniform sky is the one case whose beam average is known by definition.
 uniform = jnp.full((N_FREQ, N_PIX), 200.0)
@@ -168,19 +178,41 @@ TRUE_T = jnp.stack([
 ])
 
 
-def antenna_sources():
-    """The three things that reach the antenna terminals, before its own loss."""
+def antenna_chain():
+    """What reaches the antenna terminals, in the order the graph places it.
+
+    BeamSpillOperator supplies the below-horizon ground term itself, so there is
+    no GroundPickupOperator here — adding one would be a SECOND ground term on
+    top of the one the split already accounts for.
+    """
     return (
         SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
-        GroundPickupOperator(coupling=jnp.array(GROUND_COUPLING),
-                             t_ground=jnp.array(T_GROUND)),
+        BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(T_GROUND)),
         AtmosphericEmissionOperator(t_atm=jnp.array(T_ATM)),
+        AntennaLossOperator(efficiency=jnp.array(ETA),
+                            t_physical=jnp.array(T_PHYS)),
     )
 
 
-def antenna_loss():
-    return AntennaLossOperator(efficiency=jnp.array(ETA),
-                               t_physical=jnp.array(T_PHYS))
+def antenna_branch():
+    """The same chain, hand-wired — what assemble() builds for it.
+
+    The split is a TRANSFORM on the astro branch, so it chains after the sky;
+    the atmosphere is a separate leaf that SUMS at t_ant_sum; the ohmic loss is
+    the trunk stage after that sum. Getting any of those three relationships
+    wrong is shape-legal, which is why the assertion below compares this against
+    assemble() rather than trusting it.
+    """
+    sky, spill, atmosphere, loss = antenna_chain()
+    return Pipeline(
+        SumOperator(
+            Pipeline(sky, spill, names=("sky", "beam_spill")),
+            atmosphere,
+            names=("astro", "atmosphere"),
+        ),
+        loss,
+        names=("t_ant_sum", "antenna_loss"),
+    )
 
 
 def receiver(t_nw, gamma_src):
@@ -196,8 +228,7 @@ def receiver(t_nw, gamma_src):
 # nothing that connects downstream of the antenna — which is why the loads,
 # entering at receiver_input, arrive unattenuated.
 two_branch = assemble(
-    *antenna_sources(),
-    antenna_loss(),
+    *antenna_chain(),
     CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
     receiver(TRUE_T, jnp.stack([gamma_ant, gamma_ambient])),
 )
@@ -210,8 +241,8 @@ ab_switch = jnp.arange(N_TIME) % 2
 ab_coords = coords.replace(extra={"lst_deg": lst_deg, "receiver_input": ab_switch})
 assembled = eqx.filter_jit(two_branch)(State(coords=ab_coords)).data
 
-t_collected = (projector.forward(sky_maps, ab_coords)
-               + GROUND_COUPLING * T_GROUND + T_ATM)
+t_visible = projector.forward(sky_maps, ab_coords)          # masked sky average
+t_collected = (f_sky * t_visible + (1.0 - f_sky) * T_GROUND) + T_ATM
 t_ant = ETA * t_collected + (1.0 - ETA) * T_PHYS
 by_hand = rcj.system_temperature(
     rcj.Couplings.from_stacked(
@@ -231,13 +262,16 @@ print(f"assembled twin vs Eq. 1 by hand: {worst:.1e} relative — roundoff\n")
 # the other, and folding one into the other loses the additive term.
 coup = rcj.couplings(jnp.stack([gamma_ant, gamma_ambient, gamma_hot]), gamma_rec)
 print("what happens to the sky, in order:")
-print(f"   collected by the beam        {float(t_sky.mean()):8.1f} K")
-print(f"   after ohmic loss (eta={ETA})  "
-      f"{float(ETA * t_sky.mean() + (1 - ETA) * T_PHYS):8.1f} K   "
-      f"(-{float((1 - ETA) * (t_sky.mean() - T_PHYS)):.0f} K, and "
-      f"+{(1 - ETA) * T_PHYS:.0f} K of the horn's own emission)")
-print(f"   after mismatch (c_s={float(coup.c_src[0].mean()):.3f})     "
-      f"{float(coup.c_src[0].mean() * (ETA * t_sky.mean() + (1 - ETA) * T_PHYS)):8.1f} K")
+print(f"   visible-sky beam average     {float(t_sky.mean()):8.1f} K")
+print(f"   after horizon spill          "
+      f"{float((f_sky * t_sky).mean() + ((1 - f_sky) * T_GROUND).mean()):8.1f} K"
+      f"   (f_sky ~ {float(f_sky.mean()):.3f}; the rest sees {T_GROUND:.0f} K ground)")
+_spilled = float((f_sky * t_sky).mean() + ((1 - f_sky) * T_GROUND).mean())
+_lossy = ETA * _spilled + (1 - ETA) * T_PHYS
+print(f"   after ohmic loss (eta={ETA})   {_lossy:8.1f} K"
+      f"   (+{(1 - ETA) * T_PHYS:.0f} K of the horn's own emission)")
+print(f"   after mismatch (c_s={float(coup.c_src[0].mean()):.3f})      "
+      f"{float(coup.c_src[0].mean()) * _lossy:8.1f} K")
 print(f"   c_s per source: antenna {float(coup.c_src[0].mean()):.3f}   "
       f"ambient {float(coup.c_src[1].mean()):.3f}   "
       f"hot {float(coup.c_src[2].mean()):.3f}\n")
@@ -246,20 +280,10 @@ print(f"   c_s per source: antenna {float(coup.c_src[0].mean()):.3f}   "
 # Three sources: the antenna and two loads. assemble() cannot express this yet
 # (the cal_loads node has no many=True), so the selector is built directly —
 # the documented workaround, and the same operator assemble() would have made.
-# SumOperator, not Pipeline, for the three sources: a Pipeline of source-type
-# operators REPLACES the data at each stage, so the sky and the ground would be
-# silently overwritten by the atmosphere. That is what the graph's t_ant_sum
-# junction is for, and it is why the assertion below compares the hand-built
-# branch against the assembled one rather than trusting it.
 def twin(t_nw):
     return Pipeline(
         SelectOperator(
-            Pipeline(
-                SumOperator(*antenna_sources(),
-                            names=("sky", "ground", "atmosphere")),
-                antenna_loss(),
-                names=("t_ant_sum", "antenna_loss"),
-            ),
+            antenna_branch(),
             CalLoadOperator(t_load=jnp.array(T_AMBIENT)),
             CalLoadOperator(t_load=jnp.array(T_HOT)),
             names=("antenna", "ambient", "hot"),
@@ -346,7 +370,8 @@ for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
 def total_power(maps, efficiency):
     pipeline = twin(TRUE_T)
     pipeline = eqx.tree_at(
-        lambda p: p["receiver_input"].branches[0]["t_ant_sum"]["sky"].sky_model.maps,
+        lambda p: (p["receiver_input"].branches[0]["t_ant_sum"]["astro"]["sky"]
+                   .sky_model.maps),
         pipeline, maps,
     )
     pipeline = eqx.tree_at(
@@ -361,11 +386,8 @@ print(f"\nd(sum P^2)/d(sky pixel):  {float(jnp.abs(d_maps).max()):.3e}  "
       f"(nonzero on {int(jnp.sum(jnp.abs(d_maps) > 0))}/{d_maps.size} pixels)")
 print(f"d(sum P^2)/d(eta):        {float(d_eta):.3e}")
 
-print(f"\nKNOWN GAP: {100 * below.min():.1f}-{100 * below.max():.1f}% of the "
-      "horn's response is below the horizon and this\nrun lets it see "
-      "celestial sky rather than ground. The "
-      "correct split needs the\nsky branch weighted by the above-horizon beam "
-      "fraction, which no graph node\napplies yet — ground_pickup adds the "
-      "ground term but nothing scales the sky.")
-print("\nOne object: RHINO's horn, limTOD's sky, rhino-cal-jax's Eq. 1, "
+print("\nThree losses, in order and none standing in for another: the horizon "
+      "split\n(mixing, no loss), the horn's ohmic loss (loss + its own "
+      "emission), and the\nreceiver mismatch (loss, nothing added).")
+print("One object: RHINO's horn, limTOD's sky, rhino-cal-jax's Eq. 1, "
       "rheplicant's graph.")

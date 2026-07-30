@@ -155,9 +155,9 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
 - **Core** — `State` (immutable pytree context), `Pipeline` / `SumOperator` /
   `SelectOperator` composition, `SignalGraph` + `assemble` (graph-guided
   auto-composition with lit/dim mermaid & HTML rendering).
-- **Radio** — a 30-node canonical signal-path graph covering every element of
+- **Radio** — a 32-node canonical signal-path graph covering every element of
   a single-antenna experiment: sky components, ionosphere, RFI, shared
-  chromatic beam, antenna ohmic loss, noise-wave/reflection terms, CW tone
+  chromatic beam, horizon spill, antenna ohmic loss, noise-wave terms, CW tone
   and switched calibration loads, gain, thermal noise, EMI, ADC, flagging, averaging —
   plus a modular sky engine — a general differentiable limTOD port and a
   drift-scan m-mode fast path that returns the same numbers orders of
@@ -179,7 +179,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 |---|---|
 | [Guided tour](docs/tour.md) | The complete API, top to bottom, with runnable snippets |
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
-| [Architecture](DESIGN.md) | Design decisions D1–D16, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D17, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Nine end-to-end runnable demos |
 
