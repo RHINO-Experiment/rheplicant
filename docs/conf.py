@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - docs build without the package
 extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx.ext.mathjax",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
@@ -27,7 +28,12 @@ extensions = [
     "sphinxcontrib.mermaid",
 ]
 
-myst_enable_extensions = ["colon_fence", "deflist"]
+# dollarmath is what makes `$...$` and `$$...$$` render as math rather than as
+# literal dollar signs; amsmath admits `align`/`aligned` environments. Both were
+# missing while the physics pages were already written in TeX, so every equation
+# on them shipped as source text — a docs build cannot warn about that, only a
+# reader can.
+myst_enable_extensions = ["amsmath", "colon_fence", "deflist", "dollarmath"]
 myst_heading_anchors = 3
 
 autodoc_member_order = "bysource"
@@ -145,7 +151,62 @@ try:
     _example_svgs()
     _SIGNAL_PATH_PAGE.write_text(
         "# The canonical signal path\n\n"
-        "The single-antenna template every assembly lights up — generated "
+        "## Operators, and three ways to compose them\n\n"
+        "A signal path is not a special kind of object. It is **operators** — "
+        "each one `State in, State out` — plus exactly **three structures** "
+        "for putting them together. There is nothing else in the graph:\n\n"
+        ":::{list-table}\n:header-rows: 1\n:widths: 14 22 30 34\n\n"
+        "* - Structure\n  - Combinator\n  - Meaning\n  - Node kind it comes from\n"
+        "* - **Cascade**\n  - `Pipeline`\n  - one after another; each "
+        "transforms what the last produced\n  - a chain of `transform` nodes\n"
+        "* - **Sum**\n  - `SumOperator`\n  - independent contributions that "
+        "**add**\n  - a `junction` node `(+)`\n"
+        "* - **Switch**\n  - `SelectOperator`\n  - alternatives, one "
+        "**selected** per time sample\n  - a `selector` node `(sw)`\n"
+        ":::\n\n"
+        "Nodes come in the matching four kinds: a **source** creates data "
+        "(in-degree 0), a **transform** changes it (in-degree 1), a "
+        "**junction** sums its inputs and a **selector** switches between "
+        "them (both in-degree ≥ 2). That is the entire vocabulary. "
+        "`assemble(*operators)` lights the sub-path your operators induce and "
+        "folds it into exactly those three combinators, so the composition is "
+        "a consequence of the physics you declared rather than something you "
+        "wrote out.\n\n"
+        "Two rules follow from the table rather than being extra:\n\n"
+        "- **A junction or selector with one live input is traversed as "
+        "identity.** No `SumOperator` around a single branch, no switch array "
+        "for a twin with no calibration load. Partial models come free because "
+        "a structure with nothing to combine is not a structure.\n"
+        "- **Several instances at one `many` node compose the way their "
+        "consumer composes** — summed into a junction, switched at a selector. "
+        "Two `CalLoadOperator`s are two switch positions, not one load worth "
+        "their sum.\n\n"
+        ":::{admonition} The graph is a template, not the framework\n"
+        ":class: note\n"
+        "`rheplicant.radio.RADIO_GRAPH` is **RHINO's** structure: a "
+        "single-antenna, switched-load, drift-scanning horn. It is the "
+        "*default*, not the definition. The machinery underneath — "
+        "`SignalGraph`, the four node kinds, the three combinators, "
+        "`assemble` — knows nothing about radio astronomy, and a different "
+        "instrument is a different template registered the same way:\n\n"
+        "```python\n"
+        "from rheplicant.core.graph import NodeSpec, SignalGraph, register_graph\n\n"
+        "MY_GRAPH = register_graph(SignalGraph(\n"
+        '    "my-instrument",\n'
+        '    {"emitter":  NodeSpec("source", "what I emit"),\n'
+        '     "response": NodeSpec("transform", "what my box does")},\n'
+        '    [("emitter", "response")],\n'
+        "))\n"
+        "```\n\n"
+        "*Planned:* a documented path for supplying a custom graph end to end "
+        "— operators declaring `graph_node` against it, rendering, and the "
+        "assembly rules — so that *which instrument* becomes a configuration "
+        "choice rather than a fork. The pieces are already public and are what "
+        "`RADIO_GRAPH` itself is built from; what is missing is the guide.\n"
+        ":::\n\n"
+        "---\n\n"
+        "## RHINO's template\n\n"
+        "The single-antenna path every assembly lights up — generated "
         "from `rheplicant.radio.RADIO_GRAPH` at documentation build time. `(+)` "
         "nodes are sum junctions, `(sw)` the antenna/cal-load selector; see "
         "the [tour](tour.md#4-graph-assembly) for the assembly rules and "

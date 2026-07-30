@@ -41,3 +41,4 @@ repro-todsim/
 # Cached data behind the docs sky-engine figures (regenerate with the script)
 docs/_engine-figure-data.npz
 docs/_inference-figure-data.npz
+docs/_receiver-figure-data.npz
