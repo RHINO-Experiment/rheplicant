@@ -18,6 +18,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from rheplicant import Coordinates, Environment, State
 from rheplicant.core.combinators import SumOperator
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
@@ -650,6 +651,160 @@ class TestGCRSample:
         with pytest.raises(ParameterSpaceError, match="prior_std"):
             gcr_sample(gain_block, observed, noise_std=1.0, prior_std=None,
                        key=jax.random.key(0))
+
+
+class DesignMatrixOperator(AbstractOperator):
+    """A real observation through an explicit design matrix -- test double.
+
+    Exists to construct arbitrarily ill-conditioned normal operators
+    directly, with no external calibration package needed: no physics is
+    asserted here, only ``data = matrix @ coeffs``.
+    """
+
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+
+    coeffs: jax.Array
+    matrix: jax.Array
+
+    def __call__(self, state):
+        return state.with_data(self.matrix @ self.coeffs)
+
+
+class TestGCRSampleIllConditionedConvergence:
+    """``gcr_sample``'s CG tolerance has to bound the SOLUTION error, not just
+    the residual (see the ``tol``/``require_convergence`` docstrings in
+    ``linear.py``). Every other test in this file uses a well-conditioned
+    block, which cannot exercise this at all: point-by-point agreement with a
+    dense reference says nothing about what happens at a dispatch/convergence
+    boundary (boundary-validation.md), and CG on a well-conditioned normal
+    operator converges to the same answer at any reasonable ``tol``.
+
+    This block is deliberately as ill-conditioned as the noise-wave
+    calibration case that surfaced the bug (``cond(M) ~ 4e8``): one equation
+    per channel, overwhelmingly sensitive to the FIRST of three unknowns and
+    only residually (``1e-3``, vs. the ``100`` of the sensitive one) coupled
+    to the other two. That residual coupling is not incidental: an EXACTLY
+    diagonal design (no coupling at all) does NOT reproduce this bug, because
+    then CG solves every coordinate independently and the aggregate residual
+    can no longer hide a large per-coordinate error in a poorly-constrained
+    direction behind a tiny error in a well-constrained one. A real physical
+    design matrix (a reflection coefficient touching all three noise-wave
+    terms in one equation) is never exactly diagonal, so the mixed case here
+    is the representative one, not a special one.
+    """
+
+    N_CHANNEL = 16
+    NOISE_STD = 0.5
+    PRIOR_STD = 100.0
+    # One equation per channel: overwhelmingly sensitive to the first unknown,
+    # only residually coupled (1e-3 out of 100) to the other two.
+    ROW = (100.0, 1e-3, 1e-3)
+    TRUE = (250.0, 20.0, -10.0)
+    N_DRAWS = 1000
+
+    @pytest.fixture
+    def block(self):
+        n_param = 3 * self.N_CHANNEL
+        row = jnp.array(self.ROW)
+        matrix = jnp.zeros((self.N_CHANNEL, n_param))
+        for c in range(self.N_CHANNEL):
+            matrix = matrix.at[c, 3 * c: 3 * c + 3].set(row)
+        state = State(
+            coords=Coordinates(time=jnp.arange(1.0), freq=jnp.arange(float(self.N_CHANNEL))),
+            env=Environment(temperature=jnp.array(280.0)),
+            key=jax.random.key(0),
+            meta={"telescope": "test"},
+        )
+        twin = Pipeline(
+            DesignMatrixOperator(coeffs=jnp.zeros(n_param), matrix=matrix),
+            names=("design",),
+        )
+        space = ParameterSpace.direct(
+            "coeffs", init=jnp.zeros(n_param),
+            into=lambda p: p["design"].coeffs, linear=True,
+        )
+        return linear_operator(space, twin, state)
+
+    @pytest.fixture
+    def observed(self, block):
+        # A real (nonzero) signal matters: it is what puts a large component
+        # along the well-constrained direction into the right-hand side,
+        # which is what lets the aggregate residual norm be dominated by it.
+        # observed == block.offset (no signal) does not reproduce the bug.
+        true_coeffs = jnp.tile(jnp.array(self.TRUE), self.N_CHANNEL)
+        truth = block.offset + block.forward(true_coeffs)
+        return truth + self.NOISE_STD * jax.random.normal(jax.random.key(1), truth.shape)
+
+    def test_the_construction_is_genuinely_ill_conditioned(self, block):
+        """Pin the fixture's own condition number, so a future edit to the
+        constants above cannot silently defang this regression test."""
+        _, _, cov = _dense_posterior(block, self.NOISE_STD, self.PRIOR_STD)
+        eigvals = jnp.linalg.eigvalsh(jnp.linalg.inv(cov))
+        cond = float(eigvals[-1] / eigvals[0])
+        assert cond > 1e7, f"fixture is not ill-conditioned enough: cond={cond:.2e}"
+
+    def test_the_unconstrained_directions_are_prior_dominated_in_closed_form(self, block):
+        """Two of every three parameters are, for all practical purposes,
+        unmeasured (their design-matrix entry is 1e-3 against a row whose
+        other entry is 100): the closed-form posterior sigma for them is
+        PRIOR_STD, not merely "close to it". Pinning this analytically is
+        what makes the draw-based assertions below a real regression test
+        rather than a guess at what the "right" number should be."""
+        _, _, cov = _dense_posterior(block, self.NOISE_STD, self.PRIOR_STD)
+        dense_sigma = jnp.sqrt(jnp.diag(cov)).reshape(self.N_CHANNEL, 3)
+        assert jnp.allclose(dense_sigma[:, 1:], self.PRIOR_STD, rtol=1e-4)
+
+    def test_default_tol_recovers_the_prior_in_the_unconstrained_directions(
+        self, block, observed
+    ):
+        """THE regression pin. Library defaults only: no ``tol``/``maxiter``
+        passed here at all."""
+        keys = jax.random.split(jax.random.key(2), self.N_DRAWS)
+        draws, residual = jax.vmap(
+            lambda k: gcr_sample(block, observed, noise_std=self.NOISE_STD,
+                                 prior_std=self.PRIOR_STD, key=k)
+        )(keys)
+        sigma = draws.std(axis=0).reshape(self.N_CHANNEL, 3)
+        null_sigma = sigma[:, 1:]
+        # The standard error of an empirical std from N draws is
+        # sigma/sqrt(2N); with N_DRAWS=1000 that is ~2.2% relative, so 10%
+        # (~4.5 SE) is generous against MC noise while still ~1000x tighter
+        # than the collapse this guards against (see the next test).
+        rel_err = jnp.abs(null_sigma - self.PRIOR_STD) / self.PRIOR_STD
+        assert jnp.all(jnp.isfinite(residual))
+        assert float(jnp.max(rel_err)) < 0.10, (
+            "gcr_sample under-reported the posterior width in an "
+            f"unconstrained direction: {float(jnp.max(rel_err)):.3f} relative error"
+        )
+
+    def test_the_old_default_tol_collapses_the_same_sigma(self, block, observed):
+        """Proof the test above has teeth. At the library's PRE-FIX default
+        (``tol=1e-6``), ``gcr_sample``'s own ``require_convergence`` guard
+        (also left at ITS default, ``1e-3``) does NOT catch this: the
+        aggregate relative residual stays far under ``1e-3`` because it is
+        dominated by the one well-constrained direction, exactly as described
+        in ``linear.py``. Yet the reported sigma in the unconstrained
+        directions collapses towards zero instead of the 100 K prior --
+        understating the posterior width by orders of magnitude, always in
+        the direction of false confidence, and without raising anything."""
+        keys = jax.random.split(jax.random.key(2), self.N_DRAWS)
+        draws, residual = jax.vmap(
+            lambda k: gcr_sample(block, observed, noise_std=self.NOISE_STD,
+                                 prior_std=self.PRIOR_STD, key=k, tol=1e-6)
+        )(keys)
+        assert jnp.all(residual < 1e-3), (
+            "the require_convergence guard fired here, which would mean this "
+            "no longer demonstrates the silent-failure mode the test exists for"
+        )
+        sigma = draws.std(axis=0).reshape(self.N_CHANNEL, 3)
+        null_sigma = sigma[:, 1:]
+        assert float(jnp.mean(null_sigma)) < 0.01 * self.PRIOR_STD, (
+            "expected the OLD tol=1e-6 default to collapse the unconstrained "
+            f"sigma near zero; got {float(jnp.mean(null_sigma)):.4f} K "
+            f"({100 * float(jnp.mean(null_sigma)) / self.PRIOR_STD:.2f}% of prior) -- "
+            "if this now passes, either the bug was fixed differently or this "
+            "fixture stopped being ill-conditioned enough to show it"
+        )
 
 
 class SpectralTiltOperator(AbstractOperator):
