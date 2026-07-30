@@ -42,6 +42,7 @@ that will replace the body. Graph topology and assembly rules: see
 | Operator | Node | Role | Differentiable parameters |
 |---|---|---|---|
 | `BeamOperator` *(P)* | `beam` | shared chromatic beam — the single marginalisation target | `solid_angle` |
+| `AntennaLossOperator` | `antenna_loss` | antenna ohmic loss: `η T + (1−η) T_phys`, on the whole `t_ant_sum`, before the switch | `efficiency`, `t_physical` |
 | `CalLoadOperator` *(P)* | `cal_loads` | switched calibration load (via `receiver_input` selector) | `t_load` |
 | `NoiseWaveOperator` | `noise_wave` | full Eq. 1 (noise-wave GCR note) via `rhino_cal_jax`: reflection couplings + noise-wave temperatures, linear in `t_nw = (t_unc, t_cos, t_sin)` — the GCR structure | `t_unc`, `t_cos`, `t_sin`, `t_rx`, `gamma_src_re`, `gamma_src_im`, `gamma_rec_re`, `gamma_rec_im` |
 | `CWCalibrationOperator` *(P)* | `cw_tone` | CW tone injected before bandpass/gain (tracks gain drift) | `amplitude` |
@@ -63,6 +64,60 @@ correctly-shaped, wrong answer. See `examples/noise_wave_gcr.py` for the model
 exercised as a checked linear block (Wiener mean and exact GCR draws) and D15
 in `DESIGN.md` for why the per-source placement is what makes per-channel
 noise-wave temperatures identifiable at all.
+
+**The sky as `T_src`.** On the antenna branch `T_src` *is* the beam-convolved
+sky, so a `SkySourceOperator` upstream feeds the receiver directly. The full
+walkthrough is [From the sky to the receiver](sky-to-receiver.md); the three
+joins that carry no structural guard, in short:
+
+- the projector must return a **temperature**. Both sky engines default to
+  `normalize_beam=False` (numpy limTOD's convention), which returns `∫BT`, not
+  `∫BT/∫B`. Pass `normalize_beam=True` when the output feeds `T_src`. A beam
+  normalized by hand to unit pixel sum is *still* biased — 0.2 % at
+  nside 16 / lmax 47, ~4 % at nside 8 with a 20° beam — because the band-limit
+  truncates the denominator as well.
+- `gamma_src`'s **row order must match the selector's branch order**, which is
+  the graph's in-edge declaration (antenna, then `cal_loads`). Both objects are
+  `(n_source, n_freq)`, so swapping them is shape-legal; it moves the answer by
+  tens of kelvin. Read the order off the assembly:
+  `twin["receiver_input"].names`.
+- a hand-wired antenna branch needs `SumOperator`, not `Pipeline`: a `Pipeline`
+  of *source-type* operators replaces the data at each stage, so only the last
+  source survives. Check any hand-wiring against `assemble()`.
+
+An out-of-range switch value used to be a fourth: the eager range check in
+`SwitchCycle` is skipped under tracing, and JAX's gather would clamp the coupling
+lookup to a neighbouring source while the selector selected nothing.
+`SwitchCycle.gather` now fills those samples with NaN instead, so the two
+consumers of the switch array can no longer disagree in silence.
+
+Multi-load switching (three sources — the minimum for an identifiable
+per-channel fit) still bypasses `assemble()`, since the `cal_loads` node has no
+`many=True`; build the `SelectOperator` directly, as the example does.
+
+`AntennaLossOperator` is a *different* loss from `NoiseWaveOperator`'s
+`c_s = (1−|Γ|²)|F|²`: ohmic dissipation inside the antenna versus impedance
+mismatch at the receiver input. They multiply, and only the ohmic one adds
+emission of its own (`(1−η) T_phys`). The node sits on the trunk between
+`t_ant_sum` and `receiver_input`, so it acts on everything the beam collected
+and on nothing that connects downstream — the calibration loads arrive
+unattenuated. See D16 in `DESIGN.md`.
+
+## Beam data
+
+| Function | Role |
+|---|---|
+| `read_cst_farfield` | one CST Studio far-field ASCII export → `(theta_deg, phi_deg, directivity)` on its regular grid, dBi converted to linear power |
+| `cst_frequency_table` | a directory of per-frequency exports → `{frequency [Hz]: path}` |
+| `cst_beam_maps` | those exports → `(n_freq, npix)` HEALPix beam maps in limTOD's beam-local convention, linearly interpolated in frequency (extrapolation refused) |
+
+Nothing is normalized on the way out: pass `normalize_beam=True` to the
+projector and let it divide by its own quadrature, which is the only way the
+band-limit cancels exactly. CST azimuth is measured from the model's `+x` axis,
+and which physical direction that is is a fact about the as-built horn rather
+than about the file — `phi0_deg` and `phi_sense` expose the offset and the
+handedness, and their defaults are an assumption to check, not a result. Needs
+`healpy` and `scipy`, both already required by `limTOD`.
 
 ## Processing segment
 

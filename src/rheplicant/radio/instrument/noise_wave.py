@@ -29,6 +29,31 @@ physical one, that needs the switch.)
 ``Gamma`` is stored as two real leaves rather than one complex leaf because
 :func:`~rheplicant.inference.uncertainty.fisher_information` runs
 ``jax.jacfwd``, which refuses complex parameters.
+
+The source temperature. ``T_src`` is whatever the selected source delivers, so
+for the antenna branch it is the beam-convolved sky --
+:class:`~rheplicant.radio.sky.source.SkySourceOperator` upstream feeds it
+directly, and ``examples/sky_to_noise_wave.py`` runs that end to end. Two things
+about that junction are the caller's responsibility, because neither is a shape:
+
+* the sky projector must return a *temperature*. ``DriftScanProjector`` and
+  ``GeneralPointingProjector`` default to ``normalize_beam=False`` (numpy
+  limTOD's convention), which returns ``int(B T)`` rather than
+  ``int(B T)/int(B)``. Use ``normalize_beam=True`` when the output is destined
+  for ``T_src``; a beam the caller normalized by hand is still biased at the
+  percent level, since the band-limit truncates the denominator too.
+* ``gamma_src``'s row order must match the selector's branch order (the graph's
+  in-edge declaration: antenna, then ``cal_loads``). Both are
+  ``(n_source, n_freq)``, so a transposition is shape-legal and costs tens of
+  kelvin. Read the order off the assembled twin --
+  ``assembly["receiver_input"].names`` -- rather than assuming it.
+
+A third join used to be the caller's problem and no longer is. ``SwitchCycle``
+range-checks the switch array against its source count, but that check needs
+concrete values and is skipped under tracing; JAX's gather semantics would then
+clamp the coupling lookup to a neighbouring source while ``SelectOperator``
+selected no branch at all. ``SwitchCycle.gather`` now fills out-of-range samples
+with NaN, so the two consumers of one switch array cannot disagree in silence.
 """
 
 from typing import ClassVar

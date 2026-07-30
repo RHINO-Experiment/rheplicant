@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+### Added: RHINO's horn on the sky, feeding the noise-wave receiver
+
+The two halves were already there — limTOD says what the antenna sees, the
+Noise-Wave GCR draft's Eq. 1 says what the receiver does with it — and they meet
+at one quantity, `T_src`. `SkySourceOperator` upstream of the `receiver_input`
+selector now feeds `NoiseWaveOperator` directly, and the path is tested end to
+end against Eq. 1 written out by hand (4.0e-16 relative).
+
+**`AntennaLossOperator`** and the `antenna_loss` graph node (graph v1.3) close
+the physics gap that separated them. A real antenna dissipates part of what it
+collects and re-emits it at its own temperature, `T = eta T_collected +
+(1 - eta) T_phys`. This is a *different* loss from the noise-wave stage's
+`c_s = (1 - |Gamma|^2)|F|^2`: ohmic dissipation inside the antenna versus
+impedance mismatch at the receiver input. They multiply, and only the ohmic one
+adds emission of its own — an efficiency folded into the noise-wave couplings
+would be indistinguishable from a mismatch in the fit while silently dropping
+that term.
+
+The node sits on the trunk between `t_ant_sum` and the switch: it acts on
+everything the beam collected (unlike atmospheric opacity — D13 moved the
+atmosphere *off* the trunk for exactly the reason that does not apply here) and
+on nothing that connects downstream, so the calibration loads arrive
+unattenuated. The pairing is pinned by its thermodynamic fixed point — an
+antenna at `T` looking at a sky at `T` delivers `T` for any efficiency — which
+`(eta, eta)`, `(eta, 1)` and `(1, 1 - eta)` all fail. See D16 in `DESIGN.md`.
+
+**`rheplicant.radio.beams`** reads RHINO's horn as it is actually shipped: CST
+Studio far-field ASCII exports, one file per frequency, total directivity in dBi
+on a regular (theta, phi) grid. `cst_beam_maps` samples them onto HEALPix in
+limTOD's beam-local convention as linear power and interpolates in frequency
+(extrapolation beyond the simulated band is refused). Validated against the real
+horn: the directivity still integrates to 4*pi after resampling, the boresight
+lands on the pole, and the below-horizon fraction survives. CST azimuth is
+measured from the model's `+x` axis, which is a fact about the as-built horn and
+not about the file — `phi0_deg`/`phi_sense` expose the offset and the handedness
+as assumptions to check, not results.
+
+**`examples/sky_to_noise_wave.py`** runs the whole path on the real horn:
+CST → HEALPix → drift-scan m-mode sky with `normalize_beam=True`, ground spill
+and atmospheric emission, ohmic loss, a three-source switching cycle
+(antenna + ambient + hot load), Eq. 8 fractional radiometer noise, a closed-form
+recovery of the per-channel noise-wave temperatures with the sky treated as
+known data (0.11–0.14 K RMS, kappa ~ 40), and one gradient from the HEALPix sky
+map through the beam convolution, the switch and Eq. 1.
+`docs/sky-to-receiver.md` walks through it.
+
+**Fixed — an out-of-range switch value now refuses instead of clamping.**
+`SwitchCycle`'s range check needs concrete values and is skipped under tracing,
+which is the production path. There the two consumers of one switch array
+disagreed: `SelectOperator` selected no branch (`T_src = 0`) while
+`SwitchCycle.gather` clamped to a neighbouring coupling row, leaving a sample
+with a receiver contribution, no source, and another load's `Gamma` — finite and
+correctly shaped throughout. `gather` now fills out-of-range samples with NaN.
+(In `rhino_cal_jax`; `one_hot` needs no change, since an unmatched sample
+already gets an all-zero row.)
+
+**Three joins that carry no structural guard** are documented and pinned by
+`tests/radio/test_sky_noise_wave_integration.py` (21 tests), alongside the
+physics — a matched antenna passes the sky through untouched, a mismatched one
+attenuates it by exactly `c_s`, the receiver terms do not scale with the sky,
+load samples never see it and antenna samples never see the load:
+
+- **`normalize_beam` decides whether `T_src` is a temperature at all.** Both sky
+  engines default to `False` (numpy limTOD's convention), returning `∫BT` rather
+  than `∫BT/∫B`. Against a uniform 200 K sky: `True` gives 200.0000 K exactly, a
+  raw beam gives 32838 K, and a beam normalized by hand to unit pixel sum still
+  gives 200.4113 K — **+0.21 %**, growing to ~4 % at nside 8 with a 20° beam,
+  because the band-limit truncates the denominator too. The hand-normalized case
+  is the one that hides. Now documented in `docs/sky-engines.md`, which had no
+  mention of `normalize_beam` at all.
+- **`gamma_src`'s row order must match the selector's branch order.** Both are
+  `(n_source, n_freq)`, so a transposition is shape-legal; measured cost, 46 K
+  peak / 28 K mean on a 545 K signal. Read the order off the assembly
+  (`twin["receiver_input"].names`) rather than assuming it.
+- **A hand-wired antenna branch needs `SumOperator`, not `Pipeline`.** A
+  `Pipeline` of *source-type* operators replaces the data at each stage, so
+  `Pipeline(sky, ground, atmosphere)` returns the atmosphere alone — the sky
+  silently gone, the result finite and correctly shaped. This was a live bug in
+  the first draft of the example, caught only because the gradient with respect
+  to the sky map came back exactly zero. Whenever `assemble()` could have built
+  the branch, check the hand-wiring against it.
+
+**Known gap, stated rather than fudged:** 1–3 % of RHINO's horn response is
+below the horizon and this configuration lets it see celestial sky rather than
+ground. The correct split needs the sky branch weighted by the above-horizon
+beam fraction; `GroundPickupOperator` supplies the ground term and
+`DriftScanProjector(horizon_mask=True)` the masked sky average, but no node
+applies the weight — so masking alone is no better than not masking, and at a
+3000 K sky either choice is a ~90 K bias. It needs its own node (D16).
+
 ### Added: parameter spaces — infer anything, however it is parameterized
 
 The inference seam could already fit any pipeline leaf. It could only fit a

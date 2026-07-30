@@ -11,13 +11,13 @@ and compiles it to the equivalent ``Pipeline``/``SumOperator`` nesting::
     print(twin)                # lit nodes + skipped-as-identity nodes
     print(twin.to_mermaid())   # lit/dim signal-path rendering
 
-Topology (v1.2; sum junctions marked ``(+)``)::
+Topology (v1.3; sum junctions marked ``(+)``)::
 
     global_signal | foregrounds | point_sources | uniform_sky
         -> (+) astro_sum -> ionosphere -> atmosphere_field* --\\
     ground_field* | rfi_field ----------------------> (+) field_sum -> beam --\\
     observed_astro_sky | ground_pickup | t_sys_extra* | atmosphere -------------> (+) t_ant_sum
-        -> (SW) receiver_input <- cal_loads
+        -> antenna_loss -> (SW) receiver_input <- cal_loads
         -> noise_wave -> cw_tone -> bandpass -> gain
         -> noise -> emi -> adc
         -> flagging -> averaging -> apply_cal -> filters      [processing segment]
@@ -41,6 +41,13 @@ switched in and out on a pre-defined cycle") enter through the
 passes through; provide ``CalLoadOperator`` too and each time sample takes
 the branch chosen by ``coords.extra["receiver_input"]`` (0 = antenna,
 1 = load — the edge declaration order).
+
+``antenna_loss`` (v1.3) is the antenna's own ohmic dissipation, on the trunk
+between ``t_ant_sum`` and the switch: it acts on everything the beam
+collected (unlike atmospheric opacity — see D13) and on nothing that connects
+downstream of the antenna, which is why the calibration loads must enter after
+it. Absent an ``AntennaLossOperator`` the node is skipped as identity, which
+is the lossless-antenna assumption made explicit rather than hidden.
 
 The forward physical chain ends at ``adc`` (the raw waterfall); the
 processing segment (flagging/averaging/apply_cal/filters) is data-side and
@@ -77,6 +84,9 @@ RADIO_GRAPH = register_graph(
             ),
             "atmosphere": NodeSpec(_S, "beam-averaged atmospheric emission"),
             "t_ant_sum": NodeSpec(_J, "antenna-temperature assembly"),
+            "antenna_loss": NodeSpec(
+                _T, "antenna ohmic loss: eta T + (1-eta) T_phys (before the switch)"
+            ),
             "cal_loads": NodeSpec(
                 _S,
                 "switched calibration loads (single instance only — no "
@@ -117,7 +127,8 @@ RADIO_GRAPH = register_graph(
             ("ground_pickup", "t_ant_sum"),
             ("t_sys_extra", "t_ant_sum"),
             ("atmosphere", "t_ant_sum"),
-            ("t_ant_sum", "receiver_input"),
+            ("t_ant_sum", "antenna_loss"),
+            ("antenna_loss", "receiver_input"),
             ("cal_loads", "receiver_input"),
             ("receiver_input", "noise_wave"),
             ("noise_wave", "cw_tone"),

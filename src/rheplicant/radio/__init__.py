@@ -35,6 +35,11 @@ assumptions.
 """
 
 from rheplicant.radio.backend import BackendOperator, FlaggingOperator, MomentRFIFlaggingOperator
+from rheplicant.radio.beams import (
+    cst_beam_maps,
+    cst_frequency_table,
+    read_cst_farfield,
+)
 from rheplicant.radio.environment import (
     AtmosphericEmissionOperator,
     GroundPickupOperator,
@@ -49,6 +54,7 @@ from rheplicant.radio.filters import (
 )
 from rheplicant.radio.instrument import (
     ADCOperator,
+    AntennaLossOperator,
     ApplyCalibrationOperator,
     BeamOperator,
     CalLoadOperator,
@@ -79,6 +85,7 @@ __all__ = [
     "AbstractLinearFilter",
     "AbstractSkyModel",
     "AbstractSkyProjector",
+    "AntennaLossOperator",
     "ApplyCalibrationOperator",
     "AtmosphericEmissionOperator",
     "BackendOperator",
@@ -113,6 +120,7 @@ __all__ = [
 from rheplicant.radio.graph import RADIO_GRAPH, assemble  # noqa: E402  (needs operators above)
 
 __all__ += ["RADIO_GRAPH", "assemble"]
+__all__ += ["cst_beam_maps", "cst_frequency_table", "read_cst_farfield"]
 
 from rheplicant.radio.graph import _validate_registrations as _v  # noqa: E402
 
