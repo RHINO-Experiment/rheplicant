@@ -72,6 +72,17 @@ class CalLoadOperator(AbstractOperator):
     Real physics to come (GCR draft): warm/hot loads with their own
     reflection coefficients and physical-temperature telemetry.
 
+    Current limitation: the ``cal_loads`` node is declared without
+    ``many=True`` (see ``radio/graph.py``), so ``assemble()`` accepts only one
+    ``CalLoadOperator`` instance — a second raises ``AssemblyError`` ("this
+    node accepts a single instance"), giving a two-branch ``receiver_input``
+    selector (antenna, one load) at most. Multi-load switching — which
+    ``NoiseWaveOperator`` needs for an identifiable per-channel fit (three
+    distinct loads, not one) — is not yet expressible through ``assemble()``.
+    Until that graph change lands, supply ``coords.extra["receiver_input"]``
+    directly, as ``examples/noise_wave_gcr.py`` does, bypassing
+    ``CalLoadOperator`` entirely for the multi-load case.
+
     Attributes:
         t_load: load temperature [K] — differentiable scalar or ``(n_freq,)``.
     """

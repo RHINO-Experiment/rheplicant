@@ -433,6 +433,29 @@ between the two regimes is exactly the note's basis matrices `U_unc`, `U_cos`,
 `U_sin` (Eqs. 13–15): they tie channels together and so lower the number of
 calibrators needed.
 
+**A decision worth flagging rather than burying in a code comment**: `Γ` is
+stored on the operator as two real leaves per source/receiver
+(`gamma_src_re`/`gamma_src_im`, `gamma_rec_re`/`gamma_rec_im`) rather than one
+complex leaf. The reason is `jax.jacfwd`:
+`rheplicant.inference.uncertainty.fisher_information` flattens the parameter
+pytree and explicitly rejects any complex leaf before differentiating,
+because a real-valued prediction makes the map R-linear but not C-linear, so
+the Jacobian is only defined over the real degrees of freedom — confirmed by
+reading `_flat_forward` and reproducing the raise on a toy complex parameter.
+That is in tension with D14's whole point: D14 exists precisely so a
+re-parameterization like "split a complex latent into real and imaginary
+parts" is a `Bind` in the inference layer (`ParameterSpace`), not a shape
+baked into the instrument description. The natural D14-respecting
+alternative is one complex `gamma` leaf plus
+`Bind(("gamma_re", "gamma_im"), into=..., fn=lambda re, im: re + 1j * im)`.
+The split is also **preemptive**: nothing in this codebase currently calls
+`fisher_information` on `NoiseWaveOperator`'s `Γ` — the only thing exercised
+against it is `jax.grad` (`tests/radio/test_noise_wave.py`), which handles
+complex leaves without issue. The cheapest time to undo the split, if D14's
+principle is judged to matter more here than the two-line jacfwd guard, is
+now, while the operator is still marked BREAKING (see CHANGELOG) — every
+release after this one adds a migration cost.
+
 ## Element taxonomy → module map
 
 `rheplicant.radio` mirrors the element taxonomy of a single-antenna global-signal
