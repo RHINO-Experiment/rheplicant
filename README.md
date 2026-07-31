@@ -186,14 +186,16 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
 | [Sky engines](docs/sky-engines.md) | The limTOD ports: m-mode drift scan, beam normalization, the horizon |
 | [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
+| [Tutorial: GCR](docs/tutorial-gcr.md) | 256 sky pixels by exact conjugate solve, with iterative GLS for the covariance |
+| [Tutorial: NUTS](docs/tutorial-nuts.md) | Gradient MCMC, MCMC diagnostics, and what a broken posterior looks like |
 | [Architecture](DESIGN.md) | Design decisions D1–D25, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
-| `examples/` | Eleven end-to-end runnable demos |
+| `examples/` | Thirteen end-to-end runnable demos |
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(679 tests, ~97 % coverage, jit+grad+vmap through the full twin; assembly
+(682 tests, ~97 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder pending ports from limTOD and friends
 — except the sky engines, which are real: a general differentiable limTOD
