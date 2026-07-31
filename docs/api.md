@@ -200,6 +200,9 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.inference.gls
+   :members:
+
 .. automodule:: rheplicant.inference.likelihood
    :members:
    :show-inheritance:

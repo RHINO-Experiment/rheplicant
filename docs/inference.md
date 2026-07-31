@@ -422,6 +422,76 @@ declared starting point, which is right for exactly one sweep.
 
 ---
 
+### When the covariance is not given
+
+Both solvers above take `noise_std` and neither cares where it came from. Under
+`HomoscedasticNoise` it comes from you and there is nothing more to say. Under
+the default `RadiometerNoise` there is: σ tracks the prediction, so the weights
+depend on the solution and the solution depends on the weights. Neither is
+available first.
+
+`iterative_gls` supplies the missing half by fixed point — solve at the current
+σ, recompute σ at the new prediction, repeat — and **nothing about
+`gcr_sample` changes**:
+
+```python
+found = iterative_gls(block, observed, noise=RadiometerNoise(dnu, tau),
+                      prior_std=PRIOR)
+
+draw, _ = gcr_sample(block, observed, noise_std=found.noise_std,
+                     prior_std=PRIOR, key=key)
+```
+
+It is the same iteratively-reweighted GLS as hydra-tod's
+`hydra_tod.linear_sampler.iterative_gls` — a test checks the two agree — but
+**matrix-free**: hydra-tod forms a dense `U` and `N_inv`, while here the
+algorithm runs on the block's JVP and VJP, which is what makes 10⁶ degrees of
+freedom possible at all.
+
+Check `found.converged`. A covariance that is not a fixed point is still a
+number, and a draw conditioned on it is still a draw.
+
+:::{tip}
+**The mean can be weight-independent while the width is not.** In
+[`examples/gls_gcr.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gls_gcr.py)
+three switched loads meet three per-channel noise-wave unknowns, so the reduced
+system is **square** — one solution, and the weights cancel out of it. The
+point estimate is unmoved by reweighting, exactly, not approximately.
+
+The posterior covariance $(A^\top\Sigma^{-1}A + S^{-1})^{-1}$ depends on Σ all
+the same, and a GCR draw is precisely a draw of that width. In that example a
+frozen σ reports error bars wrong by −8 % to +8 %, in both directions, on a
+point estimate that was already right. "The fit came out the same" is not
+evidence the covariance did not matter.
+
+Where the system *is* over-determined across genuinely different noise levels,
+the estimate moves too: on a prediction spanning a decade, freezing σ costs a
+factor of ≈2.3 in recovered RMS error.
+:::
+
+:::{warning}
+`reweight_tol` cannot have a fixed default, and neither should yours. Two
+independent floors bound how small a step is measurable: the arithmetic's
+epsilon (`1.2e-7` in float32 — so a plausible-looking `1e-8` is exactly this
+trap), and **the inner CG tolerance**, since consecutive solves differ by their
+own residual whatever the outer iteration does. The latter binds in float64,
+where a tight `tol=1e-10` sits five orders of magnitude above `eps`. The default
+is `max(8·eps, tol)`. Ask for less than either and the run does not fail
+quietly — it spends `max_reweights` steps and reports `converged=False` for a
+fixed point it had reached.
+:::
+
+**What this estimator is.** Freezing σ inside each solve is what makes every
+step a linear-Gaussian problem, and it is also what makes the converged answer
+*generalized least squares* rather than the maximum of the full Gaussian
+likelihood: the log-determinant's dependence on the solution is held fixed
+rather than differentiated ([above](#the-term-that-is-not-a-constant)). GLS is
+the right thing to condition a constrained realization on, because a GCR draw
+*is* a draw from a linear-Gaussian posterior at a given covariance. If you want
+the full likelihood's mode or posterior, that is a gradient sampler's job.
+
+---
+
 ## Conditioning: why a residual is not an accuracy
 
 CG only ever reports on itself: `‖M x̂ - b‖`, the **residual** — how well `x̂`
