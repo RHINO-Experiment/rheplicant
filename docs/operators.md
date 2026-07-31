@@ -172,12 +172,57 @@ handedness, and their defaults are an assumption to check, not a result. Needs
 | Operator | Node | Role | Notes |
 |---|---|---|---|
 | `FlaggingOperator` *(P)* | `flagging` | threshold mask → `aux["flags"]` | data untouched |
-| `MomentRFIFlaggingOperator` | `flagging` | MomentRFI flagger via `pure_callback` | prior flags compose |
+| `MomentRFIFlaggingOperator` | `flagging` | MomentRFI flagger via `pure_callback` | prior flags compose; `kernel_shapes` runs the broad rounds |
 | `BackendOperator` *(P)* | `averaging` | time-chunk integration; updates `coords.time` | shape-changing |
 | `ApplyCalibrationOperator` *(P)* | `apply_cal` | apply a gain solution (`data / gain`) | inference → analysis bridge |
 | `SiderealFilter` | `filters` (multi-instance) | day-repeating (sky-locked) subspace | `mode` extract/remove |
 | `SkySpaceFilter` | `filters` | CG map-make/re-project through any linear projector | flags-weighted; `regularization` differentiable |
 | `FourierBandFilter` | `filters` | fringe-rate (`axis=0`) / delay (`axis=1`) band | `mode` extract/remove |
+
+### Flagging, and where the flags go
+
+Flagging is a boolean decision, so it has no gradient — and that is why
+`jax.pure_callback` into the numpy [MomentRFI](https://github.com/zzhang0123/MomentRFI)
+package is the *permanent* integration rather than a stopgap. The operator is
+jittable (and tested to give bit-identical flags under `jit`); it is not
+vmappable or differentiable, by nature.
+
+```python
+op = MomentRFIFlaggingOperator(config={"sigma_threshold": 4.0},
+                               kernel_shapes=((3, 3),))
+flags = op(state).aux["flags"]
+```
+
+`kernel_shapes` runs MomentRFI's broad rounds, and they buy the matched
+filter's $\sqrt{K}$ rather than a looser cut: a spatially continuous emitter
+adds roughly linearly under a box kernel while thermal noise adds in
+quadrature, so averaging $K$ pixels lifts it by $\sqrt{K}$. On a 3σ-per-pixel
+blob under the fitter's default 4σ threshold, round 0 alone recovers **none**
+of it and a single 3×3 box recovers **all** of it — the package's own test
+asserts both numbers.
+
+The flags then reach inference by **wrapping the noise model**, which is where
+a sample that was not observed belongs:
+
+```python
+noise = FlaggedNoise(RadiometerNoise(channel_width, integration_time), flags)
+```
+
+That one object carries them into the likelihood, the Fisher matrix, the
+weights of a Wiener solve or GCR draw, and a NumPyro observation scale — see
+[the noise model](inference.md#the-noise-model). The route is tested by the
+bias it removes rather than by the mask it produces: a persistent narrow-band
+emitter on 2 of 32 channels pulls a maximum-likelihood amplitude **+5.8 %**
+high, and wrapping MomentRFI's own flags around the noise model recovers the
+truth — matching, to six digits, what flagging the contaminated channels by
+hand would have given.
+
+Install: MomentRFI is not on PyPI, so the `rheplicant[rfi]` extra names the
+requirement rather than resolving it (the same arrangement as `limtod`).
+
+```bash
+pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+```
 
 ## Core combinators & utilities
 

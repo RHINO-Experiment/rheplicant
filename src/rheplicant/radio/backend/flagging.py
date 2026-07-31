@@ -59,9 +59,17 @@ class MomentRFIFlaggingOperator(AbstractOperator):
           waterfall (MomentRFI works on log10 internally).
         * Existing ``aux["flags"]`` are passed as MomentRFI's ``prior_mask``
           and included in the output — flaggers compose instead of clobbering.
-        * The result is written back to ``aux["flags"]`` (True = flagged);
-          consumed by ``MaskedGaussianLikelihood`` (noise covariance, per the
-          GCR draft) and by ``SkySpaceFilter`` weighting.
+        * The result is written back to ``aux["flags"]`` (True = flagged).
+
+    The flags reach inference by wrapping the noise model, which is where a
+    sample that was not observed belongs (D21)::
+
+        noise = FlaggedNoise(RadiometerNoise(dnu, tau), state.aux["flags"])
+
+    That one object then carries them into the likelihood, the Fisher matrix,
+    the weights of a Wiener solve or GCR draw, and a NumPyro observation scale.
+    ``MaskedGaussianLikelihood`` and ``SkySpaceFilter`` weighting take the raw
+    mask directly and remain available.
 
     Requires the optional ``MomentRFI`` package (install it into the same
     environment); raises a helpful ImportError otherwise.
@@ -103,7 +111,10 @@ class MomentRFIFlaggingOperator(AbstractOperator):
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
                 "MomentRFIFlaggingOperator needs the MomentRFI package installed "
-                "in this environment (pip install -e <path-to-MomentRFI>). "
+                "in this environment. It is not on PyPI, so the rheplicant[rfi] "
+                "extra names it rather than resolving it:\n"
+                "  pip install -e <path-to-MomentRFI>\n"
+                '  pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"\n'
                 "The threshold-based FlaggingOperator works without it."
             ) from exc
 

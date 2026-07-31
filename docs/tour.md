@@ -273,7 +273,10 @@ re-projects — Wiener-style sky separation, differentiable end to end, with
 `FourierBandFilter(axis=0, ...)` is a fringe-rate filter; `axis=1` a delay
 filter. RFI flagging: `FlaggingOperator` (threshold placeholder) or
 `MomentRFIFlaggingOperator` (the real flagger, host-callback to MomentRFI;
-existing flags compose via `prior_mask`).
+existing flags compose via `prior_mask`, and `kernel_shapes` runs the broad
+matched-filter rounds). Its flags reach inference by wrapping the noise model —
+`FlaggedNoise(RadiometerNoise(...), flags)` — rather than as a separate
+argument to every consumer.
 
 ## 8. Inference
 

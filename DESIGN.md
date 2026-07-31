@@ -801,6 +801,42 @@ bars too wide by `sqrt(1 + 2 f^2)` — a plausible number, and the wrong one.
 agree with `NoiseModelLikelihood` to roundoff: the seam generalizes them rather
 than replacing them.
 
+### D22 — A bridge that has never been executed is not a bridge
+
+`MomentRFIFlaggingOperator` had been in the tree since the rename, with tests,
+and **every one of them was skipped**: MomentRFI had no `pyproject.toml` or
+`setup.py`, so it could not be installed into any environment, so the guard
+`skipif(find_spec("MomentRFI") is None)` was true everywhere including CI. The
+bridge was written against an API nobody had called.
+
+Packaging MomentRFI (hatchling, flat layout; `matplotlib` an extra rather than a
+dependency, because the package's `__init__` deliberately does not import
+`plotting`) made the tests runnable, and they passed unmodified — the assumed
+signature `fit(waterfall, kernels=..., prior_mask=...)` was right. That is a
+good outcome and not evidence the arrangement was sound: it was one signature
+away from silently shipping a bridge to nothing.
+
+What the first real execution then bought, none of which a skipped test could
+have claimed:
+
+- **jit gives bit-identical flags.** The docstring asserted it; now a test does.
+- **`kernel_shapes` earns the matched filter's sqrt(K).** On a 3-sigma-per-pixel
+  blob under the fitter's default 4-sigma cut, round 0 recovers *none* of it and
+  a single 3x3 box recovers *all* of it, at a 0.15% false-positive rate. That is
+  the whole argument for broad rounds, and it was previously untested here.
+- **The flags matter, measurably.** A persistent narrow-band emitter on 2 of 32
+  channels biases a maximum-likelihood amplitude by +5.8%; routing MomentRFI's
+  flags through `FlaggedNoise` (D21) recovers the truth and agrees to six digits
+  with flagging the contaminated channels by hand.
+
+That last test is the shape the others should have had from the start: it does
+not assert a mask, it asserts the bias the mask removes. A flagger can be
+checked against its own output forever and still be useless.
+
+`rheplicant[rfi]` names MomentRFI rather than resolving it — it is not on PyPI —
+which is the same arrangement `limtod` already had. The operator's ImportError
+now names both install routes.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`
