@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### The CST beam reader moved to limTOD
+
+D20 moved the horizon partition upstream and left the CST far-field reader
+behind, calling the distinction "a follow-up, not a distinction worth
+defending". It was not worth defending: reading a measured horn into a beam map
+is the same kind of thing as deciding how that beam weights the sky, and limTOD
+already had the slot — `limTOD.uvbeam` does exactly this job for pyuvdata.
+
+`limTOD.cstbeam` is now its sibling, and gained something it could not have
+while living downstream: a **`cst_beam_func`** satisfying `TODSim`'s
+`beam_func(freq=..., nside=...)` contract, so a CST horn drops straight into
+limTOD's own simulator. It caches each file's HEALPix resampling too — a
+200-channel sweep over a 61-file directory now parses each file once rather
+than hundreds of times.
+
+`read_cst_farfield`, `cst_frequency_table` and `cst_beam_maps` remain importable
+from `rheplicant.radio` and are unchanged in signature. They are pass-throughs
+now, and the seam has exactly one job: **units**. `Coordinates.freq` is in Hz;
+limTOD is in MHz throughout. Each package keeps its house convention and the
+adapter is where they meet.
+
+Consequently a bad export raises `ValueError` (limTOD's) rather than
+`StateValidationError`, as already happened for `horizon_truncated_beam` in
+D20. rheplicant's beam tests now cover the seam and RHINO's real horn; the
+synthetic convention tests — the theta-fastest reshape, the `phi_sense`
+reflection, the frequency interpolation — went upstream with the reader rather
+than being duplicated across two repositories.
+
+Needs a limTOD with `limTOD.cstbeam` (it arrived after 1.9); the import is the
+check and the error names it.
+
 ### NUTS through the noise model, then inference without a likelihood at all
 
 **`to_numpyro_model` accepts a `NoiseModel`.** With `RadiometerNoise` the

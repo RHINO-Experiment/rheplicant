@@ -146,26 +146,33 @@ See D16 and D17 in `DESIGN.md`.
 
 ## Beam data
 
-| Function | Role |
-|---|---|
-| `read_cst_farfield` | one CST Studio far-field ASCII export → `(theta_deg, phi_deg, directivity)` on its regular grid, dBi converted to linear power |
-| `cst_frequency_table` | a directory of per-frequency exports → `{frequency [Hz]: path}` |
-| `cst_beam_maps` | those exports → `(n_freq, npix)` HEALPix beam maps in limTOD's beam-local convention, linearly interpolated in frequency (extrapolation refused) |
-| `horizon_truncated_beam` | pass-through to `limtod_jax.horizon_truncated_beam`: cut the maps at the horizon, and get `f_sky` back with them |
+**Every one of these is a pass-through.** What a beam IS, how a measured one is
+read, how it weights the sky and where the horizon falls in it all belong to
+limTOD (D20, D25). What stays here is *placement* — `BeamSpillOperator`
+consumes `f_sky` but does not compute it — and the seam's own arguments.
 
-Where the line falls: what a beam IS and how it weights the sky belongs to
-limTOD, so `horizon_truncated_beam` here is a pass-through and
-`DriftScanProjector.horizon_fraction()` is another. What stays is placement —
-`BeamSpillOperator` consumes `f_sky` but does not compute it. Beam *ingestion*
-(the CST reader below) is the one piece still on this side.
+| Function | Delegates to | What this side adds |
+|---|---|---|
+| `read_cst_farfield` | `limTOD.cstbeam` | nothing but the name |
+| `cst_frequency_table` | `limTOD.cstbeam` | keys in **Hz**, not limTOD's MHz |
+| `cst_beam_maps` | `limTOD.cstbeam` | `freq_hz` in **Hz**, to match `Coordinates.freq` |
+| `horizon_truncated_beam` | `limtod_jax` | `nside` inferred from maps that carry it |
 
-Nothing is normalized on the way out: pass `normalize_beam=True` to the
-projector and let it divide by its own quadrature, which is the only way the
-band-limit cancels exactly. CST azimuth is measured from the model's `+x` axis,
-and which physical direction that is is a fact about the as-built horn rather
-than about the file — `phi0_deg` and `phi_sense` expose the offset and the
-handedness, and their defaults are an assumption to check, not a result. Needs
-`healpy` and `scipy`, both already required by `limTOD`.
+Frequencies cross that boundary in Hz because that is what `Coordinates.freq`
+carries; limTOD is in MHz throughout, as it is everywhere in that package. The
+conversion is the adapter's whole contribution, so it is exactly what
+rheplicant's tests check — the conventions themselves are locked upstream, in
+`limTOD/tests/test_cstbeam.py`, rather than duplicated here.
+
+Two things worth knowing before trusting a beam, both documented in full by
+[`limTOD.cstbeam`](https://limtod.readthedocs.io/en/latest/cstbeam.html):
+nothing is normalized on the way out (pass `normalize_beam=True` to the
+projector and let it divide by its own quadrature, the only way the band limit
+cancels exactly); and CST azimuth is measured from the model's `+x` axis, which
+physical direction being a fact about the as-built horn rather than about the
+file — `phi0_deg` and `phi_sense` expose the offset and the handedness, and
+their defaults are **an assumption to check, not a result**. Needs `healpy` and
+`scipy`, both already required by `limTOD`.
 
 ## Processing segment
 
