@@ -38,6 +38,13 @@ numpyro = ["numpyro"]
 # stay, so an environment on an older limTOD keeps working for everything that
 # does not touch the horizon, and says so at the boundary for what does.
 limtod = ["limTOD[jax]>=1.9"]
+# MomentRFIFlaggingOperator bridges to the numpy MomentRFI package through
+# jax.pure_callback. Like limTOD above, MomentRFI is not on PyPI, so this extra
+# names the requirement rather than resolving it:
+#   uv pip install -e <path-to-MomentRFI>
+#   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+# The threshold-based FlaggingOperator needs none of it.
+rfi = ["MomentRFI"]
 docs = [
     "sphinx>=7",
     "myst-parser",

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### MomentRFI flagging: the bridge now actually runs
+
+`MomentRFIFlaggingOperator` had been in the tree with tests since the rename,
+and **every one of those tests was skipped** — MomentRFI had no packaging, so
+it could not be installed anywhere, so `skipif(find_spec(...) is None)` was
+true in every environment including CI. The bridge was written against an API
+nobody had called.
+
+MomentRFI is packaged now (upstream), and the tests pass unmodified: the
+assumed `fit(waterfall, kernels=..., prior_mask=...)` signature was right.
+What first execution added:
+
+- **jit gives bit-identical flags** — asserted by the docstring before, by a
+  test now. `jax.pure_callback` is the permanent integration for a boolean
+  decision, not a stopgap.
+- **`kernel_shapes` earns the matched filter's √K.** On a 3σ-per-pixel blob
+  under the fitter's default 4σ cut, round 0 alone recovers *none* of it and a
+  single 3×3 box recovers *all* of it, at a 0.15 % false-positive rate.
+- **The flags reach the noise covariance, and it matters.** A persistent
+  narrow-band emitter on 2 of 32 channels biases a maximum-likelihood amplitude
+  **+5.8 %**; wrapping MomentRFI's flags in `FlaggedNoise` recovers the truth
+  and agrees to six digits with flagging those channels by hand. The test
+  asserts the bias removed, not the mask produced.
+
+New `rheplicant[rfi]` extra. Like `limtod`, it names the requirement rather
+than resolving it — MomentRFI is not on PyPI — and the operator's ImportError
+now gives both install routes.
+
 ### The noise level became a model instead of an argument
 
 `noise_std` was a bare scalar handed separately to five places —
