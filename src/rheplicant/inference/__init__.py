@@ -25,6 +25,11 @@ from rheplicant.inference.noise import (
     RadiometerNoise,
     inverse_variance,
 )
+from rheplicant.inference.npe import (
+    NeuralPosterior,
+    simulate_pairs,
+    train_posterior,
+)
 from rheplicant.inference.numpyro_bridge import predict_from_samples, to_numpyro_model
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.inference.uncertainty import (
@@ -47,6 +52,7 @@ __all__ = [
     "LinearBlock",
     "Likelihood",
     "MaskedGaussianLikelihood",
+    "NeuralPosterior",
     "NoiseModel",
     "NoiseModelLikelihood",
     "ParameterSpace",
@@ -64,7 +70,9 @@ __all__ = [
     "parameter_covariance",
     "predict_from_samples",
     "propagate_covariance",
+    "simulate_pairs",
     "push_forward",
     "to_numpyro_model",
+    "train_posterior",
     "wiener_solve",
 ]
