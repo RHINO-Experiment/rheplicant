@@ -30,8 +30,13 @@ synthetic convention tests — the theta-fastest reshape, the `phi_sense`
 reflection, the frequency interpolation — went upstream with the reader rather
 than being duplicated across two repositories.
 
-Needs a limTOD with `limTOD.cstbeam` (it arrived after 1.9); the import is the
-check and the error names it.
+The `limtod` extra is floored at **1.10**, which is the release the reader
+landed in. The runtime gates still check the *symbol* rather than the version,
+and that is not redundancy: an editable install reports whatever version its
+dist metadata was written with, and this repository's own environment was found
+sitting at a recorded `1.8.0` while running 1.10.0 source, `limTOD.cstbeam`
+importable throughout. A version check would have refused a fully capable
+install. The floor says what to install; the symbol says what is there.
 
 ### NUTS through the noise model, then inference without a likelihood at all
 

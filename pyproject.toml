@@ -30,14 +30,19 @@ classifiers = [
 
 [project.optional-dependencies]
 numpyro = ["numpyro"]
-# The sky engines (GeneralPointingProjector, DriftScanProjector) are wired to
-# limTOD's JAX package. Floored at 1.9, which is where the horizon partition
-# lives (horizon_truncated_beam / horizon_beam_fraction / the half-counted
-# horizon ring) — beam-weighted-sky physics is limTOD's subject and this
-# package only places the result on a signal path. The runtime feature checks
-# stay, so an environment on an older limTOD keeps working for everything that
-# does not touch the horizon, and says so at the boundary for what does.
-limtod = ["limTOD[jax]>=1.9"]
+# The sky engines (GeneralPointingProjector, DriftScanProjector) and the beam
+# adapters are wired to limTOD. Floored at 1.10, which is where the CST reader
+# lives (limTOD.cstbeam); 1.9 brought the horizon partition. Beam physics and
+# beam ingestion are both limTOD's subject and this package only places the
+# result on a signal path (D20, D25).
+#
+# The floor is for a resolver; the RUNTIME gates check the symbol, not the
+# version, and that is not redundancy. An editable install reports whatever
+# version its dist metadata was written with, which goes stale the moment the
+# source moves ahead of the last `pip install -e` — this very repo's venv sat
+# at a recorded 1.8.0 while running 1.10.0 source. A version check would have
+# refused a fully capable install; the symbol check cannot.
+limtod = ["limTOD[jax]>=1.10"]
 # MomentRFIFlaggingOperator bridges to the numpy MomentRFI package through
 # jax.pure_callback. Like limTOD above, MomentRFI is not on PyPI, so this extra
 # names the requirement rather than resolving it:

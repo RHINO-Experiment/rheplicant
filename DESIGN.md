@@ -987,6 +987,19 @@ RHINO's own horn stays tested here, against the real export: that is this
 package's subject, not limTOD's. The synthetic convention tests went upstream
 with the reader.
 
+**Why the runtime gates check symbols and not versions**, here and in D20. The
+`limtod` extra is floored at 1.10 for a resolver's benefit, but
+`_require_cstbeam` imports the module and `_require_limtod_jax` tests
+`hasattr` — neither reads `__version__`. An editable install reports whatever
+version its dist metadata was written with, and that goes stale the moment the
+source moves ahead of the last `pip install -e`. This package's own development
+environment was found sitting at a recorded `1.8.0` while running 1.10.0
+source, with `limTOD.cstbeam` importable the whole time: a version check would
+have refused a fully capable install, and refused it with a message about
+upgrading something already newer than asked for. The two checks are not
+redundant — the floor describes what to install, the symbol describes what is
+actually there.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

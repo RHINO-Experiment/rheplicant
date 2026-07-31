@@ -64,18 +64,24 @@ def _require_limtod_jax(feature: str):
 def _require_cstbeam():
     """``limTOD.cstbeam``, gated on the module rather than on a version.
 
-    The CST reader moved upstream after limTOD 1.9, so a version floor cannot
-    yet name it; the import is the check, and it says what is missing rather
-    than failing on an AttributeError three calls deeper.
+    Deliberately not a version check, for the same reason
+    :func:`_require_limtod_jax` tests ``hasattr`` rather than
+    ``limtod_jax.__version__``. An editable install reports whatever version
+    its dist metadata was written with, and that goes stale the moment the
+    source moves ahead of the last ``pip install -e``: this package's own
+    development environment sat at a recorded ``1.8.0`` while running 1.10.0
+    source, with ``cstbeam`` importable the whole time. A version check would
+    have refused a fully capable install. The floor in ``pyproject.toml`` is
+    for a resolver; this is for reality.
     """
     try:
         from limTOD import cstbeam
     except ImportError as exc:  # pragma: no cover - exercised by the import guard
         raise ImportError(
             "rheplicant.radio.beams needs limTOD.cstbeam, which is where the CST "
-            "far-field reader lives. The installed limTOD does not have it "
-            "(it arrived after 1.9). Install limTOD from source, or "
-            'pip install "rheplicant[limtod]" if you have none at all.'
+            "far-field reader lives (limTOD >= 1.10). The installed limTOD does "
+            'not have it: pip install "rheplicant[limtod]", or reinstall limTOD '
+            "from source if you are tracking it there."
         ) from exc
     return cstbeam
 
