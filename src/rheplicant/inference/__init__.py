@@ -16,9 +16,18 @@ from rheplicant.inference.linear import (
     linear_operator,
     wiener_solve,
 )
+from rheplicant.inference.noise import (
+    FlaggedNoise,
+    HomoscedasticNoise,
+    NoiseModel,
+    NoiseModelLikelihood,
+    RadiometerNoise,
+    inverse_variance,
+)
 from rheplicant.inference.numpyro_bridge import predict_from_samples, to_numpyro_model
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.inference.uncertainty import (
+    as_noise_model,
     fisher_information,
     parameter_covariance,
     propagate_covariance,
@@ -28,18 +37,25 @@ from rheplicant.inference.uncertainty import (
 __all__ = [
     "AdamCalibrator",
     "Bind",
+    "FlaggedNoise",
     "GaussianLikelihood",
     "GradientCalibrator",
+    "HomoscedasticNoise",
     "Latent",
     "LinearBlock",
     "Likelihood",
     "MaskedGaussianLikelihood",
+    "NoiseModel",
+    "NoiseModelLikelihood",
     "ParameterSpace",
+    "RadiometerNoise",
+    "as_noise_model",
     "build_forward_fn",
     "check_linearity",
     "condition_estimate",
     "fisher_information",
     "gcr_sample",
+    "inverse_variance",
     "linear_operator",
     "mean_squared_error",
     "parameter_covariance",

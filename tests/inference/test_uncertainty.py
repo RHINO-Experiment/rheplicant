@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant.core.errors import StateValidationError
+from rheplicant.inference.noise import HomoscedasticNoise, RadiometerNoise
 from rheplicant.inference.uncertainty import (
     fisher_information,
     parameter_covariance,
@@ -47,6 +48,63 @@ class TestFisher:
         forward, theta0, _ = linear_problem
         with pytest.raises(StateValidationError, match="flags"):
             fisher_information(forward, theta0, 1.0, flags=jnp.zeros(3, bool))
+
+    def test_a_noise_model_may_replace_the_bare_sigma(self, linear_problem):
+        forward, theta0, A = linear_problem
+        bare = fisher_information(forward, theta0, noise_std=0.3)
+        model = fisher_information(
+            forward, theta0, noise_std=HomoscedasticNoise(jnp.asarray(0.3))
+        )
+        assert jnp.allclose(bare.matrix, model.matrix, rtol=1e-5)
+
+    def test_an_array_sigma_is_not_mistaken_for_a_noise_model(self, linear_problem):
+        """jax arrays have a ``.std`` method; only the protocol's data member
+        tells the two apart, so a per-sample sigma must still be a sigma."""
+        forward, theta0, A = linear_problem
+        sigma = jnp.linspace(0.2, 0.6, N_DATA)
+        F = fisher_information(forward, theta0, noise_std=sigma)
+        assert jnp.allclose(F.matrix, A.T @ (A / sigma[:, None] ** 2), rtol=1e-5)
+
+    def test_prediction_dependent_noise_adds_the_variance_term(self):
+        """For the radiometer model the correction is a closed-form factor.
+
+        ``sigma = |mu| f`` gives ``d log sigma/d theta = A/mu``, so the
+        variance term is ``2 sum A A / mu^2`` while ``J^T N^-1 J`` is
+        ``(1/f^2) sum A A / mu^2``. The full Fisher is therefore exactly
+        ``(1 + 2 f^2)`` times the naive one — and a forecast built on the naive
+        one alone reports error bars too wide by ``sqrt(1 + 2 f^2)``.
+        """
+        key = jax.random.key(4)
+        A = jax.random.normal(key, (N_DATA, N_PAR))
+        theta0 = jnp.array([1.0, -2.0, 0.5])
+        # Offset well clear of zero: sigma is proportional to the prediction,
+        # so a prediction near zero is a weight near infinity, not a bug.
+        def forward(theta):
+            return A @ theta + 300.0
+
+        noise = RadiometerNoise(50.0, 2.0)  # f = 0.1
+        full = fisher_information(forward, theta0, noise_std=noise)
+        naive = fisher_information(
+            forward, theta0, noise_std=noise.std(forward(theta0))
+        )
+        factor = 1.0 + 2.0 * noise.fractional**2
+        assert jnp.allclose(full.matrix, factor * naive.matrix, rtol=1e-4)
+
+    def test_flagged_samples_carry_no_variance_information_either(self):
+        key = jax.random.key(4)
+        A = jax.random.normal(key, (N_DATA, N_PAR))
+        theta0 = jnp.array([1.0, -2.0, 0.5])
+
+        def forward(theta):
+            return A @ theta + 300.0
+
+        flags = jnp.zeros(N_DATA, bool).at[:4].set(True)
+        noise = RadiometerNoise(50.0, 2.0)
+        flagged = fisher_information(forward, theta0, noise_std=noise, flags=flags)
+        kept = fisher_information(
+            lambda t: forward(t)[4:], theta0, noise_std=noise
+        )
+        assert jnp.allclose(flagged.matrix, kept.matrix, rtol=1e-4)
 
     def test_pytree_params(self):
         """Fisher works on structured (pytree) parameter sets."""
