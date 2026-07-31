@@ -1,10 +1,21 @@
-"""CST far-field exports -> HEALPix beam maps.
+"""The beam adapters' own surface only.
 
-Two layers. The synthetic tests build CST files whose answer is known in closed
-form and always run. The RHINO tests run against the real horn when
-``~/Dataspace/RHINO/CST_beams`` is present, and check the invariants that a
-convention error would break: a directivity integrates to 4*pi, its boresight
-sits at the pole, and the below-horizon fraction survives the resampling.
+What a CST export *is*, and what the horizon cut *is*, are limTOD's subject and
+are locked upstream — in ``tests/test_cstbeam.py`` and
+``tests/limtod_jax/test_horizon_partition.py`` respectively. Re-testing the
+grid reshape, the phi handedness, the frequency interpolation or the horizon
+partition here would duplicate a moving target across two repositories (D20,
+D25).
+
+What belongs here is the seam:
+
+* that the call reaches limTOD at all;
+* the argument this side adds — Hz in, MHz across the boundary, and ``nside``
+  inferred from maps that already carry it;
+* that a limTOD without the feature is named at the boundary rather than
+  failing on an AttributeError three calls deeper;
+
+plus RHINO's actual horn, which is this package's subject and not limTOD's.
 """
 
 from pathlib import Path
@@ -22,6 +33,7 @@ from rheplicant.radio import (
 
 hp = pytest.importorskip("healpy", reason="healpy comes with rheplicant[limtod]")
 pytest.importorskip("scipy")
+pytest.importorskip("limTOD.cstbeam", reason="the CST reader lives in limTOD")
 
 RHINO_BEAMS = Path("~/Dataspace/RHINO/CST_beams/HornDryGround").expanduser()
 requires_rhino = pytest.mark.skipif(
@@ -31,183 +43,94 @@ requires_rhino = pytest.mark.skipif(
 THETA_STEP, PHI_STEP = 2.0, 5.0
 
 
-def synthetic_directivity(theta_deg, phi_deg, *, sigma_deg, az_depth):
-    """A Gaussian main lobe with genuine azimuthal structure, as directivity.
+def write_cst(path, *, sigma_deg=15.0):
+    """A minimal well-formed export — enough to exercise the seam, no more.
 
-    Two properties the tests below rely on:
-
-    * the azimuthal modulation carries a ``sin(theta)`` factor, so it vanishes
-      at the pole. A far-field pattern must be single-valued at ``theta = 0``;
-      a modulation that survives there makes "where is the peak?" meaningless.
-    * it is ``sin(phi)``, ODD about ``phi = 0``, so reversing the azimuth
-      handedness is detectable. ``cos(phi)`` would be its own mirror image and
-      the ``phi_sense`` test would pass on a no-op.
-
-    Normalized so ``int D dOmega == 4*pi`` on its own quadrature, which is what
-    makes the integral test a statement about the reader rather than about the
-    test's own arithmetic.
+    The pattern's properties do not matter here; the ones that do (azimuthal
+    structure odd in phi, vanishing at the pole) are what limTOD's own tests
+    are built on.
     """
-    theta = np.deg2rad(theta_deg)[:, None]
-    phi = np.deg2rad(phi_deg)[None, :]
-    pattern = np.exp(-0.5 * (theta / np.deg2rad(sigma_deg)) ** 2) * (
-        1.0 + az_depth * np.sin(theta) * np.sin(phi)
-    )
-    weight = np.sin(theta) * np.deg2rad(THETA_STEP) * np.deg2rad(PHI_STEP)
-    return 4.0 * np.pi * pattern / float((pattern * weight).sum())
-
-
-def write_cst(path, *, sigma_deg=15.0, az_depth=0.5):
     theta_deg = np.arange(0.0, 180.0 + THETA_STEP, THETA_STEP)
     phi_deg = np.arange(0.0, 360.0, PHI_STEP)
-    directivity = synthetic_directivity(
-        theta_deg, phi_deg, sigma_deg=sigma_deg, az_depth=az_depth
-    )
-    rows = []
-    for j, phi in enumerate(phi_deg):          # theta runs fastest, as CST writes
-        for i, theta in enumerate(theta_deg):
-            dbi = 10.0 * np.log10(directivity[i, j])
-            rows.append(f"{theta:10.3f} {phi:10.3f} {dbi:22.14e} 0 0 0 0 0")
+    pattern = np.exp(
+        -0.5 * (np.deg2rad(theta_deg)[:, None] / np.deg2rad(sigma_deg)) ** 2
+    ) * np.ones_like(phi_deg)[None, :]
+    rows = [
+        f"{theta:10.3f} {phi:10.3f} {10.0 * np.log10(pattern[i, j]):22.14e} 0 0 0 0 0"
+        for j, phi in enumerate(phi_deg)      # theta runs fastest, as CST writes
+        for i, theta in enumerate(theta_deg)
+    ]
     path.write_text(
         "Theta [deg.]  Phi [deg.]  Abs(Dir.)[dBi]  Abs(Theta)[dBi]  "
         "Phase(Theta)[deg.]  Abs(Phi)[dBi]  Phase(Phi)[deg.]  Ax.Ratio[dB]\n"
         + "-" * 100 + "\n" + "\n".join(rows) + "\n"
     )
-    return theta_deg, phi_deg, directivity
 
 
-class TestReader:
-    def test_it_recovers_the_grid_and_the_linear_power(self, tmp_path):
-        """dBi in, linear power out -- the quantity the projectors integrate."""
-        path = tmp_path / "Horn70.txt"
-        theta_deg, phi_deg, directivity = write_cst(path)
-        got_theta, got_phi, got_d = read_cst_farfield(path)
-        np.testing.assert_allclose(got_theta, theta_deg)
-        np.testing.assert_allclose(got_phi, phi_deg)
-        np.testing.assert_allclose(got_d, directivity, rtol=1e-6)
+class TestTheCstSeam:
+    NSIDE = 8
 
-    def test_the_reshape_is_theta_fastest_not_phi_fastest(self, tmp_path):
-        """CST writes theta fastest within each phi block. Reshaping the other
-        way is shape-legal and gives a different beam, so the choice needs a
-        discriminating check rather than a comment.
+    def test_the_reader_reaches_limtod(self, tmp_path):
+        write_cst(tmp_path / "Horn70.txt")
+        theta_deg, phi_deg, directivity = read_cst_farfield(tmp_path / "Horn70.txt")
+        assert directivity.shape == (theta_deg.size, phi_deg.size)
+        assert np.all(directivity > 0.0)     # linear power, not dB
 
-        The discriminator: ``theta = 0`` is a single direction, so row 0 of the
-        correct grid is constant in phi. Under the transposed reading row 0 is a
-        phi-slice at many thetas, and a beam with any radial structure at all
-        makes that visibly non-constant."""
-        path = tmp_path / "Horn70.txt"
-        write_cst(path, az_depth=0.9)
-        _, _, got = read_cst_farfield(path)
-        np.testing.assert_allclose(got[0], got[0, 0], rtol=1e-9)
+    def test_the_frequency_table_is_in_HERTZ_on_this_side(self, tmp_path):
+        """limTOD keys the table in MHz, as it does everywhere; this package
+        speaks Hz, because that is what ``Coordinates.freq`` carries. The
+        conversion is the seam's whole contribution, so it is what gets tested.
+        """
+        write_cst(tmp_path / "HornDry70.5.txt")
+        write_cst(tmp_path / "HornDry71.txt")
+        assert sorted(cst_frequency_table(tmp_path)) == [70.5e6, 71.0e6]
 
-        flat = np.loadtxt(path, skiprows=2)[:, 2]
-        transposed = 10.0 ** (flat.reshape(got.shape[0], got.shape[1]) / 10.0)
-        assert not np.allclose(transposed[0], transposed[0, 0], rtol=1e-3), (
-            "the transposed reading must be distinguishable, or this test is "
-            "not testing anything"
+        from limTOD.cstbeam import cst_frequency_table as upstream
+
+        assert sorted(upstream(tmp_path)) == [70.5, 71.0]
+
+    def test_maps_are_requested_in_hertz(self, tmp_path):
+        write_cst(tmp_path / "Horn70.txt")
+        maps = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE)
+        assert maps.shape == (1, hp.nside2npix(self.NSIDE))
+
+        from limTOD.cstbeam import cst_beam_maps as upstream
+
+        np.testing.assert_allclose(
+            maps, upstream(tmp_path, [70.0], nside=self.NSIDE), rtol=1e-12
         )
 
-    def test_an_incomplete_grid_is_refused(self, tmp_path):
-        path = tmp_path / "Horn70.txt"
-        write_cst(path)
-        lines = path.read_text().splitlines()
-        path.write_text("\n".join(lines[:-3]) + "\n")   # drop three samples
-        with pytest.raises(StateValidationError, match="do not fill"):
-            read_cst_farfield(path)
-
-    def test_a_table_without_the_directivity_column_is_refused(self, tmp_path):
-        path = tmp_path / "Horn70.txt"
-        path.write_text("h\n---\n0.0 0.0\n1.0 0.0\n")
-        with pytest.raises(StateValidationError, match="columns"):
-            read_cst_farfield(path)
-
-
-class TestFrequencyTable:
-    def test_frequencies_come_from_the_trailing_number_in_megahertz(self, tmp_path):
-        for name in ("Horn70.txt", "Horn70.5.txt", "Horn85.txt", "notes.txt"):
-            write_cst(tmp_path / name) if name != "notes.txt" else (
-                (tmp_path / name).write_text("no frequency here\n")
-            )
-        table = cst_frequency_table(tmp_path)
-        assert sorted(table) == [70e6, 70.5e6, 85e6]
-
-    def test_an_empty_directory_is_refused(self, tmp_path):
-        with pytest.raises(StateValidationError, match="No CST exports"):
-            cst_frequency_table(tmp_path)
-
-
-class TestHealpixSampling:
-    NSIDE = 32
-
-    def test_a_directivity_still_integrates_to_four_pi(self, tmp_path):
-        """The single strongest check on the whole path: dBi conversion, the
-        (theta, phi) mapping and the HEALPix sampling all have to be right for
-        the solid-angle integral to survive."""
-        write_cst(tmp_path / "Horn70.txt")
-        maps = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE)
-        integral = maps[0].sum() * 4.0 * np.pi / hp.nside2npix(self.NSIDE)
-        assert abs(integral / (4.0 * np.pi) - 1.0) < 0.01
-
-    def test_the_boresight_lands_on_the_pole(self, tmp_path):
-        write_cst(tmp_path / "Horn70.txt")
-        maps = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE)
-        theta, _ = hp.pix2ang(self.NSIDE, int(np.argmax(maps[0])))
-        assert np.rad2deg(theta) < 2.0
-
-    def test_phi_sense_flips_the_azimuthal_structure(self, tmp_path):
-        """The handedness is not derivable from the file, so it is a knob; this
-        pins that the knob does something, and does the RIGHT something -- a
-        reflection about phi = 0, not a relabelling."""
-        write_cst(tmp_path / "Horn70.txt", az_depth=0.9)
-        ccw = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE, phi_sense="ccw")[0]
-        cw = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE, phi_sense="cw")[0]
-        assert not np.allclose(ccw, cw)
-
-        theta, phi = hp.pix2ang(self.NSIDE, np.arange(hp.nside2npix(self.NSIDE)))
-        mirrored = hp.ang2pix(self.NSIDE, theta, (2.0 * np.pi - phi) % (2.0 * np.pi))
-        band = theta > np.deg2rad(10.0)   # the pole's pixels are their own mirror
-        np.testing.assert_allclose(ccw[mirrored][band], cw[band], rtol=2e-2)
-
-    def test_phi0_rotates_the_pattern(self, tmp_path):
-        write_cst(tmp_path / "Horn70.txt", az_depth=0.9)
-        base = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE)[0]
-        turned = cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE, phi0_deg=180.0)[0]
-        assert not np.allclose(base, turned)
-        assert abs(base.sum() - turned.sum()) / base.sum() < 1e-3
-
-    def test_an_unknown_phi_sense_is_refused(self, tmp_path):
-        write_cst(tmp_path / "Horn70.txt")
-        with pytest.raises(StateValidationError, match="phi_sense"):
-            cst_beam_maps(tmp_path, [70e6], nside=8, phi_sense="widdershins")
-
-
-class TestFrequencyInterpolation:
-    def test_a_frequency_on_the_grid_reproduces_its_own_file(self, tmp_path):
-        write_cst(tmp_path / "Horn60.txt", sigma_deg=20.0)
-        write_cst(tmp_path / "Horn80.txt", sigma_deg=12.0)
-        both = cst_beam_maps(tmp_path, [60e6, 80e6], nside=16)
-        only60 = cst_beam_maps(tmp_path, [60e6], nside=16)[0]
-        np.testing.assert_allclose(both[0], only60, rtol=1e-12)
-        assert not np.allclose(both[0], both[1]), "the two files must differ"
-
-    def test_a_midpoint_is_the_average_of_its_neighbours(self, tmp_path):
-        write_cst(tmp_path / "Horn60.txt", sigma_deg=20.0)
-        write_cst(tmp_path / "Horn80.txt", sigma_deg=12.0)
-        ends = cst_beam_maps(tmp_path, [60e6, 80e6], nside=16)
-        mid = cst_beam_maps(tmp_path, [70e6], nside=16)[0]
-        np.testing.assert_allclose(mid, 0.5 * (ends[0] + ends[1]), rtol=1e-10)
-
-    def test_extrapolation_beyond_the_simulated_band_is_refused(self, tmp_path):
+    def test_a_band_stated_in_hertz_is_the_band_enforced(self, tmp_path):
+        """A unit slip at this seam would turn 70 MHz into 70 Hz and refuse
+        every legitimate request — or, worse, accept an illegitimate one."""
         write_cst(tmp_path / "Horn60.txt")
         write_cst(tmp_path / "Horn80.txt")
-        with pytest.raises(StateValidationError, match="covers only"):
-            cst_beam_maps(tmp_path, [55e6], nside=8)
-        with pytest.raises(StateValidationError, match="covers only"):
-            cst_beam_maps(tmp_path, [85e6], nside=8)
+        assert cst_beam_maps(tmp_path, [70e6], nside=self.NSIDE).shape[0] == 1
+        with pytest.raises(ValueError, match="covers only"):
+            cst_beam_maps(tmp_path, [85e6], nside=self.NSIDE)
+
+    def test_a_limtod_without_the_reader_is_named_at_the_boundary(self, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def blocked(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "limTOD" and fromlist and "cstbeam" in fromlist:
+                raise ImportError("no cstbeam")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", blocked)
+        with pytest.raises(ImportError, match="limTOD.cstbeam"):
+            read_cst_farfield("irrelevant.txt")
 
 
 @requires_rhino
 class TestTheRhinoHorn:
-    """Against the real CST export, not a synthetic stand-in."""
+    """Against the real CST export, not a synthetic stand-in.
+
+    RHINO's horn is this package's subject, so these stay here even though the
+    reader does not.
+    """
 
     NSIDE = 32
 
@@ -244,9 +167,7 @@ class TestTheRhinoHorn:
         catch a frequency table read in the wrong order."""
         maps = cst_beam_maps(RHINO_BEAMS, [60e6, 85e6], nside=self.NSIDE)
         theta_hp, _ = hp.pix2ang(self.NSIDE, np.arange(hp.nside2npix(self.NSIDE)))
-        widths = [
-            float((m * theta_hp).sum() / m.sum()) for m in maps
-        ]
+        widths = [float((m * theta_hp).sum() / m.sum()) for m in maps]
         assert widths[1] < widths[0], f"85 MHz should be narrower, got {widths}"
 
 
@@ -256,9 +177,6 @@ class TestHorizonTruncation:
     What the horizon cut IS -- the partition weights, the half-counted horizon
     ring, the zenith-only exactness, the painted-ground closure -- is limTOD's
     subject and is locked in ``tests/limtod_jax/test_horizon_partition.py``.
-    Re-testing it here would duplicate a moving target across two repos. What
-    belongs here is the seam: that the call reaches limTOD, that nside is
-    inferred from the maps, and that a stale install says so.
     """
 
     NSIDE = 16

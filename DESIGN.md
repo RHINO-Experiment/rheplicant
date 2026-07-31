@@ -748,11 +748,9 @@ them here would be two copies of a moving target. What this side tests is the
 seam: that the call arrives, that `nside` is inferred, and that a stale install
 says so.
 
-Still on this side and arguably on the same line: `cst_beam_maps` /
-`read_cst_farfield`, the CST far-field reader. It is beam *ingestion* rather
-than beam-weighted-sky computation, and limTOD has the natural slot for it
-(`limTOD.uvbeam` does the same job for pyuvdata) — a follow-up, not a
-distinction worth defending.
+Still on this side at the time of writing: `cst_beam_maps` /
+`read_cst_farfield`, the CST far-field reader — beam *ingestion* rather than
+beam-weighted-sky computation. Done in D25.
 
 ### D21 — The noise level is a model, not an argument
 
@@ -947,6 +945,47 @@ The estimator is deliberately a conditional Gaussian mixture rather than a
 normalizing flow: exact at one component for a Gaussian posterior, which is
 what makes the check above sharp, and few enough moving parts that the failure
 modes stay legible. Adam is hand-rolled, as in `calibrate.py` — no optax.
+
+### D25 — Beam ingestion is on the same line as beam physics
+
+D20 moved the horizon partition to limTOD and left the CST far-field reader
+here, calling the distinction "a follow-up, not a distinction worth defending".
+It was not worth defending. Reading a measured horn into a beam map is the same
+kind of thing as deciding how that beam weights the sky, and limTOD already had
+the slot: `limTOD.uvbeam` does exactly this job for pyuvdata.
+
+`limTOD.cstbeam` is now its sibling — `read_cst_farfield`, `cst_frequency_table`,
+`cst_beam_maps`, plus a `cst_beam_func` that satisfies `TODSim`'s
+`beam_func(freq=..., nside=...)` contract. That last one is what makes this a
+migration rather than a relocation: a CST horn now drops straight into limTOD's
+own simulator, which it could not do while the reader lived downstream. It also
+caches each file's HEALPix resampling, so a 200-channel sweep over a 61-file
+directory parses each file once instead of hundreds of times — an inefficiency
+this side never had reason to notice, because rheplicant only ever asked for a
+handful of frequencies at once.
+
+What stays here is the seam, and the seam has exactly one job: **units**.
+`Coordinates.freq` is in Hz; limTOD is in MHz throughout. Each package keeps
+its own house convention and the adapter is where they meet, which is what an
+adapter is for. rheplicant's tests were rewritten to check that conversion and
+nothing else — a unit slip here would turn 70 MHz into 70 Hz and refuse every
+legitimate request, or accept an illegitimate one.
+
+The conventions moved with the code, and one of them could not move intact.
+`limTOD.uvbeam` locks its azimuth mapping numerically, because pyuvdata *fixes*
+that convention. CST does not: which physical direction the model's `+x` axis
+points is a fact about how the horn was built and mounted, and it is simply not
+in the export. So `phi0_deg` and `phi_sense` remain knobs whose defaults are an
+assumption to check rather than a result, and what the upstream tests lock is
+that the knobs act correctly — `phi_sense` a reflection about `phi = 0` rather
+than a relabelling, `phi0_deg` a rotation conserving the integral. For RHINO's
+horn, which varies 30-60 % around the `theta = 30` deg ring, a wrong handedness
+mirrors that structure into the wrong half of the sky while leaving every
+integral, every peak and every azimuthally-symmetric diagnostic unchanged.
+
+RHINO's own horn stays tested here, against the real export: that is this
+package's subject, not limTOD's. The synthetic convention tests went upstream
+with the reader.
 
 ## Known deferred issues
 
