@@ -837,6 +837,67 @@ checked against its own output forever and still be useless.
 which is the same arrangement `limtod` already had. The operator's ImportError
 now names both install routes.
 
+### D23 — GCR takes a covariance; iterative GLS is what supplies one
+
+`gcr_sample` is a linear sampler *given* a covariance, and `wiener_solve` the
+corresponding mean. Under `RadiometerNoise` the covariance is not given: sigma
+tracks the prediction, so the weights depend on the solution and the solution
+depends on the weights. (Framed by Zheng: "GCR 就是给定 covariance 的线性采样器；
+只不过对于默认的 radiometer equation noise，covariance 通过 iterative GLS 确定".)
+
+That framing is also the API. **`wiener_solve` and `gcr_sample` did not
+change** — they already accepted an array `noise_std` broadcastable to the
+data, and their linear-Gaussian correctness was already tested. The new module
+supplies only the thing that *produces* sigma, and hands it over:
+
+```python
+found = iterative_gls(block, observed, noise=RadiometerNoise(dnu, tau), prior_std=P)
+draw, _ = gcr_sample(block, observed, noise_std=found.noise_std, prior_std=P, key=k)
+```
+
+A matrix-free port of hydra-tod's `hydra_tod.linear_sampler.iterative_gls`:
+that implementation forms a dense `U` and `N_inv`, while this one runs the same
+fixed-point iteration on the `LinearBlock`'s JVP and VJP, which is what makes
+10^6 degrees of freedom possible. A transcription of the numpy original lives
+in the test file as the oracle — inlined rather than imported, because hydra-tod
+imports `mpi4py` at module scope.
+
+**The convergence tolerance cannot have a fixed default.** Two independent
+floors bound how small a step is measurable, and the first default tried
+(`1e-8`) violated both in turn:
+
+- the arithmetic's epsilon — float32's is `1.2e-7`, so `1e-8` is rounding
+  rather than a measurement, and the loop ran to `max_reweights` reporting
+  `converged=False` for a run that had settled at `delta = 7e-8`;
+- **the inner CG tolerance** — consecutive solves differ by roughly their own
+  residual whatever the outer iteration does. This is the binding floor in
+  float64, where the worked example's `tol=1e-10` sits five orders of magnitude
+  above `eps`; `8*eps = 1.8e-15` was then *too tight* and failed the same way.
+
+The default is `max(8*eps, tol)`. Both terms are derived, neither is tuned, and
+a test pins the failure mode so the derivation is not quietly replaced by a
+constant later.
+
+**The mean can be weight-independent while the width is not.** In
+`examples/gls_gcr.py` three switched loads meet three per-channel noise-wave
+unknowns, so the reduced system is square — one solution, weights cancelling
+out of it — and reweighting moves the point estimate by nothing, exactly. The
+posterior covariance `(A^T Sigma^-1 A + S^-1)^-1` depends on Sigma regardless,
+and a GCR draw is precisely a draw of that width: a frozen sigma there reports
+error bars wrong by -8% to +8%, in both directions, on an estimate that was
+already right. "The fit came out the same" is not evidence the covariance did
+not matter. Where the system is over-determined across genuinely different
+noise levels the estimate moves too — a factor of ~2.3 in recovered RMS on a
+prediction spanning a decade.
+
+Freezing sigma inside each solve is what makes every step linear-Gaussian, and
+is also what makes the converged answer *generalized least squares* rather than
+the maximum of the full Gaussian likelihood — the log-determinant's dependence
+on the solution is held fixed rather than differentiated (D21). That is the
+right estimator to condition a constrained realization on, because a GCR draw
+is a draw at a *given* covariance. The full likelihood's posterior is a
+gradient sampler's job, not this one's.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

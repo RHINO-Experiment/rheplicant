@@ -2,6 +2,7 @@
 
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
 from rheplicant.inference.forward import build_forward_fn
+from rheplicant.inference.gls import GLSResult, iterative_gls
 from rheplicant.inference.likelihood import (
     GaussianLikelihood,
     Likelihood,
@@ -38,6 +39,7 @@ __all__ = [
     "AdamCalibrator",
     "Bind",
     "FlaggedNoise",
+    "GLSResult",
     "GaussianLikelihood",
     "GradientCalibrator",
     "HomoscedasticNoise",
@@ -56,6 +58,7 @@ __all__ = [
     "fisher_information",
     "gcr_sample",
     "inverse_variance",
+    "iterative_gls",
     "linear_operator",
     "mean_squared_error",
     "parameter_covariance",

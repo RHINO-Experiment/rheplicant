@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### `iterative_gls`: finding the covariance a GCR draw is conditioned on
+
+`gcr_sample` is a linear sampler *given* a covariance. Under `RadiometerNoise`
+the covariance is not given — σ tracks the prediction, so the weights depend on
+the solution and the solution depends on the weights.
+
+**`wiener_solve` and `gcr_sample` did not change.** They already accepted an
+array `noise_std`, and their linear-Gaussian correctness was already tested.
+The new module supplies only the thing that produces σ:
+
+```python
+found = iterative_gls(block, observed, noise=RadiometerNoise(dnu, tau), prior_std=P)
+draw, _ = gcr_sample(block, observed, noise_std=found.noise_std, prior_std=P, key=k)
+```
+
+A **matrix-free** port of hydra-tod's `hydra_tod.linear_sampler.iterative_gls`
+— that one forms a dense `U` and `N_inv`; this runs the same fixed point on the
+block's JVP and VJP. A transcription of the numpy original is the test oracle.
+
+**The convergence tolerance cannot have a fixed default**, and the first one
+tried (`1e-8`) violated both bounds in turn. Two independent floors limit how
+small a step is measurable: the arithmetic's epsilon (float32's is `1.2e-7`, so
+`1e-8` is rounding — the loop ran to its cap reporting `converged=False` for a
+run settled at `delta = 7e-8`), and the **inner CG tolerance**, since
+consecutive solves differ by their own residual whatever the outer iteration
+does. The latter binds in float64, where a tight `tol=1e-10` made `8·eps` far
+*too tight* and it failed the same way. The default is `max(8·eps, tol)` — both
+derived, neither tuned — and a test pins the failure mode.
+
+**The mean can be weight-independent while the width is not.** New
+`examples/gls_gcr.py`: three switched loads against three per-channel
+noise-wave unknowns is a **square** system, so reweighting moves the point
+estimate by nothing, exactly. The posterior covariance depends on Σ regardless,
+and a GCR draw is a draw of that width — a frozen σ there reports error bars
+wrong by −8 % to +8 %, in both directions, on an estimate that was already
+right. Where the system is over-determined across genuinely different noise
+levels the estimate moves too: a factor of ≈2.3 in recovered RMS on a
+prediction spanning a decade.
+
 ### MomentRFI flagging: the bridge now actually runs
 
 `MomentRFIFlaggingOperator` had been in the tree with tests since the rename,
