@@ -30,7 +30,11 @@ from rheplicant.inference.npe import (
     simulate_pairs,
     train_posterior,
 )
-from rheplicant.inference.numpyro_bridge import predict_from_samples, to_numpyro_model
+from rheplicant.inference.numpyro_bridge import (
+    init_to_declared,
+    predict_from_samples,
+    to_numpyro_model,
+)
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.inference.uncertainty import (
     as_noise_model,
@@ -63,6 +67,7 @@ __all__ = [
     "condition_estimate",
     "fisher_information",
     "gcr_sample",
+    "init_to_declared",
     "inverse_variance",
     "iterative_gls",
     "linear_operator",

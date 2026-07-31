@@ -86,6 +86,8 @@ signal-path
 sky-engines
 sky-to-receiver
 inference
+tutorial-gcr
+tutorial-nuts
 api
 design
 changelog

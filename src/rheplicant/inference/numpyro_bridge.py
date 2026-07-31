@@ -153,6 +153,44 @@ def to_numpyro_model(
     return model
 
 
+def init_to_declared(space: ParameterSpace):
+    """A NumPyro init strategy that starts where the ``ParameterSpace`` says.
+
+    ``Latent(..., init=...)`` already states where the model starts, and the
+    calibrators and :func:`~rheplicant.inference.linear.check_linearity` both
+    use it. NUTS does not: a kernel built without an ``init_strategy`` uses
+    NumPyro's default ``init_to_uniform``, which draws in the *unconstrained*
+    space with no knowledge of the declaration. Pass this instead::
+
+        kernel = numpyro.infer.NUTS(model, init_strategy=init_to_declared(space))
+
+    **This is not a tuning knob.** On the ring toy of
+    ``examples/tutorial_nuts.py`` — 1024 samples constraining three beam
+    parameters — the default initialization gives ``r_hat = 840`` and an
+    effective sample size of **2** out of 8000 draws, while the identical model
+    started here gives ``r_hat = 1.002`` and ``n_eff = 1327``. Neither
+    tightening the priors nor tripling the warmup moved those numbers at all;
+    only the starting point did.
+
+    The mechanism is ordinary and worth recognising: a posterior far narrower
+    than its prior is a needle, ``init_to_uniform`` lands in the haystack, and
+    warmup adapts a step size for wherever it landed. The declared ``init`` does
+    not have to be good — the one in that tutorial is deliberately mis-set, some
+    11000 nats below the peak — it only has to be somewhere a gradient can be
+    followed.
+
+    Args:
+        space: the space the model was built from.
+
+    Returns:
+        A NumPyro init strategy, ready for ``NUTS(model, init_strategy=...)``.
+    """
+    _require_numpyro()
+    import numpyro
+
+    return numpyro.infer.init_to_value(values=space.initial_values())
+
+
 def predict_from_samples(
     pipeline: AbstractOperator,
     state_template: State,

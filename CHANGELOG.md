@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Two inference tutorials, and a sampler bug they found
+
+New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and
+[`docs/tutorial-nuts.md`](docs/tutorial-nuts.md), backed by
+`examples/tutorial_gcr.py` and `examples/tutorial_nuts.py`. One ring toy, two
+opposite questions: 256 sky pixels by exact conjugate solve, three beam
+parameters by gradient MCMC. Every number in both pages is the script's real
+output.
+
+**The GCR tutorial ends by breaking itself.** With a beam that resolves the sky
+the RMS error equals the posterior σ and coverage is exactly 68 %. Widen the
+beam past the structure and κ rises 13×, the posterior keeps 63 % of the prior
+instead of 4 %, and coverage climbs to 100 % — nothing fails, and every
+diagnostic says the answer is now mostly prior. An estimator without error bars
+would return a similar map and report none of it.
+
+**The NUTS tutorial fails first, on purpose, because it really did.** Written
+the obvious way it produces `r_hat = 840` and an effective sample size of **2**
+out of 8000 draws, with no exception, no NaN and means that look like numbers.
+Two hypotheses were tested: the likelihood is multimodal (**wrong** — a scan
+finds one maximum), and the posterior is a needle inside its prior (**right** —
+500× narrower).
+
+That produced a real fix in the library. New
+**`rheplicant.inference.init_to_declared(space)`**: `ParameterSpace` already
+declares where to start, the calibrators and `check_linearity` both use it, and
+`to_numpyro_model` was dropping it on the floor. One line takes `r_hat` from 840
+to **1.002** and `n_eff` from 2 to **1327** — and the run gets *faster*.
+Measured on the same problem, tightening the priors and tripling the warmup
+each change nothing whatever (`r_hat` 1123 and 1124).
+
+The NUTS page also documents what the reference pages never did: `r_hat`,
+`n_eff` and divergences, what each one means, and a six-point checklist for any
+run.
+
 ### The CST beam reader moved to limTOD
 
 D20 moved the horizon partition upstream and left the CST far-field reader

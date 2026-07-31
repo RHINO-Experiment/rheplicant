@@ -706,6 +706,30 @@ declarative form genuinely cannot express what you need, not to save a line.
 
 ---
 
+## Tutorials
+
+The reference above says what each piece is. These walk one problem through end
+to end, in the order you would actually do it, with the scripts' real output:
+
+:::{list-table}
+:header-rows: 1
+:widths: 30 70
+
+* - Tutorial
+  - What it covers
+* - [An exact posterior for a big linear block](tutorial-gcr.md)
+  - 256 sky pixels, no chain. Checking the linearity claim, reading κ before
+    choosing `tol`, `iterative_gls` for the covariance, `gcr_sample` for the
+    draws — then widening the beam until the prior takes over, and watching
+    every diagnostic say so.
+* - [A gradient posterior, and how to tell it is wrong](tutorial-nuts.md)
+  - Three nonlinear beam parameters. **It fails first**: `r_hat = 840`,
+    `n_eff = 2`, nothing raised. Diagnosing that — two hypotheses, one right —
+    is most of the page, and the fix is one line.
+:::
+
+---
+
 ## Run it
 
 [`examples/inferring_anything.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/inferring_anything.py)
