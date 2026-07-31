@@ -42,7 +42,9 @@ import jax.numpy as jnp
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.parameters import ParameterSpace
+from rheplicant.inference.uncertainty import as_noise_model
 
 
 def _require_numpyro():
@@ -80,10 +82,18 @@ def to_numpyro_model(
         pipeline: the (deterministic) forward model.
         state_template: input state the model is evaluated on (closed over).
         space: what to infer and how it binds. Every latent needs a prior.
-        noise_std: likelihood noise standard deviation — a scalar/array, or a
-            NumPyro distribution to infer it (sampled at site ``"noise_std"``).
+        noise_std: how noisy the data is. Three forms:
+
+            * a scalar or array standard deviation;
+            * a :class:`~rheplicant.inference.noise.NoiseModel` — in particular
+              :class:`~rheplicant.inference.noise.RadiometerNoise`, whose sigma
+              tracks the prediction and therefore the sampled parameters;
+            * a NumPyro distribution, to infer a constant sigma (sampled at
+              site ``"noise_std"``).
         flags: optional boolean mask (True = flagged); flagged samples are
             excluded from the likelihood (RFI flags -> noise covariance).
+            Equivalent to wrapping ``noise_std`` in
+            :class:`~rheplicant.inference.noise.FlaggedNoise`.
         obs_name: name of the observed sample site.
 
     Returns:
@@ -91,6 +101,22 @@ def to_numpyro_model(
         ``observed=data``; run without it for prior-predictive checks. The
         noiseless prediction is recorded at the deterministic site
         ``"prediction"``.
+
+    Note:
+        **A prediction-dependent sigma brings its log-determinant with it, and
+        that is the point of routing it through here.** ``Normal(loc,
+        scale).log_prob`` contains ``-log scale``, so when ``scale`` is a
+        function of the sampled parameters the term is part of the potential
+        automatically — this is the full Gaussian density, not the generalized
+        least squares that :func:`~rheplicant.inference.gls.iterative_gls`
+        converges to (which freezes that dependence in order to keep each step
+        linear). The two answers differ, in the direction
+        :mod:`rheplicant.inference.noise` gives in closed form.
+
+        An unobserved sample — infinite sigma, from
+        :class:`~rheplicant.inference.noise.FlaggedNoise` or ``flags`` — is
+        masked out rather than given an infinite scale, which would send the
+        whole potential to ``-inf``. Masking is the limit that exists.
     """
     _require_numpyro()
     import numpyro
@@ -107,16 +133,21 @@ def to_numpyro_model(
         prediction = space.bind(pipeline, values)(state_template).data
         numpyro.deterministic("prediction", prediction)
 
-        scale = (
-            numpyro.sample("noise_std", noise_std)
+        noise = as_noise_model(
+            HomoscedasticNoise(numpyro.sample("noise_std", noise_std))
             if isinstance(noise_std, dist.Distribution)
-            else noise_std
+            else noise_std,
+            flags,
         )
-        site = dist.Normal(prediction, scale)
-        if flags is not None:
-            with numpyro.handlers.mask(mask=~flags):
-                numpyro.sample(obs_name, site, obs=observed)
-        else:
+        sigma = noise.std(prediction)
+
+        # A sample with infinite sigma was not observed. Handing that scale to
+        # Normal sends its log_prob -- and so the whole potential -- to -inf,
+        # because r^2/sigma^2 vanishes but log sigma does not. Masking is the
+        # limit that exists.
+        seen = jnp.isfinite(sigma)
+        site = dist.Normal(prediction, jnp.where(seen, sigma, 1.0))
+        with numpyro.handlers.mask(mask=seen):
             numpyro.sample(obs_name, site, obs=observed)
 
     return model

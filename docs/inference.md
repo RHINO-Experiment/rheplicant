@@ -630,6 +630,64 @@ is what physical fitting wants.
 
 ---
 
+## Inference without a likelihood
+
+Every engine above evaluates a likelihood. Simulation-based inference does not:
+it draws pairs $(\theta, x)$ from the prior and the simulator, fits a
+conditional density $q(\theta \mid x)$ to them, and reads the posterior off $q$
+at the data actually observed.
+
+```python
+thetas, bank = simulate_pairs(twin, state, space, noise=noise,
+                              key=jax.random.key(0), n_simulations=32_768)
+q = NeuralPosterior.create(thetas, bank, key=jax.random.key(1))
+q, history = train_posterior(q, thetas, bank, key=jax.random.key(2))
+
+draws = q.sample(observed, key=jax.random.key(3), n_samples=4000)
+```
+
+Nothing there needs the noise to be Gaussian, the model to be differentiable,
+or a normalization to be tractable — only a simulator, which the twin already
+is. And the cost is **amortized**: a second observation is a forward pass, not
+another chain.
+
+The density is a conditional Gaussian mixture (an MLP → weights, means,
+scales). A normalizing flow is more expressive; a mixture is a few dozen lines,
+is exact for a Gaussian posterior at one component, and keeps the failure modes
+legible.
+
+:::{danger}
+**An approximate posterior has no internal notion of being wrong.** A
+badly-fitted $q$ returns a smooth, confident, correctly-centred, incorrect
+distribution and reports nothing amiss. Both failure modes are real, and they
+push in opposite directions — measured on the package's own linear-Gaussian
+test problem, where the exact answer is available from `gcr_sample`:
+
+| simulations | steps | components | width / exact |
+|---|---|---|---|
+| 8 192 | 1 500 | 1 | 0.88 |
+| 8 192 | 4 000 | 1 | 0.84 |
+| 8 192 | 4 000 | 2 | **0.60** |
+| 32 768 | 1 500 | 1 | **0.98** |
+| 32 768 | 1 500 | 2 | 1.07 |
+
+*Too few simulations*: draws come from the prior, so only a fraction
+$\sigma_\text{post}/\sigma_\text{prior}$ of them land near any given
+observation, and the width comes out wrong. *Too many steps on a small bank*:
+over-fitting, which makes $q$ too **narrow** — the failure that looks like a
+better answer.
+
+`train_posterior` holds out a validation split by default and **returns the
+best validation step, not the last**, because the training loss falls
+monotonically straight through the point where the fit stops being a
+posterior. Prefer few components. And validate on a problem you can solve
+exactly before trusting one you cannot — which is what
+`tests/inference/test_npe.py` does, and why NUTS was wired to the noise model
+first.
+:::
+
+---
+
 ## When the blocks are not enough
 
 `ParameterSpace.raw` takes a bind function outright:

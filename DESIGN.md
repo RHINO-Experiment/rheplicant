@@ -898,6 +898,56 @@ right estimator to condition a constrained realization on, because a GCR draw
 is a draw at a *given* covariance. The full likelihood's posterior is a
 gradient sampler's job, not this one's.
 
+### D24 — An approximate posterior is only trustworthy where an exact one exists
+
+Two engines were added on top of the noise-model seam (D21): NUTS through the
+NumPyro bridge, and amortized neural posterior estimation. The ordering was the
+design decision, not an accident of scheduling.
+
+`to_numpyro_model` takes a `NoiseModel` in the `noise_std` slot, like every
+other consumer. Nothing special is needed to get the log-determinant: with
+`RadiometerNoise` the scale is a function of the sampled parameters, so
+`Normal(loc, scale).log_prob`'s `-log scale` is already in the potential. That
+makes NUTS the *full* Gaussian posterior, where `iterative_gls` (D23) converges
+to generalized least squares — the two are different estimators and the bridge
+now says which is which. An infinite sigma is masked rather than passed as a
+scale, since `Normal(loc, inf).log_prob` is `-inf` and one flagged channel
+would otherwise take the whole potential with it.
+
+**NUTS is validated against `gcr_sample`, not against plausibility.** On a
+linear-Gaussian problem the constrained realization is exact — closed form,
+independent draws, no burn-in — so agreement is a real check on both: mean to
+0.00 sigma and width to 1.00x.
+
+Only then NPE, because **an approximate posterior has no internal notion of
+being wrong**. A badly-fitted `q` returns a smooth, confident,
+correctly-centred, incorrect density and reports nothing amiss. Both of its
+failure modes appeared during development and push opposite ways:
+
+| simulations | steps | components | width / exact |
+|---|---|---|---|
+| 8192 | 1500 | 1 | 0.88 |
+| 8192 | 4000 | 1 | 0.84 |
+| 8192 | 4000 | 2 | 0.60 |
+| 32768 | 1500 | 1 | 0.98 |
+| 32768 | 1500 | 2 | 1.07 |
+
+Draws come from the prior, so only a fraction `sigma_post / sigma_prior` of
+them land near any given observation and too small a bank cannot resolve the
+posterior at all. Independently, too many steps on a small bank over-fits — and
+over-fitting an NPE makes it too NARROW, which is the failure that looks like a
+better answer. The training loss falls monotonically straight through it.
+
+So `train_posterior` holds out a validation split by default and returns the
+**best validation step, not the last**. In the worked example that is step 489
+of 2000. Without it the shipped default would have been quietly over-confident,
+and nothing in the output would have said so.
+
+The estimator is deliberately a conditional Gaussian mixture rather than a
+normalizing flow: exact at one component for a Gaussian posterior, which is
+what makes the check above sharp, and few enough moving parts that the failure
+modes stay legible. Adam is hand-rolled, as in `calibrate.py` — no optax.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

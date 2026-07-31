@@ -210,6 +210,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
 .. automodule:: rheplicant.inference.numpyro_bridge
    :members:
 
+.. automodule:: rheplicant.inference.npe
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.inference.uncertainty
    :members:
    :show-inheritance:

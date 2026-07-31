@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### NUTS through the noise model, then inference without a likelihood at all
+
+**`to_numpyro_model` accepts a `NoiseModel`.** With `RadiometerNoise` the
+observation scale is a function of the sampled parameters, so
+`Normal(loc, scale).log_prob`'s `-log scale` puts the log-determinant in the
+potential automatically — this is the *full* Gaussian density, not the
+generalized least squares `iterative_gls` converges to. An unobserved sample
+(infinite σ) is masked rather than given an infinite scale, which would send
+the whole potential to `-inf`; `flags=` and wrapping in `FlaggedNoise` are now
+the same code path.
+
+*Validated against an exact sampler.* On a linear-Gaussian problem
+`gcr_sample` draws the posterior in closed form with no chain and nothing to
+diagnose, and NUTS must reproduce it. It does: **mean to 0.00σ, width to
+1.00×**.
+
+**New `rheplicant.inference.npe` — amortized neural posterior estimation.**
+`simulate_pairs` draws (θ, x) from the prior and the simulator;
+`NeuralPosterior` is a conditional Gaussian mixture; `train_posterior` fits it.
+No likelihood is written anywhere, and a second observation costs a forward
+pass — measured at **3.5 ms against 66 ms** for a fresh exact solve.
+
+**An approximate posterior has no internal notion of being wrong**, and both
+failure modes appeared while building this, pushing in opposite directions:
+
+| simulations | steps | components | width / exact |
+|---|---|---|---|
+| 8 192 | 1 500 | 1 | 0.88 |
+| 8 192 | 4 000 | 2 | **0.60** |
+| 32 768 | 1 500 | 1 | **0.98** |
+
+Too few simulations and the width is wrong; too many steps on a small bank and
+it over-fits, which makes `q` too **narrow** — the failure that presents as a
+better answer. So `train_posterior` holds out a validation split by default and
+**returns the best validation step, not the last**: in the worked example that
+is step 489 of 2000, with the training loss still falling throughout.
+
+New `examples/three_ways_to_a_posterior.py` puts all three engines on one
+problem, in the order that makes them checkable.
+
 ### `iterative_gls`: finding the covariance a GCR draw is conditioned on
 
 `gcr_sample` is a linear sampler *given* a covariance. Under `RadiometerNoise`
