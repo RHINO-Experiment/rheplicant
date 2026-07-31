@@ -204,6 +204,99 @@ reason to make it skippable.
 
 ---
 
+## The noise model
+
+Every inference route needs one number per sample: how noisy is it? The
+likelihood needs it, a Wiener solve and a GCR draw need it as a weight, the
+Fisher matrix needs it, a NumPyro observation site needs it as a scale. Passing
+it to each of them as a bare `noise_std` quietly assumes the answer is *given*
+and *constant*. For a radiometer it is neither:
+
+$$\sigma(d) = \frac{|d|}{\sqrt{\Delta\nu\,\tau}}$$
+
+σ is a function of the very thing being inferred. So there is one object that
+answers the question, and every route takes it:
+
+:::{list-table}
+:header-rows: 1
+:widths: 26 40 34
+
+* - Model
+  - σ
+  - `depends_on_prediction`
+* - `HomoscedasticNoise(sigma)`
+  - a constant — what a bare `noise_std` always meant
+  - `False`
+* - `RadiometerNoise(Δν, τ)`
+  - `|prediction| / √(Δν·τ)`
+  - `True`
+* - `FlaggedNoise(base, flags)`
+  - the wrapped model, `∞` where flagged
+  - inherited
+:::
+
+Anywhere the package writes `noise_std=`, a noise model is accepted in its
+place — the argument is polymorphic, so nothing downstream changed signature:
+
+```python
+from rheplicant.inference import RadiometerNoise, FlaggedNoise
+
+noise = FlaggedNoise(RadiometerNoise(channel_width=61e3, integration_time=1.0),
+                     flags=state.aux["flags"])
+
+fisher_information(forward, params, noise_std=noise)
+```
+
+`FlaggedNoise` is how RFI flags reach the covariance: by **wrapping a noise
+model**, not by threading a `flags=` keyword through five separate functions. An
+infinite σ is a self-describing encoding of "this sample was not observed", and
+every consumer turns it into a clean zero rather than a NaN.
+
+`depends_on_prediction` is not a hint. It is the claim a solver branches on:
+`False` means one solve, `True` means the covariance has to be found before it
+can be used.
+
+### The term that is not a constant
+
+The Gaussian log-density is
+
+$$\log p = -\tfrac{1}{2}\sum_i\left[\frac{r_i^2}{\sigma_i(\theta)^2}
+  + \log 2\pi\sigma_i(\theta)^2\right]$$
+
+When σ is constant the second term is an additive constant and dropping it
+changes nothing. When σ depends on the prediction, dropping it — which is
+exactly what generalized least squares does — gives a **different estimator**,
+one with no penalty for shrinking the prediction to make the variance small.
+
+For the multiplicative model both are solvable by hand. With $d_i = \theta(1+w_i)$
+and $w\sim\mathcal N(0,f^2)$:
+
+| Objective | Stationary point | Expectation |
+|---|---|---|
+| GLS (log-det dropped) | $\hat\theta = \sum d^2 / \sum d$ | $\theta_{\rm true}(1+f^2)$ — biased high |
+| Full Gaussian | $nf^2\theta^2 + \theta\sum d - \sum d^2 = 0$ | $\theta_{\rm true}$ — unbiased |
+
+So the term GLS discards as a normalization is precisely the one that removes
+the bias. `NoiseModelLikelihood` keeps it by default; `include_logdet=False` is
+the explicit, documented GLS variant rather than an oversight.
+
+:::{warning}
+The same thing happens to the Fisher matrix, and more quietly. When the
+covariance carries parameter dependence, $J^\top N^{-1} J$ **is not** the Fisher
+information — there is a second term,
+
+$$F = J^\top\Sigma^{-1}J + \tfrac{1}{2}
+  \operatorname{tr}\!\left(\Sigma^{-1}\partial\Sigma\,\Sigma^{-1}\partial\Sigma\right),$$
+
+which for a diagonal covariance is $2\,(\partial\log\sigma)^\top(\partial\log\sigma)$.
+`fisher_information` includes it whenever the noise model reports
+`depends_on_prediction`. Under `RadiometerNoise` it is a clean factor,
+$F = (1+2f^2)\,J^\top N^{-1} J$ — so reporting only the first term forecasts
+error bars too wide by $\sqrt{1+2f^2}$: a plausible number, and the wrong one.
+:::
+
+---
+
 ## Linear blocks
 
 Some parameters enter the model linearly — sky `alm` coefficients, noise-wave

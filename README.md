@@ -164,10 +164,13 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
   magnitude cheaper, alongside projection matrices and a numpy-limTOD
   validation bridge — and linear analysis filters (sidereal, sky-space
   map-making, fringe-rate/delay).
-- **Inference** — gradient & Adam calibrators, NumPyro bridge with pytree
-  priors and posterior predictive, Fisher / Cramér-Rao / delta-method
-  uncertainty propagation, Monte Carlo pushforward, `NeuralOperator`
-  surrogate stages, MomentRFI flagging bridge, masked likelihoods.
+- **Inference** — a noise model (`RadiometerNoise` by default: multiplicative,
+  σ tracking the prediction) that the likelihood, the weights, the Fisher
+  matrix and the NumPyro scale all read from one place; gradient & Adam
+  calibrators, NumPyro bridge with pytree priors and posterior predictive,
+  Fisher / Cramér-Rao / delta-method uncertainty propagation, Monte Carlo
+  pushforward, `NeuralOperator` surrogate stages, MomentRFI flagging bridge,
+  masked likelihoods.
 
 ## Documentation
 

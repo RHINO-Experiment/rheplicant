@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### The noise level became a model instead of an argument
+
+`noise_std` was a bare scalar handed separately to five places —
+`GaussianLikelihood`, `to_numpyro_model`, `fisher_information`, `wiener_solve`
+and `gcr_sample` — each assuming the answer was given and constant. **The
+radiometer equation says it is neither**: `sigma = |d| / sqrt(delta_nu * tau)`,
+so the noise level is a function of the very thing being inferred.
+
+New `rheplicant.inference.noise`:
+
+- `HomoscedasticNoise(sigma)` — what a bare `noise_std` always meant, now named.
+- `RadiometerNoise(channel_width, integration_time)` — the multiplicative
+  default, `sigma = |prediction| / sqrt(delta_nu * tau)`. A test asserts its
+  sigma matches the one `rhino_cal_jax.power.add_radiometer_noise` actually
+  draws with, so the side that scores the data and the side that generates it
+  cannot drift apart.
+- `FlaggedNoise(base, flags)` — RFI flags reach the covariance by *wrapping a
+  noise model*, not by threading a `flags=` keyword through five signatures.
+- `NoiseModelLikelihood`, `inverse_variance`, `as_noise_model`.
+
+Every `noise_std=` argument accepts a noise model in place of a number, so no
+downstream signature changed. `GaussianLikelihood` and
+`MaskedGaussianLikelihood` are unchanged and tested to agree with the general
+form to roundoff.
+
+**The log-determinant is not a constant when sigma depends on the prediction,
+and dropping it is a different estimator.** For the multiplicative model both
+are solvable in closed form: generalized least squares returns
+`sum d^2 / sum d`, biased high by `(1 + f^2)`, while the full Gaussian density
+is asymptotically unbiased. `NoiseModelLikelihood` keeps the term by default;
+`include_logdet=False` is the explicit GLS variant. The tests assert the
+implemented log-density has a vanishing gradient at each closed form, so the
+claim is pinned rather than measured.
+
+**`fisher_information` was reporting the wrong matrix for prediction-dependent
+noise** — `J^T N^-1 J` is not the Fisher information when the covariance
+carries parameter dependence. The variance term
+`2 (d log sigma/d theta)^T (d log sigma/d theta)` is now included whenever the
+noise model reports `depends_on_prediction`. Under `RadiometerNoise` it is
+exactly the factor `(1 + 2 f^2)`; without it a forecast reports error bars too
+wide by `sqrt(1 + 2 f^2)`.
+
 ### Docs: the equations were never rendering, and the framing was in the wrong place
 
 **Every equation in the physics pages shipped as literal `$$...$$` source

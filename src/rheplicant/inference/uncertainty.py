@@ -35,6 +35,12 @@ import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
 from rheplicant.core.errors import StateValidationError
+from rheplicant.inference.noise import (
+    FlaggedNoise,
+    HomoscedasticNoise,
+    NoiseModel,
+    inverse_variance,
+)
 
 
 def _named_spans(
@@ -167,45 +173,99 @@ def _flat_forward(
     return f_flat, x0, forward(params)
 
 
-def _noise_weights(
-    prediction: jax.Array, noise_std: jax.Array, flags: jax.Array | None
+def as_noise_model(noise_std: Any, flags: jax.Array | None = None) -> NoiseModel:
+    """Normalize a ``noise_std`` argument into a :class:`NoiseModel`.
+
+    A bare scalar or array becomes :class:`HomoscedasticNoise`; a noise model
+    is passed through; ``flags`` wrap either in :class:`FlaggedNoise`. This is
+    what lets every ``noise_std=`` argument in the package accept the seam
+    without any of their signatures changing.
+
+    The discrimination is by ``depends_on_prediction``, not by ``std``: jax and
+    numpy arrays both *have* a ``.std`` method, so the protocol's data member
+    is the only unambiguous marker.
+    """
+    noise = (
+        noise_std
+        if isinstance(noise_std, NoiseModel)
+        else HomoscedasticNoise(jnp.asarray(noise_std))
+    )
+    return noise if flags is None else FlaggedNoise(noise, flags)
+
+
+def _log_sigma_curvature(
+    noise: NoiseModel,
+    f_flat: Callable[[jax.Array], jax.Array],
+    x0: jax.Array,
+    prediction: jax.Array,
 ) -> jax.Array:
-    """Per-sample inverse-variance weights, zeroed on flagged samples."""
-    weights = jnp.broadcast_to(1.0 / jnp.asarray(noise_std) ** 2, prediction.shape)
-    if flags is not None:
-        if flags.shape != prediction.shape:
-            raise StateValidationError(
-                f"flags shape {flags.shape} does not match prediction shape "
-                f"{prediction.shape}."
-            )
-        weights = jnp.where(flags, 0.0, weights)
-    return jnp.ravel(weights)
+    """``(d log sigma/d theta)^T (d log sigma/d theta)`` over observed samples.
+
+    The Gaussian information carried by the *variance* rather than the mean.
+    Unobserved samples (infinite sigma) contribute a flat zero, which also
+    keeps their derivative from being a NaN.
+    """
+    shape = jnp.shape(prediction)
+
+    def log_sigma(x: jax.Array) -> jax.Array:
+        sigma = noise.std(jnp.reshape(f_flat(x), shape))
+        seen = jnp.isfinite(sigma)
+        safe = jnp.where(seen, sigma, 1.0)
+        return jnp.ravel(jnp.where(seen, jnp.log(safe), 0.0))
+
+    jac = jax.jacfwd(log_sigma)(x0)  # (n_data, n_params)
+    return jac.T @ jac
 
 
 def fisher_information(
     forward: Callable[[Any], jax.Array],
     params: Any,
-    noise_std: jax.Array,
+    noise_std: Any,
     flags: jax.Array | None = None,
 ) -> jax.Array:
-    """Fisher information matrix ``F = J^T N^-1 J`` at ``params``.
+    """Fisher information matrix at ``params``, for independent Gaussian noise.
 
-    Assumes independent Gaussian noise with standard deviation ``noise_std``
-    (scalar or broadcastable to the prediction shape); flagged samples
-    (``flags`` True) carry zero weight — the same convention as
-    :class:`~rheplicant.inference.likelihood.MaskedGaussianLikelihood`.
+    Args:
+        forward: ``f(params) -> prediction``.
+        params: where to evaluate.
+        noise_std: standard deviation — scalar or broadcastable to the
+            prediction — **or** a :class:`~rheplicant.inference.noise.NoiseModel`.
+        flags: optional boolean mask; flagged samples carry zero weight, the
+            same convention as
+            :class:`~rheplicant.inference.likelihood.MaskedGaussianLikelihood`.
 
     Returns:
         A :class:`FlatMatrix` — the ``(n_params, n_params)`` Fisher matrix
         (``.matrix``) over the flattened parameter vector, tagged with the
         parameter structure it belongs to.
+
+    Note:
+        **When the noise depends on the parameters, ``J^T N^-1 J`` is not the
+        Fisher matrix.** For ``d ~ N(mu(theta), Sigma(theta))`` the information
+        has a second term from the covariance's own parameter dependence::
+
+            F = J^T Sigma^-1 J  +  1/2 tr(Sigma^-1 dSigma Sigma^-1 dSigma)
+
+        which for a diagonal covariance is ``2 (d log sigma/d theta)^T
+        (d log sigma/d theta)``. It is included automatically whenever the
+        noise model reports ``depends_on_prediction``, and omitted otherwise
+        (where it is exactly zero). Under
+        :class:`~rheplicant.inference.noise.RadiometerNoise` with fractional
+        level ``f`` the correction is a clean factor: ``F = (1 + 2 f^2)
+        J^T N^-1 J``. Reporting only the first term would forecast error bars
+        that are too wide by ``sqrt(1 + 2 f^2)`` — a plausible number, and the
+        wrong one.
     """
     f_flat, x0, prediction = _flat_forward(forward, params)
     jacobian = jax.jacfwd(f_flat)(x0)  # (n_data, n_params)
-    weights = _noise_weights(prediction, noise_std, flags)
+    noise = as_noise_model(noise_std, flags)
+    weights = jnp.ravel(inverse_variance(noise, prediction))
+    matrix = jacobian.T @ (weights[:, None] * jacobian)
+    if noise.depends_on_prediction:
+        matrix = matrix + 2.0 * _log_sigma_curvature(noise, f_flat, x0, prediction)
     names, spans, shapes = _named_spans(params)
     return FlatMatrix(
-        matrix=jacobian.T @ (weights[:, None] * jacobian),
+        matrix=matrix,
         structure=jax.tree_util.tree_structure(params),
         kind="fisher",
         names=names,

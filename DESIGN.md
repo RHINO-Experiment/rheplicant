@@ -754,6 +754,53 @@ than beam-weighted-sky computation, and limTOD has the natural slot for it
 (`limTOD.uvbeam` does the same job for pyuvdata) — a follow-up, not a
 distinction worth defending.
 
+### D21 — The noise level is a model, not an argument
+
+`noise_std` was a bare scalar passed independently to five places —
+`GaussianLikelihood`, `to_numpyro_model`, `fisher_information`, `wiener_solve`,
+`gcr_sample`. Each of them assumed the answer is *given* and *constant*. The
+radiometer equation says it is neither: `sigma = |d| / sqrt(delta_nu * tau)`, so
+sigma is a function of the very quantity being inferred. (Framed by Zheng:
+"给定噪声模型，我们可以定义 likelihood 和 posterior，或者说 loss function。
+默认的噪声模型是使用 radiometer equation（因此是 multiplicative noise）".)
+
+`rheplicant.inference.noise` makes it one object every route asks:
+`HomoscedasticNoise` (what a bare sigma always meant), `RadiometerNoise` (the
+default physics), and `FlaggedNoise` wrapping either.
+
+Three decisions inside it, each of which had a plausible wrong answer.
+
+**Flags reach the covariance by wrapping, not by a keyword.** A flagged sample
+was not observed, which is a statement about its variance, so it belongs inside
+the noise model — `FlaggedNoise` sets `sigma = inf`. The alternative, threading
+`flags=` through five signatures, makes every consumer responsible for
+remembering a convention. `inf` is only an encoding: `inverse_variance` and
+`NoiseModelLikelihood` both give it a clean zero, because the limit does *not*
+work — `r^2/sigma^2 -> 0` but `log sigma^2 -> inf`, so one flagged channel would
+otherwise send the whole log-density to `-inf`.
+
+**`depends_on_prediction` is a claim, not a hint.** It is what a solver branches
+on: `False` means one solve, `True` means the covariance must be found before it
+can be used (D22 / `iterative_gls`). It is also what makes `noise_std=`
+polymorphic without ambiguity — jax and numpy arrays both *have* a `.std`
+method, so a protocol keyed on that alone would swallow a bare sigma and call it
+with the prediction.
+
+**The log-determinant is kept by default.** With `sigma = sigma(theta)` the
+Gaussian normalization is no longer an additive constant, and dropping it —
+exactly what generalized least squares does — is a different estimator. For the
+multiplicative model both are closed-form: GLS returns `sum d^2 / sum d`, biased
+high by `(1 + f^2)`, while the full density is asymptotically unbiased. So
+`include_logdet=False` exists and is documented as GLS rather than being the
+silent default. The same term appears in `fisher_information` as the covariance's
+own contribution, `2 (d log sigma/d theta)^T (d log sigma/d theta)`; under
+`RadiometerNoise` it is the factor `(1 + 2 f^2)`, and omitting it forecasts error
+bars too wide by `sqrt(1 + 2 f^2)` — a plausible number, and the wrong one.
+
+`GaussianLikelihood` and `MaskedGaussianLikelihood` stay, and tests assert they
+agree with `NoiseModelLikelihood` to roundoff: the seam generalizes them rather
+than replacing them.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`
