@@ -47,8 +47,8 @@ class DataIngestionError(DirtError, ValueError):
 
     Distinct from :class:`StateValidationError`, which covers *structural*
     problems with an in-memory State — wrong ndim, wrong dtype, bad key types.
-    A malformed Touchstone line and a declared frequency unit that disagrees
-    with the file's own values are neither: nothing is wrong with the shape of
-    what was read, only with what it means. Both would otherwise propagate as a
-    finite, correctly-shaped, wrong answer.
+    A value given in a unit other than the one the caller declared, and a
+    record that violates the file's own format rules, are neither: nothing is
+    wrong with the shape of what was read, only with what it means. Both would
+    otherwise propagate as a finite, correctly-shaped, wrong answer.
     """
