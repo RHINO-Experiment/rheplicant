@@ -101,6 +101,19 @@ def _frequencies_in_hz(raw: np.ndarray, freq_unit: str) -> np.ndarray:
             "known producers disagree, so there is no default to fall back on."
         )
     freq_hz = raw * _FREQ_UNIT_HZ[key]
+    if freq_hz.size == 0:
+        raise DataIngestionError(
+            "/sdr/sdr_freqs is empty. There is no band to check the declared "
+            "freq_unit against, and nothing for a reflection coefficient to be "
+            "interpolated onto."
+        )
+    if not np.all(np.isfinite(freq_hz)):
+        n_bad = int((~np.isfinite(freq_hz)).sum())
+        raise DataIngestionError(
+            f"/sdr/sdr_freqs holds {n_bad} non-finite channel(s). NaN compares "
+            "False against every bound, so it would pass the plausibility check "
+            "below untouched and surface only as a silently wrong interpolation."
+        )
     lo, hi = _PLAUSIBLE_HZ
     if freq_hz.min() < lo or freq_hz.max() > hi:
         raise DataIngestionError(
@@ -129,6 +142,12 @@ def _expand_switch_log(
             "sdr_times are not strictly ascending. The switch log is a list of "
             "transitions, so assigning a state to each sample assumes an "
             "ordered time axis."
+        )
+    if switch_time.size == 0:
+        raise DataIngestionError(
+            "/switches/switch_times is empty, so no sample has a defined switch "
+            "state. Every sample would be dropped as leading, leaving an empty "
+            "recording that still looks well-formed."
         )
     order = np.argsort(switch_time, kind="stable")
     edges, labels = switch_time[order], switch_label[order]

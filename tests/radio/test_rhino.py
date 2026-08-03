@@ -23,7 +23,16 @@ SWITCH_TIMES = np.array([1000.0, 1004.0, 1008.0])
 SWITCH_STATES = [b"antenna", b"internal_load", b"heated_load"]
 
 
-def make_file(path, *, freqs=FREQ_MHZ, times=TIME_S, temps=None, with_adc=False):
+def make_file(
+    path,
+    *,
+    freqs=FREQ_MHZ,
+    times=TIME_S,
+    temps=None,
+    with_adc=False,
+    switch_times=SWITCH_TIMES,
+    switch_states=SWITCH_STATES,
+):
     n_time, n_freq = len(times), len(freqs)
     if temps is None:
         # column 0 = ambient (20 C), column 1 = hot (100 C)
@@ -42,8 +51,8 @@ def make_file(path, *, freqs=FREQ_MHZ, times=TIME_S, temps=None, with_adc=False)
             sdr.create_dataset("max_i_adc", data=np.zeros(n_time))
             sdr.create_dataset("max_q_adc", data=np.ones(n_time))
         sw = f.create_group("switches")
-        sw.create_dataset("switch_times", data=SWITCH_TIMES)
-        sw.create_dataset("switch_states", data=np.array(SWITCH_STATES, dtype="S"))
+        sw.create_dataset("switch_times", data=np.asarray(switch_times, dtype=float))
+        sw.create_dataset("switch_states", data=np.array(switch_states, dtype="S16"))
         tg = f.create_group("temperatures")
         tg.create_dataset("temperature_times", data=times)
         tg.create_dataset("temperatures", data=temps)
@@ -143,6 +152,39 @@ def test_samples_before_the_first_transition_are_dropped_and_counted(tmp_path):
     assert obs.waterfall.shape == (12, 3)
     assert obs.switch_label.shape == (12,)
     assert obs.settled.shape == (12,)
+
+
+def test_non_finite_frequencies_raise(tmp_path):
+    # NaN compares False against both bounds, so it slips through a bare
+    # min()/max() plausibility test and reaches the interpolation intact.
+    with pytest.raises(DataIngestionError, match="non-finite"):
+        read_rhino_observation(
+            make_file(tmp_path / "nan.hd5f", freqs=np.array([60.0, np.nan, 80.0])),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_an_empty_frequency_axis_raises(tmp_path):
+    # min() of an empty array is a bare numpy ValueError, which callers
+    # catching DataIngestionError would not catch.
+    with pytest.raises(DataIngestionError, match="empty"):
+        read_rhino_observation(
+            make_file(tmp_path / "nofreq.hd5f", freqs=np.array([])),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_an_empty_switch_log_raises_rather_than_dropping_every_sample(tmp_path):
+    with pytest.raises(DataIngestionError, match="switch_times"):
+        read_rhino_observation(
+            make_file(
+                tmp_path / "noswitch.hd5f", switch_times=np.array([]), switch_states=[]
+            ),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
 
 
 def test_non_ascending_sample_times_raise(tmp_path):
