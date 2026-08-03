@@ -112,6 +112,36 @@ def _frequencies_in_hz(raw: np.ndarray, freq_unit: str) -> np.ndarray:
     return freq_hz
 
 
+def _expand_switch_log(
+    time_s: np.ndarray,
+    switch_time: np.ndarray,
+    switch_label: np.ndarray,
+    settle_seconds: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Per-sample labels and a settling mask, plus the leading-drop count.
+
+    ``np.searchsorted`` rather than one boolean mask per switch block: a
+    four-hour recording holds thousands of transitions, and the reference's
+    per-block masking is O(n_switch * n_time).
+    """
+    if np.any(np.diff(time_s) <= 0):
+        raise DataIngestionError(
+            "sdr_times are not strictly ascending. The switch log is a list of "
+            "transitions, so assigning a state to each sample assumes an "
+            "ordered time axis."
+        )
+    order = np.argsort(switch_time, kind="stable")
+    edges, labels = switch_time[order], switch_label[order]
+
+    index = np.searchsorted(edges, time_s, side="right") - 1
+    keep = index >= 0
+    n_dropped = int((~keep).sum())
+    index = index[keep]
+
+    elapsed = time_s[keep] - edges[index]
+    return labels[index], elapsed >= settle_seconds, keep, n_dropped
+
+
 def read_rhino_observation(
     path,
     *,
@@ -162,15 +192,25 @@ def read_rhino_observation(
     switch_label_raw = np.array(
         [s.decode() if isinstance(s, bytes) else str(s) for s in switch_raw]
     )
+    per_sample_label, settled, keep, n_dropped = _expand_switch_log(
+        time_s, switch_time, switch_label_raw, settle_seconds
+    )
+    time_s = time_s[keep]
+    waterfall = waterfall[keep]
+    if adc_i is not None:
+        adc_i = adc_i[keep]
+    if adc_q is not None:
+        adc_q = adc_q[keep]
+
     return RhinoObservation(
         freq_hz=freq_hz,
         time_s=time_s,
         waterfall=waterfall,
-        switch_label=switch_label_raw,
-        settled=np.ones(time_s.shape, dtype=bool),
+        switch_label=per_sample_label,
+        settled=settled,
         thermistor_k={},
         transitions=(switch_time, switch_label_raw),
-        n_leading_dropped=0,
+        n_leading_dropped=n_dropped,
         adc_max_i=adc_i,
         adc_max_q=adc_q,
     )

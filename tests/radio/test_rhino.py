@@ -103,3 +103,54 @@ def test_temperatures_without_a_timestamp_each_raise(tmp_path):
             freq_unit="MHz",
             thermistor_columns=COLUMNS,
         )
+
+
+def test_switch_labels_are_expanded_per_sample(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=0.0,
+    )
+    assert obs.switch_label.shape == (12,)
+    assert list(obs.switch_label[:4]) == ["antenna"] * 4
+    assert list(obs.switch_label[4:8]) == ["internal_load"] * 4
+    assert list(obs.switch_label[8:]) == ["heated_load"] * 4
+
+
+def test_settled_is_false_for_settle_seconds_after_each_transition(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=2.0,
+    )
+    # transitions at t = 1000, 1004, 1008; samples are 1 s apart from t = 1000.
+    expected = np.array([False, False, True, True] * 3)
+    np.testing.assert_array_equal(obs.settled, expected)
+
+
+def test_samples_before_the_first_transition_are_dropped_and_counted(tmp_path):
+    early = np.concatenate([[998.0, 999.0], TIME_S])
+    obs = read_rhino_observation(
+        make_file(tmp_path / "early.hd5f", times=early),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=0.0,
+    )
+    assert obs.n_leading_dropped == 2
+    assert obs.time_s.shape == (12,)
+    assert obs.waterfall.shape == (12, 3)
+    assert obs.switch_label.shape == (12,)
+    assert obs.settled.shape == (12,)
+
+
+def test_non_ascending_sample_times_raise(tmp_path):
+    scrambled = TIME_S.copy()
+    scrambled[5], scrambled[6] = scrambled[6], scrambled[5]
+    with pytest.raises(DataIngestionError, match="ascending"):
+        read_rhino_observation(
+            make_file(tmp_path / "scrambled.hd5f", times=scrambled),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
