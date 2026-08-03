@@ -431,6 +431,19 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
     backwards yields a finite, correctly-shaped result that discards every
     good sample and keeps every transient -- nothing about the shape or dtype
     would reveal it.
+
+    ``aux["flags"]`` is also **broadcast to ``(n_time, n_freq)``**, matching
+    ``state.data``, even though settling is inherently a per-time quantity --
+    every channel of an unsettled sample is unsettled, so the broadcast
+    changes nothing about what is being said. The shape is not this
+    function's choice; it is set by every consumer: ``FlaggedNoise.std``
+    (``inference/noise.py``) raises if ``flags`` disagrees in shape with the
+    prediction it masks, ``SkySpaceFilter`` (``radio/filters/skyspace.py``)
+    multiplies ``1 - flags`` elementwise against the data, and both
+    ``FlaggingOperator`` and ``MomentRFIFlaggingOperator``
+    (``radio/backend/flagging.py``) produce and expect ``(n_time, n_freq)``.
+    ``obs.settled`` itself stays ``(n_time,)`` on :class:`RhinoObservation`,
+    for a caller who wants the per-time form directly.
     """
     order = tuple(source_order)
     duplicates = sorted({label for label in order if order.count(label) > 1})
@@ -459,6 +472,7 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
         )
 
     index = np.array([lookup[label] for label in obs.switch_label], dtype=int)
+    flags = jnp.broadcast_to(jnp.asarray(~obs.settled)[:, None], obs.waterfall.shape)
     return State(
         data=jnp.asarray(obs.waterfall),
         coords=Coordinates(
@@ -466,5 +480,5 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
             freq=obs.freq_hz,
             extra={"receiver_input": jnp.asarray(index)},
         ),
-        aux={"flags": jnp.asarray(~obs.settled)},
+        aux={"flags": flags},
     )

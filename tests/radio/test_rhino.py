@@ -532,17 +532,29 @@ def test_to_state_indexes_sources_and_inverts_the_settling_mask(tmp_path):
     np.testing.assert_allclose(np.asarray(state.coords.time), obs.time_s)
     np.testing.assert_allclose(np.asarray(state.data), obs.waterfall)
 
-    # aux["flags"] is True-means-BAD; settled is True-means-GOOD. With
-    # settle_seconds=2.0 on this fixture's 1 s cadence, the split is exact and
-    # known (see test_settled_is_false_for_settle_seconds_after_each_transition):
-    # 6 of 12 samples settled, 6 not. Pin the count itself, not merely that
-    # flags and settled differ somewhere -- a symmetric split like this one is
+    # aux["flags"] is True-means-BAD; settled is True-means-GOOD. Every
+    # consumer (FlaggedNoise, SkySpaceFilter, both flagging operators) needs
+    # flags shaped like the data, not like the per-time settling mask, so
+    # settled is broadcast across the frequency axis: every channel of an
+    # unsettled sample is unsettled. Assert against that convention --
+    # state.data.shape -- rather than a hardcoded (12, 3), so this tracks the
+    # fixture rather than freezing today's numbers.
+    flags = np.asarray(state.aux["flags"])
+    assert flags.shape == np.asarray(state.data).shape
+
+    # With settle_seconds=2.0 on this fixture's 1 s cadence, the split is
+    # exact and known (see
+    # test_settled_is_false_for_settle_seconds_after_each_transition): 6 of
+    # 12 samples settled, 6 not. Pin the count itself, not merely that flags
+    # and settled differ somewhere -- a symmetric split like this one is
     # exactly the case where "differs somewhere" cannot distinguish correct
-    # inversion from a reversed one, so the element-wise equality below is the
-    # check that actually carries the polarity guarantee; the count is the
-    # explicit pin the count-based check calls for.
-    np.testing.assert_array_equal(np.asarray(state.aux["flags"]), ~obs.settled)
-    assert np.asarray(state.aux["flags"]).sum() == 6
+    # inversion from a reversed one, so the element-wise equality below
+    # (against the broadcast expectation) is the check that actually carries
+    # the polarity guarantee; the count is the explicit pin the exact-count
+    # instruction calls for.
+    expected = np.broadcast_to((~obs.settled)[:, None], flags.shape)
+    np.testing.assert_array_equal(flags, expected)
+    assert flags.sum() == 6 * obs.freq_hz.size
 
 
 def test_to_state_rejects_a_label_outside_source_order(tmp_path):
