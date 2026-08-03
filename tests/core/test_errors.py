@@ -1,3 +1,5 @@
+"""Tests for DataIngestionError."""
+
 import pytest
 
 from rheplicant import DataIngestionError, DirtError
