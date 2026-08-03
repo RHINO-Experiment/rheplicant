@@ -312,6 +312,21 @@ def test_kelvin_input_is_not_offset_again(tmp_path):
     np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0)
 
 
+def test_thermistor_unit_is_case_and_whitespace_insensitive(tmp_path):
+    # thermistor_unit goes through the same .strip().lower() normalisation as
+    # freq_unit, but every other test here passes it already-lowercase, so
+    # nothing would fail if that normalisation were deleted. Pin it directly,
+    # the way the freq_unit tests already pin theirs by passing "MHz".
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        thermistor_unit="  CeLsIuS  ",
+        settle_seconds=0.0,
+    )
+    np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0 + 273.15)
+
+
 def test_an_unknown_thermistor_unit_raises(tmp_path):
     with pytest.raises(DataIngestionError, match="thermistor_unit"):
         read_rhino_observation(

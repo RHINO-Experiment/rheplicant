@@ -255,6 +255,20 @@ def _thermistors_in_kelvin(
     ``"flag"`` would leave the non-finite samples in the interpolated output
     for the caller to mask, the way ``settled`` already lets a caller mask
     unsettled samples -- not silently interpolating through them by default.
+
+    A second, distinct way this raises: ``_interp_strict``'s range check is
+    now strict enough (a tolerance on the order of a microsecond on a
+    unix-epoch axis, not the multi-second one it replaced) that a real
+    thermistor log stopping even a millisecond short of the last SDR sample
+    makes the *whole file* unreadable, not just that one column. That refusal
+    is correct -- clamping to the edge reading is exactly the silent failure
+    the tolerance fix exists to prevent -- but it is a different failure mode
+    from the non-finite one above, and ``on_nonfinite`` would not help here:
+    that argument is about a bad value inside the covered range, not about a
+    thermistor log that does not cover the SDR axis at all. The remedy is on
+    the caller's side, not this function's: trim the SDR time axis to the
+    thermistor log's actual coverage before reading, or record a thermistor
+    log that spans the full observation window in the first place.
     """
     unit = str(thermistor_unit).strip().lower()
     if unit == "celsius":
