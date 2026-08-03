@@ -29,6 +29,7 @@ def make_file(
     freqs=FREQ_MHZ,
     times=TIME_S,
     temps=None,
+    temp_times=None,
     with_adc=False,
     switch_times=SWITCH_TIMES,
     switch_states=SWITCH_STATES,
@@ -40,6 +41,11 @@ def make_file(
         temps = np.stack(
             [np.full(n_time, 20.0), np.full(n_time, 100.0)], axis=1
         )
+    if temp_times is None:
+        # Independent by default only in name -- the thermistor log normally
+        # shares the SDR's own time axis. A caller that wants to test a
+        # thermistor log spanning something else passes temp_times directly.
+        temp_times = times
     if waterfall is None:
         waterfall = np.arange(n_time * n_freq, dtype=float).reshape(n_time, n_freq)
     with h5py.File(path, "w") as f:
@@ -54,7 +60,7 @@ def make_file(
         sw.create_dataset("switch_times", data=np.asarray(switch_times, dtype=float))
         sw.create_dataset("switch_states", data=np.array(switch_states, dtype="S16"))
         tg = f.create_group("temperatures")
-        tg.create_dataset("temperature_times", data=times)
+        tg.create_dataset("temperature_times", data=np.asarray(temp_times, dtype=float))
         tg.create_dataset("temperatures", data=temps)
     return path
 
@@ -268,4 +274,157 @@ def test_non_ascending_sample_times_raise(tmp_path):
             make_file(tmp_path / "scrambled.hd5f", times=scrambled),
             freq_unit="MHz",
             thermistor_columns=COLUMNS,
+        )
+
+
+def test_thermistor_columns_are_mapped_and_converted_to_kelvin(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=0.0,
+    )
+    assert set(obs.thermistor_k) == {"antenna", "internal_load", "heated_load"}
+    np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0 + 273.15)
+    np.testing.assert_allclose(obs.thermistor_k["heated_load"], 100.0 + 273.15)
+    # Two labels sharing column 0 hold equal arrays -- that is how the
+    # reference's "ambient covers everything but the hot load" rule is
+    # written down once the caller has to state it.
+    np.testing.assert_allclose(
+        obs.thermistor_k["antenna"], obs.thermistor_k["internal_load"]
+    )
+
+
+def test_kelvin_input_is_not_offset_again(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        thermistor_unit="kelvin",
+        settle_seconds=0.0,
+    )
+    np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0)
+
+
+def test_an_unknown_thermistor_unit_raises(tmp_path):
+    with pytest.raises(DataIngestionError, match="thermistor_unit"):
+        read_rhino_observation(
+            make_file(tmp_path / "obs.hd5f"),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            thermistor_unit="fahrenheit",
+        )
+
+
+def test_a_switch_label_with_no_column_raises_and_names_it(tmp_path):
+    with pytest.raises(DataIngestionError, match="heated_load"):
+        read_rhino_observation(
+            make_file(tmp_path / "obs.hd5f"),
+            freq_unit="MHz",
+            thermistor_columns={"antenna": 0, "internal_load": 0},
+        )
+
+
+def test_a_thermistor_column_index_out_of_range_raises(tmp_path):
+    # Column 5 does not exist -- /temperatures/temperatures has 2 columns in
+    # the default fixture. Out of range must raise, not index silently into
+    # whatever numpy does with it (wraparound on a negative index; IndexError
+    # with no DataIngestionError wrapper on a positive one).
+    with pytest.raises(DataIngestionError, match="antenna"):
+        read_rhino_observation(
+            make_file(tmp_path / "obs.hd5f"),
+            freq_unit="MHz",
+            thermistor_columns={"antenna": 5, "internal_load": 0, "heated_load": 1},
+            settle_seconds=0.0,
+        )
+
+
+def test_a_non_default_column_order_reads_back_correctly(tmp_path):
+    # Hot in column 0, ambient in column 1 -- the reverse of what
+    # save_to_hdf5's default save_temps order produces. The reference's magic
+    # indices would silently swap them; a declared map cannot.
+    swapped = np.stack(
+        [np.full(len(TIME_S), 100.0), np.full(len(TIME_S), 20.0)], axis=1
+    )
+    obs = read_rhino_observation(
+        make_file(tmp_path / "swapped.hd5f", temps=swapped),
+        freq_unit="MHz",
+        thermistor_columns={"antenna": 1, "internal_load": 1, "heated_load": 0},
+        settle_seconds=0.0,
+    )
+    np.testing.assert_allclose(obs.thermistor_k["heated_load"], 100.0 + 273.15)
+    np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0 + 273.15)
+
+
+def test_every_time_axis_array_keeps_the_same_length_after_the_leading_drop(tmp_path):
+    early = np.concatenate([[998.0, 999.0], TIME_S])
+    obs = read_rhino_observation(
+        make_file(tmp_path / "early.hd5f", times=early),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=0.0,
+    )
+    n = len(obs.time_s)
+    assert n == 12
+    assert obs.waterfall.shape[0] == n
+    assert obs.switch_label.shape == (n,)
+    assert obs.settled.shape == (n,)
+    for label, series in obs.thermistor_k.items():
+        assert series.shape == (n,), label
+
+
+def test_adc_monitors_are_passed_through_when_present(tmp_path):
+    without = read_rhino_observation(
+        make_file(tmp_path / "a.hd5f"), freq_unit="MHz", thermistor_columns=COLUMNS
+    )
+    assert without.adc_max_i is None and without.adc_max_q is None
+
+    with_adc = read_rhino_observation(
+        make_file(tmp_path / "b.hd5f", with_adc=True),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+    )
+    assert with_adc.adc_max_i.shape == (12,)
+    np.testing.assert_allclose(with_adc.adc_max_q, 1.0)
+
+
+def test_a_declared_column_never_switched_to_has_no_thermistor_k_entry(tmp_path):
+    # thermistor_columns may cover more loads than a given file's switch log
+    # uses -- see the rhino.py module docstring. A label that is declared but
+    # never appears in this file's switch log gets no entry; that is not an
+    # error, since a caller may hold one shared column map across many files.
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns={**COLUMNS, "spare_load": 1},
+        settle_seconds=0.0,
+    )
+    assert "spare_load" not in obs.thermistor_k
+    assert set(obs.thermistor_k) == {"antenna", "internal_load", "heated_load"}
+
+
+def test_thermistor_log_shorter_than_the_sdr_axis_raises_rather_than_clamping(tmp_path):
+    # Reproduces the exact bug _interp_strict's tolerance was fixed for. On a
+    # real unix-epoch-scale axis, the old tol = 1e-9 * max(span, abs(hi))
+    # reduces to ~1e-9 * abs(hi) once abs(hi) dominates the (short) span --
+    # about 1.75 s of slack independent of window length -- so a target 1.5 s
+    # past the sampled range would have been silently clamped instead of
+    # raising. The new two-term tolerance is on the order of a microsecond on
+    # this axis, so the same 1.5 s gap must raise instead.
+    base = 1_735_000_000.0
+    times = np.array([base, base + 11.5])
+    obs_path = make_file(
+        tmp_path / "short_thermistor_log.hd5f",
+        times=times,
+        temps=np.array([[20.0], [20.0]]),
+        temp_times=np.array([base, base + 10.0]),
+        switch_times=np.array([base]),
+        switch_states=[b"antenna"],
+    )
+    with pytest.raises(DataIngestionError, match="outside"):
+        read_rhino_observation(
+            obs_path,
+            freq_unit="MHz",
+            thermistor_columns={"antenna": 0},
+            settle_seconds=0.0,
         )

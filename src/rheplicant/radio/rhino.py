@@ -43,6 +43,7 @@ from pathlib import Path
 import numpy as np
 
 from rheplicant.core.errors import DataIngestionError
+from rheplicant.radio.touchstone import _interp_strict
 
 _FREQ_UNIT_HZ = {"hz": 1.0, "mhz": 1e6}
 #: Wide on purpose: this band's job is to catch a 10^6 unit error, not to
@@ -199,6 +200,69 @@ def _expand_switch_log(
     return labels[index], elapsed >= settle_seconds, keep, n_dropped
 
 
+def _thermistors_in_kelvin(
+    time_s: np.ndarray,
+    temp_time: np.ndarray,
+    temps: np.ndarray,
+    labels_present: set[str],
+    thermistor_columns: Mapping[str, int],
+    thermistor_unit: str,
+) -> dict[str, np.ndarray]:
+    """Map switch labels onto thermistor columns, in Kelvin, on ``time_s``.
+
+    The reference (``rhino-cal/gcr/data_processing.py``) takes
+    ``heated_load_index=1, ambient_load_index=0`` and routes every state
+    except ``heated_load`` to the ambient column. Those indices are the
+    positional order of ``save_to_hdf5``'s ``save_temps`` argument -- a
+    convention shared between writer and reader with nothing in the file to
+    enforce it, so a file written with a different order reads back with hot
+    and ambient swapped and nothing raises. Requiring the map here makes that
+    a declaration, not a default.
+
+    Built for ``labels_present``, not for every key in ``thermistor_columns``:
+    a caller may reasonably hold one shared column map covering more loads
+    than a given file's switch log uses, so a label the map declares but this
+    file never switched to simply has no entry.
+
+    ``temps`` arrives already checked 2-D with one row per ``temp_time``
+    entry (``read_rhino_observation`` does that, ahead of this call, for
+    every temperature reading regardless of whether any label maps onto it)
+    -- nothing here re-derives that.
+    """
+    unit = str(thermistor_unit).strip().lower()
+    if unit == "celsius":
+        temps_k = temps + _KELVIN_OFFSET
+    elif unit == "kelvin":
+        temps_k = temps
+    else:
+        raise DataIngestionError(
+            f"thermistor_unit must be 'celsius' or 'kelvin'; got {thermistor_unit!r}."
+        )
+
+    missing = sorted(labels_present - set(thermistor_columns))
+    if missing:
+        raise DataIngestionError(
+            f"thermistor_columns has no entry for {missing}, which appear in the "
+            f"switch log. Declared: {sorted(thermistor_columns)}."
+        )
+
+    out: dict[str, np.ndarray] = {}
+    for label in sorted(labels_present):
+        column = thermistor_columns[label]
+        if not 0 <= column < temps_k.shape[1]:
+            raise DataIngestionError(
+                f"thermistor_columns[{label!r}] = {column}, but /temperatures has "
+                f"{temps_k.shape[1]} columns."
+            )
+        out[label] = _interp_strict(
+            time_s,
+            temp_time,
+            temps_k[:, column],
+            what=f"thermistor column {column} for {label!r}",
+        )
+    return out
+
+
 def read_rhino_observation(
     path,
     *,
@@ -277,7 +341,14 @@ def read_rhino_observation(
         waterfall=waterfall,
         switch_label=per_sample_label,
         settled=settled,
-        thermistor_k={},
+        thermistor_k=_thermistors_in_kelvin(
+            time_s,
+            temp_time,
+            temps_raw,
+            set(per_sample_label.tolist()),
+            thermistor_columns,
+            thermistor_unit,
+        ),
         transitions=(switch_time, switch_label_raw),
         n_leading_dropped=n_dropped,
         adc_max_i=adc_i,
