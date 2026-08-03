@@ -75,6 +75,11 @@ class RhinoObservation:
             the opposite of ``aux["flags"]``, which is True-means-bad.
         thermistor_k: switch label -> ``(n_time,)`` physical temperature [K].
             Two labels may share a column and therefore hold equal arrays.
+            Keyed by the labels actually present in this file's switch log,
+            not by every key in the ``thermistor_columns`` map passed to the
+            reader -- a label that map declares but this file never switched
+            to has no entry here. ``thermistor_k[label]`` raises ``KeyError``
+            for such a label; it does not return ``None`` or an empty array.
         transitions: the raw ``(times, labels)`` switch log, kept for diagnosis.
         n_leading_dropped: samples that preceded the first transition and were
             dropped, because they have no defined switch state.
@@ -222,12 +227,31 @@ def _thermistors_in_kelvin(
     Built for ``labels_present``, not for every key in ``thermistor_columns``:
     a caller may reasonably hold one shared column map covering more loads
     than a given file's switch log uses, so a label the map declares but this
-    file never switched to simply has no entry.
+    file never switched to simply has no entry -- see
+    :attr:`RhinoObservation.thermistor_k`.
 
     ``temps`` arrives already checked 2-D with one row per ``temp_time``
     entry (``read_rhino_observation`` does that, ahead of this call, for
     every temperature reading regardless of whether any label maps onto it)
     -- nothing here re-derives that.
+
+    A non-finite reading (NaN or +/-inf) in a used column raises rather than
+    propagating. ``_interp_strict`` only guards its *x*-axis (``temp_time``)
+    against NaN; the values being interpolated (a thermistor column) get no
+    such guard from it, and a linear interpolant spreads one bad row into
+    every sample whose bracketing interval touches it -- a dropout wider than
+    the dropout itself. Left unchecked, that value flows into T_sys and then
+    the noise-wave solve, where nothing left points back at the thermistor
+    log it came from. Only the columns a present label actually uses are
+    checked, matching the labels-present policy above.
+
+    Real thermistor logs do drop samples, and always raising makes a whole
+    file unreadable for one bad reading. If that turns out to be routine on
+    real RHINO recordings, the fix is an explicit caller policy -- e.g. an
+    ``on_nonfinite: Literal["raise", "flag"] = "raise"`` argument, where
+    ``"flag"`` would leave the non-finite samples in the interpolated output
+    for the caller to mask, the way ``settled`` already lets a caller mask
+    unsettled samples -- not silently interpolating through them by default.
     """
     unit = str(thermistor_unit).strip().lower()
     if unit == "celsius":
@@ -254,10 +278,22 @@ def _thermistors_in_kelvin(
                 f"thermistor_columns[{label!r}] = {column}, but /temperatures has "
                 f"{temps_k.shape[1]} columns."
             )
+        column_values = temps_k[:, column]
+        if not np.all(np.isfinite(column_values)):
+            bad_index = int(np.flatnonzero(~np.isfinite(column_values))[0])
+            raise DataIngestionError(
+                f"thermistor_columns[{label!r}] = {column}: /temperatures/temperatures "
+                f"has a non-finite reading at row {bad_index} (0-based, indexing "
+                "temperature_times). A linear interpolant spreads one bad row into "
+                "every sample whose bracketing interval touches it -- a dropout wider "
+                "than the dropout itself -- and by the time the value reaches T_sys "
+                "and the noise-wave solve there is nothing left pointing back at the "
+                "thermistor log it came from."
+            )
         out[label] = _interp_strict(
             time_s,
             temp_time,
-            temps_k[:, column],
+            column_values,
             what=f"thermistor column {column} for {label!r}",
         )
     return out

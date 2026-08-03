@@ -428,3 +428,66 @@ def test_thermistor_log_shorter_than_the_sdr_axis_raises_rather_than_clamping(tm
             thermistor_columns={"antenna": 0},
             settle_seconds=0.0,
         )
+
+
+def test_a_nan_thermistor_reading_raises_and_names_the_source(tmp_path):
+    # _interp_strict only guards its x-axis (temp_time) against NaN -- the
+    # column being interpolated gets no such guard from it. A NaN here must
+    # not propagate: a linear interpolant would spread it into every sample
+    # whose bracketing interval touches it, and by the time it reached T_sys
+    # nothing would point back at the thermistor log it came from.
+    temps = np.stack(
+        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
+    )
+    temps[2, 1] = np.nan  # heated_load's column (1), source row 2
+    with pytest.raises(DataIngestionError, match="heated_load") as excinfo:
+        read_rhino_observation(
+            make_file(tmp_path / "nan_temp.hd5f", temps=temps),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            settle_seconds=0.0,
+        )
+    message = str(excinfo.value)
+    assert "= 1" in message  # names the column
+    assert "row 2" in message  # names the offending source index
+
+
+def test_an_infinite_thermistor_reading_raises_and_names_the_source(tmp_path):
+    # isfinite, not isnan -- an infinite temperature is equally not a
+    # temperature, matching the frequency guard's own reasoning.
+    temps = np.stack(
+        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
+    )
+    temps[5, 0] = np.inf  # column 0, shared by antenna and internal_load
+    with pytest.raises(DataIngestionError, match="antenna") as excinfo:
+        read_rhino_observation(
+            make_file(tmp_path / "inf_temp.hd5f", temps=temps),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            settle_seconds=0.0,
+        )
+    message = str(excinfo.value)
+    assert "= 0" in message
+    assert "row 5" in message
+
+
+def test_a_non_finite_reading_in_an_unused_thermistor_column_does_not_raise(tmp_path):
+    # Only the columns a present label actually uses are checked, matching
+    # the labels-present policy: column 1 carries a NaN, but this file's
+    # switch log never visits a label mapped to it.
+    temps = np.stack(
+        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
+    )
+    temps[0, 1] = np.nan
+    obs = read_rhino_observation(
+        make_file(
+            tmp_path / "unused_nan.hd5f",
+            temps=temps,
+            switch_times=np.array([1000.0]),
+            switch_states=[b"antenna"],
+        ),
+        freq_unit="MHz",
+        thermistor_columns={"antenna": 0},
+        settle_seconds=0.0,
+    )
+    assert np.isfinite(obs.thermistor_k["antenna"]).all()
