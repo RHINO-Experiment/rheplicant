@@ -221,20 +221,49 @@ def _assemble_s(flat: np.ndarray, n_port: int) -> np.ndarray:
 
 
 def _check_strictly_ascending(freq_hz: np.ndarray, path: Path) -> None:
-    """Raise unless ``freq_hz`` is strictly ascending.
+    """Raise unless ``freq_hz`` is finite and strictly ascending.
 
-    Interpolating this sweep onto the observing band (a later module) goes
-    through ``np.interp``, which *assumes* ascending order and does not check
-    it -- unsorted input comes back as a finite, silently wrong answer rather
-    than an error. This is the one place that precondition gets verified.
+    Two checks, deliberately kept separate, run in this order:
+
+    NaN first, checked directly against ``freq_hz`` rather than through
+    ``np.diff``. A NaN frequency spreads into the diff cells on *both* sides
+    of it, and the ordering check below always blames the *later* element of
+    a diff pair -- right for a genuine ordering violation, but wrong for a
+    leading NaN, which has no earlier row to blame and would be misattributed
+    to the row after it. Checking ``freq_hz`` directly sidesteps that
+    asymmetry and reports the NaN's own row. It also gets its own message:
+    "not strictly ascending" describes a disordered measurement, not an
+    invalid one, and the fix differs too -- correct that row's value, not
+    reorder the file.
+
+    Ascending order second, now that NaN is ruled out: interpolating this
+    sweep onto the observing band (a later module) goes through ``np.interp``,
+    which *assumes* ascending order and does not check it -- unsorted input
+    comes back as a finite, silently wrong answer rather than an error.
     """
-    ascending = np.diff(freq_hz) > 0
-    if not np.all(ascending):
-        bad_row = int(np.argmin(ascending)) + 2
+    nan_rows = np.flatnonzero(np.isnan(freq_hz))
+    if nan_rows.size:
+        row = int(nan_rows[0]) + 1
+        raise DataIngestionError(
+            f"{path}: frequency at data row {row} is NaN (counting only data "
+            "rows -- comments and blank lines are not counted). That is a "
+            "different problem from rows being out of order: fix that row's "
+            "value; np.interp cannot use it either way."
+        )
+
+    # NaN is already ruled out above, so the plain form is safe here: with no
+    # NaN in play, `np.any(diffs <= 0)` and `not np.all(diffs > 0)` agree. They
+    # would NOT agree with a NaN present (NaN compares False to everything,
+    # including "<= 0" -- see the docstring above for why that matters) --
+    # do not "simplify" this without keeping the NaN check ahead of it.
+    diffs = np.diff(freq_hz)
+    if np.any(diffs <= 0):
+        bad_row = int(np.argmin(diffs > 0)) + 2
         raise DataIngestionError(
             f"{path}: frequencies are not strictly ascending (first offender "
-            f"at data row {bad_row}). Interpolation onto this sweep assumes "
-            "they are, and np.interp does not check."
+            f"at data row {bad_row}, counting only data rows -- comments and "
+            "blank lines are not counted). Interpolation onto this sweep "
+            "assumes they are, and np.interp does not check."
         )
 
 
@@ -366,7 +395,12 @@ def read_touchstone(path: str | Path, *, flipped: bool = False) -> Touchstone:
         freq.append(raw_freq * multiplier)
         rows.append(row)
 
-    if not freq:
+    if n_column is None:
+        # Equivalent to `if not freq:` -- every loop iteration that appends to
+        # `freq` also assigns `n_column` (see above) -- but phrased this way,
+        # the check documents and enforces, rather than merely implies, the
+        # invariant _build_touchstone depends on: its `n_column` parameter is
+        # typed `int`, not `int | None`.
         raise DataIngestionError(f"{path}: no data rows.")
 
     return _build_touchstone(path, freq, rows, n_column, z0, flipped)

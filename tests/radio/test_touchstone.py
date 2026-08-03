@@ -244,3 +244,51 @@ def test_the_public_names_are_reachable_from_the_subpackage():
     from rheplicant.radio import read_touchstone as r
 
     assert (T, r, i) == (Touchstone, read_touchstone, interpolate_onto)
+
+
+@pytest.mark.parametrize(
+    ("freqs", "expected_row"),
+    [
+        (["nan", "70.0", "80.0"], 1),
+        (["60.0", "nan", "80.0"], 2),
+        (["60.0", "70.0", "nan"], 3),
+    ],
+    ids=["leading", "middle", "trailing"],
+)
+def test_a_nan_frequency_names_its_own_row_not_the_next_one(tmp_path, freqs, expected_row):
+    # A NaN frequency spreads into np.diff's cells on both sides of it, and
+    # the ordering check's "first offender" arithmetic always blames the
+    # later element of a diff pair -- right for genuine disorder, wrong for a
+    # leading NaN, which has no earlier row to blame. All three positions are
+    # pinned so that misattribution cannot come back unnoticed.
+    text = "# MHZ S RI R 50\n" + "".join(f"{f}  0.1 0.2\n" for f in freqs)
+    with pytest.raises(DataIngestionError, match="NaN") as excinfo:
+        read_touchstone(write(tmp_path, "nan_freq.s1p", text))
+    assert f"data row {expected_row}" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["no_suffix", "data.txt", "data.s3p", "foo.s2p.bak"],
+)
+def test_an_unrecognised_suffix_passes_through_unchecked(tmp_path, name):
+    # None of these are ".s1p"/".s2p" as pathlib's `.suffix` sees them: no
+    # extension at all, an unrelated one, a Touchstone-shaped extension this
+    # reader does not support at any port count (3-port), and ".s2p" that is
+    # not the *final* suffix. The suffix check has no second opinion to offer
+    # in any of these cases and must not invent one.
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2\n"
+    ts = read_touchstone(write(tmp_path, name, text))
+    assert ts.n_port == 1
+
+
+def test_suffix_check_case_insensitively_accepts_a_match(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2  0.3 0.4  0.5 0.6  0.7 0.8\n"
+    ts = read_touchstone(write(tmp_path, "cal.S2P", text))
+    assert ts.n_port == 2
+
+
+def test_suffix_check_case_insensitively_still_catches_a_mismatch(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2  0.3 0.4  0.5 0.6  0.7 0.8\n"
+    with pytest.raises(DataIngestionError, match="name says"):
+        read_touchstone(write(tmp_path, "cal.S1P", text))
