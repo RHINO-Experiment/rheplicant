@@ -32,6 +32,7 @@ def make_file(
     with_adc=False,
     switch_times=SWITCH_TIMES,
     switch_states=SWITCH_STATES,
+    waterfall=None,
 ):
     n_time, n_freq = len(times), len(freqs)
     if temps is None:
@@ -39,14 +40,13 @@ def make_file(
         temps = np.stack(
             [np.full(n_time, 20.0), np.full(n_time, 100.0)], axis=1
         )
+    if waterfall is None:
+        waterfall = np.arange(n_time * n_freq, dtype=float).reshape(n_time, n_freq)
     with h5py.File(path, "w") as f:
         sdr = f.create_group("sdr")
         sdr.create_dataset("sdr_freqs", data=freqs)
         sdr.create_dataset("sdr_times", data=times)
-        sdr.create_dataset(
-            "sdr_waterfall",
-            data=np.arange(n_time * n_freq, dtype=float).reshape(n_time, n_freq),
-        )
+        sdr.create_dataset("sdr_waterfall", data=waterfall)
         if with_adc:
             sdr.create_dataset("max_i_adc", data=np.zeros(n_time))
             sdr.create_dataset("max_q_adc", data=np.ones(n_time))
@@ -182,6 +182,79 @@ def test_an_empty_switch_log_raises_rather_than_dropping_every_sample(tmp_path):
             make_file(
                 tmp_path / "noswitch.hd5f", switch_times=np.array([]), switch_states=[]
             ),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_non_finite_sample_times_raise(tmp_path):
+    # np.diff across a NaN yields NaN and `nan <= 0` is False, so the strictly
+    # ascending guard passes it through -- the same mechanism the frequency
+    # axis was hardened against.
+    times = np.array([np.nan, 900.0, 1000.0, 1001.0])
+    with pytest.raises(DataIngestionError, match="non-finite"):
+        read_rhino_observation(
+            make_file(tmp_path / "nantime.hd5f", times=times),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_a_nan_timestamp_cannot_punch_an_interior_hole_in_the_leading_drop(tmp_path):
+    # Regression: this exact axis produced keep = [1, 0, 1, 1] -- a dropped
+    # sample in the *interior*, counted as leading. `keep` must stay a suffix.
+    times = np.array([np.nan, 900.0, 1000.0, 1001.0])
+    with pytest.raises(DataIngestionError):
+        read_rhino_observation(
+            make_file(tmp_path / "hole.hd5f", times=times),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            settle_seconds=0.0,
+        )
+
+
+@pytest.mark.parametrize("n_channels", [2, 7])
+def test_waterfall_channel_count_must_match_sdr_freqs(tmp_path, n_channels):
+    # Both directions leak: neither too few nor too many channels was caught.
+    bad = np.zeros((len(TIME_S), n_channels), dtype=float)
+    with pytest.raises(DataIngestionError, match="channel"):
+        read_rhino_observation(
+            make_file(tmp_path / f"w{n_channels}.hd5f", waterfall=bad),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_more_switch_states_than_switch_times_raise(tmp_path):
+    # Silently truncated the third label and handed back a mismatched
+    # (2,)/(3,) pair as the public `transitions` field.
+    with pytest.raises(DataIngestionError, match="switch_states"):
+        read_rhino_observation(
+            make_file(
+                tmp_path / "extra.hd5f",
+                switch_times=np.array([1000.0, 1004.0]),
+                switch_states=SWITCH_STATES,
+            ),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_an_empty_time_axis_raises(tmp_path):
+    with pytest.raises(DataIngestionError, match="no samples"):
+        read_rhino_observation(
+            make_file(tmp_path / "notime.hd5f", times=np.array([])),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+
+def test_every_sample_preceding_the_first_transition_raises(tmp_path):
+    # Would otherwise return a well-formed but empty recording with
+    # n_leading_dropped == n_time.
+    with pytest.raises(DataIngestionError, match="precede"):
+        read_rhino_observation(
+            make_file(tmp_path / "allearly.hd5f", times=np.array([990.0, 991.0, 992.0])),
             freq_unit="MHz",
             thermistor_columns=COLUMNS,
         )

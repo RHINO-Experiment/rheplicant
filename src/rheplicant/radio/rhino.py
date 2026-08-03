@@ -112,7 +112,9 @@ def _frequencies_in_hz(raw: np.ndarray, freq_unit: str) -> np.ndarray:
         raise DataIngestionError(
             f"/sdr/sdr_freqs holds {n_bad} non-finite channel(s). NaN compares "
             "False against every bound, so it would pass the plausibility check "
-            "below untouched and surface only as a silently wrong interpolation."
+            "below untouched and surface only as a silently wrong interpolation. "
+            "An infinity would trip that check, but is rejected here too so the "
+            "diagnosis names the bad channel rather than blaming the declared unit."
         )
     lo, hi = _PLAUSIBLE_HZ
     if freq_hz.min() < lo or freq_hz.max() > hi:
@@ -137,6 +139,21 @@ def _expand_switch_log(
     four-hour recording holds thousands of transitions, and the reference's
     per-block masking is O(n_switch * n_time).
     """
+    if time_s.size == 0:
+        raise DataIngestionError(
+            "/sdr/sdr_times is empty, so the recording holds no samples. An empty "
+            "recording is never a legitimate read here: it would travel on as a "
+            "well-formed State that quietly contributes nothing to a calibration."
+        )
+    if not np.all(np.isfinite(time_s)):
+        n_bad = int((~np.isfinite(time_s)).sum())
+        raise DataIngestionError(
+            f"/sdr/sdr_times holds {n_bad} non-finite timestamp(s). np.diff across a "
+            "NaN yields NaN and `nan <= 0` is False, so the strictly-ascending check "
+            "below would pass it; searchsorted then sorts NaN to the end, labelling "
+            "that sample with the last switch state and breaking the contiguity the "
+            "leading drop depends on."
+        )
     if np.any(np.diff(time_s) <= 0):
         raise DataIngestionError(
             "sdr_times are not strictly ascending. The switch log is a list of "
@@ -149,11 +166,32 @@ def _expand_switch_log(
             "state. Every sample would be dropped as leading, leaving an empty "
             "recording that still looks well-formed."
         )
+    if switch_label.shape[0] != switch_time.shape[0]:
+        raise DataIngestionError(
+            f"/switches/switch_times has {switch_time.shape[0]} entries but "
+            f"/switches/switch_states has {switch_label.shape[0]}. Sorting the log "
+            "indexes the labels by the times' order, so a longer label array loses "
+            "its tail silently and `transitions` is handed back as a mismatched pair."
+        )
     order = np.argsort(switch_time, kind="stable")
     edges, labels = switch_time[order], switch_label[order]
 
     index = np.searchsorted(edges, time_s, side="right") - 1
     keep = index >= 0
+    if not keep.any():
+        raise DataIngestionError(
+            f"all {time_s.size} samples precede the first switch transition at "
+            f"{edges[0]:.6g}, so none of them has a defined switch state. Check that "
+            "the switch log and the SDR share a time origin."
+        )
+    # `keep` is a contiguous suffix, so every dropped sample really is *leading*
+    # and `n_leading_dropped` means what it says. That rests on three preconditions,
+    # all enforced above: `edges` is sorted, and `time_s` is both finite and strictly
+    # ascending -- together those make `index` non-decreasing. Finiteness is the easy
+    # one to overlook: searchsorted sorts NaN to the end, so a single NaN timestamp
+    # punches an interior hole in `keep` and the count silently means something else.
+    assert np.all(np.diff(keep.astype(np.int8)) >= 0), "keep is not a contiguous suffix"
+
     n_dropped = int((~keep).sum())
     index = index[keep]
 
@@ -208,6 +246,18 @@ def read_rhino_observation(
         )
 
     freq_hz = _frequencies_in_hz(freq_raw, freq_unit)
+    if waterfall.ndim != 2:
+        raise DataIngestionError(
+            "/sdr/sdr_waterfall must be 2-D (n_time, n_freq); got shape "
+            f"{waterfall.shape}."
+        )
+    if waterfall.shape[1] != freq_hz.size:
+        raise DataIngestionError(
+            f"/sdr/sdr_waterfall has {waterfall.shape[1]} channels but /sdr/sdr_freqs "
+            f"has {freq_hz.size}. The row axis is checked by the sample mask, but a "
+            "channel-axis mismatch in either direction would survive as a waterfall "
+            "silently misaligned with the band it is labelled by."
+        )
     switch_label_raw = np.array(
         [s.decode() if isinstance(s, bytes) else str(s) for s in switch_raw]
     )
