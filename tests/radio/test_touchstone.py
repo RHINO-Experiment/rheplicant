@@ -7,7 +7,9 @@ than absorbed.
 """
 
 import numpy as np
+import pytest
 
+from rheplicant.core.errors import DataIngestionError
 from rheplicant.radio.touchstone import Touchstone, read_touchstone
 
 RI_2PORT = """\
@@ -38,3 +40,51 @@ def test_ri_two_port_parses_to_hz_and_touchstone_column_order(tmp_path):
     np.testing.assert_allclose(ts.s22, [0.70 + 0.80j, 0.71 + 0.81j])
     assert ts.z0 == 50.0
     assert ts.n_port == 2
+
+
+def test_option_line_ending_in_r_with_no_value_raises(tmp_path):
+    # "R" as the option line's last token used to index one past the end of
+    # `parts` and leak a bare IndexError, with no path/line context.
+    path = write(tmp_path, "bad_r.s1p", "# MHZ S RI R\n")
+    with pytest.raises(DataIngestionError, match="impedance") as excinfo:
+        read_touchstone(path)
+    assert f"{path}:1" in str(excinfo.value)
+
+
+def test_option_line_non_numeric_impedance_raises(tmp_path):
+    # A non-numeric value after "R" used to leak a bare ValueError from
+    # float(), again with no path/line context.
+    path = write(tmp_path, "bad_r2.s1p", "# MHZ S RI R FOO\n")
+    with pytest.raises(DataIngestionError, match="not a number") as excinfo:
+        read_touchstone(path)
+    assert f"{path}:1" in str(excinfo.value)
+
+
+def test_option_line_missing_frequency_unit_raises_rather_than_defaulting_to_ghz(tmp_path):
+    # Touchstone v1 defaults an omitted unit to GHz. Applying that default
+    # unstated would silently rescale the whole sweep by 1e9; this reader
+    # raises instead of guessing.
+    path = write(tmp_path, "no_unit.s1p", "# S RI R 50\n")
+    with pytest.raises(DataIngestionError, match="GHz") as excinfo:
+        read_touchstone(path)
+    assert f"{path}:1" in str(excinfo.value)
+
+
+def test_second_option_line_raises(tmp_path):
+    # A second '#' line used to silently re-specify the unit/format/impedance
+    # for the rows that follow it, leaving one Touchstone.s array built from
+    # two different interpretations.
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2\n# MHZ S RI R 50\n70.0  0.3 0.4\n"
+    path = write(tmp_path, "two_opts.s1p", text)
+    with pytest.raises(DataIngestionError, match="second") as excinfo:
+        read_touchstone(path)
+    assert f"{path}:3" in str(excinfo.value)
+
+
+def test_option_line_non_s_parameter_type_raises(tmp_path):
+    # The network-parameter type token was never checked, so a Y-parameter
+    # file would parse and land in Touchstone.s mislabelled as S-parameters.
+    path = write(tmp_path, "yparam.s1p", "# MHZ Y RI R 50\n")
+    with pytest.raises(DataIngestionError, match="S-parameters") as excinfo:
+        read_touchstone(path)
+    assert "'Y'" in str(excinfo.value)
