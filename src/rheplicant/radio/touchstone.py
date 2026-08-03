@@ -546,12 +546,31 @@ def _interp_strict(
         # x_new.size guards .min()/.max(): both raise on a zero-size array,
         # and an empty target grid is vacuously within any range anyway.
         tol = _INTERP_SPAN_TOL * (hi - lo) + _INTERP_ULP_SLACK * np.spacing(max(abs(lo), abs(hi)))
-        if x_new.min() < lo - tol or x_new.max() > hi + tol:
+        gap_below = lo - x_new.min()
+        gap_above = x_new.max() - hi
+        if gap_below > tol or gap_above > tol:
+            # State the overshoot itself, not the four raw bounds. At
+            # unix-epoch magnitude (~1.7e9) formatting lo/hi/x_new.min()/
+            # x_new.max() with %.6g renders all four identically -- six
+            # significant figures cannot resolve a few seconds against a
+            # 1.7e9 base -- which hides the one number that actually matters.
+            # The gap itself is a small number on its own scale regardless of
+            # the axis's magnitude, so reporting it directly is legible at a
+            # megahertz frequency axis and a unix-epoch time axis alike.
+            by = []
+            if gap_below > tol:
+                by.append(f"{gap_below:.6g} below the low end")
+            if gap_above > tol:
+                by.append(f"{gap_above:.6g} above the high end")
+            gap_description = " and ".join(by)
             raise DataIngestionError(
-                f"{what}: the target range [{x_new.min():.6g}, {x_new.max():.6g}] "
-                f"lies outside the sampled range [{lo:.6g}, {hi:.6g}]. "
-                "np.interp would clamp to the edge values and report nothing; "
-                "pass allow_extrapolation=True only if that is what you want."
+                f"{what}: the target range is outside the sampled range "
+                f"[{lo:.6g}, {hi:.6g}] by {gap_description}. np.interp would "
+                "clamp to the edge values and report nothing. The fix is "
+                "usually to trim the target axis to the sampled coverage, or "
+                "to extend what was measured -- a wider sweep, a longer log "
+                "-- to cover it; pass allow_extrapolation=True only when "
+                "clamping to the edge value is actually what you want."
             )
     if np.iscomplexobj(y):
         return np.interp(x_new, x, np.real(y)) + 1j * np.interp(x_new, x, np.imag(y))

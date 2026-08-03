@@ -345,8 +345,12 @@ def test_frequency_scale_extrapolation_is_still_refused_under_the_new_tolerance(
     # megahertz-scale case the old span-dominated term already covered.
     text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
     ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
-    with pytest.raises(DataIngestionError, match="outside"):
+    with pytest.raises(DataIngestionError, match="outside") as excinfo:
         interpolate_onto(np.array([80e6 + 1e4]), ts)  # 10 kHz past the edge
+    # The message states the overshoot itself (here 1e4 Hz, verified
+    # numerically before writing this test), not just the word "outside" --
+    # see the epoch-scale test below for why that distinction matters.
+    assert "10000" in str(excinfo.value)
 
 
 def test_a_target_past_a_short_unix_epoch_window_is_still_refused():
@@ -360,8 +364,19 @@ def test_a_target_past_a_short_unix_epoch_window_is_still_refused():
     time_s = epoch + np.arange(12.0)  # 12 samples, 1 s cadence
     values = np.arange(12.0)
     target = np.array([time_s[-1] + 1.5])
-    with pytest.raises(DataIngestionError, match="outside"):
+    with pytest.raises(DataIngestionError, match="outside") as excinfo:
         _interp_strict(target, time_s, values, what="thermistor time axis")
+    message = str(excinfo.value)
+    # %.6g on the four raw bounds alone renders all of them as "1.75e+09" at
+    # this magnitude -- six significant figures cannot resolve a 1.5 s gap
+    # against a 1.7e9 base -- so the message must state the shortfall itself
+    # (verified numerically before writing this assertion: exactly 1.5,
+    # bit-exact, not just approximately), not merely the word "outside".
+    assert "1.5" in message
+    # And for a mismatch this small (a log a couple of samples short), the
+    # remedy is not "pass allow_extrapolation=True" -- that clamps and hides
+    # the very problem being reported. The message must name a real fix.
+    assert "trim" in message
 
 
 def test_a_target_one_ulp_past_a_short_unix_epoch_window_still_passes():
