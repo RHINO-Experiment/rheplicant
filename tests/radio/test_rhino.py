@@ -225,6 +225,29 @@ def test_a_nan_timestamp_cannot_punch_an_interior_hole_in_the_leading_drop(tmp_p
         )
 
 
+def test_a_non_finite_switch_time_raises_rather_than_losing_its_state(tmp_path):
+    # The fourth axis in this package to meet the same mechanism, and the last
+    # one to be guarded. sdr_freqs, sdr_times and the interpolation axes all
+    # check finiteness because `nan <= 0` and `nan > hi` are both False, so a
+    # comparison-based guard never sees a NaN. switch_times reaches the same
+    # searchsorted call two lines below the sdr_times guard, and had none.
+    #
+    # Unguarded, this file read back with NO exception, n_leading_dropped == 0
+    # and all 12 samples kept -- but "internal_load" absent from switch_label
+    # entirely, its samples folded into the neighbouring states. searchsorted
+    # sorts NaN to the end, so the corrupted transition ends up after every
+    # sample and can never be selected. A finite, correctly-shaped, silently
+    # wrong recording: exactly what this layer exists to prevent.
+    corrupted = np.array([1000.0, np.nan, 1008.0])
+    with pytest.raises(DataIngestionError, match="non-finite"):
+        read_rhino_observation(
+            make_file(tmp_path / "nanswitch.hd5f", switch_times=corrupted),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            settle_seconds=0.0,
+        )
+
+
 @pytest.mark.parametrize("n_channels", [2, 7])
 def test_waterfall_channel_count_must_match_sdr_freqs(tmp_path, n_channels):
     # Both directions leak: neither too few nor too many channels was caught.
@@ -346,16 +369,19 @@ def test_a_switch_label_with_no_column_raises_and_names_it(tmp_path):
         )
 
 
-def test_a_thermistor_column_index_out_of_range_raises(tmp_path):
-    # Column 5 does not exist -- /temperatures/temperatures has 2 columns in
-    # the default fixture. Out of range must raise, not index silently into
-    # whatever numpy does with it (wraparound on a negative index; IndexError
-    # with no DataIngestionError wrapper on a positive one).
+@pytest.mark.parametrize("column", [-1, 5])
+def test_a_thermistor_column_index_out_of_range_raises(tmp_path, column):
+    # /temperatures/temperatures has 2 columns in the default fixture, so both
+    # of these are out of range -- and the guard `0 <= column < n` has two
+    # independently-failable sides. Only the upper one used to be tested, while
+    # the comment claimed both. Narrow it to `column >= n` and -1 stops raising:
+    # numpy's negative indexing hands back the LAST column instead, which is a
+    # real thermistor reading of the wrong load. Shape-legal, silently wrong.
     with pytest.raises(DataIngestionError, match="antenna"):
         read_rhino_observation(
-            make_file(tmp_path / "obs.hd5f"),
+            make_file(tmp_path / f"obs{column}.hd5f"),
             freq_unit="MHz",
-            thermistor_columns={"antenna": 5, "internal_load": 0, "heated_load": 1},
+            thermistor_columns={"antenna": column, "internal_load": 0, "heated_load": 1},
             settle_seconds=0.0,
         )
 

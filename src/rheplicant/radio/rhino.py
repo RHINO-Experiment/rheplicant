@@ -163,11 +163,14 @@ def _expand_switch_log(
             "that sample with the last switch state and breaking the contiguity the "
             "leading drop depends on."
         )
-    if np.any(np.diff(time_s) <= 0):
+    ascending = np.diff(time_s) > 0
+    if not np.all(ascending):
+        bad = int(np.argmin(ascending)) + 1
         raise DataIngestionError(
-            "sdr_times are not strictly ascending. The switch log is a list of "
-            "transitions, so assigning a state to each sample assumes an "
-            "ordered time axis."
+            f"sdr_times are not strictly ascending (first offender at sample {bad}, "
+            "0-based). The switch log is a list of transitions, so assigning a state "
+            "to each sample assumes an ordered time axis. Naming the offender matches "
+            "the two sibling checks in touchstone.py, which report theirs."
         )
     if switch_time.size == 0:
         raise DataIngestionError(
@@ -181,6 +184,17 @@ def _expand_switch_log(
             f"/switches/switch_states has {switch_label.shape[0]}. Sorting the log "
             "indexes the labels by the times' order, so a longer label array loses "
             "its tail silently and `transitions` is handed back as a mismatched pair."
+        )
+    if not np.all(np.isfinite(switch_time)):
+        n_bad = int((~np.isfinite(switch_time)).sum())
+        raise DataIngestionError(
+            f"/switches/switch_times holds {n_bad} non-finite timestamp(s). This is "
+            "the same mechanism the sdr_times guard above names, on the other array "
+            "feeding the same searchsorted: NaN sorts to the end, so the corrupted "
+            "transition lands after every sample and can never be selected. Its "
+            "label then vanishes from the recording and its samples fold into the "
+            "neighbouring states -- no exception, nothing dropped, and a switch "
+            "position silently missing."
         )
     order = np.argsort(switch_time, kind="stable")
     edges, labels = switch_time[order], switch_label[order]
@@ -292,8 +306,8 @@ def _thermistors_in_kelvin(
         column = thermistor_columns[label]
         if not 0 <= column < temps_k.shape[1]:
             raise DataIngestionError(
-                f"thermistor_columns[{label!r}] = {column}, but /temperatures has "
-                f"{temps_k.shape[1]} columns."
+                f"thermistor_columns[{label!r}] = {column}, but "
+                f"/temperatures/temperatures has {temps_k.shape[1]} columns."
             )
         column_values = temps_k[:, column]
         if not np.all(np.isfinite(column_values)):
