@@ -7,6 +7,8 @@ records neither. Most of what is tested here is that disagreement being caught
 rather than absorbed.
 """
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -14,7 +16,11 @@ from rheplicant.core.errors import DataIngestionError
 
 h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 
-from rheplicant.radio.rhino import RhinoObservation, read_rhino_observation  # noqa: E402
+from rheplicant.radio.rhino import (  # noqa: E402
+    RhinoObservation,
+    read_rhino_observation,
+    to_state,
+)
 
 FREQ_MHZ = np.array([60.0, 70.0, 80.0])
 #: Four samples per switch position, 1 s apart, three positions.
@@ -491,3 +497,93 @@ def test_a_non_finite_reading_in_an_unused_thermistor_column_does_not_raise(tmp_
         settle_seconds=0.0,
     )
     assert np.isfinite(obs.thermistor_k["antenna"]).all()
+
+
+def test_to_state_indexes_sources_and_inverts_the_settling_mask(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=2.0,
+    )
+    state = to_state(obs, source_order=("antenna", "internal_load", "heated_load"))
+
+    index = np.asarray(state.coords.extra["receiver_input"])
+    assert index.shape == (12,)
+    assert np.issubdtype(index.dtype, np.integer)
+    np.testing.assert_array_equal(index, [0] * 4 + [1] * 4 + [2] * 4)
+
+    np.testing.assert_allclose(np.asarray(state.coords.freq), obs.freq_hz)
+    np.testing.assert_allclose(np.asarray(state.coords.time), obs.time_s)
+    np.testing.assert_allclose(np.asarray(state.data), obs.waterfall)
+
+    # aux["flags"] is True-means-BAD; settled is True-means-GOOD. With
+    # settle_seconds=2.0 on this fixture's 1 s cadence, the split is exact and
+    # known (see test_settled_is_false_for_settle_seconds_after_each_transition):
+    # 6 of 12 samples settled, 6 not. Pin the count itself, not merely that
+    # flags and settled differ somewhere -- a symmetric split like this one is
+    # exactly the case where "differs somewhere" cannot distinguish correct
+    # inversion from a reversed one, so the element-wise equality below is the
+    # check that actually carries the polarity guarantee; the count is the
+    # explicit pin the count-based check calls for.
+    np.testing.assert_array_equal(np.asarray(state.aux["flags"]), ~obs.settled)
+    assert np.asarray(state.aux["flags"]).sum() == 6
+
+
+def test_to_state_rejects_a_label_outside_source_order(tmp_path):
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+    )
+    with pytest.raises(DataIngestionError, match="heated_load"):
+        to_state(obs, source_order=("antenna", "internal_load"))
+
+
+def test_to_state_rejects_a_source_order_with_duplicate_labels(tmp_path):
+    # A repeated label collapses two switch positions onto the same index --
+    # shape-legal, and NoiseWaveOperator would silently attribute one source's
+    # samples to another source's Gamma.
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+    )
+    with pytest.raises(DataIngestionError, match="antenna"):
+        to_state(
+            obs, source_order=("antenna", "antenna", "internal_load", "heated_load")
+        )
+
+
+def test_to_state_rejects_a_non_boolean_settled_array(tmp_path):
+    # `~` on a non-bool numpy array is a bitwise complement, not a logical
+    # negation -- e.g. ~np.array([1, 0]) == [-2, -1], both nonzero, so a cast
+    # back to bool would read as "everything flagged" rather than an inversion.
+    # read_rhino_observation always produces bool settled; this guards the
+    # to_state seam itself against a hand-built or future-refactored
+    # RhinoObservation that does not.
+    obs = read_rhino_observation(
+        make_file(tmp_path / "obs.hd5f"),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+    )
+    bad = dataclasses.replace(obs, settled=obs.settled.astype(int))
+    with pytest.raises(DataIngestionError, match="bool"):
+        to_state(bad, source_order=("antenna", "internal_load", "heated_load"))
+
+
+def test_the_public_names_are_reachable_from_the_subpackage():
+    from rheplicant import radio
+    from rheplicant.radio import RhinoObservation as R
+    from rheplicant.radio import read_rhino_observation as r
+    from rheplicant.radio import rhino_to_state as t
+
+    assert (R, r, t) == (RhinoObservation, read_rhino_observation, to_state)
+    # Reachability alone is not enough -- see the identical note in
+    # test_touchstone.py::test_the_public_names_are_reachable_from_the_subpackage:
+    # `from pkg import name` resolves through the module namespace, not
+    # __all__, so this would still pass even with the trailing `__all__ +=`
+    # block for this module deleted.
+    assert {"RhinoObservation", "read_rhino_observation", "rhino_to_state"}.issubset(
+        radio.__all__
+    )

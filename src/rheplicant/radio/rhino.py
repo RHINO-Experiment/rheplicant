@@ -37,12 +37,15 @@ read.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 
+from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import DataIngestionError
+from rheplicant.core.state import State
 from rheplicant.radio.touchstone import _interp_strict
 
 _FREQ_UNIT_HZ = {"hz": 1.0, "mhz": 1e6}
@@ -389,4 +392,65 @@ def read_rhino_observation(
         n_leading_dropped=n_dropped,
         adc_max_i=adc_i,
         adc_max_q=adc_q,
+    )
+
+
+def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
+    """Place a recording on the signal graph.
+
+    Args:
+        obs: a recording.
+        source_order: switch labels in the graph's in-edge order. Read it off
+            the assembled twin -- ``assembly["receiver_input"].names`` -- rather
+            than assuming it: it is the order ``NoiseWaveOperator``'s
+            ``gamma_src`` rows must match, and a transposition there is
+            shape-legal and costs tens of kelvin.
+
+    Raises:
+        DataIngestionError: if ``source_order`` repeats a label, if the
+            recording switches to a label ``source_order`` does not name, or
+            if ``obs.settled`` is not boolean.
+
+    The settling mask is **inverted** on the way in. ``aux["flags"]`` is
+    True-means-flagged (``radio/backend/flagging.py``, and ``FlaggedNoise``
+    consumes it that way) while ``settled`` is True-means-usable. Getting this
+    backwards yields a finite, correctly-shaped result that discards every
+    good sample and keeps every transient -- nothing about the shape or dtype
+    would reveal it.
+    """
+    order = tuple(source_order)
+    duplicates = sorted({label for label in order if order.count(label) > 1})
+    if duplicates:
+        raise DataIngestionError(
+            f"source_order names {duplicates} more than once: {list(order)}. A "
+            "repeated label would collapse two switch positions onto the same "
+            "index -- shape-legal, and silently wrong."
+        )
+
+    lookup = {label: i for i, label in enumerate(order)}
+    unknown = sorted(set(obs.switch_label.tolist()) - set(lookup))
+    if unknown:
+        raise DataIngestionError(
+            f"the recording switches to {unknown}, which source_order does not "
+            f"name (it lists {list(order)}). Deferring this makes "
+            "SwitchCycle.gather return NaN much later, where the cause is no "
+            "longer visible."
+        )
+
+    if obs.settled.dtype != np.bool_:
+        raise DataIngestionError(
+            f"obs.settled must be boolean; got dtype {obs.settled.dtype}. `~` on "
+            "a non-bool array is a bitwise complement, not a logical negation, "
+            "and the result would not recover the intended flag polarity."
+        )
+
+    index = np.array([lookup[label] for label in obs.switch_label], dtype=int)
+    return State(
+        data=jnp.asarray(obs.waterfall),
+        coords=Coordinates(
+            time=obs.time_s,
+            freq=obs.freq_hz,
+            extra={"receiver_input": jnp.asarray(index)},
+        ),
+        aux={"flags": jnp.asarray(~obs.settled)},
     )
