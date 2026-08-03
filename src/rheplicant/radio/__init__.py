@@ -67,6 +67,13 @@ from rheplicant.radio.instrument import (
     NoiseWaveOperator,
     ReceiverOperator,
 )
+from rheplicant.radio.rhino import (
+    RhinoObservation,
+    read_rhino_observation,
+)
+from rheplicant.radio.rhino import (
+    to_state as rhino_to_state,
+)
 from rheplicant.radio.sky import (
     AbstractSkyModel,
     AbstractSkyProjector,
@@ -81,6 +88,7 @@ from rheplicant.radio.sky import (
     UniformSkyModel,
 )
 from rheplicant.radio.surrogate import NeuralOperator
+from rheplicant.radio.touchstone import Touchstone, interpolate_onto, read_touchstone
 
 __all__ = [
     "ADCOperator",
@@ -128,6 +136,16 @@ __all__ += [
     "cst_frequency_table",
     "horizon_truncated_beam",
     "read_cst_farfield",
+]
+__all__ += [
+    "Touchstone",
+    "interpolate_onto",
+    "read_touchstone",
+]
+__all__ += [
+    "RhinoObservation",
+    "read_rhino_observation",
+    "rhino_to_state",
 ]
 
 from rheplicant.radio.graph import _validate_registrations as _v  # noqa: E402

@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### An ingestion layer, and what checking it against the original found
+
+rheplicant can now read real RHINO recordings. Two thin adapters, flat under
+`radio/` alongside `beams.py` because neither is an operator:
+
+**`rheplicant.radio.touchstone`** — `read_touchstone`, `Touchstone`,
+`interpolate_onto`. Touchstone v1 `.s1p`/`.s2p` measured S-parameters, in Hz.
+
+**`rheplicant.radio.rhino`** — `read_rhino_observation`, `RhinoObservation`,
+`to_state` (exported as `rhino_to_state`). The observation HDF5 — waterfall,
+switch log, thermistor log — in Hz, unix seconds and Kelvin, and then onto the
+signal graph. Needs the new `rheplicant[rhino]` extra (h5py).
+
+Plus **`DataIngestionError`**, for a file that cannot be read or that
+contradicts what the caller declared about it.
+
+**Both readers refuse what the originals accepted.** `read_s2p` skipped any row
+whose column count was not exactly nine, so a trailing `!` comment — legal
+Touchstone — silently removed that frequency point, and a 1-port file came back
+as *empty arrays*. `DataHandler` defaulted `freq_unit` to MHz, which is wrong
+for its own simulator's output and silent about it. `interp_vals_to_new_freq`
+let `np.interp` clamp, so a sweep narrower than the observing band returned a
+constant Γ at the edges. Every one of those is now an error naming the file and
+the line.
+
+Two policies are deliberately stricter than the standard, for the same reason
+in both cases — a unit error is invisible downstream and unrecoverable:
+`freq_unit` on the HDF5 side is a required argument with no default, and a
+Touchstone file omitting its frequency-unit token is refused rather than
+silently taking the spec's GHz default.
+
+**`tests/radio/test_ingestion_vs_reference.py` reads the same bytes through
+both implementations and demands they agree.** Where both answer, every value
+is bit-identical — `rtol=0, atol=0`. Skipped when the rhino-cal checkout is
+absent.
+
+That comparison also turned up a live bug in the reference:
+`DataHandler(temperature_unit=un.K)` ignores the argument and adds 273.15
+anyway, so a file already in Kelvin reads back 293.15 K for a 20 K reading.
+
+**What review caught that tests did not.** `_interp_strict`'s tolerance scaled
+with the axis *magnitude*, which is harmless at 60–85 MHz and gives 1.75 s of
+slack on a unix-epoch axis — silently clamping a thermistor log that stopped
+1.5 s short, in the one caller it was written for. `aux["flags"]` was built
+per-sample when every consumer in this package requires it data-shaped. And
+NaN defeated three independently-written boundary guards, because `nan <= 0`
+and `nan > hi` are both `False`: a NaN channel walked through the frequency
+plausibility check, a NaN timestamp walked through the ascending check and made
+the sample-drop mask non-contiguous, and a NaN axis walked through
+`_interp_strict`'s own ordering guard.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and

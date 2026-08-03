@@ -39,3 +39,16 @@ class ParameterSpaceError(DirtError, ValueError):
     Every one of these would otherwise yield a finite, correctly-shaped, wrong
     inference — so they are errors, not warnings.
     """
+
+
+class DataIngestionError(DirtError, ValueError):
+    """A data file could not be read, or its contents contradict what the
+    caller declared about them.
+
+    Distinct from :class:`StateValidationError`, which covers *structural*
+    problems with an in-memory State — wrong ndim, wrong dtype, bad key types.
+    A value given in a unit other than the one the caller declared, and a
+    record that violates the file's own format rules, are neither: nothing is
+    wrong with the shape of what was read, only with what it means. Both would
+    otherwise propagate as a finite, correctly-shaped, wrong answer.
+    """
