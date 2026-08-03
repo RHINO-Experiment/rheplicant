@@ -8,6 +8,7 @@ from rheplicant.core.combinators import SelectOperator, SumOperator
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.environment import Environment
 from rheplicant.core.errors import (
+    DataIngestionError,
     DirtError,
     MissingKeyError,
     PipelineError,
@@ -40,6 +41,7 @@ __all__ = [
     "register_graph",
     "Coordinates",
     "Environment",
+    "DataIngestionError",
     "DirtError",
     "FrozenMapping",
     "LambdaOperator",
