@@ -220,6 +220,80 @@ def _assemble_s(flat: np.ndarray, n_port: int) -> np.ndarray:
     return s
 
 
+def _check_strictly_ascending(freq_hz: np.ndarray, path: Path) -> None:
+    """Raise unless ``freq_hz`` is strictly ascending.
+
+    Interpolating this sweep onto the observing band (a later module) goes
+    through ``np.interp``, which *assumes* ascending order and does not check
+    it -- unsorted input comes back as a finite, silently wrong answer rather
+    than an error. This is the one place that precondition gets verified.
+    """
+    ascending = np.diff(freq_hz) > 0
+    if not np.all(ascending):
+        bad_row = int(np.argmin(ascending)) + 2
+        raise DataIngestionError(
+            f"{path}: frequencies are not strictly ascending (first offender "
+            f"at data row {bad_row}). Interpolation onto this sweep assumes "
+            "they are, and np.interp does not check."
+        )
+
+
+def _check_suffix_matches_port_count(path: Path, n_column: int, n_port: int) -> None:
+    """Cross-check a ``.s1p``/``.s2p`` suffix against the port count the rows carry.
+
+    Nothing in a Touchstone file states its own port count independently of
+    the column count, so the filename is the only second opinion available --
+    and disagreement matters: a mislabelled file would otherwise put a
+    transmission term where a reflection coefficient belongs, or vice versa,
+    with nothing to catch it. A file with no suffix, or one this reader does
+    not otherwise recognise, has no second opinion to check against and
+    passes through untouched.
+    """
+    suffix = path.suffix.lower()
+    if suffix not in (".s1p", ".s2p"):
+        return
+    declared = int(suffix[2])
+    if declared != n_port:
+        raise DataIngestionError(
+            f"{path}: the name says {suffix} but the rows carry {n_column} "
+            f"columns, i.e. {n_port}-port data. One of the two is wrong and "
+            "guessing which would silently mislabel a port."
+        )
+
+
+def _build_touchstone(
+    path: Path,
+    freq: list[float],
+    rows: list[list[complex]],
+    n_column: int,
+    z0: float,
+    flipped: bool,
+) -> Touchstone:
+    """Validate the fully-parsed rows and assemble them into a ``Touchstone``.
+
+    Both cross-file checks live here rather than in the parse loop, because
+    both need every row before they mean anything: ascending order is a
+    property of the whole sequence, and the suffix check needs the column
+    count the *first* row established, which is only final once parsing ends.
+    """
+    freq_hz = np.asarray(freq, dtype=float)
+    _check_strictly_ascending(freq_hz, path)
+
+    n_port = _PORTS_BY_COLUMN_COUNT[n_column]
+    _check_suffix_matches_port_count(path, n_column, n_port)
+    s = _assemble_s(np.asarray(rows, dtype=complex), n_port)
+
+    if flipped:
+        if n_port == 1:
+            raise DataIngestionError(
+                f"{path}: flipped=True on a 1-port file. Port reversal exchanges "
+                "two ports; there is only one."
+            )
+        s = s[:, ::-1, ::-1]
+
+    return Touchstone(freq_hz=freq_hz, s=s, z0=z0)
+
+
 def _read_option_line(
     line: str, path: Path, lineno: int, already_seen: bool
 ) -> tuple[float, str, float]:
@@ -295,15 +369,4 @@ def read_touchstone(path: str | Path, *, flipped: bool = False) -> Touchstone:
     if not freq:
         raise DataIngestionError(f"{path}: no data rows.")
 
-    n_port = _PORTS_BY_COLUMN_COUNT[n_column]
-    s = _assemble_s(np.asarray(rows, dtype=complex), n_port)
-
-    if flipped:
-        if n_port == 1:
-            raise DataIngestionError(
-                f"{path}: flipped=True on a 1-port file. Port reversal exchanges "
-                "two ports; there is only one."
-            )
-        s = s[:, ::-1, ::-1]
-
-    return Touchstone(freq_hz=np.asarray(freq, dtype=float), s=s, z0=z0)
+    return _build_touchstone(path, freq, rows, n_column, z0, flipped)

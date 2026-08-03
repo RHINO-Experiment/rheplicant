@@ -111,3 +111,51 @@ def test_ri_ma_and_db_render_the_same_physical_s(tmp_path):
     ]
     for tag, value in got:
         assert value == pytest.approx(z, rel=1e-12), f"{tag} format disagreed with RI"
+
+
+def test_a_short_row_raises_instead_of_vanishing(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2  0.3 0.4  0.5 0.6  0.7 0.8\n70.0  0.1 0.2\n"
+    with pytest.raises(DataIngestionError, match="columns"):
+        read_touchstone(write(tmp_path, "short.s2p", text))
+
+
+def test_data_before_the_option_line_raises(tmp_path):
+    with pytest.raises(DataIngestionError, match="option line"):
+        read_touchstone(write(tmp_path, "no_opt.s1p", "60.0  0.1  0.2\n"))
+
+
+def test_non_ascending_frequencies_raise(tmp_path):
+    text = "# MHZ S RI R 50\n70.0  0.1 0.2\n60.0  0.3 0.4\n"
+    with pytest.raises(DataIngestionError, match="ascending"):
+        read_touchstone(write(tmp_path, "back.s1p", text))
+
+
+def test_suffix_disagreeing_with_the_port_count_raises(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2\n"
+    with pytest.raises(DataIngestionError, match="name says"):
+        read_touchstone(write(tmp_path, "mislabelled.s2p", text))
+
+
+def test_comments_and_blank_lines_do_not_change_the_result(tmp_path):
+    noisy = (
+        "! leading comment\n"
+        "\n"
+        "# MHZ S RI R 50\n"
+        "!\n"
+        "60.0  0.1 0.2   ! trailing comment on a real row\n"
+        "   \n"
+        "70.0  0.3 0.4\n"
+    )
+    clean = "# MHZ S RI R 50\n60.0  0.1 0.2\n70.0  0.3 0.4\n"
+    a = read_touchstone(write(tmp_path, "noisy.s1p", noisy))
+    b = read_touchstone(write(tmp_path, "clean.s1p", clean))
+    np.testing.assert_allclose(a.freq_hz, b.freq_hz)
+    np.testing.assert_allclose(a.s11, b.s11)
+
+
+def test_s1p_has_no_transmission_term(tmp_path):
+    ts = read_touchstone(write(tmp_path, "one.s1p", "# MHZ S RI R 50\n60.0  0.1 0.2\n"))
+    with pytest.raises(DataIngestionError, match="1-port"):
+        _ = ts.s21  # bare `ts.s21` trips ruff B018 ("useless expression"); the
+        # property access itself is what raises, so the value is discarded on
+        # purpose -- assigning to `_` says so instead of looking like a typo.
