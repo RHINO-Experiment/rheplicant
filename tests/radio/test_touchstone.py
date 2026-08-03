@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from rheplicant.core.errors import DataIngestionError
-from rheplicant.radio.touchstone import Touchstone, read_touchstone
+from rheplicant.radio.touchstone import Touchstone, interpolate_onto, read_touchstone
 
 RI_2PORT = """\
 ! a two-port, real/imaginary
@@ -159,3 +159,80 @@ def test_s1p_has_no_transmission_term(tmp_path):
         _ = ts.s21  # bare `ts.s21` trips ruff B018 ("useless expression"); the
         # property access itself is what raises, so the value is discarded on
         # purpose -- assigning to `_` says so instead of looking like a typo.
+
+
+def test_interpolation_lands_on_the_target_grid(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
+    ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
+    got = interpolate_onto(np.array([60e6, 70e6, 80e6]), ts)
+    np.testing.assert_allclose(got, [0.0 + 0.0j, 1.0 + 2.0j, 2.0 + 4.0j])
+
+
+def test_extrapolation_is_refused_by_default_and_names_both_bands(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
+    ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
+    with pytest.raises(DataIngestionError, match="outside"):
+        interpolate_onto(np.array([50e6, 70e6]), ts)
+
+
+def test_extrapolation_clamps_when_explicitly_allowed(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
+    ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
+    got = interpolate_onto(np.array([50e6]), ts, allow_extrapolation=True)
+    np.testing.assert_allclose(got, [0.0 + 0.0j])
+
+
+def test_an_unknown_component_raises(tmp_path):
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2\n70.0  0.3 0.4\n"
+    ts = read_touchstone(write(tmp_path, "one.s1p", text))
+    with pytest.raises(DataIngestionError, match="component"):
+        interpolate_onto(np.array([65e6]), ts, component="s99")
+
+
+def test_interpolate_onto_a_1port_component_defers_to_touchstones_own_error(tmp_path):
+    # component="s12" is a recognised S-parameter name -- interpolate_onto's own
+    # check is only about the string. Whether this particular source actually
+    # carries it is Touchstone.s12's job, and its error already names the
+    # reason ("1-port"); duplicating that check here would just be a second
+    # place for the message to drift out of sync with the first.
+    text = "# MHZ S RI R 50\n60.0  0.1 0.2\n70.0  0.3 0.4\n"
+    ts = read_touchstone(write(tmp_path, "one.s1p", text))
+    with pytest.raises(DataIngestionError, match="1-port"):
+        interpolate_onto(np.array([65e6]), ts, component="s12")
+
+
+def test_interpolate_onto_rejects_a_non_ascending_source_axis():
+    # Touchstone.freq_hz is only guaranteed ascending by read_touchstone's own
+    # check (_check_strictly_ascending) -- the dataclass itself enforces
+    # nothing. _interp_strict is shared with a caller (the thermistor time
+    # axis interpolated in Task 9) that has no such upstream guarantee at all,
+    # so it re-checks ascending order itself rather than trusting the caller;
+    # np.interp assumes ascending order and does not check it.
+    ts = Touchstone(
+        freq_hz=np.array([80e6, 60e6]),
+        s=np.array([[[1 + 0j]], [[2 + 0j]]]),
+        z0=50.0,
+    )
+    with pytest.raises(DataIngestionError, match="ascending"):
+        interpolate_onto(np.array([70e6]), ts)
+
+
+def test_interpolate_onto_rejects_an_empty_source_axis():
+    # x[0] on an empty array raises a bare IndexError with no path/context.
+    # read_touchstone can never produce an empty freq_hz (it raises "no data
+    # rows" first), but _interp_strict is a general helper that does not get
+    # to assume its caller already checked that -- so it checks it directly.
+    ts = Touchstone(freq_hz=np.array([]), s=np.zeros((0, 1, 1), dtype=complex), z0=50.0)
+    with pytest.raises(DataIngestionError, match="empty"):
+        interpolate_onto(np.array([70e6]), ts)
+
+
+def test_interpolate_onto_an_empty_target_grid_does_not_crash(tmp_path):
+    # x_new.min()/.max() raise a bare ValueError ("zero-size array to
+    # reduction operation...") on an empty target grid, with no context. An
+    # empty target is vacuously inside any range, so there is nothing to
+    # refuse -- this should return an empty result, not crash.
+    text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
+    ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
+    got = interpolate_onto(np.array([]), ts)
+    assert got.shape == (0,)

@@ -370,3 +370,89 @@ def read_touchstone(path: str | Path, *, flipped: bool = False) -> Touchstone:
         raise DataIngestionError(f"{path}: no data rows.")
 
     return _build_touchstone(path, freq, rows, n_column, z0, flipped)
+
+
+def _interp_strict(
+    x_new: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    allow_extrapolation: bool = False,
+    what: str = "value",
+) -> np.ndarray:
+    """Linear interpolation that refuses to leave the sampled range.
+
+    ``np.interp`` *clamps* outside ``x`` rather than raising, so a reflection
+    coefficient measured over a narrower band than the one being observed comes
+    back as a constant at the edges, with no diagnostic. That is the failure
+    this guard exists for; the reference implementation
+    (``rhino-cal/utils/utils.py::interp_vals_to_new_freq``) has it.
+
+    Real and imaginary parts are interpolated separately. Not magnitude/phase:
+    across a mismatch resonance the phase wraps, and interpolating a wrapped
+    angle is worse than interpolating Cartesian components, not better.
+
+    ``x`` must be non-empty and strictly ascending -- checked here, not
+    assumed. ``Touchstone.freq_hz`` arrives already checked (see
+    ``_check_strictly_ascending``), but this is a general helper, shared with
+    a caller (a thermistor time axis) that carries no such guarantee at all.
+    ``np.interp`` assumes ascending order without checking it, so unsorted
+    input would otherwise come back as a finite, silently wrong answer rather
+    than raising -- exactly the failure mode this function exists to prevent.
+    """
+    x_new = np.asarray(x_new, dtype=float)
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        raise DataIngestionError(f"{what}: the sampled range is empty; nothing to interpolate.")
+    if np.any(np.diff(x) <= 0):
+        raise DataIngestionError(
+            f"{what}: the sampled x-axis is not strictly ascending. np.interp "
+            "assumes ascending order and does not check it, so unsorted input "
+            "would come back as a finite, silently wrong answer instead."
+        )
+    lo, hi = float(x[0]), float(x[-1])
+    if not allow_extrapolation and x_new.size:
+        # A tolerance on the span, so that a target grid whose endpoint agrees
+        # with the source to within a unit conversion's rounding still passes.
+        # x_new.size guards .min()/.max(): both raise on a zero-size array, and
+        # an empty target grid is vacuously within any range, so there is
+        # nothing here to refuse.
+        tol = 1e-9 * max(hi - lo, abs(hi))
+        if x_new.min() < lo - tol or x_new.max() > hi + tol:
+            raise DataIngestionError(
+                f"{what}: the target range [{x_new.min():.6g}, {x_new.max():.6g}] "
+                f"lies outside the sampled range [{lo:.6g}, {hi:.6g}]. "
+                "np.interp would clamp to the edge values and report nothing; "
+                "pass allow_extrapolation=True only if that is what you want."
+            )
+    if np.iscomplexobj(y):
+        return np.interp(x_new, x, np.real(y)) + 1j * np.interp(x_new, x, np.imag(y))
+    return np.interp(x_new, x, np.asarray(y, dtype=float))
+
+
+def interpolate_onto(
+    freq_hz: np.ndarray,
+    source: Touchstone,
+    *,
+    component: str = "s11",
+    allow_extrapolation: bool = False,
+) -> np.ndarray:
+    """Interpolate one S-parameter of ``source`` onto ``freq_hz`` [Hz].
+
+    ``component`` is checked here only against the four canonical S-parameter
+    names. Whether ``source`` actually carries that component -- a 1-port file
+    has no s12/s21/s22 -- is ``Touchstone``'s own concern: its property
+    getters already raise a precise, reason-naming ``DataIngestionError`` (see
+    ``Touchstone._entry``), and duplicating that check here would only be a
+    second place for the message to drift out of sync with the first.
+    """
+    if component not in ("s11", "s12", "s21", "s22"):
+        raise DataIngestionError(f"component must be one of s11, s12, s21, s22; got {component!r}.")
+    values = getattr(source, component)
+    return _interp_strict(
+        freq_hz,
+        source.freq_hz,
+        values,
+        allow_extrapolation=allow_extrapolation,
+        what=f"{component} interpolation",
+    )
