@@ -240,6 +240,14 @@ def _check_strictly_ascending(freq_hz: np.ndarray, path: Path) -> None:
     sweep onto the observing band (a later module) goes through ``np.interp``,
     which *assumes* ascending order and does not check it -- unsorted input
     comes back as a finite, silently wrong answer rather than an error.
+
+    :func:`_interp_strict`, later in this module, mirrors this same
+    NaN-first-then-ascending structure over a general ``x`` axis rather than
+    a file's own ``freq_hz``. It is a second, independent implementation
+    rather than a shared one -- the two report different things (1-based
+    file rows against a ``path`` here, 0-based array indices against a
+    ``what`` label there) -- so if this function's check order or reasoning
+    changes, that one needs the same change made by hand.
     """
     nan_rows = np.flatnonzero(np.isnan(freq_hz))
     if nan_rows.size:
@@ -406,6 +414,21 @@ def read_touchstone(path: str | Path, *, flipped: bool = False) -> Touchstone:
     return _build_touchstone(path, freq, rows, n_column, z0, flipped)
 
 
+#: A "few ULPs" of slack for _interp_strict's tolerance band, at the sampled
+#: axis's own magnitude (np.spacing() of it). One ULP would cover a value
+#: compared exactly as read; the 4x margin budgets headroom for a short chain
+#: of ordinary float64 ops between a raw reading and the comparison here (a
+#: unit-multiplier conversion, an epoch offset, a subtraction for elapsed
+#: time), each of which can add roughly another ULP of drift -- without
+#: approaching a magnitude that could mask a genuine range violation.
+_INTERP_ULP_SLACK = 4
+#: Relative tolerance on the interpolation span in _interp_strict, applied to
+#: (hi - lo) so a target grid whose endpoint agrees with the source only to
+#: within a unit conversion's rounding still passes. Deliberately tiny: this
+#: exists to swallow float rounding, not to make extrapolation lenient.
+_INTERP_SPAN_TOL = 1e-9
+
+
 def _interp_strict(
     x_new: np.ndarray,
     x: np.ndarray,
@@ -422,13 +445,10 @@ def _interp_strict(
     this guard exists for; the reference implementation
     (``rhino-cal/utils/utils.py::interp_vals_to_new_freq``) has it.
 
-    Real and imaginary parts are interpolated separately. Not magnitude/phase:
-    across a mismatch resonance the phase wraps, and interpolating a wrapped
-    angle is worse than interpolating Cartesian components, not better.
-
     ``x`` must be non-empty, finite, and strictly ascending -- checked here,
     not assumed, in that order and for the same reason
-    :func:`_check_strictly_ascending` checks them in that order.
+    :func:`_check_strictly_ascending` checks them in that order (see that
+    function's docstring for the cross-reference back to this one).
     ``Touchstone.freq_hz`` arrives already checked, but this is a general
     helper, shared with a caller (a thermistor time axis) that carries no
     such guarantee at all. NaN gets its own check and its own message ahead
@@ -438,11 +458,56 @@ def _interp_strict(
     function raising. Once NaN is ruled out, ``np.interp`` assumes ascending
     order without checking it either, so unsorted input would otherwise come
     back as a finite, silently wrong answer instead of raising.
+
+    Args:
+        x_new: the target grid to interpolate onto.
+        x: the sampled grid ``y`` was measured on. Must be 1-D, non-empty,
+            finite, strictly ascending, and the same length as ``y`` (see
+            above and Raises below).
+        y: the sampled values, real or complex, co-indexed with ``x``.
+        allow_extrapolation: if ``False`` (the default), raise when any of
+            ``x_new`` falls outside ``[x[0], x[-1]]`` by more than the
+            tolerance band (see Raises below). If ``True``, skip that check
+            entirely and let ``np.interp`` clamp to the edge values as it
+            normally would.
+        what: a short label identifying the call site, folded into every
+            error message this function raises (e.g. ``"s11 interpolation"``
+            or ``"thermistor column 1 for 'heated_load'"``).
+
+    Returns:
+        ``y`` interpolated onto ``x_new``. Complex if ``y`` is complex, with
+        the real and imaginary parts interpolated separately -- not
+        magnitude/phase, since across a mismatch resonance the phase wraps,
+        and interpolating a wrapped angle is worse than interpolating
+        Cartesian components, not better. Real otherwise: this is Task 9's
+        actual case (a thermistor temperature series), and that branch
+        returns a plain float array, not a complex one with a zero
+        imaginary part.
+
+    Raises:
+        DataIngestionError: if ``x`` and ``y`` disagree in length; if ``x``
+            is empty or contains NaN; if ``x`` is not strictly ascending; or
+            if ``allow_extrapolation`` is ``False`` and any of ``x_new``
+            falls outside ``x``'s range by more than a tolerance band of
+            roughly ``_INTERP_SPAN_TOL * span(x)`` plus
+            ``_INTERP_ULP_SLACK`` ULPs at ``x``'s own magnitude -- see the
+            body comment above the tolerance computation for why both terms
+            are needed. That band, not point equality, is what
+            "outside the sampled range" means here; it is the most
+            carefully-tuned, and previously buggy, part of this function.
     """
     x_new = np.asarray(x_new, dtype=float)
     x = np.asarray(x, dtype=float)
+    y = np.asarray(y)
     if x.size == 0:
         raise DataIngestionError(f"{what}: the sampled range is empty; nothing to interpolate.")
+    if x.shape != y.shape:
+        raise DataIngestionError(
+            f"{what}: x has {x.shape[0]} samples but y has {y.shape[0]}; they "
+            "must be co-indexed. np.interp raises its own unbranded "
+            "ValueError here ('fp and xp are not of the same length'), with "
+            "no indication of which call site or which arrays were involved."
+        )
     nan_indices = np.flatnonzero(np.isnan(x))
     if nan_indices.size:
         raise DataIngestionError(
@@ -450,11 +515,14 @@ def _interp_strict(
             "(0-based). That is a different problem from being out of order: "
             "fix that value; np.interp cannot use it either way."
         )
-    if np.any(np.diff(x) <= 0):
+    diffs = np.diff(x)
+    if np.any(diffs <= 0):
+        bad_index = int(np.argmin(diffs > 0)) + 1
         raise DataIngestionError(
-            f"{what}: the sampled x-axis is not strictly ascending. np.interp "
-            "assumes ascending order and does not check it, so unsorted input "
-            "would come back as a finite, silently wrong answer instead."
+            f"{what}: the sampled x-axis is not strictly ascending (first "
+            f"offender at index {bad_index}, 0-based). np.interp assumes "
+            "ascending order and does not check it, so unsorted input would "
+            "come back as a finite, silently wrong answer instead."
         )
     lo, hi = float(x[0]), float(x[-1])
     if not allow_extrapolation and x_new.size:
@@ -477,7 +545,7 @@ def _interp_strict(
         #
         # x_new.size guards .min()/.max(): both raise on a zero-size array,
         # and an empty target grid is vacuously within any range anyway.
-        tol = 1e-9 * (hi - lo) + 4 * np.spacing(max(abs(lo), abs(hi)))
+        tol = _INTERP_SPAN_TOL * (hi - lo) + _INTERP_ULP_SLACK * np.spacing(max(abs(lo), abs(hi)))
         if x_new.min() < lo - tol or x_new.max() > hi + tol:
             raise DataIngestionError(
                 f"{what}: the target range [{x_new.min():.6g}, {x_new.max():.6g}] "

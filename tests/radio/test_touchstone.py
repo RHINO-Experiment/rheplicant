@@ -10,6 +10,20 @@ import numpy as np
 import pytest
 
 from rheplicant.core.errors import DataIngestionError
+
+# _interp_strict is imported directly, not only exercised through
+# interpolate_onto, for the tests below that need a state interpolate_onto's
+# public surface cannot express at all: an x axis at unix-epoch magnitude,
+# rather than frequency. It is *not* because Touchstone's other branches
+# (NaN, non-ascending, empty) are unreachable through interpolate_onto --
+# Touchstone is a frozen dataclass with no __post_init__, so a hand-built one
+# reaches those through interpolate_onto too, and two tests below do exactly
+# that. The reason to prefer the direct route where either is possible is
+# that it isolates _interp_strict's own contract from Touchstone's
+# *incidental* lack of construction-time validation: if Touchstone ever grows
+# a __post_init__ that enforces its own invariants, a test that only reaches
+# a branch by constructing an invalid Touchstone would silently stop
+# covering it, while a direct call to _interp_strict would not.
 from rheplicant.radio.touchstone import (
     Touchstone,
     _interp_strict,
@@ -218,8 +232,12 @@ def test_interpolate_onto_rejects_a_non_ascending_source_axis():
         s=np.array([[[1 + 0j]], [[2 + 0j]]]),
         z0=50.0,
     )
-    with pytest.raises(DataIngestionError, match="ascending"):
+    with pytest.raises(DataIngestionError, match="ascending") as excinfo:
         interpolate_onto(np.array([70e6]), ts)
+    # Mirrors _check_strictly_ascending's own "first offender" naming (Minor
+    # 2 of the touchstone.py review): index 1 (0-based) is freq_hz[1] = 60e6,
+    # the later element of the one disordered pair.
+    assert "index 1" in str(excinfo.value)
 
 
 def test_interpolate_onto_rejects_an_empty_source_axis():
@@ -361,19 +379,41 @@ def test_a_target_one_ulp_past_a_short_unix_epoch_window_still_passes():
     np.testing.assert_allclose(got, [11.0])
 
 
-def test_interp_strict_a_single_sample_axis_still_only_tolerates_a_few_ulps():
+def test_a_single_row_touchstone_still_only_tolerates_a_few_ulps(tmp_path):
+    # A single-row Touchstone file is a legitimate, if unusual, input --
+    # _check_strictly_ascending does not reject it (np.diff on a length-1
+    # array is trivially empty), so this state, unlike the epoch-scale ones
+    # above, IS reachable through the public surface without hand-building a
+    # Touchstone: goes through read_touchstone + interpolate_onto rather than
+    # calling _interp_strict directly (see the note by the import above).
     # Single-sample x means hi == lo, so the span term of tol is zero and the
-    # tolerance comes entirely from the ULP term. Confirms the "effectively
-    # exact match required" behaviour that a single-sample axis relies on
-    # (there is nothing to interpolate between, only a point to match)
-    # survives the tolerance formula change -- it just arrives at the same
-    # near-zero tolerance by a different route than before.
-    x = np.array([5.0])
-    y = np.array([42.0])
-    got = _interp_strict(np.array([5.0]), x, y, what="single sample")
-    np.testing.assert_allclose(got, [42.0])
+    # tolerance comes entirely from the ULP term -- confirms the
+    # "effectively exact match required" behaviour a single-sample axis
+    # relies on (there is nothing to interpolate between, only a point to
+    # match) survives the tolerance formula change; verified numerically
+    # before writing this test (tol ~= 3e-8 Hz at 60 MHz).
+    text = "# MHZ S RI R 50\n60.0  42.0 0.0\n"
+    ts = read_touchstone(write(tmp_path, "single.s1p", text))
+    got = interpolate_onto(np.array([60e6]), ts)
+    np.testing.assert_allclose(got, [42.0 + 0.0j])
     with pytest.raises(DataIngestionError, match="outside"):
-        _interp_strict(np.array([5.001]), x, y, what="single sample")
+        interpolate_onto(np.array([60e6 + 1.0]), ts)  # 1 Hz past the edge
+
+
+def test_interp_strict_names_a_length_mismatch_between_x_and_y():
+    # np.interp's own error here is unbranded and context-free: "fp and xp
+    # are not of the same length." No `what`, no indication of which call
+    # site or which arrays were involved -- the exact failure class this
+    # module's docstring says it exists to eliminate. No current caller can
+    # trigger this (Touchstone.freq_hz and each sXX are co-indexed by
+    # construction), but Task 9 calls this with x and y read from two
+    # different HDF5 datasets, where a partial write or schema drift makes a
+    # mismatch an ordinary ingestion bug rather than a programming error.
+    x = np.array([0.0, 1.0, 2.0, 3.0])
+    y = np.array([10.0, 20.0, 30.0])
+    with pytest.raises(DataIngestionError, match="length") as excinfo:
+        _interp_strict(np.array([0.5]), x, y, what="mismatched-length test")
+    assert "mismatched-length test" in str(excinfo.value)
 
 
 def test_interp_strict_handles_real_valued_y_not_just_complex():
