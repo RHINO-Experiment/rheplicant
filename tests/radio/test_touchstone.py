@@ -244,11 +244,20 @@ def test_interpolate_onto_an_empty_target_grid_does_not_crash(tmp_path):
 
 
 def test_the_public_names_are_reachable_from_the_subpackage():
+    from rheplicant import radio
     from rheplicant.radio import Touchstone as T
     from rheplicant.radio import interpolate_onto as i
     from rheplicant.radio import read_touchstone as r
 
     assert (T, r, i) == (Touchstone, read_touchstone, interpolate_onto)
+    # Reachability alone is not enough: `from pkg import name` resolves through
+    # the module namespace, not through __all__, so deleting the `__all__ +=`
+    # block leaves the three asserts above passing. __all__ is what
+    # _validate_registrations() iterates at import time and what `import *`
+    # honours -- and this file's own convention puts the import line and the
+    # `__all__ +=` block in two separate places, which is what invites the
+    # omission in the first place.
+    assert {"Touchstone", "interpolate_onto", "read_touchstone"}.issubset(radio.__all__)
 
 
 @pytest.mark.parametrize(
