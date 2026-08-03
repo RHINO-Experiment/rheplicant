@@ -88,3 +88,22 @@ def test_option_line_non_s_parameter_type_raises(tmp_path):
     with pytest.raises(DataIngestionError, match="S-parameters") as excinfo:
         read_touchstone(path)
     assert "'Y'" in str(excinfo.value)
+
+
+def test_ri_ma_and_db_render_the_same_physical_s(tmp_path):
+    z = 0.5 * np.exp(1j * np.deg2rad(37.0))
+    # float(...) before !r: with numpy>=2.0, repr(np.float64(x)) is the
+    # unambiguous "np.float64(x)" (NEP 51), which float() cannot parse back
+    # out of the generated file text. Converting to a plain Python float first
+    # is lossless (same IEEE-754 double) and only changes the string written,
+    # not the value.
+    ri = f"# HZ S RI R 50\n1.0e8   {float(z.real)!r}  {float(z.imag)!r}\n"
+    ma = "# HZ S MA R 50\n1.0e8   0.5  37.0\n"
+    db = f"# HZ S DB R 50\n1.0e8   {float(20 * np.log10(0.5))!r}  37.0\n"
+
+    got = [
+        read_touchstone(write(tmp_path, f"one_{tag}.s1p", text)).s11[0]
+        for tag, text in (("ri", ri), ("ma", ma), ("db", db))
+    ]
+    for value in got:
+        assert value == pytest.approx(z, rel=1e-12)
