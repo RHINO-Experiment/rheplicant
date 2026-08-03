@@ -426,18 +426,30 @@ def _interp_strict(
     across a mismatch resonance the phase wraps, and interpolating a wrapped
     angle is worse than interpolating Cartesian components, not better.
 
-    ``x`` must be non-empty and strictly ascending -- checked here, not
-    assumed. ``Touchstone.freq_hz`` arrives already checked (see
-    ``_check_strictly_ascending``), but this is a general helper, shared with
-    a caller (a thermistor time axis) that carries no such guarantee at all.
-    ``np.interp`` assumes ascending order without checking it, so unsorted
-    input would otherwise come back as a finite, silently wrong answer rather
-    than raising -- exactly the failure mode this function exists to prevent.
+    ``x`` must be non-empty, finite, and strictly ascending -- checked here,
+    not assumed, in that order and for the same reason
+    :func:`_check_strictly_ascending` checks them in that order.
+    ``Touchstone.freq_hz`` arrives already checked, but this is a general
+    helper, shared with a caller (a thermistor time axis) that carries no
+    such guarantee at all. NaN gets its own check and its own message ahead
+    of the ordering check: ``np.diff(x) <= 0`` compares ``False`` against
+    NaN, so a NaN axis would otherwise sail straight through the ordering
+    check and ``np.interp`` would return NaN silently rather than this
+    function raising. Once NaN is ruled out, ``np.interp`` assumes ascending
+    order without checking it either, so unsorted input would otherwise come
+    back as a finite, silently wrong answer instead of raising.
     """
     x_new = np.asarray(x_new, dtype=float)
     x = np.asarray(x, dtype=float)
     if x.size == 0:
         raise DataIngestionError(f"{what}: the sampled range is empty; nothing to interpolate.")
+    nan_indices = np.flatnonzero(np.isnan(x))
+    if nan_indices.size:
+        raise DataIngestionError(
+            f"{what}: the sampled x-axis has NaN at index {int(nan_indices[0])} "
+            "(0-based). That is a different problem from being out of order: "
+            "fix that value; np.interp cannot use it either way."
+        )
     if np.any(np.diff(x) <= 0):
         raise DataIngestionError(
             f"{what}: the sampled x-axis is not strictly ascending. np.interp "
@@ -446,12 +458,26 @@ def _interp_strict(
         )
     lo, hi = float(x[0]), float(x[-1])
     if not allow_extrapolation and x_new.size:
-        # A tolerance on the span, so that a target grid whose endpoint agrees
-        # with the source to within a unit conversion's rounding still passes.
-        # x_new.size guards .min()/.max(): both raise on a zero-size array, and
-        # an empty target grid is vacuously within any range, so there is
-        # nothing here to refuse.
-        tol = 1e-9 * max(hi - lo, abs(hi))
+        # Two terms, added. A relative tolerance on the span, so a target
+        # grid whose endpoint agrees with the source to within a unit
+        # conversion's rounding still passes -- plus a few ULPs of slack at
+        # the axis's own magnitude, for float64 representation noise that
+        # does not shrink along with a short span.
+        #
+        # Both terms are needed. On a large-magnitude, short-span axis (a
+        # unix-epoch time axis sampled a few seconds apart, ~1.75e9 in
+        # magnitude), the span term alone is smaller than float64's own
+        # spacing there -- ~1e-8 s of span-tolerance against ~2e-7 s of
+        # representation noise -- which would reject an endpoint that is
+        # genuinely equal up to roundoff. The single-term `abs(hi)`-only form
+        # this replaced overcorrected the other way: on that same axis it
+        # gave ~1.75 s of slack *regardless of window length*, so a target
+        # 1.5 s past the sampled range was silently accepted and clamped --
+        # the exact failure this function exists to catch.
+        #
+        # x_new.size guards .min()/.max(): both raise on a zero-size array,
+        # and an empty target grid is vacuously within any range anyway.
+        tol = 1e-9 * (hi - lo) + 4 * np.spacing(max(abs(lo), abs(hi)))
         if x_new.min() < lo - tol or x_new.max() > hi + tol:
             raise DataIngestionError(
                 f"{what}: the target range [{x_new.min():.6g}, {x_new.max():.6g}] "

@@ -10,7 +10,12 @@ import numpy as np
 import pytest
 
 from rheplicant.core.errors import DataIngestionError
-from rheplicant.radio.touchstone import Touchstone, interpolate_onto, read_touchstone
+from rheplicant.radio.touchstone import (
+    Touchstone,
+    _interp_strict,
+    interpolate_onto,
+    read_touchstone,
+)
 
 RI_2PORT = """\
 ! a two-port, real/imaginary
@@ -292,3 +297,84 @@ def test_suffix_check_case_insensitively_still_catches_a_mismatch(tmp_path):
     text = "# MHZ S RI R 50\n60.0  0.1 0.2  0.3 0.4  0.5 0.6  0.7 0.8\n"
     with pytest.raises(DataIngestionError, match="name says"):
         read_touchstone(write(tmp_path, "cal.S1P", text))
+
+
+def test_interp_strict_names_a_nan_in_the_source_axis_rather_than_calling_it_unsorted():
+    # Mirrors _check_strictly_ascending's NaN-first structure: NaN compares
+    # False to everything, including "<= 0", so a bare
+    # `np.any(np.diff(x) <= 0)` check does not see a NaN axis as disordered
+    # at all -- np.interp would return NaN silently rather than this
+    # function raising. NaN gets its own check and its own message ahead of
+    # the ordering check, exactly as the file-reading sibling check does.
+    x = np.array([0.0, 1.0, np.nan, 3.0])
+    y = np.array([0.0, 1.0, 2.0, 3.0])
+    with pytest.raises(DataIngestionError, match="NaN"):
+        _interp_strict(np.array([0.5]), x, y, what="nan axis test")
+
+
+def test_frequency_scale_extrapolation_is_still_refused_under_the_new_tolerance(tmp_path):
+    # Regime check alongside the unix-epoch regression below: the combined
+    # span + ULP tolerance must not accidentally loosen the ordinary
+    # megahertz-scale case the old span-dominated term already covered.
+    text = "# MHZ S RI R 50\n60.0  0.0 0.0\n80.0  2.0 4.0\n"
+    ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
+    with pytest.raises(DataIngestionError, match="outside"):
+        interpolate_onto(np.array([80e6 + 1e4]), ts)  # 10 kHz past the edge
+
+
+def test_a_target_past_a_short_unix_epoch_window_is_still_refused():
+    # The regression the old tolerance missed: on a unix-epoch axis
+    # (~1.75e9 s) `1e-9 * max(span, abs(hi))` is dominated by abs(hi)
+    # whenever the span is short, giving ~1.75 s of slack *regardless of
+    # window length* -- so a target 1.5 s past a 1 s-cadence, 11 s-wide
+    # window was silently accepted and clamped. The new tolerance here is
+    # ~1e-6 s (verified numerically before writing this test), far below 1.5 s.
+    epoch = 1_750_000_000.0
+    time_s = epoch + np.arange(12.0)  # 12 samples, 1 s cadence
+    values = np.arange(12.0)
+    target = np.array([time_s[-1] + 1.5])
+    with pytest.raises(DataIngestionError, match="outside"):
+        _interp_strict(target, time_s, values, what="thermistor time axis")
+
+
+def test_a_target_one_ulp_past_a_short_unix_epoch_window_still_passes():
+    # The fix must not overcorrect: a target that agrees with the sampled
+    # range up to float64 roundoff (one ULP past the last sample) must still
+    # be accepted and clamped, not rejected as "outside". Dropping the ULP
+    # term and keeping only 1e-9 * span would fail this, since float64
+    # spacing at epoch magnitude (~2.4e-7 s) exceeds 1e-9 * an 11 s span
+    # (~1.1e-8 s).
+    epoch = 1_750_000_000.0
+    time_s = epoch + np.arange(12.0)
+    values = np.arange(12.0)
+    target = np.array([time_s[-1] + np.spacing(time_s[-1])])
+    got = _interp_strict(target, time_s, values, what="thermistor time axis")
+    np.testing.assert_allclose(got, [11.0])
+
+
+def test_interp_strict_a_single_sample_axis_still_only_tolerates_a_few_ulps():
+    # Single-sample x means hi == lo, so the span term of tol is zero and the
+    # tolerance comes entirely from the ULP term. Confirms the "effectively
+    # exact match required" behaviour that a single-sample axis relies on
+    # (there is nothing to interpolate between, only a point to match)
+    # survives the tolerance formula change -- it just arrives at the same
+    # near-zero tolerance by a different route than before.
+    x = np.array([5.0])
+    y = np.array([42.0])
+    got = _interp_strict(np.array([5.0]), x, y, what="single sample")
+    np.testing.assert_allclose(got, [42.0])
+    with pytest.raises(DataIngestionError, match="outside"):
+        _interp_strict(np.array([5.001]), x, y, what="single sample")
+
+
+def test_interp_strict_handles_real_valued_y_not_just_complex():
+    # interpolate_onto only ever hands _interp_strict complex S-parameters,
+    # so the real-valued branch (np.iscomplexobj(y) is False) has no coverage
+    # through the public API -- yet it is exactly Task 9's thermistor path
+    # (temperatures are real), the one branch the general-helper contract
+    # exists to serve.
+    x = np.array([0.0, 1.0, 2.0])
+    y = np.array([10.0, 20.0, 30.0])
+    got = _interp_strict(np.array([0.5, 1.5]), x, y, what="real-valued test")
+    assert not np.iscomplexobj(got)
+    np.testing.assert_allclose(got, [15.0, 25.0])
