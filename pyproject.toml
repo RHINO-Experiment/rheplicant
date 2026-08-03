@@ -50,6 +50,11 @@ limtod = ["limTOD[jax]>=1.10"]
 #   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 # The threshold-based FlaggingOperator needs none of it.
 rfi = ["MomentRFI"]
+# read_rhino_observation() reads the RHINO observation HDF5 through h5py. Unlike
+# limTOD and MomentRFI this one IS on PyPI, so the extra resolves normally:
+#   uv pip install -e ".[rhino]"
+# The Touchstone reader needs none of it -- it is numpy only.
+rhino = ["h5py"]
 docs = [
     "sphinx>=7",
     "myst-parser",

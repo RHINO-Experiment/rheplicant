@@ -236,3 +236,11 @@ def test_interpolate_onto_an_empty_target_grid_does_not_crash(tmp_path):
     ts = read_touchstone(write(tmp_path, "ramp.s1p", text))
     got = interpolate_onto(np.array([]), ts)
     assert got.shape == (0,)
+
+
+def test_the_public_names_are_reachable_from_the_subpackage():
+    from rheplicant.radio import Touchstone as T
+    from rheplicant.radio import interpolate_onto as i
+    from rheplicant.radio import read_touchstone as r
+
+    assert (T, r, i) == (Touchstone, read_touchstone, interpolate_onto)

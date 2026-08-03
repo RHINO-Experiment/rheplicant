@@ -81,6 +81,7 @@ from rheplicant.radio.sky import (
     UniformSkyModel,
 )
 from rheplicant.radio.surrogate import NeuralOperator
+from rheplicant.radio.touchstone import Touchstone, interpolate_onto, read_touchstone
 
 __all__ = [
     "ADCOperator",
@@ -128,6 +129,11 @@ __all__ += [
     "cst_frequency_table",
     "horizon_truncated_beam",
     "read_cst_farfield",
+]
+__all__ += [
+    "Touchstone",
+    "interpolate_onto",
+    "read_touchstone",
 ]
 
 from rheplicant.radio.graph import _validate_registrations as _v  # noqa: E402
