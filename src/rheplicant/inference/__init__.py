@@ -43,6 +43,9 @@ from rheplicant.inference.numpyro_bridge import (
     to_numpyro_model,
 )
 from rheplicant.inference.parameters import (
+    BROADCAST,
+    DISTRIBUTE,
+    AmbiguousFanWarning,
     Bind,
     Latent,
     ParameterSpace,
@@ -66,9 +69,12 @@ from rheplicant.inference.uncertainty import (
 )
 
 __all__ = [
+    "BROADCAST",
     "DEFAULT_RANK_RTOL",
+    "DISTRIBUTE",
     "ParameterSpaceError",
     "AdamCalibrator",
+    "AmbiguousFanWarning",
     "Bind",
     "Block",
     "Draws",

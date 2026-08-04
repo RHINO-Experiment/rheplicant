@@ -53,8 +53,9 @@ samples, ``ravel_pytree`` for Fisher matrices, and ``jit`` all assume a fixed
 treedef. :meth:`ParameterSpace.validate` checks it.
 """
 
+import warnings
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, NoReturn
 
 import equinox as eqx
 import jax
@@ -70,6 +71,26 @@ from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.graph import _aliased_leaf_paths
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+
+#: ``Bind(fan="distribute")`` — ``fn`` returns one value PER ``into`` selector.
+DISTRIBUTE: str = "distribute"
+
+#: ``Bind(fan="broadcast")`` — ``fn`` returns ONE value, written to every
+#: ``into`` selector. This is parameter tying.
+BROADCAST: str = "broadcast"
+
+#: The declarable fan-out modes.
+FAN_MODES: tuple[str, ...] = (DISTRIBUTE, BROADCAST)
+
+
+class AmbiguousFanWarning(UserWarning):
+    """A :class:`Bind` whose fan-out mode could not be inferred from what it
+    produced, only guessed.
+
+    Raised as a warning rather than an error in exactly one situation — a
+    single ``into`` selector fed a container — because there the guess cannot
+    give a wrong answer, only an undeclared one. See :attr:`Bind.fan`.
+    """
 
 
 def _as_tuple(x: Any) -> tuple:
@@ -223,11 +244,57 @@ class Bind(eqx.Module):
             requires exactly one latent. If ``fn`` returns a single array it is
             written to **every** selector in ``into`` (this is parameter
             tying); if it returns a tuple, its length must match ``into``.
+        fan: ``"broadcast"``, ``"distribute"``, or ``None`` to infer from what
+            ``fn`` produced, which is what happens below and what the rest of
+            this docstring is about.
+
+    **The two modes are different physics, and with ``fan=None`` a Python
+    container type is the only thing that tells them apart.**
+    ``"broadcast"`` writes one produced value into every selector — parameter
+    tying, one number driving several stages. ``"distribute"`` writes the
+    ``k``-th produced value into the ``k``-th selector — several stages each
+    getting their own. Measured on two scalar leaves, an antenna efficiency and
+    a gain, with the same 2-vector ``[2, 5]``::
+
+        fn = lambda v: v         -> broadcast   pred[0, 0] = 2 * 2 = 4.0
+        fn = lambda v: list(v)   -> distribute  pred[0, 0] = 2 * 5 = 10.0
+
+    ``v`` and ``list(v)`` are the SAME DATA. One is a JAX array and one is a
+    Python list of its elements, and that difference — invisible in the values,
+    invisible in every shape, invisible to
+    :func:`~rheplicant.inference.linear.check_linearity` and to
+    :func:`~rheplicant.inference.identifiability.identifiability` — selects
+    between a tie and an element-wise split. A user who meant "write this whole
+    vector into both leaves" and reached for ``list(v)`` gets a finite,
+    correctly-shaped, silently wrong model, off by a factor of 2.5 here and by
+    whatever the leaves happen to be worth in general.
+
+    ``fan=`` is that intent, written down and therefore checkable. ``None``
+    keeps the inference, because ``Bind`` is public and appears in every
+    example and every doc page and a refusal by default would break all of
+    them. Declaring it turns the guess into a refusal: a declared broadcast
+    that produced a container, or a declared distribute that produced a single
+    value, is a contradiction between what the caller said and what ``fn`` did,
+    and is refused naming both.
+
+    **The one case no inference can decide even in principle.** With a single
+    ``into`` selector the length test that separates the modes,
+    ``len(produced) == len(into)``, is satisfied by a length-1 container under
+    EITHER intent, so the container is unwrapped on a guess. That guess is
+    warned about (:class:`AmbiguousFanWarning`), not refused, and deliberately:
+    a Python list is not an array leaf, so unwrapping is the only reading that
+    can yield a valid pipeline at all — broadcasting the container would change
+    the pipeline's pytree structure and be refused by
+    :meth:`ParameterSpace.validate` a moment later. There is no wrong answer to
+    prevent here, only an undeclared one, so refusing would break working code
+    and buy no correctness. ``fan="distribute"`` declares it and the warning
+    goes.
     """
 
     latents: tuple[str, ...] = eqx.field(static=True, converter=_as_tuple)
     into: tuple[Callable, ...] = eqx.field(static=True, converter=_as_tuple)
     fn: Callable | None = eqx.field(static=True, default=None)
+    fan: str | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
         if not self.latents:
@@ -247,19 +314,84 @@ class Bind(eqx.Module):
                 f"Bind for {self.latents} has no `fn`, so it is the identity — which takes "
                 "exactly one latent. Supply `fn` to combine several."
             )
+        if self.fan is not None and self.fan not in FAN_MODES:
+            raise ParameterSpaceError(
+                f"Bind for {self.latents} asks for fan={self.fan!r}; the fan-out modes "
+                f"are {list(FAN_MODES)}. fan='broadcast' writes ONE produced value into "
+                "every `into` selector (parameter tying); fan='distribute' writes one "
+                "produced value PER selector. Leave fan=None and the mode is inferred "
+                "from whether `fn` returned a tuple/list, which is the backwards-"
+                "compatible default and the thing an explicit fan= exists to check."
+            )
+
+    def _refuse_contradiction(self, message: str) -> NoReturn:
+        """Refuse a declared ``fan`` that contradicts what ``fn`` produced."""
+        raise ParameterSpaceError(
+            f"Bind for {self.latents} {message} A tie writes one value into every "
+            "leaf and a distribution gives each leaf its own, which is different "
+            "physics — and the two spellings differ only by a Python container type, "
+            "so nothing downstream would report the mismatch: the model would be "
+            "finite, correctly shaped and wrong. Fix `fn`, or change the declaration "
+            "to the mode you meant."
+        )
 
     def evaluate(self, values: dict[str, jax.Array]) -> tuple[jax.Array, ...]:
-        """Produce one value per selector in ``into``."""
+        """Produce one value per selector in ``into``.
+
+        The fan-out mode is :attr:`fan` when declared and inferred from whether
+        ``fn`` returned a Python ``tuple``/``list`` when it is not. See the
+        class docstring for why that inference is not something to rely on.
+
+        Raises:
+            ParameterSpaceError: if a declared ``fan`` contradicts what ``fn``
+                produced, or if a distribution's length does not match ``into``.
+
+        Warns:
+            AmbiguousFanWarning: if a container reached a lone ``into``
+                selector with no ``fan`` declared, where the inference is a
+                coin flip that happens to have only one landing.
+        """
         args = [values[name] for name in self.latents]
         produced = self.fn(*args) if self.fn is not None else args[0]
-        if isinstance(produced, (tuple, list)):
-            if len(produced) != len(self.into):
-                raise ParameterSpaceError(
-                    f"Bind for {self.latents} returned {len(produced)} values but has "
-                    f"{len(self.into)} `into` selectors."
-                )
-            return tuple(produced)
-        return (produced,) * len(self.into)
+        container = isinstance(produced, (tuple, list))
+
+        # The declaration against what `fn` actually did, before either is used.
+        if self.fan == BROADCAST and container:
+            self._refuse_contradiction(
+                f"declares fan='broadcast' — ONE value written into all "
+                f"{len(self.into)} `into` selectors — but `fn` returned a "
+                f"{type(produced).__name__} of {len(produced)}, which is a "
+                "distribution."
+            )
+        if self.fan == DISTRIBUTE and not container:
+            self._refuse_contradiction(
+                f"declares fan='distribute' — one value PER `into` selector, of which "
+                f"it has {len(self.into)} — but `fn` returned a single "
+                f"{type(produced).__name__}, which would be tied into all of them."
+            )
+
+        if not container:
+            return (produced,) * len(self.into)
+
+        if len(produced) != len(self.into):
+            declared = " declares fan='distribute' and" if self.fan else ""
+            raise ParameterSpaceError(
+                f"Bind for {self.latents}{declared} returned {len(produced)} values "
+                f"but has {len(self.into)} `into` selectors."
+            )
+        if self.fan is None and len(self.into) == 1:
+            warnings.warn(
+                f"Bind for {self.latents} has one `into` selector and `fn` returned a "
+                f"{type(produced).__name__} of 1, so which fan-out mode was meant "
+                "cannot be told from the length: a 1-container matches a single "
+                "selector under 'distribute' AND under 'broadcast'. Unwrapping it, "
+                "which is the only reading that can reach an array leaf — but say "
+                "fan='distribute' to declare that, or fan='broadcast' to be refused "
+                "here if this ever stops being a container.",
+                AmbiguousFanWarning,
+                stacklevel=2,
+            )
+        return tuple(produced)
 
 
 class ParameterSpace(eqx.Module):
@@ -347,11 +479,18 @@ class ParameterSpace(eqx.Module):
         prior: Any = None,
         fn: Callable | None = None,
         linear: bool = False,
+        fan: str | None = None,
     ) -> "ParameterSpace":
-        """One latent, one binding — the common case, in one call."""
+        """One latent, one binding — the common case, in one call.
+
+        ``fan`` is threaded straight through to :class:`Bind`. It is worth
+        having here rather than only on the long form because ``into`` accepts
+        a tuple of selectors, so the shorthand reaches the tie-versus-
+        distribute ambiguity too.
+        """
         return cls(
             latents=(Latent(name, init=init, prior=prior, linear=linear),),
-            bindings=(Bind(name, into=into, fn=fn),),
+            bindings=(Bind(name, into=into, fn=fn, fan=fan),),
         )
 
     # ------------------------------------------------------------- reading --

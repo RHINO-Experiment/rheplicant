@@ -17,12 +17,13 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from rheplicant import Coordinates, State
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.graph import At, NodeSpec, SignalGraph, assemble
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import AdamCalibrator, Bind, Latent, ParameterSpace
-from rheplicant.radio import GainOperator, SkyOperator
+from rheplicant.radio import AntennaLossOperator, GainOperator, SkyOperator
 
 SKY_K = 100.0
 
@@ -218,6 +219,207 @@ class TestDeclarationValidation:
         prior = pytest.importorskip("numpyro.distributions")
         with pytest.raises(ParameterSpaceError, match="shape"):
             Latent("g", init=1.0, prior=prior.Normal(jnp.zeros(3), 1.0))
+
+
+class TestFanOut:
+    """`fan=` — whether one produced value ties every leaf or one value per leaf.
+
+    Two scalar leaves that a 2-vector reaches by opposite routes, chosen so the
+    two readings are numerically far apart rather than merely different:
+
+    * **broadcast** writes the whole ``[2, 5]`` to BOTH — the loss sees it as a
+      spectrum and the gain as a per-sample series, so ``pred[0, 0]`` is
+      ``2 * 2 = 4``;
+    * **distribute** writes ``2`` to the loss and ``5`` to the gain, so
+      ``pred[0, 0]`` is ``2 * 5 = 10``.
+
+    A symmetric fixture (equal leaves, or a ``[c, c]`` vector) makes both
+    readings agree and blinds every test below.
+    """
+
+    N = 2
+    V = (2.0, 5.0)
+
+    @pytest.fixture
+    def fan_state(self):
+        return State(
+            coords=Coordinates(
+                time=jnp.arange(self.N, dtype=float),
+                freq=jnp.array([100.0, 110.0]),
+            ),
+            data=jnp.ones((self.N, self.N)),
+        )
+
+    @pytest.fixture
+    def fan_twin(self):
+        """t_physical = 0, so the efficiency is a pure multiply and the two
+        leaves enter the prediction as a bare product."""
+        return Pipeline(
+            AntennaLossOperator(
+                efficiency=jnp.array(1.0), t_physical=jnp.array(0.0)
+            ),
+            GainOperator(gain=jnp.array(1.0)),
+            names=("loss", "gain"),
+        )
+
+    @staticmethod
+    def _space(fn, into, init, fan=None):
+        return ParameterSpace(
+            latents=[Latent("v", init=init)],
+            bindings=[Bind("v", into=into, fn=fn, fan=fan)],
+        )
+
+    def _predict(self, twin, state, fn, fan=None):
+        into = (lambda p: p["loss"].efficiency, lambda p: p["gain"].gain)
+        init = jnp.array(self.V)
+        space = self._space(fn, into, init, fan)
+        return float(space.bind(twin, {"v": init})(state).data[0, 0])
+
+    # ------------------------------------------------- the defect, restated --
+
+    def test_the_python_container_type_alone_decides_the_physics(
+        self, fan_twin, fan_state
+    ):
+        """`v` and `list(v)` are the SAME DATA and mean opposite things.
+
+        This is what `fan=` exists for, and it is still accepted with
+        `fan=None` on purpose — `Bind` is public and used in every example, so
+        the inference stays the default. What changes is that the intent can
+        now be declared and CHECKED, which is the next two tests.
+        """
+        assert self._predict(fan_twin, fan_state, lambda v: v) == pytest.approx(4.0)
+        assert self._predict(fan_twin, fan_state, list) == pytest.approx(10.0)
+
+    # ------------------------------------------------- declared: broadcast --
+
+    def test_a_declared_broadcast_that_produced_a_container_is_refused(
+        self, fan_twin, fan_state
+    ):
+        """The motivating row: the user meant "this whole 2-vector into both
+        leaves" and `list(v)` distributed it element-wise instead — finite,
+        correctly shaped, and 10.0 where 4.0 was meant."""
+        with pytest.raises(ParameterSpaceError, match="fan='broadcast'"):
+            self._predict(fan_twin, fan_state, list, fan="broadcast")
+
+    def test_a_declared_broadcast_still_ties_when_it_produced_one_value(
+        self, fan_twin, fan_state
+    ):
+        """The guard's other branch: the declaration agrees, nothing is refused,
+        and the answer is the tied one."""
+        value = self._predict(fan_twin, fan_state, lambda v: v, fan="broadcast")
+        assert value == pytest.approx(4.0)
+
+    # ------------------------------------------------ declared: distribute --
+
+    def test_a_declared_distribute_that_produced_one_value_is_refused(
+        self, fan_twin, fan_state
+    ):
+        """The mirror image: the user meant one value per leaf and got a tie."""
+        with pytest.raises(ParameterSpaceError, match="fan='distribute'"):
+            self._predict(fan_twin, fan_state, lambda v: v, fan="distribute")
+
+    def test_a_declared_distribute_still_distributes_a_matching_container(
+        self, fan_twin, fan_state
+    ):
+        value = self._predict(fan_twin, fan_state, list, fan="distribute")
+        assert value == pytest.approx(10.0)
+
+    def test_a_declared_distribute_of_the_wrong_length_is_refused(
+        self, fan_twin, fan_state
+    ):
+        """The length check is not replaced by the declaration, it is sharpened
+        by it — the refusal can now say which count was the declared one."""
+        with pytest.raises(ParameterSpaceError, match="returned 3 values"):
+            self._predict(
+                fan_twin, fan_state, lambda v: [v[0], v[1], v[0]], fan="distribute"
+            )
+
+    def test_the_length_check_still_holds_with_no_declaration(
+        self, fan_twin, fan_state
+    ):
+        with pytest.raises(ParameterSpaceError, match="returned 3 values"):
+            self._predict(fan_twin, fan_state, lambda v: [v[0], v[1], v[0]])
+
+    # ------------------------------------------------------ one selector --
+
+    def test_a_lone_selector_fed_a_container_warns_rather_than_guessing_silently(
+        self, fan_twin, fan_state
+    ):
+        """`len(produced) == len(into)` is what distinguishes the two modes, and
+        at 1 it cannot: a length-1 container satisfies it under either intent.
+
+        Warned rather than refused, and warned rather than left silent. Refused
+        would break working code for no correctness gain — a Python list is not
+        an array leaf, so unwrapping is the only reading that can produce a
+        valid pipeline, and a broadcast of the container would be caught
+        downstream as a pytree-structure change. Silent is what it was.
+        """
+        into = (lambda p: p["gain"].gain,)
+        init = jnp.array([3.0])
+        space = self._space(lambda v: [v[0]], into, init)
+        with pytest.warns(UserWarning, match="one `into` selector"):
+            bound = space.bind(fan_twin, {"v": init})
+        assert float(bound["gain"].gain) == pytest.approx(3.0)
+
+    def test_declaring_distribute_silences_the_lone_selector_warning(
+        self, fan_twin, recwarn
+    ):
+        into = (lambda p: p["gain"].gain,)
+        init = jnp.array([3.0])
+        space = self._space(lambda v: [v[0]], into, init, fan="distribute")
+        bound = space.bind(fan_twin, {"v": init})
+        assert float(bound["gain"].gain) == pytest.approx(3.0)
+        assert [w for w in recwarn.list if "into` selector" in str(w.message)] == []
+
+    def test_declaring_broadcast_on_a_lone_selector_refuses_instead(self, fan_twin):
+        """The other way out of the ambiguity, and it is a refusal: a container
+        is not a leaf value however many selectors there are."""
+        into = (lambda p: p["gain"].gain,)
+        init = jnp.array([3.0])
+        space = self._space(lambda v: [v[0]], into, init, fan="broadcast")
+        with pytest.raises(ParameterSpaceError, match="fan='broadcast'"):
+            space.bind(fan_twin, {"v": init})
+
+    def test_a_lone_selector_fed_one_value_does_not_warn(self, fan_twin, recwarn):
+        """The warning is about the container, not about having one selector."""
+        into = (lambda p: p["gain"].gain,)
+        init = jnp.array(3.0)
+        space = self._space(None, into, init)
+        bound = space.bind(fan_twin, {"v": init})
+        assert float(bound["gain"].gain) == pytest.approx(3.0)
+        assert [w for w in recwarn.list if "into` selector" in str(w.message)] == []
+
+    # ----------------------------------------------------- the declaration --
+
+    def test_an_unknown_fan_is_refused_at_declaration_and_names_both_modes(self):
+        with pytest.raises(ParameterSpaceError, match="fan='tie'"):
+            Bind("v", into=lambda p: p["gain"].gain, fan="tie")
+
+    def test_fan_defaults_to_absent_so_every_existing_Bind_is_unchanged(self):
+        assert Bind("v", into=lambda p: p["gain"].gain).fan is None
+
+    def test_the_new_static_field_left_Bind_a_leafless_pytree(self):
+        """`Bind` carries no array leaves — every field is static — so the new
+        field lands in the treedef's aux data and changes no leaf count. Pinned
+        because `ParameterSpace.bindings` is itself static, which makes that aux
+        data part of a jit cache key and therefore required to stay hashable.
+        """
+        bind = Bind("v", into=lambda p: p["gain"].gain, fan="broadcast")
+        leaves, treedef = jax.tree_util.tree_flatten(bind)
+        assert leaves == []
+        assert hash(treedef) == hash(treedef)
+        assert list(Bind.__dataclass_fields__) == ["latents", "into", "fn", "fan"]
+
+    def test_direct_threads_the_fan_through(self, fan_twin, fan_state):
+        space = ParameterSpace.direct(
+            "v",
+            init=jnp.array(self.V),
+            into=(lambda p: p["loss"].efficiency, lambda p: p["gain"].gain),
+            fn=list,
+            fan="broadcast",
+        )
+        with pytest.raises(ParameterSpaceError, match="fan='broadcast'"):
+            space.bind(fan_twin, {"v": jnp.array(self.V)})
 
 
 class TestPipelineValidation:
