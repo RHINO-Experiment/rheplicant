@@ -7,10 +7,15 @@ samples -- the note's Eqs. 30 and 31 respectively.
 
 The switching is what makes it work, and the demonstration is deliberately
 per-channel. Each switch position contributes one equation per frequency
-channel, so with per-channel temperatures the design matrix has rank
-min(n_src, 3) x n_freq: three loads make it square, one leaves it deficient
-threefold. Scalar noise waves would be identified by a single load, which is
-why a scalar version of this example would prove nothing.
+channel, so while the temperatures are free per channel the design matrix has
+rank min(n_src, k) x n_freq over the k FREE temperature families. Here k = 3:
+T_rx is held at its known value and only T_unc, T_cos, T_sin are fitted, so
+three loads make the system square and one leaves it deficient threefold. Fit
+T_rx as well and k becomes 4 and a fourth load is needed. Scalar noise waves
+would be identified by a single load, which is why a scalar version of this
+example would prove nothing -- and a BASIS parameterization is not covered by
+this counting at all; measure that one with rheplicant.inference.
+identifiability. See NoiseWaveOperator's module docstring for the full rule.
 
 Run:  uv run python examples/noise_wave_gcr.py
       uv run python examples/noise_wave_gcr.py --one-source
@@ -120,9 +125,13 @@ def twin(t_nw):
 truth = twin(TRUE_T)(state).data
 observed = truth + NOISE * jax.random.normal(jax.random.key(0), truth.shape)
 print(f"observation: {observed.shape}, {float(observed.mean()):.2f} K mean")
-print(f"loads: {n_source}   unknowns: {TRUE_T.size} (3 x {N_FREQ} channels)")
+# k = 3 free temperature families here: T_rx is pinned at T_RX and is not a
+# latent. Fitting it too would make k = 4 and the denominators below 4 x N_FREQ.
+K_FREE = 3
+print(f"loads: {n_source}   unknowns: {TRUE_T.size} "
+      f"({K_FREE} families x {N_FREQ} channels)")
 print(f"equations per channel: {n_source}   -> expected rank "
-      f"{min(n_source, 3) * N_FREQ}/{3 * N_FREQ}\n")
+      f"{min(n_source, K_FREE) * N_FREQ}/{K_FREE * N_FREQ}\n")
 
 # All three spectra are ONE latent of shape (3, n_freq) feeding three leaves.
 # Declaring linear=True is a claim; check_linearity is what turns it into a fact.

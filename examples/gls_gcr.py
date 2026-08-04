@@ -159,7 +159,8 @@ print(f"condition_estimate at that covariance: kappa = {float(kappa):.2e}")
 # ----------------------------------------- what it bought the POINT estimate: nil
 #
 # And that is exact, not a weak effect. Per frequency channel there are three
-# unknowns (T_unc, T_cos, T_sin) and three loads; every time sample on a given
+# unknowns (T_unc, T_cos, T_sin -- T_rx is held known, so it is not a fourth)
+# and three loads; every time sample on a given
 # load predicts the SAME value, so the design matrix has three distinct rows
 # repeated, and the reduced system is square. A square linear system has one
 # solution and the weights cancel out of it. Reweighting cannot move a mean

@@ -104,8 +104,13 @@ twin = assemble(SkySourceOperator(...), CalLoadOperator(t_load=...),
 twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads_1', 'cal_loads_2')
 ```
 
-Three distinct sources is the minimum for an identifiable per-channel
-noise-wave fit, so nothing about that configuration needs hand-wiring. The rule
+A switching cycle of any length comes out of `assemble()` this way, so nothing
+about the configuration needs hand-wiring. How long it has to be for an
+identifiable fit is `NoiseWaveOperator`'s module docstring to say and is stated
+once there: `min(n_src, k) × n_freq` over the `k` **free** temperature families
+while they are free per channel — so three loads suffice only with `T_rx` held
+known, and a basis parameterization has no counting rule at all and must be
+measured with `identifiability()`. The folding rule
 generalizes: `many` instances fold as sibling **Sum** branches into a junction
 and as sibling **selector** branches into a selector, and a selector with only
 one live branch is traversed as identity — no switch array required.

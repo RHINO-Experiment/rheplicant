@@ -44,9 +44,13 @@ the branch chosen by ``coords.extra["receiver_input"]``. ``cal_loads`` is
 ``many=True`` and feeds only the selector, so each instance becomes its OWN
 switch position rather than being summed with its siblings: with two loads the
 switch indexes 0 = antenna, 1 = first load, 2 = second load — the edge
-declaration order, then the order the loads were provided. Three distinct
-sources is what an identifiable per-channel noise-wave fit needs, and
-``assemble()`` expresses it directly. Two instances are addressed as
+declaration order, then the order the loads were provided. How many distinct
+sources an identifiable noise-wave fit needs is
+:mod:`~rheplicant.radio.instrument.noise_wave`'s to say and is stated once
+there — it depends on how many temperature families are free and on whether
+they are free per channel, so it is not a fixed number and in particular is not
+always three. ``assemble()`` expresses any of them directly: one
+``CalLoadOperator`` per switch position. Two instances are addressed as
 ``cal_loads_1`` / ``cal_loads_2``; the bare ``cal_loads`` is an address only
 while there is exactly one (see :mod:`rheplicant.core.graph`).
 

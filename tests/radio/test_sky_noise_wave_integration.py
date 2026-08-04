@@ -527,7 +527,12 @@ class TestCalibrationClosure:
         known, the antenna counts as a source like any other. Three distinct
         Gamma therefore make the per-channel 3x3 system square -- the same
         counting as ``examples/noise_wave_gcr.py``, now with a real sky in the
-        T_src column."""
+        T_src column.
+
+        Three because ``T_rx`` is held known here and only ``t_unc, t_cos,
+        t_sin`` are varied below. The general rule is ``min(n_src, k) * n_freq``
+        over the ``k`` FREE temperature families, measured in
+        ``tests/radio/test_noise_wave.py::TestPerChannelRankRule``."""
         switch = jnp.arange(N_TIME) % self.N_SOURCE
         coords = make_coords(freq, switch)
         state = State(coords=coords)

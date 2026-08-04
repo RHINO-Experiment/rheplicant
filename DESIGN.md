@@ -419,19 +419,35 @@ and re-reads the switch array — which the previous placeholder, holding one
 scalar `Γ` for every sample, could not do.
 
 Why that placement is the whole game: count equations **per frequency channel**,
-since the noise-wave temperatures are functions of frequency and nothing ties
-channels together a priori. Each switch position contributes exactly one
-equation per channel, so the design matrix has rank `min(n_src, 3) × n_freq` —
-one load leaves it deficient threefold, three distinct loads make it square.
-That is why EDGES and REACH switch between four or five calibrators.
+since *while the temperatures are free per channel* nothing ties channels
+together a priori. Each switch position contributes exactly one equation per
+channel, so the design matrix has rank `min(n_src, k) × n_freq`, where `k` is
+the number of **free temperature families**. That is why EDGES and REACH switch
+between four or five calibrators.
 
-The sharp edge worth recording, because the loose version of this claim is
-false: frequency structure in `Γ` **does** identify *scalar*,
-frequency-independent noise-wave temperatures from a single load. It is the
-per-channel case — the physical one — that requires switching. The bridge
-between the two regimes is exactly the note's basis matrices `U_unc`, `U_cos`,
-`U_sin` (Eqs. 13–15): they tie channels together and so lower the number of
-calibrators needed.
+Two sharp edges worth recording, because the loose version of this claim is
+false in both directions, and a team picks a physical switching cadence off it.
+
+**`k` is four, not three, whenever `T_rx` is fitted.** `t_rx` is a leaf of
+`NoiseWaveOperator` exactly like `t_unc, t_cos, t_sin`; its coupling is 1 rather
+than absent. Three distinct loads therefore make a three-family per-channel fit
+square and leave a four-family one deficient by exactly `n_freq`.
+
+**The count is per-channel and does not survive a basis.** Frequency structure
+in `Γ` **does** identify *scalar*, frequency-independent noise-wave temperatures
+from a single load, and the note's basis matrices `U_unc`, `U_cos`, `U_sin`
+(Eqs. 13–15) are the general case of that: they tie channels together, and the
+per-channel counting then stops applying in *both* directions with no counting
+rule to replace it. Two loads and a three-coefficient basis identify all
+`k · n_basis = 12` coefficients at `k = 4` where the per-channel count would say
+6; a single load whose `Γ` is itself low-order in frequency falls *below* the
+counting bound `min(n_src · n_freq, k · n_basis)`, because a basis function
+times a low-order coupling is another low-order function.
+
+So the rule for a basis parameterization is: measure it, with
+`rheplicant.inference.identifiability`. Every number above is a measurement from
+`tests/radio/test_noise_wave.py`, and `NoiseWaveOperator`'s module docstring is
+where the statement lives in full.
 
 **A decision worth flagging rather than burying in a code comment**: `Γ` is
 stored on the operator as two real leaves per source/receiver
@@ -653,8 +669,9 @@ efficiency and a spill fraction indistinguishable in a fit.
 `many=True` at a source folded its instances into a `SumOperator`, always. That
 is right for a junction and wrong for a selector: a switch picks one source per
 sample, it does not add them up. So the graph could not express multi-load
-switching — three distinct sources, the minimum for an identifiable per-channel
-noise-wave fit — and the workaround was to hand-build the `SelectOperator`,
+switching — three distinct sources for an identifiable per-channel noise-wave
+fit with `T_rx` held known, four with it free, per the counting in D15 — and
+the workaround was to hand-build the `SelectOperator`,
 which is how a `Pipeline`-instead-of-`SumOperator` bug got into an example and
 survived until a gradient came back exactly zero.
 

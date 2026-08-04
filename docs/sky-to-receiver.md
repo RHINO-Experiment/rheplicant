@@ -297,16 +297,29 @@ in place of the antenna.
 
 ## 4. A real switching cycle
 
-An identifiable per-channel noise-wave fit needs three sources with genuinely
+An identifiable per-channel noise-wave fit needs several sources with genuinely
 different $\Gamma$. Each switch position contributes exactly **one equation per
-frequency channel**, so with per-channel temperatures the design matrix has rank
+frequency channel**, so *while every temperature is free per channel* the design
+matrix has rank
 
 $$
-\mathrm{rank} = \min\!\left(n_\mathrm{src},\, 3\right) \times n_\mathrm{freq}
+\mathrm{rank} = \min\!\left(n_\mathrm{src},\, k\right) \times n_\mathrm{freq}
 $$
 
-— three distinct loads make it square, one leaves it deficient threefold. See
-[D15](design.md) for the counting.
+where $k$ is the number of **free temperature families**: four when $T_{rx}$ is
+fitted alongside $T_{unc}, T_{cos}, T_{sin}$, three only when it is held known.
+So the three loads assembled below make a three-family fit square and leave a
+four-family one deficient by exactly $n_\mathrm{freq}$.
+
+:::{warning}
+That count is per-channel and nothing more. The moment the temperatures become
+coefficients of a frequency basis, the basis ties channels together and the
+counting stops applying — in **both** directions, with no counting rule to
+replace it. Measure that case with
+{func}`~rheplicant.inference.identifiability.identifiability` instead of
+counting loads. See [D15](design.md) and `NoiseWaveOperator`'s module docstring
+for the measured numbers.
+:::
 
 `cal_loads` is `many=True` and feeds only the selector, so each
 `CalLoadOperator` becomes its own switch position rather than being summed with
@@ -397,9 +410,11 @@ Wiener mean (Eq. 30), CG residual 5.1e-11:
    T_sin  RMS error   0.110 K   ( 1.40% of its  8 K spread)
 ```
 
-$\kappa \approx 40$ is a well-conditioned system: three distinct $\Gamma$ make
-the per-channel $3\times 3$ square, and the antenna counts as a source like any
-other because its $T_\mathrm{src}$ is known. Drop to one source and $\kappa$
+$\kappa \approx 40$ is a well-conditioned system: with $T_{rx}$ held known,
+three distinct $\Gamma$ make the per-channel $3\times 3$ square, and the antenna
+counts as a source like any other because its $T_\mathrm{src}$ is known. Fit
+$T_{rx}$ as well and the per-channel system is $4\times 4$ and wants a fourth
+load. Drop to one source and $\kappa$
 jumps to $\sim 4\times 10^{6}$, at which point `wiener_solve`'s guard
 [refuses to answer](inference.md#conditioning-why-a-residual-is-not-an-accuracy)
 rather than returning a prior-driven posterior that looks converged.

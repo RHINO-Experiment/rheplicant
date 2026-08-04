@@ -77,9 +77,13 @@ class CalLoadOperator(AbstractOperator):
     becomes its OWN switch position rather than being summed with its siblings.
     Provide two loads alongside the antenna chain and the switch indexes
     0 = antenna, 1 = first load, 2 = second load — the graph's in-edge order,
-    then the order they were given. Three distinct sources is exactly what
-    ``NoiseWaveOperator`` needs for an identifiable per-channel fit, so
-    ``assemble()`` expresses the whole switching cycle with no hand-wiring.
+    then the order they were given, so ``assemble()`` expresses a switching
+    cycle of any length with no hand-wiring. How long that cycle has to be for
+    ``NoiseWaveOperator``'s temperatures to be identifiable is stated once, in
+    :mod:`~rheplicant.radio.instrument.noise_wave` — it is
+    ``min(n_src, k) * n_freq`` over the ``k`` FREE temperature families while
+    they are free per channel, so three loads are enough only when ``T_rx`` is
+    held known, and no fixed number covers a basis parameterization at all.
     Read the order off the assembly (``twin["receiver_input"].names``) rather
     than assuming it: it is the order ``gamma_src``'s rows must match.
 

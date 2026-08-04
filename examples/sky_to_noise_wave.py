@@ -297,7 +297,11 @@ print()
 #
 # The switch is what makes it solvable: each position gives one equation per
 # channel, so three distinct Gamma make the per-channel 3x3 system square. The
-# antenna counts as a source like any other because its T_src is known.
+# antenna counts as a source like any other because its T_src is known. Three is
+# the right number HERE because T_rx is held at its known value and only the
+# three noise-wave temperatures are fitted; fit T_rx too and the per-channel
+# system is 4x4 and needs a fourth load. See NoiseWaveOperator's module
+# docstring for the rule and for why a basis parameterization has none.
 space = ParameterSpace(
     latents=[Latent("t_nw", init=jnp.full((3, N_FREQ), 100.0), linear=True)],
     bindings=[

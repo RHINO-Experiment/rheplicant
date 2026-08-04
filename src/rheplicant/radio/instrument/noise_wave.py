@@ -16,15 +16,51 @@ that is precisely what the couplings depend on. The operator therefore carries
 ``Gamma`` per source and re-reads the same switch array the selector used,
 ``coords.extra["receiver_input"]``.
 
-That is not a convenience. Each switch position contributes exactly one equation
-per frequency channel, so with per-channel noise-wave temperatures the design
-matrix has rank ``min(n_src, 3) * n_freq``. One load leaves it deficient by a
-factor of three; three distinct loads make it square. Sharing a single ``Gamma``
-across the cycle collapses every source onto the same row and gives that up
-entirely — the fit then returns a finite, correctly-shaped, wholly prior-driven
-answer. (Frequency structure in ``Gamma`` *does* identify **scalar** noise-wave
-temperatures from a single load; it is the per-channel case, which is the
-physical one, that needs the switch.)
+That is not a convenience, and the counting it supports is the number a real
+experiment picks its switching cadence from, so state it exactly.
+
+**The per-channel rank rule.** Each switch position contributes exactly one
+equation per frequency channel, so *while every temperature is free per
+channel* the design matrix has rank ``min(n_src, k) * n_freq``, where ``k`` is
+the number of free temperature **families**. ``k`` is four — ``T_unc, T_cos,
+T_sin, T_rx`` — whenever ``T_rx`` is fitted, and three only when ``T_rx`` is
+taken as known: ``t_rx`` is a leaf of this operator like the other three, and
+its coupling is 1 rather than absent. So a four-family per-channel fit needs
+**four** distinct loads to be square, and three loads leave it deficient by
+exactly ``n_freq``. Sharing a single ``Gamma`` across the cycle collapses every
+source onto the same row and drops the rank to ``n_freq`` whatever ``n_src``
+is — the fit then returns a finite, correctly-shaped, wholly prior-driven
+answer.
+
+Those are measurements, not arguments:
+``tests/radio/test_noise_wave.py::TestPerChannelRankRule`` sweeps ``n_src`` 1-5,
+``k`` in {3, 4} and ``n_freq`` in {3, 5, 7} through
+:func:`~rheplicant.inference.identifiability.identifiability`.
+
+**The rule is per-channel and nothing more.** The moment the temperatures
+become coefficients of a frequency basis — which is what a smooth-spectrum
+parameterization does, and what the next tranche makes ordinary — the basis
+ties channels together, the per-channel counting stops applying in *both*
+directions, and no counting rule replaces it. What survives is a bound,
+``rank <= min(n_src * n_freq, k * n_basis)``, and two measured facts about how
+loosely it binds (``TestBasisRegimeBreaksTheRule``):
+
+* per-channel counting **understates**. Two loads and a 3-coefficient basis
+  identify all ``k * n_basis = 12`` coefficients at ``k = 4``, where
+  ``min(n_src, k) * n_basis`` would have said 6.
+* the bound **overstates**. A single load whose ``Gamma`` is itself linear in
+  frequency gives rank 5 against a bound of 7, because a basis function times a
+  low-order coupling is another low-order function and the products are not
+  independent. Which loads do that is not visible from ``n_src``.
+
+The scalar case is the ``n_basis = 1`` corner of the same statement: frequency
+structure in ``Gamma`` identifies all ``k`` **scalar** temperatures from a
+single load, which is why a scalar demonstration says nothing about switching.
+
+So: read a switching cadence off ``min(n_src, k) * n_freq`` for a per-channel
+fit, and *measure* every other parameterization with
+:func:`~rheplicant.inference.identifiability.identifiability` — the instrument
+every number above came from.
 
 ``Gamma`` is stored as two real leaves rather than one complex leaf because
 :func:`~rheplicant.inference.uncertainty.fisher_information` runs
@@ -80,15 +116,81 @@ def _rhino_cal_jax():
     return rhino_cal_jax
 
 
+#: Every temperature leaf takes one of these, and the phrasing is shared by all
+#: four error messages so a caller sees the same list wherever they trip.
+_TEMPERATURE_SHAPES = (
+    "() scalar, (n_freq,) per channel, (n_time, 1) per time sample, or "
+    "(n_time, n_freq) per cell"
+)
+
+
+def _check_temperature(name: str, value: jax.Array, n_freq: int) -> None:
+    """Reject a temperature leaf whose shape cannot mean what the caller meant.
+
+    ``rhino_cal_jax.system_temperature`` broadcasts each temperature against a
+    ``(n_time, n_freq)`` coupling, so the *legal* shapes are exactly the ones
+    that broadcast there: scalar, ``(n_freq,)``, ``(n_time, 1)`` and
+    ``(n_time, n_freq)`` (with 1 allowed on either axis). Without this check the
+    illegal ones still fail — but as a raw ``ValueError`` from ``jnp.multiply``
+    at *call* time, naming neither the leaf nor the convention.
+
+    Only ``n_freq`` is checkable here: ``n_time`` arrives with the state, long
+    after ``__check_init__``. That is enough for the case worth catching,
+    because the dangerous shape is a bare per-*time* vector and this rejects
+    every one of those whose length is not ``n_freq``.
+
+    The residual is irreducible and is stated in the message rather than papered
+    over: when ``n_time == n_freq`` a per-time vector and a per-frequency
+    spectrum have the identical shape, nothing can tell them apart, and the
+    wrong one broadcasts along the wrong axis to a finite, correctly-shaped,
+    wrong ``T_sys``. That is upstream's reason for the ``(n_time, 1)`` column
+    convention, and it is why this message names the convention every time.
+    """
+    if value.ndim > 2:
+        raise StateValidationError(
+            f"{name} has shape {tuple(value.shape)}: a noise-wave temperature is "
+            f"0-, 1- or 2-D, never {value.ndim}-D. Legal shapes are "
+            f"{_TEMPERATURE_SHAPES}."
+        )
+    if value.ndim == 1 and value.shape[0] != n_freq:
+        raise StateValidationError(
+            f"{name} has shape {tuple(value.shape)}, but a 1-D temperature is "
+            f"always read as per-FREQUENCY and this operator has n_freq={n_freq}. "
+            f"Legal shapes are {_TEMPERATURE_SHAPES}. If you meant one value per "
+            f"time sample, pass an explicit (n_time, 1) column: the bare vector "
+            f"is not a shape this package can distinguish from a spectrum, and "
+            f"when n_time == n_freq it would broadcast along frequency and return "
+            f"a finite, correctly-shaped, wrong T_sys."
+        )
+    if value.ndim == 2 and value.shape[1] not in (1, n_freq):
+        raise StateValidationError(
+            f"{name} has shape {tuple(value.shape)}: the trailing axis of a 2-D "
+            f"temperature is the frequency axis, so it must be n_freq={n_freq} "
+            f"(or 1, for a per-time column). Legal shapes are "
+            f"{_TEMPERATURE_SHAPES}. A transposed (n_freq, n_time) array lands "
+            f"here rather than broadcasting silently."
+        )
+
+
 class NoiseWaveOperator(AbstractOperator):
     """Apply reflection couplings and add the noise-wave temperatures.
 
+    All four temperatures broadcast against the ``(n_time, n_freq)`` couplings,
+    so each independently takes ``() scalar``, ``(n_freq,)``, ``(n_time, 1)`` or
+    ``(n_time, n_freq)``. **A bare 1-D array is always read as per-frequency**
+    — that is ``rhino_cal_jax.system_temperature``'s convention, and this
+    operator inherits it. To vary a temperature with time, pass an explicit
+    ``(n_time, 1)`` column; a bare ``(n_time,)`` vector is refused at
+    construction unless ``n_time == n_freq``, where no check can tell it from a
+    spectrum.
+
     Attributes:
-        t_unc: uncorrelated noise-wave temperature [K]; scalar or ``(n_freq,)``.
+        t_unc: uncorrelated noise-wave temperature [K].
         t_cos: in-phase noise-wave temperature [K].
         t_sin: quadrature noise-wave temperature [K].
         t_rx: receiver offset temperature [K] (the draft's ``T_rx``; the numpy
-            reference calls the same quantity ``t_0``).
+            reference calls the same quantity ``t_0``). Free like the other
+            three — see the module docstring for what that costs in loads.
         gamma_src_re: ``(n_source, n_freq)`` real part of each source's ``Gamma``.
         gamma_src_im: ``(n_source, n_freq)`` imaginary part.
         gamma_rec_re: ``(n_freq,)`` real part of the receiver's ``Gamma``.
@@ -135,6 +237,12 @@ class NoiseWaveOperator(AbstractOperator):
                 f"gamma_src has n_freq={self.gamma_src_re.shape[1]} but gamma_rec "
                 f"has n_freq={self.gamma_rec_re.shape[0]}."
             )
+        # After the gamma checks, because they are what establish n_freq.
+        n_freq = int(self.gamma_rec_re.shape[0])
+        _check_temperature("t_unc", self.t_unc, n_freq)
+        _check_temperature("t_cos", self.t_cos, n_freq)
+        _check_temperature("t_sin", self.t_sin, n_freq)
+        _check_temperature("t_rx", self.t_rx, n_freq)
 
     @property
     def n_source(self) -> int:
