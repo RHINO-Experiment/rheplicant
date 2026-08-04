@@ -989,16 +989,20 @@ def _check_solve_arguments(
     keywords when they were given, the latent's declaration when they were not,
     and an exception when the two disagree.
 
-    ``noise_std`` is checked here only for the axis contract
-    (:func:`~rheplicant.inference.noise.check_noise_std_axis`), and only when
-    the caller passes it. **OWED: unification.** Every other exit reaches that
-    rule through :func:`~rheplicant.inference.uncertainty.as_noise_model`, which
-    is the one place a ``noise_std`` argument is normalized — but this module
-    does not call it, taking the bare array straight into ``_weights``. Until
-    the solves are routed through ``as_noise_model`` the rule has two homes,
-    and the default of ``None`` is what keeps that gap honest rather than
-    silent: :func:`gcr_sample` does not pass it yet, so the draw is NOT covered
-    while the mean is.
+    ``noise_std`` is checked here for the axis contract
+    (:func:`~rheplicant.inference.noise.check_noise_std_axis`). Both exits pass
+    it — :func:`wiener_solve` and :func:`gcr_sample` — and
+    ``tests/inference/test_noise_std_axis.py`` asserts they refuse the same
+    inputs, because a rule enforced on the mean and not on the draw is worse
+    than no rule: it teaches that the argument is checked.
+
+    **OWED: unification.** Every other exit reaches that rule through
+    :func:`~rheplicant.inference.uncertainty.as_noise_model`, which is the one
+    place a ``noise_std`` argument is normalized — but this module does not
+    call it, taking the bare array straight into ``_weights``. Until the solves
+    are routed through ``as_noise_model`` the rule has two homes. The keyword
+    stays optional so an internal caller that has already normalized need not
+    pay for it twice.
     """
     check_observed_shape(jnp.shape(block.offset), observed)
     if noise_std is not None:
@@ -1447,7 +1451,7 @@ def gcr_sample(
         can be right in.
     """
     prior_mean, prior_std = _check_solve_arguments(
-        block, observed, prior_mean, prior_std, "gcr_sample"
+        block, observed, prior_mean, prior_std, "gcr_sample", noise_std=noise_std
     )
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,

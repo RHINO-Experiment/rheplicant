@@ -38,6 +38,7 @@ from rheplicant.inference import (
     Latent,
     ParameterSpace,
     RadiometerNoise,
+    gcr_sample,
     linear_operator,
     wiener_solve,
 )
@@ -323,3 +324,74 @@ class TestWienerSolve:
             square_block, observed, noise_std=0.5, prior_std=1.0
         )
         assert solved.shape == (N,)
+
+
+class TestBothExitsAgree:
+    """The mean and the draw refuse the same inputs.
+
+    ``gcr_sample`` shares ``_check_solve_arguments`` with ``wiener_solve`` but
+    did not pass ``noise_std`` to it, so the draw accepted an ambiguous vector
+    that the mean refused. That asymmetry is worse than having no rule: a user
+    who meets the refusal on ``estimate`` learns the argument is checked, and
+    then carries the same array into ``sample``.
+
+    It also lands harder on the draw. The mean applies ``noise_std`` once, in
+    the weights; the draw applies it again in the fluctuation term, so a
+    misread axis puts the *width* of every draw on the wrong axis, not merely
+    the point.
+
+    Written as a symmetry test rather than a second copy of the wiener_solve
+    cases on purpose -- a copied test drifts, and it was the absence of a
+    both-exits assertion that let the gap exist in the first place.
+    """
+
+    @pytest.fixture
+    def square_block(self, square_state):
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(SKY)),
+            GainOperator(gain=jnp.ones(N)),
+        )
+        space = ParameterSpace(
+            latents=[Latent("gt", init=jnp.ones(N), linear=True)],
+            bindings=[Bind("gt", into=lambda p: p["gain"].gain)],
+        )
+        return linear_operator(space, twin, square_state)
+
+    @staticmethod
+    def _exits(block, observed, noise_std):
+        """Both exits as zero-argument thunks, so the two rows are identical
+        apart from the exit itself."""
+        return {
+            "wiener_solve": lambda: wiener_solve(
+                block, observed, noise_std=noise_std, prior_std=1.0
+            ),
+            "gcr_sample": lambda: gcr_sample(
+                block, observed, noise_std=noise_std, prior_std=1.0,
+                key=jax.random.PRNGKey(0),
+            ),
+        }
+
+    def test_the_ambiguous_vector_is_refused_by_both(self, square_block, square_state):
+        observed = jnp.full((N, N), SKY)
+        for name, run in self._exits(square_block, observed, SIGMA_VECTOR).items():
+            with pytest.raises(StateValidationError, match="more than one"):
+                run()
+            # ...and each names itself, so the message tells the caller which
+            # exit they were at rather than which one happened to check.
+            with pytest.raises(StateValidationError, match=name):
+                run()
+
+    @pytest.mark.parametrize(
+        "reading",
+        [
+            pytest.param(SIGMA_VECTOR[:, None], id="explicit-column"),
+            pytest.param(SIGMA_VECTOR[None, :], id="explicit-row"),
+            pytest.param(0.5, id="scalar"),
+        ],
+    )
+    def test_an_unambiguous_noise_std_is_accepted_by_both(self, square_block, reading):
+        observed = jnp.full((N, N), SKY)
+        for run in self._exits(square_block, observed, reading).values():
+            value, _ = run()
+            assert value.shape == (N,)
+            assert jnp.all(jnp.isfinite(value))
