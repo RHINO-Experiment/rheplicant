@@ -32,6 +32,11 @@ htmlcov/
 .vscode/
 .idea/
 
+# Claude Code: agent workspace and the specs/plans it writes (working notes,
+# not package documentation — DESIGN.md is where decisions land)
+.claude/
+docs/superpowers/
+
 # Local reference material (contains unpublished draft; repo is public)
 assets/
 
