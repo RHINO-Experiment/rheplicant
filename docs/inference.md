@@ -395,6 +395,31 @@ quantities, since a noise-wave temperature sits near 250 K, not near zero. An
 affine binding that adds the same offset gives the identical Gaussian, but
 putting it on the prior says what it means.
 
+### Where `S` comes from
+
+Both keywords default to the latent's own declaration. `Latent(prior=...)` is
+the one place this package says what a quantity is a priori, and it is what
+`to_numpyro_model` reads — so it is what these solves read too, and a space
+handed to NUTS and to `gcr_sample` targets one posterior rather than two:
+
+```python
+space = ParameterSpace.direct(
+    "t_nw", init=jnp.zeros((3, N_FREQ)),
+    into=lambda p: p["rx"].noise_wave_temps,
+    prior=dist.Normal(250.0, 50.0), linear=True,
+)
+block = linear_operator(space, pipeline, template)
+mean, _ = wiener_solve(block, observed, noise_std=sigma)   # S is already known
+```
+
+The keywords remain, for a latent with no declared prior. What is *not*
+allowed is passing one that contradicts the declaration — that raises, naming
+both numbers, rather than letting one of the two silently win. A declared
+prior with no conjugate Gaussian form (a Half-Normal, a Uniform, a LogNormal)
+also raises here: these routines solve `(AᵀN⁻¹A + S⁻¹)x = b`, and substituting
+such a prior's mean and variance would hand back a finite, confident posterior
+for a model you did not declare. Sample that space with NUTS instead.
+
 This is a constrained realization, not a Markov chain: every call is an
 independent draw, with no burn-in and no convergence to diagnose. It costs the
 same single CG solve as the mean, because the fluctuation enters the

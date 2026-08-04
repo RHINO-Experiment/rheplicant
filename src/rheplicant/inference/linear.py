@@ -28,6 +28,16 @@ to rebuild it wherever those currently are — which is what makes a Gibbs
 sweep possible: draw the linear block exactly, update the nonlinear ones
 however you like, repeat.
 
+**Where the prior comes from.** ``S`` is read off ``Latent(prior=...)`` — the
+same declaration :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`
+reads, so one space handed to NUTS and to :func:`gcr_sample` targets one
+posterior. The ``prior_std=`` / ``prior_mean=`` keywords remain for a
+prior-free latent, but a keyword that *contradicts* a declaration is refused
+rather than allowed to win, and a declared prior with no conjugate Gaussian
+form is refused rather than approximated by its first two moments. Both would
+otherwise be a finite, confident posterior for a model nobody declared, which
+is the failure mode every guard in this module is placed against.
+
 **Probe at extreme scales.** :func:`check_linearity` probes at 10⁻³, 1 and 10³
 times the latent's own magnitude, because near-linearity is scale-dependent:
 ``x + εx²`` is indistinguishable from linear near the origin and grossly
@@ -85,6 +95,12 @@ class LinearBlock:
         offset: ``prediction(0)`` — everything the other parameters contribute.
         forward: ``x -> A x``, from ``jax.linearize``.
         adjoint: ``y -> Aᵀ y``, from ``jax.vjp``, shaped like ``x``.
+        prior: the latent's declared prior, carried through from the
+            :class:`~rheplicant.inference.parameters.Latent`. ``None`` for a
+            prior-free latent, and for a block assembled by hand. It is what
+            lets :func:`wiener_solve` and :func:`gcr_sample` read ``S`` off the
+            declaration instead of making the caller hand-pass — and hand-sync
+            — the same two numbers at every exit.
 
     Adjoint convention, which matters as soon as ``x`` is complex (sky
     ``alm`` coefficients are): ``adjoint`` is exactly ``jax.vjp``, and JAX
@@ -105,6 +121,7 @@ class LinearBlock:
     offset: jax.Array
     forward: Callable[[jax.Array], jax.Array]
     adjoint: Callable[[jax.Array], jax.Array]
+    prior: Any = None
 
 
 def _resolve_name(space: ParameterSpace, name: str | None) -> str:
@@ -316,6 +333,7 @@ def linear_operator(
         offset=offset,
         forward=tangent,
         adjoint=lambda y: pullback(y)[0],
+        prior=latent.prior,
     )
 
 
@@ -337,26 +355,150 @@ def _real_parts(block: LinearBlock) -> tuple[Callable, Callable]:
     return (lambda x: x, lambda parts: parts)
 
 
+def _numpyro_distributions() -> Any:
+    """numpyro's distribution module, or ``None`` when it is not installed.
+
+    Imported here rather than at module scope because numpyro is an optional
+    extra and this module is usable without it — a prior-free linear block
+    solves from keywords alone.
+    """
+    try:
+        import numpyro.distributions as distributions
+    except ImportError:  # pragma: no cover - numpyro is an optional extra
+        return None
+    return distributions
+
+
+def _gaussian_parameters(prior: Any) -> tuple[Any, Any] | None:
+    """``(loc, scale)`` if ``prior`` is a Gaussian **on the latent itself**.
+
+    ``None`` otherwise — including for distributions that merely look like one.
+    Identification is by TYPE, never by attribute, and that is the whole point:
+    ``numpyro.distributions.LogNormal`` carries ``.loc`` and ``.scale`` and even
+    a ``.base_dist`` that *is* a ``Normal``, while being a Gaussian in ``log x``
+    and not in ``x``. Duck-typing on ``.loc``/``.scale`` would read those two
+    numbers off it and return a finite, confident posterior for a
+    parameterization nobody declared, which is exactly the failure this module
+    exists to refuse.
+
+    ``Independent`` and ``ExpandedDistribution`` are unwrapped because both
+    only re-shape a base distribution; ``TransformedDistribution`` and the
+    truncations are not, because both change what the distribution *is*.
+    """
+    distributions = _numpyro_distributions()
+    if distributions is None:  # pragma: no cover - numpyro is an optional extra
+        return None
+    if isinstance(prior, (distributions.Independent, distributions.ExpandedDistribution)):
+        return _gaussian_parameters(prior.base_dist)
+    if isinstance(prior, distributions.Normal):
+        return prior.loc, prior.scale
+    return None
+
+
+def _agrees(supplied: Any, declared: Any) -> bool | None:
+    """Whether two prior parameters are the same number. ``None``: undecidable."""
+    try:
+        return bool(jnp.all(jnp.asarray(supplied) == jnp.asarray(declared)))
+    except jax.errors.ConcretizationTypeError:
+        return None
+    except (TypeError, ValueError):
+        # Shapes that do not even broadcast are a disagreement, not a crash.
+        return False
+
+
+def _reconcile(
+    keyword: str, field: str, supplied: Any, declared: Any, block: LinearBlock, caller: str
+) -> Any:
+    """The supplied keyword, or the declared value — never a silent choice."""
+    if supplied is None:
+        return declared
+    verdict = _agrees(supplied, declared)
+    if verdict is None:
+        raise ParameterSpaceError(
+            f"{caller} cannot check the {keyword}= it was given against the prior latent "
+            f"{block.name!r} declares, because one of the two is a traced value. Pass one "
+            "or the other, not both: whichever lost would still look like it was in force."
+        )
+    if not verdict:
+        raise ParameterSpaceError(
+            f"{caller} was given {keyword}={supplied!r}, but latent {block.name!r} declares "
+            f"prior={type(block.prior).__name__}(..., {field}={declared!r}) in its "
+            "ParameterSpace. One of the two would silently win and the other would be a "
+            "number you believed was in force — and that same declaration reaches "
+            "to_numpyro_model unchanged, so this exit and NUTS would then target different "
+            f"posteriors from one space. Drop {keyword}= and let the declaration drive the "
+            "solve, or change the declaration."
+        )
+    return supplied
+
+
+def _resolve_prior(
+    block: LinearBlock, prior_mean: Any, prior_std: Any, caller: str
+) -> tuple[Any, Any]:
+    """Fill ``prior_mean``/``prior_std`` from the latent's declaration.
+
+    A block with no declared prior passes straight through — that is the escape
+    hatch for a prior-free latent, which the optimizers use and which
+    ``prior_std=`` alone is enough for.
+    """
+    if block.prior is None:
+        return prior_mean, prior_std
+    gaussian = _gaussian_parameters(block.prior)
+    if gaussian is None:
+        raise ParameterSpaceError(
+            f"{caller} is a conjugate-Gaussian solve, but latent {block.name!r} declares a "
+            f"{type(block.prior).__name__} prior, which has no conjugate Gaussian form. "
+            "These exits solve (AᵀN⁻¹A + S⁻¹)x = b, and S⁻¹ only exists as a matrix for a "
+            "Gaussian S; substituting the distribution's mean and variance would return a "
+            "finite, confident posterior for a prior you did not declare — narrower than "
+            "the truth wherever the declared prior is skewed or bounded. Sample this space "
+            "with to_numpyro_model + NUTS instead, which honours the prior as written, or "
+            "declare a numpyro Normal here and keep the conjugate exits."
+        )
+    loc, scale = gaussian
+    return (
+        _reconcile("prior_mean", "loc", prior_mean, loc, block, caller),
+        _reconcile("prior_std", "scale", prior_std, scale, block, caller),
+    )
+
+
+def _require_prior_std(prior_std: Any, caller: str) -> None:
+    """No prior at all leaves AᵀN⁻¹A free to be singular."""
+    if prior_std is None:
+        raise ParameterSpaceError(
+            f"{caller} needs prior_std: with no prior the normal operator AᵀN⁻¹A can be "
+            "singular, and CG would return a finite, arbitrary answer rather than fail. "
+            "Pass a large prior_std for an effectively flat prior, or declare "
+            "Latent(prior=dist.Normal(...)) and it will be read from there."
+        )
+
+
 def _check_solve_arguments(
-    block: LinearBlock, observed: jax.Array, prior_std: Any, caller: str
-) -> None:
-    """Shared preconditions for the mean and the draw."""
+    block: LinearBlock,
+    observed: jax.Array,
+    prior_mean: Any,
+    prior_std: Any,
+    caller: str,
+) -> tuple[Any, Any]:
+    """Shared preconditions for the mean and the draw, plus the resolved prior.
+
+    Returns the ``(prior_mean, prior_std)`` the solve should actually use: the
+    keywords when they were given, the latent's declaration when they were not,
+    and an exception when the two disagree.
+    """
     if jnp.shape(observed) != jnp.shape(block.offset):
         raise ParameterSpaceError(
             f"observed has shape {jnp.shape(observed)} but this block predicts "
             f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
             "problem and return a perfectly finite answer."
         )
-    if prior_std is None:
-        raise ParameterSpaceError(
-            f"{caller} needs prior_std: with no prior the normal operator AᵀN⁻¹A can be "
-            "singular, and CG would return a finite, arbitrary answer rather than fail. "
-            "Pass a large prior_std for an effectively flat prior."
-        )
+    prior_mean, prior_std = _resolve_prior(block, prior_mean, prior_std, caller)
+    _require_prior_std(prior_std, caller)
     if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
         raise ParameterSpaceError(
             f"{caller} expects a real-valued prediction; this block's offset is complex."
         )
+    return prior_mean, prior_std
 
 
 def wiener_solve(
@@ -364,7 +506,7 @@ def wiener_solve(
     observed: jax.Array,
     *,
     noise_std: Any,
-    prior_std: Any,
+    prior_std: Any = None,
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
@@ -397,11 +539,15 @@ def wiener_solve(
         noise_std: noise standard deviation — scalar or broadcastable to the
             data.
         prior_std: prior standard deviation on the latent — scalar or
-            broadcastable to it. Required: without a prior the normal operator
-            can be singular, and CG would return a finite, arbitrary answer
-            instead of complaining.
-        prior_mean: centre of the prior. Defaults to zero, which is wrong for
-            most physical quantities — a noise-wave temperature sits near
+            broadcastable to it. **Defaults to the latent's declared prior**;
+            required only when there is none, because without a prior the
+            normal operator can be singular and CG would return a finite,
+            arbitrary answer instead of complaining. Passing a value that
+            contradicts the declaration raises rather than one silently
+            winning — see the note below.
+        prior_mean: centre of the prior. Defaults to the declared prior's
+            location, and to zero when nothing is declared — which is wrong for
+            most physical quantities, a noise-wave temperature sitting near
             250 K. Equivalent to an affine binding that adds the same offset,
             but says what it means.
         tol: CG tolerance — a bound on the relative RESIDUAL, which is not the
@@ -450,8 +596,22 @@ def wiener_solve(
         require_convergence / κ`` with a ``maxiter`` to match. Past ``κ · eps``
         no tolerance helps and only precision does; the guard says so in its
         own words.
+
+    Note:
+        **Where S comes from.** ``Latent(prior=dist.Normal(m, s))`` is the
+        package's one statement of what a latent is a priori, and it is the
+        statement ``to_numpyro_model`` reads. So it is the statement this solve
+        reads too: declare it once and both exits target the same posterior.
+        The keywords remain, for a prior-free latent and for overriding a
+        declaration you are deliberately solving away from — but a keyword that
+        *contradicts* a declaration raises, because the alternative is one of
+        the two silently winning and the two exits quietly disagreeing. A
+        declared prior with no conjugate Gaussian form (a Half-Normal, a
+        Uniform) raises here as well; NUTS is where that space belongs.
     """
-    _check_solve_arguments(block, observed, prior_std, "wiener_solve")
+    prior_mean, prior_std = _check_solve_arguments(
+        block, observed, prior_mean, prior_std, "wiener_solve"
+    )
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
         prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=None,
@@ -497,7 +657,7 @@ def condition_estimate(
     block: LinearBlock,
     *,
     noise_std: Any,
-    prior_std: Any,
+    prior_std: Any = None,
     iterations: int = POWER_ITERATIONS,
     key: jax.Array | None = None,
 ) -> jax.Array:
@@ -522,7 +682,10 @@ def condition_estimate(
 
     Args:
         block: from :func:`linear_operator`.
-        noise_std, prior_std: as for :func:`wiener_solve`.
+        noise_std, prior_std: as for :func:`wiener_solve`, ``prior_std``
+            included — it defaults to the latent's declared prior, so the κ
+            reported here is the κ of the system those solves will build rather
+            than of a system nobody solves.
         iterations: power-iteration steps per end of the spectrum. The default
             is comfortable; the estimate typically settles within three.
         key: PRNG key for the starting vectors. Fixed by default, so the
@@ -531,6 +694,8 @@ def condition_estimate(
     Returns:
         The estimated condition number, as a scalar array.
     """
+    _, prior_std = _resolve_prior(block, None, prior_std, "condition_estimate")
+    _require_prior_std(prior_std, "condition_estimate")
     return _condition_number(
         block,
         1.0 / jnp.asarray(noise_std) ** 2,
@@ -681,7 +846,7 @@ def gcr_sample(
     observed: jax.Array,
     *,
     noise_std: Any,
-    prior_std: Any,
+    prior_std: Any = None,
     key: jax.Array,
     prior_mean: Any = None,
     tol: float = 1e-6,
@@ -720,11 +885,13 @@ def gcr_sample(
         block: from :func:`linear_operator`.
         observed: the data, shaped like ``block.offset``.
         noise_std: noise standard deviation — scalar or broadcastable to the data.
-        prior_std: prior standard deviation on the latent. Required, as for
-            :func:`wiener_solve`. For a complex latent this is the width of the
-            real and imaginary parts independently.
+        prior_std: prior standard deviation on the latent. Defaults to the
+            latent's declared prior, as for :func:`wiener_solve`, and required
+            only when there is none. For a complex latent this is the width of
+            the real and imaginary parts independently.
         key: PRNG key. ``vmap`` over split keys for many independent draws.
-        prior_mean: centre of the prior; defaults to zero. With uninformative
+        prior_mean: centre of the prior; defaults to the declared prior's
+            location, and to zero when nothing is declared. With uninformative
             data the draws fall back to ``N(prior_mean, prior_std²)``, which is
             the check that it is wired in correctly.
         tol: CG tolerance — a bound on the residual, not on the accuracy.
@@ -743,8 +910,18 @@ def gcr_sample(
         directions left unresolved are the prior-dominated ones that should
         have carried the most scatter — so ``require_convergence`` is on by
         default here too.
+
+    Note:
+        ``S`` is read off ``Latent(prior=...)`` when the keywords are omitted;
+        see the corresponding note on :func:`wiener_solve` for what that does
+        and does not permit. It matters more here than for the mean: with a
+        declared prior ignored, the fluctuation term ``S⁻¹ᐟ²ω₂`` is drawn at
+        the wrong width, so every draw is wrong in the one direction the mean
+        can be right in.
     """
-    _check_solve_arguments(block, observed, prior_std, "gcr_sample")
+    prior_mean, prior_std = _check_solve_arguments(
+        block, observed, prior_mean, prior_std, "gcr_sample"
+    )
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
         prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=key,

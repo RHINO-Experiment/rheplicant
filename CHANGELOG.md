@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### Fixed: `Latent(prior=...)` had no effect at the conjugate exits
+
+`ParameterSpace` is the one place this package says what a latent is, and
+`to_numpyro_model` reads the `prior=` on it. `wiener_solve`, `gcr_sample`,
+`iterative_gls` and `condition_estimate` did not — `grep '\.prior'` over
+`inference/linear.py` and `inference/gls.py` returned nothing. Same twin, same
+space, only the declaration changed:
+
+```
+declared prior Normal(1.0, 0.05)  -> wiener_solve(prior_std=1, mean=0) = 0.999997795
+declared prior Normal(9.9, 1e-4)  -> wiener_solve(prior_std=1, mean=0) = 0.999997795
+declared prior None               -> wiener_solve(prior_std=1, mean=0) = 0.999997795
+```
+
+Bit-identical. The numbers had to be hand-passed as keywords and hand-synced
+across every re-parameterization, and one space could be given to NUTS and to
+`gcr_sample` and target two different posteriors with nothing raised.
+
+`LinearBlock` now carries the declaration, and `prior_std=` / `prior_mean=`
+default from it. Three consequences, all of them refusals rather than guesses:
+
+* a keyword that **contradicts** the declaration raises, naming both numbers —
+  neither silently wins;
+* a declared prior with **no conjugate Gaussian form** (Half-Normal, Uniform,
+  LogNormal, MultivariateNormal, any truncation) raises at these exits and says
+  that `to_numpyro_model` + NUTS is where that space belongs. It is not
+  approximated by its first two moments;
+* the Gaussian is identified by **type, never by attribute**. `LogNormal`
+  carries `.loc`, `.scale` and a `.base_dist` that really is a `Normal`, so
+  duck-typing would have read a lognormal prior as a Gaussian one and returned
+  a finite, confident posterior for a parameterization nobody declared.
+  `Independent` and `.expand()` *are* unwrapped, being re-shapings of a Normal
+  and nothing more.
+
+Keyword-only use is unchanged, and was checked by running rather than by
+reasoning: `examples/gls_gcr.py`, `examples/noise_wave_gcr.py`,
+`examples/tutorial_gcr.py` produce byte-identical output before and after, and
+`examples/three_ways_to_a_posterior.py` — which declares a prior *and* passes
+the matching keywords — differs only in its wall-clock timings.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and
