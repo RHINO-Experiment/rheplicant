@@ -29,7 +29,7 @@ already say. Both stay as documentation of intent, and the class docstring on
 rather than promising a checker.
 
 The walk is by *pytree position*, not by the composite spine
-:func:`~rheplicant.core.graph._children` uses. That is on purpose: this is a
+``rheplicant.core.graph._children`` uses. That is on purpose: this is a
 safety check, so it must not miss a stage held by a composite type nobody
 taught it about. Named composites (:class:`~rheplicant.core.pipeline.Pipeline`,
 :class:`~rheplicant.core.combinators.SumOperator`,

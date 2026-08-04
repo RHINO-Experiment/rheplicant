@@ -313,6 +313,10 @@ class Assembly(AbstractOperator):
             that call goes through no framework code, so nothing intercepts it
             and it still rewrites one copy only. Consult ``.aliased`` yourself
             before writing one.
+        placements: the recipe :meth:`without` re-assembles from, as
+            ``(template nodes, address)`` per placed operator, in template
+            order. Addresses rather than operators on purpose — see the field's
+            own comment.
 
     If the assembly contains live sources it *generates* its data — calling
     it on a state that already carries data raises, because that data would
@@ -437,7 +441,7 @@ class Assembly(AbstractOperator):
 
         Not tree surgery: this re-runs :func:`assemble` over the remaining
         operators, recovered from the built tree by the addresses recorded in
-        :attr:`placements`. So the result is exactly the assembly you would
+        ``placements``. So the result is exactly the assembly you would
         have got by not providing that operator in the first place — same fold,
         same ``lit``/``skipped``/``has_source``/``materialized``, and every
         assembly-time refusal re-run. If dropping the stage leaves something
