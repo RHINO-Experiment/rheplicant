@@ -311,8 +311,17 @@ class TestSeveralLatents:
 
     @pytest.fixture
     def two_linear_latents(self):
-        """``prediction = gain * (SKY_A + amp_b)`` — affine in EITHER, given
-        the other, so both may be declared linear and both get an operator.
+        """``prediction = gain * (SKY_A + sum(amp_b))`` — affine in EITHER,
+        given the other, so both may be declared linear and both get an
+        operator.
+
+        ``amp_b`` is deliberately a DIFFERENT SHAPE from ``gain`` (a
+        3-vector, reduced through ``fn=jnp.sum``), not only a different
+        prior: a block that carried ``space.latents[0]``'s ``shape``/
+        ``dtype`` instead of the ``Latent`` it was actually asked to resolve
+        would then be visibly wrong on its own — the same defect class as
+        carrying the wrong ``prior``, one line above in
+        :func:`~rheplicant.inference.linear.linear_operator`.
 
         The two declarations are deliberately far apart and both sharp enough
         to dominate a nearly flat likelihood, so whichever one reaches the
@@ -320,12 +329,19 @@ class TestSeveralLatents:
         """
         return ParameterSpace(
             latents=(
-                # Declared FIRST, and NOT the one asked for below.
-                Latent("amp_b", init=SKY_B, prior=dist.Normal(20.0, 1e-6), linear=True),
+                # Declared FIRST, and NOT the one asked for below — and a
+                # different SHAPE, so carrying this one by mistake is wrong
+                # in shape as well as in prior.
+                Latent(
+                    "amp_b",
+                    init=jnp.full((3,), SKY_B / 3),
+                    prior=dist.Normal(jnp.full((3,), 20.0), jnp.full((3,), 1e-6)),
+                    linear=True,
+                ),
                 Latent("gain", init=1.0, prior=dist.Normal(7.0, 0.01), linear=True),
             ),
             bindings=(
-                Bind("amp_b", into=lambda p: p["sum"]["sky_b"].amplitude),
+                Bind("amp_b", into=lambda p: p["sum"]["sky_b"].amplitude, fn=jnp.sum),
                 Bind("gain", into=lambda p: p["gain"].gain),
             ),
         )
@@ -336,8 +352,15 @@ class TestSeveralLatents:
         gain = linear_operator(two_linear_latents, twin, template_state, "gain")
         amp_b = linear_operator(two_linear_latents, twin, template_state, "amp_b")
 
+        # Carrying `space.latents[0]` (amp_b) instead of the resolved latent
+        # would give the 'gain' block a (3,) shape, and/or the 'amp_b' block
+        # a () shape — pinned here, not only through the prior below.
+        assert gain.shape == ()
+        assert amp_b.shape == (3,)
+
         assert (float(gain.prior.loc), float(gain.prior.scale)) == (7.0, 0.01)
-        assert (float(amp_b.prior.loc), float(amp_b.prior.scale)) == (20.0, 1e-6)
+        assert jnp.allclose(amp_b.prior.loc, 20.0)
+        assert jnp.allclose(amp_b.prior.scale, 1e-6)
 
     def test_the_solve_is_driven_by_the_resolved_latents_prior(
         self, twin, template_state, two_linear_latents, observed
@@ -421,7 +444,11 @@ class TestContradictionIsRefused:
         def solve(std):
             return wiener_solve(block, observed, noise_std=WEAK_SIGMA, prior_std=std)[0]
 
-        with pytest.raises(ParameterSpaceError, match="traced"):
+        # Names the SUPPLIED side, not the declared one: nothing declared is
+        # traced here, so a message blaming latent 'gain''s declared scale
+        # would be false about this call and must not pass silently. "traced"
+        # alone is satisfied by either side's wording — this pins the side.
+        with pytest.raises(ParameterSpaceError, match=r"prior_std= you passed is a traced value"):
             solve(jnp.array(0.05))
 
     @pytest.mark.parametrize("wrap", [jax.jit, eqx.filter_jit], ids=["jax", "equinox"])
@@ -481,18 +508,37 @@ class TestContradictionIsRefused:
 
         assert float(solve(observed)) == pytest.approx(float(without), rel=1e-6)
 
+    @pytest.mark.parametrize(
+        "wrap_in",
+        [lambda std: [std], lambda std: {"k": std}],
+        ids=["list", "dict"],
+    )
     def test_a_tracer_inside_a_container_is_undecidable_not_a_contradiction(
-        self, twin, template_state, observed
+        self, twin, template_state, observed, wrap_in
     ):
         """A tracer that never reaches a bare ``isinstance`` check is still a
         tracer. Reporting it as a *disagreement* would name two numbers as
-        contradicting when one of them has no value yet."""
+        contradicting when one of them has no value yet.
+
+        Both containers matter, for different reasons: a LIST still lets
+        ``jnp.asarray([tracer])`` succeed, so ``bool()`` on the traced result
+        raises ``ConcretizationTypeError`` — a bare-``isinstance`` guard is
+        saved here by the backstop ``except jax.errors.ConcretizationTypeError``
+        clause in :func:`_agrees`, so this case alone would not catch a guard
+        that only checks the top-level object. A DICT never reaches that
+        backstop the same way: ``jnp.asarray({"k": tracer})`` raises a plain
+        ``TypeError`` before any tracer is ever compared, which the *other*
+        backstop clause, ``except (TypeError, ValueError): return False``,
+        also swallows — but into a settled, invented disagreement rather than
+        ``None``. Only scanning the pytree leaves (rather than the object
+        itself) catches the dict case.
+        """
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
 
         @jax.jit
         def solve(std):
             return wiener_solve(
-                block, observed, noise_std=WEAK_SIGMA, prior_std=[std]
+                block, observed, noise_std=WEAK_SIGMA, prior_std=wrap_in(std)
             )[0]
 
         with pytest.raises(ParameterSpaceError, match="traced"):
