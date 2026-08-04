@@ -49,7 +49,12 @@ from rheplicant.inference.noise import (
     HomoscedasticNoise,
     RadiometerNoise,
 )
-from rheplicant.inference.plan import CHECK_EACH_SWEEP, CHECK_ONCE, MIN_DRAWS
+from rheplicant.inference.plan import (
+    CHECK_EACH_SWEEP,
+    CHECK_ONCE,
+    MIN_DRAWS,
+    _halves,
+)
 from rheplicant.radio import GainOperator
 
 N_TIME, N_FREQ = 6, 9
@@ -1046,6 +1051,80 @@ class TestResults:
 class TestSplitRhat:
     def test_a_constant_trace_has_nothing_to_mix(self):
         assert split_rhat(np.full(20, 3.5)) == 1.0
+
+    @pytest.mark.parametrize("size", [0, 1, 2, 3])
+    def test_a_trace_shorter_than_MIN_DRAWS_is_refused_by_name(self, size):
+        """Every one of these used to be an accident rather than an answer.
+
+        Measured before the guard: 0 raised a bare ``ZeroDivisionError``, 1 a
+        bare ``ValueError: all input arrays must have the same shape``, and 2
+        and 3 RETURNED ``nan`` carrying only a numpy ``RuntimeWarning`` that
+        nothing in this package surfaces. The nan is the dangerous one — it
+        defeats both directions of a comparison-based guard, so a caller
+        testing ``rhat <= rhat_max`` and one testing ``rhat > rhat_max`` both
+        read an undefined diagnostic as the answer they were hoping for.
+
+        ``SamplingPlan.sample`` enforced this minimum already; ``split_rhat``
+        is public and exported and did not.
+        """
+        trace = np.arange(size, dtype=np.float64) * 1.7 + 1.0
+        with pytest.raises(ParameterSpaceError, match=f"at least {MIN_DRAWS}"):
+            split_rhat(trace)
+
+    def test_MIN_DRAWS_itself_is_accepted_and_the_value_is_pinned(self):
+        """The other branch of the guard: the boundary is inclusive, and the
+        answer at it is a number rather than a nan.
+
+        Two traces, because ``r_hat`` is invariant under an affine map of the
+        trace — every four-draw straight ramp gives the same 1.5*sqrt(2), so a
+        ramp alone would pin an accident of the fixture rather than the
+        formula. The second is asymmetric in its halves' spread as well as
+        their means.
+        """
+        ramp = split_rhat(np.array([1.0, 2.7, 4.4, 6.1]))
+        assert ramp == pytest.approx(2.1213203435596424)
+
+        uneven = split_rhat(np.array([1.0, 2.0, 5.0, 11.0]))
+        assert uneven == pytest.approx(1.6684674955730434)
+        assert uneven != pytest.approx(ramp)
+
+    @pytest.mark.parametrize("size", [0, 1, 2, 3, 4, 5, 6, 7])
+    def test_the_two_halves_are_the_first_and_the_LAST_n_over_2(self, size):
+        """The slice, checked at the lengths ``MIN_DRAWS`` forbids as well as
+        the ones it allows — deliberately bypassing ``split_rhat``, because a
+        guard that makes a bug unreachable has not fixed it.
+
+        ``values[-half:]`` is ``values[0:]`` — the WHOLE trace — when ``half``
+        is 0, which is how a one-draw trace came to be compared against
+        itself and reported as mismatched shapes.
+        """
+        values = np.arange(size, dtype=np.float64) * 1.7 + 1.0
+        halves = _halves(values)
+        half = size // 2
+
+        assert halves.shape == (2, half)
+        if half:
+            np.testing.assert_array_equal(halves[0], values[:half])
+            assert halves[1][0] == values[size - half]
+            assert halves[1][-1] == values[-1]
+        if size % 2 and half:
+            assert values[half] not in halves.ravel().tolist()
+
+    def test_sample_at_its_own_minimum_hands_split_rhat_a_trace_it_accepts(
+        self, basis_setup, state
+    ):
+        """The two guards are the same number, so the exit that computes an
+        r_hat cannot trip the one that refuses to compute it. Run at exactly
+        MIN_DRAWS kept draws — one fewer and ``sample`` refuses first.
+        """
+        space, pipeline, observed = basis_setup
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        draws = plan.sample(
+            pipeline, state, observed, noise=NOISE, key=jax.random.key(5),
+            n_sweeps=2 * MIN_DRAWS, warmup=MIN_DRAWS, solve_guard=None,
+        )
+        assert draws.diagnostics.chi2[MIN_DRAWS:].size == MIN_DRAWS
+        assert np.isfinite(draws.diagnostics.rhat)
 
     def test_two_constant_halves_at_different_values_are_infinitely_unmixed(self):
         """A chain that moved once and stopped. Reported as inf rather than as

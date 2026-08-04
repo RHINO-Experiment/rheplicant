@@ -190,6 +190,27 @@ MIN_DRAWS: int = 4
 _DIRECTIONS_SHOWN: int = 4
 
 
+def _halves(values: np.ndarray) -> np.ndarray:
+    """The two halves a split-``r_hat`` compares, stacked ``(2, n // 2)``.
+
+    The first ``n // 2`` draws and the LAST ``n // 2``, so an odd-length trace
+    drops its middle draw rather than handing one half an extra one.
+
+    Written ``values[values.size - half:]`` and not ``values[-half:]``. Those
+    are the same slice for every positive ``half`` and are NOT the same slice
+    when ``half`` is 0: ``values[-0:]`` is ``values[0:]``, the whole trace. The
+    minimum :data:`MIN_DRAWS` imposes makes that unreachable through
+    :func:`split_rhat` today, which is exactly why it is written correctly here
+    — a slice that is only right because a caller upstream never passes the
+    length that breaks it is a bug waiting for someone to lower a constant. Its
+    symptom was a length-1 trace compared against itself and reported by numpy
+    as "all input arrays must have the same shape", naming neither this
+    function nor the length that caused it.
+    """
+    half = values.size // 2
+    return np.stack([values[:half], values[values.size - half :]])
+
+
 def split_rhat(trace: Any) -> float:
     """Split-``r_hat`` of a one-dimensional trace.
 
@@ -207,10 +228,42 @@ def split_rhat(trace: Any) -> float:
     halves are reported as 1.0, and halves that are each constant at *different*
     values as ``inf``, which is the honest reading of a chain that moved once
     and stopped.
+
+    **A trace too short to halve is refused, not answered.**
+    :meth:`SamplingPlan.sample` enforces :data:`MIN_DRAWS` on the draws it keeps
+    and this function is public and exported, so it enforces the same minimum
+    rather than trusting its one in-package caller. What it refuses used to be
+    returned: two halves of one have no within-half variance, so ``ddof=1`` gave
+    ``nan`` under a numpy ``RuntimeWarning`` nothing here surfaces. That nan is
+    worse than either bare exception below it, because **nan defeats a
+    comparison in both directions** — ``rhat <= rhat_max`` is False and
+    ``rhat > rhat_max`` is False too, so a threshold guard reads an undefined
+    diagnostic as whichever answer the caller happened to test for.
+
+    Args:
+        trace: any array-like; flattened first, so its shape does not matter.
+
+    Returns:
+        The split-``r_hat``, or ``inf`` for halves each constant at different
+        values.
+
+    Raises:
+        ParameterSpaceError: if fewer than :data:`MIN_DRAWS` values are given.
     """
     values = np.asarray(trace, dtype=np.float64).ravel()
-    half = values.size // 2
-    halves = np.stack([values[:half], values[-half:]])
+    if values.size < MIN_DRAWS:
+        raise ParameterSpaceError(
+            f"split_rhat was given {values.size} value(s) and a split-r_hat needs at "
+            f"least {MIN_DRAWS} — two halves of two. Below that the mixing diagnostic "
+            "is not weak, it is undefined: halves of one have no variance within them "
+            "to divide by, so the answer came back as nan rather than as this refusal "
+            "— and a nan passes no threshold test in either direction, which makes an "
+            "undefined diagnostic read as whichever verdict the caller tested for. "
+            "SamplingPlan.sample refuses the same count on (n_sweeps - warmup); this "
+            "is that refusal, for the trace you brought yourself."
+        )
+    halves = _halves(values)
+    half = halves.shape[1]
     within = float(np.mean(np.var(halves, axis=1, ddof=1)))
     between = float(half * np.var(np.mean(halves, axis=1), ddof=1))
     if within <= 0.0:
