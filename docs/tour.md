@@ -183,8 +183,12 @@ the graph's own node ids — `CWCalibrationOperator.must_precede == ("bandpass",
 cw_tone))` raises instead of building that calibrator. The test is
 **reachability**, not a sort order: an absent stage is no violation (there is
 nothing to pass through), while a node id the template does not have is one.
-It is checked by `assemble()` and only there — the equivalent `Pipeline(...)`
-spelling builds the same composition without the check. See D27.
+Both routes check it: `assemble()` by reachability on the template,
+`Pipeline(...)` by order among its own `names`. The graph route is the stronger
+one — it also refuses a `must_precede` naming a node the template does not
+have, and a sequence binds the constraint only through stage names, so
+`ReceiverOperator`'s auto-derived `receiver` does not bind a `bandpass`
+constraint unless you pass `names=`. See D27.
 
 Switched calibration is one more provided operator:
 

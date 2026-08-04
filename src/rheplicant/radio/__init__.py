@@ -42,22 +42,40 @@ or by just providing the operators::
                     beam, ground_pickup, atmosphere, noise_wave, cw_tone,
                     bandpass, gain, noise, emi, adc, flagging, averaging)
 
-The two spellings compile to the same composition, and both now *check* the
-ordering an operator declares (``must_precede``) — ``Pipeline`` refuses a
-violating sequence at construction, ``assemble`` refuses a violating placement
-on the graph. They differ in how much they can say: the graph knows the tone
-landed on ``noise`` and names the node, a sequence knows only its own stages,
-so the two raise ``AssemblyError`` and ``PipelineError`` respectively. Both
-derive from ``DirtError`` and from ``ValueError``, so one ``except`` catches
-either.
+Both spellings compile to the same composition, and both now check the ordering
+an operator declares (``must_precede``). They are still not interchangeable,
+and the difference is what each one is *able* to ask:
 
-One limit worth knowing before relying on the sequence route: it binds through
-stage NAMES. ``Pipeline(..., names=(...))`` and the auto-derived names are what
-a ``must_precede`` entry is matched against, so ``GainOperator`` → ``"gain"``
-binds the tone's ``"gain"`` constraint, while ``ReceiverOperator`` →
-``"receiver"`` does not bind its ``"bandpass"`` one. A domain-agnostic sequence
-has no graph vocabulary to do better. ``assemble`` has no such gap, because
-placement is on the node itself. See D27.
+* ``assemble`` tests **reachability** on the template — does this stage's
+  output actually reach the node it must precede — and additionally refuses a
+  ``must_precede`` naming a node the template does not have, because an
+  unenforceable declaration is prose in a ClassVar. It raises ``AssemblyError``
+  and can name the node the operator landed on.
+* ``Pipeline`` tests **order among its own** ``names``: if a named stage is
+  present in this sequence, it must come after the declaring stage. It raises
+  ``PipelineError``. A stage that is not present is not a violation, it cannot
+  see into a nested composite, and — having no node list — it cannot tell a
+  typo from a legitimately absent stage.
+
+Both errors derive from ``DirtError`` and from ``ValueError``, so one ``except``
+catches either.
+
+The practical consequence, because it is easy to be caught by: the sequence
+route binds through stage NAMES, so auto-derived names bind a constraint only
+where they happen to coincide with node ids. ``GainOperator`` auto-names to
+``"gain"``, so the tone's ``"gain"`` half binds; ``ReceiverOperator``
+auto-names to ``"receiver"``, **not** ``"bandpass"``, so that half does not
+bind unless the caller passes ``names=``. Measured::
+
+    Pipeline(receiver, tone)                              # accepted
+    Pipeline(receiver, tone, names=("bandpass", "cw_tone"))
+    # PipelineError: ... 'bandpass' ... runs BEFORE this one
+
+The example above is in exactly that situation — its ``cw_tone`` precedes both
+stages, so nothing is wrong with it, but only the ``gain`` half of the
+constraint is actually being checked. Pass ``names=`` matching the graph's node
+ids, or use ``assemble``, which has no such gap because placement is on the
+node itself. See D27.
 
 Physics is deliberately placeholder where the operator's own docstring says so
 — 17 of the 29 concrete operator classes here, a count pinned by

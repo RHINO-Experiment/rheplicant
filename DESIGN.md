@@ -1130,16 +1130,32 @@ reads `"data"` and writes `"data"` — so "before the gain" is not a sentence th
 vocabulary can form. Keeping them separate is what lets `requires`/`provides`
 stay a single-shape contract (see *Known deferred issues*).
 
-**Known limit, recorded rather than implied.** Enforcement lives in
-`assemble()`. The `Pipeline` route that `rheplicant.radio`'s own module
-docstring calls "equivalently, by just providing the operators" is equivalent in
-*result*, not in *checking*: `Pipeline(sky, bandpass, gain, cw_tone)` builds and
-runs the placement `assemble` refuses. `Pipeline` and both combinators call
-`validate_operators`; none of them applies `must_precede`, because a bare
-sequence has no reachability structure to test against — degrading the test to
-"this stage's index precedes every named stage present in this sequence" is
-possible and is not implemented. Until it is, `assemble()` is the enforcing
-route and the only one.
+**Both routes enforce it, and they are not equally able to.** The degraded test
+this section once recorded as "possible and not implemented" is now
+`check_stage_ordering`, called from `Pipeline.__init__`: *if a named stage is
+present in this sequence, it must come after the declaring stage*. So
+`Pipeline(sky, bandpass, gain, cw_tone)` no longer builds the placement
+`assemble` refuses.
+
+What the sequence route still cannot do follows from having `names` where the
+graph has a node list, and each item is pinned in
+`tests/core/test_ordering.py`:
+
+* it cannot refuse an unenforceable declaration. `assemble` rejects a
+  `must_precede` naming a node the template does not have; a Pipeline has no
+  such list, so a typo and a legitimately absent stage are one observation.
+* it cannot see into a nested composite — `names` is one level deep.
+* it binds through NAMES, so an auto-derived name enforces a constraint only
+  where it coincides with a node id. `GainOperator` auto-names to `gain` and
+  binds; `ReceiverOperator` auto-names to `receiver`, not `bandpass`, and does
+  not. Measured: `Pipeline(receiver, tone)` is accepted where
+  `Pipeline(receiver, tone, names=("bandpass", "cw_tone"))` is refused.
+
+The combinators still do not apply it, and that is not an omission:
+`SumOperator` and `SelectOperator` run their branches in parallel on the same
+input, so "precede" is not a relation between two of them.
+
+`assemble()` therefore remains the stronger route, no longer the only one.
 
 ### D28 — A smooth basis is the identifiability repair, so it belongs to `core`
 
