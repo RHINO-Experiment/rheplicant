@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant import Pipeline
+from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference import (
     GaussianLikelihood,
     GradientCalibrator,
@@ -17,11 +18,18 @@ from rheplicant.radio import GainOperator, NoiseOperator, SkyOperator
 
 @pytest.fixture
 def pipeline():
+    """Deterministic, and 3 != 5 so a stage swap is a different number."""
     return Pipeline(
-        SkyOperator(amplitude=jnp.array(1.0)),
-        GainOperator(gain=jnp.array(1.5)),
-        NoiseOperator(sigma=jnp.array(0.1)),
-        names=("sky", "gain", "noise"),
+        SkyOperator(amplitude=jnp.array(3.0)),
+        GainOperator(gain=jnp.array(5.0)),
+        names=("sky", "gain"),
+    )
+
+
+@pytest.fixture
+def stochastic_pipeline(pipeline):
+    return Pipeline(
+        *pipeline.stages, NoiseOperator(sigma=jnp.array(0.1)), names=("sky", "gain", "noise")
     )
 
 
@@ -30,12 +38,28 @@ class TestBuildForwardFn:
         forward, params0 = build_forward_fn(pipeline, template_state)
         direct = pipeline(template_state).data
         assert jnp.array_equal(forward(params0), direct)
+        assert jnp.allclose(direct, 15.0)
 
     def test_params_are_only_inexact_arrays(self, pipeline, template_state):
         _, params0 = build_forward_fn(pipeline, template_state)
         leaves = jax.tree.leaves(params0)
-        assert len(leaves) == 3  # amplitude, gain, sigma
+        assert len(leaves) == 2  # amplitude, gain
         assert all(jnp.issubdtype(leaf.dtype, jnp.inexact) for leaf in leaves)
+
+    def test_a_stochastic_stage_is_refused_by_name(
+        self, stochastic_pipeline, template_state
+    ):
+        """The closure would freeze one noise draw and fit against it forever."""
+        with pytest.raises(ParameterSpaceError, match="NoiseOperator at 'noise'"):
+            build_forward_fn(stochastic_pipeline, template_state)
+
+    def test_the_stochastic_pipeline_still_runs_as_a_simulator(
+        self, stochastic_pipeline, template_state
+    ):
+        """Refusing a FIT TARGET must not refuse the twin that generates data."""
+        first = stochastic_pipeline(template_state).data
+        other = stochastic_pipeline(template_state.replace(key=jax.random.key(3))).data
+        assert jnp.all(jnp.isfinite(first)) and not jnp.allclose(first, other)
 
     def test_grad_is_finite_and_nonzero(self, pipeline, template_state):
         forward, params0 = build_forward_fn(pipeline, template_state)

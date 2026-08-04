@@ -60,6 +60,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.contract import RANDOMNESS, describe_stages, stages_requiring
 from rheplicant.core.errors import ParameterSpaceError
 
 # `Assembly.aliased` records the nodes a fold embedded more than once; this
@@ -88,6 +89,55 @@ def _dtype_kind(dtype: Any) -> str:
     if jnp.issubdtype(dtype, jnp.bool_):
         return "boolean"
     return str(dtype)  # pragma: no cover - defensive
+
+
+def refuse_stochastic_stages(pipeline: AbstractOperator, caller: str) -> None:
+    """Refuse a forward model that draws its own randomness. Raises, or returns ``None``.
+
+    Inference closes the model over ONE template state, so an operator that
+    consumes the PRNG draws ONE realisation and every prediction the engine
+    compares against the data carries that same frozen field. The likelihood is
+    then a likelihood of the wrong model, and nothing downstream can tell:
+    adding a constant field is exactly affine, so
+    :func:`~rheplicant.inference.linear.check_linearity` sees residual 0.0 and
+    :func:`~rheplicant.inference.identifiability.identifiability` reports full
+    rank. Measured on an 8x8 grid with a ``NoiseOperator(sigma=20)`` in the
+    twin and nothing else changed: the point estimate moved from 1.1015 to
+    1.0824 against a truth of 1.1, and BOTH exits reported the same error bar,
+    0.002451, to every digit. That is 7.8 sigma of bias for this draw — the
+    magnitude is the realisation, the invisibility is structural. Both exits of
+    the workflow wrong by the same amount, with no diagnostic moving, is the
+    failure this refusal exists for.
+
+    The detector is the operators' own declaration —
+    :data:`~rheplicant.core.contract.RANDOMNESS` in ``requires`` — so a new
+    stochastic operator is covered the day it declares what it reads, with
+    nothing here to update.
+
+    Args:
+        pipeline: the forward model.
+        caller: what to name in the message.
+
+    Raises:
+        ParameterSpaceError: naming every stochastic stage and its label.
+    """
+    stochastic = stages_requiring(pipeline, RANDOMNESS)
+    if not stochastic:
+        return
+    raise ParameterSpaceError(
+        f"{caller} was given a forward model containing {describe_stages(stochastic)}, "
+        f"which declares {RANDOMNESS!r} in `requires` and therefore draws randomness "
+        "from the state's PRNG key. Inference closes the model over one template "
+        "state, so that draw is made ONCE and the same frozen realisation is added to "
+        "every prediction compared against the data — a bias in the fitted parameters "
+        "that is reported with an unchanged error bar, because adding a constant field "
+        "is exactly affine and so passes check_linearity, identifiability and every "
+        "shape check untouched. Drop the stage from the twin you infer with: "
+        "Assembly.without(node_id) for a graph assembly, or rebuild the Pipeline "
+        "without it. Keep the stochastic pipeline for GENERATING data — that is where "
+        "the noise belongs — and give the inference exits the deterministic model plus "
+        "a noise_std / NoiseModel, which is how the scatter is meant to enter."
+    )
 
 
 def _tag_leaves_with_paths(pipeline: AbstractOperator) -> AbstractOperator:
@@ -359,7 +409,15 @@ class ParameterSpace(eqx.Module):
 
         The failure modes it exists to prevent all share a shape: they produce a
         finite, correctly-shaped, **wrong** inference rather than an exception.
+
+        One of them is a property of the pipeline alone rather than of the pair:
+        a stage that draws randomness (:func:`refuse_stochastic_stages`). It is
+        checked here because this is the one place every inference exit passes
+        through — :meth:`forward_fn` calls it, and so do
+        :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model` and
+        :func:`~rheplicant.inference.npe.simulate_pairs` directly.
         """
+        refuse_stochastic_stages(pipeline, "This ParameterSpace")
         abstract = self._abstract_values()
 
         if self.raw_bind is None:

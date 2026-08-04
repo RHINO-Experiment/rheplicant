@@ -41,7 +41,12 @@ from rheplicant.inference.numpyro_bridge import (
     predict_from_samples,
     to_numpyro_model,
 )
-from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
+from rheplicant.inference.parameters import (
+    Bind,
+    Latent,
+    ParameterSpace,
+    refuse_stochastic_stages,
+)
 from rheplicant.inference.plan import (
     Block,
     Draws,
@@ -100,6 +105,7 @@ __all__ = [
     "parameter_covariance",
     "predict_from_samples",
     "propagate_covariance",
+    "refuse_stochastic_stages",
     "simulate_pairs",
     "split_rhat",
     "push_forward",

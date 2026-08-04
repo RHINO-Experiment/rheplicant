@@ -6,6 +6,7 @@ so it can later be extracted as a standalone framework package.
 
 from rheplicant.core.basis import BASIS_KINDS, SeparableBasis, basis_matrix
 from rheplicant.core.combinators import SelectOperator, SumOperator
+from rheplicant.core.contract import RANDOMNESS, stages_requiring, walk_operators
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.environment import Environment
 from rheplicant.core.errors import (
@@ -33,6 +34,7 @@ from rheplicant.core.state import State
 
 __all__ = [
     "BASIS_KINDS",
+    "RANDOMNESS",
     "AbstractOperator",
     "AmbiguousNodeError",
     "Assembly",
@@ -59,4 +61,6 @@ __all__ = [
     "SeparableBasis",
     "SumOperator",
     "basis_matrix",
+    "stages_requiring",
+    "walk_operators",
 ]

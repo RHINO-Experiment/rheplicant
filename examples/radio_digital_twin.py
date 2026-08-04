@@ -95,7 +95,18 @@ print(f"simulated waterfall: {observation.data.shape}  "
 # --------------------------------------------------------------- inference --
 # Mis-calibrated model: same instrument, wrong gain. Train ONLY the gain —
 # node-id access works on the assembly regardless of fold nesting.
-model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
+#
+# First drop the two stochastic stages. The twin ABOVE should have them: that
+# is where the noise and the RFI belong, in the data. A fit target may not,
+# because inference closes the model over one state, so each of them would draw
+# ONE realisation and add that same frozen field to every prediction — a biased
+# gain reported with an unchanged error bar. `build_forward_fn` refuses such a
+# model by name; `without` is how you answer it.
+model = (
+    twin.without("noise")
+    .without("rfi_field")
+    .replace_node("gain", GainOperator(gain=jnp.array(1.0)))
+)
 spec = jax.tree.map(lambda _: False, model)
 spec = eqx.tree_at(lambda p: p["gain"].gain, spec, replace=True)
 forward, params0 = build_forward_fn(model, state, filter_spec=spec)

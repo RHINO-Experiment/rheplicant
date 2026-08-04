@@ -30,9 +30,11 @@ class AbstractOperator(eqx.Module):
     """A pure, differentiable transformation ``State -> State``.
 
     Attributes:
-        requires: declarative contract (not enforced yet) — dotted State
-            paths this operator reads, e.g. ``("data", "coords.freq", "key")``.
+        requires: dotted State paths this operator reads, e.g.
+            ``("data", "coords.freq", "key")``. Mostly documentation — with one
+            enforced member, ``"key"``: see below.
         provides: dotted State paths this operator writes, e.g. ``("data",)``.
+            Documentation.
         graph_node: home node on a SignalGraph template (assembly); ``None``
             means "place explicitly with At(node, op)".
         must_precede: node ids this operator's contribution must flow
@@ -43,9 +45,28 @@ class AbstractOperator(eqx.Module):
             refusal still names the operator, the constraint and the actual
             placement; it just cannot say what the wrong placement costs.
 
-    The requires/provides tuples are documentation today and the hook for a
-    future ``pipeline.validate()`` static checker. ``must_precede`` is NOT one
-    of their consumers and is deliberately a third declaration: requires and
+    ``"key"`` in ``requires`` is a **contract, not a note**: it says this
+    operator draws randomness through :meth:`~rheplicant.core.state.State.next_key`,
+    and the inference layer refuses a model that contains one — a frozen draw
+    from the template key would be added to every prediction alike, which is a
+    bias no shape check, no linearity check and no rank test can see (the
+    corruption is exactly affine and full rank). :mod:`rheplicant.core.contract`
+    reads the declaration; :func:`~rheplicant.inference.parameters.refuse_stochastic_stages`
+    is the consumer.
+
+    The rest is descriptive, and that is a decision rather than an omission.
+    Threading paths forward from a template State and refusing an operator
+    whose ``requires`` names an absent one is not implementable against the
+    operators shipped here: ``GroundPickupOperator`` declares
+    ``"env.temperature"`` and documents a ``t_ground`` fallback for when it is
+    missing, so its declaration means "reads if present". And ``provides`` is
+    ``("data",)`` on 26 of the 31 declaring classes, so threading it
+    distinguishes nothing the graph's own node kinds do not already say. These
+    tuples therefore describe intent and carry exactly one enforced rule; they
+    are not a checker waiting to be written.
+
+    ``must_precede`` is NOT one of their consumers and is deliberately a third
+    declaration: requires and
     provides speak in State paths, and every operator on the receiver chain
     reads ``"data"`` and writes ``"data"``, so "before the gain" is not a
     sentence that vocabulary can form. Position on the signal path is the

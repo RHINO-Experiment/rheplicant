@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant import Pipeline, State, SumOperator
+from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference import build_forward_fn, mean_squared_error
 from rheplicant.radio import (
     ADCOperator,
@@ -23,6 +24,16 @@ from rheplicant.radio import (
 )
 
 N_FREQ = 4  # matches tests/conftest.py
+
+
+def _without_noise(pipeline: Pipeline) -> Pipeline:
+    """The same twin with its stochastic stage dropped — a legal fit target."""
+    kept = [
+        (name, stage)
+        for name, stage in zip(pipeline.names, pipeline.stages, strict=True)
+        if name != "noise"
+    ]
+    return Pipeline(*(stage for _, stage in kept), names=tuple(name for name, _ in kept))
 
 
 @pytest.fixture
@@ -97,8 +108,18 @@ class TestEndToEnd:
         assert batch.shape == (3, 2, N_FREQ)
         assert not jnp.allclose(batch[0], batch[1])  # different keys, different noise
 
-    def test_forward_fn_composes_with_pipeline(self, demo_pipeline, template_state):
-        forward, params0 = build_forward_fn(demo_pipeline, template_state)
-        assert jnp.array_equal(forward(params0), demo_pipeline(template_state).data)
+    def test_forward_fn_refuses_the_stochastic_twin(self, demo_pipeline, template_state):
+        """The demo twin generates data; a fit target may not draw its own noise."""
+        with pytest.raises(ParameterSpaceError, match="NoiseOperator at 'noise'"):
+            build_forward_fn(demo_pipeline, template_state)
+
+    def test_forward_fn_composes_with_the_deterministic_twin(
+        self, demo_pipeline, template_state
+    ):
+        model = _without_noise(demo_pipeline)
+        forward, params0 = build_forward_fn(model, template_state)
+        assert jnp.array_equal(forward(params0), model(template_state).data)
+        # one leaf fewer than the twin: sigma is gone, everything else stayed
+        assert len(jax.tree.leaves(eqx.filter(params0, eqx.is_inexact_array))) == 6
         grads = jax.grad(lambda p: jnp.sum(forward(p)))(params0)
         assert all(jnp.all(jnp.isfinite(g)) for g in jax.tree.leaves(grads))

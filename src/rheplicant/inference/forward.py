@@ -18,6 +18,7 @@ import jax
 
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.parameters import refuse_stochastic_stages
 
 
 def build_forward_fn(
@@ -40,7 +41,20 @@ def build_forward_fn(
         ``(forward, params0)``: the forward function and the initial parameter
         pytree extracted from the pipeline. ``forward(params0)`` reproduces
         ``pipeline(state_template).data`` exactly.
+
+    Raises:
+        ParameterSpaceError: if the pipeline contains a stage that draws
+            randomness. ``state_template`` is closed over, so ``forward`` would
+            return one frozen noise realisation on every call and a calibrator
+            would fit the wrong model without complaint — see
+            :func:`~rheplicant.inference.parameters.refuse_stochastic_stages`.
+            To build a *simulator* closure over a stochastic pipeline, use the
+            ``eqx.partition``/``eqx.combine`` idiom in the module docstring
+            directly, and vary the key per call: that is a different object
+            from a fit target, and the point of refusing here is that the two
+            look identical once built.
     """
+    refuse_stochastic_stages(pipeline, "build_forward_fn")
     params0, static = eqx.partition(pipeline, filter_spec)
 
     def forward(params: Any) -> jax.Array:
