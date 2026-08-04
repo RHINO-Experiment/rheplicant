@@ -108,6 +108,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from rheplicant.core.coordinates import (
+    MAX_TIME_RESOLUTION_IN_SAMPLES as _MAX_TIME_RESOLUTION_IN_SAMPLES,
+)
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -194,15 +197,14 @@ MIN_CEILING_IN_CHANNELS = 2.0
 
 #: Largest fraction of one sample interval that ``coords.time``'s own
 #: representable resolution may occupy, before a drift is measured against
-#: times that are not there.
+#: times that are not there. Re-exported, not redefined: the cut is a property
+#: of how ``coords.time`` is STORED rather than of this operator's arithmetic,
+#: so it is stated once in :mod:`rheplicant.core.coordinates` — which now
+#: refuses such an axis at construction, ahead of every consumer — together
+#: with the calibration of the 1e-2 itself.
 #:
-#: ``coords.time`` is stored through ``jnp.asarray``, which is float32 unless
-#: x64 is enabled, and both the injection and the band guard read ``t - t[0]``.
-#: Subtracting the anchor cannot undo a rounding that already happened at STORE
-#: time: a unix-second axis (~1.75e9) has a float32 spacing of 128 s, so a
-#: 100 s cadence is quantised onto a 128 s grid BEFORE the subtraction. Both
-#: sides read the same corrupted values, so the band guard cannot see it.
-#: Measured on an 11-channel 1 MHz grid, 4 samples 100 s apart, ``drift_rate``
+#: What this operator adds on top of the container's check is the measurement
+#: below. On an 11-channel 1 MHz grid, 4 samples 100 s apart, ``drift_rate``
 #: 1e4 Hz/s — one channel per sample:
 #:
 #:     coords.time            elapsed              peak ch     protected/11
@@ -213,20 +215,11 @@ MIN_CEILING_IN_CHANNELS = 2.0
 #: wrong channel, and the mask blows out from one channel to eight of eleven —
 #: this operator's own named silent failure. Nothing raises, nothing is NaN,
 #: every shape is right; the same run under ``JAX_ENABLE_X64=1`` gives
-#: ``[4,5,6,7]``, so the cause is precision, not logic. The axis is not
-#: hypothetical: :func:`~rheplicant.radio.rhino.read_rhino_observation` sets
-#: ``time=obs.time_s``, documented there as unix seconds.
-#:
-#: 1e-2 rather than something tighter because a sample is an AVERAGE over its
-#: own integration, so its time tag is only meaningful to within one interval
-#: to begin with; demanding the representation error be a hundredth of that
-#: leaves two orders of magnitude of headroom below what the axis itself means.
-#: At a ratio of 1.0 samples merge outright, which is the measured failure —
-#: 100x beyond this cut. Seconds from the start of the run, of the day
-#: (86400 -> 3.9e-5 of a 100 s interval) or of the month (2.6e6 -> 2.5e-3) all
-#: pass; seconds from the start of the YEAR (3.15e7 -> 2e-2) do not, and should
-#: not, because elapsed times there are already wrong by 2 s.
-MAX_TIME_RESOLUTION_IN_SAMPLES = 1e-2
+#: ``[4,5,6,7]``, so the cause is precision, not logic. Both the injection and
+#: the band guard read ``t - t[0]``, so they read the SAME corrupted elapsed
+#: values and the band guard cannot see it — subtracting the anchor cannot undo
+#: a rounding that already happened at store time.
+MAX_TIME_RESOLUTION_IN_SAMPLES = _MAX_TIME_RESOLUTION_IN_SAMPLES
 
 
 def _static_setting(name: str, array_why: str, traced_why: str):
@@ -609,24 +602,26 @@ class CWCalibrationOperator(AbstractOperator):
         """Refuse a ``coords.time`` whose STORED precision has eaten the cadence.
 
         The one check here that is not about the tone at all: it is about the
-        axis the drift is measured against. ``np.spacing`` is taken on the
-        array's own scalar rather than on a Python float, deliberately — the
-        question is what the stored dtype can represent, and
-        ``np.spacing(float(x))`` answers it for float64 (2.4e-7 s at unix
-        seconds) no matter what the array actually holds (128 s in float32).
+        axis the drift is measured against.
 
-        ``np.abs`` on both because an axis anchored on a future epoch is
-        negative — ``np.spacing`` of a negative number is negative, and a
-        negative resolution would compare below any positive threshold and
-        wave the axis through. On the gaps because the comparison is against
-        the MAGNITUDE of the sample interval, which a descending axis has just
-        as much as an ascending one.
+        Most of what this used to catch alone is now caught earlier, by
+        :func:`rheplicant.core.coordinates._refuse_a_time_axis_the_stored_dtype_cannot_carry`,
+        which applies the same ratio at the point where ``jnp.asarray`` does the
+        rounding — so a unix-second axis never reaches this operator at all.
+        Read that function for the shared reasoning: ``np.spacing`` on the
+        array's own scalar rather than on a Python float, ``np.abs`` on both the
+        peak and the gaps, non-finite values named before any comparison.
 
-        The smallest gap rather than the median or the mean: rounding makes
-        every nonzero gap a multiple of the resolution, so a run that has
+        What is still this operator's own is the **smallest gap including
+        zero**. The container takes the smallest DISTINCT gap, because it cannot
+        tell a genuinely repeated timestamp from a collision and has no business
+        refusing the first. This operator can: it subtracts times, so two
+        samples sharing an elapsed value means the tone silently stops drifting
+        across them, which is precisely this operator's named failure. Rounding
+        makes every nonzero gap a multiple of the resolution, so a run that has
         already lost samples to collision reports a smallest gap of exactly
-        zero and is refused by the same comparison, with the zero in the
-        message saying why.
+        zero and is refused by the same comparison, with the zero in the message
+        saying why.
         """
         resolution = float(np.spacing(np.abs(times).max()))
         cadence = float(np.min(np.abs(np.diff(times))))

@@ -22,6 +22,24 @@ class BackendOperator(AbstractOperator):
     Updates ``coords.time`` to the per-chunk mean times, keeping data and
     coordinates consistent.
 
+    This is one of exactly two places in the package that does ARITHMETIC on
+    ``coords.time`` values rather than reading its length (the other is
+    :class:`~rheplicant.radio.instrument.calibration.CWCalibrationOperator`'s
+    drift), and it is where a time axis the stored dtype cannot carry surfaces
+    as a wrong number rather than as an exception. Measured on 8 samples 100 s
+    apart on a unix-epoch axis, ``n_chunk=2``, before
+    :class:`~rheplicant.core.coordinates.Coordinates` guarded its own store::
+
+        chunk times  [1750000128, 1750000256, 1750000384, 1750000640]
+        float64 truth[1750000050, 1750000250, 1750000450, 1750000650]
+        error [s]    [       +78,         +6,        -66,        -10]
+
+    Wrong by 78 s of a 100 s cadence, with two of the eight input samples
+    already merged before the mean ran. Nothing here can detect that -- the
+    merged values arrive indistinguishable from real ones -- so the check lives
+    at the store, in ``Coordinates``, and this operator inherits it: the
+    ``replace`` below re-runs it on the chunk-mean axis it produces.
+
     Attributes:
         n_chunk: samples per integration chunk (static configuration).
     """

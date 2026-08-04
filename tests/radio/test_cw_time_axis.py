@@ -69,7 +69,7 @@ def _injected(op, state):
 class TestTheTimeAxisMustBeAbleToExpressItsOwnCadence:
     """The drift is only as good as the axis it is measured against.
 
-    Measured before the guard existed, on this grid with ``drift_rate`` 1e4
+    Measured before any guard existed, on this grid with ``drift_rate`` 1e4
     Hz/s — one channel per 100 s sample:
 
         coords.time            elapsed              peak ch     protected/11
@@ -81,13 +81,28 @@ class TestTheTimeAxisMustBeAbleToExpressItsOwnCadence:
     this operator's own named silent failure, protecting so much that genuine
     RFI survives. Nothing raised and nothing was NaN; under ``JAX_ENABLE_X64=1``
     the same run gives ``[4,5,6,7]``, so the cause is precision, not logic.
+
+    **A position stated here has since been overturned, deliberately.** This
+    class used to assert that a *static* tone on a unix-second axis is fine and
+    must be accepted, on the grounds that a tone which never subtracts anything
+    is not harmed by a coarse axis. That is true of this operator and false of
+    the axis: the same 8-sample axis handed to ``BackendOperator`` produces
+    chunk timestamps wrong by up to 78 s of a 100 s cadence, silently, and
+    ``Coordinates`` cannot know which consumer comes next. The refusal
+    therefore moved to ``Coordinates.__check_init__``, where the rounding
+    actually happens, and the axis no longer reaches any operator — see
+    ``tests/core/test_coordinates.py::TestATimeAxisTheStoredDtypeCannotCarry``.
+    What survives here is what is genuinely this operator's own: the check runs
+    only when the tone DRIFTS, and it counts a zero gap that the container
+    deliberately allows.
     """
 
     def _at(self, state, anchor, cadence=100.0):
         times = anchor + cadence * jnp.arange(N_TIME, dtype=float)
         return state.replace(coords=state.coords.replace(time=times))
 
-    def test_a_unix_second_axis_is_refused_and_says_what_to_do(self, state):
+    def test_a_unix_second_axis_never_reaches_the_operator_any_more(self, state):
+        """Refused at the store, with the remedies this operator used to name."""
         with pytest.raises(StateValidationError) as excinfo:
             _tone(drift_rate=DRIFT_PER_CHANNEL)(self._at(state, 1.75e9))
         message = str(excinfo.value)
@@ -100,35 +115,54 @@ class TestTheTimeAxisMustBeAbleToExpressItsOwnCadence:
         injected = _injected(_tone(drift_rate=DRIFT_PER_CHANNEL), self._at(state, 0.0))
         assert list(injected.argmax(axis=-1)) == [4, 5, 6, 7]
 
-    def test_a_static_tone_does_not_care_what_epoch_the_axis_uses(self, state):
-        """The check belongs to the DRIFT, like ``coords.time`` itself. A tone
-        that does not move never subtracts anything, so a coarse axis costs it
-        nothing and refusing it would break a pipeline that is entirely fine."""
-        out = _tone()(self._at(state, 1.75e9))
+    def test_a_collided_axis_is_refused_only_when_the_tone_actually_drifts(self, state):
+        """Both branches of the clause this operator still owns alone.
+
+        ``[0, 0, 100, 250]`` is stored exactly in float32 and has a repeated
+        timestamp, which ``Coordinates`` accepts on purpose — it cannot tell a
+        genuine repeat from a collision. This operator can act on it, because it
+        SUBTRACTS times: across a zero gap the tone does not move, so a drift
+        measured there is silently wrong. Gaps 0/100/150, so a check reading the
+        mean (83) or the last gap rather than the minimum would pass this axis.
+        """
+        collided = state.replace(
+            coords=state.coords.replace(time=jnp.array([0.0, 0.0, 100.0, 250.0]))
+        )
+        with pytest.raises(StateValidationError, match="representable"):
+            _tone(drift_rate=DRIFT_PER_CHANNEL)(collided)
+
+        # The other branch: a tone that does not move never subtracts anything,
+        # so the same axis costs it nothing and must be accepted.
+        out = _tone()(collided)
         assert np.isclose(
             float(np.asarray(out.data)[0, TONE_CHANNEL]), 10.0 + TONE_KELVIN, rtol=1e-5
         )
 
-    def test_the_threshold_is_pinned_from_both_sides(self, state):
-        """At an anchor of 1e7 s the float32 grid is exactly 1 s, so the ratio
+    def test_the_threshold_is_pinned_from_both_sides(self):
+        """The operator's own copy of the ratio, evaluated directly.
+
+        Routed around ``Coordinates`` on purpose: the container now refuses the
+        99 s axis first, so going through a State would pin the container's
+        threshold and say nothing about this one. Both methods must agree at the
+        boundary, and they are only comparable when each is called on its own.
+
+        At an anchor of 1e7 s the float32 grid is exactly 1 s, so the ratio
         against the cadence is 1/cadence and the threshold (1e-2) sits between
         two cadences two percent apart. Both axes are stored exactly and are
         otherwise identical — only the ratio moves across the cut.
 
         This is also the pair that separates ``np.spacing(times.max())`` from
         ``np.spacing(float(times.max()))``: the latter answers for float64 no
-        matter what the array holds. The unix-second case above is refused
-        either way, because its samples have already COLLIDED and the smallest
-        gap is exactly zero; only a sub-collision loss like this one tells the
-        two apart.
+        matter what the array holds, and would pass BOTH sides.
         """
-        with pytest.raises(StateValidationError, match="representable"):
-            _tone(drift_rate=DRIFT_PER_CHANNEL)(self._at(state, 1.0e7, cadence=99.0))
-
-        injected = _injected(
-            _tone(drift_rate=DRIFT_PER_CHANNEL), self._at(state, 1.0e7, cadence=101.0)
+        refuse = CWCalibrationOperator._refuse_a_time_axis_it_cannot_resolve
+        stored = lambda cadence: np.asarray(  # noqa: E731 - one expression, read inline
+            jnp.asarray(1.0e7 + cadence * np.arange(N_TIME, dtype=float))
         )
-        assert list(injected.argmax(axis=-1)) == [4, 5, 6, 7]
+
+        assert refuse(stored(101.0)) is None
+        with pytest.raises(StateValidationError, match="representable"):
+            refuse(stored(99.0))
 
     def test_a_single_sample_run_has_no_cadence_to_compare_against(self):
         """One sample has no interval, so the check steps aside rather than

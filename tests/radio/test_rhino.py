@@ -17,6 +17,7 @@ from rheplicant.core.errors import DataIngestionError
 h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 
 from rheplicant.radio.rhino import (  # noqa: E402
+    TIME_EPOCH_META_KEY,
     RhinoObservation,
     read_rhino_observation,
     to_state,
@@ -557,6 +558,130 @@ def test_a_non_finite_reading_in_an_unused_thermistor_column_does_not_raise(tmp_
     assert np.isfinite(obs.thermistor_k["antenna"]).all()
 
 
+class TestTheThermistorLogIsOnlyReadWhenItIsAskedFor:
+    """A file must not be refused over a column nothing downstream consumes.
+
+    ``_thermistors_in_kelvin`` used to run unconditionally, and its two
+    refusals -- a log ending short of the SDR axis, a non-finite reading in a
+    used column -- made a whole recording unreadable. Both refusals are right
+    for a caller who wants the temperatures. Neither is right for a caller who
+    does not, and until a load-temperature consumer exists in ``src/`` nobody
+    does: ``to_state`` carries ``data``, ``coords.time``, ``coords.freq``,
+    ``coords.extra["receiver_input"]``, ``aux["flags"]`` and the epoch in
+    ``meta``, and ``thermistor_k`` reaches no operator anywhere (audited by
+    grepping ``src/`` for each field of RhinoObservation).
+
+    So ``thermistor_columns`` is now opt-in. It is still REQUIRED to get
+    temperatures -- the map is a declaration the file cannot make for itself,
+    which is the argument ``_thermistors_in_kelvin`` gives for demanding it --
+    and omitting it says "not these", not "guess".
+
+    Every case below is tested from BOTH sides: the same file read once with
+    columns (refused) and once without (read).
+    """
+
+    BASE = 1_735_000_000.0
+
+    def _short_log(self, tmp_path):
+        """A thermistor log ending 1.5 s before the last SDR sample."""
+        return make_file(
+            tmp_path / "short_log.hd5f",
+            times=np.array([self.BASE, self.BASE + 11.5]),
+            temps=np.array([[20.0], [20.0]]),
+            temp_times=np.array([self.BASE, self.BASE + 10.0]),
+            switch_times=np.array([self.BASE]),
+            switch_states=[b"antenna"],
+        )
+
+    def _nan_row(self, tmp_path):
+        """A NaN in the column ``antenna`` maps onto, at row 1 of 12."""
+        temps = np.stack([np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1)
+        temps[1, 0] = np.nan
+        return make_file(tmp_path / "nan_row.hd5f", temps=temps)
+
+    def _flat_table(self, tmp_path):
+        """A 1-D /temperatures, which cannot be addressed by column at all."""
+        return make_file(tmp_path / "flat.hd5f", temps=np.full(len(TIME_S), 20.0))
+
+    @pytest.mark.parametrize(
+        ("build", "declared", "match"),
+        [
+            ("_short_log", {"antenna": 0}, "outside"),
+            ("_nan_row", COLUMNS, "non-finite"),
+            ("_flat_table", COLUMNS, "2-D"),
+        ],
+    )
+    def test_declaring_the_columns_still_refuses_every_bad_log(
+        self, tmp_path, build, declared, match
+    ):
+        with pytest.raises(DataIngestionError, match=match):
+            read_rhino_observation(
+                getattr(self, build)(tmp_path),
+                freq_unit="MHz",
+                thermistor_columns=declared,
+                settle_seconds=0.0,
+            )
+
+    @pytest.mark.parametrize("build", ["_short_log", "_nan_row", "_flat_table"])
+    def test_omitting_them_reads_the_same_file(self, tmp_path, build):
+        obs = read_rhino_observation(
+            getattr(self, build)(tmp_path), freq_unit="MHz", settle_seconds=0.0
+        )
+        assert obs.thermistor_k == {}
+        assert obs.waterfall.shape == (obs.time_s.size, obs.freq_hz.size)
+        assert np.isfinite(obs.time_s).all()
+
+    def test_the_signal_path_is_untouched_by_the_omission(self, tmp_path):
+        """What is carried must not depend on what was declared. Both reads of
+        the SAME file must agree element-by-element on everything ``to_state``
+        puts on the graph -- on a fixture whose switch blocks are 4/4/4 but
+        whose waterfall and index array are not symmetric."""
+        path = make_file(tmp_path / "both.hd5f")
+        kwargs = dict(freq_unit="MHz", settle_seconds=2.0)
+        with_temps = read_rhino_observation(path, thermistor_columns=COLUMNS, **kwargs)
+        without = read_rhino_observation(path, **kwargs)
+
+        assert set(with_temps.thermistor_k) == {"antenna", "internal_load", "heated_load"}
+        assert without.thermistor_k == {}
+
+        a = to_state(with_temps, source_order=("antenna", "internal_load", "heated_load"))
+        b = to_state(without, source_order=("antenna", "internal_load", "heated_load"))
+        for field in ("data", "coords.time", "coords.freq"):
+            obj = a if field == "data" else a.coords
+            other = b if field == "data" else b.coords
+            name = field.split(".")[-1]
+            np.testing.assert_array_equal(
+                np.asarray(getattr(obj, name)), np.asarray(getattr(other, name))
+            )
+        np.testing.assert_array_equal(
+            np.asarray(a.coords.extra["receiver_input"]),
+            np.asarray(b.coords.extra["receiver_input"]),
+        )
+        np.testing.assert_array_equal(np.asarray(a.aux["flags"]), np.asarray(b.aux["flags"]))
+        assert a.meta[TIME_EPOCH_META_KEY] == b.meta[TIME_EPOCH_META_KEY]
+
+    def test_a_file_with_no_temperature_group_at_all_is_readable(self, tmp_path):
+        """The stronger form: not merely tolerating a bad log, but not needing
+        the datasets to exist. Reading them anyway would refuse this file with a
+        raw h5py KeyError over data the caller never asked for."""
+        path = tmp_path / "no_temps.hd5f"
+        make_file(path)
+        with h5py.File(path, "a") as f:
+            del f["temperatures"]
+        obs = read_rhino_observation(path, freq_unit="MHz", settle_seconds=0.0)
+        assert obs.thermistor_k == {}
+        assert obs.waterfall.shape == (len(TIME_S), len(FREQ_MHZ))
+
+    def test_an_unmapped_label_is_still_refused_when_columns_are_declared(self, tmp_path):
+        """Opting in must not have loosened the declaration it opts into."""
+        with pytest.raises(DataIngestionError, match="heated_load"):
+            read_rhino_observation(
+                make_file(tmp_path / "partial.hd5f"),
+                freq_unit="MHz",
+                thermistor_columns={"antenna": 0, "internal_load": 0},
+            )
+
+
 def test_to_state_indexes_sources_and_inverts_the_settling_mask(tmp_path):
     obs = read_rhino_observation(
         make_file(tmp_path / "obs.hd5f"),
@@ -572,7 +697,10 @@ def test_to_state_indexes_sources_and_inverts_the_settling_mask(tmp_path):
     np.testing.assert_array_equal(index, [0] * 4 + [1] * 4 + [2] * 4)
 
     np.testing.assert_allclose(np.asarray(state.coords.freq), obs.freq_hz)
-    np.testing.assert_allclose(np.asarray(state.coords.time), obs.time_s)
+    # Relative to the first sample, with the epoch in meta -- see
+    # TestTheTimeAxisIsStoredFromTheStartOfTheRun below.
+    np.testing.assert_allclose(np.asarray(state.coords.time), obs.time_s - obs.time_s[0])
+    assert state.meta[TIME_EPOCH_META_KEY] == obs.time_s[0]
     np.testing.assert_allclose(np.asarray(state.data), obs.waterfall)
 
     # aux["flags"] is True-means-BAD; settled is True-means-GOOD. Every
@@ -643,7 +771,11 @@ def test_to_state_after_a_leading_drop_attributes_and_flags_the_kept_samples(tmp
     # The rows that survived are the LAST 11 of 14, not the first 11. Both are
     # (11, 3) and they share no element.
     np.testing.assert_allclose(np.asarray(state.data), waterfall[3:])
-    np.testing.assert_allclose(np.asarray(state.coords.time), kept_times)
+    # Measured from the first KEPT sample, not from the first sample in the
+    # file: the dropped head is not part of the run the State describes, and an
+    # epoch taken before the drop would put the whole axis 5 s off its own zero.
+    np.testing.assert_allclose(np.asarray(state.coords.time), kept_times - kept_times[0])
+    assert state.meta[TIME_EPOCH_META_KEY] == kept_times[0]
 
     # Settling is measured from each transition, on the samples that were KEPT:
     # computing it against the head of the un-dropped axis instead shifts every
@@ -663,6 +795,120 @@ def test_to_state_after_a_leading_drop_attributes_and_flags_the_kept_samples(tmp
         flags, np.broadcast_to(~expected_settled[:, None], flags.shape)
     )
     assert flags.sum() == 6 * obs.freq_hz.size
+
+
+class TestTheTimeAxisIsStoredFromTheStartOfTheRun:
+    """Why ``to_state`` no longer hands ``obs.time_s`` straight to Coordinates.
+
+    ``Coordinates`` stores through ``jnp.asarray`` -- float32 unless x64 is on
+    -- and a unix second near 1.75e9 sits on a 128 s grid there. Measured on
+    this fixture's six samples at offsets [0, 100, 250, 450, 700, 1000] s::
+
+        offsets asked for   [   0,  100,  250,  450,  700, 1000]
+        offsets stored      [   0,  128,  256,  512,  640, 1024]
+        error [s]           [   0,  +28,   +6,  +62,  -60,  +24]
+
+    All six remain DISTINCT, so nothing structural signals the loss -- no
+    collision, no NaN, the right shape and the right count -- while individual
+    timestamps are wrong by up to 62 s. Subtracting the first sample before the
+    store removes the cause rather than detecting it: the offsets are then small
+    integers, exact in float32, and the absolute epoch survives in ``meta``.
+
+    The public behaviour change: ``state.coords.time`` is SECONDS SINCE THE
+    FIRST KEPT SAMPLE, not unix seconds. ``obs.time_s`` on the recording is
+    unchanged and still absolute.
+    """
+
+    OFFSETS = np.array([0.0, 100.0, 250.0, 450.0, 700.0, 1000.0])
+    EPOCH = 1_750_000_000.0
+    #: 1 / 3 / 2 samples per switch position -- deliberately not 2 / 2 / 2, so a
+    #: mis-attributed sample changes the index array rather than only a shape.
+    SWITCHES = EPOCH + np.array([0.0, 100.0, 700.0])
+    ORDER = ("antenna", "internal_load", "heated_load")
+
+    def _obs(self, tmp_path):
+        return read_rhino_observation(
+            make_file(
+                tmp_path / "unix.hd5f",
+                times=self.EPOCH + self.OFFSETS,
+                switch_times=self.SWITCHES,
+                switch_states=SWITCH_STATES,
+            ),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+            settle_seconds=0.0,
+        )
+
+    def test_the_stored_axis_is_exact_and_the_epoch_recovers_the_absolute_time(
+        self, tmp_path
+    ):
+        obs = self._obs(tmp_path)
+        state = to_state(obs, source_order=self.ORDER)
+
+        stored = np.asarray(state.coords.time, dtype=np.float64)
+        # Exact equality, not allclose: these offsets are integers below 2**24
+        # and float32 holds them without error. An allclose here would pass on
+        # the very axis this change exists to eliminate.
+        np.testing.assert_array_equal(stored, self.OFFSETS)
+
+        epoch = state.meta[TIME_EPOCH_META_KEY]
+        assert epoch == self.EPOCH
+        np.testing.assert_array_equal(epoch + stored, obs.time_s)
+
+    def test_the_recording_itself_still_carries_absolute_unix_seconds(self, tmp_path):
+        """The two layers stay separate: only the State's axis moved."""
+        obs = self._obs(tmp_path)
+        np.testing.assert_array_equal(obs.time_s, self.EPOCH + self.OFFSETS)
+
+    def test_the_absolute_axis_would_not_have_survived_the_store(self, tmp_path):
+        """The measurement above, as an assertion: what the old ``to_state``
+        produced is now refused outright by the container it produced it for."""
+        from rheplicant.core.coordinates import Coordinates
+        from rheplicant.core.errors import StateValidationError
+
+        obs = self._obs(tmp_path)
+        with pytest.raises(StateValidationError, match="representable"):
+            Coordinates(time=obs.time_s)
+
+        # And what the loss actually was, had it been stored: six distinct
+        # values, no NaN, no collision -- and up to 62 s of error.
+        import jax.numpy as jnp
+
+        lossy = np.asarray(jnp.asarray(obs.time_s), dtype=np.float64)
+        assert len(set(lossy.tolist())) == obs.time_s.size
+        assert np.abs(lossy - obs.time_s).max() == 62.0
+
+    def test_averaging_the_relative_axis_gives_the_chunk_times_exactly(self, tmp_path):
+        """The stage the defect surfaced in. Chunks of 2 over gaps 100/150/200/
+        250/300 give means 50 / 350 / 850 -- three different numbers, so a chunk
+        boundary off by one changes every one of them."""
+        from rheplicant.radio import BackendOperator
+
+        state = to_state(self._obs(tmp_path), source_order=self.ORDER)
+        out = BackendOperator(n_chunk=2)(state)
+        np.testing.assert_array_equal(
+            np.asarray(out.coords.time, dtype=np.float64), [50.0, 350.0, 850.0]
+        )
+
+    def test_a_recording_with_no_samples_is_named_rather_than_indexed(self):
+        """``obs.time_s[0]`` on an empty axis is a bare IndexError with nothing
+        in it. read_rhino_observation cannot produce one, but a hand-built
+        RhinoObservation can, and this seam already guards two other ways of
+        hand-building a malformed one."""
+        empty = RhinoObservation(
+            freq_hz=np.array([60e6]),
+            time_s=np.array([]),
+            waterfall=np.zeros((0, 1)),
+            switch_label=np.array([], dtype="<U8"),
+            settled=np.array([], dtype=bool),
+            thermistor_k={},
+            transitions=(np.array([]), np.array([], dtype="<U8")),
+            n_leading_dropped=0,
+            adc_max_i=None,
+            adc_max_q=None,
+        )
+        with pytest.raises(DataIngestionError, match="no samples"):
+            to_state(empty, source_order=("antenna",))
 
 
 def test_to_state_rejects_a_label_outside_source_order(tmp_path):

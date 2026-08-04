@@ -6,6 +6,13 @@ graph, so a waterfall can be plotted and a switch log inspected without
 constructing anything. :func:`to_state` is the separate seam that places it on
 the graph.
 
+The two layers do not use the same time convention, on purpose.
+:class:`RhinoObservation` keeps the file's own **unix seconds**;
+:func:`to_state` stores **seconds since the first kept sample** and puts the
+epoch in ``meta[TIME_EPOCH_META_KEY]``, because ``Coordinates`` stores in
+float32 by default and a unix second there is quantised onto a 128 s grid --
+argued, and measured, at :func:`to_state`.
+
 **The file does not record its own frequency unit, and its two producers
 disagree.** ``rhino-cal``'s ``ObservationHandler.save_to_hdf5`` writes an
 astropy Quantity in Hz; the ``RHINO_fully_simulated_calibration`` notebook
@@ -48,6 +55,16 @@ from rheplicant.core.errors import DataIngestionError
 from rheplicant.core.state import State
 from rheplicant.radio.touchstone import _interp_strict
 
+#: ``state.meta`` key under which :func:`to_state` records the unix second the
+#: State's time axis is measured from. ``meta`` rather than ``coords`` on
+#: purpose: it is one static number describing the run, not a traced quantity
+#: the forward model differentiates through, and ``State``'s own taxonomy puts
+#: labels and settings there. The cost is that two observations differ in the
+#: jit cache key, which is one recompilation per recording -- the same price
+#: ``obs_id`` already pays, and the reason the epoch is a scalar here rather
+#: than a per-sample array.
+TIME_EPOCH_META_KEY = "time_epoch_unix_s"
+
 _FREQ_UNIT_HZ = {"hz": 1.0, "mhz": 1e6}
 #: Wide on purpose: this band's job is to catch a 10^6 unit error, not to
 #: police which telescope wrote the file.
@@ -83,6 +100,11 @@ class RhinoObservation:
             reader -- a label that map declares but this file never switched
             to has no entry here. ``thermistor_k[label]`` raises ``KeyError``
             for such a label; it does not return ``None`` or an empty array.
+            **Empty when the reader was called without ``thermistor_columns``**,
+            which is not the same statement as a missing label: it says the
+            temperatures were never asked for, so the file's thermistor log was
+            not read and not judged. Both cases surface as ``KeyError``; the
+            caller distinguishes them by what it declared.
         transitions: the raw ``(times, labels)`` switch log, kept for diagnosis.
         n_leading_dropped: samples that preceded the first transition and were
             dropped, because they have no defined switch state.
@@ -232,6 +254,26 @@ def _thermistors_in_kelvin(
 ) -> dict[str, np.ndarray]:
     """Map switch labels onto thermistor columns, in Kelvin, on ``time_s``.
 
+    **Called only when the reader was given a ``thermistor_columns`` map.** Both
+    refusals below are refusals of a whole file, and what they defend does not
+    currently reach the signal path: ``to_state`` carries the waterfall, the two
+    axes, the switch index and the settling mask, and nothing in ``rheplicant``
+    consumes ``thermistor_k``. Running this unconditionally therefore made a
+    recording unreadable over a column no operator would have seen. The
+    resolution is opt-in, argued in :func:`read_rhino_observation`: a caller who
+    declares the map gets every check here, unchanged; a caller who does not
+    gets an empty ``thermistor_k`` and a readable waterfall.
+
+    The other direction -- wiring ``thermistor_k`` onto
+    ``CalLoadOperator.t_load`` so the defended quantity does reach the signal
+    path -- remains open, and is the one worth taking. It is larger than it
+    looks: ``t_load`` is a scalar or ``(n_freq,)``, while a load's physical
+    temperature is per-SAMPLE, so the operator needs a ``(n_time,)`` case whose
+    disambiguation from ``(n_freq,)`` is not free when the two are equal; and
+    ``to_state`` returns a State, so wiring an operator from it either changes
+    its return type or moves the load temperature into the State for the
+    operator to read, which changes that operator's ``requires`` declaration.
+
     The reference (``rhino-cal/gcr/data_processing.py``) takes
     ``heated_load_index=1, ambient_load_index=0`` and routes every state
     except ``heated_load`` to the ambient column. Those indices are the
@@ -281,8 +323,10 @@ def _thermistors_in_kelvin(
     that argument is about a bad value inside the covered range, not about a
     thermistor log that does not cover the SDR axis at all. The remedy is on
     the caller's side, not this function's: trim the SDR time axis to the
-    thermistor log's actual coverage before reading, or record a thermistor
-    log that spans the full observation window in the first place.
+    thermistor log's actual coverage before reading, record a thermistor log
+    that spans the full observation window in the first place, or -- for a
+    caller who wanted the waterfall and not the temperatures -- omit
+    ``thermistor_columns`` so this function is never reached.
     """
     unit = str(thermistor_unit).strip().lower()
     if unit == "celsius":
@@ -404,7 +448,7 @@ def read_rhino_observation(
     path,
     *,
     freq_unit: str,
-    thermistor_columns: Mapping[str, int],
+    thermistor_columns: Mapping[str, int] | None = None,
     settle_seconds: float = 5.0,
     thermistor_unit: str = "celsius",
 ) -> RhinoObservation:
@@ -413,22 +457,54 @@ def read_rhino_observation(
     Args:
         path: the ``.hd5f`` / ``.hdf5`` file.
         freq_unit: ``"Hz"`` or ``"MHz"``. Required -- see the module docstring.
-        thermistor_columns: switch label -> column of ``/temperatures``. Required.
+        thermistor_columns: switch label -> column of ``/temperatures``. Omit it
+            (or pass ``None``) to skip the thermistor log entirely; see below.
         settle_seconds: samples within this long after a transition are marked
             unsettled. The reference is inconsistent here (5 s in the notebook,
             2 s and 1 s in two rhino-cal functions); 5 s is the most conservative.
         thermistor_unit: ``"celsius"`` (the file's convention) or ``"kelvin"``.
+            Unused when ``thermistor_columns`` is omitted.
+
+    **What reaches the signal path, and what does not.** :func:`to_state` places
+    ``waterfall`` on ``data``, ``time_s`` on ``coords.time`` (relative -- see
+    there), ``freq_hz`` on ``coords.freq``, ``switch_label`` as the integer
+    ``coords.extra["receiver_input"]``, and ``settled``, inverted and broadcast,
+    on ``aux["flags"]``. Those five are the recording. ``thermistor_k``,
+    ``transitions``, ``n_leading_dropped``, ``adc_max_i`` and ``adc_max_q`` are
+    **diagnostic**: nothing in ``rheplicant`` consumes them, and a caller that
+    wants them reads them off the :class:`RhinoObservation` directly.
+
+    ``thermistor_columns`` is therefore opt-in. ``_thermistors_in_kelvin``
+    refuses a thermistor log ending short of the SDR axis, and refuses a
+    non-finite reading in a used column; both refusals are argued there and both
+    are right for a caller who wants the temperatures. Running them
+    unconditionally made a whole recording unreadable over a column nothing
+    downstream consumes -- the waterfall, the switch log and the settling mask
+    are all intact in such a file, and they are what a forward model needs.
+
+    Omitting the map is not a default guess. The positional convention linking a
+    switch label to a ``/temperatures`` column is shared between writer and
+    reader with nothing in the file to enforce it, so ``_thermistors_in_kelvin``
+    demands a declaration rather than assuming rhino-cal's order; omitting it
+    declares that no temperatures are wanted, and ``thermistor_k`` comes back
+    empty. When the map IS given, every check it used to make still runs.
+
+    Nothing under ``/temperatures`` is read at all in that case, so a file that
+    has no such group -- or a malformed one -- is readable for its waterfall.
     """
     h5py = _require_h5py()
     path = Path(path)
+    want_thermistors = thermistor_columns is not None
+    temps_raw = temp_time = None
     with h5py.File(path, "r") as f:
         freq_raw = np.asarray(f["sdr/sdr_freqs"][:], dtype=float)
         time_s = np.asarray(f["sdr/sdr_times"][:], dtype=float)
         waterfall = np.asarray(f["sdr/sdr_waterfall"][:], dtype=float)
         switch_time = np.asarray(f["switches/switch_times"][:], dtype=float)
         switch_raw = f["switches/switch_states"][:]
-        temps_raw = np.asarray(f["temperatures/temperatures"][:], dtype=float)
-        temp_time = np.asarray(f["temperatures/temperature_times"][:], dtype=float)
+        if want_thermistors:
+            temps_raw = np.asarray(f["temperatures/temperatures"][:], dtype=float)
+            temp_time = np.asarray(f["temperatures/temperature_times"][:], dtype=float)
         adc_i = np.asarray(f["sdr/max_i_adc"][:], dtype=float) if "sdr/max_i_adc" in f else None
         adc_q = np.asarray(f["sdr/max_q_adc"][:], dtype=float) if "sdr/max_q_adc" in f else None
 
@@ -436,8 +512,11 @@ def read_rhino_observation(
     # diagnosed by whichever of these runs first, and the sequence below reports
     # the cause a reader can act on -- the temperature table before the band it
     # knows nothing about, the declared unit before a channel count that the
-    # unit cannot change.
-    _check_temperature_table(temps_raw, temp_time)
+    # unit cannot change. The table check keeps its place at the head of that
+    # order when it runs at all; it simply does not run for a caller who did not
+    # ask for the table.
+    if want_thermistors:
+        _check_temperature_table(temps_raw, temp_time)
     freq_hz = _frequencies_in_hz(freq_raw, freq_unit)
     _check_waterfall(waterfall, freq_hz)
 
@@ -458,13 +537,17 @@ def read_rhino_observation(
         waterfall=waterfall,
         switch_label=per_sample_label,
         settled=settled,
-        thermistor_k=_thermistors_in_kelvin(
-            time_s,
-            temp_time,
-            temps_raw,
-            set(per_sample_label.tolist()),
-            thermistor_columns,
-            thermistor_unit,
+        thermistor_k=(
+            _thermistors_in_kelvin(
+                time_s,
+                temp_time,
+                temps_raw,
+                set(per_sample_label.tolist()),
+                thermistor_columns,
+                thermistor_unit,
+            )
+            if want_thermistors
+            else {}
         ),
         transitions=(switch_time, switch_label_raw),
         n_leading_dropped=n_dropped,
@@ -484,10 +567,42 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
             ``gamma_src`` rows must match, and a transposition there is
             shape-legal and costs tens of kelvin.
 
+    Returns:
+        A State carrying, and only carrying, ``data`` (the waterfall),
+        ``coords.time``, ``coords.freq``, ``coords.extra["receiver_input"]``,
+        ``aux["flags"]`` and ``meta[TIME_EPOCH_META_KEY]``. Everything else on
+        the recording is diagnostic -- see :func:`read_rhino_observation`.
+
     Raises:
         DataIngestionError: if ``source_order`` repeats a label, if the
-            recording switches to a label ``source_order`` does not name, or
-            if ``obs.settled`` is not boolean.
+            recording switches to a label ``source_order`` does not name, if
+            ``obs.settled`` is not boolean, or if the recording holds no
+            samples.
+
+    ``coords.time`` is **seconds since the first kept sample**, not unix
+    seconds, and ``meta[TIME_EPOCH_META_KEY]`` holds the unix second it is
+    measured from -- so ``meta[TIME_EPOCH_META_KEY] + coords.time`` recovers
+    ``obs.time_s`` exactly. This is a behaviour change, and it is a fix rather
+    than a convenience. :class:`~rheplicant.core.coordinates.Coordinates` stores
+    its axes through ``jnp.asarray``, which is float32 unless x64 is enabled,
+    and a unix second near 1.75e9 has a float32 resolution of 128 s. Measured on
+    six samples at offsets [0, 100, 250, 450, 700, 1000] s from a 1.75e9 epoch,
+    with the axis handed over absolute::
+
+        stored offsets  [0, 128, 256, 512, 640, 1024]
+        error [s]       [0, +28,  +6, +62,  -60,  +24]
+
+    All six values stay distinct, so no shape, count, dtype or finiteness check
+    can see it, while ``BackendOperator``'s chunk timestamps come out wrong by
+    tens of seconds and a drifting ``CWCalibrationOperator`` tone lands in the
+    wrong channel. Subtracting the epoch *before* the store removes the cause:
+    the offsets become small integers, which float32 holds exactly. Detecting it
+    afterwards is not possible from the stored values alone, which is why
+    ``Coordinates`` refuses such an axis outright rather than repairing it.
+
+    The epoch is the first **kept** sample, not the first sample in the file:
+    the leading drop removes samples with no defined switch state, and they are
+    not part of the run the State describes.
 
     The settling mask is **inverted** on the way in. ``aux["flags"]`` is
     True-means-flagged (``radio/backend/flagging.py``, and ``FlaggedNoise``
@@ -509,6 +624,15 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
     ``obs.settled`` itself stays ``(n_time,)`` on :class:`RhinoObservation`,
     for a caller who wants the per-time form directly.
     """
+    if obs.time_s.size == 0:
+        raise DataIngestionError(
+            "the recording holds no samples, so there is no first sample for the "
+            "time axis to be measured from. read_rhino_observation refuses an "
+            "empty recording ahead of this, so a hand-built RhinoObservation is "
+            "the only way here; without this the failure is a bare IndexError "
+            "out of obs.time_s[0], naming neither the field nor the reason."
+        )
+
     order = tuple(source_order)
     duplicates = sorted({label for label in order if order.count(label) > 1})
     if duplicates:
@@ -537,12 +661,19 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
 
     index = np.array([lookup[label] for label in obs.switch_label], dtype=int)
     flags = jnp.broadcast_to(jnp.asarray(~obs.settled)[:, None], obs.waterfall.shape)
+    # In numpy float64, deliberately: the subtraction has to happen at the
+    # recording's own precision. Handing `obs.time_s` to Coordinates and
+    # subtracting afterwards would read the already-rounded values, which is the
+    # failure this exists to prevent, not a cheaper way of preventing it.
+    epoch = float(obs.time_s[0])
+    elapsed = np.asarray(obs.time_s, dtype=np.float64) - obs.time_s[0]
     return State(
         data=jnp.asarray(obs.waterfall),
         coords=Coordinates(
-            time=obs.time_s,
+            time=elapsed,
             freq=obs.freq_hz,
             extra={"receiver_input": jnp.asarray(index)},
         ),
         aux={"flags": flags},
+        meta={TIME_EPOCH_META_KEY: epoch},
     )
