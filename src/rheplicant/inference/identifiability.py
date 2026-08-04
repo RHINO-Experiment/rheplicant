@@ -40,11 +40,18 @@ question there is to ask.
 **It runs in float64 regardless of the caller's configuration.** The measured
 separation between an identified and a non-identified basis model is
 ``s_min/s_max`` = 6.8e-2 versus 6.6e-17. Computed in float32 the *same* null
-direction of the *same* model surfaces at 3.1e-8 — above any usable rank
-tolerance — and the degenerate model is reported as fully identified. There is
-no float32 tolerance that fixes this: the number the verdict turns on is
-smaller than single-precision roundoff. See :data:`DEFAULT_RANK_RTOL` for how
-the tolerance is chosen against that spectrum.
+direction of the *same* model surfaces at 3.1e-8 — 3.1x above the default
+tolerance — and the degenerate model is reported as fully identified.
+
+That is fragility rather than impossibility, and the difference is worth
+stating precisely rather than overselling. In float32 the window between this
+model's weakest identified direction (4.8e-5) and its null one (3.1e-8) is
+still 3.2 decades wide; it simply no longer contains the default. A
+per-precision retune of ``rtol`` would therefore recover *this* model. It would
+not recover one a few decades worse conditioned, which float64 still resolves
+with eight decades to spare. Forcing float64 is what lets one default be right
+for both. See :data:`DEFAULT_RANK_RTOL` for how that default is chosen against
+the spectrum.
 
 **The result is named.** An anonymous index into a flattened vector tells a
 user they have a problem and nothing about which; :meth:`IdentifiabilityReport.
@@ -101,6 +108,26 @@ from rheplicant.inference.parameters import ParameterSpace
 #: two decades away from mis-classifying it. Read
 #: :attr:`IdentifiabilityReport.weakest_identified` before trusting the verdict,
 #: and pass ``rtol=`` when it comes back close to the cut.
+#:
+#: **The test suite pins this value into 2.5 decades, not 8.7.** That is
+#: deliberate but not obvious, so know where a retune will fail before reaching
+#: for the assertions. Two counterfactuals elsewhere are stated against this
+#: default rather than against a literal, and each end of the window is a
+#: measured number that a real claim turns on:
+#:
+#: * **lower, 1.0e-10** — ``test_the_same_model_without_normalisation_would_be
+#:   _called_degenerate``. The mixed-scale fixture's RAW spectrum ratio is
+#:   1.0e-10, and that counterfactual only demonstrates anything while the ratio
+#:   sits *below* this default. Retune under 1e-10 and the right repair is to
+#:   widen the fixture's 1e10 scale gap, not to relax its assertion.
+#: * **upper, 3.1168e-8** — ``test_float32_would_have_got_the_verdict_wrong``.
+#:   The basis model's null direction surfaces there in single precision, so a
+#:   default *above* it would call that direction null, float32 would get the
+#:   verdict right, and the argument for the x64 machinery would be gone. The
+#:   margin here is 3.1x, not a decade.
+#:
+#: ``test_the_suite_pins_this_constant_more_tightly_than_the_physics`` states
+#: that window in one place; read it first if a retune starts failing tests.
 DEFAULT_RANK_RTOL: float = 1e-8
 
 
@@ -290,6 +317,20 @@ class IdentifiabilityReport:
                 f"{self.nullity}, so the valid indices are "
                 f"{list(range(self.nullity)) or 'none — it is fully identified'}."
             )
+        # `nullity` and `null_space` are two records of one fact, and the bounds
+        # check above trusts the first while the lookup below uses the second. An
+        # SVD taken with full_matrices=False truncates the second whenever there
+        # are fewer data points than parameters — the motivating case — and the
+        # two then disagree silently: this lookup runs off the end of the array
+        # and numpy raises a bare IndexError naming neither cause. Name it.
+        if self.null_space.shape != (self.nullity, self.n_par):
+            raise StateValidationError(
+                f"Inconsistent report: nullity is {self.nullity} over {self.n_par} "
+                f"parameters, so null_space should have shape "
+                f"{(self.nullity, self.n_par)}, but it has {self.null_space.shape}. "
+                "The SVD behind it must be taken with full_matrices=True, or the "
+                "null space is truncated whenever n_data < n_par."
+            )
         return self.null_space[index]
 
     def direction(self, index: int) -> dict[str, np.ndarray]:
@@ -310,6 +351,13 @@ class IdentifiabilityReport:
         """
         raw = self._row(index) / self.column_norms
         norm = float(np.linalg.norm(raw))
+        # `norm` cannot reach 0 while `column_norms` holds the SAFE norms: `raw`
+        # is then an orthonormal row divided by finite positive numbers. The
+        # fallback is a floor under that invariant, not live code — no mutation
+        # of it can be killed, which is why no test below tries to. It becomes
+        # reachable only if `column_norms` is ever changed to store the raw
+        # norms, and then it makes things worse rather than better: `norm` is
+        # NaN, `NaN > 0.0` is False, and dividing by 1.0 preserves the NaN.
         raw = raw / (norm if norm > 0.0 else 1.0)
         return {
             name: raw[start:stop].reshape(shape)
@@ -455,6 +503,14 @@ def identifiability(
         # for every model. Leaving it at zero is both finite and correct.
         safe_norms = jnp.where(norms > 0, norms, 1.0)
         normalised = jacobian / safe_norms
+        # The full_matrices flag is load-bearing, and precisely in the headline
+        # case: the free-per-cell model has 64 data points against 72 parameters.
+        # Turned off, `right` comes back (n_data, n_par) with no rows past index
+        # n_data, so `right[rank:]` below would be EMPTY while `nullity` still
+        # reported n_par - rank — a report whose two halves disagree, and whose
+        # direction() passes its bounds check and then indexes off the end. It is
+        # also the obvious performance simplification, so it is pinned by
+        # test_the_null_space_is_whole_when_there_are_fewer_data_than_parameters.
         _, spectrum, right = jnp.linalg.svd(normalised, full_matrices=True)
 
         n_par = int(x0.size)

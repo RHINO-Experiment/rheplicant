@@ -17,6 +17,7 @@ the whole point of the diagnostic is a number at 1e-17, so a suite that only
 held in one precision would not be testing the claim.
 """
 
+import dataclasses
 import os
 import subprocess
 import sys
@@ -370,6 +371,93 @@ class TestNamedNullDirections:
         with pytest.raises(StateValidationError, match="null direction"):
             report.direction(0)
 
+    def test_the_null_space_is_whole_when_there_are_fewer_data_than_parameters(self, state):
+        """The headline case, and the one an SVD shortcut silently empties.
+
+        The free-per-cell model has 64 data points against 72 parameters. Taken
+        with ``full_matrices=False`` the SVD returns a (64, 72) ``Vh`` with no
+        rows past index 64, so ``right[rank:]`` with ``rank = 64`` is EMPTY
+        while ``nullity`` still reports 8 — and every direction the report
+        names becomes unreachable. Every OTHER model in this file is
+        over-determined, where the two spellings agree, so nothing else here
+        can tell them apart. The shape is asserted against ``nullity`` and
+        ``n_par`` rather than against literals alone, so the two records of one
+        fact cannot drift apart quietly.
+        """
+        free = identifiability(free_space(), make_pipeline(TONE_KELVIN), state)
+        assert free.n_data < free.n_par, (free.n_data, free.n_par)
+        assert (free.n_data, free.n_par, free.nullity) == (64, 72, N_TIME)
+        assert free.null_space.shape == (free.nullity, free.n_par) == (N_TIME, 72)
+
+        # The LAST direction has to be reachable too, not just the first: a null
+        # space truncated to any size short of `nullity` fails here.
+        for index in (0, free.nullity - 1):
+            direction = free.direction(index)
+            assert direction["gain"].shape == (N_TIME,)
+            assert direction["t_ant"].shape == (N_TIME, N_FREQ)
+            assert np.all(np.isfinite(direction["gain"])), direction
+            assert np.all(np.isfinite(direction["t_ant"])), direction
+
+    def test_moving_along_a_free_per_cell_direction_does_not_move_the_model(self, state):
+        """The end-to-end statement, on the UNDER-determined model.
+
+        The same check ``test_moving_along_the_direction_really_does_not_move
+        _the_model`` makes for the basis model, repeated where ``direction`` has
+        to survive a null space the SVD only returns under
+        ``full_matrices=True``. Measured at step 1e-3: **9.77e-4** along the
+        null direction against **9.38** along a random one, four decades apart.
+        """
+        space = free_space()
+        pipeline = make_pipeline(TONE_KELVIN)
+        forward, values0 = space.forward_fn(pipeline, state)
+        report = identifiability(space, pipeline, state)
+        direction = report.direction(0)
+
+        step = 1e-3
+        base = forward(values0)
+        along = forward({k: values0[k] + step * jnp.asarray(direction[k]) for k in values0})
+        key = jax.random.key(0)
+        random = {
+            k: values0[k]
+            + step * jax.random.normal(jax.random.fold_in(key, i), jnp.shape(values0[k]))
+            for i, k in enumerate(values0)
+        }
+        away = forward(random)
+
+        moved_along = float(jnp.max(jnp.abs(along - base)))
+        moved_away = float(jnp.max(jnp.abs(away - base)))
+        assert moved_along < 1e-3 * moved_away, (moved_along, moved_away)
+
+    def test_a_report_whose_null_space_disagrees_with_its_nullity_is_refused(self, state):
+        """``nullity`` and ``null_space`` are two records of one fact.
+
+        ``_row``'s bounds check trusts the first; the lookup after it uses the
+        second. A truncated null space satisfies the bounds check and then
+        indexes off the end of the array, and numpy's bare ``IndexError`` names
+        neither the cause nor the repair. Constructed here directly rather than
+        by mutating the SVD, so the invariant is pinned as an invariant.
+        """
+        good = identifiability(free_space(), make_pipeline(TONE_KELVIN), state)
+
+        # Too FEW rows — what full_matrices=False produces.
+        truncated = dataclasses.replace(good, null_space=good.null_space[:0])
+        assert (truncated.nullity, truncated.null_space.shape) == (N_TIME, (0, 72))
+        with pytest.raises(StateValidationError, match="Inconsistent report"):
+            truncated.direction(0)
+        with pytest.raises(StateValidationError, match="Inconsistent report"):
+            truncated.participation(0)
+
+        # Too few COLUMNS — the other half of the shape, which would otherwise
+        # reach `row / column_norms` and die on a numpy broadcast error instead.
+        narrowed = dataclasses.replace(good, null_space=good.null_space[:, :5])
+        assert (narrowed.nullity, narrowed.null_space.shape) == (N_TIME, (N_TIME, 5))
+        with pytest.raises(StateValidationError, match="Inconsistent report"):
+            narrowed.direction(0)
+
+        # ... while the intact report is not disturbed by the same check.
+        assert good.direction(0)["gain"].shape == (N_TIME,)
+        assert good.participation(0)["gain"] == pytest.approx(0.5, abs=0.05)
+
 
 # ------------------------------------------------- conditional blocks (Gibbs) --
 
@@ -562,6 +650,98 @@ class TestColumnNormalisation:
         assert share["flat"] == pytest.approx(1.0, abs=1e-9)
         assert share["live"] == pytest.approx(0.0, abs=1e-9)
 
+    @staticmethod
+    def _zero_column_model():
+        """A live latent and a DEAD one, deliberately hard to confuse.
+
+        ``live`` is ``(2,)`` and drives two channels at scales 1e5 apart;
+        ``flat`` is ``(3,)`` and is bound through ``b**2`` at ``b = 0``, so all
+        three of its Jacobian columns are exactly zero. Different shapes AND
+        different scales AND different sizes, because this file has twice
+        shipped a test blinded by a symmetric fixture — a direction that
+        carried the wrong latent, or the right one mis-scaled, must not be able
+        to pass here by coincidence.
+        """
+        pipeline = Pipeline(
+            AntennaTemperature(t_ant=jnp.zeros((N_TIME, N_FREQ))),
+            CalibrationTone(tone=jnp.zeros(N_FREQ)),
+            names=("t_ant", "tone"),
+        )
+        space = ParameterSpace(
+            latents=[
+                Latent("live", init=jnp.array([1.0, 1.0])),
+                Latent("flat", init=jnp.zeros(3)),
+            ],
+            bindings=[
+                Bind(
+                    ("live", "flat"),
+                    into=lambda p: p["tone"].tone,
+                    fn=lambda a, b: (
+                        jnp.zeros(N_FREQ)
+                        .at[1]
+                        .set(1e3 * a[0])
+                        .at[4]
+                        .set(1e-2 * a[1])
+                        .at[2]
+                        .set(b[0] ** 2)
+                        .at[5]
+                        .set(b[1] ** 2)
+                        .at[7]
+                        .set(b[2] ** 2)
+                    ),
+                ),
+            ],
+        )
+        return space, pipeline
+
+    def test_a_direction_through_a_zero_column_is_finite_not_NaN(self, state):
+        """What storing the SAFE column norms is actually for.
+
+        ``column_norms`` keeps the GUARDED norms — 1.0 substituted for every
+        exactly-zero column — and :meth:`direction` divides by them to undo the
+        normalisation. Store the raw norms instead and that division is 1/0 on
+        the supported entry and 0/0 on the rest, so every direction through a
+        dead latent comes back as ``[nan, nan, inf]``. The unit-norm rescale
+        cannot repair it either: ``norm`` is then NaN, ``NaN > 0.0`` is False,
+        and the fallback quietly divides by 1.0 and preserves it.
+
+        :meth:`participation` never touches ``column_norms``, so it stays
+        correct and cannot see any of this — which is exactly why the existing
+        zero-column test above, which only asks for shares, passes against a
+        raw-norm store. Only ``direction`` can catch it.
+
+        A latent the prediction does not depend on at all is an ordinary way to
+        discover a modelling mistake, so this is the path a user hits on the
+        day the diagnostic is doing its job.
+        """
+        space, pipeline = self._zero_column_model()
+        report = identifiability(space, pipeline, state)
+        assert (report.n_par, report.rank, report.nullity) == (5, 2, 3)
+
+        # The stored norms are the safe ones: no zero survives to be divided by.
+        assert np.all(report.column_norms > 0.0), report.column_norms
+        assert report.column_norms.shape == (5,)
+        # ... and they are the REAL norms where the column is live, not 1.0 for
+        # everything — a store that substituted 1.0 unconditionally would undo
+        # the column normalisation `direction` exists to reverse.
+        assert report.column_norms[0] == pytest.approx(1e3 * np.sqrt(N_TIME), rel=1e-6)
+        assert report.column_norms[1] == pytest.approx(1e-2 * np.sqrt(N_TIME), rel=1e-6)
+        assert np.all(report.column_norms[2:] == 1.0)
+
+        for index in range(report.nullity):
+            direction = report.direction(index)
+            assert direction["live"].shape == (2,)
+            assert direction["flat"].shape == (3,)
+            assert np.all(np.isfinite(direction["live"])), (index, direction)
+            assert np.all(np.isfinite(direction["flat"])), (index, direction)
+            # Documented contract: unit 2-norm over the flat vector.
+            flat_vector = np.concatenate([direction["live"], direction["flat"]])
+            assert float(np.linalg.norm(flat_vector)) == pytest.approx(1.0)
+            # The degeneracy is the DEAD latent's, entirely — and the live
+            # latent's two very differently scaled halves are both untouched.
+            assert np.allclose(direction["live"], 0.0), (index, direction)
+            assert float(np.linalg.norm(direction["flat"])) == pytest.approx(1.0)
+
 
 # -------------------------------------------------------------- the threshold --
 
@@ -585,6 +765,55 @@ class TestRankThreshold:
         assert strict.nullity == 0
         assert loose.nullity > 0
         assert loose.rtol == 0.5
+
+    def test_the_suite_pins_this_constant_more_tightly_than_the_physics(self, state):
+        """Where a retune of ``DEFAULT_RANK_RTOL`` will fail, and why — in one place.
+
+        The numerically justified window is wide: every tolerance between the
+        SVD's own noise floor (~1e-13) and the basis model's weakest identified
+        direction (4.8e-5) returns the same verdict, 8.7 decades of freedom.
+        The SUITE allows 2.5, because two counterfactuals elsewhere in this file
+        are stated against the default rather than against a literal:
+
+        * below **1.0e-10** the mixed-scale fixture's raw spectrum ratio stops
+          falling under the tolerance, and ``test_the_same_model_without
+          _normalisation_would_be_called_degenerate`` demonstrates nothing;
+        * above **3.1168e-8** the basis model's float32 null direction falls
+          under the tolerance, single precision gets the verdict RIGHT, and
+          ``test_float32_would_have_got_the_verdict_wrong`` is simply false.
+
+        Both are real claims about the constant rather than drift catchers, so
+        the narrow window is kept rather than loosened. What is added is that it
+        is *findable*: a retuner who reads only the constant's docstring sees
+        8.7 decades of headroom and then gets two failures in unrelated classes.
+        This test names the window, and the constant's docstring points here.
+        """
+        justified_low, justified_high = 1e-13, 4.822138e-05
+        pinned_low, pinned_high = 1.0e-10, 3.116758e-08
+
+        assert justified_low < pinned_low, "the suite's floor is above the noise floor"
+        assert pinned_low < DEFAULT_RANK_RTOL < pinned_high, DEFAULT_RANK_RTOL
+        assert pinned_high < justified_high, "the suite's ceiling is the tighter one"
+
+        # The two ends are measured numbers, so pin them to the fixtures they
+        # come from. A fixture that drifts is then caught here, with the window
+        # in view, rather than as a puzzling failure two classes away.
+        space, pipeline = TestColumnNormalisation._mixed_scale_model()
+        forward, values0 = space.forward_fn(pipeline, state)
+        order = ("big", "small")
+
+        def flat(x):
+            return jnp.ravel(forward({**values0, **{n: x[i] for i, n in enumerate(order)}}))
+
+        raw = jax.jacfwd(flat)(jnp.array([values0[n] for n in order]))
+        raw_spectrum = jnp.linalg.svd(raw, compute_uv=False)
+        assert float(raw_spectrum[-1] / raw_spectrum[0]) == pytest.approx(pinned_low, rel=1e-3)
+
+        # The upper end's own measurement lives in the float32 test, which has
+        # to skip under x64; the number it straddles is this model's, and it is
+        # precision-independent because the diagnostic forces float64.
+        off = identifiability(basis_space(), make_pipeline(0.0), state)
+        assert off.weakest_identified == pytest.approx(justified_high, rel=1e-3)
 
 
 # ---------------------------------------------------------------- precision --
