@@ -202,6 +202,14 @@ reason to make it skippable.
 | A prior's shape matches its latent's | Sampling a different-sized thing than you bind |
 | Binding preserves the pytree structure | `vmap`, `jit` and Fisher flattening all break |
 
+Every one of them raises `ParameterSpaceError`, and so does most of the rest of
+this page. It is **not** re-exported from `rheplicant` or
+`rheplicant.inference`, unlike its sibling error classes; the import path is
+
+```python
+from rheplicant.core.errors import ParameterSpaceError
+```
+
 ---
 
 ## The noise model
@@ -370,6 +378,49 @@ the check off.
 `linear_operator` never forms a matrix: `A` comes from `jax.linearize` and `Aᵀ`
 from `jax.vjp`, so applying a 10⁶-dimensional block costs one forward
 evaluation.
+
+### One latent, or a group
+
+`linear_operator` takes `name=` for one latent and `names=` for several exported
+as **one** block. Both are legitimate, and they are not interchangeable — which
+is why passing both is refused rather than guessed.
+
+```python
+block = linear_operator(space, twin, state, names=("t_unc", "t_cos", "t_sin"))
+solved, residual = wiener_solve(block, observed, noise_std=0.02)
+solved            # {"t_unc": Array, "t_cos": Array, "t_sin": Array}
+```
+
+A group's `x` is a `{name: array}` dict, and so is the answer. That is the
+point: the physical names survive the solve instead of the caller slicing an
+anonymous stacked vector — and the dict is the shape the rest of the package
+consumes. Measured on the tour's one-latent gain model:
+
+```text
+names=('gain',)  -> {'gain': Array(1.09999272)}   forward(solved) -> (128, 32)
+name='gain'      -> Array(1.09999272)             forward(x) -> TypeError: JAX
+                                                  does not support string
+                                                  indexing; got idx='gain'
+```
+
+`names=("gain",)` is a legitimate **group of one**, and is how a partition holds
+one-latent and many-latent blocks without special-casing either; the plan's own
+engine always spells it that way. Prefer `names=` unless you specifically want
+the bare array — if you have one, wrap it as `{block.name: x}` before it meets
+anything downstream.
+
+**Solving a group jointly is not the same as alternating over its members.** Two
+latents the data barely tells apart are resolved in one CG here, where
+alternation converges at the rate of their correlation while reporting a
+converged residual and a well-conditioned block at every step. The joint κ that
+`condition_estimate` reports for the group is the honest one — and "group the
+correlated latents into ONE `Block`" is exactly what `SamplingPlan`'s own
+non-convergence message recommends.
+
+Not everything can be grouped, and the check says so: for a group,
+`check_linearity` verifies **joint** affinity, which a bilinear pair fails. A
+`gain × T_ant` model is refused as a group and belongs in two blocks of one
+[plan](#a-plan-one-partition-two-exits).
 
 ### Sampling it, exactly
 

@@ -175,6 +175,17 @@ leaves* let the same physics enter in different forms — ground spill as a
 pre-beam field (`ground_field`) or a post-beam effective temperature
 (`ground_pickup`, generic `t_sys_extra`).
 
+One refusal comes from the operator rather than from the graph. An operator
+whose physics depends on *where* it sits declares that with `must_precede`, in
+the graph's own node ids — `CWCalibrationOperator.must_precede == ("bandpass",
+"gain")`, because a tone injected after the gain has a gain response of exactly
+1.0 and therefore monitors nothing. `assemble(sky, bandpass, gain, At("noise",
+cw_tone))` raises instead of building that calibrator. The test is
+**reachability**, not a sort order: an absent stage is no violation (there is
+nothing to pass through), while a node id the template does not have is one.
+It is checked by `assemble()` and only there — the equivalent `Pipeline(...)`
+spelling builds the same composition without the check. See D27.
+
 Switched calibration is one more provided operator:
 
 ```python
@@ -341,6 +352,60 @@ posterior_predictive = predict_from_samples(bayes_twin, state, space,
 A space is not limited to one prior per leaf: `Bind` can derive a leaf from
 several latents, drive several leaves from one, or transform on the way — see
 [Inferring anything](inference.md).
+
+**Linear blocks — the exact route for the big parameters.** A latent declared
+`linear=True` has its `A`, `Aᵀ` and offset exported without a matrix ever being
+formed, and its posterior is then available in closed form. Prefer the
+**grouped** spelling: it returns `{name: array}`, which is the shape every
+downstream consumer takes.
+
+```python
+from rheplicant.inference import check_linearity, linear_operator, wiener_solve
+
+check_linearity(space, model, state, names=("gain",))    # the claim, checked first
+block = linear_operator(space, model, state, names=("gain",))
+solved, residual = wiener_solve(block, observation.data, noise_std=0.5)
+# solved == {"gain": Array(1.09999272)} — hand it straight back to forward(...)
+```
+
+`gcr_sample` takes the same block and returns an exact posterior *draw*, one CG
+solve each. The singular `name="gain"` is legitimate and different — its answer
+is a bare array, which `space.forward_fn`'s `forward` rejects — see
+[Linear blocks](inference.md#linear-blocks).
+
+**Is the model identified at all?** `identifiability()` is a rank test on the
+Jacobian with respect to **every** latent at once. It is the one diagnostic no
+per-block residual or condition number can replace: a degeneracy whose two
+halves live in different blocks leaves each conditional looking perfectly well
+posed.
+
+```python
+from rheplicant.inference import identifiability
+
+report = identifiability(space, model, state)
+if report.nullity:
+    print(report.nullity, "blind directions;", report.participation(0))
+```
+
+**A whole model, in one declaration.** `SamplingPlan` is the Gibbs loop the
+above sketches, declared rather than written: partition the space into `Block`s
+and each block's engine is *derived* from `Latent(..., linear=True)`, never
+restated. Two methods over one implementation — a best fit, and draws:
+
+```python
+from rheplicant.inference import SamplingPlan, Block
+
+plan  = SamplingPlan(space, Block("gain"))   # repr: SamplingPlan(('gain'):conjugate)
+est   = plan.estimate(model, state, observation.data, noise=0.5)
+draws = plan.sample(model, state, observation.data, noise=0.5,
+                    key=jax.random.key(1), n_sweeps=200)
+```
+
+The partition is checked to be strict, `identifiability()` runs at both exits
+before a sweep, and convergence is monitored on the **joint** χ² rather than on
+any per-block residual — see
+[A plan: one partition, two exits](inference.md#a-plan-one-partition-two-exits)
+and D26.
 
 **Uncertainty propagation** — Fisher forecasts from exact Jacobians, and
 Monte Carlo pushforward. Matrices carry the parameter structure they were
