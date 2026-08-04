@@ -1,21 +1,33 @@
 """Every exit that consumes ``observed`` must refuse one shaped wrong.
 
-The scenario is one honest slicing mistake, in three shapes. ``observed[0]``
+The scenario is one honest slicing mistake, in five shapes. ``observed[0]``
 drops a rank — ``(8,)`` where ``(24, 8)`` was meant. ``observed[:, :1]`` and
 ``observed[:1]`` keep it — ``(24, 1)`` and ``(1, 8)``, one channel or one time
-sample standing in for the whole record. All three broadcast. Nothing about any
-of them is loud: the subtraction succeeds, the loss is finite and small, and the
-calibrator reports convergence while every recovered gain is wrong. The loss
-history is the only evidence the user has, and it says the fit worked.
+sample standing in for the whole record. ``observed[:, None, :]`` gains a rank
+instead of losing one — ``(24, 1, 8)``, a spurious axis nothing asked for.
+``observed.mean()`` collapses the whole record to a single number — ``()``.
+All five broadcast. Nothing about any of them is loud: the subtraction
+succeeds, the loss is finite and small, and the calibrator reports convergence
+while every recovered gain is wrong. The loss history is the only evidence the
+user has, and it says the fit worked.
 
-The two rank-preserving slices are the more insidious, and they are here because
-a guard that compared only ``jnp.ndim`` would let them through. Measured, with
-that relaxation in place: both calibrators converged on ``(24, 1)`` and
-``(1, 8)``, the NumPyro site conditioned without complaint, and ``wiener_solve``
-returned a perfectly well-shaped ``(24,)`` gain estimate from a single column of
-data. A finite, correctly-shaped, wrong answer is the failure these guards
-exist to prevent, so one scenario that happens to differ in rank cannot be the
-whole of the evidence.
+The two rank-preserving slices are the more insidious of the first three, and
+they are here because a guard that compared only ``jnp.ndim`` would let them
+through. Measured, with that relaxation in place: both calibrators converged
+on ``(24, 1)`` and ``(1, 8)``, the NumPyro site conditioned without complaint,
+and ``wiener_solve`` returned a perfectly well-shaped ``(24,)`` gain estimate
+from a single column of data. A finite, correctly-shaped, wrong answer is the
+failure these guards exist to prevent, so one scenario that happens to differ
+in rank cannot be the whole of the evidence.
+
+The rank-gained and scalar shapes close the other side of that same gap: a
+relaxation that tolerates a singleton or an added axis — "squeeze before
+comparing", or "``jnp.size(observed) == 1`` broadcasts everywhere, that's not
+a mistake" — passes all three narrowing shapes above yet still admits
+``observed.mean()``, ``(1,)``, and ``(24, 1, 8)`` at every exit. Measured, with
+the size-1 relaxation in place: ``AdamCalibrator`` converges on the mean of the
+record with ``loss[-1]=2.274e-11`` and every recovered gain still wrong by up
+to ``0.23``.
 
 :func:`~rheplicant.inference.linear.wiener_solve` already refused this, and its
 message already owns the explanation. These tests pin the same refusal, with
@@ -108,6 +120,14 @@ MIS_SLICES = [
     pytest.param(
         (lambda d: d[:1], (1, N_FREQ)),
         id="one_time_sample_rank_kept",
+    ),
+    pytest.param(
+        (lambda d: d[:, None, :], (N_TIME, 1, N_FREQ)),
+        id="spurious_axis_rank_gained",
+    ),
+    pytest.param(
+        (lambda d: d.mean(), ()),
+        id="scalar_whole_record_collapsed",
     ),
 ]
 
