@@ -23,13 +23,22 @@ hand-built composite it compiles to.
 Operators declare their home node via the ``graph_node`` ClassVar (resolved
 through the MRO, so subclasses inherit it); :class:`At` overrides placement
 per instance.
+
+**Addressing.** ``assembly[node_id]`` reaches the operator at a node whatever
+the fold did with it. A ``many`` node holding several instances is the one
+case a single id cannot answer for, so its instances are named ``x_1``,
+``x_2``, … and the bare ``x`` raises :class:`AmbiguousNodeError` listing them.
+With one instance nothing changes — ``x`` is still the address, and a
+:class:`~rheplicant.inference.parameters.ParameterSpace` written against it is
+untouched until a sibling actually arrives.
 """
 
 import dataclasses
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 import equinox as eqx
+import jax
 
 from rheplicant.core.combinators import SelectOperator, SumOperator
 from rheplicant.core.errors import DirtError
@@ -40,6 +49,17 @@ from rheplicant.core.state import State
 
 class AssemblyError(DirtError, ValueError):
     """A provided operator set cannot be assembled on the signal graph."""
+
+
+class AmbiguousNodeError(AssemblyError):
+    """A node id was used as an address, but it holds more than one operator.
+
+    Raised by :meth:`Assembly.__getitem__` / :meth:`Assembly.replace_node` for
+    a ``many=True`` node carrying several instances. Answering with one of
+    them (or with the fold over all of them) would silently pick a different
+    operator than the caller means — and, through ``replace_node``, silently
+    delete the siblings. The message names every instance id instead.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,17 +182,30 @@ class SignalGraph:
 
     # -- rendering -----------------------------------------------------------
 
-    def to_mermaid(self, lit: Iterable[str] = (), skipped: Iterable[str] = ()) -> str:
+    def to_mermaid(
+        self,
+        lit: Iterable[str] = (),
+        skipped: Iterable[str] = (),
+        counts: Mapping[str, int] | None = None,
+    ) -> str:
         """Render the template as a mermaid flowchart with lit/dim styling.
 
         ``lit`` nodes are highlighted, ``skipped`` (traversed-as-identity)
         nodes are half-lit, everything else is dimmed — the signal-path view
         of what an assembly simulates.
+
+        ``counts`` maps a node id to the number of operator instances sitting
+        on it. A ``many`` node is one box however many instances it carries,
+        so the count is shown in the label: an unannotated box would render
+        two components as one.
         """
         lit, skipped = set(lit), set(skipped)
+        counts = dict(counts or {})
         lines = ["flowchart TD"]
         for n, spec in self.nodes.items():
             label = n.replace("_", " ")
+            if counts.get(n, 1) > 1:
+                label = f"{label} (x{counts[n]})"
             if spec.kind == "junction":
                 shape = '(("+"))'
             elif spec.kind == "selector":
@@ -195,22 +228,28 @@ class SignalGraph:
         lit: Iterable[str] = (),
         skipped: Iterable[str] = (),
         title: str | None = None,
+        counts: Mapping[str, int] | None = None,
     ) -> str:
         """Standalone HTML page of the template with lit/dim signal-path styling."""
         from rheplicant.core.render import signal_path_html
 
-        return signal_path_html(self, lit=lit, skipped=skipped, title=title)
+        return signal_path_html(
+            self, lit=lit, skipped=skipped, title=title, counts=counts
+        )
 
     def to_svg(
         self,
         lit: Iterable[str] = (),
         skipped: Iterable[str] = (),
         title: str | None = None,
+        counts: Mapping[str, int] | None = None,
     ) -> str:
         """Self-contained ``<svg>`` of the template, for embedding (docs, notebooks)."""
         from rheplicant.core.render import signal_path_svg
 
-        return signal_path_svg(self, lit=lit, skipped=skipped, title=title)
+        return signal_path_svg(
+            self, lit=lit, skipped=skipped, title=title, counts=counts
+        )
 
     def __repr__(self) -> str:
         return f"SignalGraph({self.name!r}, {len(self.nodes)} nodes, {len(self.edges)} edges)"
@@ -244,6 +283,28 @@ class Assembly(AbstractOperator):
     :meth:`replace_node`, render the lit/dim signal path with
     :meth:`to_mermaid`.
 
+    Attributes:
+        lit: template nodes this assembly claims, in template order.
+        skipped: nodes traversed as identity between lit ones.
+        instances: ``(node_id, instance_ids)`` for every node carrying more
+            than one operator. ``lit`` names template nodes, and a node is one
+            node however many operators sit on it — this is where the
+            multiplicity lives, and what makes the bare node id ambiguous.
+        materialized: junction/selector nodes that actually became a
+            ``SumOperator``/``SelectOperator`` (rather than passing through).
+        aliased: **public, and the thing to check before writing a selector** —
+            nodes the fold embedded at more than one position, because their
+            contribution reaches the sink by more than one path. Reading them
+            is honest — ``self[nid]`` IS the operator sitting there — so only
+            writing refuses: :meth:`replace_node` and
+            :meth:`~rheplicant.inference.parameters.ParameterSpace.validate`
+            both consult this tuple, since either would otherwise rewrite one
+            copy and leave the others live in the forward model. What neither
+            can see is a hand-rolled ``eqx.tree_at(lambda a: a[nid].x, ...)``:
+            that call goes through no framework code, so nothing intercepts it
+            and it still rewrites one copy only. Consult ``.aliased`` yourself
+            before writing one.
+
     If the assembly contains live sources it *generates* its data — calling
     it on a state that already carries data raises, because that data would
     be silently discarded (pass ``data=None``). Source-free assemblies are
@@ -256,6 +317,11 @@ class Assembly(AbstractOperator):
     skipped: tuple[str, ...] = eqx.field(static=True)
     has_source: bool = eqx.field(static=True)
     root_label: str = eqx.field(static=True, default="")
+    instances: tuple[tuple[str, tuple[str, ...]], ...] = eqx.field(
+        static=True, default=()
+    )
+    materialized: tuple[str, ...] = eqx.field(static=True, default=())
+    aliased: tuple[str, ...] = eqx.field(static=True, default=())
 
     def __call__(self, state: State) -> State:
         if self.has_source and state.data is not None:
@@ -272,6 +338,16 @@ class Assembly(AbstractOperator):
         return self.operator(state)
 
     def __getitem__(self, node_id: str) -> AbstractOperator:
+        siblings = dict(self.instances).get(node_id)
+        if siblings is not None:
+            raise AmbiguousNodeError(
+                f"{node_id!r} holds {len(siblings)} operator instances in this "
+                f"assembly, so it addresses none of them: {list(siblings)}. Use one "
+                f"of those ids — e.g. assembly[{siblings[0]!r}] — or "
+                f"assembly.operator to reach the fold that sums them. (With a "
+                f"single instance {node_id!r} is still the address; it stopped "
+                "being one the moment a second operator was placed there.)"
+            )
         if node_id and node_id == self.root_label:
             return self.operator
         found = _find_named(self.operator, node_id)
@@ -280,8 +356,34 @@ class Assembly(AbstractOperator):
         return found
 
     def replace_node(self, node_id: str, operator: AbstractOperator) -> "Assembly":
-        """Return a new Assembly with the operator at ``node_id`` swapped."""
-        target = self[node_id]
+        """Return a new Assembly with the operator at ``node_id`` swapped.
+
+        Raises rather than swapping when ``node_id`` names something that is
+        not one operator: a ``many`` node carrying several instances
+        (:class:`AmbiguousNodeError`), a junction/selector that assembly
+        materialized as a combinator, or a node the fold embedded at more than
+        one position. In all three ``eqx.tree_at`` would happily rewrite one
+        position — dropping live branches from the forward model, or leaving
+        the node's other copies in it, with no shape change and no complaint.
+        """
+        target = self[node_id]  # raises AmbiguousNodeError on a multi-instance node
+        if node_id in self.aliased:
+            raise AssemblyError(
+                f"{node_id!r} is folded into this assembly at more than one place: "
+                "its contribution reaches the sink by several paths, so the operator "
+                "sits in several branches. Replacing it would rewrite the one branch "
+                "this id reaches and silently leave the others in the forward model. "
+                f"Re-assemble() with the operator you want at {node_id!r}."
+            )
+        if node_id in self.materialized:
+            names = getattr(target, "names", ())
+            raise AssemblyError(
+                f"{node_id!r} is a junction/selector that this assembly materialized "
+                f"as {type(target).__name__} over {list(names)}; it is not an "
+                "operator slot, and replacing it would drop those branches from the "
+                "forward model. Replace one of them by its own node id, or "
+                "re-assemble() with the operator set you want."
+            )
 
         def where(a: "Assembly") -> AbstractOperator:
             return a[node_id]
@@ -289,25 +391,39 @@ class Assembly(AbstractOperator):
         del target  # existence check only
         return eqx.tree_at(where, self, operator)
 
+    @property
+    def _counts(self) -> dict[str, int]:
+        """Instances per node, for renderings — one lit box may be several."""
+        return {nid: len(names) for nid, names in self.instances}
+
     def to_mermaid(self) -> str:
         """Lit/dim mermaid rendering via the registered template."""
-        return get_graph(self.graph_name).to_mermaid(lit=self.lit, skipped=self.skipped)
+        return get_graph(self.graph_name).to_mermaid(
+            lit=self.lit, skipped=self.skipped, counts=self._counts
+        )
 
     def to_html(self, title: str | None = None) -> str:
         """Standalone HTML page: the full graph with this assembly's nodes lit."""
         return get_graph(self.graph_name).to_html(
-            lit=self.lit, skipped=self.skipped, title=title
+            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
         )
 
     def to_svg(self, title: str | None = None) -> str:
         """Self-contained ``<svg>`` with this assembly's nodes lit, for embedding."""
         return get_graph(self.graph_name).to_svg(
-            lit=self.lit, skipped=self.skipped, title=title
+            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
         )
 
     def __repr__(self) -> str:
+        # `lit` names template nodes, and a node stays one node however many
+        # operators sit on it — so the multiplicity is reported beside it
+        # rather than folded into the list, where it would read as a node id.
+        counts = self._counts
+        lit = [
+            f"{nid} x{counts[nid]}" if nid in counts else nid for nid in self.lit
+        ]
         return (
-            f"Assembly(graph={self.graph_name!r}, lit={list(self.lit)}, "
+            f"Assembly(graph={self.graph_name!r}, lit={lit}, "
             f"skipped-as-identity={list(self.skipped)})"
         )
 
@@ -327,6 +443,192 @@ def _find_named(op: AbstractOperator, name: str) -> AbstractOperator | None:
                     next_level.append(part)
         queue = next_level
     return None
+
+
+def _children(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
+    """The fold's composite spine, in one place: what holds operators.
+
+    Everything that walks a fold by identity descends through exactly these,
+    so a new composite type has one place to be taught rather than several to
+    be forgotten in.
+    """
+    if isinstance(op, Pipeline):
+        return tuple(op.stages)
+    if isinstance(op, (SumOperator, SelectOperator)):
+        return tuple(op.branches)
+    return ()
+
+
+def _children_through_assemblies(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
+    """:func:`_children`, also stepping into an Assembly's folded operator.
+
+    Kept separate because :func:`_positions` must NOT step into one: it asks
+    what *this* fold did, and a nested assembly's contents were placed by an
+    earlier one.
+    """
+    if isinstance(op, Assembly):
+        return (op.operator,)
+    return _children(op)
+
+
+def _spine_pairs(
+    root: AbstractOperator, mirror: AbstractOperator | None = None
+) -> Iterable[tuple[AbstractOperator, AbstractOperator | None]]:
+    """Every position of ``root``, paired with the same position of ``mirror``.
+
+    ``mirror`` is a ``tree_map`` copy of ``root``, so the two have the same
+    spine and each pair is one position seen twice: once as the real operator
+    (which a fold may have placed more than once, by identity) and once as
+    whatever the copy put there. Pass ``None`` to walk ``root`` alone.
+    """
+    queue: list[tuple[AbstractOperator, AbstractOperator | None]] = [(root, mirror)]
+    while queue:
+        current, twin = queue.pop()
+        yield current, twin
+        children = _children_through_assemblies(current)
+        if twin is None:
+            queue.extend((child, None) for child in children)
+        else:
+            queue.extend(
+                zip(children, _children_through_assemblies(twin), strict=True)
+            )
+
+
+class _LeafPath:
+    """One tagged leaf path, wrapped so that flattening cannot expand it.
+
+    ``tree_map_with_path`` writing the bare path would leave a *tuple* in leaf
+    position, and any later ``tree_leaves`` would flatten it into its
+    components. An opaque object is a leaf, so the path reads back out whole.
+    """
+
+    __slots__ = ("path",)
+
+    def __init__(self, path: tuple):
+        self.path = path
+
+
+def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
+    """``{leaf key path: node id}`` for every leaf an aliased node owns.
+
+    :attr:`Assembly.aliased` names the *nodes* the fold embedded more than
+    once; an ``eqx.tree_at`` selector lands on a *leaf*, so anything vetting a
+    selector — :meth:`ParameterSpace.validate
+    <rheplicant.inference.parameters.ParameterSpace.validate>` — needs the
+    leaves those nodes own.
+
+    Every copy is reported, not only the one :func:`_find_named` reaches: a
+    selector spelled out by hand can name the second copy, and rewriting that
+    one leaves the first live — the same wrong answer from the other end.
+    Assemblies nested inside a larger composite are covered too.
+    """
+    if not any(
+        isinstance(op, Assembly) and op.aliased for op, _ in _spine_pairs(pipeline)
+    ):
+        return {}
+    tagged = jax.tree_util.tree_map_with_path(lambda path, _: _LeafPath(path), pipeline)
+    owned: dict[tuple, str] = {}
+    for current, twin in _spine_pairs(pipeline, tagged):
+        if not isinstance(current, Assembly):
+            continue
+        for node_id in current.aliased:
+            target = _find_named(current.operator, node_id)
+            if target is None:  # pragma: no cover - assemble() checked these ids
+                continue
+            for below, below_twin in _spine_pairs(current.operator, twin.operator):
+                if below is target:
+                    owned.update(
+                        (tag.path, node_id)
+                        for tag in jax.tree_util.tree_leaves(below_twin)
+                    )
+    return owned
+
+
+def _positions(root: AbstractOperator, target: AbstractOperator) -> int:
+    """How many positions of the folded tree ``target`` occupies (by identity)."""
+    count = 0
+    queue: list[AbstractOperator] = [root]
+    while queue:
+        current = queue.pop()
+        if current is target:
+            count += 1
+        queue.extend(_children(current))
+    return count
+
+
+def _fold_duplicates(
+    root: AbstractOperator,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> dict[str, int]:
+    """Nodes whose operator the FOLD put at more than one position, and how many.
+
+    A node whose contribution reaches the sink by several paths is folded in
+    once per path. ``_find_named`` reaches one of those positions and
+    ``eqx.tree_at`` rewrites that one, so writing through the node id leaves
+    the other copies live — a finite, correctly-shaped, wrong forward model.
+
+    Placing ONE operator object at several nodes is deliberate and not this, so
+    the occurrence count is compared against how often the caller placed it
+    rather than against 1.
+    """
+    slots: list[tuple[str, AbstractOperator]] = [
+        (nid, op) for nid, ops_at in placement.items() for op in ops_at
+    ]
+    slots += [(path[-1], op) for path, op in regions]
+    placed: dict[int, int] = {}
+    for _, op in slots:
+        placed[id(op)] = placed.get(id(op), 0) + 1
+    duplicates: dict[str, int] = {}
+    for nid, op in slots:
+        found = _positions(root, op)
+        if found > placed[id(op)]:
+            duplicates[nid] = max(duplicates.get(nid, 0), found)
+    return duplicates
+
+
+def _check_promised_ids(
+    root: AbstractOperator,
+    multi: dict[str, tuple[str, ...]],
+    placement: dict[str, list[AbstractOperator]],
+    duplicates: dict[str, int],
+) -> None:
+    """Every per-instance id the assembly will hand out must reach its instance.
+
+    :func:`_instance_names` mints ``x_1..x_n``; :func:`_dedup` independently
+    mints ``x, x_2, x_3, ...`` for repeated branch labels, and the two overlap
+    from ``_2`` on. Both arise from the same graph shape — a node reaching a
+    fold by several paths — so the collision is reported as what it is rather
+    than as a naming accident. An id that resolves to something other than the
+    operator placed there would be handed to the caller BY
+    :class:`AmbiguousNodeError` and then written through, which is worse than
+    saying nothing.
+    """
+    for nid, names in multi.items():
+        if nid in duplicates:
+            raise AssemblyError(
+                f"Node {nid!r} carries {len(names)} operator instances, and its "
+                f"contribution reaches the sink by {duplicates[nid]} paths — so the "
+                f"fold embeds each instance {duplicates[nid]} times and labels the "
+                f"repeated branches {nid!r}, {nid + '_2'!r}, ... . Those labels "
+                f"collide with the per-instance ids {list(names)}, leaving no id that "
+                f"names one instance: reading {nid + '_2'!r} would reach a whole "
+                "branch and writing it would rewrite that branch instead. Give the "
+                "paths their own nodes so each instance has one home; placing ONE "
+                f"composed operator at {nid!r} also removes the ambiguity, though a "
+                "node folded in twice stays unwritable."
+            )
+        for index, (name, op) in enumerate(zip(names, placement[nid], strict=True), 1):
+            found = _find_named(root, name)
+            if found is not op:
+                raise AssemblyError(
+                    f"Node {nid!r} would report {name!r} as the id of instance "
+                    f"{index} ({type(op).__name__}), but that id resolves to "
+                    f"{type(found).__name__ if found is not None else 'nothing'} in "
+                    "the assembled operator — it addresses the wrong part of the "
+                    "forward model, and replace_node/ParameterSpace would rewrite "
+                    f"that part. Re-assemble with one operator at {nid!r}."
+                )
 
 
 def _descend_to_own_stage(part: AbstractOperator, name: str) -> AbstractOperator:
@@ -383,6 +685,27 @@ def _dedup(names: list[str]) -> list[str]:
         counts[n] = counts.get(n, 0) + 1
         out.append(n if counts[n] == 1 else f"{n}_{counts[n]}")
     return out
+
+
+def _instance_names(node_id: str, count: int) -> tuple[str, ...]:
+    """Names addressing the ``count`` operator instances placed at ``node_id``.
+
+    One instance keeps the bare node id: the single-instance assembly is
+    exactly what it always was, down to the static names, so existing spaces
+    and examples are untouched.
+
+    Two or more get a 1-based suffix **including the first** — ``x_1``,
+    ``x_2`` — rather than ``x``, ``x_2``. Suffixing only the later ones would
+    leave ``x`` naming both one particular instance *and* the fold that a
+    consumer labels by the node id, and the breadth-first lookup in
+    :func:`_find_named` resolves that collision to the fold: ``assembly[x]``
+    then hands back a ``SumOperator`` and ``replace_node(x, ...)`` overwrites
+    every instance with one operator. Making the bare id name nothing turns
+    that into :class:`AmbiguousNodeError`, which can say what to write.
+    """
+    if count == 1:
+        return (node_id,)
+    return tuple(f"{node_id}_{i}" for i in range(1, count + 1))
 
 
 def _validate_region(graph: SignalGraph, path: tuple[str, ...], op: AbstractOperator):
@@ -485,6 +808,25 @@ def assemble(
     :class:`AssemblyError` on unknown/ambiguous placement, junction slots,
     duplicate single-instance nodes, or a transform-rooted branch feeding a
     materialized junction (a sum branch must contain a source).
+
+    **Limitation — the envelope is in-trees.** The package's promise is that
+    any assembled graph serves both forward modelling *and* inference. That
+    holds while every node reaches the sink by exactly one path, and it is
+    stated here rather than assumed because assembly folds the graph to a
+    **tree**: a node reached by several paths is folded in once per path, so
+    one operator object ends up at several positions. The forward model is
+    right either way — each path contributes as the graph says. What breaks is
+    *writing* to such a node afterwards, because ``eqx.tree_at`` rewrites the
+    one position a selector reaches and leaves the other copies live: a
+    finite, correctly-shaped, wrong model in which the parameter is only
+    partly free. Those nodes are recorded in :attr:`Assembly.aliased`, and
+    both :meth:`Assembly.replace_node` and
+    :meth:`~rheplicant.inference.parameters.ParameterSpace.validate` refuse to
+    write through them rather than answer wrongly.
+
+    No shipped graph is affected: every node of the radio template reaches the
+    sink by exactly one path, so ``aliased`` is always empty there. This bites
+    user-defined graphs only.
     """
     if not operators:
         raise AssemblyError("assemble() needs at least one operator.")
@@ -504,6 +846,12 @@ def assemble(
     # a different shape).
     fan: dict[str, list[_Branch]] = {}
     skipped: list[str] = []
+    # Addressing bookkeeping, both static: which node ids carry several
+    # operator instances (so the bare id addresses none of them in particular),
+    # and which junction/selector nodes actually materialized as a combinator
+    # (so replace_node there would discard every branch feeding it).
+    multi: dict[str, tuple[str, ...]] = {}
+    materialized: list[str] = []
 
     def upstream_of(nid: str) -> list[_Branch]:
         out: list[_Branch] = []
@@ -517,6 +865,8 @@ def assemble(
         spec = graph.nodes[nid]
         instances = placement.get(nid, [])
         upstream = upstream_of(nid)
+        if len(instances) > 1:
+            multi[nid] = _instance_names(nid, len(instances))
 
         if nid in region_of:
             idx = region_of[nid]
@@ -566,6 +916,7 @@ def assemble(
                     combined = SelectOperator(
                         *branch_ops, names=branch_names, switch_key=nid
                     )
+                materialized.append(nid)
                 exprs[nid] = _Branch([(nid, combined)], sourced=True)
         elif spec.kind == "source":
             if not instances:
@@ -573,10 +924,14 @@ def assemble(
             elif len(instances) == 1:
                 exprs[nid] = _Branch([(nid, instances[0])], sourced=True)
             elif _feeds_only_selectors(graph, nid):
-                fan[nid] = [_Branch([(nid, op)], sourced=True) for op in instances]
+                names = _instance_names(nid, len(instances))
+                fan[nid] = [
+                    _Branch([(name, op)], sourced=True, origin=nid)
+                    for name, op in zip(names, instances, strict=True)
+                ]
                 exprs[nid] = fan[nid][0]  # liveness marker; consumers read `fan`
             else:
-                names = _dedup([nid] * len(instances))
+                names = _instance_names(nid, len(instances))
                 exprs[nid] = _Branch(
                     [(nid, SumOperator(*instances, names=names))], sourced=True
                 )
@@ -584,9 +939,11 @@ def assemble(
             up = upstream[0] if upstream else None
             if instances:
                 stages = list(up.stages) if up else []
-                stages += [(nid, op) for op in instances]
+                names = _instance_names(nid, len(instances))
+                stages += list(zip(names, instances, strict=True))
                 exprs[nid] = _Branch(
-                    stages, sourced=up.sourced if up else False
+                    stages, sourced=up.sourced if up else False,
+                    origin=up.origin if up else nid,
                 )
             else:
                 if up is not None:
@@ -597,16 +954,27 @@ def assemble(
     if final is None:
         raise AssemblyError("Nothing to assemble: no provided node reaches the sink.")
 
+    operator = final.to_operator()
+    # Addressing closure: the ids this assembly is about to promise must reach
+    # the operators they name, and a node the fold duplicated cannot be written
+    # through at all. Both are decided on the BUILT tree, so they cannot drift
+    # from what `_find_named`/`eqx.tree_at` actually do to it.
+    duplicates = _fold_duplicates(operator, placement, regions)
+    _check_promised_ids(operator, multi, placement, duplicates)
+
     claimed = set(placement) | set(region_of)
     lit = tuple(n for n in graph.nodes if n in claimed)
     live_span = _live_span(graph, lit)
     return Assembly(
-        operator=final.to_operator(),
+        operator=operator,
         graph_name=graph.name,
         lit=lit,
         skipped=tuple(n for n in skipped if n in live_span),
         has_source=final.sourced,
         root_label=final.stages[0][0] if len(final.stages) == 1 else "",
+        instances=tuple((nid, names) for nid, names in multi.items()),
+        materialized=tuple(materialized),
+        aliased=tuple(n for n in graph.nodes if n in duplicates),
     )
 
 

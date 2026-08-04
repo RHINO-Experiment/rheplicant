@@ -46,7 +46,9 @@ switch position rather than being summed with its siblings: with two loads the
 switch indexes 0 = antenna, 1 = first load, 2 = second load — the edge
 declaration order, then the order the loads were provided. Three distinct
 sources is what an identifiable per-channel noise-wave fit needs, and
-``assemble()`` expresses it directly.
+``assemble()`` expresses it directly. Two instances are addressed as
+``cal_loads_1`` / ``cal_loads_2``; the bare ``cal_loads`` is an address only
+while there is exactly one (see :mod:`rheplicant.core.graph`).
 
 ``beam_spill`` (v1.4) is the horizon split of a beam that does not stop at the
 horizon: the part below it sees ground, not sky. It is the trunk stage of the

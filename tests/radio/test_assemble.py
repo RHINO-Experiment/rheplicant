@@ -1,13 +1,17 @@
 """Tests for graph-guided assembly on the canonical single-antenna graph."""
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
 
 import rheplicant.radio as radio
-from rheplicant import Pipeline, SelectOperator, SumOperator
-from rheplicant.core.graph import AssemblyError, At
+from rheplicant import AbstractOperator, Pipeline, SelectOperator, SumOperator
+from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.graph import AmbiguousNodeError, AssemblyError, At
+from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.radio import (
     RADIO_GRAPH,
     ADCOperator,
@@ -114,6 +118,18 @@ class TestCanonicalTopology:
         with pytest.raises(AssemblyError, match="no live source"):
             assemble(o["io"], o["gd"])
 
+    def test_no_node_of_the_shipped_graph_reaches_the_sink_twice(self):
+        """The shipped template is an in-tree, and this is what says so.
+
+        A node reaching the sink by several paths is folded in once per path,
+        which makes it unwritable: ``replace_node`` and ``ParameterSpace.
+        validate`` both refuse on :attr:`Assembly.aliased` rather than rewrite
+        one copy and leave the others live. Nothing in the radio template is
+        such a node today. If someone adds a fork that makes one, this test is
+        where they find out what it costs.
+        """
+        assert assemble(*ops().values()).aliased == ()
+
     def test_full_set_equals_hand_built_bitwise(self, template_state):
         o = ops()
         asm = assemble(*o.values())
@@ -217,6 +233,56 @@ class TestSwitchedCalibration:
         assert jnp.isfinite(g["cal_loads"].t_load) and g["cal_loads"].t_load != 0
 
 
+class TestSelectorFoldReplacement:
+    """``replace_node`` on a materialized SELECTOR, on the shipped graph.
+
+    ``cal_loads -> receiver_input`` is the multi-instance path the calibration
+    and noise-wave examples tell users to read, and a materialized
+    ``SelectOperator`` is exactly as replaceable as a materialized
+    ``SumOperator``: not at all. ``eqx.tree_at`` would swap the whole switch for
+    one operator, deleting both the antenna chain and the load from the forward
+    model with no error and no shape change — the assembly would still return
+    an (n_time, n_freq) array, just of one constant.
+    """
+
+    @pytest.fixture
+    def switched(self, template_state):
+        """Sky through the switch against a load, then gain. Both branches live."""
+        switch = jnp.array([0, 1, 0, 0, 1, 0, 0, 1])
+        state = template_state.replace(
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
+        )
+        o = ops()
+        twin = assemble(o["fg"], CalLoadOperator(t_load=jnp.array(300.0)), o["gn"])
+        return twin, state, switch
+
+    def test_the_selector_really_materialized(self, switched):
+        twin, state, switch = switched
+        assert twin.materialized == ("receiver_input",)
+        assert isinstance(twin["receiver_input"], SelectOperator)
+        assert twin["receiver_input"].names == ("foregrounds", "cal_loads")
+        # both positions are genuinely in the output: load rows are 300 * 1.1
+        out = twin(state).data
+        assert jnp.allclose(out[switch == 1], 330.0)
+        assert not jnp.any(jnp.isclose(out[switch == 0], 330.0))
+
+    def test_replace_node_on_the_selector_refuses(self, switched):
+        twin, state, _ = switched
+        before = twin(state).data
+        with pytest.raises(AssemblyError) as excinfo:
+            twin.replace_node("receiver_input", CalLoadOperator(t_load=jnp.array(0.0)))
+        message = str(excinfo.value)
+        assert "SelectOperator" in message
+        assert "foregrounds" in message and "cal_loads" in message
+        # physics, not shape: the forward model is byte-for-byte what it was
+        assert jnp.array_equal(twin(state).data, before)
+
+    def test_reading_the_selector_still_works(self, switched):
+        """Reading the fold is how you inspect switch order; only writing lies."""
+        twin, _, _ = switched
+        assert twin["receiver_input"].switch_key == "receiver_input"
+
+
 class TestRegistryCompleteness:
     def test_every_concrete_operator_is_placeable(self):
         """Every exported radio operator class has a valid graph_node."""
@@ -309,7 +375,7 @@ class TestManyInstancesComposeLikeTheirConsumer:
         )
         selector = twin["receiver_input"]
         assert isinstance(selector, SelectOperator)
-        assert selector.names == ("uniform_sky", "cal_loads", "cal_loads_2")
+        assert selector.names == ("uniform_sky", "cal_loads_1", "cal_loads_2")
 
         out = twin(template_state.replace(
             coords=template_state.coords.replace(extra={"receiver_input": switch})
@@ -345,7 +411,8 @@ class TestManyInstancesComposeLikeTheirConsumer:
                                spectral_index=jnp.array(-2.5),
                                ref_freq=jnp.array(70e6)),
         )
-        assert isinstance(twin["foregrounds"], SumOperator)
+        assert isinstance(twin.operator, SumOperator)
+        assert twin.operator.names == ("foregrounds_1", "foregrounds_2")
         out = twin(template_state).data
         one = assemble(
             ForegroundOperator(amplitude=jnp.array(30.0),
@@ -382,3 +449,132 @@ class TestManyInstancesComposeLikeTheirConsumer:
         )).data
         assert jnp.allclose(out[switch == 0], 100.0)
         assert jnp.allclose(out[switch == 1], 300.0)
+
+
+class _TSysBasis(AbstractOperator):
+    """A generic effective-T_sys contribution: ``basis @ coeff``, flat in time.
+
+    ``t_sys_extra`` is the ``many=True`` node the graph docstring designates
+    for exactly this, and it ships no operator — so the test brings its own,
+    the way the next component to arrive there will.
+    """
+
+    graph_node: ClassVar[str] = "t_sys_extra"
+    coeff: jax.Array
+    basis: jax.Array
+
+    def __call__(self, state):
+        n_time = state.coords.time.shape[0]
+        return state.with_data(
+            jnp.broadcast_to(self.basis @ self.coeff, (n_time, self.basis.shape[0]))
+        )
+
+
+def _basis():
+    return jnp.stack([jnp.ones(N_FREQ), jnp.linspace(-1.0, 1.0, N_FREQ)], axis=1)
+
+
+def _coeff_space(node_id: str) -> ParameterSpace:
+    return ParameterSpace(
+        latents=(Latent("C", init=jnp.array([10.0, 1.0])),),
+        bindings=(Bind("C", into=lambda p, n=node_id: p[n].coeff),),
+    )
+
+
+class TestManyNodeSurvivesASibling:
+    """One ParameterSpace, two assemblies differing only by a sibling component.
+
+    The design intent under test: *re-parameterizing never requires editing
+    the instrument description*. The failure it replaces was the reverse —
+    adding a component silently redirected an existing space onto the fold
+    that sums the instances, so ``validate`` reported a missing ``coeff``
+    attribute and named nothing the author could act on.
+    """
+
+    def test_the_space_validates_against_the_single_instance_assembly(self):
+        one = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        assert isinstance(one["t_sys_extra"], _TSysBasis)
+        _coeff_space("t_sys_extra").validate(one)  # raises on failure
+
+    def test_a_sibling_makes_the_bare_node_id_a_named_error(self):
+        space = _coeff_space("t_sys_extra")
+        two = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        with pytest.raises(ParameterSpaceError) as excinfo:
+            space.validate(two)
+        message = str(excinfo.value)
+        assert "t_sys_extra_1" in message and "t_sys_extra_2" in message
+
+    def test_the_names_the_error_gives_are_the_ones_that_work(self):
+        two = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        _coeff_space("t_sys_extra_1").validate(two)
+        _coeff_space("t_sys_extra_2").validate(two)
+        bound = _coeff_space("t_sys_extra_2").bind(two, {"C": jnp.array([7.0, 0.0])})
+        assert jnp.allclose(bound["t_sys_extra_2"].coeff, jnp.array([7.0, 0.0]))
+        assert jnp.allclose(bound["t_sys_extra_1"].coeff, jnp.array([10.0, 1.0]))
+
+    def test_the_sibling_is_still_in_the_forward_model(self, template_state):
+        """The bug's signature was a component silently vanishing; check it did
+        not, by the forward output rather than by shape."""
+        a = _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis())
+        b = _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis())
+        two = assemble(a, b, GainOperator(gain=jnp.array(1.1)))
+        expected = 1.1 * (a(template_state).data + b(template_state).data)
+        assert jnp.allclose(two(template_state).data, expected)
+
+    def test_replace_node_on_the_bare_id_refuses_instead_of_deleting(
+        self, template_state
+    ):
+        a = _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis())
+        b = _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis())
+        two = assemble(a, b, GainOperator(gain=jnp.array(1.1)))
+        before = two(template_state).data
+        zeroed = _TSysBasis(coeff=jnp.zeros(2), basis=_basis())
+        with pytest.raises(AmbiguousNodeError, match="t_sys_extra_1"):
+            two.replace_node("t_sys_extra", zeroed)
+        assert jnp.array_equal(two(template_state).data, before)
+        # the named form drops instance 1 only, and says so in the output
+        swapped = two.replace_node("t_sys_extra_1", zeroed)
+        assert jnp.allclose(
+            swapped(template_state).data, 1.1 * b(template_state).data
+        )
+
+    def test_a_fold_buried_in_a_pipeline_branch_is_caught_too(self, template_state):
+        """The hardest shape for the old lookup: the many-instance Sum is not
+        the assembly root, it is stage 0 of a Pipeline that a sibling Sum
+        labels by the same node id. Closure check: zeroing one instance must
+        equal re-assembling without it."""
+        f1 = ForegroundOperator(
+            amplitude=jnp.array(10.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        f2 = ForegroundOperator(
+            amplitude=jnp.array(20.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        io = IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6)
+        gd = GroundPickupOperator(
+            coupling=jnp.array(0.01), t_ground=jnp.array(300.0)
+        )
+        asm = assemble(f1, f2, io, gd)
+        assert isinstance(asm.operator, SumOperator)
+        assert isinstance(asm.operator.branches[0], Pipeline)  # not the root
+        with pytest.raises(AmbiguousNodeError):
+            asm["foregrounds"]
+
+        zero = ForegroundOperator(
+            amplitude=jnp.array(0.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        without_f2 = asm.replace_node("foregrounds_2", zero)
+        f1_only = assemble(f1, io, gd)
+        assert jnp.allclose(
+            without_f2(template_state).data, f1_only(template_state).data
+        )

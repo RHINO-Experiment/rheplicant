@@ -53,6 +53,129 @@ plausibility check, a NaN timestamp walked through the ascending check and made
 the sample-drop mask non-contiguous, and a NaN axis walked through
 `_interp_strict`'s own ordering guard.
 
+### A `many=True` node id is now a stable identifier
+
+A second operator placed at a `many` node used to take over the first one's
+name. Measured, on a two-source graph with `f` a `many` source:
+
+```
+one instance  forward: [10. 10. 10.]  lit: ('f', 'g')
+two instances forward: [30. 30. 30.]  lit: ('f', 'g')   <- lit IDENTICAL
+A2['f']  type: SumOperator    A2['f_2'] type: Src
+replace_node('f', amp=0) forward : [0. 0. 0.]    correct would be 0 + 20 = 20.0
+```
+
+`_dedup` gave instance 1 the bare node id, which is also the label the fold
+over the instances carries, and the breadth-first lookup resolved the
+collision to the fold — so `replace_node` overwrote *both* instances with one
+operator. A component of the instrument disappeared with no shape change, no
+error, and an unchanged `lit` and rendering.
+
+The same defect reached inference through `t_sys_extra`, the `many` node the
+graph designates for a generic effective-T_sys contribution:
+
+```
+one instance : space.validate PASSED
+two instances: space.validate RAISED ParameterSpaceError: Bind for ('C',): `into` selector 0
+               failed against the pipeline ('SumOperator' object has no attribute 'coeff').
+```
+
+Every `ParameterSpace` written against such a node was invalidated by the next
+component someone added there — the stated design intent ("re-parameterizing
+never requires editing the instrument description") failing in reverse.
+
+**What changed.** With two or more instances at a node they are now named
+`x_1`, `x_2`, … — *including the first*, so the bare id names no instance and
+cannot collide with the fold — and the bare id raises the new
+**`AmbiguousNodeError`**, which lists the instance ids to use instead.
+`replace_node` therefore refuses rather than deleting; it also refuses on a
+junction/selector that assembly materialized as a combinator, which silently
+discarded every branch feeding it for the same reason. `Assembly.instances`
+records the multiplicity, `repr` shows `t_sys_extra x2`, and the mermaid/SVG
+renderings label such a node `(x2)` — `lit` alone said the same thing for one
+instance and for two.
+
+**A single instance is untouched**, bitwise: `_instance_names(x, 1) == (x,)`,
+so existing spaces, examples and tests keep working unchanged. The one
+user-visible rename is the *first* of several siblings:
+`twin["receiver_input"].names` for two calibration loads is now
+`('observed_astro_sky', 'cal_loads_1', 'cal_loads_2')`, was `(..., 'cal_loads',
+'cal_loads_2')`. Branch order, switch indices and every forward value are
+unchanged — the names are static metadata.
+
+Note that one `ParameterSpace` still cannot validate against both the
+one-instance and the two-instance assembly: that is the point. Answering the
+bare id with instance 1 would be the finite, correctly-shaped, wrong binding
+this package exists to refuse.
+
+**Follow-up: the ids the error message hands out are now checked.** The
+per-instance ids `x_1..x_n` above and the `x, x_2, x_3…` that `_dedup` mints
+for repeated branch labels are the same format, so on a graph where a node
+reaches a junction by two paths they collided — and the breadth-first lookup
+resolved the collision to the fold, as before. Measured on `x[many] -> p`,
+`x -> q`, `p -> j`, `q -> j`, with sources 10 and 20 at `x` (forward 60):
+
+```
+asm['x_1'] -> Src(10)        correct
+asm['x_2'] -> a fold over the q-path, NOT instance 2
+replace_node('x_2', Src(0))  <- literally what AmbiguousNodeError said to write
+           -> forward 60 -> 30    correct for dropping instance 2 is 20
+```
+
+`assemble()` now closes that loop on the *built* tree: every id it is about to
+promise must resolve to the very operator placed there, and no operator may
+occupy more than one position. It refuses with `AssemblyError` otherwise, so
+no caller is handed an id that rewrites the wrong subtree.
+
+The same probe found the identity check alone is not enough: `x_1` *does*
+round-trip, yet `replace_node('x_1', Src(0))` still returned 50 where dropping
+instance 1 is 40, because `eqx.tree_at` rewrites the one position the lookup
+reaches and the fork had folded the operator in twice. That is not specific to
+`many` — a *single* operator at such a node had the same defect all along
+(`replace_node('x', 0)` gave 10.0 where 0.0 is correct). `Assembly.aliased`
+now records those nodes and `replace_node` refuses on them; reading still
+works, since `assembly[nid]` genuinely is the operator sitting there.
+
+No shipped graph is affected: every node of the radio template reaches the
+sink by exactly one path, so `aliased` is always empty there and the `assemble`
+check never fires.
+
+**Follow-up: the same rule now covers binding, which is the route that
+mattered.** `replace_node` was guarded; `ParameterSpace.bind` was not, and
+`into` selectors are documented as `lambda p: p["gain"].gain`, so they go
+through `Assembly.__getitem__` and never through `replace_node`. On the
+fork-rejoin graph with one `Src(10)` at `x` (forward 20.0) the space
+*validated*, and binding `V=0` gave 10.0 where 0.0 is correct — silent,
+finite, correctly shaped, wrong, in the inference path.
+
+`ParameterSpace.validate` now refuses a binding whose `into` selector lands
+inside an aliased node, naming the latent and the node and saying what to do
+instead (bind downstream of the fork, or restructure the graph). Every copy is
+checked, not only the one `__getitem__` reaches, so a selector spelled out by
+hand to the second copy is refused too. Gradients were never the problem here:
+both copies carry their own and the two sum to the true derivative — the
+pytree is a correct *two*-parameter model where a one-parameter model was
+declared, which is why `validate` is a complete gate for it.
+
+**`Assembly.__getitem__` stays an inspection API.** Reading an aliased node
+returns the operator that genuinely sits there; only writing refuses. That is
+pinned by tests on both sides so a later editor does not "fix" the read.
+
+**Known limit.** A hand-rolled `eqx.tree_at(lambda a: a[nid].x, ...)` goes
+through no framework call, so nothing can intercept it and it still rewrites
+one copy only. `Assembly.aliased` is documented as public API for exactly
+this: check it yourself before writing such a selector.
+
+**Stated envelope.** The design promise — any assembled graph serves both
+forward modelling and inference — holds while every node reaches the sink by
+exactly one path, because assembly folds the graph to a *tree*. That is now
+written down in `assemble()` as a limitation with its reason rather than left
+as a silent assumption. Not making the fold duplicate operators at all is the
+real root-cause fix; it is an architecture change (evaluating the graph as a
+memoised DAG) with consequences beyond rewriting — a duplicated *stochastic*
+operator is evaluated twice with different randomness — and is left to its own
+decision.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and

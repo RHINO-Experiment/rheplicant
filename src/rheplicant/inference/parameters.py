@@ -61,6 +61,12 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.core.errors import ParameterSpaceError
+
+# `Assembly.aliased` records the nodes a fold embedded more than once; this
+# turns them into the leaf paths a selector can actually land on, which is the
+# form `validate` needs. Kept in the graph layer because that is where the
+# duplication is created and where `replace_node` refuses on the same rule.
+from rheplicant.core.graph import _aliased_leaf_paths
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 
@@ -351,6 +357,7 @@ class ParameterSpace(eqx.Module):
 
         if self.raw_bind is None:
             resolved = self._resolve_targets(pipeline)
+            self._reject_aliased_targets(pipeline, resolved)
 
             seen: dict[tuple, Bind] = {}
             for binding, _, path, _ in resolved:
@@ -413,6 +420,42 @@ class ParameterSpace(eqx.Module):
 
         if self.raw_bind is not None:
             self._reject_latents_the_raw_bind_ignores(pipeline)
+
+    def _reject_aliased_targets(
+        self, pipeline: AbstractOperator, resolved: list[tuple[Bind, int, tuple, Any]]
+    ) -> None:
+        """Refuse a binding that writes into an operator the fold duplicated.
+
+        :func:`~rheplicant.core.graph.assemble` folds a graph to a tree, so a
+        node whose contribution reaches the sink by several paths is embedded
+        once per path. An ``into`` selector is an ``eqx.tree_at`` selector and
+        nothing more, so it rewrites the one copy it reaches.
+
+        :meth:`~rheplicant.core.graph.Assembly.replace_node` already refuses on
+        those nodes. Binding never went through it — ``into`` is documented as
+        ``lambda p: p["gain"].gain``, which goes through ``__getitem__`` — so
+        this is the same rule on the route that matters more, the one whose
+        wrong answer lands in a posterior.
+        """
+        owned = _aliased_leaf_paths(pipeline)
+        if not owned:
+            return
+        for binding, slot, path, _ in resolved:
+            node_id = owned.get(path)
+            if node_id is None:
+                continue
+            named = ", ".join(repr(name) for name in binding.latents)
+            raise ParameterSpaceError(
+                f"Bind for {binding.latents}: `into` selector {slot} writes into node "
+                f"{node_id!r}, which is folded into this assembly at more than one "
+                "place: its contribution reaches the sink by several paths, so the "
+                "operator sits in several branches. Binding would rewrite the one "
+                "branch this selector reaches and silently leave the others in the "
+                f"forward model, which would then answer as if {named} were frozen "
+                "everywhere but that branch — finite, correctly shaped, wrong. Bind at "
+                "a node downstream of the fork instead, or restructure the graph so "
+                f"that {node_id!r} reaches the sink once."
+            )
 
     def _reject_latents_the_raw_bind_ignores(self, pipeline: AbstractOperator) -> None:
         """The dead-latent check, for spaces whose bind function is opaque.

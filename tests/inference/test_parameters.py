@@ -10,12 +10,16 @@ Plus the invariant everything downstream rests on: binding never changes the
 pipeline's pytree structure.
 """
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
 
 from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.graph import At, NodeSpec, SignalGraph, assemble
+from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import AdamCalibrator, Bind, Latent, ParameterSpace
 from rheplicant.radio import GainOperator, SkyOperator
@@ -445,3 +449,175 @@ class TestEscapeHatch:
                 bind=lambda pipeline, values: pipeline,
                 bindings=[Bind("g", into=lambda p: p["gain_a"].gain)],
             )
+
+
+# ---------------------------------------------------------------------------
+# binding into a node the fold embedded more than once
+# ---------------------------------------------------------------------------
+
+
+class _ForkSrc(AbstractOperator):
+    """Toy source: ``value * ones(3)``."""
+
+    graph_node: ClassVar[str | None] = None
+    value: jax.Array
+
+    def __call__(self, state):
+        return state.with_data(self.value * jnp.ones(3))
+
+
+class _ForkScale(AbstractOperator):
+    """Toy transform, so the fork-rejoin graph has an ordinary node too."""
+
+    graph_node: ClassVar[str | None] = None
+    factor: jax.Array
+
+    def __call__(self, state):
+        return state.with_data(state.data * self.factor)
+
+
+@pytest.fixture
+def fork_rejoin():
+    """``x`` reaches the sink by TWO paths, ``out`` by one.
+
+    ``x -> p -> j`` and ``x -> q -> j``, then ``j -> out``. The fold has no
+    way to express the diamond as a tree, so it embeds ``x``'s operator once
+    per path; ``out`` sits below the rejoin and is embedded once.
+    """
+    return SignalGraph(
+        "fork-rejoin-binding",
+        {
+            "x": NodeSpec("source"),
+            "p": NodeSpec("transform"),
+            "q": NodeSpec("transform"),
+            "j": NodeSpec("junction"),
+            "out": NodeSpec("transform"),
+        },
+        [("x", "p"), ("x", "q"), ("p", "j"), ("q", "j"), ("j", "out")],
+    )
+
+
+@pytest.fixture
+def forked(fork_rejoin):
+    """One ``Src(10)`` at the aliased ``x``, one unit ``Scale`` at ``out``.
+
+    Forward is ``10`` down each path, summed at ``j``, scaled by ``1`` — 20.
+    """
+    return assemble(
+        fork_rejoin,
+        At("x", _ForkSrc(value=jnp.array(10.0))),
+        At("out", _ForkScale(factor=jnp.array(1.0))),
+    )
+
+
+class TestBindingIntoAnAliasedNode:
+    """A node the fold embedded twice cannot be BOUND either, only read.
+
+    :meth:`Assembly.replace_node` already refuses on ``Assembly.aliased``.
+    Binding never went through it: ``Bind(into=lambda p: p["x"].value)`` is an
+    ``eqx.tree_at`` selector, so ``eqx.tree_at`` rewrote the one copy the
+    selector reaches and left the others live in the forward model.
+
+    Measured on the ``forked`` fixture (forward 20.0) before this guard: the
+    space validated, and binding ``V=0`` gave 10.0 where 0.0 is correct.
+    Finite, correctly shaped, wrong — in the inference path, which is what
+    this package is for. Gradients were never the problem: both copies carry
+    their own, and the two sum to the true derivative. The pytree is simply a
+    correct TWO-parameter model where a one-parameter model was declared,
+    which makes ``validate`` a complete gate.
+    """
+
+    def test_the_fixture_really_aliases_x_and_not_out(self, forked, template_state):
+        assert forked.aliased == ("x",)
+        assert jnp.allclose(forked(template_state).data, 20.0)
+
+    def test_binding_into_the_aliased_node_is_refused(self, forked):
+        space = ParameterSpace(
+            latents=[Latent("V", init=0.0)],
+            bindings=[Bind("V", into=lambda p: p["x"].value)],
+        )
+        with pytest.raises(ParameterSpaceError) as excinfo:
+            space.validate(forked)
+        message = str(excinfo.value)
+        assert "'V'" in message  # the latent
+        assert "'x'" in message  # the node
+
+    def test_the_refusal_says_what_breaks_and_what_to_do_instead(self, forked):
+        space = ParameterSpace(
+            latents=[Latent("V", init=0.0)],
+            bindings=[Bind("V", into=lambda p: p["x"].value)],
+        )
+        with pytest.raises(ParameterSpaceError) as excinfo:
+            space.validate(forked)
+        message = str(excinfo.value)
+        assert "more than one place" in message
+        assert "several paths" in message
+        assert "downstream" in message
+
+    def test_forward_fn_is_gated_too(self, forked, template_state):
+        """The entry point users actually call validates first; it must refuse."""
+        space = ParameterSpace(
+            latents=[Latent("V", init=0.0)],
+            bindings=[Bind("V", into=lambda p: p["x"].value)],
+        )
+        with pytest.raises(ParameterSpaceError, match="'x'"):
+            space.forward_fn(forked, template_state)
+
+    def test_a_selector_spelled_out_to_the_other_copy_is_refused_too(self, forked):
+        """The guard is about the node, not about which copy the lambda picks.
+
+        ``p["x"]`` reaches the first copy. A selector written out by hand can
+        name the second one, and rewriting THAT leaves the first live — the
+        same silent wrong answer from the other end.
+        """
+        space = ParameterSpace(
+            latents=[Latent("V", init=0.0)],
+            bindings=[Bind("V", into=lambda p: p.operator.stages[0].branches[1].value)],
+        )
+        with pytest.raises(ParameterSpaceError, match="'x'"):
+            space.validate(forked)
+
+    def test_an_assembly_nested_in_a_larger_pipeline_is_covered(self, forked):
+        """The guard finds assemblies wherever they sit, not only at the root.
+
+        ``Pipeline(assembly, post)`` is a perfectly ordinary way to bolt a
+        processing stage onto a compiled graph, and ``p["asm"]["x"].value`` is
+        the selector it makes natural — so a guard that only looked at the top
+        level would leave the same silent wrong answer one wrapper away.
+        """
+        nested = Pipeline(
+            forked, _ForkScale(factor=jnp.array(2.0)), names=("asm", "post")
+        )
+        space = ParameterSpace(
+            latents=[Latent("V", init=0.0)],
+            bindings=[Bind("V", into=lambda p: p["asm"]["x"].value)],
+        )
+        with pytest.raises(ParameterSpaceError, match="'x'"):
+            space.validate(nested)
+
+    def test_an_ordinary_node_on_the_same_graph_still_binds(
+        self, forked, template_state
+    ):
+        """The guard must not fire on the shape it is not about.
+
+        ``out`` sits below the rejoin, so the fold embeds it once. Asserted on
+        the forward OUTPUT: 20 scaled by 0.5 is 10, and a guard that quietly
+        stopped writing would leave it at 20.
+        """
+        space = ParameterSpace(
+            latents=[Latent("F", init=1.0)],
+            bindings=[Bind("F", into=lambda p: p["out"].factor)],
+        )
+        space.validate(forked)  # must not raise
+        forward, _ = space.forward_fn(forked, template_state)
+        assert jnp.allclose(forward({"F": jnp.array(0.5)}), 10.0)
+        assert jnp.allclose(forward({"F": jnp.array(1.0)}), 20.0)
+
+    def test_reading_the_aliased_node_still_works(self, forked):
+        """The read is an inspection API and stays one; only the write refuses.
+
+        Pinned here beside the guard so that "make ``__getitem__`` refuse too"
+        breaks a test in the same file as the guard it would be tightening.
+        """
+        assert isinstance(forked["x"], _ForkSrc)
+        assert forked["x"].value == 10.0

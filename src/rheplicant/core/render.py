@@ -13,7 +13,7 @@ assets — the opacity classes are styled inside the SVG itself):
 """
 
 import html as _html
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 _NODE_W, _NODE_H = 150, 40
 _X_GAP, _Y_GAP = 24, 42
@@ -63,11 +63,16 @@ def signal_path_svg(
     lit: Iterable[str] = (),
     skipped: Iterable[str] = (),
     title: str | None = None,
+    counts: Mapping[str, int] | None = None,
 ) -> str:
     """Render ``graph`` as a self-contained ``<svg>`` element (lit/dim styling).
 
     The opacity classes are styled inside the SVG, so the result embeds
     anywhere a plain image does — documentation pages, notebooks, ``<img>``.
+
+    ``counts`` maps a node id to how many operator instances an assembly put
+    on it; ``many`` nodes carrying more than one say so in their label,
+    because the template draws them as a single box either way.
     """
     # Deferred import: graph.py calls into this module from a method body, so a
     # top-level import here would merely be redundant, not cyclic — kept local
@@ -75,6 +80,7 @@ def signal_path_svg(
     from rheplicant.core.graph import _live_span
 
     lit_set = set(lit)
+    counts = dict(counts or {})
     # skipped nodes are traversed-as-identity; the live span normally covers
     # them, but explicit skipped input keeps callers authoritative.
     active = lit_set | set(skipped) | _live_span(graph, tuple(lit_set))
@@ -146,7 +152,10 @@ def signal_path_svg(
         state = "lit" if nid in lit_set else ("wire" if nid in active else "dim")
         border = _LIT_STROKE if nid in lit_set else stroke
         border_w = 2 if nid in lit_set else 0.75
-        label = _html.escape(nid.replace("_", " "))
+        text_label = nid.replace("_", " ")
+        if counts.get(nid, 1) > 1:
+            text_label = f"{text_label} (x{counts[nid]})"
+        label = _html.escape(text_label)
         if spec.kind in ("junction", "selector"):
             symbol = "+" if spec.kind == "junction" else "sw"
             parts.append(
@@ -179,11 +188,19 @@ def signal_path_html(
     lit: Iterable[str] = (),
     skipped: Iterable[str] = (),
     title: str | None = None,
+    counts: Mapping[str, int] | None = None,
 ) -> str:
     """Render ``graph`` as a standalone HTML page with lit/dim signal-path styling."""
     page_title = _html.escape(title or f"Signal path: {graph.name}")
-    lit_line = _html.escape(", ".join(sorted(set(lit))) or "none")
-    svg = signal_path_svg(graph, lit=lit, skipped=skipped, title=title)
+    counts = dict(counts or {})
+    lit_line = _html.escape(
+        ", ".join(
+            f"{nid} (x{counts[nid]})" if counts.get(nid, 1) > 1 else nid
+            for nid in sorted(set(lit))
+        )
+        or "none"
+    )
+    svg = signal_path_svg(graph, lit=lit, skipped=skipped, title=title, counts=counts)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{page_title}</title><style>{_STYLE}</style></head><body>"

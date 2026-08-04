@@ -101,7 +101,7 @@ that consumer composes — one switch position each, not a sum:
 ```python
 twin = assemble(SkySourceOperator(...), CalLoadOperator(t_load=...),
                 CalLoadOperator(t_load=...), NoiseWaveOperator(...))
-twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads', 'cal_loads_2')
+twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads_1', 'cal_loads_2')
 ```
 
 Three distinct sources is the minimum for an identifiable per-channel
@@ -112,6 +112,16 @@ one live branch is traversed as identity — no switch array required.
 
 Reach any parameter by its graph node, wherever the fold put it:
 `eqx.tree_at(lambda t: t["observed_astro_sky"].sky_model.maps, twin, new_maps)`.
+
+**A `many` node with several instances is addressed per instance.** One
+instance keeps the bare node id — `twin["cal_loads"]`, and every space written
+against it — but the moment a second operator is placed there the instances
+become `cal_loads_1`, `cal_loads_2`, … and the bare id raises
+`AmbiguousNodeError` naming them. It has to: the bare id would otherwise
+resolve to the fold over the instances, so `replace_node("cal_loads", ...)`
+would overwrite *both* loads with one operator — the same forward shape, one
+component of the instrument gone. `assembly.instances` reports the multiplicity,
+and the signal-path renderings label such a node `(x2)`.
 
 **Three losses on the antenna path, none standing in for another.** They
 compose in this order, and each has a distinct signature:
