@@ -151,8 +151,11 @@ model = to_numpyro_model(twin, state, space, noise_std=0.02)
 :width: 100%
 
 Left: the NUTS posterior over the two latents, with the truth marked. Right:
-the same posterior against the Fisher forecast computed at the truth — they
-agree, as they should for a model this close to linear in its parameters.
+the same posterior against the **likelihood** Fisher forecast computed at the
+truth — measured, `sd(NUTS) / sd(Fisher)` is 0.985 for `fwhm` and 0.975 for
+`offset`. They agree because the model is this close to linear in its
+parameters *and* because these two priors say almost nothing at this noise
+level; see below for the second half, which is not general.
 :::
 
 :::{figure} _static/inference-posterior-dark.svg
@@ -161,9 +164,48 @@ agree, as they should for a model this close to linear in its parameters.
 :width: 100%
 
 Left: the NUTS posterior over the two latents, with the truth marked. Right:
-the same posterior against the Fisher forecast computed at the truth — they
-agree, as they should for a model this close to linear in its parameters.
+the same posterior against the **likelihood** Fisher forecast computed at the
+truth — measured, `sd(NUTS) / sd(Fisher)` is 0.985 for `fwhm` and 0.975 for
+`offset`. They agree because the model is this close to linear in its
+parameters *and* because these two priors say almost nothing at this noise
+level; see below for the second half, which is not general.
 :::
+
+### Why those two agree, and when they will not
+
+A Fisher matrix and a posterior are only the same object when the prior is
+flat over the region the data picks out. That is the case here, and it is worth
+measuring rather than assuming: `offset`'s declared `Normal(0, 0.4)` contributes
+**5×10⁻⁷** of the total precision, and `fwhm`'s `Uniform(0.15, 0.70)` is flat
+across a range **512×** the posterior width. Neither prior is doing any work,
+so the likelihood's information is the whole story and the two panels land on
+top of each other.
+
+Change either declaration to something informative — the `Normal(250.0, 50.0)`
+noise-wave temperature further down this page is one, and `wiener_solve` solves
+with it as `S` — and the two part company, silently, because
+`fisher_information` builds `F = JᵀN⁻¹J` and that is a statement about the
+**data alone**. Pass the space and it adds each declared Gaussian prior's own
+curvature at that latent's span:
+
+```python
+# likelihood only: the Cramér-Rao bound, no prior in it
+fisher_information(forward, fitted, noise_std=0.02)              # kind="fisher"
+
+# the posterior precision NUTS is sampling from, same declaration
+fisher_information(forward, fitted, noise_std=0.02, space=space) # kind="posterior_precision"
+```
+
+`kind` travels through `parameter_covariance` into `"covariance"` and
+`"posterior_covariance"`, so which quantity a `sigma()` reports is a property
+of the object rather than of what the caller remembers passing.
+
+The beam space above cannot use `space=`: `fwhm` is declared `Uniform`, which
+has no quadratic form, and substituting its variance would report a crisp
+Gaussian posterior for a prior with no curvature at all. That raises by name
+rather than being approximated — the same refusal, in the same words,
+`wiener_solve` already gives a non-conjugate prior. For a space like this one
+the likelihood Fisher *is* the answer available, and the figure says so.
 
 Sample sites are named by their **latents**, so the samples come back keyed by
 the coordinates the model was declared in. A `log_gain` latent is one site

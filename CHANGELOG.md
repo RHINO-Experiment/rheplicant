@@ -2,6 +2,228 @@
 
 ## Unreleased
 
+### `coords.time` is refused when the dtype it is stored in cannot carry it
+
+**Breaking, and deliberately so.** `Coordinates.__check_init__` now raises
+`StateValidationError` for a concrete `time` axis whose stored representable
+resolution exceeds `MAX_TIME_RESOLUTION_IN_SAMPLES` (1e-2) of its own smallest
+distinct sample gap, and for a non-finite `time` axis. This is the first *value*
+check in that container, which is otherwise structural and value-independent.
+
+**What was wrong.** `Coordinates` stores through `jnp.asarray` — float32 unless
+x64 is enabled — and a unix second near 1.75e9 has a float32 resolution of
+128 s. `read_rhino_observation` produces a unix-epoch axis and `to_state` put it
+straight in. Measured, 8 samples 100 s apart, through `BackendOperator(n_chunk=2)`:
+
+```
+stored       [1750000000, 1750000128, 1750000256, 1750000256,
+              1750000384, 1750000512, 1750000640, 1750000640]   6 distinct of 8
+chunk times  [1750000128, 1750000256, 1750000384, 1750000640]
+float64 truth[1750000050, 1750000250, 1750000450, 1750000650]
+error [s]    [       +78,         +6,        -66,        -10]
+```
+
+Two of eight samples merged *before* the average ran, and every chunk timestamp
+is wrong — by 78 s of a 100 s cadence at worst. No exception, no NaN, every
+shape right. The rounding happens at store time, so nothing downstream can
+recover or even detect it: a consumer's own consistency checks compare the
+corrupted values against each other and see nothing.
+
+**Why the container and not the consumers.** `CWCalibrationOperator` already
+refused this exact axis, and was the only thing in the package that did — one
+consumer of two that do arithmetic on `coords.time` (`BackendOperator` is the
+other; every remaining `requires=("coords.time", ...)` reads only its length).
+A per-consumer check scales with consumers and is a fresh omission each time.
+
+**A previous decision is overturned.**
+`tests/radio/test_cw_time_axis.py::test_a_static_tone_does_not_care_what_epoch_the_axis_uses`
+asserted that a unix-second axis must be *accepted* when the tone does not
+drift, on the grounds that refusing it "would break a pipeline that is entirely
+fine". That holds for the operator and not for the axis: the same axis is
+already lying about its own samples, and `Coordinates` cannot know which
+consumer comes next. The test is rewritten around what is still genuinely that
+operator's own — the check runs only when the tone drifts, and it counts a zero
+gap that the container deliberately allows.
+
+**Where the two checks differ, on purpose.** The container takes the smallest
+*distinct* gap; `CWCalibrationOperator` takes the smallest gap including zero. A
+container cannot tell a genuine repeated timestamp from a collision and has no
+business refusing the first. Nothing is lost on the motivating defect: rounding
+makes every surviving gap a multiple of the resolution, so a uniformly quantised
+axis that has collided still shows a smallest distinct gap of one or two grid
+steps. What does escape is one isolated close pair merging in an otherwise
+coarse axis — the pre-conversion values are gone by then, and only float64 or a
+relative axis defends against that.
+
+**Two traps this is built around**, each with a test on both sides.
+`np.spacing(float(times.max()))` promotes to a Python float and answers for
+float64 (2.4e-7 s at unix seconds) whatever the array holds — blind to the one
+thing being guarded; the array's own scalar is used instead. And NaN compares
+False against everything, so a NaN gap is not positive and drops out of "the
+smallest distinct gap", leaving an all-NaN axis with no gap left to test and a
+clean pass through any purely comparison-based guard; non-finiteness is named
+first, before any comparison. Traced axes are stepped over rather than forced.
+
+**What this costs a long run, stated rather than papered over.** For a uniform
+axis measured from its own start the ratio is `spacing(n·cadence)/cadence`, and
+because `spacing(x)` is within a factor of two of `x·2⁻²³` the cadence nearly
+cancels: the constraint is on the sample COUNT, of order 1e5 for float32 (in
+[8.4e4, 1.7e5]; exactly 2¹⁷ = 131072 at 1 s cadence). A four-hour RHINO run at
+1 s is 1.4e4 samples and an order of magnitude clear; the same run at 0.05 s is
+2.9e5 and is refused, and needs x64. Making the axis relative buys about five
+decimal orders over a unix epoch, not unlimited range.
+
+Cost in eager mode, measured on a 1e5-sample axis: 0.14 ms per
+`Coordinates.replace` against 0.03 ms without a time axis. Zero under jit, where
+the axis is a tracer and the check steps aside.
+
+`MAX_TIME_RESOLUTION_IN_SAMPLES` moved to `rheplicant.core.coordinates`, since it
+describes how `coords.time` is stored rather than what any operator does with
+it. `rheplicant.radio.instrument.calibration` re-exports the name unchanged.
+
+### `rhino.to_state` stores time from the start of the run, not from the epoch
+
+**Breaking, on a public function.** `state.coords.time` is now **seconds since
+the first kept sample**, and `state.meta["time_epoch_unix_s"]` holds the unix
+second it is measured from, so `meta[TIME_EPOCH_META_KEY] + coords.time`
+recovers `obs.time_s` exactly. `obs.time_s` on the recording is unchanged and
+still absolute. The name is `rheplicant.radio.rhino.TIME_EPOCH_META_KEY`.
+
+This makes the precision defect above structurally impossible on the documented
+ingestion path rather than merely detected on it. The subtraction happens in
+numpy float64, before the store — subtracting after the store reads the
+already-rounded values and is exactly the failure, not a cheaper fix. Measured
+on six samples at offsets [0, 100, 250, 450, 700, 1000] s from a 1.75e9 epoch:
+
+```
+stored offsets  [0, 128, 256, 512, 640, 1024]
+error [s]       [0, +28,  +6, +62, -60,  +24]
+```
+
+All six values stay *distinct* here, so no shape, count, dtype or finiteness
+check could see it, while individual timestamps are wrong by up to 62 s.
+Relative, the offsets are small integers and float32 holds them exactly.
+
+The epoch is the first **kept** sample, not the first in the file: the leading
+drop removes samples with no defined switch state, and they are not part of the
+run the State describes. `to_state` also now refuses a recording with no
+samples, which previously surfaced as a bare `IndexError` from `obs.time_s[0]`.
+
+Every `coords.time` consumer in `src/` was audited for an absolute-time
+assumption; there is none. `SiderealFilter` bins by index and `DriftScan` reads
+`coords.extra["lst_deg"]`, not `coords.time`.
+
+### `read_rhino_observation` no longer refuses a file over data it discards
+
+`thermistor_columns` is now optional. Omitting it skips the thermistor log
+entirely — nothing under `/temperatures` is read, so a file with a malformed
+table, a log ending short of the SDR axis, a non-finite reading, or no
+temperature group at all is readable for its waterfall. `thermistor_k` comes
+back `{}`.
+
+`_thermistors_in_kelvin` was called unconditionally and refused a whole
+observation for a thermistor log ending 1 ms short of the SDR axis, or one NaN
+row in a used column. Both refusals are argued in that function and both are
+right for a caller who wants the temperatures. But `to_state` carries only
+`data`, `coords.time`, `coords.freq`, `coords.extra["receiver_input"]`,
+`aux["flags"]` and the epoch: `thermistor_k`, `transitions`,
+`n_leading_dropped`, `adc_max_i` and `adc_max_q` reach no operator anywhere in
+`src/` — audited by grepping each field name. The file was being refused over a
+column nothing downstream consumes, while the waterfall, the switch log and the
+settling mask in it were intact.
+
+Omitting the map is not a default guess, which is the thing
+`_thermistors_in_kelvin` argues against: the label-to-column convention is
+shared between writer and reader with nothing in the file to enforce it, so a
+declaration is still required to get temperatures at all. Declaring it runs
+every check that ran before, unchanged. `read_rhino_observation`'s docstring now
+states which fields reach the signal path and which are diagnostic.
+
+**Still open:** wiring `obs.thermistor_k` onto `CalLoadOperator.t_load`, so the
+defended quantity does reach the signal path and switched-load noise-wave
+calibration works on real recordings. `t_load` is a scalar or `(n_freq,)` while
+a load temperature is per-sample, so it needs a `(n_time,)` case that is not
+free to disambiguate; and `to_state` returns a State, so wiring an operator from
+it either changes its return type or moves the temperature into the State and
+so changes that operator's `requires` declaration.
+
+### `fisher_information(space=...)`: the declared prior can reach the one exit that ignored it
+
+`Latent(prior=...)` is the package's single statement of what a latent is a
+priori, and every other exit reads it — `to_numpyro_model` samples it,
+`wiener_solve` and `gcr_sample` solve with it as `S` and refuse a prior-free
+linear latent by name. `fisher_information` never received the `ParameterSpace`
+at all, so the declaration could not reach it:
+
+```
+declared Normal(10, 5.0)   -> sigma('amp') = 0.00568182
+declared Normal(10, 1e-06) -> sigma('amp') = 0.00568182
+```
+
+A 5,000,000x tightening of the prior moved the reported error bar by exactly
+zero, and nothing in the result said the matrix was likelihood-only.
+
+`space=` adds each declared Gaussian prior's own curvature (`1/scale²`) at that
+latent's span, giving the posterior precision at `params`:
+
+```
+declared Normal(10, 5.0)   -> 0.00568181   kind='posterior_covariance'
+declared Normal(10, 1e-06) -> 0.00000100   kind='posterior_covariance'
+```
+
+`space=None` is unchanged and is a real answer rather than a missing argument:
+`F = JᵀN⁻¹J` is the **likelihood** Fisher, the standard forecasting quantity,
+and it now says so — `kind="fisher"`, and the docstring leads with it. The
+distinction travels: `parameter_covariance` carries `kind` across into
+`"covariance"` (Cramér-Rao, no prior) or `"posterior_covariance"`, and `sigma()`
+refuses both precision kinds rather than only the one it used to know about.
+
+A prior with no quadratic form (a `Uniform`, a `LogNormal`) and a prior-free
+latent are both refused by name rather than approximated — the same refusal, in
+the same words, that the conjugate exits already give. That is not hypothetical:
+the beam space in `docs/inference.md` declares `fwhm` as `Uniform`, so its
+Fisher forecast is necessarily likelihood-only, and the page now says so.
+
+**Re-measured, not assumed:** that page's "Fisher and NUTS agree" claim
+survives — `sd(NUTS)/sd(Fisher)` is 0.985 for `fwhm` and 0.975 for `offset`.
+The reason is now written down rather than implied: `offset`'s declared
+`Normal(0, 0.4)` contributes 5e-7 of the total precision and `fwhm`'s `Uniform`
+is flat over 512x the posterior width, so neither prior does any work at this
+noise level. With the informative priors the rest of the package reads, the two
+would not agree.
+
+### `noise_std` has an axis contract, because a square grid has two readings
+
+Every `noise_std` docstring said "scalar or broadcastable to the data", under
+which a 1-D sigma vector against a square `(n_time, n_freq)` grid means one
+sigma per time sample *and* one per frequency channel. Both are legitimate,
+which is the defect. Measured on an 8x8 grid with a `(8,)` per-time gain latent
+and `sigma = linspace(0.01, 1.0, 8)`:
+
+```
+noise_std (8,)   -> sigma('gt') [0.00010 .. 0.00010]
+noise_std (8,1)  -> sigma('gt') [0.00004 .. 0.00354]
+noise_std (1,8)  -> sigma('gt') [0.00010 .. 0.00010]
+```
+
+All three succeeded and returned the same shape. NumPy settles the tie by
+aligning trailing axes, so the per-**time** vector was applied per-**frequency**
+and an error bar that genuinely spans ~90x came back internally flat.
+
+`check_noise_std_axis` refuses a 1-D `noise_std` whose length matches more than
+one axis of the prediction, quoting both readings and naming the two shapes that
+settle it. It reads **shapes only** — a NaN defeats every comparison-based guard,
+so a value check here would be the one thing a poisoned sigma sails past. A
+constant sigma wrapped in `HomoscedasticNoise` or `FlaggedNoise` is unwrapped and
+checked; `RadiometerNoise` is exempt, its sigma being the prediction's shape by
+construction. Reached through `as_noise_model(..., prediction_shape=...)`, which
+existing callers do not pass and are therefore untouched.
+
+`inference/linear.py` does not route through `as_noise_model`, so the rule has a
+second home in `_check_solve_arguments`, passed by `wiener_solve`. **Owed:**
+`gcr_sample` does not pass it yet, so the draw is not covered while the mean is;
+the unification is named in the code rather than left implicit.
+
 ### `Bind(fan=...)`: the fan-out mode is declarable, because the container type is not evidence
 
 `Bind` decided between *tying* one produced value into every `into` selector
