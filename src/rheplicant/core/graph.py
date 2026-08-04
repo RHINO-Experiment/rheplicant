@@ -22,7 +22,12 @@ hand-built composite it compiles to.
 
 Operators declare their home node via the ``graph_node`` ClassVar (resolved
 through the MRO, so subclasses inherit it); :class:`At` overrides placement
-per instance.
+per instance — freely between nodes of the same kind, and not across the
+source/transform line, because a node's kind is what says whether the operator
+there creates the data or acts on data reaching it. ``has_source``, the
+``__call__`` guard and the "a summed branch must contain a source" rule are all
+read off that kind, so an operator disagreeing with its node makes all three
+wrong at once; :func:`_check_slot_kinds` refuses the disagreement instead.
 
 **Ordering.** An operator whose physics depends on *where* it sits — a
 calibration tone that only tracks a gain it passes through — declares that in
@@ -108,6 +113,13 @@ class At:
     contiguous region of the template (it implements all of those stages at
     once). Regions are atomic — no other live branch may feed their interior —
     and are addressed by their LAST covered node id in the assembly.
+
+    "Regardless of its class registration" stops at the node's *kind*: an
+    operator that declares a ``graph_node`` may be moved to any other node of
+    the same kind, and not across the source/transform line. A source at a
+    transform node discards the signal reaching that node, and a transform at a
+    source node is handed ``data=None``; neither is a placement, and
+    :func:`assemble` refuses both — see :func:`_check_slot_kinds`.
     """
 
     node: str | tuple[str, ...]
@@ -322,6 +334,13 @@ class Assembly(AbstractOperator):
     it on a state that already carries data raises, because that data would
     be silently discarded (pass ``data=None``). Source-free assemblies are
     transform chains operating on caller data.
+
+    ``has_source`` is read off the template's node kinds, not off the
+    operators, and that is only sound because :func:`_check_slot_kinds` refuses
+    a placement whose operator disagrees with its node about creating data. An
+    operator declaring no ``graph_node`` cannot be screened, so it can still be
+    placed on the wrong kind of node and make this flag — and therefore the
+    guard above — wrong in either direction.
     """
 
     operator: AbstractOperator
@@ -842,6 +861,105 @@ def _descendants(graph: SignalGraph, node: str) -> set[str]:
     return seen
 
 
+def _declared_node(op: AbstractOperator) -> str | tuple[str, ...] | None:
+    """The operator's declared home node, resolved through the MRO.
+
+    ``AbstractOperator.graph_node`` is ``None``, so a plain ``getattr`` on the
+    class already answers for most operators; the walk exists for the class
+    that sets ``graph_node = None`` on an intermediate base and declares the
+    real node on the subclasses of it, which is how the shipped families and
+    the test fixtures are written.
+    """
+    for klass in type(op).__mro__:
+        node = getattr(klass, "graph_node", None)
+        if node is not None:
+            return node
+    return None
+
+
+def _creates_data(graph: SignalGraph, node: str) -> bool:
+    """Does the template say the operator at ``node`` generates its own data?"""
+    return graph.nodes[node].kind == "source"
+
+
+def _check_slot_kinds(
+    graph: SignalGraph,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> None:
+    """A placed operator must agree with its node about who creates the data.
+
+    ``Assembly.has_source`` — and with it the ``__call__`` guard, and the fold's
+    "every summed branch must contain a source" rule — is read off the template's
+    node kinds. That is only sound while the operator sitting at a node does what
+    the node kind says, and ``At`` will put any operator at any node. Both
+    disagreements produce a model that runs:
+
+    * a source operator at a transform node overwrites ``state.data``, so the
+      caller's data and everything the upstream branch computed are discarded —
+      while ``has_source`` is False and the guard that exists to say exactly that
+      stays silent;
+    * a transform operator at a source node leaves ``has_source`` True, so the
+      guard demands ``data=None``, which is the one input that makes the
+      operator die on ``NoneType``.
+
+    Refusing the disagreement fixes both at once rather than patching each guard:
+    with the kinds in agreement the node kind IS the operator kind, and the
+    existing derivation is correct by construction. It is a *placement* refusal,
+    so it is raised before :func:`_check_ordering`'s physics one — where an
+    operator sits has to be settled before what it must precede can mean
+    anything.
+
+    Only ``graph_node`` can be consulted, so an operator that declares no home
+    (or one belonging to some other template) is not screened. That is the whole
+    of what this misses, it is stated in :func:`assemble`'s docstring, and it is
+    pinned in ``tests/core/test_placement_kind.py``. Deriving the answer instead
+    by running each operator under ``jax.eval_shape`` at assemble time does not
+    work here: ``assemble`` has no coordinates to build a probe state from, and
+    every shipped source raises ``StateValidationError`` without them — the
+    probe classifies 0 of 10 shipped operators correctly, so it would report
+    every assembly as source-free and the guard would then refuse every
+    legitimate forward run.
+    """
+    slots: list[tuple[str, tuple[str, ...], AbstractOperator]] = [
+        (node, (node,), op) for node, ops_at in placement.items() for op in ops_at
+    ]
+    # A region is *entered* at its first node — that is the node whose kind
+    # decides whether the branch generates its own data, and the node whose
+    # upstream (or absence of one) the operator will be handed — so that is the
+    # one it has to match. Covering the declared home somewhere further down the
+    # region does not excuse the entry: an operator that multiplies its input,
+    # entered where there is no input, still meets `data=None`.
+    slots += [(path[0], path, op) for path, op in regions]
+    for node, path, op in slots:
+        declared = _declared_node(op)
+        if not isinstance(declared, str) or declared not in graph.nodes:
+            continue
+        if _creates_data(graph, declared) == _creates_data(graph, node):
+            continue
+        makes, takes = (
+            (declared, node) if _creates_data(graph, declared) else (node, declared)
+        )
+        where = f"the region {tuple(path)}, entered at {node!r}" if len(path) > 1 else (
+            f"node {node!r}"
+        )
+        raise AssemblyError(
+            f"{type(op).__name__} declares graph_node={declared!r}, a "
+            f"{graph.nodes[declared].kind} node of graph {graph.name!r}, but this "
+            f"assembly places it at {where}, which is a "
+            f"{graph.nodes[node].kind} node. A source creates data and a transform "
+            "consumes it, so the two are not interchangeable placements: "
+            f"{makes!r} says the operator there generates its own data and "
+            f"{takes!r} says it acts on data that reaches it. Assembly.has_source "
+            "is read off the node, so the mismatch is not caught at call time "
+            "either — it produces an assembly that either discards the caller's "
+            "data (and the upstream branch's) with the guard silent, or demands "
+            "data=None from an operator that cannot run without data. Place it at "
+            f"a {graph.nodes[declared].kind} node, or give the template a node "
+            "that says what this operator actually does."
+        )
+
+
 def _check_ordering(
     graph: SignalGraph,
     placement: dict[str, list[AbstractOperator]],
@@ -921,11 +1039,7 @@ def _resolve(
             node, op = item.node, item.op
         else:
             op = item
-            node = None
-            for klass in type(op).__mro__:
-                node = getattr(klass, "graph_node", None)
-                if node is not None:
-                    break
+            node = _declared_node(op)
             if node is None:
                 raise AssemblyError(
                     f"{type(op).__name__} declares no graph_node and no At(...) wrapper "
@@ -981,8 +1095,10 @@ def assemble(
 
     See the module docstring for the contraction rules. Raises
     :class:`AssemblyError` on unknown/ambiguous placement, junction slots,
-    duplicate single-instance nodes, a transform-rooted branch feeding a
-    materialized junction (a sum branch must contain a source), or a violated
+    duplicate single-instance nodes, an operator placed on a node of the other
+    kind (:func:`_check_slot_kinds` — a source at a transform node or the
+    reverse), a transform-rooted branch feeding a materialized junction (a sum
+    branch must contain a source), or a violated
     :attr:`~rheplicant.core.operator.AbstractOperator.must_precede` ordering
     constraint.
 
@@ -1008,6 +1124,7 @@ def assemble(
     if not operators:
         raise AssemblyError("assemble() needs at least one operator.")
     placement, regions = _resolve(graph, operators)
+    _check_slot_kinds(graph, placement, regions)
     _check_ordering(graph, placement, regions)
     region_of: dict[str, int] = {}
     for idx, (path, _) in enumerate(regions):
