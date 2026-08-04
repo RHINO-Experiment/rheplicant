@@ -297,6 +297,65 @@ there is nothing there to check; its one data-shaped argument, `flags`, was
 already guarded by `FlaggedNoise`. `tests/inference/test_observed_shape.py`
 pins that reading so the signature cannot gain an unchecked `observed` quietly.
 
+### `identifiability()` — the diagnostic that can see across Gibbs blocks
+
+New **`rheplicant.inference.identifiability`**. Every convergence guard in
+`inference.linear` is computed *from one block*: a CG residual and
+`condition_estimate`'s κ are both properties of the operator for the block
+being solved, and `check_linearity` asks about one latent at a time. None of
+them can see a degeneracy whose two halves live in different blocks — and they
+are not wrong to pass, because each conditional of a bilinear model genuinely
+*is* affine.
+
+The failure that leaves behind is silent and large. An alternating solve over
+gain × antenna temperature reports **κ = 1** and a CG residual of **1.7e-7**
+while sitting **2288 K** from the truth.
+
+`identifiability(space, pipeline, state)` column-normalises the Jacobian of the
+prediction with respect to *all* the declared latents and takes its SVD. On the
+same two parameterizations, with and without a known 5000 K calibration tone:
+
+```
+free-per-cell T_ant,  tone ON    n_par=72 rank=64 nullity=8   weakest identified 7.071e-01
+free-per-cell T_ant,  tone OFF   n_par=72 rank=64 nullity=8   weakest identified 7.071e-01
+(3,3)-basis T_ant,    tone ON    n_par=17 rank=17 nullity=0   weakest identified 6.790e-02
+(3,3)-basis T_ant,    tone OFF   n_par=17 rank=16 nullity=1   null direction at  6.647e-17
+```
+
+The tone buys **exactly nothing** against a free-per-cell antenna temperature —
+the free cell at the tone's channel absorbs the gain sample by sample — and
+**everything** against a frequency-smooth one. And the same partition, asked one
+block at a time, reports `gain` rank 8 of 8 and `t_coeff` rank 9 of 9: two clean
+bills of health on a model that is degenerate.
+
+The null space comes back **named**. `report.participation(0)` returns
+`{'gain': 0.5014, 't_coeff': 0.4986}` — the bilinear degeneracy, read as the
+combination it actually is — and `report.direction(0)` returns arrays shaped
+like the latents, in raw units, such that adding a small multiple of them to
+the parameters leaves the prediction where it was.
+
+Three parts of the method are load-bearing, and all three are pinned by tests
+that fail when they are removed:
+
+- **Column normalisation.** Two perfectly identified latents whose scales
+  differ by 1e10 have a raw singular-value ratio of 1e-10; without the scaling
+  the rank test reports the choice of units and calls the model degenerate.
+- **float64, whatever the caller has configured.** In single precision the
+  degenerate model's null direction surfaces at **3.1e-8** — above any usable
+  tolerance — and is reported as identified. The function forces
+  `jax_enable_x64` for the duration and restores it afterwards, including on
+  the way out of an exception, and hands back numpy arrays so the precision
+  survives leaving the context.
+- **A threshold that is exposed and argued for.** `DEFAULT_RANK_RTOL = 1e-8`
+  sits in an 8.7-decade window (1e-13 to 4.8e-5) where every choice returns the
+  same verdict on the measured model. `report.weakest_identified` is there to
+  be read before the verdict is trusted.
+
+`names=` asks the conditional question a Gibbs block faces, `at=` moves the
+evaluation point the way `linear_operator`'s `at=` does, and the function
+refuses rather than guesses on an empty or repeated selection, a complex or
+integer latent, and a model that pins its own prediction to float32.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and

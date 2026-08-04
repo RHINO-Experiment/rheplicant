@@ -3,6 +3,11 @@
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
 from rheplicant.inference.forward import build_forward_fn
 from rheplicant.inference.gls import GLSResult, iterative_gls
+from rheplicant.inference.identifiability import (
+    DEFAULT_RANK_RTOL,
+    IdentifiabilityReport,
+    identifiability,
+)
 from rheplicant.inference.likelihood import (
     GaussianLikelihood,
     Likelihood,
@@ -46,6 +51,7 @@ from rheplicant.inference.uncertainty import (
 )
 
 __all__ = [
+    "DEFAULT_RANK_RTOL",
     "AdamCalibrator",
     "Bind",
     "FlaggedNoise",
@@ -53,6 +59,7 @@ __all__ = [
     "GaussianLikelihood",
     "GradientCalibrator",
     "HomoscedasticNoise",
+    "IdentifiabilityReport",
     "Latent",
     "LinearBlock",
     "Likelihood",
@@ -69,6 +76,7 @@ __all__ = [
     "condition_estimate",
     "fisher_information",
     "gcr_sample",
+    "identifiability",
     "init_to_declared",
     "inverse_variance",
     "iterative_gls",
