@@ -66,9 +66,9 @@ exercised as a checked linear block (Wiener mean and exact GCR draws) and D15
 in `DESIGN.md` for why the per-source placement is what makes per-channel
 noise-wave temperatures identifiable at all.
 
-**The CW tone has two hard limits, and both are silent until you hit them —
-neither is stated anywhere but the source comments next to the constants
-(`calibration.py:181`, `:230`).**
+**The CW tone has two hard limits.** Both used to be stated nowhere but the
+source comments beside the constants; both now refuse by name, and the second
+of them refuses at a different place than it used to.
 
 `line_width` is boxed on both sides, as a multiple of the channel spacing.
 Below `MIN_WIDTH_IN_CHANNELS` (1 channel for `"sinc2"`, 0.25 for `"gaussian"`)
@@ -87,28 +87,56 @@ for the band in hand; there is no default because guessing it silently
 mis-sizes the protection mask, which is the one thing this operator exists to
 avoid.
 
-`coords.time`'s STORED precision is a second, independent limit, and it is the
-one the package's own documented ingestion path trips **by default**. A
-nonzero `drift_rate` or `amplitude_drift_rate` measures elapsed time as
-`t - t[0]`, and that subtraction cannot undo a rounding that already happened
-when the axis was stored: `coords.time` goes through `jnp.asarray`, which is
-float32 unless x64 is enabled, and a unix-second axis (~1.75e9) has ~128 s of
-float32 resolution. `rheplicant.radio.rhino.read_rhino_observation` sets
-`time_s` from the SDR clock — unix seconds — and `to_state` places it on
-`coords.time` unchanged, so **a drifting CW tone on a freshly ingested RHINO
-recording hits `MAX_TIME_RESOLUTION_IN_SAMPLES` (= 1e-2) on the very first
-run**: at RHINO's ~100 s cadence, without `JAX_ENABLE_X64`, two samples land
-on the same stored float32 value and every other sample is off by up to 60 s
-against its true elapsed time (measured over 8 samples straight out of
-`read_rhino_observation` → `to_state`) — so the tone is computed at the wrong
-centre frequency and protects the wrong channels — no exception, no NaN,
-every shape correct. A static tone
-(`drift_rate = amplitude_drift_rate = 0.0`) never reads `coords.time` and is
-unaffected. Remedy, either one: pass `coords.time` measured in seconds **from
-the start of the run** rather than raw unix seconds (small numbers keep
-float32's resolution far below the cadence), or enable x64 for the run
-(`JAX_ENABLE_X64=1`, or `jax.config.update("jax_enable_x64", True)`) so the
-unix-second axis itself is stored precisely enough to resolve it.
+`coords.time`'s STORED precision is a second, independent limit, and it is no
+longer the CW tone's to enforce. `coords.time` goes through `jnp.asarray`,
+float32 unless x64 is on, and a unix-second axis (~1.75e9) has ~128 s of
+float32 resolution — so at RHINO's ~100 s cadence two samples land on the same
+stored value before any operator runs. That is a property of how the axis is
+STORED, not of what the tone does with it, so
+`Coordinates.__check_init__` now refuses such an axis at construction
+(`MAX_TIME_RESOLUTION_IN_SAMPLES` = 1e-2 of the smallest distinct gap):
+
+```python
+Coordinates(time=jnp.asarray(unix_seconds), freq=freq)   # 100 s cadence
+# StateValidationError: coords.time is stored as float32 and reaches
+# 1.75000064e+09, where consecutive representable numbers are 128 apart — but
+# the closest two distinct samples on this axis are 128 apart, and coords.time
+# must resolve its own sampling to at most 0.01 of that. ...
+```
+
+Read the two "128"s: the second is not the cadence you asked for. The samples
+have *already* been snapped onto the 128 s grid by the time anything can look
+at them, which is why the check is on the stored axis and why no later
+subtraction recovers the 100 s you meant.
+
+Two consequences worth knowing before you build anything on this.
+
+**The ingestion path no longer trips it, because it no longer produces that
+axis.** `to_state` stores seconds since the first kept sample and puts the
+absolute epoch in `meta["time_epoch_unix_s"]`
+(`rheplicant.radio.rhino.TIME_EPOCH_META_KEY`); the subtraction happens in
+float64 before the store, and `meta[key] + coords.time == obs.time_s` exactly.
+A drifting tone on a freshly ingested RHINO recording now runs at default
+precision, with no x64 and nothing to configure. (This is a change: it
+previously stored the raw unix axis, and a drifting tone on it computed the
+wrong centre frequency and protected the wrong channels, silently.)
+
+**The guard is unit-agnostic, which means MJD is not exempt.** It compares
+stored resolution against the axis's own smallest distinct gap, so it judges a
+cadence rather than a convention: MJD 60000 at daily samples is accepted, and
+MJD 60000 at a 100 s cadence is refused for exactly the same reason unix
+seconds are — the float32 grid there is 3.9e-3 d, or 337 s.
+
+Making the axis relative buys about five decimal orders, not unlimited range.
+A float32 relative axis carries of order 1e5 uniform samples (exactly
+2¹⁷ = 131072 at 1 s cadence; the exact count depends on where `n · cadence`
+falls inside its binade). A four-hour run at 1 s is 1.4e4 samples and an order
+of magnitude clear; the same run at 0.05 s is 2.9e5 and is refused. **That** is
+when to reach for `JAX_ENABLE_X64=1` — a long or fast run, not merely an
+absolute epoch. A static tone (`drift_rate = amplitude_drift_rate = 0.0`)
+never reads `coords.time` at all, but the container check still applies,
+because the axis is wrong for every other consumer too — `BackendOperator`'s
+chunk timestamps were measured off by up to 78 s out of a 100 s cadence.
 
 **The sky as `T_src`.** On the antenna branch `T_src` *is* the beam-convolved
 sky, so a `SkySourceOperator` upstream feeds the receiver directly. The full
