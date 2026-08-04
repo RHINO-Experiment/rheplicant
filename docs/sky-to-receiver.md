@@ -61,7 +61,7 @@ flowchart LR
   tsum(("+"))
   loss["AntennaLossOperator<br/>attenuates, and emits<br/>antenna_loss"]
   sw(("sw"))
-  amb["CalLoadOperator<br/>ambient load, 300 K<br/>cal_loads"]
+  amb["CalLoadOperator<br/>ambient load, 300 K<br/>cal_loads_1"]
   hot["CalLoadOperator<br/>hot load, 400 K<br/>cal_loads_2"]
   nw["NoiseWaveOperator<br/>Eq. 1<br/>noise_wave"]
   out["T_sys"]

@@ -23,10 +23,18 @@ hand-built composite it compiles to.
 Operators declare their home node via the ``graph_node`` ClassVar (resolved
 through the MRO, so subclasses inherit it); :class:`At` overrides placement
 per instance.
+
+**Addressing.** ``assembly[node_id]`` reaches the operator at a node whatever
+the fold did with it. A ``many`` node holding several instances is the one
+case a single id cannot answer for, so its instances are named ``x_1``,
+``x_2``, … and the bare ``x`` raises :class:`AmbiguousNodeError` listing them.
+With one instance nothing changes — ``x`` is still the address, and a
+:class:`~rheplicant.inference.parameters.ParameterSpace` written against it is
+untouched until a sibling actually arrives.
 """
 
 import dataclasses
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 import equinox as eqx
@@ -40,6 +48,17 @@ from rheplicant.core.state import State
 
 class AssemblyError(DirtError, ValueError):
     """A provided operator set cannot be assembled on the signal graph."""
+
+
+class AmbiguousNodeError(AssemblyError):
+    """A node id was used as an address, but it holds more than one operator.
+
+    Raised by :meth:`Assembly.__getitem__` / :meth:`Assembly.replace_node` for
+    a ``many=True`` node carrying several instances. Answering with one of
+    them (or with the fold over all of them) would silently pick a different
+    operator than the caller means — and, through ``replace_node``, silently
+    delete the siblings. The message names every instance id instead.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,17 +181,30 @@ class SignalGraph:
 
     # -- rendering -----------------------------------------------------------
 
-    def to_mermaid(self, lit: Iterable[str] = (), skipped: Iterable[str] = ()) -> str:
+    def to_mermaid(
+        self,
+        lit: Iterable[str] = (),
+        skipped: Iterable[str] = (),
+        counts: Mapping[str, int] | None = None,
+    ) -> str:
         """Render the template as a mermaid flowchart with lit/dim styling.
 
         ``lit`` nodes are highlighted, ``skipped`` (traversed-as-identity)
         nodes are half-lit, everything else is dimmed — the signal-path view
         of what an assembly simulates.
+
+        ``counts`` maps a node id to the number of operator instances sitting
+        on it. A ``many`` node is one box however many instances it carries,
+        so the count is shown in the label: an unannotated box would render
+        two components as one.
         """
         lit, skipped = set(lit), set(skipped)
+        counts = dict(counts or {})
         lines = ["flowchart TD"]
         for n, spec in self.nodes.items():
             label = n.replace("_", " ")
+            if counts.get(n, 1) > 1:
+                label = f"{label} (x{counts[n]})"
             if spec.kind == "junction":
                 shape = '(("+"))'
             elif spec.kind == "selector":
@@ -195,22 +227,28 @@ class SignalGraph:
         lit: Iterable[str] = (),
         skipped: Iterable[str] = (),
         title: str | None = None,
+        counts: Mapping[str, int] | None = None,
     ) -> str:
         """Standalone HTML page of the template with lit/dim signal-path styling."""
         from rheplicant.core.render import signal_path_html
 
-        return signal_path_html(self, lit=lit, skipped=skipped, title=title)
+        return signal_path_html(
+            self, lit=lit, skipped=skipped, title=title, counts=counts
+        )
 
     def to_svg(
         self,
         lit: Iterable[str] = (),
         skipped: Iterable[str] = (),
         title: str | None = None,
+        counts: Mapping[str, int] | None = None,
     ) -> str:
         """Self-contained ``<svg>`` of the template, for embedding (docs, notebooks)."""
         from rheplicant.core.render import signal_path_svg
 
-        return signal_path_svg(self, lit=lit, skipped=skipped, title=title)
+        return signal_path_svg(
+            self, lit=lit, skipped=skipped, title=title, counts=counts
+        )
 
     def __repr__(self) -> str:
         return f"SignalGraph({self.name!r}, {len(self.nodes)} nodes, {len(self.edges)} edges)"
@@ -244,6 +282,16 @@ class Assembly(AbstractOperator):
     :meth:`replace_node`, render the lit/dim signal path with
     :meth:`to_mermaid`.
 
+    Attributes:
+        lit: template nodes this assembly claims, in template order.
+        skipped: nodes traversed as identity between lit ones.
+        instances: ``(node_id, instance_ids)`` for every node carrying more
+            than one operator. ``lit`` names template nodes, and a node is one
+            node however many operators sit on it — this is where the
+            multiplicity lives, and what makes the bare node id ambiguous.
+        materialized: junction/selector nodes that actually became a
+            ``SumOperator``/``SelectOperator`` (rather than passing through).
+
     If the assembly contains live sources it *generates* its data — calling
     it on a state that already carries data raises, because that data would
     be silently discarded (pass ``data=None``). Source-free assemblies are
@@ -256,6 +304,10 @@ class Assembly(AbstractOperator):
     skipped: tuple[str, ...] = eqx.field(static=True)
     has_source: bool = eqx.field(static=True)
     root_label: str = eqx.field(static=True, default="")
+    instances: tuple[tuple[str, tuple[str, ...]], ...] = eqx.field(
+        static=True, default=()
+    )
+    materialized: tuple[str, ...] = eqx.field(static=True, default=())
 
     def __call__(self, state: State) -> State:
         if self.has_source and state.data is not None:
@@ -272,6 +324,16 @@ class Assembly(AbstractOperator):
         return self.operator(state)
 
     def __getitem__(self, node_id: str) -> AbstractOperator:
+        siblings = dict(self.instances).get(node_id)
+        if siblings is not None:
+            raise AmbiguousNodeError(
+                f"{node_id!r} holds {len(siblings)} operator instances in this "
+                f"assembly, so it addresses none of them: {list(siblings)}. Use one "
+                f"of those ids — e.g. assembly[{siblings[0]!r}] — or "
+                f"assembly.operator to reach the fold that sums them. (With a "
+                f"single instance {node_id!r} is still the address; it stopped "
+                "being one the moment a second operator was placed there.)"
+            )
         if node_id and node_id == self.root_label:
             return self.operator
         found = _find_named(self.operator, node_id)
@@ -280,8 +342,25 @@ class Assembly(AbstractOperator):
         return found
 
     def replace_node(self, node_id: str, operator: AbstractOperator) -> "Assembly":
-        """Return a new Assembly with the operator at ``node_id`` swapped."""
-        target = self[node_id]
+        """Return a new Assembly with the operator at ``node_id`` swapped.
+
+        Raises rather than swapping when ``node_id`` names something that is
+        not one operator: a ``many`` node carrying several instances
+        (:class:`AmbiguousNodeError`), or a junction/selector that assembly
+        materialized as a combinator. In both cases ``eqx.tree_at`` would
+        happily overwrite the whole fold — dropping live branches from the
+        forward model with no shape change and no complaint.
+        """
+        target = self[node_id]  # raises AmbiguousNodeError on a multi-instance node
+        if node_id in self.materialized:
+            names = getattr(target, "names", ())
+            raise AssemblyError(
+                f"{node_id!r} is a junction/selector that this assembly materialized "
+                f"as {type(target).__name__} over {list(names)}; it is not an "
+                "operator slot, and replacing it would drop those branches from the "
+                "forward model. Replace one of them by its own node id, or "
+                "re-assemble() with the operator set you want."
+            )
 
         def where(a: "Assembly") -> AbstractOperator:
             return a[node_id]
@@ -289,25 +368,39 @@ class Assembly(AbstractOperator):
         del target  # existence check only
         return eqx.tree_at(where, self, operator)
 
+    @property
+    def _counts(self) -> dict[str, int]:
+        """Instances per node, for renderings — one lit box may be several."""
+        return {nid: len(names) for nid, names in self.instances}
+
     def to_mermaid(self) -> str:
         """Lit/dim mermaid rendering via the registered template."""
-        return get_graph(self.graph_name).to_mermaid(lit=self.lit, skipped=self.skipped)
+        return get_graph(self.graph_name).to_mermaid(
+            lit=self.lit, skipped=self.skipped, counts=self._counts
+        )
 
     def to_html(self, title: str | None = None) -> str:
         """Standalone HTML page: the full graph with this assembly's nodes lit."""
         return get_graph(self.graph_name).to_html(
-            lit=self.lit, skipped=self.skipped, title=title
+            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
         )
 
     def to_svg(self, title: str | None = None) -> str:
         """Self-contained ``<svg>`` with this assembly's nodes lit, for embedding."""
         return get_graph(self.graph_name).to_svg(
-            lit=self.lit, skipped=self.skipped, title=title
+            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
         )
 
     def __repr__(self) -> str:
+        # `lit` names template nodes, and a node stays one node however many
+        # operators sit on it — so the multiplicity is reported beside it
+        # rather than folded into the list, where it would read as a node id.
+        counts = self._counts
+        lit = [
+            f"{nid} x{counts[nid]}" if nid in counts else nid for nid in self.lit
+        ]
         return (
-            f"Assembly(graph={self.graph_name!r}, lit={list(self.lit)}, "
+            f"Assembly(graph={self.graph_name!r}, lit={lit}, "
             f"skipped-as-identity={list(self.skipped)})"
         )
 
@@ -383,6 +476,27 @@ def _dedup(names: list[str]) -> list[str]:
         counts[n] = counts.get(n, 0) + 1
         out.append(n if counts[n] == 1 else f"{n}_{counts[n]}")
     return out
+
+
+def _instance_names(node_id: str, count: int) -> tuple[str, ...]:
+    """Names addressing the ``count`` operator instances placed at ``node_id``.
+
+    One instance keeps the bare node id: the single-instance assembly is
+    exactly what it always was, down to the static names, so existing spaces
+    and examples are untouched.
+
+    Two or more get a 1-based suffix **including the first** — ``x_1``,
+    ``x_2`` — rather than ``x``, ``x_2``. Suffixing only the later ones would
+    leave ``x`` naming both one particular instance *and* the fold that a
+    consumer labels by the node id, and the breadth-first lookup in
+    :func:`_find_named` resolves that collision to the fold: ``assembly[x]``
+    then hands back a ``SumOperator`` and ``replace_node(x, ...)`` overwrites
+    every instance with one operator. Making the bare id name nothing turns
+    that into :class:`AmbiguousNodeError`, which can say what to write.
+    """
+    if count == 1:
+        return (node_id,)
+    return tuple(f"{node_id}_{i}" for i in range(1, count + 1))
 
 
 def _validate_region(graph: SignalGraph, path: tuple[str, ...], op: AbstractOperator):
@@ -504,6 +618,12 @@ def assemble(
     # a different shape).
     fan: dict[str, list[_Branch]] = {}
     skipped: list[str] = []
+    # Addressing bookkeeping, both static: which node ids carry several
+    # operator instances (so the bare id addresses none of them in particular),
+    # and which junction/selector nodes actually materialized as a combinator
+    # (so replace_node there would discard every branch feeding it).
+    multi: dict[str, tuple[str, ...]] = {}
+    materialized: list[str] = []
 
     def upstream_of(nid: str) -> list[_Branch]:
         out: list[_Branch] = []
@@ -517,6 +637,8 @@ def assemble(
         spec = graph.nodes[nid]
         instances = placement.get(nid, [])
         upstream = upstream_of(nid)
+        if len(instances) > 1:
+            multi[nid] = _instance_names(nid, len(instances))
 
         if nid in region_of:
             idx = region_of[nid]
@@ -566,6 +688,7 @@ def assemble(
                     combined = SelectOperator(
                         *branch_ops, names=branch_names, switch_key=nid
                     )
+                materialized.append(nid)
                 exprs[nid] = _Branch([(nid, combined)], sourced=True)
         elif spec.kind == "source":
             if not instances:
@@ -573,10 +696,14 @@ def assemble(
             elif len(instances) == 1:
                 exprs[nid] = _Branch([(nid, instances[0])], sourced=True)
             elif _feeds_only_selectors(graph, nid):
-                fan[nid] = [_Branch([(nid, op)], sourced=True) for op in instances]
+                names = _instance_names(nid, len(instances))
+                fan[nid] = [
+                    _Branch([(name, op)], sourced=True, origin=nid)
+                    for name, op in zip(names, instances, strict=True)
+                ]
                 exprs[nid] = fan[nid][0]  # liveness marker; consumers read `fan`
             else:
-                names = _dedup([nid] * len(instances))
+                names = _instance_names(nid, len(instances))
                 exprs[nid] = _Branch(
                     [(nid, SumOperator(*instances, names=names))], sourced=True
                 )
@@ -584,9 +711,11 @@ def assemble(
             up = upstream[0] if upstream else None
             if instances:
                 stages = list(up.stages) if up else []
-                stages += [(nid, op) for op in instances]
+                names = _instance_names(nid, len(instances))
+                stages += list(zip(names, instances, strict=True))
                 exprs[nid] = _Branch(
-                    stages, sourced=up.sourced if up else False
+                    stages, sourced=up.sourced if up else False,
+                    origin=up.origin if up else nid,
                 )
             else:
                 if up is not None:
@@ -607,6 +736,8 @@ def assemble(
         skipped=tuple(n for n in skipped if n in live_span),
         has_source=final.sourced,
         root_label=final.stages[0][0] if len(final.stages) == 1 else "",
+        instances=tuple((nid, names) for nid, names in multi.items()),
+        materialized=tuple(materialized),
     )
 
 

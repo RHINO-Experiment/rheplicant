@@ -9,6 +9,7 @@ import pytest
 
 from rheplicant.core.combinators import SumOperator
 from rheplicant.core.graph import (
+    AmbiguousNodeError,
     Assembly,
     AssemblyError,
     At,
@@ -418,3 +419,119 @@ class TestManyNodes:
             At("t", Mul(factor=jnp.array(5.0))),
         )
         assert jnp.array_equal(asm(State()).data, jnp.full(3, 30.0))
+
+
+class TestManyNodeAddressing:
+    """A ``many`` node id addresses one operator or none — never "whichever".
+
+    With one instance the bare id IS the address (unchanged). With two, the
+    bare id would have to answer for both: the fold that sums them, or an
+    arbitrary one of them. Either answer is a finite, correctly-shaped, wrong
+    handle — through ``replace_node`` it deletes a component outright — so the
+    bare id becomes an error that names the per-instance ids instead.
+    """
+
+    @pytest.fixture
+    def many_graph(self):
+        return SignalGraph(
+            "many-addressing",
+            {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J),
+             "t": NodeSpec(T, many=True)},
+            [("a", "j"), ("b", "j"), ("j", "t")],
+        )
+
+    @pytest.fixture
+    def two_at_a(self, many_graph):
+        """10 + 20 at the many source ``a``; nothing else live."""
+        return assemble(
+            many_graph,
+            At("a", Src(value=jnp.array(10.0))),
+            At("a", Src(value=jnp.array(20.0))),
+        )
+
+    def test_single_instance_id_still_addresses_the_operator(self, many_graph):
+        """The constraint everything else must not break."""
+        asm = assemble(many_graph, At("a", Src(value=jnp.array(10.0))))
+        assert isinstance(asm["a"], Src)
+        assert asm["a"].value == 10.0
+
+    def test_ambiguous_source_id_raises_and_names_the_instances(self, two_at_a):
+        with pytest.raises(AmbiguousNodeError) as excinfo:
+            two_at_a["a"]
+        message = str(excinfo.value)
+        assert "a_1" in message and "a_2" in message
+
+    def test_instance_ids_address_the_instances(self, two_at_a):
+        assert two_at_a["a_1"].value == 10.0
+        assert two_at_a["a_2"].value == 20.0
+
+    def test_replace_node_on_ambiguous_id_refuses_without_deleting(self, two_at_a):
+        """The measured bug: this used to return 0.0 — instance 2 deleted."""
+        before = two_at_a(State()).data
+        assert jnp.array_equal(before, jnp.full(3, 30.0))
+        with pytest.raises(AmbiguousNodeError):
+            two_at_a.replace_node("a", Src(value=jnp.array(0.0)))
+        assert jnp.array_equal(two_at_a(State()).data, before)
+
+    def test_replace_node_by_instance_id_keeps_the_sibling(self, two_at_a):
+        """What the error message tells you to write actually works."""
+        swapped = two_at_a.replace_node("a_1", Src(value=jnp.array(0.0)))
+        assert jnp.array_equal(swapped(State()).data, jnp.full(3, 20.0))
+        assert jnp.array_equal(two_at_a(State()).data, jnp.full(3, 30.0))
+
+    def test_ambiguous_transform_id_raises(self, many_graph):
+        asm = assemble(
+            many_graph,
+            At("a", Src(value=jnp.array(2.0))),
+            At("t", Mul(factor=jnp.array(3.0))),
+            At("t", Mul(factor=jnp.array(5.0))),
+        )
+        with pytest.raises(AmbiguousNodeError, match="t_1"):
+            asm["t"]
+        assert asm["t_1"].factor == 3.0
+        assert asm["t_2"].factor == 5.0
+
+    def test_multi_instance_forward_output_is_unchanged(self, many_graph):
+        """Renaming instances is a naming change only: the physics is bitwise."""
+        ops = [At("a", Src(value=jnp.array(1.0))), At("a", Src(value=jnp.array(2.0))),
+               At("b", Src(value=jnp.array(4.0)))]
+        asm = assemble(many_graph, *ops)
+        hand = SumOperator(
+            SumOperator(Src(value=jnp.array(1.0)), Src(value=jnp.array(2.0))),
+            Src(value=jnp.array(4.0)),
+        )
+        state = State(key=jax.random.key(0))
+        assert jnp.array_equal(asm(state).data, hand(state).data)
+
+    def test_assembly_reports_its_multiplicity(self, two_at_a, many_graph):
+        """`lit` alone said the same thing for one instance and for two."""
+        one = assemble(many_graph, At("a", Src(value=jnp.array(10.0))))
+        assert one.lit == two_at_a.lit  # the template node is lit either way
+        assert one.instances == ()
+        assert two_at_a.instances == (("a", ("a_1", "a_2")),)
+        assert "x2" in repr(two_at_a) and "x2" not in repr(one)
+
+    def test_mermaid_shows_the_multiplicity(self, two_at_a, many_graph):
+        register_graph(many_graph)
+        one = assemble(many_graph, At("a", Src(value=jnp.array(10.0))))
+        assert "(x2)" in two_at_a.to_mermaid()
+        assert "(x2)" not in one.to_mermaid()
+        assert "(x2)" in two_at_a.to_svg()
+
+
+class TestFoldReplacement:
+    """``replace_node`` on a junction would discard every branch feeding it."""
+
+    def test_replace_node_on_a_materialized_junction_refuses(self, graph):
+        asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
+        before = asm(State()).data
+        assert jnp.array_equal(before, jnp.full(3, 30.0))
+        with pytest.raises(AssemblyError, match="junction"):
+            asm.replace_node("j1", SrcA(value=jnp.array(0.0)))
+        assert jnp.array_equal(asm(State()).data, before)
+
+    def test_reading_a_materialized_junction_still_works(self, graph):
+        """Reading the fold is how you inspect branch order; only writing lies."""
+        asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
+        assert isinstance(asm["j1"], SumOperator)
+        assert asm["j1"].names == ("a", "b")

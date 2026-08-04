@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### A `many=True` node id is now a stable identifier
+
+A second operator placed at a `many` node used to take over the first one's
+name. Measured, on a two-source graph with `f` a `many` source:
+
+```
+one instance  forward: [10. 10. 10.]  lit: ('f', 'g')
+two instances forward: [30. 30. 30.]  lit: ('f', 'g')   <- lit IDENTICAL
+A2['f']  type: SumOperator    A2['f_2'] type: Src
+replace_node('f', amp=0) forward : [0. 0. 0.]    correct would be 0 + 20 = 20.0
+```
+
+`_dedup` gave instance 1 the bare node id, which is also the label the fold
+over the instances carries, and the breadth-first lookup resolved the
+collision to the fold — so `replace_node` overwrote *both* instances with one
+operator. A component of the instrument disappeared with no shape change, no
+error, and an unchanged `lit` and rendering.
+
+The same defect reached inference through `t_sys_extra`, the `many` node the
+graph designates for a generic effective-T_sys contribution:
+
+```
+one instance : space.validate PASSED
+two instances: space.validate RAISED ParameterSpaceError: Bind for ('C',): `into` selector 0
+               failed against the pipeline ('SumOperator' object has no attribute 'coeff').
+```
+
+Every `ParameterSpace` written against such a node was invalidated by the next
+component someone added there — the stated design intent ("re-parameterizing
+never requires editing the instrument description") failing in reverse.
+
+**What changed.** With two or more instances at a node they are now named
+`x_1`, `x_2`, … — *including the first*, so the bare id names no instance and
+cannot collide with the fold — and the bare id raises the new
+**`AmbiguousNodeError`**, which lists the instance ids to use instead.
+`replace_node` therefore refuses rather than deleting; it also refuses on a
+junction/selector that assembly materialized as a combinator, which silently
+discarded every branch feeding it for the same reason. `Assembly.instances`
+records the multiplicity, `repr` shows `t_sys_extra x2`, and the mermaid/SVG
+renderings label such a node `(x2)` — `lit` alone said the same thing for one
+instance and for two.
+
+**A single instance is untouched**, bitwise: `_instance_names(x, 1) == (x,)`,
+so existing spaces, examples and tests keep working unchanged. The one
+user-visible rename is the *first* of several siblings:
+`twin["receiver_input"].names` for two calibration loads is now
+`('observed_astro_sky', 'cal_loads_1', 'cal_loads_2')`, was `(..., 'cal_loads',
+'cal_loads_2')`. Branch order, switch indices and every forward value are
+unchanged — the names are static metadata.
+
+Note that one `ParameterSpace` still cannot validate against both the
+one-instance and the two-instance assembly: that is the point. Answering the
+bare id with instance 1 would be the finite, correctly-shaped, wrong binding
+this package exists to refuse.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and

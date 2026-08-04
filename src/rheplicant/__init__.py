@@ -12,6 +12,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from rheplicant.core import (
     AbstractOperator,
+    AmbiguousNodeError,
     Assembly,
     AssemblyError,
     At,
@@ -40,6 +41,7 @@ except PackageNotFoundError:  # running from a source tree with no install
 
 __all__ = [
     "AbstractOperator",
+    "AmbiguousNodeError",
     "Assembly",
     "AssemblyError",
     "At",

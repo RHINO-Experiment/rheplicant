@@ -1,13 +1,17 @@
 """Tests for graph-guided assembly on the canonical single-antenna graph."""
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
 
 import rheplicant.radio as radio
-from rheplicant import Pipeline, SelectOperator, SumOperator
-from rheplicant.core.graph import AssemblyError, At
+from rheplicant import AbstractOperator, Pipeline, SelectOperator, SumOperator
+from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.graph import AmbiguousNodeError, AssemblyError, At
+from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.radio import (
     RADIO_GRAPH,
     ADCOperator,
@@ -309,7 +313,7 @@ class TestManyInstancesComposeLikeTheirConsumer:
         )
         selector = twin["receiver_input"]
         assert isinstance(selector, SelectOperator)
-        assert selector.names == ("uniform_sky", "cal_loads", "cal_loads_2")
+        assert selector.names == ("uniform_sky", "cal_loads_1", "cal_loads_2")
 
         out = twin(template_state.replace(
             coords=template_state.coords.replace(extra={"receiver_input": switch})
@@ -345,7 +349,8 @@ class TestManyInstancesComposeLikeTheirConsumer:
                                spectral_index=jnp.array(-2.5),
                                ref_freq=jnp.array(70e6)),
         )
-        assert isinstance(twin["foregrounds"], SumOperator)
+        assert isinstance(twin.operator, SumOperator)
+        assert twin.operator.names == ("foregrounds_1", "foregrounds_2")
         out = twin(template_state).data
         one = assemble(
             ForegroundOperator(amplitude=jnp.array(30.0),
@@ -382,3 +387,102 @@ class TestManyInstancesComposeLikeTheirConsumer:
         )).data
         assert jnp.allclose(out[switch == 0], 100.0)
         assert jnp.allclose(out[switch == 1], 300.0)
+
+
+class _TSysBasis(AbstractOperator):
+    """A generic effective-T_sys contribution: ``basis @ coeff``, flat in time.
+
+    ``t_sys_extra`` is the ``many=True`` node the graph docstring designates
+    for exactly this, and it ships no operator — so the test brings its own,
+    the way the next component to arrive there will.
+    """
+
+    graph_node: ClassVar[str] = "t_sys_extra"
+    coeff: jax.Array
+    basis: jax.Array
+
+    def __call__(self, state):
+        n_time = state.coords.time.shape[0]
+        return state.with_data(
+            jnp.broadcast_to(self.basis @ self.coeff, (n_time, self.basis.shape[0]))
+        )
+
+
+def _basis():
+    return jnp.stack([jnp.ones(N_FREQ), jnp.linspace(-1.0, 1.0, N_FREQ)], axis=1)
+
+
+def _coeff_space(node_id: str) -> ParameterSpace:
+    return ParameterSpace(
+        latents=(Latent("C", init=jnp.array([10.0, 1.0])),),
+        bindings=(Bind("C", into=lambda p, n=node_id: p[n].coeff),),
+    )
+
+
+class TestManyNodeSurvivesASibling:
+    """One ParameterSpace, two assemblies differing only by a sibling component.
+
+    The design intent under test: *re-parameterizing never requires editing
+    the instrument description*. The failure it replaces was the reverse —
+    adding a component silently redirected an existing space onto the fold
+    that sums the instances, so ``validate`` reported a missing ``coeff``
+    attribute and named nothing the author could act on.
+    """
+
+    def test_the_space_validates_against_the_single_instance_assembly(self):
+        one = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        assert isinstance(one["t_sys_extra"], _TSysBasis)
+        _coeff_space("t_sys_extra").validate(one)  # raises on failure
+
+    def test_a_sibling_makes_the_bare_node_id_a_named_error(self):
+        space = _coeff_space("t_sys_extra")
+        two = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        with pytest.raises(ParameterSpaceError) as excinfo:
+            space.validate(two)
+        message = str(excinfo.value)
+        assert "t_sys_extra_1" in message and "t_sys_extra_2" in message
+
+    def test_the_names_the_error_gives_are_the_ones_that_work(self):
+        two = assemble(
+            _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis()),
+            _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis()),
+            GainOperator(gain=jnp.array(1.1)),
+        )
+        _coeff_space("t_sys_extra_1").validate(two)
+        _coeff_space("t_sys_extra_2").validate(two)
+        bound = _coeff_space("t_sys_extra_2").bind(two, {"C": jnp.array([7.0, 0.0])})
+        assert jnp.allclose(bound["t_sys_extra_2"].coeff, jnp.array([7.0, 0.0]))
+        assert jnp.allclose(bound["t_sys_extra_1"].coeff, jnp.array([10.0, 1.0]))
+
+    def test_the_sibling_is_still_in_the_forward_model(self, template_state):
+        """The bug's signature was a component silently vanishing; check it did
+        not, by the forward output rather than by shape."""
+        a = _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis())
+        b = _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis())
+        two = assemble(a, b, GainOperator(gain=jnp.array(1.1)))
+        expected = 1.1 * (a(template_state).data + b(template_state).data)
+        assert jnp.allclose(two(template_state).data, expected)
+
+    def test_replace_node_on_the_bare_id_refuses_instead_of_deleting(
+        self, template_state
+    ):
+        a = _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis())
+        b = _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis())
+        two = assemble(a, b, GainOperator(gain=jnp.array(1.1)))
+        before = two(template_state).data
+        zeroed = _TSysBasis(coeff=jnp.zeros(2), basis=_basis())
+        with pytest.raises(AmbiguousNodeError, match="t_sys_extra_1"):
+            two.replace_node("t_sys_extra", zeroed)
+        assert jnp.array_equal(two(template_state).data, before)
+        # the named form drops instance 1 only, and says so in the output
+        swapped = two.replace_node("t_sys_extra_1", zeroed)
+        assert jnp.allclose(
+            swapped(template_state).data, 1.1 * b(template_state).data
+        )

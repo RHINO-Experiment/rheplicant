@@ -378,8 +378,10 @@ class TestAssembly:
             make_noise_wave(freq, gamma_src=three),
         )
         selector = twin["receiver_input"]
-        assert selector.names == ("observed_astro_sky", "cal_loads", "cal_loads_2")
+        assert selector.names == ("observed_astro_sky", "cal_loads_1", "cal_loads_2")
         assert [float(b.t_load) for b in selector.branches[1:]] == [300.0, 400.0]
+        # and the bare node id now addresses neither of them, by name
+        assert dict(twin.instances)["cal_loads"] == ("cal_loads_1", "cal_loads_2")
 
     def test_the_loads_are_switched_between_not_added_together(
         self, sky_maps, freq

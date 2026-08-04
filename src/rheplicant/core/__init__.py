@@ -15,6 +15,7 @@ from rheplicant.core.errors import (
 )
 from rheplicant.core.frozen import FrozenMapping
 from rheplicant.core.graph import (
+    AmbiguousNodeError,
     Assembly,
     AssemblyError,
     At,
@@ -30,6 +31,7 @@ from rheplicant.core.state import State
 
 __all__ = [
     "AbstractOperator",
+    "AmbiguousNodeError",
     "Assembly",
     "AssemblyError",
     "At",
