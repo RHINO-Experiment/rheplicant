@@ -2,6 +2,77 @@
 
 ## Unreleased
 
+### `Bind(fan=...)`: the fan-out mode is declarable, because the container type is not evidence
+
+`Bind` decided between *tying* one produced value into every `into` selector
+and *distributing* one value per selector by asking whether `fn` returned a
+Python `tuple`/`list`. Measured on two scalar leaves — an
+`AntennaLossOperator.efficiency` and a `GainOperator.gain` — fed the same
+2-vector `[2, 5]`:
+
+```
+fn = lambda v: v          ACCEPTED   pred[0,0] = 4.0    (2 * 2, tied)
+fn = lambda v: [v[0],v[1]] ACCEPTED  pred[0,0] = 10.0   (2 * 5, distributed)
+fn = lambda v: list(v)    ACCEPTED   pred[0,0] = 10.0   (2 * 5, distributed)
+```
+
+**Row three is the defect.** `v` and `list(v)` are the same data. One is a JAX
+array and the other a Python list of its elements, and that difference — which
+survives no shape check, no `check_linearity`, no `identifiability` — is the
+whole basis on which the two readings were told apart. A user who meant "write
+this whole 2-vector into both leaves" and reached for `list(v)` got element-wise
+distribution: finite, correctly shaped, and 2.5x off.
+
+`fan="broadcast"` and `fan="distribute"` write that intent down.
+`fan=None` is the default and **keeps the old inference exactly** — `Bind` is
+public and appears in every example and doc page, so nothing existing changes.
+Declared, a contradiction between the declaration and what `fn` did is refused
+by name: broadcast that produced a container, distribute that produced a single
+value. `ParameterSpace.direct(..., fan=...)` threads it through, since `into`
+there takes a tuple of selectors too.
+
+**The one case no rule can decide, and why it warns rather than refuses.** With
+a single `into` selector, the length test that separates the modes —
+`len(produced) == len(into)` — is satisfied by a length-1 container under either
+intent, so the container was silently unwrapped. It still is, now under a new
+`AmbiguousFanWarning`. Not a refusal, because there is no wrong answer to
+prevent: a Python list is not an array leaf, so unwrapping is the only reading
+that can reach one, and broadcasting the container instead would change the
+pipeline's pytree structure and be refused by `ParameterSpace.validate` a moment
+later. Refusing would break working code and buy no correctness. Declaring
+`fan="distribute"` silences it.
+
+`Bind` carries no array leaves — every field is static — so the new field lands
+in the treedef's aux data and changes no leaf count. `ParameterSpace.bindings`
+is itself static, which puts that aux data in a jit cache key; `str | None`
+keeps it hashable. Pinned by a test.
+
+### `split_rhat` refuses a trace it cannot halve, instead of returning NaN
+
+`MIN_DRAWS = 4` was enforced by `SamplingPlan.sample` and not by `split_rhat`,
+which is public, exported, and documented no minimum. Called directly:
+
+```
+len 0 -> ZeroDivisionError: division by zero
+len 1 -> ValueError: all input arrays must have the same shape
+len 2 -> nan
+len 3 -> nan
+len 4 -> 2.1213203435596424
+```
+
+Sizes 0-3 now raise `ParameterSpaceError` carrying the same "two halves of two"
+sentence `MIN_DRAWS` and `sample()` already use. **The NaN is the one that
+mattered.** It arrived with only a numpy `RuntimeWarning` that nothing surfaces,
+and a NaN passes no threshold test in either direction — both `rhat <= rhat_max`
+and `rhat > rhat_max` are `False` — so an undefined diagnostic reads as whichever
+verdict the caller happened to test for.
+
+Independently: the second half is now sliced `values[values.size - half:]` and
+not `values[-half:]`. Those agree for every positive `half` and disagree at 0,
+where `values[-0:]` is the *whole* trace — which is how a length-1 trace came to
+be compared against itself. Extracted as `_halves` so the slice stays testable
+at the lengths the new guard forbids; a guard that hides a bug is not a fix.
+
 ### A twin that draws its own noise is refused at every inference exit
 
 **Breaking, for one shape of call.** Handing a forward model containing a
