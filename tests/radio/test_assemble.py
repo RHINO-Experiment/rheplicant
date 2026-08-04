@@ -118,6 +118,18 @@ class TestCanonicalTopology:
         with pytest.raises(AssemblyError, match="no live source"):
             assemble(o["io"], o["gd"])
 
+    def test_no_node_of_the_shipped_graph_reaches_the_sink_twice(self):
+        """The shipped template is an in-tree, and this is what says so.
+
+        A node reaching the sink by several paths is folded in once per path,
+        which makes it unwritable: ``replace_node`` and ``ParameterSpace.
+        validate`` both refuse on :attr:`Assembly.aliased` rather than rewrite
+        one copy and leave the others live. Nothing in the radio template is
+        such a node today. If someone adds a fork that makes one, this test is
+        where they find out what it costs.
+        """
+        assert assemble(*ops().values()).aliased == ()
+
     def test_full_set_equals_hand_built_bitwise(self, template_state):
         o = ops()
         asm = assemble(*o.values())

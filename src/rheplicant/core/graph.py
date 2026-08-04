@@ -38,6 +38,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 import equinox as eqx
+import jax
 
 from rheplicant.core.combinators import SelectOperator, SumOperator
 from rheplicant.core.errors import DirtError
@@ -291,13 +292,18 @@ class Assembly(AbstractOperator):
             multiplicity lives, and what makes the bare node id ambiguous.
         materialized: junction/selector nodes that actually became a
             ``SumOperator``/``SelectOperator`` (rather than passing through).
-        aliased: nodes the fold embedded at more than one position, because
-            their contribution reaches the sink by more than one path. Reading
-            them is honest — ``self[nid]`` IS the operator sitting there — so
-            only :meth:`replace_node` refuses. Note the limit: a hand-rolled
-            ``eqx.tree_at(lambda a: a[nid].x, ...)``, which is also how
-            ``ParameterSpace`` binds, does not go through ``replace_node`` and
-            still rewrites one copy only.
+        aliased: **public, and the thing to check before writing a selector** —
+            nodes the fold embedded at more than one position, because their
+            contribution reaches the sink by more than one path. Reading them
+            is honest — ``self[nid]`` IS the operator sitting there — so only
+            writing refuses: :meth:`replace_node` and
+            :meth:`~rheplicant.inference.parameters.ParameterSpace.validate`
+            both consult this tuple, since either would otherwise rewrite one
+            copy and leave the others live in the forward model. What neither
+            can see is a hand-rolled ``eqx.tree_at(lambda a: a[nid].x, ...)``:
+            that call goes through no framework code, so nothing intercepts it
+            and it still rewrites one copy only. Consult ``.aliased`` yourself
+            before writing one.
 
     If the assembly contains live sources it *generates* its data — calling
     it on a state that already carries data raises, because that data would
@@ -439,6 +445,105 @@ def _find_named(op: AbstractOperator, name: str) -> AbstractOperator | None:
     return None
 
 
+def _children(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
+    """The fold's composite spine, in one place: what holds operators.
+
+    Everything that walks a fold by identity descends through exactly these,
+    so a new composite type has one place to be taught rather than several to
+    be forgotten in.
+    """
+    if isinstance(op, Pipeline):
+        return tuple(op.stages)
+    if isinstance(op, (SumOperator, SelectOperator)):
+        return tuple(op.branches)
+    return ()
+
+
+def _children_through_assemblies(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
+    """:func:`_children`, also stepping into an Assembly's folded operator.
+
+    Kept separate because :func:`_positions` must NOT step into one: it asks
+    what *this* fold did, and a nested assembly's contents were placed by an
+    earlier one.
+    """
+    if isinstance(op, Assembly):
+        return (op.operator,)
+    return _children(op)
+
+
+def _spine_pairs(
+    root: AbstractOperator, mirror: AbstractOperator | None = None
+) -> Iterable[tuple[AbstractOperator, AbstractOperator | None]]:
+    """Every position of ``root``, paired with the same position of ``mirror``.
+
+    ``mirror`` is a ``tree_map`` copy of ``root``, so the two have the same
+    spine and each pair is one position seen twice: once as the real operator
+    (which a fold may have placed more than once, by identity) and once as
+    whatever the copy put there. Pass ``None`` to walk ``root`` alone.
+    """
+    queue: list[tuple[AbstractOperator, AbstractOperator | None]] = [(root, mirror)]
+    while queue:
+        current, twin = queue.pop()
+        yield current, twin
+        children = _children_through_assemblies(current)
+        if twin is None:
+            queue.extend((child, None) for child in children)
+        else:
+            queue.extend(
+                zip(children, _children_through_assemblies(twin), strict=True)
+            )
+
+
+class _LeafPath:
+    """One tagged leaf path, wrapped so that flattening cannot expand it.
+
+    ``tree_map_with_path`` writing the bare path would leave a *tuple* in leaf
+    position, and any later ``tree_leaves`` would flatten it into its
+    components. An opaque object is a leaf, so the path reads back out whole.
+    """
+
+    __slots__ = ("path",)
+
+    def __init__(self, path: tuple):
+        self.path = path
+
+
+def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
+    """``{leaf key path: node id}`` for every leaf an aliased node owns.
+
+    :attr:`Assembly.aliased` names the *nodes* the fold embedded more than
+    once; an ``eqx.tree_at`` selector lands on a *leaf*, so anything vetting a
+    selector — :meth:`ParameterSpace.validate
+    <rheplicant.inference.parameters.ParameterSpace.validate>` — needs the
+    leaves those nodes own.
+
+    Every copy is reported, not only the one :func:`_find_named` reaches: a
+    selector spelled out by hand can name the second copy, and rewriting that
+    one leaves the first live — the same wrong answer from the other end.
+    Assemblies nested inside a larger composite are covered too.
+    """
+    if not any(
+        isinstance(op, Assembly) and op.aliased for op, _ in _spine_pairs(pipeline)
+    ):
+        return {}
+    tagged = jax.tree_util.tree_map_with_path(lambda path, _: _LeafPath(path), pipeline)
+    owned: dict[tuple, str] = {}
+    for current, twin in _spine_pairs(pipeline, tagged):
+        if not isinstance(current, Assembly):
+            continue
+        for node_id in current.aliased:
+            target = _find_named(current.operator, node_id)
+            if target is None:  # pragma: no cover - assemble() checked these ids
+                continue
+            for below, below_twin in _spine_pairs(current.operator, twin.operator):
+                if below is target:
+                    owned.update(
+                        (tag.path, node_id)
+                        for tag in jax.tree_util.tree_leaves(below_twin)
+                    )
+    return owned
+
+
 def _positions(root: AbstractOperator, target: AbstractOperator) -> int:
     """How many positions of the folded tree ``target`` occupies (by identity)."""
     count = 0
@@ -447,10 +552,7 @@ def _positions(root: AbstractOperator, target: AbstractOperator) -> int:
         current = queue.pop()
         if current is target:
             count += 1
-        if isinstance(current, (Pipeline, SumOperator, SelectOperator)):
-            queue.extend(
-                current.stages if isinstance(current, Pipeline) else current.branches
-            )
+        queue.extend(_children(current))
     return count
 
 
@@ -706,6 +808,25 @@ def assemble(
     :class:`AssemblyError` on unknown/ambiguous placement, junction slots,
     duplicate single-instance nodes, or a transform-rooted branch feeding a
     materialized junction (a sum branch must contain a source).
+
+    **Limitation — the envelope is in-trees.** The package's promise is that
+    any assembled graph serves both forward modelling *and* inference. That
+    holds while every node reaches the sink by exactly one path, and it is
+    stated here rather than assumed because assembly folds the graph to a
+    **tree**: a node reached by several paths is folded in once per path, so
+    one operator object ends up at several positions. The forward model is
+    right either way — each path contributes as the graph says. What breaks is
+    *writing* to such a node afterwards, because ``eqx.tree_at`` rewrites the
+    one position a selector reaches and leaves the other copies live: a
+    finite, correctly-shaped, wrong model in which the parameter is only
+    partly free. Those nodes are recorded in :attr:`Assembly.aliased`, and
+    both :meth:`Assembly.replace_node` and
+    :meth:`~rheplicant.inference.parameters.ParameterSpace.validate` refuse to
+    write through them rather than answer wrongly.
+
+    No shipped graph is affected: every node of the radio template reaches the
+    sink by exactly one path, so ``aliased`` is always empty there. This bites
+    user-defined graphs only.
     """
     if not operators:
         raise AssemblyError("assemble() needs at least one operator.")

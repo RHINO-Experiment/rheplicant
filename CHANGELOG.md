@@ -89,12 +89,41 @@ No shipped graph is affected: every node of the radio template reaches the
 sink by exactly one path, so `aliased` is always empty there and the `assemble`
 check never fires.
 
-**Known limit.** A hand-rolled `eqx.tree_at(lambda a: a[nid].x, ...)` does not
-go through `replace_node`, and neither does `ParameterSpace.bind`. On an
-aliased node binding a latent still rewrites one copy only — measured, 20.0 ->
-10.0 where 0.0 is correct. Closing that means deciding whether `Assembly.
-__getitem__` is an inspection API or a `tree_at` selector; it is tracked
-separately rather than settled here.
+**Follow-up: the same rule now covers binding, which is the route that
+mattered.** `replace_node` was guarded; `ParameterSpace.bind` was not, and
+`into` selectors are documented as `lambda p: p["gain"].gain`, so they go
+through `Assembly.__getitem__` and never through `replace_node`. On the
+fork-rejoin graph with one `Src(10)` at `x` (forward 20.0) the space
+*validated*, and binding `V=0` gave 10.0 where 0.0 is correct — silent,
+finite, correctly shaped, wrong, in the inference path.
+
+`ParameterSpace.validate` now refuses a binding whose `into` selector lands
+inside an aliased node, naming the latent and the node and saying what to do
+instead (bind downstream of the fork, or restructure the graph). Every copy is
+checked, not only the one `__getitem__` reaches, so a selector spelled out by
+hand to the second copy is refused too. Gradients were never the problem here:
+both copies carry their own and the two sum to the true derivative — the
+pytree is a correct *two*-parameter model where a one-parameter model was
+declared, which is why `validate` is a complete gate for it.
+
+**`Assembly.__getitem__` stays an inspection API.** Reading an aliased node
+returns the operator that genuinely sits there; only writing refuses. That is
+pinned by tests on both sides so a later editor does not "fix" the read.
+
+**Known limit.** A hand-rolled `eqx.tree_at(lambda a: a[nid].x, ...)` goes
+through no framework call, so nothing can intercept it and it still rewrites
+one copy only. `Assembly.aliased` is documented as public API for exactly
+this: check it yourself before writing such a selector.
+
+**Stated envelope.** The design promise — any assembled graph serves both
+forward modelling and inference — holds while every node reaches the sink by
+exactly one path, because assembly folds the graph to a *tree*. That is now
+written down in `assemble()` as a limitation with its reason rather than left
+as a silent assumption. Not making the fold duplicate operators at all is the
+real root-cause fix; it is an architecture change (evaluating the graph as a
+memoised DAG) with consequences beyond rewriting — a duplicated *stochastic*
+operator is evaluated twice with different randomness — and is left to its own
+decision.
 
 ### Two inference tutorials, and a sampler bug they found
 
