@@ -34,6 +34,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.core.contract
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.core.graph
    :members:
    :show-inheritance:
