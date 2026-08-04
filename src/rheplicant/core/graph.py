@@ -52,7 +52,7 @@ import jax
 from rheplicant.core.combinators import SelectOperator, SumOperator
 from rheplicant.core.errors import DirtError
 from rheplicant.core.operator import AbstractOperator
-from rheplicant.core.pipeline import Pipeline
+from rheplicant.core.pipeline import Pipeline, validate_operators
 from rheplicant.core.state import State
 
 
@@ -331,6 +331,15 @@ class Assembly(AbstractOperator):
     )
     materialized: tuple[str, ...] = eqx.field(static=True, default=())
     aliased: tuple[str, ...] = eqx.field(static=True, default=())
+    # The recipe, as ADDRESSES rather than operators: (template nodes, the id
+    # `self[...]` reaches this operator by). Storing the operators themselves
+    # would put every one of them at a second pytree position, which is exactly
+    # the `aliased` failure this class refuses to create. Addresses are static
+    # strings, so the fold stays the only place an operator lives, and
+    # `without` recovers the set by reading them back off the built tree.
+    placements: tuple[tuple[tuple[str, ...], str], ...] = eqx.field(
+        static=True, default=()
+    )
 
     def __call__(self, state: State) -> State:
         if self.has_source and state.data is not None:
@@ -374,7 +383,24 @@ class Assembly(AbstractOperator):
         one position. In all three ``eqx.tree_at`` would happily rewrite one
         position — dropping live branches from the forward model, or leaving
         the node's other copies in it, with no shape change and no complaint.
+
+        ``operator`` must be an :class:`~rheplicant.core.operator.AbstractOperator`.
+        ``None`` in particular is refused by name: it reads as "take this stage
+        out", and it used to return an Assembly whose ``lit`` and whose mermaid
+        rendering both still claimed the stage, which then died on the next call
+        with ``TypeError: 'NoneType' object is not callable``. Removing a stage
+        is :meth:`without`.
         """
+        if operator is None:
+            raise AssemblyError(
+                f"replace_node({node_id!r}, None) does not remove the stage — it would "
+                "return an Assembly whose metadata and rendering still claim "
+                f"{node_id!r} is present, and which raises TypeError: 'NoneType' object "
+                f"is not callable the next time it runs. Use assembly.without({node_id!r}) "
+                "to drop it, which re-assembles and reports lit/skipped/has_source "
+                "honestly."
+            )
+        validate_operators((operator,), "replace_node")
         target = self[node_id]  # raises AmbiguousNodeError on a multi-instance node
         if node_id in self.aliased:
             raise AssemblyError(
@@ -399,6 +425,58 @@ class Assembly(AbstractOperator):
 
         del target  # existence check only
         return eqx.tree_at(where, self, operator)
+
+    def without(self, node_id: str) -> "Assembly":
+        """Return a new Assembly with the operator(s) at ``node_id`` dropped.
+
+        The supported answer to "this stage must not be here" — the sentence
+        :func:`~rheplicant.inference.parameters.refuse_stochastic_stages` says
+        about a noise stage in a twin you infer with, and the one
+        :meth:`replace_node` used to invite with ``None`` and then answer
+        wrongly.
+
+        Not tree surgery: this re-runs :func:`assemble` over the remaining
+        operators, recovered from the built tree by the addresses recorded in
+        :attr:`placements`. So the result is exactly the assembly you would
+        have got by not providing that operator in the first place — same fold,
+        same ``lit``/``skipped``/``has_source``/``materialized``, and every
+        assembly-time refusal re-run. If dropping the stage leaves something
+        that cannot be assembled — a summed branch with no source left on it,
+        say, or a :attr:`~rheplicant.core.operator.AbstractOperator.must_precede`
+        constraint whose target stage has just gone — you get that refusal, in
+        assemble's own words, rather than a model that quietly changed meaning.
+
+        A ``many`` node is dropped whole: every instance on it goes. Use
+        ``assemble()`` directly to keep some of them.
+
+        Raises:
+            AssemblyError: if ``node_id`` carries no operator in this assembly,
+                if it is the only one, or if this Assembly was not built by
+                :func:`assemble` (so there is no recipe to re-run).
+        """
+        if not self.placements:
+            raise AssemblyError(
+                "This Assembly carries no placement record, so without() has no recipe "
+                "to re-assemble from. Only assemble() builds that record; an Assembly "
+                "constructed directly cannot be edited this way."
+            )
+        kept = [entry for entry in self.placements if node_id not in entry[0]]
+        if len(kept) == len(self.placements):
+            raise AssemblyError(
+                f"without({node_id!r}): no operator sits at {node_id!r} in this "
+                f"assembly. Lit nodes: {list(self.lit)}."
+            )
+        if not kept:
+            raise AssemblyError(
+                f"without({node_id!r}) would leave nothing to assemble — {node_id!r} "
+                "carries the only operator here. An empty assembly is not a model; "
+                "drop the assembly instead."
+            )
+        return assemble(
+            get_graph(self.graph_name),
+            *(At(nodes if len(nodes) > 1 else nodes[0], self[address])
+              for nodes, address in kept),
+        )
 
     @property
     def _counts(self) -> dict[str, int]:
@@ -822,6 +900,13 @@ def _check_ordering(
 def _resolve(
     graph: SignalGraph, operators: Sequence[AbstractOperator | At]
 ) -> tuple[dict[str, list[AbstractOperator]], list[tuple[tuple[str, ...], AbstractOperator]]]:
+    # `Pipeline` and both combinators screen their members through this; before
+    # `must_precede` landed, a non-operator here reached the fold and failed
+    # there. It now fails earlier and worse, on `op.must_precede` — so the
+    # screen belongs at the top of the one route that skipped it.
+    validate_operators(
+        tuple(item.op if isinstance(item, At) else item for item in operators), "assemble"
+    )
     placement: dict[str, list[AbstractOperator]] = {}
     regions: list[tuple[tuple[str, ...], AbstractOperator]] = []
     for item in operators:
@@ -1061,7 +1146,36 @@ def assemble(
         instances=tuple((nid, names) for nid, names in multi.items()),
         materialized=tuple(materialized),
         aliased=tuple(n for n in graph.nodes if n in duplicates),
+        placements=_placement_addresses(graph, placement, regions),
     )
+
+
+def _placement_addresses(
+    graph: SignalGraph,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> tuple[tuple[tuple[str, ...], str], ...]:
+    """``(template nodes, address)`` per placed operator — the recipe `without` re-runs.
+
+    The address is the id ``Assembly.__getitem__`` reaches that operator by:
+    the node id for a single instance, the minted instance id when several sit
+    on a ``many`` node (:func:`_instance_names` decides both, so the two cannot
+    drift), and the LAST covered node for a region, which is how the class
+    docstring says regions are addressed.
+
+    Sorted by TEMPLATE order, not by the order the operators were provided in.
+    ``assemble`` promises that argument order is irrelevant — two assemblies of
+    the same operator set compare equal — and this field is part of the
+    Assembly, so a record that remembered the call would quietly break that.
+    """
+    order = {nid: i for i, nid in enumerate(graph.nodes)}
+    entries = [
+        ((nid,), address)
+        for nid, ops_at in placement.items()
+        for address in _instance_names(nid, len(ops_at))
+    ]
+    entries += [(path, path[-1]) for path, _ in regions]
+    return tuple(sorted(entries, key=lambda entry: (order[entry[0][0]], entry[1])))
 
 
 def _live_span(graph: SignalGraph, lit: tuple[str, ...]) -> set[str]:
