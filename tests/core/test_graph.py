@@ -569,6 +569,29 @@ def fork_rejoin_graph():
     )
 
 
+@pytest.fixture
+def id_collision_graph():
+    """``x`` (many, 2 instances) sits beside a REAL node literally named ``x_1``.
+
+    ``x`` reaches the sink by exactly ONE path, so ``_fold_duplicates`` reports
+    nothing for it and the "folded in twice" branch of ``_check_promised_ids``
+    never fires here — unlike ``fork_rejoin_graph``. The only thing that can
+    catch ``x_1`` (the id ``_instance_names`` mints for instance 1 of ``x``)
+    resolving to the unrelated node ``x_1`` instead is the identity round-trip
+    half of the guard.
+    """
+    return SignalGraph(
+        "collide-with-a-real-node",
+        {
+            "x": NodeSpec(S, many=True),
+            "x_1": NodeSpec(S),
+            "j": NodeSpec(J),
+            "t": NodeSpec(T),
+        },
+        [("x", "j"), ("x_1", "j"), ("j", "t")],
+    )
+
+
 class TestPromisedIdsAddressTheirOwnInstance:
     """Every id :class:`AmbiguousNodeError` hands out must reach that instance.
 
@@ -623,6 +646,80 @@ class TestPromisedIdsAddressTheirOwnInstance:
             )
         message = str(excinfo.value)
         assert "'x'" in message and "2 paths" in message
+
+    def test_assemble_refuses_when_a_minted_id_collides_with_a_real_node(self, id_collision_graph):
+        """The identity round-trip half, caught with nothing else in play.
+
+        ``x`` reaches the sink by ONE path here, so ``duplicates`` is empty
+        and the "folded in twice" branch above never fires — this can only be
+        caught by checking that ``x_1`` (minted for instance 1 of ``x``)
+        resolves back to the very object placed there, not merely to
+        *something*. Measured before this guard existed (relaxing the check
+        to ``found is None``): assemble ACCEPTED and silently aliased
+        instance 1 of ``x`` to the unrelated node ``x_1``'s own operator.
+        """
+        with pytest.raises(AssemblyError) as excinfo:
+            assemble(
+                id_collision_graph,
+                At("x", Src(value=jnp.array(10.0))),
+                At("x", Src(value=jnp.array(20.0))),
+                At("x_1", Src(value=jnp.array(100.0))),
+            )
+        message = str(excinfo.value)
+        assert "'x'" in message
+        assert "'x_1'" in message
+        assert "resolves to" in message
+
+    def test_the_refused_advice_would_have_deleted_the_wrong_node(
+        self, id_collision_graph, monkeypatch
+    ):
+        """Anchor the guard on the physics it protects, not just the raise.
+
+        ``x`` reaching the sink by one path means ``_fold_duplicates`` reports
+        no duplicates for this graph, so disabling ``_check_promised_ids``
+        entirely is behaviourally identical, HERE, to relaxing only the
+        identity half to ``found is None``: the "folded in twice" branch was
+        never going to fire either way (see the previous test's fixture
+        docstring). Bypassing the guard reproduces exactly what a caller
+        would see under that relaxation, then follows the refused message's
+        own advice — ``replace_node`` by the id it names — to show what
+        accepting it would have broken: not instance 1 of ``x`` (value 10),
+        but the unrelated node ``x_1`` (value 100).
+        """
+        import rheplicant.core.graph as graph_module
+
+        monkeypatch.setattr(graph_module, "_check_promised_ids", lambda *a, **k: None)
+        asm = assemble(
+            id_collision_graph,
+            At("x", Src(value=jnp.array(10.0))),
+            At("x", Src(value=jnp.array(20.0))),
+            At("x_1", Src(value=jnp.array(100.0))),
+        )
+        assert asm.aliased == ()  # the OTHER half is right: nothing is folded in twice
+        before = asm(State()).data
+        assert jnp.array_equal(before, jnp.full(3, 130.0))  # 10 + 20 + 100
+
+        # 'x_1' does not address instance 1 of x -- it silently resolves to the
+        # unrelated node x_1's own operator instead.
+        resolved = asm["x_1"]
+        assert resolved.value == 100.0  # node x_1's own operator ...
+        assert resolved.value != 10.0  # ... not the promised instance-1 operator
+
+        # What the (relaxed) message tells the caller to write: replace instance
+        # 1 of x by its id.
+        swapped = asm.replace_node("x_1", Src(value=jnp.array(0.0)))
+        after = swapped(State()).data
+        assert jnp.array_equal(after, jnp.full(3, 30.0))  # 10 + 20 + 0: node x_1 deleted
+
+        # What the caller meant -- drop instance 1 of x -- is a different number,
+        # and the advice silently produced neither an error nor that number.
+        meant = assemble(
+            id_collision_graph,
+            At("x", Src(value=jnp.array(20.0))),
+            At("x_1", Src(value=jnp.array(100.0))),
+        )
+        assert jnp.array_equal(meant(State()).data, jnp.full(3, 120.0))
+        assert not jnp.array_equal(after, meant(State()).data)
 
 
 class TestAliasedNodeIsNotWritable:
