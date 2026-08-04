@@ -9,6 +9,8 @@ Organized by the element taxonomy (see ``DESIGN.md``):
 - ``rheplicant.radio.instrument`` — beam, noise-wave / reflection terms, bandpass,
   gain, CW calibration tone, thermal noise, self-generated EMI, digitisation.
 - ``rheplicant.radio.backend`` — flagging, averaging.
+- ``rheplicant.radio.protection`` — the ``aux`` contract that keeps a known
+  calibrator (the CW tone) out of the flags it would otherwise trip.
 
 A forward model composes them with the two core combinators, following the
 canonical signal-path graph (``rheplicant.radio.graph``; RFI enters as a
