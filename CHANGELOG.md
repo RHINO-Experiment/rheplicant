@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+### `SamplingPlan`: one declared partition, two exits
+
+A point estimate and a posterior sample are two exits from one workflow, not
+two workflows. That was already true in exactly one place — `_conjugate_solve`'s
+`key=None | k`, which `wiener_solve` and `gcr_sample` share — and this promotes
+it to the level a whole model is inferred at.
+
+```python
+plan = SamplingPlan(space, Block("t_nw", "t_ant"), Block("gain"),
+                    Block("beam_fwhm", steps=20))
+est   = plan.estimate(twin, state, observed, noise=noise)
+draws = plan.sample(twin, state, observed, noise=noise, key=k, n_sweeps=200)
+```
+
+**Two methods rather than a mode flag.** `key=k` says "pass a PRNG key", which
+is an implementation detail and not an intent. Two signatures make the invalid
+combinations unrepresentable instead of validated: `key` is required on one and
+absent from the other, `n_sweeps`/`warmup` belong to one and `max_iter`/`tol` to
+the other. What the two share is the implementation — conditioning, the
+partition, sigma, the joint chi-squared, the identifiability check — and they
+diverge at the last step, which is where the layer below already diverges.
+
+**The engine is derived, never restated.** `Latent(..., linear=True)` already
+says which exit a latent takes, so `Block("t_nw", "t_ant")` needs no `engine=`.
+A block mixing declared-linear and non-linear latents is the one genuinely
+ambiguous case and is refused unless the caller downgrades the whole block to
+gradient deliberately; `engine="conjugate"` on a latent nobody declared linear
+is refused outright, because that claim belongs in the declaration where
+`check_linearity` verifies it.
+
+**The partition is checked to be strict.** Every latent of the space in exactly
+one block, and a latent omitted, duplicated, or undeclared is refused *by name*.
+An omitted latent is the dangerous one: it sits frozen at its declared init for
+the whole run while the sweep converges and every other number looks healthy.
+
+**Two guards see what no per-block number can.** `identifiability()` runs at
+**both** exits before a sweep and refuses a degenerate model, printing the null
+directions as named combinations of latents. The point estimate is the exit that
+needs it more, not less — a chain at least has `r_hat` to scream with, while CG
+converges quietly onto an arbitrary point of the null space. And the convergence
+monitor is the **joint** chi-squared across sweeps, never a per-block residual,
+which is precisely the number that read `1.7e-07` on an answer 2288 K wrong.
+`check_identifiability="once" | "each_sweep" | False` is the caller's explicit
+choice with the cost documented at both ends, not a size heuristic: the sky is
+not always 10⁶ coefficients, and for a small model the per-sweep check is cheap
+*and* strictly more informative, since a nonlinear model's identifiability is a
+property of where you are.
+
+Measured on the bilinear `gain × T_ant` model that motivated all of this: the
+free-per-cell parameterization is refused (nullity 6 of 60, direction named as
+`gain 0.50, t_ant 0.50`); the basis one runs, and `estimate` and `sample` agree
+with each other and with the truth to well inside the posterior width; and at
+sweep three the joint chi-squared is still falling by 3e7 while every block's own
+CG residual is below 1e-5.
+
+**The chi-squared test is on the decrease, not the change.** Testing
+`|chi2[k] - chi2[k-1]|` walks into the trap `iterative_gls` documents for its own
+`reweight_tol`: consecutive sweeps differ by the inner solver's own noise
+whatever the outer iteration is doing. Measured in float32, the plateau sits at
+`chi2 = 2.7e-3` and jitters by `1.2e-3` a sweep, so a converged run was refused
+for 300 sweeps and counting.
+
+**A plan does not nest `iterative_gls`.** Sigma is re-evaluated at the current
+joint prediction before every block update, so for a `RadiometerNoise` the sweep
+*is* the reweighting iteration; nesting would run one fixed point inside another
+at the product of their costs. `PlanDiagnostics.noise_depends_on_prediction`
+records when that applied, because freezing sigma inside a draw makes it exact
+for the linear-Gaussian conditional *at that covariance* and not for the full
+model's.
+
+**NUTS-within-Gibbs is stated, not hidden.** A conjugate block's GCR draw is an
+exact conditional draw, so a plan of conjugate blocks is an exact Gibbs sampler.
+A finite number of NUTS steps is a transition that merely leaves the conditional
+invariant, which makes the scheme Metropolis-within-Gibbs — still valid, and the
+inner step count now affects mixing. `Block(..., steps=20)` looks like a
+performance knob and is a statistical assumption; it says so in its own
+docstring. The kernel adapts through warmup and is **frozen** afterwards, since
+a kernel that keeps adapting from the states it visits is no longer a valid
+transition.
+
 ### The CW tone: a position the graph checks, a level it knows, a channel it keeps
 
 `calibration.py` stated its ordering constraint in a module docstring — the

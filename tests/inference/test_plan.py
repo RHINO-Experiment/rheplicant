@@ -44,7 +44,11 @@ from rheplicant.inference import (
     split_rhat,
 )
 from rheplicant.inference.engines import CONJUGATE, GRADIENT
-from rheplicant.inference.noise import HomoscedasticNoise, RadiometerNoise
+from rheplicant.inference.noise import (
+    FlaggedNoise,
+    HomoscedasticNoise,
+    RadiometerNoise,
+)
 from rheplicant.inference.plan import CHECK_EACH_SWEEP, CHECK_ONCE, MIN_DRAWS
 from rheplicant.radio import GainOperator
 
@@ -684,16 +688,40 @@ class TestConvergence:
         plateau = trace[-min(10, trace.size) :]
         assert float(np.max(np.abs(np.diff(plateau)))) > 1e-8, plateau
 
-    def test_min_sweeps_keeps_a_stationary_first_step_from_ending_the_run(
-        self, basis_setup, state
-    ):
-        space, pipeline, observed = basis_setup
-        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=200, min_sweeps=8,
-            solve_guard=None,
+    def test_min_sweeps_keeps_a_stationary_first_step_from_ending_the_run(self, state):
+        """The reason iterative_gls has a min_reweights: the first steps of a
+        fixed-point iteration can be nearly stationary without being anywhere
+        near the fixed point.
+
+        Started AT the answer, the very first sweep makes no progress — so
+        min_sweeps is the only thing standing between the run and a
+        one-sweep "converged". The two settings must give different sweep
+        counts, or the floor is doing nothing.
+        """
+        space = ParameterSpace(
+            latents=[
+                Latent("gain", init=GAIN0, prior=GAIN_PRIOR, linear=True),
+                Latent("t_coeff", init=COEFF0, prior=COEFF_PRIOR, linear=True),
+            ],
+            bindings=[
+                Bind("gain", into=lambda p: p["gain"].gain),
+                Bind(
+                    "t_coeff",
+                    into=lambda p: p["t_ant"].t_ant,
+                    fn=lambda c: TIME_BASIS @ c @ FREQ_BASIS.T,
+                ),
+            ],
         )
-        assert est.diagnostics.sweeps >= 8
+        pipeline = make_pipeline()
+        observed = observed_of(space, pipeline, TRUTH)
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "max_iter": 30, "solve_guard": None}
+
+        immediate = plan.estimate(pipeline, state, observed, min_sweeps=1, **common)
+        floored = plan.estimate(pipeline, state, observed, min_sweeps=8, **common)
+        assert immediate.diagnostics.sweeps == 1, immediate.diagnostics.chi2
+        assert floored.diagnostics.sweeps >= 8, floored.diagnostics.chi2
+        assert immediate.diagnostics.converged is floored.diagnostics.converged is True
 
     def test_a_min_sweeps_above_the_cap_is_refused(self, basis_setup, state):
         """It would make the test unreachable, so every run would exhaust
@@ -792,14 +820,58 @@ class TestSharedSeam:
     """What the two exits share is the implementation, not the signature."""
 
     def test_both_exits_refuse_a_mis_shaped_observed(self, basis_setup, state):
+        """A BROADCASTABLE mismatch on purpose: (1, 9) against a (6, 9)
+        prediction subtracts cleanly, minimizes a different problem, and reports
+        a small converged chi-squared for it. A shape that merely fails to
+        broadcast would be caught by jax anyway and would test nothing.
+
+        Matched on the PLAN's own wording rather than on the shared phrase.
+        wiener_solve refuses the same data one layer down, saying "this block",
+        so a test that accepted either message passes with the plan's guard
+        deleted — which is how it was written first, and what mutation caught.
+        The next test is why the plan's guard is not redundant.
+        """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        wrong = observed[:, 0]
-        with pytest.raises(ParameterSpaceError, match="observed has shape"):
-            plan.estimate(pipeline, state, wrong, noise=NOISE)
-        with pytest.raises(ParameterSpaceError, match="observed has shape"):
+        wrong = observed[:1, :]
+        assert jnp.shape(wrong - observed) == jnp.shape(observed), "must broadcast"
+        with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
+            plan.estimate(
+                pipeline, state, wrong, noise=NOISE, max_iter=2, tol=None,
+                solve_guard=None,
+            )
+        with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
             plan.sample(
-                pipeline, state, wrong, noise=NOISE, key=jax.random.key(0), n_sweeps=8
+                pipeline, state, wrong, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                solve_guard=None,
+            )
+
+    def test_an_ALL_GRADIENT_plan_has_no_other_shape_guard_at_all(self, state):
+        """Why the plan checks ``observed`` itself instead of leaving it to the
+        block solves.
+
+        A conjugate block passes its data to wiener_solve, which refuses a
+        mis-shaped one. A gradient block passes it to nothing: the joint
+        chi-squared subtracts the two arrays directly, so a broadcastable
+        mismatch is a finite, converged, wrong answer with no symptom anywhere.
+        This is the plan's guard doing the only work being done.
+        """
+        space, pipeline = line_space(), make_line_pipeline()
+        observed = observed_of(space, pipeline, LINE_TRUTH)
+        plan = SamplingPlan(space, Block("amp", "centre", engine=GRADIENT, steps=2))
+        assert set(plan.engines.values()) == {GRADIENT}, plan.engines
+
+        wrong = observed[:1, :]
+        assert jnp.shape(wrong - observed) == jnp.shape(observed), "must broadcast"
+        with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
+            plan.estimate(
+                pipeline, state, wrong, noise=NOISE, max_iter=2, tol=None,
+                check_identifiability=False,
+            )
+        with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
+            plan.sample(
+                pipeline, state, wrong, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                check_identifiability=False,
             )
 
     def test_both_exits_refuse_a_BILINEAR_group(self, basis_setup, state):
@@ -810,10 +882,14 @@ class TestSharedSeam:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain", "t_coeff"))
         with pytest.raises(ParameterSpaceError, match="not affine in them JOINTLY"):
-            plan.estimate(pipeline, state, observed, noise=NOISE)
+            plan.estimate(
+                pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
+                solve_guard=None,
+            )
         with pytest.raises(ParameterSpaceError, match="not affine in them JOINTLY"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0), n_sweeps=8
+                pipeline, state, observed, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                solve_guard=None,
             )
 
     def test_sample_cannot_be_called_without_a_key(self, basis_setup, state):
@@ -844,6 +920,45 @@ class TestSharedSeam:
         )
         assert jnp.allclose(bare.values["gain"], wrapped.values["gain"])
         assert bare.diagnostics.noise_depends_on_prediction is False
+
+    def test_a_flagged_sample_contributes_nothing_to_the_JOINT_chi2(
+        self, basis_setup, state
+    ):
+        """A flagged sample was not observed, so it must inform nothing — and it
+        arrives at the monitor as an infinite sigma, where the naive residual is
+        ``0 * inf`` and the whole convergence trace becomes NaN.
+
+        The evidence is a comparison, not a finiteness check: corrupting only
+        the flagged cells must leave the chi-squared trace bitwise unchanged.
+        A monitor that let them through would move.
+        """
+        space, pipeline, observed = basis_setup
+        flags = jnp.zeros(jnp.shape(observed), dtype=bool).at[2, 5].set(True)
+        flags = flags.at[4, 1].set(True)
+        noise = FlaggedNoise(HomoscedasticNoise(jnp.asarray(NOISE)), flags)
+        corrupted = observed.at[2, 5].set(1e9).at[4, 1].set(-1e9)
+        common = {
+            "noise": noise, "max_iter": 4, "tol": None, "solve_guard": None,
+            "check_identifiability": False,
+        }
+
+        clean = plan_estimate = SamplingPlan(
+            space, Block("gain"), Block("t_coeff")
+        ).estimate(pipeline, state, observed, **common)
+        dirty = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+            pipeline, state, corrupted, **common
+        )
+        assert np.all(np.isfinite(clean.diagnostics.chi2)), clean.diagnostics.chi2
+        assert np.array_equal(plan_estimate.diagnostics.chi2, dirty.diagnostics.chi2), (
+            clean.diagnostics.chi2, dirty.diagnostics.chi2
+        )
+        # ... and the run really did depend on the unflagged data, so the
+        # comparison above is not two runs that both ignored everything.
+        elsewhere = observed.at[0, 0].set(observed[0, 0] + 5e3)
+        moved = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+            pipeline, state, elsewhere, **common
+        )
+        assert not np.array_equal(clean.diagnostics.chi2, moved.diagnostics.chi2)
 
     def test_a_prediction_dependent_noise_model_is_recorded_as_such(
         self, basis_setup, state
@@ -983,6 +1098,45 @@ class TestGradientEngine:
         space, pipeline = line_space(), make_line_pipeline()
         return space, pipeline, observed_of(space, pipeline, LINE_TRUTH)
 
+    def test_the_conditional_potential_carries_the_DECLARED_prior(self, line_setup):
+        """The gradient engine's two exits share one potential, so the prior has
+        to be in it: descend the likelihood alone and the point estimate and the
+        draw target different distributions.
+
+        Asserted as an exact identity rather than as an outcome, because a
+        loose prior barely moves either answer — which is how this branch would
+        ship pinned on the wrong side.
+        """
+        from rheplicant.inference.engines import Conditioning, conditional_potential
+
+        space, pipeline, observed = line_setup
+        forward, values0 = space.forward_fn(pipeline, STATE)
+        cond = Conditioning(
+            space=space, pipeline=pipeline, state_template=STATE, observed=observed,
+            noise=HomoscedasticNoise(jnp.asarray(0.5)), forward=forward,
+        )
+        free = ParameterSpace(
+            latents=[
+                Latent("amp", init=values0["amp"], prior=AMP_PRIOR, linear=True),
+                Latent("centre", init=values0["centre"]),
+            ],
+            bindings=list(space.bindings),
+        )
+        bare = Conditioning(
+            space=free, pipeline=pipeline, state_template=STATE, observed=observed,
+            noise=HomoscedasticNoise(jnp.asarray(0.5)), forward=forward,
+        )
+
+        probe = {"centre": jnp.array(0.42)}
+        declared = conditional_potential(cond, ("centre",), values0)(probe)
+        without = conditional_potential(bare, ("centre",), values0)(probe)
+        expected = -jnp.sum(CENTRE_PRIOR.log_prob(probe["centre"]))
+        # rel=1e-3, not tighter: this is a difference of two chi-squareds of
+        # order 1e3 taken in float32, so ~1e-4 of cancellation noise is the
+        # arithmetic and not the identity.
+        assert float(declared - without) == pytest.approx(float(expected), rel=1e-3)
+        assert float(expected) != 0.0, "the fixture's prior must actually bite"
+
     def test_a_mixed_plan_estimates_both_blocks(self, line_setup, state):
         space, pipeline, observed = line_setup
         plan = SamplingPlan(space, Block("amp"), Block("centre", steps=200))
@@ -1017,6 +1171,34 @@ class TestGradientEngine:
         # the gradient block MOVED — a NUTS step that silently returned its
         # starting point would leave every draw identical
         assert float(jnp.std(draws.samples["centre"])) > 0.0
+
+    def test_the_NUTS_tuning_is_frozen_once_warmup_ends(
+        self, line_setup, state, monkeypatch
+    ):
+        """A kernel that keeps adapting from the states it visits is no longer a
+        valid transition, so every sweep whose draws are KEPT must run frozen.
+        Asserted on the argument itself rather than on an outcome: adaptive and
+        frozen chains both produce finite draws, so nothing downstream can tell
+        them apart, and this is exactly the sort of branch that ships pinned on
+        one side.
+        """
+        import rheplicant.inference.plan as plan_module
+
+        space, pipeline, observed = line_setup
+        plan = SamplingPlan(space, Block("amp"), Block("centre", steps=4))
+        seen = []
+        real = plan_module.gradient_draw
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs["adapt"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(plan_module, "gradient_draw", spy)
+        plan.sample(
+            pipeline, state, observed, noise=0.5, key=jax.random.key(0),
+            n_sweeps=9, warmup=3, solve_guard=None,
+        )
+        assert seen == [True, True, True, False, False, False, False, False, False], seen
 
     def test_the_gradient_block_uses_its_declared_step_count(self, line_setup, state):
         """``steps`` is a statistical assumption for a draw and a real budget
