@@ -307,10 +307,32 @@ class TestRegistryCompleteness:
                 missing.append(name)
         assert not missing, f"operators without a valid graph_node: {missing}"
 
-    def test_reserved_leaves_exist(self):
-        """The equivalent-entry placeholder leaves are part of the template."""
-        for leaf in ("ground_field", "t_sys_extra"):
-            assert RADIO_GRAPH.nodes[leaf].reserved
+    def test_reserved_leaves_are_exactly_those_with_no_shipped_operator(self):
+        """`reserved` means what its docstring says, and keeps meaning it.
+
+        The flag drives the dashed rendering, so a leaf that acquires an
+        operator and keeps the flag draws as absent physics that is in fact
+        present. `t_sys_extra` was exactly that for a day, until
+        `BasisTemperatureOperator` landed on it. Deriving the expected set from
+        the operators rather than listing it means the next such landing
+        updates this test by itself.
+        """
+        import rheplicant.radio as radio
+
+        declared = {
+            getattr(getattr(radio, name), "graph_node", None) for name in radio.__all__
+        }
+        # Junctions and selectors never carry an operator -- `assemble` synthesises
+        # their Sum/Select -- so `reserved`, which the docstring defines for leaves,
+        # is only meaningful on the kinds a user can supply an operator for.
+        for leaf, spec in RADIO_GRAPH.nodes.items():
+            if spec.kind not in ("source", "transform"):
+                assert not spec.reserved, f"{leaf}: reserved is a leaf property"
+                continue
+            assert spec.reserved == (leaf not in declared), leaf
+        # ...and the concrete pair, so a bug that empties `declared` still fails.
+        assert RADIO_GRAPH.nodes["ground_field"].reserved
+        assert not RADIO_GRAPH.nodes["t_sys_extra"].reserved
 
     def test_t_sys_extra_accepts_at_injection(self, template_state):
         asm = assemble(

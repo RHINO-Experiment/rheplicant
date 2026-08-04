@@ -113,8 +113,10 @@ RADIO_GRAPH = register_graph(
             "beam": NodeSpec(_T, "shared chromatic beam (the pain point)"),
             "observed_astro_sky": NodeSpec(_S, "pre-convolved astro sky (SkySource)"),
             "ground_pickup": NodeSpec(_S, "effective ground-spill temperature"),
+            # Not `reserved`: BasisTemperatureOperator declares this node, so
+            # the leaf has a shipped operator and must not render dashed.
             "t_sys_extra": NodeSpec(
-                _S, "generic effective T_sys contribution", many=True, reserved=True
+                _S, "generic effective T_sys contribution", many=True
             ),
             "atmosphere": NodeSpec(_S, "beam-averaged atmospheric emission"),
             "astro_ant_sum": NodeSpec(_J, "beam-convolved astro sky, either entrance"),
