@@ -78,6 +78,12 @@ DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
 #: of ``2 * POWER_ITERATIONS`` operator applications per guarded solve.
 POWER_ITERATIONS: int = 12
 
+#: ``jax.ensure_compile_time_eval``, under the name of what it does at the one
+#: place it is used: run this comparison **now**, on the constants in hand,
+#: rather than emitting it into whatever trace happens to be open. See
+#: :func:`_agrees`.
+_RIGHT_NOW = jax.ensure_compile_time_eval
+
 
 @dataclasses.dataclass(frozen=True)
 class LinearBlock:
@@ -395,11 +401,50 @@ def _gaussian_parameters(prior: Any) -> tuple[Any, Any] | None:
     return None
 
 
+def _holds_a_tracer(value: Any) -> bool:
+    """Whether ``value`` carries a tracer anywhere inside it.
+
+    Asked of the pytree *leaves* rather than of the object itself, so a tracer
+    wrapped in a list or a tuple is still recognised as one. The alternative —
+    letting the comparison run and reading the failure — cannot tell a tracer
+    apart from a shape mismatch, because ``TracerArrayConversionError`` is a
+    ``TypeError``; an unanswerable comparison would then be reported as a
+    settled *disagreement*, which is the one verdict this must never invent.
+    """
+    return any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(value))
+
+
 def _agrees(supplied: Any, declared: Any) -> bool | None:
-    """Whether two prior parameters are the same number. ``None``: undecidable."""
+    """Whether two prior parameters are the same number. ``None``: undecidable.
+
+    Only a genuine tracer is undecidable. Two concrete numbers are the same two
+    numbers whether or not some enclosing ``jit`` or ``lax.while_loop`` happens
+    to be tracing — so the comparison is evaluated *here*, on the constants in
+    hand, rather than staged into that trace. Staged, ``bool()`` raises on the
+    result, a settled ``True`` comes back as unanswerable, and
+    :func:`_reconcile` refuses a correct call while blaming a tracer that does
+    not exist. That is not hypothetical:
+    :func:`~rheplicant.inference.gls.iterative_gls` resolves the prior once and
+    re-passes it into :func:`wiener_solve` from *inside* its reweighting loop,
+    so this guard meets a live trace on every iteration of the one function it
+    was written to serve.
+
+    The comparison itself stays in ``jnp``, which canonicalizes both sides to
+    the working precision. Comparing in NumPy instead would widen a declared
+    ``float32`` scale to ``float64`` and call ``prior_std=0.05`` a
+    contradiction of ``Normal(jnp.asarray(1.0), jnp.asarray(0.05))``, whose
+    scale reads ``0.05000000074505806`` once widened — the same false refusal,
+    moved rather than removed.
+    """
+    if _holds_a_tracer(supplied) or _holds_a_tracer(declared):
+        return None
     try:
-        return bool(jnp.all(jnp.asarray(supplied) == jnp.asarray(declared)))
+        with _RIGHT_NOW():
+            return bool(jnp.all(jnp.asarray(supplied) == jnp.asarray(declared)))
     except jax.errors.ConcretizationTypeError:
+        # Unreachable given the check above, and kept regardless: an
+        # undecidable comparison has to reach the caller as undecidable, never
+        # as a verdict.
         return None
     except (TypeError, ValueError):
         # Shapes that do not even broadcast are a disagreement, not a crash.
@@ -414,10 +459,17 @@ def _reconcile(
         return declared
     verdict = _agrees(supplied, declared)
     if verdict is None:
+        side = (
+            f"the {keyword}= you passed is"
+            if _holds_a_tracer(supplied)
+            else f"latent {block.name!r}'s declared {field} is"
+        )
         raise ParameterSpaceError(
             f"{caller} cannot check the {keyword}= it was given against the prior latent "
-            f"{block.name!r} declares, because one of the two is a traced value. Pass one "
-            "or the other, not both: whichever lost would still look like it was in force."
+            f"{block.name!r} declares: {side} a traced value, so what the two are cannot be "
+            "known until the trace runs. Pass one or the other, not both: whichever lost "
+            "would still look like it was in force. (Two CONCRETE values are compared "
+            "normally, jit or no jit — being inside a trace is not itself the problem.)"
         )
     if not verdict:
         raise ParameterSpaceError(

@@ -20,6 +20,7 @@ a LogNormal — the last of which duck-types as a Gaussian, holding ``.loc`` and
 approximated.
 """
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -29,8 +30,11 @@ from rheplicant.core.combinators import SumOperator
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import (
+    Bind,
     HomoscedasticNoise,
+    Latent,
     ParameterSpace,
+    RadiometerNoise,
     condition_estimate,
     gcr_sample,
     iterative_gls,
@@ -47,6 +51,18 @@ SKY_A, SKY_B = 100.0, 20.0
 WEAK_SIGMA = 1e4
 
 TRUE_GAIN = 3.0
+
+#: A radiometer whose fractional level is huge, so ``sigma = |prediction| * f``
+#: is as uninformative as :data:`WEAK_SIGMA` — the same "let the prior decide"
+#: setup, reached through the PREDICTION-DEPENDENT noise model. That model is
+#: the only one that enters ``iterative_gls``'s reweighting loop, and so the
+#: only one that exercises the declaration inside a live trace.
+WEAK_RADIOMETER = RadiometerNoise(channel_width=1.0, integration_time=1e-8)
+
+#: A radiometer chosen so the likelihood and a ``std=0.4`` prior carry
+#: comparable weight: the answer then sits strictly between the data's 3.0 and
+#: the prior's centre, so BOTH halves of the solve are load-bearing.
+BALANCED_RADIOMETER = RadiometerNoise(channel_width=2.0, integration_time=1.0)
 
 
 @pytest.fixture
@@ -77,12 +93,16 @@ def wiener_by_hand(block, observed, *, mean, std, noise_std=WEAK_SIGMA):
     ``x̂ = (Σ aᵢwᵢrᵢ + m/s²) / (Σ aᵢ²wᵢ + 1/s²)`` with ``a = A·1``. Written out
     rather than obtained from the code under test, so it is an independent
     statement of what the declaration means.
+
+    ``noise_std`` may be a scalar or a per-sample array — the weights stay
+    inside the sums, which is the same number for a scalar and the right one
+    for the varying sigma a reweighted GLS converges to.
     """
     a = block.forward(jnp.array(1.0))
-    weight = 1.0 / noise_std**2
+    weight = 1.0 / jnp.asarray(noise_std) ** 2
     residual = observed - block.offset
-    curvature = float(jnp.sum(a**2)) * weight + 1.0 / std**2
-    rhs = float(jnp.sum(a * residual)) * weight + mean / std**2
+    curvature = float(jnp.sum(a**2 * weight)) + 1.0 / std**2
+    rhs = float(jnp.sum(a * residual * weight)) + mean / std**2
     return rhs / curvature
 
 
@@ -149,6 +169,60 @@ class TestDeclaredPriorReachesTheSolvers:
             block, observed, noise=HomoscedasticNoise(sigma=jnp.array(WEAK_SIGMA))
         )
         assert float(found.solution) == pytest.approx(9.9, rel=1e-4)
+
+
+class TestTheReweightingLoopReadsTheDeclaration:
+    """``iterative_gls`` under the noise model it exists for.
+
+    ``HomoscedasticNoise`` does not depend on the prediction, so there is
+    nothing to reweight and ``iterative_gls`` early-returns a single
+    ``wiener_solve`` — the loop is never entered. Every claim about the
+    declaration reaching ``iterative_gls`` is therefore untested by a
+    homoscedastic case. These use ``RadiometerNoise``, whose sigma tracks the
+    prediction, which is the whole reason this function exists and the only
+    path that resolves the prior once and re-passes it into ``wiener_solve``
+    from inside a ``lax.while_loop`` trace.
+    """
+
+    def test_a_declared_prior_survives_the_loop(self, twin, template_state, observed):
+        """Requirement 1's exact usage: declare the prior, pass no keywords."""
+        block = gain_block(twin, template_state, dist.Normal(2.5, 0.4))
+        found = iterative_gls(block, observed, noise=BALANCED_RADIOMETER)
+
+        assert bool(found.converged)
+        # The closed form at the covariance the run actually converged to.
+        assert float(found.solution) == pytest.approx(
+            wiener_by_hand(
+                block, observed, mean=2.5, std=0.4, noise_std=found.noise_std
+            ),
+            rel=1e-3,
+        )
+        # And the prior is doing work: strictly between the data and the prior.
+        assert 2.5 < float(found.solution) < TRUE_GAIN
+
+    @pytest.mark.parametrize(
+        ("mean", "std"), [(9.9, 1e-4), (1.0, 5e-4), (-4.0, 1e-3)]
+    )
+    def test_the_declaration_is_what_the_loop_converges_to(
+        self, twin, template_state, observed, mean, std
+    ):
+        """Three declarations, one call, three different answers — the same
+        table the hearing measured as bit-identical, through the loop."""
+        block = gain_block(twin, template_state, dist.Normal(mean, std))
+        found = iterative_gls(block, observed, noise=WEAK_RADIOMETER)
+        assert bool(found.converged)
+        assert float(found.solution) == pytest.approx(mean, rel=1e-3)
+
+    def test_a_contradicting_keyword_is_still_refused_here(
+        self, twin, template_state, observed
+    ):
+        """Weakening the reconciliation so the loop can run must not weaken the
+        refusal: these two numbers still disagree, concretely."""
+        block = gain_block(twin, template_state, dist.Normal(2.5, 0.4))
+        with pytest.raises(ParameterSpaceError, match="prior_std"):
+            iterative_gls(
+                block, observed, noise=BALANCED_RADIOMETER, prior_std=1.0
+            )
 
     def test_condition_estimate_uses_the_declaration(self, twin, template_state):
         """κ is what the docstrings tell you to choose ``tol`` from, so it has
@@ -223,6 +297,85 @@ class TestVectorLatents:
             wiener_solve(block, observed, noise_std=WEAK_SIGMA)
 
 
+class TestSeveralLatents:
+    """Which latent's declaration the block carries.
+
+    Every other test here builds its space with ``ParameterSpace.direct``,
+    which declares exactly one latent — so ``space.latents[0]`` and the latent
+    actually resolved are the same object, and an operator that carried the
+    *first-declared* prior instead of the *resolved* one would be
+    indistinguishable. A Gibbs sweep over several latents is this module's
+    stated reason to exist, and it is exactly where the two come apart: the
+    block for ``'gain'`` would silently solve with ``'amp_b'``'s prior.
+    """
+
+    @pytest.fixture
+    def two_linear_latents(self):
+        """``prediction = gain * (SKY_A + amp_b)`` — affine in EITHER, given
+        the other, so both may be declared linear and both get an operator.
+
+        The two declarations are deliberately far apart and both sharp enough
+        to dominate a nearly flat likelihood, so whichever one reaches the
+        solve is legible in the first digit of the answer.
+        """
+        return ParameterSpace(
+            latents=(
+                # Declared FIRST, and NOT the one asked for below.
+                Latent("amp_b", init=SKY_B, prior=dist.Normal(20.0, 1e-6), linear=True),
+                Latent("gain", init=1.0, prior=dist.Normal(7.0, 0.01), linear=True),
+            ),
+            bindings=(
+                Bind("amp_b", into=lambda p: p["sum"]["sky_b"].amplitude),
+                Bind("gain", into=lambda p: p["gain"].gain),
+            ),
+        )
+
+    def test_each_block_carries_its_own_latents_declaration(
+        self, twin, template_state, two_linear_latents
+    ):
+        gain = linear_operator(two_linear_latents, twin, template_state, "gain")
+        amp_b = linear_operator(two_linear_latents, twin, template_state, "amp_b")
+
+        assert (float(gain.prior.loc), float(gain.prior.scale)) == (7.0, 0.01)
+        assert (float(amp_b.prior.loc), float(amp_b.prior.scale)) == (20.0, 1e-6)
+
+    def test_the_solve_is_driven_by_the_resolved_latents_prior(
+        self, twin, template_state, two_linear_latents, observed
+    ):
+        """Not the first-declared one. With the likelihood nearly flat the
+        answer is essentially the declared mean, so carrying ``amp_b``'s
+        ``Normal(20.0, 1e-6)`` into the gain solve shows up as 20 where 7
+        belongs — a finite, confident, wrong answer, which is the failure this
+        module is built to refuse.
+        """
+        block = linear_operator(two_linear_latents, twin, template_state, "gain")
+        estimate, _ = wiener_solve(block, observed, noise_std=WEAK_SIGMA)
+        assert float(estimate) == pytest.approx(7.0, rel=1e-3)
+        assert float(estimate) == pytest.approx(
+            wiener_by_hand(block, observed, mean=7.0, std=0.01), rel=1e-4
+        )
+
+    def test_a_contradiction_is_measured_against_the_resolved_latent(
+        self, twin, template_state, two_linear_latents, observed
+    ):
+        """The refusal has to be measured against the right declaration too:
+        ``(0.01, 7.0)`` agrees with ``'gain'`` and contradicts ``'amp_b'``.
+        Carrying the wrong latent's prior would reverse both verdicts.
+        """
+        gain = linear_operator(two_linear_latents, twin, template_state, "gain")
+        amp_b = linear_operator(two_linear_latents, twin, template_state, "amp_b")
+
+        agrees, _ = wiener_solve(
+            gain, observed, noise_std=WEAK_SIGMA, prior_std=0.01, prior_mean=7.0
+        )
+        assert float(agrees) == pytest.approx(7.0, rel=1e-3)
+
+        with pytest.raises(ParameterSpaceError, match="amp_b"):
+            wiener_solve(
+                amp_b, observed, noise_std=WEAK_SIGMA, prior_std=0.01, prior_mean=7.0
+            )
+
+
 class TestContradictionIsRefused:
     """One of the two would silently win. Neither may."""
 
@@ -253,9 +406,15 @@ class TestContradictionIsRefused:
     def test_a_traced_keyword_cannot_be_reconciled_and_says_so(
         self, twin, template_state, observed
     ):
-        """Under jit the comparison has no answer at trace time. Refusing beats
-        picking one — this is the same reason the convergence guard uses
-        ``eqx.error_if`` rather than a Python ``if``."""
+        """A keyword that is *genuinely* a tracer has no comparison at trace
+        time. Refusing beats picking one — this is the same reason the
+        convergence guard uses ``eqx.error_if`` rather than a Python ``if``.
+
+        Read together with
+        :meth:`test_a_concrete_agreeing_keyword_survives_jit`: what makes the
+        value undecidable is that it *is* a tracer, not that some trace happens
+        to be live.
+        """
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
 
         @jax.jit
@@ -264,6 +423,94 @@ class TestContradictionIsRefused:
 
         with pytest.raises(ParameterSpaceError, match="traced"):
             solve(jnp.array(0.05))
+
+    @pytest.mark.parametrize("wrap", [jax.jit, eqx.filter_jit], ids=["jax", "equinox"])
+    def test_a_concrete_agreeing_keyword_survives_jit(
+        self, twin, template_state, observed, wrap
+    ):
+        """0.05 is 0.05 whether or not a trace is open.
+
+        Both numbers here are Python floats closed over by the traced function;
+        neither is a tracer. Deciding their equality with ``jnp`` stages the
+        comparison into whatever trace is live and turns a settled ``True``
+        into an unanswerable one, which the reconciliation then reports as
+        "one of the two is a traced value" — a message that is simply false
+        about this call, attached to a refusal of a call that is correct. The
+        jitted answer must equal the unjitted one.
+        """
+        block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
+
+        @wrap
+        def solve(data):
+            return wiener_solve(
+                block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
+            )[0]
+
+        assert float(solve(observed)) == pytest.approx(
+            float(wiener_solve(block, observed, noise_std=WEAK_SIGMA)[0]), rel=1e-6
+        )
+
+    def test_a_float32_declaration_agrees_with_its_python_float_keyword(
+        self, twin, template_state, observed
+    ):
+        """``Normal(jnp.asarray(1.0), jnp.asarray(0.05))`` declares float32.
+
+        ``prior_std=0.05`` is a Python float, i.e. float64. Widened to compare,
+        the declared scale reads ``0.05000000074505806`` and the two are not
+        equal — so a comparison done in NumPy calls this a contradiction and
+        refuses a caller who passed exactly the declared number. The comparison
+        has to happen in the working precision, which is what the solve uses.
+        """
+        block = gain_block(
+            twin, template_state, dist.Normal(jnp.asarray(1.0), jnp.asarray(0.05))
+        )
+        with_keywords, _ = wiener_solve(
+            block, observed, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
+        )
+        without, _ = wiener_solve(block, observed, noise_std=WEAK_SIGMA)
+        assert float(with_keywords) == float(without)
+
+        # The same cell with a trace open: a float32 declaration, a float64
+        # keyword and a live jit at once, which is where the two failure modes
+        # this class pins would have to be caught together.
+        @jax.jit
+        def solve(data):
+            return wiener_solve(
+                block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
+            )[0]
+
+        assert float(solve(observed)) == pytest.approx(float(without), rel=1e-6)
+
+    def test_a_tracer_inside_a_container_is_undecidable_not_a_contradiction(
+        self, twin, template_state, observed
+    ):
+        """A tracer that never reaches a bare ``isinstance`` check is still a
+        tracer. Reporting it as a *disagreement* would name two numbers as
+        contradicting when one of them has no value yet."""
+        block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
+
+        @jax.jit
+        def solve(std):
+            return wiener_solve(
+                block, observed, noise_std=WEAK_SIGMA, prior_std=[std]
+            )[0]
+
+        with pytest.raises(ParameterSpaceError, match="traced"):
+            solve(jnp.array(0.05))
+
+    def test_a_concrete_contradicting_keyword_still_raises_under_jit(
+        self, twin, template_state, observed
+    ):
+        """The other half of the same seam. Letting concrete values through a
+        live trace must not let a *disagreement* through with them."""
+        block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
+
+        @jax.jit
+        def solve(data):
+            return wiener_solve(block, data, noise_std=WEAK_SIGMA, prior_std=1.0)[0]
+
+        with pytest.raises(ParameterSpaceError, match="prior_std"):
+            solve(observed)
 
     def test_a_keyword_that_agrees_is_accepted(self, twin, template_state, observed):
         """Every call site written before the declaration was honoured passes

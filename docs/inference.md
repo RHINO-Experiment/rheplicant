@@ -420,6 +420,14 @@ also raises here: these routines solve `(AᵀN⁻¹A + S⁻¹)x = b`, and substi
 such a prior's mean and variance would hand back a finite, confident posterior
 for a model you did not declare. Sample that space with NUTS instead.
 
+With several latents in the space, `linear_operator(..., name="gain")` carries
+**that** latent's declaration — each block gets its own `S`, which is what
+makes the Gibbs sweep below sound. And the contradiction check reads the two
+values, not the context: concrete numbers are compared normally under `jit`,
+`eqx.filter_jit` and inside `iterative_gls`'s reweighting loop. Only a keyword
+that is *itself* a tracer is refused as undecidable, because then there is no
+number yet to compare.
+
 This is a constrained realization, not a Markov chain: every call is an
 independent draw, with no burn-in and no convergence to diagnose. It costs the
 same single CG solve as the mean, because the fluctuation enters the

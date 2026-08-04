@@ -42,6 +42,45 @@ reasoning: `examples/gls_gcr.py`, `examples/noise_wave_gcr.py`,
 `examples/three_ways_to_a_posterior.py` — which declares a prior *and* passes
 the matching keywords — differs only in its wall-clock timings.
 
+**The reconciliation is decided on the values, not on whether a trace is
+open.** Two concrete numbers are the same two numbers inside `jit` as outside
+it, so the check is evaluated where it is written rather than emitted into the
+enclosing trace. Staged, `bool()` on the comparison raises, a settled `True`
+comes back as unanswerable, and the guard refuses a correct call while blaming
+a tracer that is not there. Two calls hit exactly that, and neither was covered
+by the tests above:
+
+* `iterative_gls` with a declared prior under **any prediction-dependent noise
+  model** — `RadiometerNoise`, the default, and the entire reason the function
+  exists. It resolves the prior once and re-passes it into `wiener_solve` from
+  inside its `lax.while_loop`, so the guard met a live trace on every
+  reweighting step. `HomoscedasticNoise` has nothing to reweight and returns
+  before the loop, which is why the first round of tests missed it;
+* any agreeing keyword under `jax.jit` or `eqx.filter_jit`, with both numbers
+  plain Python floats closed over by the traced function.
+
+Only a **genuine tracer** is undecidable now, and it is recognised structurally
+— over the pytree leaves, so a tracer inside a list is still one. Deciding it
+from the failure instead cannot work: `TracerArrayConversionError` is a
+`TypeError`, so an unanswerable comparison would come back as a settled
+*disagreement*, naming two numbers as contradicting when one of them has no
+value yet. The refusal message now says which side is traced, and says that
+being inside a trace is not itself the problem.
+
+The comparison stays in `jnp`, which canonicalizes both sides to the working
+precision. Deciding it in NumPy instead widens a declared `float32` scale to
+`float64` and makes `prior_std=0.05` a contradiction of
+`Normal(jnp.asarray(1.0), jnp.asarray(0.05))`, whose scale reads
+`0.05000000074505806` once widened — the same false refusal, moved rather than
+removed.
+
+Separately, `linear_operator` carries the prior of the latent it **resolved**,
+not `space.latents[0]`'s. The two coincide for every single-latent space, which
+is what `ParameterSpace.direct` builds and what all the tests above used; they
+come apart in the Gibbs sweep over several latents this module is designed
+around, where the block for `'gain'` would have silently solved with another
+latent's prior.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and
