@@ -937,26 +937,34 @@ def _check_slot_kinds(
             continue
         if _creates_data(graph, declared) == _creates_data(graph, node):
             continue
-        makes, takes = (
-            (declared, node) if _creates_data(graph, declared) else (node, declared)
+        where = (
+            f"the region {tuple(path)}, entered at {node!r}"
+            if len(path) > 1
+            else f"node {node!r}"
         )
-        where = f"the region {tuple(path)}, entered at {node!r}" if len(path) > 1 else (
-            f"node {node!r}"
-        )
+        if _creates_data(graph, declared):
+            consequence = (
+                f"An operator that creates data, placed where data arrives, "
+                f"overwrites it: the caller's data and everything the branch "
+                f"upstream of {node!r} computed are discarded — while has_source "
+                "stays False, so the guard whose whole sentence is 'caller-supplied "
+                "state.data would be discarded' says nothing."
+            )
+        else:
+            consequence = (
+                f"An operator that consumes data, placed where data is created, is "
+                f"handed the nothing that precedes {node!r} — while has_source stays "
+                "True, so Assembly.__call__ demands data=None, which is the one "
+                "input that makes this operator die on NoneType."
+            )
         raise AssemblyError(
             f"{type(op).__name__} declares graph_node={declared!r}, a "
             f"{graph.nodes[declared].kind} node of graph {graph.name!r}, but this "
             f"assembly places it at {where}, which is a "
-            f"{graph.nodes[node].kind} node. A source creates data and a transform "
-            "consumes it, so the two are not interchangeable placements: "
-            f"{makes!r} says the operator there generates its own data and "
-            f"{takes!r} says it acts on data that reaches it. Assembly.has_source "
-            "is read off the node, so the mismatch is not caught at call time "
-            "either — it produces an assembly that either discards the caller's "
-            "data (and the upstream branch's) with the guard silent, or demands "
-            "data=None from an operator that cannot run without data. Place it at "
-            f"a {graph.nodes[declared].kind} node, or give the template a node "
-            "that says what this operator actually does."
+            f"{graph.nodes[node].kind} node. {consequence} Place it at a "
+            f"{graph.nodes[declared].kind} node — At() moves an operator freely "
+            "between nodes of one kind — or give the template a node that says what "
+            "this operator actually does."
         )
 
 
