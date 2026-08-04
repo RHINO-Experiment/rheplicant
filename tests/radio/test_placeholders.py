@@ -93,6 +93,22 @@ class TestSimpleArithmetic:
         with pytest.raises(StateValidationError, match="bandpass"):
             ReceiverOperator(bandpass=jnp.ones(N_FREQ + 1))(data_state)
 
+    def test_receiver_scalar_bandpass(self, data_state):
+        out = ReceiverOperator(bandpass=jnp.array(2.0))(data_state)
+        assert jnp.array_equal(out.data, 20.0 * jnp.ones((N_TIME, N_FREQ)))
+
+    @pytest.mark.parametrize(
+        "shape",
+        [(1, N_FREQ), (2, N_FREQ), (N_TIME, N_FREQ), (1, 1, N_FREQ)],
+        ids=["leading-1", "leading-2", "leading-n_time", "3d"],
+    )
+    def test_receiver_ndim_too_high_raises(self, data_state, shape):
+        # Every one of these has a LAST axis that matches n_freq, so it would
+        # broadcast silently via bandpass[None, :] instead of failing the
+        # existing (n_freq,) length check — the guard must catch ndim itself.
+        with pytest.raises(StateValidationError, match="bandpass"):
+            ReceiverOperator(bandpass=jnp.ones(shape))(data_state)
+
     def test_gain_scalar(self, data_state):
         out = GainOperator(gain=jnp.array(2.0))(data_state)
         assert jnp.all(out.data == 20.0)

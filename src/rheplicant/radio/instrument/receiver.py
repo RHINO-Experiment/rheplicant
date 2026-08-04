@@ -137,9 +137,20 @@ class ReceiverOperator(AbstractOperator):
     bandpass: jax.Array
 
     def __call__(self, state: State) -> State:
-        if self.bandpass.shape[-1] != state.data.shape[-1]:
-            raise StateValidationError(
-                f"bandpass has {self.bandpass.shape[-1]} channels but data has "
-                f"{state.data.shape[-1]}."
-            )
-        return state.with_data(state.data * self.bandpass[None, :])
+        if self.bandpass.ndim == 0:
+            return state.with_data(state.data * self.bandpass)
+        if self.bandpass.ndim == 1:
+            if self.bandpass.shape[-1] != state.data.shape[-1]:
+                raise StateValidationError(
+                    f"bandpass has {self.bandpass.shape[-1]} channels but data has "
+                    f"{state.data.shape[-1]}."
+                )
+            return state.with_data(state.data * self.bandpass[None, :])
+        raise StateValidationError(
+            f"bandpass must be scalar or (n_freq,), got shape "
+            f"{tuple(self.bandpass.shape)} (ndim={self.bandpass.ndim}). A 2-D (or "
+            "higher) array whose last axis happens to match n_freq would otherwise "
+            "pass the channel check silently and broadcast state.data up to "
+            f"{self.bandpass.ndim + 1}-D via bandpass[None, :], carrying the extra "
+            "axis downstream instead of being refused here."
+        )
