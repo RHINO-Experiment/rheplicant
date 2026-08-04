@@ -66,6 +66,50 @@ exercised as a checked linear block (Wiener mean and exact GCR draws) and D15
 in `DESIGN.md` for why the per-source placement is what makes per-channel
 noise-wave temperatures identifiable at all.
 
+**The CW tone has two hard limits, and both are silent until you hit them —
+neither is stated anywhere but the source comments next to the constants
+(`calibration.py:181`, `:230`).**
+
+`line_width` is boxed on both sides, as a multiple of the channel spacing.
+Below `MIN_WIDTH_IN_CHANNELS` (1 channel for `"sinc2"`, 0.25 for `"gaussian"`)
+the sampled channels land on the lineshape's own nulls or overflow its
+exponent. Above `MAX_WIDTH_IN_BAND_FRACTION` (0.25 of the band, floored at
+`MIN_CEILING_IN_CHANNELS` = 2 channel spacings so a coarse grid cannot call a
+critically-sampled line "too wide") the line stops being a line and becomes a
+pedestal across the whole band — every channel then sits above
+`protect_floor` of the peak, the protection mask covers the band, and the RFI
+flagger is switched off for the entire run: genuine RFI surviving into the
+data. Both refuse by name, and the legal window between them is narrow on a
+realistic band: an 8-channel 50–100 MHz grid (7.14 MHz channel spacing) only admits
+`line_width` in about `[7.14e6, 1.43e7]` Hz — a factor of two. Remedy: pick
+`line_width` from the spectrometer's own channel response, inside that window
+for the band in hand; there is no default because guessing it silently
+mis-sizes the protection mask, which is the one thing this operator exists to
+avoid.
+
+`coords.time`'s STORED precision is a second, independent limit, and it is the
+one the package's own documented ingestion path trips **by default**. A
+nonzero `drift_rate` or `amplitude_drift_rate` measures elapsed time as
+`t - t[0]`, and that subtraction cannot undo a rounding that already happened
+when the axis was stored: `coords.time` goes through `jnp.asarray`, which is
+float32 unless x64 is enabled, and a unix-second axis (~1.75e9) has ~128 s of
+float32 resolution. `rheplicant.radio.rhino.read_rhino_observation` sets
+`time_s` from the SDR clock — unix seconds — and `to_state` places it on
+`coords.time` unchanged, so **a drifting CW tone on a freshly ingested RHINO
+recording hits `MAX_TIME_RESOLUTION_IN_SAMPLES` (= 1e-2) on the very first
+run**: at RHINO's ~100 s cadence, without `JAX_ENABLE_X64`, two samples land
+on the same stored float32 value and every other sample is off by up to 60 s
+against its true elapsed time (measured over 8 samples straight out of
+`read_rhino_observation` → `to_state`) — so the tone is computed at the wrong
+centre frequency and protects the wrong channels — no exception, no NaN,
+every shape correct. A static tone
+(`drift_rate = amplitude_drift_rate = 0.0`) never reads `coords.time` and is
+unaffected. Remedy, either one: pass `coords.time` measured in seconds **from
+the start of the run** rather than raw unix seconds (small numbers keep
+float32's resolution far below the cadence), or enable x64 for the run
+(`JAX_ENABLE_X64=1`, or `jax.config.update("jax_enable_x64", True)`) so the
+unix-second axis itself is stored precisely enough to resolve it.
+
 **The sky as `T_src`.** On the antenna branch `T_src` *is* the beam-convolved
 sky, so a `SkySourceOperator` upstream feeds the receiver directly. The full
 walkthrough is [From the sky to the receiver](sky-to-receiver.md); the three
