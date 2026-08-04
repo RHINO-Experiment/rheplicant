@@ -26,6 +26,15 @@ so a 10⁶-step fit fails as fast as a 10-step one); the NumPyro observation sit
 checks while the model is traced, so it costs nothing at run time and fires
 before the first draw. `observed=None` is still the prior-predictive call.
 
+The test is shape *equality* — not rank, and not broadcast-compatibility —
+because the dangerous slices are exactly the compatible ones. `(24, 1)` (one
+frequency channel where the whole band was meant) and `(1, 8)` (one time sample
+where the whole record was meant) preserve rank and broadcast just as silently
+as `(8,)` does; a rank-based check would admit both, and then a calibrator
+converges and `wiener_solve` returns a well-shaped `(24,)` gain estimate from a
+single column of data. All three shapes are refused at all four exits, and
+`tests/inference/test_observed_shape.py` sweeps all three through each of them.
+
 Nothing that broadcast legitimately changed: `noise_std` is still documented as
 broadcastable to the prediction, and still is.
 

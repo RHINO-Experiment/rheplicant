@@ -1,10 +1,21 @@
 """Every exit that consumes ``observed`` must refuse one shaped wrong.
 
-The scenario is one honest slicing mistake — ``observed[0]``, shape ``(8,)``,
-handed to a model that predicts ``(24, 8)``. Nothing about it is loud: the
-subtraction broadcasts, the loss is finite and small, and the calibrator
-reports convergence while every recovered gain is wrong. The loss history is
-the only evidence the user has, and it says the fit worked.
+The scenario is one honest slicing mistake, in three shapes. ``observed[0]``
+drops a rank — ``(8,)`` where ``(24, 8)`` was meant. ``observed[:, :1]`` and
+``observed[:1]`` keep it — ``(24, 1)`` and ``(1, 8)``, one channel or one time
+sample standing in for the whole record. All three broadcast. Nothing about any
+of them is loud: the subtraction succeeds, the loss is finite and small, and the
+calibrator reports convergence while every recovered gain is wrong. The loss
+history is the only evidence the user has, and it says the fit worked.
+
+The two rank-preserving slices are the more insidious, and they are here because
+a guard that compared only ``jnp.ndim`` would let them through. Measured, with
+that relaxation in place: both calibrators converged on ``(24, 1)`` and
+``(1, 8)``, the NumPyro site conditioned without complaint, and ``wiener_solve``
+returned a perfectly well-shaped ``(24,)`` gain estimate from a single column of
+data. A finite, correctly-shaped, wrong answer is the failure these guards
+exist to prevent, so one scenario that happens to differ in rank cannot be the
+whole of the evidence.
 
 :func:`~rheplicant.inference.linear.wiener_solve` already refused this, and its
 message already owns the explanation. These tests pin the same refusal, with
@@ -85,10 +96,38 @@ def observed(state):
     return truth + SIGMA * jax.random.normal(jax.random.key(99), truth.shape)
 
 
-@pytest.fixture
-def mis_sliced(observed):
-    """``observed[0]`` — one time sample where the whole record was meant."""
-    return observed[0]
+MIS_SLICES = [
+    pytest.param(
+        (lambda d: d[0], (N_FREQ,)),
+        id="one_time_sample_rank_dropped",
+    ),
+    pytest.param(
+        (lambda d: d[:, :1], (N_TIME, 1)),
+        id="one_channel_rank_kept",
+    ),
+    pytest.param(
+        (lambda d: d[:1], (1, N_FREQ)),
+        id="one_time_sample_rank_kept",
+    ),
+]
+
+
+@pytest.fixture(params=MIS_SLICES)
+def mis_sliced(request, observed):
+    """One slice of the record where the whole record was meant.
+
+    Parametrized rather than fixed, so that every exit is asked about a
+    rank-preserving mistake as well as a rank-dropping one — see the module
+    docstring for why the distinction decides whether these tests have any
+    force.
+    """
+    take, expected_shape = request.param
+    sliced = take(observed)
+    assert jnp.shape(sliced) == expected_shape, (
+        f"the fixture does not slice what it claims: got {jnp.shape(sliced)}, "
+        f"declared {expected_shape}"
+    )
+    return sliced
 
 
 @pytest.fixture
@@ -96,10 +135,19 @@ def forward_and_start(space, twin, state):
     return space.forward_fn(twin, state)
 
 
-def assert_names_both_shapes(message: str) -> None:
-    """The message must carry the mismatch itself, not just the word 'shape'."""
-    assert "(8,)" in message, message
-    assert "(24, 8)" in message, message
+def assert_names_which_shape_is_which(message: str, observed) -> None:
+    """The message must say which shape belongs to which side.
+
+    Asserting only that both shapes appear *somewhere* passes just as happily
+    when they are swapped, and the swapped message — ``observed has shape
+    (24, 8) but this forward model predicts (8,)`` — is worse than none: it
+    sends the user to debug a forward model that is correct, and away from the
+    slice that is not. So the fragments are pinned in order. They are pinned
+    around the predictor name, not through it, because the three exits pass
+    three different ones ("this block", "this model", "this forward model").
+    """
+    assert f"observed has shape {jnp.shape(observed)}" in message, message
+    assert f"predicts {(N_TIME, N_FREQ)}" in message, message
     assert "Broadcasting these would solve a different problem" in message, message
 
 
@@ -114,7 +162,7 @@ class TestTheCalibratorExits:
             GradientCalibrator(learning_rate=1e-6, n_steps=10).fit(
                 forward, start, mis_sliced
             )
-        assert_names_both_shapes(str(excinfo.value))
+        assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
     def test_the_adam_calibrator_refuses_a_mis_shaped_observed(
         self, forward_and_start, mis_sliced
@@ -124,7 +172,7 @@ class TestTheCalibratorExits:
             AdamCalibrator(learning_rate=0.05, n_steps=10).fit(
                 forward, start, mis_sliced
             )
-        assert_names_both_shapes(str(excinfo.value))
+        assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
     def test_the_refusal_precedes_any_optimization(
         self, forward_and_start, mis_sliced
@@ -147,7 +195,7 @@ class TestTheNumpyroExit:
         model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
         with pytest.raises(ParameterSpaceError) as excinfo:
             seed(model, jax.random.key(0))(observed=mis_sliced)
-        assert_names_both_shapes(str(excinfo.value))
+        assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
     def test_nuts_refuses_a_mis_shaped_observed(self, twin, state, space, mis_sliced):
         model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
@@ -159,7 +207,7 @@ class TestTheNumpyroExit:
         )
         with pytest.raises(ParameterSpaceError) as excinfo:
             mcmc.run(jax.random.key(0), observed=mis_sliced)
-        assert_names_both_shapes(str(excinfo.value))
+        assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
     def test_an_unobserved_model_still_runs(self, twin, state, space):
         """``observed=None`` is the prior-predictive call, not a mismatch."""
@@ -189,7 +237,7 @@ class TestTheLinearExit:
         block = linear_operator(linear_space, twin, state, "gain")
         with pytest.raises(ParameterSpaceError) as excinfo:
             wiener_solve(block, mis_sliced, noise_std=SIGMA, prior_std=1.0)
-        assert_names_both_shapes(str(excinfo.value))
+        assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
 
 class TestTheFisherExit:
@@ -217,16 +265,27 @@ class TestTheFisherExit:
             "checked against the prediction like every other exit."
         )
 
-    def test_it_refuses_a_mis_shaped_flags(self, forward_and_start, mis_sliced):
-        """flags[0] where the prediction is (24, 8): the same slicing mistake,
-        on the only data-shaped argument this exit has."""
+    @pytest.mark.parametrize(
+        "flag_shape",
+        [(N_FREQ,), (N_TIME, 1), (1, N_FREQ)],
+        ids=[
+            "one_time_sample_rank_dropped",
+            "one_channel_rank_kept",
+            "one_time_sample_rank_kept",
+        ],
+    )
+    def test_it_refuses_a_mis_shaped_flags(self, forward_and_start, flag_shape):
+        """The same slicing mistake, on the only data-shaped argument this exit
+        has — and swept over the same three shapes, because a ``(24, 1)`` flags
+        array would otherwise broadcast and silently leave seven channels of
+        eight unflagged while reporting a Fisher matrix of the right size."""
         forward, start = forward_and_start
-        flags = jnp.zeros((N_FREQ,), bool)
+        flags = jnp.zeros(flag_shape, bool)
         with pytest.raises(StateValidationError) as excinfo:
             fisher_information(forward, start, noise_std=SIGMA, flags=flags)
         message = str(excinfo.value)
-        assert "(8,)" in message, message
-        assert "(24, 8)" in message, message
+        assert f"flags shape {flag_shape}" in message, message
+        assert f"prediction shape {(N_TIME, N_FREQ)}" in message, message
 
     def test_a_correctly_shaped_flags_still_runs(self, forward_and_start):
         forward, start = forward_and_start
