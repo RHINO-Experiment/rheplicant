@@ -193,9 +193,10 @@ class SelectOperator(AbstractOperator):
     the same coordinates the selector read, so it can guard its own
     singularity with the standard double-``where``
     (``safe_t = jnp.where(t == 0, 1, t)``) and stay differentiable everywhere.
-    No shipped operator divides, so nothing here trips this; a user-supplied
-    calibration-load branch with a reciprocal in it is the case to write the
-    guard for.
+    Nothing shipped trips this: the divisions in the radio operators are by
+    configuration (``width``, ``ref_freq``), never by a coordinate that can be
+    zero on an observing grid. A user-supplied calibration-load branch with a
+    reciprocal in it is the case to write the guard for.
 
     Attributes:
         branches: the selectable signal paths.

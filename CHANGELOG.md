@@ -368,8 +368,10 @@ as `0 * inf` *inside that branch's own backward pass*, upstream of anything
 So the class docstring states the precondition and the remedy that works — the
 branch guards its own singularity, using the coordinates it already receives —
 and `tests/core/test_select_finiteness.py` pins the limitation and the remedy
-side by side. No shipped operator divides; a user-supplied calibration-load
-branch with a reciprocal in it is the case this is written for.
+side by side. Nothing shipped trips it — the divisions in the radio operators
+are by configuration (`width`, `ref_freq`), never by a coordinate that can be
+zero on an observing grid — so this is written for a user-supplied
+calibration-load branch with a reciprocal in it.
 
 ### A placed operator must agree with its node about who creates the data
 
