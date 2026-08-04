@@ -446,9 +446,12 @@ class Assembly(AbstractOperator):
         same ``lit``/``skipped``/``has_source``/``materialized``, and every
         assembly-time refusal re-run. If dropping the stage leaves something
         that cannot be assembled — a summed branch with no source left on it,
-        say, or a :attr:`~rheplicant.core.operator.AbstractOperator.must_precede`
-        constraint whose target stage has just gone — you get that refusal, in
-        assemble's own words, rather than a model that quietly changed meaning.
+        say — you get that refusal, in assemble's own words, rather than a model
+        that quietly changed meaning. Dropping a stage another operator names in
+        :attr:`~rheplicant.core.operator.AbstractOperator.must_precede` is NOT
+        such a case: an absent node contracts to identity, so there is nothing
+        left to pass through and nothing to violate — the same rule
+        :func:`_check_ordering` applies to a node that was never lit.
 
         A ``many`` node is dropped whole: every instance on it goes. Use
         ``assemble()`` directly to keep some of them.

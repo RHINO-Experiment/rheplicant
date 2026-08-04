@@ -277,6 +277,47 @@ class TestWithoutRefusals:
             both.without("a")
 
 
+class TestWithoutAndOrdering:
+    def test_dropping_a_must_precede_target_is_not_a_violation(self, graph, blank):
+        """`without` re-runs _check_ordering, and an absent node contracts to identity.
+
+        Measured on the shipped template too: CWCalibrationOperator declares
+        must_precede=('bandpass', 'gain'), and dropping either leaves the tone
+        placed and the assembly runnable.
+        """
+
+        class Tone(Mul):
+            graph_node: ClassVar[str] = "t1"
+            must_precede: ClassVar[tuple[str, ...]] = ("t2",)
+
+        both = assemble(
+            graph,
+            SrcA(value=jnp.array(2.0)),
+            Tone(factor=jnp.array(5.0)),
+            MulT2(factor=jnp.array(11.0)),
+        )
+        assert value(both, blank) == 110.0
+        dropped = both.without("t2")
+        assert dropped.lit == ("a", "t1")
+        assert value(dropped, blank) == 10.0
+
+    def test_a_violated_placement_is_still_refused_after_the_drop(self, graph):
+        """The re-run is a real check, not a formality: the refusal survives it."""
+
+        class Tone(Mul):
+            graph_node: ClassVar[str] = "t2"
+            must_precede: ClassVar[tuple[str, ...]] = ("t1",)
+
+        with pytest.raises(AssemblyError, match="is not reachable"):
+            assemble(
+                graph,
+                SrcA(value=jnp.array(2.0)),
+                SrcB(value=jnp.array(3.0)),
+                MulT1(factor=jnp.array(5.0)),
+                Tone(factor=jnp.array(11.0)),
+            )
+
+
 class TestReplaceNodeRefusals:
     def test_none_is_refused_and_points_at_without(self, full):
         with pytest.raises(AssemblyError, match=r"assembly.without\('t1'\)"):
