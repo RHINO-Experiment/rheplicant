@@ -330,6 +330,76 @@ def _thermistors_in_kelvin(
     return out
 
 
+def _check_temperature_table(temps_raw: np.ndarray, temp_time: np.ndarray) -> None:
+    """Refuse a thermistor log whose table and timestamps do not describe each other.
+
+    Both checks are about the *table*, before any label has been mapped onto a
+    column, which is why they run ahead of everything else the reader does: a
+    1-D table cannot be addressed by column at all, and a table whose rows do
+    not each carry a timestamp cannot be resampled onto the SDR axis. Neither
+    is caught later. ``_thermistors_in_kelvin`` documents that it receives a
+    table already known 2-D with one row per timestamp; this is where that is
+    established.
+    """
+    if temps_raw.ndim != 2:
+        raise DataIngestionError(
+            "/temperatures/temperatures must be 2-D (n_temp_time, n_column); got shape "
+            f"{temps_raw.shape}. Thermistor columns are addressed by index, so a flat "
+            "array would silently map every switch label onto the same reading."
+        )
+    if temp_time.shape[0] != temps_raw.shape[0]:
+        raise DataIngestionError(
+            f"/temperatures/temperatures has {temps_raw.shape[0]} rows but "
+            f"/temperatures/temperature_times has {temp_time.shape[0]} entries. The "
+            "thermistor log is resampled onto the SDR time axis, which needs each row "
+            "to carry a timestamp."
+        )
+
+
+def _check_waterfall(waterfall: np.ndarray, freq_hz: np.ndarray) -> None:
+    """Refuse a waterfall that does not lie on the band it is labelled by.
+
+    Takes ``freq_hz`` rather than the raw array, so it runs *after*
+    :func:`_frequencies_in_hz`: a file with both a mis-declared ``freq_unit``
+    and a bad channel count should be diagnosed by the unit, which is the
+    cause a reader can act on. Only the channel axis is checked here -- the row
+    axis is checked by the sample mask, which is built from the time axis and
+    the switch log rather than from anything in this array.
+    """
+    if waterfall.ndim != 2:
+        raise DataIngestionError(
+            "/sdr/sdr_waterfall must be 2-D (n_time, n_freq); got shape "
+            f"{waterfall.shape}."
+        )
+    if waterfall.shape[1] != freq_hz.size:
+        raise DataIngestionError(
+            f"/sdr/sdr_waterfall has {waterfall.shape[1]} channels but /sdr/sdr_freqs "
+            f"has {freq_hz.size}. The row axis is checked by the sample mask, but a "
+            "channel-axis mismatch in either direction would survive as a waterfall "
+            "silently misaligned with the band it is labelled by."
+        )
+
+
+def _keep_samples(array: np.ndarray | None, mask: np.ndarray) -> np.ndarray | None:
+    """Apply the leading-drop mask to one per-sample array; pass ``None`` through.
+
+    Named rather than inlined because the invariant is a property of the *set*
+    of arrays, not of any one of them: every array indexed by the sample axis
+    must be cut by the same mask, or the recording comes back with a per-sample
+    label describing a different sample than the waterfall row beside it --
+    correctly shaped, and silently misaligned. A per-sample array added later
+    (a second ADC monitor, a per-sample RFI flag) is a one-line call here; the
+    failure mode of forgetting it is invisible until the leading drop is
+    non-zero, which is why ``tests/radio/test_rhino.py`` pins the lengths on a
+    file that actually drops samples rather than on the usual one that does not.
+
+    The ``None`` arm is not a convenience: ``max_i_adc``/``max_q_adc`` exist
+    only in notebook-written files, so the alternative is the same two-line
+    ``if ... is not None`` guard repeated once per optional array.
+    """
+    return None if array is None else array[mask]
+
+
 def read_rhino_observation(
     path,
     *,
@@ -362,45 +432,25 @@ def read_rhino_observation(
         adc_i = np.asarray(f["sdr/max_i_adc"][:], dtype=float) if "sdr/max_i_adc" in f else None
         adc_q = np.asarray(f["sdr/max_q_adc"][:], dtype=float) if "sdr/max_q_adc" in f else None
 
-    if temps_raw.ndim != 2:
-        raise DataIngestionError(
-            "/temperatures/temperatures must be 2-D (n_temp_time, n_column); got shape "
-            f"{temps_raw.shape}. Thermistor columns are addressed by index, so a flat "
-            "array would silently map every switch label onto the same reading."
-        )
-    if temp_time.shape[0] != temps_raw.shape[0]:
-        raise DataIngestionError(
-            f"/temperatures/temperatures has {temps_raw.shape[0]} rows but "
-            f"/temperatures/temperature_times has {temp_time.shape[0]} entries. The "
-            "thermistor log is resampled onto the SDR time axis, which needs each row "
-            "to carry a timestamp."
-        )
-
+    # Order is behaviour, not tidiness: a file malformed in two ways at once is
+    # diagnosed by whichever of these runs first, and the sequence below reports
+    # the cause a reader can act on -- the temperature table before the band it
+    # knows nothing about, the declared unit before a channel count that the
+    # unit cannot change.
+    _check_temperature_table(temps_raw, temp_time)
     freq_hz = _frequencies_in_hz(freq_raw, freq_unit)
-    if waterfall.ndim != 2:
-        raise DataIngestionError(
-            "/sdr/sdr_waterfall must be 2-D (n_time, n_freq); got shape "
-            f"{waterfall.shape}."
-        )
-    if waterfall.shape[1] != freq_hz.size:
-        raise DataIngestionError(
-            f"/sdr/sdr_waterfall has {waterfall.shape[1]} channels but /sdr/sdr_freqs "
-            f"has {freq_hz.size}. The row axis is checked by the sample mask, but a "
-            "channel-axis mismatch in either direction would survive as a waterfall "
-            "silently misaligned with the band it is labelled by."
-        )
+    _check_waterfall(waterfall, freq_hz)
+
     switch_label_raw = np.array(
         [s.decode() if isinstance(s, bytes) else str(s) for s in switch_raw]
     )
     per_sample_label, settled, keep, n_dropped = _expand_switch_log(
         time_s, switch_time, switch_label_raw, settle_seconds
     )
-    time_s = time_s[keep]
-    waterfall = waterfall[keep]
-    if adc_i is not None:
-        adc_i = adc_i[keep]
-    if adc_q is not None:
-        adc_q = adc_q[keep]
+    time_s = _keep_samples(time_s, keep)
+    waterfall = _keep_samples(waterfall, keep)
+    adc_i = _keep_samples(adc_i, keep)
+    adc_q = _keep_samples(adc_q, keep)
 
     return RhinoObservation(
         freq_hz=freq_hz,
