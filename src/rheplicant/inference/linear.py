@@ -28,6 +28,27 @@ to rebuild it wherever those currently are — which is what makes a Gibbs
 sweep possible: draw the linear block exactly, update the nonlinear ones
 however you like, repeat.
 
+**One block may hold several latents.** ``linear_operator(..., names=("t_nw",
+"t_ant"))`` exports the joint operator over a *group*, whose ``x`` is a
+``{name: array}`` dict rather than one array — and whose solve returns the same
+dict, so the physical names survive instead of the caller slicing an anonymous
+stacked vector and getting the offsets right by hand. Nothing is concatenated:
+the group's domain is a pytree, ``cg`` already solves over pytrees, and the
+prior is block-diagonal by construction because each latent's ``S`` sits on its
+own leaf.
+
+Grouping is not cosmetic. Two latents the data cannot tell apart are solved
+*together* in one CG here, whereas alternating between them as two blocks
+converges at the rate of their correlation — and reports a per-block residual
+of 1e-7 and a per-block ``κ`` of 1 the whole way down, because both numbers are
+computed from the block and neither can see across the partition. The joint
+``κ`` this module reports for the grouped block *can*; so can
+:func:`~rheplicant.inference.identifiability.identifiability`, which is the
+right instrument for choosing the partition in the first place. And a group
+whose members are only *pairwise* linear — a gain against an antenna
+temperature — is refused by :func:`check_linearity`, which probes the joint map
+and finds it bilinear, not affine.
+
 **Where the prior comes from.** ``S`` is read off ``Latent(prior=...)`` — the
 same declaration :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`
 reads, so one space handed to NUTS and to :func:`gcr_sample` targets one
@@ -95,16 +116,35 @@ class LinearBlock:
     and ``adjoint`` are closures over a traced computation, so the block is
     something you build where you need it, not a pytree to carry around.
 
+    A block may hold ONE latent or a GROUP of them, and the difference is
+    carried by ``name``: a ``str`` for one, a ``tuple[str, ...]`` for a group.
+    Everything else follows from what ``x`` then is. For one latent ``x`` is an
+    array and ``shape``/``dtype``/``prior`` describe it directly; for a group
+    ``x`` is a ``{name: array}`` dict and each of the three is a dict keyed the
+    same way — the shape of a pytree being a pytree of shapes, which is the
+    reading ``jax.eval_shape`` already uses.
+
+    That is the whole of the generalization, and it is deliberately NOT a
+    concatenation over real degrees of freedom. Every solve in this module runs
+    on ``jax.tree.map`` and ``jax.scipy.sparse.linalg.cg``, both of which take
+    pytrees; keeping the group a pytree means there is no offset arithmetic to
+    invert, no ordering to state beyond JAX's own, and ``S`` is block-diagonal
+    because each latent's variance sits on its own leaf rather than being
+    spliced into a stacked vector at the right index.
+
     Attributes:
-        name: the latent this block belongs to.
-        shape: shape of ``x``.
-        dtype: dtype of ``x``.
+        name: the latent this block belongs to — or, for a group, the tuple of
+            them in the caller's own order. :attr:`names` normalizes the two.
+        shape: shape of ``x``; for a group, ``{name: shape}``.
+        dtype: dtype of ``x``; for a group, ``{name: dtype}``.
         offset: ``prediction(0)`` — everything the other parameters contribute.
+            For a group, everything OUTSIDE the group contributes.
         forward: ``x -> A x``, from ``jax.linearize``.
         adjoint: ``y -> Aᵀ y``, from ``jax.vjp``, shaped like ``x``.
         prior: the latent's declared prior, carried through from the
             :class:`~rheplicant.inference.parameters.Latent`. ``None`` for a
-            prior-free latent, and for a block assembled by hand. It is what
+            prior-free latent, and for a block assembled by hand; for a group,
+            ``{name: prior}`` with a ``None`` per prior-free member. It is what
             lets :func:`wiener_solve` and :func:`gcr_sample` read ``S`` off the
             declaration instead of making the caller hand-pass — and hand-sync
             — the same two numbers at every exit.
@@ -122,13 +162,37 @@ class LinearBlock:
     halves so the distinction cannot rot into a silent factor.
     """
 
-    name: str
-    shape: tuple[int, ...]
+    name: str | tuple[str, ...]
+    shape: tuple[int, ...] | dict[str, tuple[int, ...]]
     dtype: Any
     offset: jax.Array
-    forward: Callable[[jax.Array], jax.Array]
-    adjoint: Callable[[jax.Array], jax.Array]
+    forward: Callable[[Any], jax.Array]
+    adjoint: Callable[[jax.Array], Any]
     prior: Any = None
+
+    @property
+    def grouped(self) -> bool:
+        """Whether this block holds several latents at once."""
+        return isinstance(self.name, tuple)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """The latents in this block, in the caller's order — one, or several."""
+        return self.name if isinstance(self.name, tuple) else (self.name,)
+
+
+#: Refusal shared by every entry point that takes both spellings. Named rather
+#: than repeated so the two exits cannot drift into saying different things.
+_BOTH_SPELLINGS = (
+    "takes name= OR names=, not both. `name='gain'` builds a block whose x is one "
+    "array; `names=('gain',)` builds a group of one, whose x is {'gain': array} and "
+    "whose solve comes back as a dict. Both are legitimate and they are not "
+    "interchangeable, so which one you meant cannot be guessed."
+)
+
+
+def _is_complex(dtype: Any) -> bool:
+    return bool(jnp.issubdtype(dtype, jnp.complexfloating))
 
 
 def _resolve_name(space: ParameterSpace, name: str | None) -> str:
@@ -155,6 +219,63 @@ def _resolve_name(space: ParameterSpace, name: str | None) -> str:
     return name
 
 
+def _resolve_names(space: ParameterSpace, names: Sequence[str] | str) -> tuple[str, ...]:
+    """The latents to put in one block, in the caller's own order.
+
+    A bare string is one name, the same "one or many" convention
+    :class:`~rheplicant.inference.parameters.Bind` and
+    :func:`~rheplicant.inference.identifiability.identifiability` use. Without
+    it, ``names="gain"`` iterates into ``('g', 'a', 'i', 'n')``.
+    """
+    selected = (names,) if isinstance(names, str) else tuple(names)
+    if not selected:
+        raise ParameterSpaceError(
+            "linear_operator() needs at least one latent name; names=() would build a "
+            "block with no parameters, whose normal operator is empty and whose solve "
+            "returns {} with a residual of zero — which reads as a converged answer to "
+            "a question nobody asked. Pass name= for one latent."
+        )
+    unknown = [name for name in selected if name not in space.names]
+    if unknown:
+        raise ParameterSpaceError(
+            f"`names` contains {unknown}, which is not a latent of this space; declared: "
+            f"{list(space.names)}."
+        )
+    repeated = sorted({name for name in selected if selected.count(name) > 1})
+    if repeated:
+        raise ParameterSpaceError(
+            f"`names` lists {repeated} more than once. Two copies of one latent are "
+            "exactly degenerate with each other, so the group's normal operator would be "
+            "singular in a direction that says nothing whatever about the model — and "
+            "the {name: array} solution has one entry per name, so one copy's answer "
+            "would silently overwrite the other's."
+        )
+    not_linear = [name for name in selected if not space.latent(name).linear]
+    if not_linear:
+        raise ParameterSpaceError(
+            f"Latent(s) {not_linear} are not declared linear=True, so their linear "
+            "operator is not meaningful. Declare them, and the claim will be checked — "
+            "jointly, which is stricter than one at a time: a gain and an antenna "
+            "temperature are each affine given the other and bilinear together."
+        )
+    return selected
+
+
+def _values_at(
+    space: ParameterSpace, values0: dict[str, jax.Array], at: dict[str, jax.Array] | None
+) -> dict[str, jax.Array]:
+    """``values0`` with ``at`` laid over it, refusing a name the space never declared."""
+    if not at:
+        return values0
+    unknown = [key for key in at if key not in space.names]
+    if unknown:
+        raise ParameterSpaceError(
+            f"`at` names {unknown}, which is not a latent of this space; declared: "
+            f"{list(space.names)}."
+        )
+    return {**values0, **at}
+
+
 def _isolate(
     space: ParameterSpace,
     pipeline: AbstractOperator,
@@ -170,14 +291,7 @@ def _isolate(
     point, which is right exactly once.
     """
     forward, values0 = space.forward_fn(pipeline, state_template)
-    if at:
-        unknown = [key for key in at if key not in space.names]
-        if unknown:
-            raise ParameterSpaceError(
-                f"`at` names {unknown}, which is not a latent of this space; declared: "
-                f"{list(space.names)}."
-            )
-        values0 = {**values0, **at}
+    values0 = _values_at(space, values0, at)
     latent = space.latent(name)
 
     def g(x: jax.Array) -> jax.Array:
@@ -186,77 +300,73 @@ def _isolate(
     return g, jnp.zeros_like(latent.init)
 
 
-def check_linearity(
+def _isolate_group(
     space: ParameterSpace,
     pipeline: AbstractOperator,
     state_template: State,
-    name: str | None = None,
-    *,
+    names: tuple[str, ...],
     at: dict[str, jax.Array] | None = None,
-    scales: Sequence[float] = DEFAULT_SCALES,
-    rtol: float | None = None,
-    key: jax.Array | None = None,
-) -> dict[float, float]:
-    """Verify that the prediction really is affine in one latent.
+) -> tuple[Callable[[dict[str, jax.Array]], jax.Array], dict[str, jax.Array]]:
+    """``g(x) = prediction with the whole group set to x``, plus a zero of it.
 
-    Compares the model against its own linearization at zero, at several
-    magnitudes of probe. Costs one linearization plus one forward evaluation
-    per scale.
+    The group's ``x`` is a ``{name: array}`` dict, so ``g`` is a function of a
+    pytree and ``jax.linearize``/``jax.vjp`` hand back a JVP and a VJP over that
+    pytree — which is exactly the domain the rest of this module solves in.
 
-    Args:
-        space, pipeline, state_template: the model under test.
-        name: which latent. Optional when exactly one is declared linear.
-        at: values for the OTHER latents. Linearity is a claim *given* them, so
-            check it where the sampler will actually be. Defaults to the
-            declared initial values.
-        scales: probe magnitudes, as multiples of the latent's own scale,
-            taken from ``max|init|``. The default spans six orders of
-            magnitude on purpose — see the module docstring. NOTE: an
-            all-zero ``init`` has no scale to take, so it falls back to 1.0
-            and the probes become absolute. If your latent lives at 1e6 (sky
-            alms in kelvin, say), give a representative ``init`` or pass
-            ``scales`` explicitly — otherwise the sweep never reaches the
-            regime the sampler will actually explore.
-        rtol: tolerance on the relative departure from affinity. Default:
-            ``1e4 * eps`` of the prediction dtype, which leaves room for
-            accumulated roundoff in a long reduction without admitting real
-            curvature.
-        key: PRNG key for the probes. Fixed by default, so the check is
-            reproducible.
-
-    Returns:
-        ``{scale: relative error}`` — useful for reporting how linear a block
-        is, not only whether it passes.
-
-    Raises:
-        ParameterSpaceError: if any scale departs from affinity by more
-            than ``rtol``.
+    ``at`` fixes the latents OUTSIDE the group, as for :func:`_isolate`. A value
+    it supplies for a latent that IS in the group is overridden by ``x`` and so
+    has no effect, which is the same for the group as for a single block: the
+    map is affine, so where it is linearized does not change it.
     """
-    name = _resolve_name(space, name)
-    g, zero = _isolate(space, pipeline, state_template, name, at)
-    latent = space.latent(name)
-    if not jnp.issubdtype(latent.init.dtype, jnp.inexact):
-        raise ParameterSpaceError(
-            f"Latent {name!r} has dtype {latent.init.dtype}; a linear block must be "
-            "floating-point or complex."
-        )
+    forward, values0 = space.forward_fn(pipeline, state_template)
+    values0 = _values_at(space, values0, at)
 
+    def g(x: dict[str, jax.Array]) -> jax.Array:
+        return forward({**values0, **x})
+
+    return g, {name: jnp.zeros_like(space.latent(name).init) for name in names}
+
+
+def _require_inexact(space: ParameterSpace, names: Sequence[str]) -> None:
+    """Every latent in a linear block must carry a derivative worth taking."""
+    for name in names:
+        dtype = space.latent(name).init.dtype
+        if not jnp.issubdtype(dtype, jnp.inexact):
+            raise ParameterSpaceError(
+                f"Latent {name!r} has dtype {dtype}; a linear block must be "
+                "floating-point or complex."
+            )
+
+
+def _magnitude(latent: Any) -> float:
+    """The latent's own scale, with the documented fallback for an all-zero init."""
+    magnitude = float(jnp.max(jnp.abs(latent.init)))
+    return magnitude if magnitude != 0.0 else 1.0
+
+
+def _affinity_errors(
+    g: Callable[[Any], jax.Array],
+    zero: Any,
+    probe_at: Callable[[int, float], Any],
+    scales: Sequence[float],
+    rtol: float | None,
+) -> tuple[dict[float, float], list[float], float]:
+    """Compare a map against its own linearization at zero, probe by probe.
+
+    Shared verbatim by the single-latent and the grouped check, which differ
+    only in what a probe *is* — an array, or a ``{name: array}`` dict. Every
+    number below is computed from ``g``, ``zero`` and the probe alone, so the
+    two paths cannot drift into measuring different things.
+    """
     baseline, tangent = jax.linearize(g, zero)
     if rtol is None:
         rtol = 1e4 * float(jnp.finfo(baseline.dtype).eps)
-    key = jax.random.key(0) if key is None else key
-
-    magnitude = float(jnp.max(jnp.abs(latent.init)))
-    if magnitude == 0.0:
-        magnitude = 1.0
 
     epsilon = float(jnp.finfo(baseline.dtype).eps)
     errors: dict[float, float] = {}
     verdicts: dict[float, bool] = {}
     for index, scale in enumerate(scales):
-        probe = magnitude * scale * jax.random.normal(
-            jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
-        )
+        probe = probe_at(index, scale)
         actual = g(probe)
         predicted = baseline + tangent(probe)
         # Measure against the VARIATION, not the total: a large constant offset
@@ -282,14 +392,130 @@ def check_linearity(
         verdicts[scale] = (not finite) or (errors[scale] > rtol and departure > floor)
 
     failed = sorted(scale for scale, bad in verdicts.items() if bad)
+    return errors, failed, rtol
+
+
+def check_linearity(
+    space: ParameterSpace,
+    pipeline: AbstractOperator,
+    state_template: State,
+    name: str | None = None,
+    *,
+    names: Sequence[str] | str | None = None,
+    at: dict[str, jax.Array] | None = None,
+    scales: Sequence[float] = DEFAULT_SCALES,
+    rtol: float | None = None,
+    key: jax.Array | None = None,
+) -> dict[float, float]:
+    """Verify that the prediction really is affine in one latent — or in a group.
+
+    Compares the model against its own linearization at zero, at several
+    magnitudes of probe. Costs one linearization plus one forward evaluation
+    per scale.
+
+    Args:
+        space, pipeline, state_template: the model under test.
+        name: which latent. Optional when exactly one is declared linear.
+        names: several latents, checked **jointly** — the claim a grouped
+            :func:`linear_operator` block makes. Mutually exclusive with
+            ``name``. This is strictly stronger than checking each in turn, and
+            the difference is the whole reason a bilinear model needs more than
+            one block: a gain and an antenna temperature are each affine given
+            the other, and their product is not affine in the pair, so a group
+            holding both is refused here rather than solved as if it were
+            linear.
+        at: values for the latents OUTSIDE the block. Linearity is a claim
+            *given* them, so check it where the sampler will actually be.
+            Defaults to the declared initial values.
+        scales: probe magnitudes, as multiples of the latent's own scale,
+            taken from ``max|init|`` — per latent, for a group, since two
+            latents in one block are routinely in different units. The default
+            spans six orders of magnitude on purpose — see the module
+            docstring. NOTE: an all-zero ``init`` has no scale to take, so it
+            falls back to 1.0 and the probes become absolute. If your latent
+            lives at 1e6 (sky alms in kelvin, say), give a representative
+            ``init`` or pass ``scales`` explicitly — otherwise the sweep never
+            reaches the regime the sampler will actually explore.
+        rtol: tolerance on the relative departure from affinity. Default:
+            ``1e4 * eps`` of the prediction dtype, which leaves room for
+            accumulated roundoff in a long reduction without admitting real
+            curvature.
+        key: PRNG key for the probes. Fixed by default, so the check is
+            reproducible. For a group the per-latent sub-keys are folded in by
+            position in the SORTED names, so permuting ``names`` probes the
+            model at the same points and returns the same verdict.
+
+    Returns:
+        ``{scale: relative error}`` — useful for reporting how linear a block
+        is, not only whether it passes.
+
+    Raises:
+        ParameterSpaceError: if ``name`` and ``names`` are both given, or if any
+            scale departs from affinity by more than ``rtol``.
+    """
+    if name is not None and names is not None:
+        raise ParameterSpaceError(f"check_linearity() {_BOTH_SPELLINGS}")
+    key = jax.random.key(0) if key is None else key
+
+    if names is None:
+        name = _resolve_name(space, name)
+        g, zero = _isolate(space, pipeline, state_template, name, at)
+        _require_inexact(space, (name,))
+        latent = space.latent(name)
+        magnitude = _magnitude(latent)
+
+        def probe_at(index: int, scale: float) -> jax.Array:
+            return magnitude * scale * jax.random.normal(
+                jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
+            )
+
+        subject = (
+            f"Latent {name!r} is declared linear=True, but the prediction is not affine "
+            "in it"
+        )
+        scale_of = "the latent's scale"
+        remedy = (
+            "Either drop the declaration, or re-parameterize so the model really is "
+            "linear in this block."
+        )
+    else:
+        selected = _resolve_names(space, names)
+        g, zero = _isolate_group(space, pipeline, state_template, selected, at)
+        _require_inexact(space, selected)
+        ordered = sorted(selected)
+
+        def probe_at(index: int, scale: float) -> dict[str, jax.Array]:
+            root = jax.random.fold_in(key, index)
+            return {
+                member: _magnitude(space.latent(member)) * scale * jax.random.normal(
+                    jax.random.fold_in(root, position),
+                    space.latent(member).init.shape,
+                    dtype=space.latent(member).init.dtype,
+                )
+                for position, member in enumerate(ordered)
+            }
+
+        subject = (
+            f"Latents {list(selected)} are each declared linear=True, but the prediction "
+            "is not affine in them JOINTLY"
+        )
+        scale_of = "each latent's own scale"
+        remedy = (
+            "Each conditional of a bilinear model is affine on its own, which is why "
+            "this is not caught one latent at a time — and why these two cannot share "
+            "one linear block. Split them into separate blocks and alternate, or "
+            "re-parameterize so the joint map really is affine. "
+            "identifiability(space, pipeline, state) will tell you what the split "
+            "costs before you choose it."
+        )
+
+    errors, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise ParameterSpaceError(
-            f"Latent {name!r} is declared linear=True, but the prediction is not affine in "
-            f"it: departure from its own linearization exceeds rtol={rtol:.2e} (above the "
-            f"per-probe roundoff floor) at {failed} times the latent's scale "
-            f"({detail}). Either drop the declaration, or re-parameterize so the model really "
-            "is linear in this block."
+            f"{subject}: departure from its own linearization exceeds rtol={rtol:.2e} "
+            f"(above the per-probe roundoff floor) at {failed} times {scale_of} "
+            f"({detail}). {remedy}"
         )
     return errors
 
@@ -300,12 +526,13 @@ def linear_operator(
     state_template: State,
     name: str | None = None,
     *,
+    names: Sequence[str] | str | None = None,
     at: dict[str, jax.Array] | None = None,
     check: bool = True,
     scales: Sequence[float] = DEFAULT_SCALES,
     rtol: float | None = None,
 ) -> LinearBlock:
-    """Export ``A``, ``Aᵀ`` and the offset for a declared-linear latent.
+    """Export ``A``, ``Aᵀ`` and the offset for a declared-linear latent — or a group.
 
     No matrix is ever formed: ``A`` comes from ``jax.linearize`` and ``Aᵀ``
     from ``jax.vjp``, so a 10⁶-dimensional block costs the same as one forward
@@ -314,33 +541,77 @@ def linear_operator(
 
     Args:
         space, pipeline, state_template: the model.
-        name: which latent. Optional when exactly one is declared linear.
-        at: values for the OTHER latents, fixing where the block is built.
+        name: which latent. Optional when exactly one is declared linear. The
+            block's ``x`` is then one array, and so is the solve's answer.
+        names: several latents, exported as ONE block. Mutually exclusive with
+            ``name``. The block's ``x`` is then a ``{name: array}`` dict — and
+            so is the answer, which is the point: the physical names survive the
+            solve instead of the caller slicing an anonymous stacked vector.
+            ``names=("gain",)`` is a legitimate group of one, and is how a
+            partition can hold one-latent and many-latent blocks without the
+            caller special-casing either.
+
+            Solving a group JOINTLY is not the same as alternating over its
+            members: two latents the data barely tells apart are resolved in one
+            CG here, where alternation converges at the rate of their
+            correlation while reporting a converged residual and a κ of ~1 at
+            every step. The joint κ that
+            :func:`condition_estimate` reports for this block is the honest one.
+        at: values for the latents OUTSIDE the block, fixing where it is built.
             Defaults to the declared initial values — right exactly once, so a
             Gibbs sweep must pass the current values here every sweep.
         check: verify the linearity claim first (:func:`check_linearity`).
             Leave it on. Turning it off costs three forward evaluations less
-            and buys a class of silent, confident errors.
+            and buys a class of silent, confident errors. For a group the claim
+            checked is JOINT affinity, which a bilinear pair fails.
         scales, rtol: forwarded to :func:`check_linearity`.
+
+    Raises:
+        ParameterSpaceError: if both ``name`` and ``names`` are given; if
+            ``names`` is empty, repeats a latent, or names an undeclared or
+            non-linear one; or if the linearity claim fails.
     """
-    name = _resolve_name(space, name)
+    if name is not None and names is not None:
+        raise ParameterSpaceError(f"linear_operator() {_BOTH_SPELLINGS}")
+
+    if names is None:
+        name = _resolve_name(space, name)
+        if check:
+            check_linearity(space, pipeline, state_template, name, at=at,
+                            scales=scales, rtol=rtol)
+        g, zero = _isolate(space, pipeline, state_template, name, at)
+        latent = space.latent(name)
+
+        offset, tangent = jax.linearize(g, zero)
+        _, pullback = jax.vjp(g, zero)
+
+        return LinearBlock(
+            name=name,
+            shape=latent.init.shape,
+            dtype=latent.init.dtype,
+            offset=offset,
+            forward=tangent,
+            adjoint=lambda y: pullback(y)[0],
+            prior=latent.prior,
+        )
+
+    selected = _resolve_names(space, names)
     if check:
-        check_linearity(space, pipeline, state_template, name, at=at,
+        check_linearity(space, pipeline, state_template, names=selected, at=at,
                         scales=scales, rtol=rtol)
-    g, zero = _isolate(space, pipeline, state_template, name, at)
-    latent = space.latent(name)
+    g, zero = _isolate_group(space, pipeline, state_template, selected, at)
 
     offset, tangent = jax.linearize(g, zero)
     _, pullback = jax.vjp(g, zero)
 
     return LinearBlock(
-        name=name,
-        shape=latent.init.shape,
-        dtype=latent.init.dtype,
+        name=selected,
+        shape={member: space.latent(member).init.shape for member in selected},
+        dtype={member: space.latent(member).init.dtype for member in selected},
         offset=offset,
         forward=tangent,
         adjoint=lambda y: pullback(y)[0],
-        prior=latent.prior,
+        prior={member: space.latent(member).prior for member in selected},
     )
 
 
@@ -352,14 +623,105 @@ def _real_parts(block: LinearBlock) -> tuple[Callable, Callable]:
     data is **ℝ-linear but not ℂ-linear**, and a Krylov method run over ℂ
     would be solving a different problem. Splitting makes the vector space the
     one the objective actually lives on.
+
+    For a group the split is per member, so a block mixing a real latent with a
+    complex one carries ``{"real_one": array, "complex_one": (re, im)}`` — the
+    real one is NOT wrapped in a one-element tuple, because there is nothing to
+    unwrap it back from and a uniform wrapper would only move the asymmetry
+    somewhere less visible. The treedef is what every ``jax.tree.map`` in this
+    module aligns against, so it is the one thing that must be exactly
+    invertible; ``join(split(x)) == x`` is what makes it so.
     """
-    is_complex = jnp.issubdtype(block.dtype, jnp.complexfloating)
-    if is_complex:
-        return (
-            lambda x: (jnp.real(x), jnp.imag(x)),
-            lambda parts: parts[0] + 1j * parts[1],
-        )
-    return (lambda x: x, lambda parts: parts)
+    if not block.grouped:
+        if _is_complex(block.dtype):
+            return (
+                lambda x: (jnp.real(x), jnp.imag(x)),
+                lambda parts: parts[0] + 1j * parts[1],
+            )
+        return (lambda x: x, lambda parts: parts)
+
+    complexity = {member: _is_complex(block.dtype[member]) for member in block.names}
+
+    def split(x):
+        return {
+            member: (jnp.real(x[member]), jnp.imag(x[member]))
+            if complexity[member]
+            else x[member]
+            for member in block.names
+        }
+
+    def join(parts):
+        return {
+            member: (parts[member][0] + 1j * parts[member][1])
+            if complexity[member]
+            else parts[member]
+            for member in block.names
+        }
+
+    return split, join
+
+
+def _domain_zero(block: LinearBlock) -> Any:
+    """A zero of the latent domain — an array, or ``{name: array}`` for a group."""
+    if not block.grouped:
+        return jnp.zeros(block.shape, dtype=block.dtype)
+    return {
+        member: jnp.zeros(block.shape[member], dtype=block.dtype[member])
+        for member in block.names
+    }
+
+
+def _domain_centre(block: LinearBlock, prior_mean: Any) -> Any:
+    """``prior_mean`` laid out over the latent domain, zero where it is ``None``."""
+
+    def one(shape, dtype, mean):
+        if mean is None:
+            return jnp.zeros(shape, dtype=dtype)
+        return jnp.broadcast_to(jnp.asarray(mean, dtype=dtype), shape)
+
+    if not block.grouped:
+        return one(block.shape, block.dtype, prior_mean)
+    return {
+        member: one(block.shape[member], block.dtype[member], prior_mean[member])
+        for member in block.names
+    }
+
+
+def _variance_parts(block: LinearBlock, prior_std: Any) -> Any:
+    """``S⁻¹``'s diagonal, shaped like :func:`_real_parts`' output.
+
+    This is the block-diagonal assembly, and it is assembly by *placement*
+    rather than by concatenation: each latent's variance lands on the leaf its
+    own parameters live on, so ``x / variance`` in a ``jax.tree.map`` IS
+    ``S⁻¹x`` with no indices to get wrong. A complex latent's variance is
+    duplicated across its real and imaginary parts, which is what
+    :func:`gcr_sample` documents ``prior_std`` to mean for one.
+    """
+
+    def one(std, is_complex):
+        variance = jnp.asarray(std) ** 2
+        return (variance, variance) if is_complex else variance
+
+    if not block.grouped:
+        return one(prior_std, _is_complex(block.dtype))
+    return {
+        member: one(prior_std[member], _is_complex(block.dtype[member]))
+        for member in block.names
+    }
+
+
+def _largest_variance(prior_variance: Any) -> jax.Array:
+    """The biggest prior variance anywhere in the block.
+
+    ``1/λ`` of it floors ``λ_min`` of the normal operator: ``AᵀN⁻¹A`` is
+    positive semi-definite, so the LOOSEST prior in the block is what bounds
+    the operator from below. Taking the tightest instead would floor the
+    estimate above the true ``λ_min`` and report a condition number smaller
+    than the real one — an over-confident guard, which is the direction that
+    costs something.
+    """
+    leaves = jax.tree.leaves(prior_variance)
+    return jnp.max(jnp.stack([jnp.max(jnp.asarray(leaf)) for leaf in leaves]))
 
 
 def _numpyro_distributions() -> Any:
@@ -453,7 +815,7 @@ def _agrees(supplied: Any, declared: Any) -> bool | None:
 
 
 def _reconcile(
-    keyword: str, field: str, supplied: Any, declared: Any, block: LinearBlock, caller: str
+    keyword: str, field: str, supplied: Any, declared: Any, name: str, prior: Any, caller: str
 ) -> Any:
     """The supplied keyword, or the declared value — never a silent choice."""
     if supplied is None:
@@ -463,19 +825,19 @@ def _reconcile(
         side = (
             f"the {keyword}= you passed is"
             if _holds_a_tracer(supplied)
-            else f"latent {block.name!r}'s declared {field} is"
+            else f"latent {name!r}'s declared {field} is"
         )
         raise ParameterSpaceError(
             f"{caller} cannot check the {keyword}= it was given against the prior latent "
-            f"{block.name!r} declares: {side} a traced value, so what the two are cannot be "
+            f"{name!r} declares: {side} a traced value, so what the two are cannot be "
             "known until the trace runs. Pass one or the other, not both: whichever lost "
             "would still look like it was in force. (Two CONCRETE values are compared "
             "normally, jit or no jit — being inside a trace is not itself the problem.)"
         )
     if not verdict:
         raise ParameterSpaceError(
-            f"{caller} was given {keyword}={supplied!r}, but latent {block.name!r} declares "
-            f"prior={type(block.prior).__name__}(..., {field}={declared!r}) in its "
+            f"{caller} was given {keyword}={supplied!r}, but latent {name!r} declares "
+            f"prior={type(prior).__name__}(..., {field}={declared!r}) in its "
             "ParameterSpace. One of the two would silently win and the other would be a "
             "number you believed was in force — and that same declaration reaches "
             "to_numpyro_model unchanged, so this exit and NUTS would then target different "
@@ -485,22 +847,22 @@ def _reconcile(
     return supplied
 
 
-def _resolve_prior(
-    block: LinearBlock, prior_mean: Any, prior_std: Any, caller: str
+def _resolve_one_prior(
+    name: str, prior: Any, prior_mean: Any, prior_std: Any, caller: str
 ) -> tuple[Any, Any]:
-    """Fill ``prior_mean``/``prior_std`` from the latent's declaration.
+    """Fill ``prior_mean``/``prior_std`` from one latent's declaration.
 
-    A block with no declared prior passes straight through — that is the escape
+    A latent with no declared prior passes straight through — that is the escape
     hatch for a prior-free latent, which the optimizers use and which
     ``prior_std=`` alone is enough for.
     """
-    if block.prior is None:
+    if prior is None:
         return prior_mean, prior_std
-    gaussian = _gaussian_parameters(block.prior)
+    gaussian = _gaussian_parameters(prior)
     if gaussian is None:
         raise ParameterSpaceError(
-            f"{caller} is a conjugate-Gaussian solve, but latent {block.name!r} declares a "
-            f"{type(block.prior).__name__} prior, which has no conjugate Gaussian form. "
+            f"{caller} is a conjugate-Gaussian solve, but latent {name!r} declares a "
+            f"{type(prior).__name__} prior, which has no conjugate Gaussian form. "
             "These exits solve (AᵀN⁻¹A + S⁻¹)x = b, and S⁻¹ only exists as a matrix for a "
             "Gaussian S; substituting the distribution's mean and variance would return a "
             "finite, confident posterior for a prior you did not declare — narrower than "
@@ -510,20 +872,105 @@ def _resolve_prior(
         )
     loc, scale = gaussian
     return (
-        _reconcile("prior_mean", "loc", prior_mean, loc, block, caller),
-        _reconcile("prior_std", "scale", prior_std, scale, block, caller),
+        _reconcile("prior_mean", "loc", prior_mean, loc, name, prior, caller),
+        _reconcile("prior_std", "scale", prior_std, scale, name, prior, caller),
     )
 
 
-def _require_prior_std(prior_std: Any, caller: str) -> None:
-    """No prior at all leaves AᵀN⁻¹A free to be singular."""
-    if prior_std is None:
+def _group_priors(block: LinearBlock) -> dict[str, Any]:
+    """The declared prior of each member of a group.
+
+    A hand-assembled grouped block may carry ``prior=None``, meaning no member
+    declares one; anything else has to be a dict covering every member, because
+    a single distribution object standing for a whole group is a statement about
+    latents in different units that nobody made, and dropping it silently would
+    solve at whatever ``prior_std=`` happened to say.
+    """
+    if block.prior is None:
+        return dict.fromkeys(block.names)
+    if isinstance(block.prior, dict) and set(block.prior) == set(block.names):
+        return block.prior
+    raise ParameterSpaceError(
+        f"This block groups {list(block.names)}, so its `prior` must be a dict with one "
+        f"entry per member (use None for a prior-free one); it holds "
+        f"{type(block.prior).__name__}"
+        + (f" keyed by {sorted(block.prior)}" if isinstance(block.prior, dict) else "")
+        + ". S is block-diagonal over the group and each member contributes its own "
+        "block, so there is no reading under which one declaration covers all of them."
+    )
+
+
+def _per_member(keyword: str, value: Any, block: LinearBlock, caller: str) -> dict[str, Any]:
+    """A grouped keyword, split by member. ``None`` everywhere when not given."""
+    if value is None:
+        return dict.fromkeys(block.names)
+    if not isinstance(value, dict):
         raise ParameterSpaceError(
-            f"{caller} needs prior_std: with no prior the normal operator AᵀN⁻¹A can be "
-            "singular, and CG would return a finite, arbitrary answer rather than fail. "
-            "Pass a large prior_std for an effectively flat prior, or declare "
-            "Latent(prior=dist.Normal(...)) and it will be read from there."
+            f"{caller} was given {keyword}={value!r} for a block grouping "
+            f"{list(block.names)}, but a grouped block has one prior PER LATENT — S is "
+            "block-diagonal, not a multiple of the identity. These latents are routinely "
+            "in different units (a noise-wave temperature in kelvin, a gain of order one), "
+            "so one number spread across all of them is a prior nobody declared, and it "
+            "would come back as a finite, confidently wrong posterior. Pass a dict keyed "
+            f"by latent name — {keyword}={{{block.names[0]!r}: ...}} — or omit it and let "
+            "each latent's own Latent(prior=...) drive the solve."
         )
+    unknown = [key for key in value if key not in block.names]
+    if unknown:
+        raise ParameterSpaceError(
+            f"{caller} was given {keyword} for {unknown}, which this block does not group; "
+            f"it holds {list(block.names)}. The entry would be silently dropped and the "
+            "latent it names solved at some other prior entirely."
+        )
+    return {member: value.get(member) for member in block.names}
+
+
+def _resolve_prior(
+    block: LinearBlock, prior_mean: Any, prior_std: Any, caller: str
+) -> tuple[Any, Any]:
+    """Fill ``prior_mean``/``prior_std`` from the block's declaration(s).
+
+    For a group the resolution is per member and independent — each one takes
+    its keyword if it was given, its declaration if it was not, and raises if
+    the two disagree — so a group mixing a declared latent with a prior-free one
+    is honoured rather than refused wholesale, and it is
+    :func:`_require_prior_std` that names any member left with nothing at all.
+    """
+    if not block.grouped:
+        return _resolve_one_prior(block.name, block.prior, prior_mean, prior_std, caller)
+
+    priors = _group_priors(block)
+    means = _per_member("prior_mean", prior_mean, block, caller)
+    stds = _per_member("prior_std", prior_std, block, caller)
+    resolved_mean: dict[str, Any] = {}
+    resolved_std: dict[str, Any] = {}
+    for member in block.names:
+        resolved_mean[member], resolved_std[member] = _resolve_one_prior(
+            member, priors[member], means[member], stds[member], caller
+        )
+    return resolved_mean, resolved_std
+
+
+def _require_prior_std(block: LinearBlock, prior_std: Any, caller: str) -> None:
+    """No prior at all leaves AᵀN⁻¹A free to be singular."""
+    if block.grouped:
+        missing = [member for member in block.names if prior_std[member] is None]
+        if not missing:
+            return
+        detail = (
+            f"needs a prior_std for {missing} — the other members of this block have one, "
+            "which does not help: "
+        )
+    else:
+        if prior_std is not None:
+            return
+        detail = "needs prior_std: "
+    raise ParameterSpaceError(
+        f"{caller} {detail}with no prior the normal operator AᵀN⁻¹A can be "
+        "singular, and CG would return a finite, arbitrary answer rather than fail. "
+        "Pass a large prior_std for an effectively flat prior, or declare "
+        "Latent(prior=dist.Normal(...)) and it will be read from there."
+    )
 
 
 def _check_solve_arguments(
@@ -541,7 +988,7 @@ def _check_solve_arguments(
     """
     check_observed_shape(jnp.shape(block.offset), observed)
     prior_mean, prior_std = _resolve_prior(block, prior_mean, prior_std, caller)
-    _require_prior_std(prior_std, caller)
+    _require_prior_std(block, prior_std, caller)
     if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
         raise ParameterSpaceError(
             f"{caller} expects a real-valued prediction; this block's offset is complex."
@@ -559,7 +1006,7 @@ def wiener_solve(
     tol: float = 1e-6,
     maxiter: int | None = None,
     require_convergence: float | None = 1e-3,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[Any, jax.Array]:
     """Posterior mean of a linear-Gaussian block — the Wiener filter, by CG.
 
     With ``d = A x + offset + n``, ``n ~ N(0, N)`` and ``x ~ N(m, S)``::
@@ -668,11 +1115,17 @@ def wiener_solve(
 
 
 def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
-    """``x -> (AᵀN⁻¹A + S⁻¹) x`` over the latent's real degrees of freedom.
+    """``x -> (AᵀN⁻¹A + S⁻¹) x`` over the block's real degrees of freedom.
 
     The curvature half is taken as a gradient rather than assembled from
     ``A`` and ``Aᵀ``, which makes it symmetric positive definite by
-    construction with no adjoint convention left to get wrong.
+    construction with no adjoint convention left to get wrong — and, for a
+    group, no cross-block bookkeeping either: ``jax.grad`` of the group's own
+    ``χ²`` produces the full operator, off-diagonal blocks included, which is
+    exactly the coupling an alternating solve throws away.
+
+    ``prior_variance`` is a pytree of the same shape as ``parts``, so ``S⁻¹``
+    enters leaf by leaf. See :func:`_variance_parts`.
     """
     split, join = _real_parts(block)
 
@@ -681,7 +1134,9 @@ def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
 
     def normal(parts):
         curvature = jax.grad(half_chi2)(parts)
-        return jax.tree.map(lambda c, p: c + p / prior_variance, curvature, parts)
+        return jax.tree.map(
+            lambda c, p, v: c + p / v, curvature, parts, prior_variance
+        )
 
     return normal
 
@@ -689,15 +1144,20 @@ def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
 def _condition_number(
     block: LinearBlock, weight, prior_variance, key, iterations: int
 ) -> jax.Array:
-    """Estimated ``κ`` of ``AᵀN⁻¹A + S⁻¹``."""
+    """Estimated ``κ`` of ``AᵀN⁻¹A + S⁻¹``.
+
+    For a group this is the JOINT condition number, and it is the number a
+    per-block guard cannot produce: two latents the data barely distinguishes
+    give a well-conditioned operator each and a badly conditioned one together.
+    """
     split, _ = _real_parts(block)
-    template = split(jnp.zeros(block.shape, dtype=block.dtype))
+    template = split(_domain_zero(block))
     largest, smallest = extreme_eigenvalues(
         _normal_operator(block, weight, prior_variance), template, key, iterations
     )
     # AᵀN⁻¹A is positive semi-definite, so λ_min can never fall below the
     # prior's own curvature however rank-deficient the data is.
-    floor = 1.0 / jnp.max(jnp.asarray(prior_variance))
+    floor = 1.0 / _largest_variance(prior_variance)
     return largest / jnp.maximum(smallest, floor)
 
 
@@ -743,11 +1203,11 @@ def condition_estimate(
         The estimated condition number, as a scalar array.
     """
     _, prior_std = _resolve_prior(block, None, prior_std, "condition_estimate")
-    _require_prior_std(prior_std, "condition_estimate")
+    _require_prior_std(block, prior_std, "condition_estimate")
     return _condition_number(
         block,
         1.0 / jnp.asarray(noise_std) ** 2,
-        jnp.asarray(prior_std) ** 2,
+        _variance_parts(block, prior_std),
         jax.random.key(0) if key is None else key,
         iterations,
     )
@@ -764,7 +1224,7 @@ def _conjugate_solve(
     maxiter: int | None,
     key: jax.Array | None,
     require_convergence: float | None,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[Any, jax.Array]:
     """Shared machinery for the posterior mean and for a posterior draw.
 
     Both solve ``(AᵀN⁻¹A + S⁻¹) x = b`` by CG over the latent's real degrees of
@@ -773,16 +1233,10 @@ def _conjugate_solve(
     """
     split, join = _real_parts(block)
     weight = 1.0 / jnp.asarray(noise_std) ** 2
-    prior_variance = jnp.asarray(prior_std) ** 2
+    prior_variance = _variance_parts(block, prior_std)
     residual_data = observed - block.offset
-    zero = split(jnp.zeros(block.shape, dtype=block.dtype))
-    centre = split(
-        jnp.zeros(block.shape, dtype=block.dtype)
-        if prior_mean is None
-        else jnp.broadcast_to(
-            jnp.asarray(prior_mean, dtype=block.dtype), block.shape
-        )
-    )
+    zero = split(_domain_zero(block))
+    centre = split(_domain_centre(block, prior_mean))
 
     def pair_with(vector):
         """``Aᵀ vector`` in real coordinates, as the gradient of a real pairing.
@@ -801,9 +1255,10 @@ def _conjugate_solve(
     # prior is not the same act as shifting the model even though the two give
     # the same Gaussian.
     rhs = jax.tree.map(
-        lambda base, m: base + m / prior_variance,
+        lambda base, m, v: base + m / v,
         pair_with(weight * residual_data),
         centre,
+        prior_variance,
     )
 
     if key is not None:
@@ -821,12 +1276,13 @@ def _conjugate_solve(
             _split_like(prior_key, zero),
         )
         rhs = jax.tree.map(
-            lambda base, from_data, from_prior: (
-                base + from_data + from_prior / jnp.sqrt(prior_variance)
+            lambda base, from_data, from_prior, v: (
+                base + from_data + from_prior / jnp.sqrt(v)
             ),
             rhs,
             pair_with(jnp.sqrt(weight) * omega_data),
             omega_prior,
+            prior_variance,
         )
 
     solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
@@ -900,7 +1356,7 @@ def gcr_sample(
     tol: float = 1e-6,
     maxiter: int | None = None,
     require_convergence: float | None = 1e-3,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[Any, jax.Array]:
     """Draw an EXACT posterior sample of a linear-Gaussian block.
 
     The constrained-realization (GCR) identity: solve the same system
