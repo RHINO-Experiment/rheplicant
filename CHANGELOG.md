@@ -339,6 +339,111 @@ State paths forward is not implementable against the shipped set:
 fallback for when it is absent, so the declaration means "reads if present".
 And `provides` is `("data",)` on 26 of the 31 declaring classes.
 
+### `SelectOperator` selects, and says what selecting cannot repair
+
+`leaf * mask` is not `data[t] = contribution[switch[t]][t]`; it is an identity
+that holds only while every branch is finite everywhere. Every branch runs at
+every sample, so a branch returning `inf` where it is switched OFF entered the
+sum as `inf * 0 -> nan`. Whether it did depended on the execution mode, because
+XLA may rewrite a multiply by a predicate into a select and does so in some
+fusion contexts and not others:
+
+```
+             before                     after
+eager        [5.  1.  0.5  0.25]        [5.  1.  0.5  0.25]
+filter_jit   [5.  1.  0.5  0.25]        [5.  1.  0.5  0.25]
+disable_jit  [nan 1.  0.5  0.25]        [5.  1.  0.5  0.25]
+```
+
+The forward answer was correct by optimiser luck. It is a `jnp.where` now,
+which never reads the unselected value, in any mode.
+
+**The gradient is a separate claim, and it is a precondition rather than a
+fix.** Reverse mode differentiates every branch at every sample. A branch that
+returns `inf` at a switched-off sample has an infinite residual there —
+`d(a/t)/da = 1/t` — and the selector's zero cotangent for that sample meets it
+as `0 * inf` *inside that branch's own backward pass*, upstream of anything
+`SelectOperator` does. Measured: the naive `jnp.where` swap and the two-step
+"sanitise then select" produce the identical VJP, and both still return `nan`.
+So the class docstring states the precondition and the remedy that works — the
+branch guards its own singularity, using the coordinates it already receives —
+and `tests/core/test_select_finiteness.py` pins the limitation and the remedy
+side by side. No shipped operator divides; a user-supplied calibration-load
+branch with a reciprocal in it is the case this is written for.
+
+### A placed operator must agree with its node about who creates the data
+
+`Assembly.has_source` was read off the template's node kinds, and `At` will put
+any operator at any node — so the one fact the `__call__` guard is built on was
+a fact about the *graph*, and it was wrong in both directions:
+
+```
+a SOURCE operator on a TRANSFORM node
+  has_source=False, lit ('t',);  caller data 100.0 in -> [777. 777. 777.]
+a TRANSFORM operator on a SOURCE node
+  has_source=True,  lit ('s',);  data=None -> TypeError on NoneType
+                                 data given -> "Pass a state with data=None"
+```
+
+The first is the guard whose entire sentence is "caller-supplied `state.data`
+would be discarded" passing in exactly the case where it is discarded — along
+with whatever the upstream branch computed. The second is the guard refusing
+the only input that runs, and naming the input that crashes.
+
+`assemble` now refuses the disagreement at placement, which fixes both at once:
+with the kinds in agreement the node kind IS the operator kind and the existing
+derivation is sound. `At` still moves an operator freely between nodes of the
+same kind. The check reads `graph_node` only, costs 2.5 µs on a 262 µs
+ten-operator assembly, and refuses nothing the shipped templates do.
+
+Deriving the answer instead by running each operator under `jax.eval_shape` at
+assemble time — asking whether it produces data from `data=None` — was measured
+and does not work here: `assemble` has no coordinates to build a probe state
+from, and every shipped source raises `StateValidationError` without them. 0 of
+10 shipped operators classify correctly against `State()`, so every assembly
+would report itself source-free and the guard would then refuse every
+legitimate forward run. With a fully-populated state, which `assemble` does not
+have, it is 5 of 10, at ~1.6 ms per operator. What the declaration check cannot
+see is an operator declaring no `graph_node`; that hole is pinned in
+`tests/core/test_placement_kind.py`.
+
+### `must_precede` is checked on the hand-built route too
+
+`assemble()` enforced the ordering constraint by reachability and was the only
+thing that did. Both routes compile to the same composition, so the refusal was
+one line of call site away from silence:
+
+```
+assemble(..., At('noise', tone))   AssemblyError: 'bandpass' is not reachable
+Pipeline(sky, band, gain, tone)    no error; tone channel 2678.5
+Pipeline(sky, band, tone, gain)              tone channel 7435.6   (g = 3.0)
+```
+
+A tone injected after the gain has a gain response of exactly 1.0 — it monitors
+nothing, which is the sentence `must_precede_because` exists to say — and the
+run converges and reports healthy diagnostics.
+
+`Pipeline` has no graph, so it cannot ask what is reachable from where; it has
+`names`, so `check_stage_ordering` asks the sequence-local question: **if a
+named stage is present, it must come after me.** A stage that is not present is
+not a violation — the same rule `_check_ordering` applies to a node that was
+never lit, and anything stricter would refuse every partial model.
+
+It runs from `Pipeline.__init__`, and equinox rebuilds a Module through
+`tree_unflatten` rather than `__init__`: measured, a `filter_jit` trace, a
+`filter_grad` and an `eqx.tree_at` edit re-run it **zero** times. Construction
+costs 1.5 µs more (8.0 → 9.5 µs), at the one place the order can be chosen.
+
+Three things it cannot do, each pinned as a test: refuse a constraint naming a
+stage nothing is called (a Pipeline has no node list, so a typo and a
+legitimately absent stage are one observation, where `assemble` refuses the
+unknown node id); see into a nested composite (`names` is one level deep); mean
+anything for `SumOperator`/`SelectOperator`, whose branches are parallel. Note
+that the constraint binds through stage *names*, so auto-derived names bind it
+only where they coincide with the node ids — `GainOperator` auto-names to
+`gain`, `ReceiverOperator` to `receiver` and not `bandpass`. Pass `names=` for
+a pipeline whose stages carry ordering constraints.
+
 ### `Assembly.without(node_id)`, and two entry points that took objects they could not use
 
 `replace_node(node, None)` returned a live `Assembly` whose `lit` and whose
