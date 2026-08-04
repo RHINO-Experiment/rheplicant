@@ -223,10 +223,27 @@ class TestTheOperator:
                 freq_basis=basis.freq,
             )
 
-    def test_a_state_without_a_time_or_frequency_axis_is_refused(self, basis):
+    @pytest.mark.parametrize(
+        "coords",
+        [
+            pytest.param(None, id="no_coords_at_all"),
+            pytest.param(
+                Coordinates(time=jnp.arange(N_TIME, dtype=float)), id="freq_missing"
+            ),
+            pytest.param(
+                Coordinates(freq=jnp.arange(N_FREQ, dtype=float)), id="time_missing"
+            ),
+        ],
+    )
+    def test_a_state_without_a_time_or_frequency_axis_is_refused(self, basis, coords):
+        """All three clauses of the guard, not just the one a single state hits.
+
+        The guard is a three-way `or`; passing one state exercises one clause,
+        and dropping either of the other two survives a green suite.
+        """
         operator = BasisTemperatureOperator.from_basis(basis, COEFF0)
         with pytest.raises(StateValidationError, match="coords"):
-            operator(State(coords=Coordinates(time=jnp.arange(N_TIME, dtype=float))))
+            operator(State() if coords is None else State(coords=coords))
 
     def test_a_basis_built_for_another_grid_is_refused_per_axis(self, basis):
         """The transposition catch, and the reason this fixture is non-square:
@@ -246,6 +263,21 @@ class TestTheOperator:
         )
         with pytest.raises(StateValidationError) as caught:
             wrong_freq(make_state())
+        assert "freq" in str(caught.value)
+
+        # And the SHORT side. The case above is longer than the grid, so it is
+        # refused by `!= n_freq` and by a relaxed `> n_freq` alike -- only a
+        # basis with FEWER rows than the grid tells the two apart. It matters
+        # because `State.with_data` does not check data against `coords`, so
+        # this guard is the only thing standing between a short freq_basis and
+        # a temperature field silently narrower than the channels it claims.
+        short_freq = BasisTemperatureOperator(
+            coeff=jnp.zeros((N_K, N_K)),
+            time_basis=basis.time,
+            freq_basis=basis_matrix("legendre", n=N_FREQ - 2, n_basis=N_K),
+        )
+        with pytest.raises(StateValidationError) as caught:
+            short_freq(make_state())
         assert "freq" in str(caught.value)
 
 

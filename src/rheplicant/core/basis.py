@@ -196,8 +196,12 @@ def basis_matrix(kind: str, *, n: int, n_basis: int) -> jax.Array:
         :class:`SeparableBasis` is always the mean level.
 
     Raises:
-        ParameterSpaceError: on an unknown ``kind``, a non-positive ``n`` or
-            ``n_basis``, or ``n_basis > n``.
+        StateValidationError: on an unknown ``kind``, a non-positive ``n`` or
+            ``n_basis``, or ``n_basis > n``. Not ``ParameterSpaceError`` --
+            this module's docstring argues that one deliberately is not part of
+            ``rheplicant.core``'s public surface, so a caller who wrote
+            ``except ParameterSpaceError`` around this would catch nothing and
+            could not import the name to try.
     """
     if kind not in BASIS_KINDS:
         raise StateValidationError(

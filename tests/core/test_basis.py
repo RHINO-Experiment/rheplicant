@@ -71,6 +71,14 @@ class TestBasisMatrix:
         for kind in BASIS_KINDS:
             design = basis_matrix(kind, n=N_FREQ, n_basis=N_J)
             assert np.allclose(np.asarray(design[:, 0]), 1.0), kind
+            # N_J is EVEN, and this is the only even-n_basis call in the file.
+            # Fourier's truncation rule -- stop after a cosine when the budget
+            # runs out mid-pair -- is documented by name and is only observable
+            # in the width. Without this line, `_fourier_columns` emitting the
+            # unpaired sine as well returns (N_FREQ, N_J + 1) and every test
+            # here still passes, while a coefficient latent declared (n_k, n_j)
+            # silently stops matching its own design matrix.
+            assert design.shape == (N_FREQ, N_J), kind
 
     def test_legendre_is_the_legendre_vandermonde_on_a_symmetric_grid(self):
         design = np.asarray(basis_matrix("legendre", n=N_TIME, n_basis=N_K))
