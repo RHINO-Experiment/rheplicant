@@ -535,3 +535,142 @@ class TestFoldReplacement:
         asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
         assert isinstance(asm["j1"], SumOperator)
         assert asm["j1"].names == ("a", "b")
+
+
+@pytest.fixture
+def many_source_graph():
+    """``a`` is a ``many`` source reaching the sink by exactly ONE path."""
+    return SignalGraph(
+        "many-source",
+        {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J),
+         "t": NodeSpec(T)},
+        [("a", "j"), ("b", "j"), ("j", "t")],
+    )
+
+
+@pytest.fixture
+def fork_rejoin_graph():
+    """``x`` reaches the junction by TWO paths: ``x -> p -> j`` and ``x -> q -> j``.
+
+    The shape that makes a node's operator appear twice in the folded tree, and
+    that makes the fold mint a repeated branch label — the two things that break
+    addressing.
+    """
+    return SignalGraph(
+        "fork-rejoin",
+        {
+            "x": NodeSpec(S, many=True),
+            "p": NodeSpec(T),
+            "q": NodeSpec(T),
+            "j": NodeSpec(J),
+            "out": NodeSpec(T),
+        },
+        [("x", "p"), ("x", "q"), ("p", "j"), ("q", "j"), ("j", "out")],
+    )
+
+
+class TestPromisedIdsAddressTheirOwnInstance:
+    """Every id :class:`AmbiguousNodeError` hands out must reach that instance.
+
+    ``_instance_names`` mints ``x_1..x_n``. ``_dedup`` independently mints
+    ``x, x_2, x_3, ...`` for repeated branch labels, and the two namespaces
+    overlap from ``_2`` on. ``_find_named`` is breadth-first, so the outer
+    ``_dedup`` label wins: ``x_2`` reached a fold over a whole path rather than
+    instance 2, and ``replace_node("x_2", ...)`` — literally what the error
+    message tells the caller to write — rewrote that path instead. Following
+    the instructions deleted physics, which is worse than not being told.
+    """
+
+    def test_named_ids_resolve_to_the_very_objects_placed(self, many_source_graph):
+        """The contract, checked by identity: not an equal operator, THE one."""
+        placed = [Src(value=jnp.array(10.0)), Src(value=jnp.array(20.0))]
+        asm = assemble(many_source_graph, *(At("a", op) for op in placed))
+        ((nid, names),) = asm.instances
+        assert nid == "a"
+        for name, op in zip(names, placed, strict=True):
+            assert asm[name] is op
+
+    def test_the_message_names_exactly_the_ids_that_work(self, many_source_graph):
+        """The message is built from ``instances``; so is the guarantee above."""
+        placed = [Src(value=jnp.array(10.0)), Src(value=jnp.array(20.0))]
+        asm = assemble(many_source_graph, *(At("a", op) for op in placed))
+        with pytest.raises(AmbiguousNodeError) as excinfo:
+            asm["a"]
+        ((_, names),) = asm.instances
+        for name in names:
+            assert name in str(excinfo.value)
+
+    def test_ids_that_would_collide_are_refused_at_assemble(self, fork_rejoin_graph):
+        """``x_2`` is both instance 2 and the fold's label for the second path.
+
+        Measured before this guard: ``asm["x_2"]`` handed back a fold, and
+        ``replace_node("x_2", Src(0))`` took the forward output 60 -> 30 with no
+        error and no shape change — where dropping instance 2 is 20.
+        """
+        with pytest.raises(AssemblyError, match="x_2"):
+            assemble(
+                fork_rejoin_graph,
+                At("x", Src(value=jnp.array(10.0))),
+                At("x", Src(value=jnp.array(20.0))),
+            )
+
+    def test_the_refusal_says_the_node_is_folded_in_twice(self, fork_rejoin_graph):
+        with pytest.raises(AssemblyError) as excinfo:
+            assemble(
+                fork_rejoin_graph,
+                At("x", Src(value=jnp.array(10.0))),
+                At("x", Src(value=jnp.array(20.0))),
+            )
+        message = str(excinfo.value)
+        assert "'x'" in message and "2 paths" in message
+
+
+class TestAliasedNodeIsNotWritable:
+    """A node the fold placed twice cannot be written through by one id.
+
+    ``eqx.tree_at`` rewrites the single position ``_find_named`` reaches. When
+    a node's contribution reaches the sink by two paths the fold embeds its
+    operator twice, so rewriting through the node id leaves the other copy
+    live: a finite, correctly-shaped, wrong forward model. Reading is still
+    honest — it returns the operator that genuinely sits there — so only the
+    write refuses, exactly as for a materialized junction.
+    """
+
+    @pytest.fixture
+    def single_at_x(self, fork_rejoin_graph):
+        """One source at the fork-rejoin node: 10 down both paths, summed = 20."""
+        return assemble(fork_rejoin_graph, At("x", Src(value=jnp.array(10.0))))
+
+    def test_the_forward_model_is_untouched(self, single_at_x):
+        """The guard is about addressing; the physics was never in question."""
+        assert jnp.array_equal(single_at_x(State()).data, jnp.full(3, 20.0))
+
+    def test_reading_the_aliased_node_still_works(self, single_at_x):
+        assert isinstance(single_at_x["x"], Src)
+        assert single_at_x["x"].value == 10.0
+
+    def test_replace_node_refuses_instead_of_rewriting_one_copy(self, single_at_x):
+        """Measured before this guard: 10.0, where zeroing ``x`` is 0.0."""
+        before = single_at_x(State()).data
+        with pytest.raises(AssemblyError, match="more than one"):
+            single_at_x.replace_node("x", Src(value=jnp.array(0.0)))
+        assert jnp.array_equal(single_at_x(State()).data, before)
+
+    def test_a_node_reached_by_one_path_is_still_writable(self, graph):
+        """The guard must not fire on the ordinary shape."""
+        asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
+        swapped = asm.replace_node("a", SrcA(value=jnp.array(0.0)))
+        assert jnp.array_equal(swapped(State()).data, jnp.full(3, 20.0))
+
+    def test_reusing_one_operator_object_at_two_nodes_is_not_aliasing(self, graph):
+        """Placed twice on purpose is not folded twice by accident.
+
+        The counts are compared against how often the caller placed the object,
+        so this keeps working: ``_find_named`` reaches position ``a`` by name
+        and ``tree_at`` rewrites that one, which is what was asked for.
+        """
+        shared = SrcA(value=jnp.array(10.0))
+        asm = assemble(graph, At("a", shared), At("b", shared))
+        assert jnp.array_equal(asm(State()).data, jnp.full(3, 20.0))
+        swapped = asm.replace_node("a", SrcA(value=jnp.array(0.0)))
+        assert jnp.array_equal(swapped(State()).data, jnp.full(3, 10.0))

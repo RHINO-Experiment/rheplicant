@@ -291,6 +291,13 @@ class Assembly(AbstractOperator):
             multiplicity lives, and what makes the bare node id ambiguous.
         materialized: junction/selector nodes that actually became a
             ``SumOperator``/``SelectOperator`` (rather than passing through).
+        aliased: nodes the fold embedded at more than one position, because
+            their contribution reaches the sink by more than one path. Reading
+            them is honest — ``self[nid]`` IS the operator sitting there — so
+            only :meth:`replace_node` refuses. Note the limit: a hand-rolled
+            ``eqx.tree_at(lambda a: a[nid].x, ...)``, which is also how
+            ``ParameterSpace`` binds, does not go through ``replace_node`` and
+            still rewrites one copy only.
 
     If the assembly contains live sources it *generates* its data — calling
     it on a state that already carries data raises, because that data would
@@ -308,6 +315,7 @@ class Assembly(AbstractOperator):
         static=True, default=()
     )
     materialized: tuple[str, ...] = eqx.field(static=True, default=())
+    aliased: tuple[str, ...] = eqx.field(static=True, default=())
 
     def __call__(self, state: State) -> State:
         if self.has_source and state.data is not None:
@@ -346,12 +354,21 @@ class Assembly(AbstractOperator):
 
         Raises rather than swapping when ``node_id`` names something that is
         not one operator: a ``many`` node carrying several instances
-        (:class:`AmbiguousNodeError`), or a junction/selector that assembly
-        materialized as a combinator. In both cases ``eqx.tree_at`` would
-        happily overwrite the whole fold — dropping live branches from the
-        forward model with no shape change and no complaint.
+        (:class:`AmbiguousNodeError`), a junction/selector that assembly
+        materialized as a combinator, or a node the fold embedded at more than
+        one position. In all three ``eqx.tree_at`` would happily rewrite one
+        position — dropping live branches from the forward model, or leaving
+        the node's other copies in it, with no shape change and no complaint.
         """
         target = self[node_id]  # raises AmbiguousNodeError on a multi-instance node
+        if node_id in self.aliased:
+            raise AssemblyError(
+                f"{node_id!r} is folded into this assembly at more than one place: "
+                "its contribution reaches the sink by several paths, so the operator "
+                "sits in several branches. Replacing it would rewrite the one branch "
+                "this id reaches and silently leave the others in the forward model. "
+                f"Re-assemble() with the operator you want at {node_id!r}."
+            )
         if node_id in self.materialized:
             names = getattr(target, "names", ())
             raise AssemblyError(
@@ -420,6 +437,96 @@ def _find_named(op: AbstractOperator, name: str) -> AbstractOperator | None:
                     next_level.append(part)
         queue = next_level
     return None
+
+
+def _positions(root: AbstractOperator, target: AbstractOperator) -> int:
+    """How many positions of the folded tree ``target`` occupies (by identity)."""
+    count = 0
+    queue: list[AbstractOperator] = [root]
+    while queue:
+        current = queue.pop()
+        if current is target:
+            count += 1
+        if isinstance(current, (Pipeline, SumOperator, SelectOperator)):
+            queue.extend(
+                current.stages if isinstance(current, Pipeline) else current.branches
+            )
+    return count
+
+
+def _fold_duplicates(
+    root: AbstractOperator,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> dict[str, int]:
+    """Nodes whose operator the FOLD put at more than one position, and how many.
+
+    A node whose contribution reaches the sink by several paths is folded in
+    once per path. ``_find_named`` reaches one of those positions and
+    ``eqx.tree_at`` rewrites that one, so writing through the node id leaves
+    the other copies live — a finite, correctly-shaped, wrong forward model.
+
+    Placing ONE operator object at several nodes is deliberate and not this, so
+    the occurrence count is compared against how often the caller placed it
+    rather than against 1.
+    """
+    slots: list[tuple[str, AbstractOperator]] = [
+        (nid, op) for nid, ops_at in placement.items() for op in ops_at
+    ]
+    slots += [(path[-1], op) for path, op in regions]
+    placed: dict[int, int] = {}
+    for _, op in slots:
+        placed[id(op)] = placed.get(id(op), 0) + 1
+    duplicates: dict[str, int] = {}
+    for nid, op in slots:
+        found = _positions(root, op)
+        if found > placed[id(op)]:
+            duplicates[nid] = max(duplicates.get(nid, 0), found)
+    return duplicates
+
+
+def _check_promised_ids(
+    root: AbstractOperator,
+    multi: dict[str, tuple[str, ...]],
+    placement: dict[str, list[AbstractOperator]],
+    duplicates: dict[str, int],
+) -> None:
+    """Every per-instance id the assembly will hand out must reach its instance.
+
+    :func:`_instance_names` mints ``x_1..x_n``; :func:`_dedup` independently
+    mints ``x, x_2, x_3, ...`` for repeated branch labels, and the two overlap
+    from ``_2`` on. Both arise from the same graph shape — a node reaching a
+    fold by several paths — so the collision is reported as what it is rather
+    than as a naming accident. An id that resolves to something other than the
+    operator placed there would be handed to the caller BY
+    :class:`AmbiguousNodeError` and then written through, which is worse than
+    saying nothing.
+    """
+    for nid, names in multi.items():
+        if nid in duplicates:
+            raise AssemblyError(
+                f"Node {nid!r} carries {len(names)} operator instances, and its "
+                f"contribution reaches the sink by {duplicates[nid]} paths — so the "
+                f"fold embeds each instance {duplicates[nid]} times and labels the "
+                f"repeated branches {nid!r}, {nid + '_2'!r}, ... . Those labels "
+                f"collide with the per-instance ids {list(names)}, leaving no id that "
+                f"names one instance: reading {nid + '_2'!r} would reach a whole "
+                "branch and writing it would rewrite that branch instead. Give the "
+                "paths their own nodes so each instance has one home; placing ONE "
+                f"composed operator at {nid!r} also removes the ambiguity, though a "
+                "node folded in twice stays unwritable."
+            )
+        for index, (name, op) in enumerate(zip(names, placement[nid], strict=True), 1):
+            found = _find_named(root, name)
+            if found is not op:
+                raise AssemblyError(
+                    f"Node {nid!r} would report {name!r} as the id of instance "
+                    f"{index} ({type(op).__name__}), but that id resolves to "
+                    f"{type(found).__name__ if found is not None else 'nothing'} in "
+                    "the assembled operator — it addresses the wrong part of the "
+                    "forward model, and replace_node/ParameterSpace would rewrite "
+                    f"that part. Re-assemble with one operator at {nid!r}."
+                )
 
 
 def _descend_to_own_stage(part: AbstractOperator, name: str) -> AbstractOperator:
@@ -726,11 +833,19 @@ def assemble(
     if final is None:
         raise AssemblyError("Nothing to assemble: no provided node reaches the sink.")
 
+    operator = final.to_operator()
+    # Addressing closure: the ids this assembly is about to promise must reach
+    # the operators they name, and a node the fold duplicated cannot be written
+    # through at all. Both are decided on the BUILT tree, so they cannot drift
+    # from what `_find_named`/`eqx.tree_at` actually do to it.
+    duplicates = _fold_duplicates(operator, placement, regions)
+    _check_promised_ids(operator, multi, placement, duplicates)
+
     claimed = set(placement) | set(region_of)
     lit = tuple(n for n in graph.nodes if n in claimed)
     live_span = _live_span(graph, lit)
     return Assembly(
-        operator=final.to_operator(),
+        operator=operator,
         graph_name=graph.name,
         lit=lit,
         skipped=tuple(n for n in skipped if n in live_span),
@@ -738,6 +853,7 @@ def assemble(
         root_label=final.stages[0][0] if len(final.stages) == 1 else "",
         instances=tuple((nid, names) for nid, names in multi.items()),
         materialized=tuple(materialized),
+        aliased=tuple(n for n in graph.nodes if n in duplicates),
     )
 
 

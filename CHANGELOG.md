@@ -57,6 +57,45 @@ one-instance and the two-instance assembly: that is the point. Answering the
 bare id with instance 1 would be the finite, correctly-shaped, wrong binding
 this package exists to refuse.
 
+**Follow-up: the ids the error message hands out are now checked.** The
+per-instance ids `x_1..x_n` above and the `x, x_2, x_3…` that `_dedup` mints
+for repeated branch labels are the same format, so on a graph where a node
+reaches a junction by two paths they collided — and the breadth-first lookup
+resolved the collision to the fold, as before. Measured on `x[many] -> p`,
+`x -> q`, `p -> j`, `q -> j`, with sources 10 and 20 at `x` (forward 60):
+
+```
+asm['x_1'] -> Src(10)        correct
+asm['x_2'] -> a fold over the q-path, NOT instance 2
+replace_node('x_2', Src(0))  <- literally what AmbiguousNodeError said to write
+           -> forward 60 -> 30    correct for dropping instance 2 is 20
+```
+
+`assemble()` now closes that loop on the *built* tree: every id it is about to
+promise must resolve to the very operator placed there, and no operator may
+occupy more than one position. It refuses with `AssemblyError` otherwise, so
+no caller is handed an id that rewrites the wrong subtree.
+
+The same probe found the identity check alone is not enough: `x_1` *does*
+round-trip, yet `replace_node('x_1', Src(0))` still returned 50 where dropping
+instance 1 is 40, because `eqx.tree_at` rewrites the one position the lookup
+reaches and the fork had folded the operator in twice. That is not specific to
+`many` — a *single* operator at such a node had the same defect all along
+(`replace_node('x', 0)` gave 10.0 where 0.0 is correct). `Assembly.aliased`
+now records those nodes and `replace_node` refuses on them; reading still
+works, since `assembly[nid]` genuinely is the operator sitting there.
+
+No shipped graph is affected: every node of the radio template reaches the
+sink by exactly one path, so `aliased` is always empty there and the `assemble`
+check never fires.
+
+**Known limit.** A hand-rolled `eqx.tree_at(lambda a: a[nid].x, ...)` does not
+go through `replace_node`, and neither does `ParameterSpace.bind`. On an
+aliased node binding a latent still rewrites one copy only — measured, 20.0 ->
+10.0 where 0.0 is correct. Closing that means deciding whether `Assembly.
+__getitem__` is an inspection API or a `tree_at` selector; it is tracked
+separately rather than settled here.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and
