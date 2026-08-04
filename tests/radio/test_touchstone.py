@@ -442,3 +442,91 @@ def test_interp_strict_handles_real_valued_y_not_just_complex():
     got = _interp_strict(np.array([0.5, 1.5]), x, y, what="real-valued test")
     assert not np.iscomplexobj(got)
     np.testing.assert_allclose(got, [15.0, 25.0])
+
+
+class TestTheOptionLineAndRowShapeGuards:
+    """Three refusals that fire, are well phrased, and were asserted nowhere.
+
+    Named in an audit of ``raise`` statements the full suite never executes:
+    of 375 in ``src/``, these are ingestion-layer guards a user meets by
+    handing the reader a real file from a real instrument, which is the
+    likeliest place in the package to meet one at all.
+
+    What being unpinned costs is not that the guard breaks -- it is that a
+    refactor downgrades it without anything noticing. Measured by neutralising
+    each guard on a copy of the tree, and the two results differ in kind:
+
+    * the row-shape check degrades to ``ValueError: zip() argument 2 is
+      shorter than argument 1``, which still raises but names nothing a user
+      could act on;
+    * the option-line format check degrades to **no error at all**. The file
+      parses, and a row ``0.1 0.2`` that meant nothing in particular comes
+      back as ``s11 = 1.0116+0.0035j`` -- a fall-through to the DB reading of
+      numbers whose format was never stated. Under RI the same row is
+      ``0.1+0.2j``. An order of magnitude wrong, finite, correctly shaped, and
+      silent.
+
+    So a test asserting only ``pytest.raises(DataIngestionError)`` would have
+    kept passing through the first degradation and could not have existed for
+    the second. Each test below pins the sentence, and the last pins that the
+    three sentences differ from one another.
+    """
+
+    def test_an_option_line_with_no_data_format_is_refused(self, tmp_path):
+        """``# MHZ S R 50`` -- a unit and a parameter type, no RI/MA/DB.
+
+        Distinct from ``test_data_before_the_option_line_raises``, which has
+        no option line at all: here the line is present and parses, and it is
+        the *format* token that is missing. The two share the substring
+        "option line", which is why this asserts the specific sentence.
+        """
+        with pytest.raises(DataIngestionError, match="names no data format"):
+            read_touchstone(write(tmp_path, "nofmt.s1p", "# MHZ S R 50\n60.0  0.1 0.2\n"))
+
+    def test_a_first_data_row_with_an_impossible_column_count_is_refused(self, tmp_path):
+        """The ``if`` branch above the one the suite already pins.
+
+        ``test_a_short_row_raises_instead_of_vanishing`` covers the ``elif``:
+        a LATER row disagreeing with the first. The branch above it -- the
+        FIRST row having a count that is neither 3 nor 9 -- had no test, and
+        it is the one that decides ``n_column`` for the whole file.
+
+        Four columns, deliberately: it is one more than a legal 1-port row, so
+        a reader that silently truncated to 3 would produce a perfectly valid
+        Touchstone from a corrupt file.
+        """
+        with pytest.raises(DataIngestionError, match=r"a Touchstone data row has 3"):
+            read_touchstone(
+                write(tmp_path, "wide.s1p", "# MHZ S RI R 50\n60.0  0.1 0.2 0.3\n")
+            )
+
+    def test_a_file_with_no_data_rows_at_all_is_refused(self, tmp_path):
+        """Header and comments, no numbers.
+
+        The empty-file case that would otherwise reach ``_build_touchstone``
+        with ``n_column=None``, whose parameter is typed ``int``. Comments and
+        a valid option line are included on purpose: a guard keyed on file
+        length rather than on rows parsed would pass this.
+        """
+        with pytest.raises(DataIngestionError, match="no data rows"):
+            read_touchstone(
+                write(tmp_path, "empty.s1p", "! a comment\n# MHZ S RI R 50\n! another\n")
+            )
+
+    def test_the_three_refusals_are_distinguishable_from_each_other(self, tmp_path):
+        """Each names its own cause, so a user is told which of the three it is.
+
+        Without this, three tests each matching a substring could all be
+        satisfied by one over-broad message -- and the file would read as
+        thoroughly covered while telling a user nothing.
+        """
+        messages = []
+        for name, text in [
+            ("nofmt.s1p", "# MHZ S R 50\n60.0  0.1 0.2\n"),
+            ("wide.s1p", "# MHZ S RI R 50\n60.0  0.1 0.2 0.3\n"),
+            ("empty.s1p", "! c\n# MHZ S RI R 50\n"),
+        ]:
+            with pytest.raises(DataIngestionError) as excinfo:
+                read_touchstone(write(tmp_path, name, text))
+            messages.append(str(excinfo.value))
+        assert len(set(messages)) == 3, messages
