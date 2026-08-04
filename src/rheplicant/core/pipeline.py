@@ -73,13 +73,89 @@ def resolve_names(
     return resolved
 
 
+def check_stage_ordering(
+    stages: Sequence[AbstractOperator], names: Sequence[str], owner: str = "Pipeline"
+) -> None:
+    """Enforce ``must_precede`` against THIS SEQUENCE, for composition by hand.
+
+    :func:`~rheplicant.core.graph.assemble` enforces the same declaration by
+    reachability on a template, and for a while it was the only thing that did.
+    The two routes compile to the same composition, so the refusal was one line
+    of call site away from silence::
+
+        assemble(..., At('noise', tone))   AssemblyError: 'bandpass' is not reachable
+        Pipeline(sky, band, gain, tone)    no error; the tone's response is 1.0
+
+    A tone injected downstream of the gain it is meant to track has a gain
+    response of exactly 1.0 — it monitors nothing, which is the sentence
+    ``must_precede_because`` exists to say — and the run converges and reports
+    healthy diagnostics.
+
+    **What this checks, and why it is weaker.** ``must_precede`` names nodes in
+    a *graph's* vocabulary; a Pipeline is domain-agnostic and has only
+    ``names``. So the question it can ask is sequence-local: *if a named stage
+    is present here, it must come after me*. A stage that is not present is not
+    a violation — the identical rule
+    :func:`~rheplicant.core.graph._check_ordering` applies to a node that was
+    never lit, and the reason is the same: an absent stage is one there is
+    nothing to pass through, and refusing there would reject every partial
+    model for the sake of a stage it never asked for.
+
+    Three things it therefore cannot do, all of them pinned in
+    ``tests/core/test_ordering.py`` rather than left to be discovered:
+
+    * refuse a constraint naming something no stage is called. ``assemble``
+      refuses an unknown node id, because a template has a node list and an
+      unenforceable declaration is prose; a Pipeline has no such list, so a typo
+      and a legitimately absent stage are the same observation here.
+    * see into a nested composite. ``names`` is one level deep; a target inside
+      a stage that is itself a Pipeline or a combinator is not a name this
+      sequence has.
+    * mean anything for the combinators. ``SumOperator`` and ``SelectOperator``
+      run their branches in parallel on the same input, so "precede" is not a
+      relation between two of them and they deliberately do not call this.
+
+    **Cost.** Called from ``Pipeline.__init__``, which equinox does NOT go
+    through when it rebuilds a Module: ``tree_unflatten`` reconstructs directly,
+    so a jit trace, a gradient and an ``eqx.tree_at`` edit re-run this zero
+    times (measured). It runs where a human composes a pipeline, which is the
+    only place the order can be chosen.
+    """
+    position = {name: i for i, name in enumerate(names)}
+    for index, (name, stage) in enumerate(zip(names, stages, strict=True)):
+        for target in stage.must_precede:
+            at = position.get(target)
+            if at is None or at >= index:
+                continue
+            because = f" {stage.must_precede_because}" if stage.must_precede_because else ""
+            raise PipelineError(
+                f"{owner} stage {index} ({type(stage).__name__}, named {name!r}) "
+                f"declares must_precede={list(stage.must_precede)}, but {target!r} "
+                f"is stage {at} of this sequence — it runs BEFORE this one, so "
+                f"nothing this operator contributes ever passes through {target!r}, "
+                f"and whatever {target!r} does to the signal is absent from it."
+                f"{because} Move it before {target!r}, or drop {target!r} if the "
+                "stage genuinely is not there. (This is the sequence-local half of "
+                "the constraint assemble() checks by reachability; a stage this "
+                "sequence does not contain is not a violation.)"
+            )
+
+
 class Pipeline(AbstractOperator):
     """An ordered, named composition of operators.
+
+    A stage whose physics depends on where it sits declares that with
+    :attr:`~rheplicant.core.operator.AbstractOperator.must_precede`, and
+    construction refuses an order that breaks it — sequence-locally, which is
+    all a domain-agnostic sequence can say. See :func:`check_stage_ordering`
+    for what that does and does not cover.
 
     Attributes:
         stages: the operators, applied first-to-last.
         names: unique stage names (static). Auto-derived from class names if
-            not given; pass ``names=`` for stable, meaningful labels.
+            not given; pass ``names=`` for stable, meaningful labels. They are
+            also the vocabulary ``must_precede`` is read in, so a pipeline whose
+            stages carry ordering constraints wants meaningful ones.
 
     Example::
 
@@ -101,6 +177,9 @@ class Pipeline(AbstractOperator):
     ):
         self.stages = validate_operators(stages, "Pipeline")
         self.names = resolve_names(stages, names)
+        # Screen first, then check the physics: what a stage is called has to be
+        # settled before what it must precede can name anything.
+        check_stage_ordering(self.stages, self.names)
 
     # -- execution -----------------------------------------------------------
 
