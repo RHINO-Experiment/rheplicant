@@ -165,6 +165,38 @@ class SelectOperator(AbstractOperator):
     (for graph-assembled selectors: the selector node's in-edge declaration
     order). Out-of-range values select nothing (that sample is zero).
 
+    **Selecting is not masking.** The selection is a ``jnp.where``, not
+    ``leaf * mask``. The two agree exactly while every branch is finite
+    everywhere, and the multiply was what this class did; it is wrong because
+    the identity it relies on — ``x * 0 == 0`` — fails for ``x`` non-finite,
+    and every branch is evaluated at every sample. One ``inf`` in a
+    switched-OFF sample of any branch entered the sum as ``inf * 0 -> nan``
+    and took the whole output with it. Whether it *did* depended on the
+    execution mode, since XLA may rewrite a multiply by a predicate into a
+    select and does so in some fusion contexts and not others: the forward
+    answer was correct by optimiser luck, and ``jax.disable_jit`` did not have
+    that luck. A ``where`` never reads the unselected value, in any mode.
+
+    **Precondition — branches must be finite at EVERY sample, including the
+    ones they are switched off for.** The ``where`` fixes the forward and
+    cannot fix the gradient, which is a claim worth being exact about.
+    Reverse mode differentiates every branch at every sample; a branch that
+    returns ``inf`` at a switched-off sample has an infinite residual there
+    (``d(a/t)/da = 1/t``), and the selector's zero cotangent for that sample
+    multiplies it as ``0 * inf -> nan`` — inside the branch's own backward
+    pass, before anything this class does. The nan then propagates to that
+    branch's parameters while the forward stays right and the other branches'
+    gradients stay finite, which is exactly the kind of failure that fits
+    through a shape check and a convergence plot alike.
+
+    The remedy belongs to the branch, and the branch can carry it: it receives
+    the same coordinates the selector read, so it can guard its own
+    singularity with the standard double-``where``
+    (``safe_t = jnp.where(t == 0, 1, t)``) and stay differentiable everywhere.
+    No shipped operator divides, so nothing here trips this; a user-supplied
+    calibration-load branch with a reciprocal in it is the case to write the
+    guard for.
+
     Attributes:
         branches: the selectable signal paths.
         names: unique branch names (static).
@@ -218,16 +250,24 @@ class SelectOperator(AbstractOperator):
                 )
             selected = switch == index
 
-            def apply_mask(leaf, mask=selected, branch=name):
+            def take_selected(leaf, mask=selected, branch=name):
                 if leaf.ndim < 1 or leaf.shape[0] != mask.shape[0]:
                     raise StateValidationError(
                         f"SelectOperator branch {branch!r} produced a leaf of shape "
                         f"{jnp.shape(leaf)}, but selection needs a leading time axis "
                         f"of length {mask.shape[0]} (the switch array length)."
                     )
-                return leaf * mask.reshape((mask.shape[0],) + (1,) * (leaf.ndim - 1))
+                per_sample = mask.reshape((mask.shape[0],) + (1,) * (leaf.ndim - 1))
+                # `jnp.where`, not `leaf * per_sample`: the unselected value is
+                # never read, so a branch that returns inf where it is switched
+                # OFF cannot reach the sum as `inf * 0 -> nan`. See the class
+                # docstring for why the multiply looked right anyway, and for
+                # the one thing this does NOT repair (the gradient).
+                # The zero is spelled with the leaf's own dtype so the select
+                # cannot silently promote an integer or boolean stream.
+                return jnp.where(per_sample, leaf, jnp.zeros((), leaf.dtype))
 
-            masked = jax.tree.map(apply_mask, contribution)
+            masked = jax.tree.map(take_selected, contribution)
             total = (
                 masked
                 if total is None
