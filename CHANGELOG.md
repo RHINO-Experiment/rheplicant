@@ -255,6 +255,48 @@ come apart in the Gibbs sweep over several latents this module is designed
 around, where the block for `'gain'` would have silently solved with another
 latent's prior.
 
+### The calibrators and the sampler now refuse an `observed` they would broadcast
+
+`wiener_solve` already refused a mis-shaped `observed`, and its message already
+explained why. The other three exits did not. Passing `observed[0]`, shape
+`(8,)`, to a model predicting `(24, 8)` — one slicing mistake — produced this:
+
+```
+  AdamCalibrator     : NO ERROR. final loss = 0.216759, max|g-g_true| = 0.4576
+                       g[:4] = [1.0024, 1.0024, 1.0024, 1.0024]  truth [1.0, 1.02, 1.04, 1.06]
+  GradientCalibrator : NO ERROR. final loss = 0.257105
+  NUTS               : NO ERROR. max|mean-g_true| = 0.4575
+```
+
+A converged loss of 0.22, a healthy chain, and every recovered gain wrong. The
+loss history was the only evidence available, and it said the fit worked.
+
+The refusal now lives in **one** place,
+`rheplicant.inference.check_observed_shape`, and the message that was already
+right is now the message all of them give. `GradientCalibrator.fit` and
+`AdamCalibrator.fit` check at entry (one `jax.eval_shape`, before `lax.scan`,
+so a 10⁶-step fit fails as fast as a 10-step one); the NumPyro observation site
+checks while the model is traced, so it costs nothing at run time and fires
+before the first draw. `observed=None` is still the prior-predictive call.
+
+The test is shape *equality* — not rank, and not broadcast-compatibility —
+because the dangerous slices are exactly the compatible ones. `(24, 1)` (one
+frequency channel where the whole band was meant) and `(1, 8)` (one time sample
+where the whole record was meant) preserve rank and broadcast just as silently
+as `(8,)` does; a rank-based check would admit both, and then a calibrator
+converges and `wiener_solve` returns a well-shaped `(24,)` gain estimate from a
+single column of data. All three shapes are refused at all four exits, and
+`tests/inference/test_observed_shape.py` sweeps all three through each of them.
+
+Nothing that broadcast legitimately changed: `noise_std` is still documented as
+broadcastable to the prediction, and still is.
+
+`fisher_information` was named in the same audit finding. It has no `observed`
+argument — a Fisher forecast is a function of the model and the noise alone — so
+there is nothing there to check; its one data-shaped argument, `flags`, was
+already guarded by `FlaggedNoise`. `tests/inference/test_observed_shape.py`
+pins that reading so the signature cannot gain an unchecked `observed` quietly.
+
 ### Two inference tutorials, and a sampler bug they found
 
 New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and

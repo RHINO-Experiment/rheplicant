@@ -69,6 +69,7 @@ from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
+from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
@@ -538,12 +539,7 @@ def _check_solve_arguments(
     keywords when they were given, the latent's declaration when they were not,
     and an exception when the two disagree.
     """
-    if jnp.shape(observed) != jnp.shape(block.offset):
-        raise ParameterSpaceError(
-            f"observed has shape {jnp.shape(observed)} but this block predicts "
-            f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
-            "problem and return a perfectly finite answer."
-        )
+    check_observed_shape(jnp.shape(block.offset), observed)
     prior_mean, prior_std = _resolve_prior(block, prior_mean, prior_std, caller)
     _require_prior_std(prior_std, caller)
     if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
