@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant import Coordinates, Environment, State
-from rheplicant.core.errors import StateValidationError
+from rheplicant.core.errors import DirtError, PipelineError, StateValidationError
 from rheplicant.core.graph import AssemblyError, At
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
@@ -72,20 +72,48 @@ def _tone(**kwargs):
 
 
 class TestTheOrderingConstraintIsEnforced:
-    """What the refusal is FOR — measured on both sides of it."""
+    """What the refusal is FOR — measured on both sides of it.
+
+    There are two refusals now, one per composition route: ``assemble`` by
+    reachability on the graph, ``Pipeline`` by the order of its own stage names.
+    They protect the same measurement, so it is taken once, below the container
+    that would otherwise refuse to produce it.
+    """
 
     def test_downstream_of_the_gain_the_tone_response_is_exactly_one(self, state):
-        """The silent failure, built by hand because ``assemble`` now refuses it.
+        """The silent failure, and the refusal that now stands in front of it.
 
-        This is the whole case for the mechanism: nothing here errors, nothing
-        is NaN, the shapes are right, and the calibrator is worthless.
+        This is the whole case for the mechanism: nothing about the wrong
+        composition errors, nothing is NaN, the shapes are right, and the
+        calibrator is worthless.
+
+        Both composition routes now refuse to *build* it — ``assemble`` by
+        reachability on the graph, ``Pipeline`` sequence-locally — so the
+        measurement is taken by applying the three operators directly, which is
+        precisely what the refused ``Pipeline`` would have done to the state.
+        The bypass is deliberate and it is the point: this number is the
+        evidence the check exists for, and a suite that could no longer produce
+        it would leave the refusal looking like an unmotivated cost to the next
+        person who finds it inconvenient. The second half of the test is the
+        refusal itself, so the bug and its fix are pinned in one place.
         """
-        wrong = Pipeline(
-            ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN), _tone()
-        )
-        bare = Pipeline(ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN))
-        response = (wrong(state).data - bare(state).data)[:, TONE_CHANNEL]
+        receiver = ReceiverOperator(bandpass=BANDPASS)
+        gain = GainOperator(gain=GAIN)
+        tone = _tone()
+
+        # -- the physics: what Pipeline(receiver, gain, tone) would have run ---
+        wrong = tone(gain(receiver(state)))
+        bare = Pipeline(receiver, gain)
+        response = (wrong.data - bare(state).data)[:, TONE_CHANNEL]
         assert jnp.allclose(response, TONE_KELVIN)  # gain response 1.0, exactly
+        # ... which is not what the tone does where it belongs: b * g, and the
+        # two disagree because BANDPASS and GAIN are neither 1.0 nor each other.
+        assert not jnp.allclose(response, TONE_KELVIN * BANDPASS[TONE_CHANNEL] * GAIN)
+
+        # -- the fix: that composition can no longer be built ------------------
+        with pytest.raises(PipelineError) as excinfo:
+            Pipeline(receiver, gain, tone)
+        assert "must_precede" in str(excinfo.value)
 
     def test_upstream_of_the_gain_the_tone_response_is_b_times_g(self, state):
         """The correct placement, and the reason the constraint is stated."""
@@ -111,6 +139,40 @@ class TestTheOrderingConstraintIsEnforced:
         assert "'bandpass'" in message and "'gain'" in message
         assert "'noise'" in message
         assert "response is exactly 1.0" in message
+
+    def test_both_routes_refuse_it_and_agree_on_why(self):
+        """The two refusals differ by LAYER and must not differ on the physics.
+
+        ``assemble`` speaks about a graph and raises ``AssemblyError``;
+        ``Pipeline`` speaks about a sequence it can see the names of and raises
+        ``PipelineError``. That difference is deliberate — each names the thing
+        that was misconfigured, and the graph one can say more, because it knows
+        the tone was put on ``noise`` and that ``bandpass`` is unreachable from
+        there, where the sequence one only knows ``gain`` runs first. It costs a
+        caller nothing: both derive from ``DirtError`` and from ``ValueError``,
+        so one ``except`` clause catches either.
+
+        What may not drift is what they say goes *wrong*, and both quote the
+        operator's own ``must_precede_because`` back.
+        """
+        with pytest.raises(AssemblyError) as by_graph:
+            assemble(
+                ReceiverOperator(bandpass=BANDPASS),
+                GainOperator(gain=GAIN),
+                At("noise", _tone()),
+            )
+        with pytest.raises(PipelineError) as by_sequence:
+            Pipeline(
+                ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN), _tone()
+            )
+        for excinfo in (by_graph, by_sequence):
+            message = str(excinfo.value)
+            assert "CWCalibrationOperator" in message  # the operator
+            assert "['bandpass', 'gain']" in message  # the constraint it declared
+            assert "response is exactly 1.0" in message  # what goes silently wrong
+            assert isinstance(excinfo.value, DirtError)
+            assert isinstance(excinfo.value, ValueError)
+        assert type(by_graph.value) is not type(by_sequence.value)
 
     def test_assemble_accepts_the_tone_at_its_home_node(self, state):
         twin = assemble(
