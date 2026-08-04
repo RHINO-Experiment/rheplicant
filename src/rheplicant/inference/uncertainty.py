@@ -11,6 +11,13 @@ Two complementary routes, both riding on the framework's differentiability:
   (delta method). Exact for models linear in the parameters; a local
   approximation otherwise.
 
+  ``F = J^T N^-1 J`` is the LIKELIHOOD's information and nothing else, which
+  is a different quantity from the posterior precision the other exits target.
+  Pass ``space=`` a :class:`~rheplicant.inference.parameters.ParameterSpace`
+  and the declared Gaussian priors' curvature is added, so a forecast and a
+  NUTS run over one declaration answer the same question; leave it out and the
+  result says ``kind="fisher"``, meaning exactly what it says.
+
 - **Monte Carlo pushforward** — :func:`push_forward` vmaps ``forward`` over
   a stack of parameter samples (e.g. a NumPyro posterior via
   :func:`~rheplicant.inference.numpyro_bridge.predict_from_samples`), giving the
@@ -34,13 +41,15 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
-from rheplicant.core.errors import StateValidationError
+from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.inference.noise import (
     FlaggedNoise,
     HomoscedasticNoise,
     NoiseModel,
+    check_noise_std_axis,
     inverse_variance,
 )
+from rheplicant.inference.parameters import ParameterSpace
 
 
 def _named_spans(
@@ -71,6 +80,20 @@ def _named_spans(
     return tuple(names), tuple(spans), tuple(shapes)
 
 
+# What each kind reports, and what inverting it gives. A precision-like kind is
+# one whose sqrt(diag(.)) is not an error bar, which is the only thing `sigma`
+# has to branch on; keeping the two facts in one table means a new kind cannot
+# be added to one of them and forgotten in the other.
+_PRECISION_KINDS: dict[str, str] = {
+    "fisher": "a Fisher matrix",
+    "posterior_precision": "a posterior precision matrix",
+}
+_INVERSE_KIND: dict[str, str] = {
+    "fisher": "covariance",
+    "posterior_precision": "posterior_covariance",
+}
+
+
 class FlatMatrix(eqx.Module):
     """A matrix over a FLATTENED parameter vector, carrying its provenance.
 
@@ -89,9 +112,23 @@ class FlatMatrix(eqx.Module):
     Attributes:
         matrix: the ``(n_params, n_params)`` array.
         structure: treedef of the parameter pytree it was computed for.
-        kind: ``"fisher"``, ``"covariance"``, or ``"matrix"``. Not decoration:
-            ``sqrt(diag(F))`` is not an error bar, so :meth:`sigma` refuses to
-            pretend otherwise on a Fisher matrix.
+        kind: which quantity this is. Not decoration, twice over.
+
+            ``"fisher"`` and ``"posterior_precision"`` are precisions:
+            ``sqrt(diag(.))`` is not an error bar, so :meth:`sigma` refuses to
+            pretend otherwise on either.
+
+            ``"covariance"`` and ``"posterior_covariance"`` are the two things
+            :meth:`sigma` can report, and they are different quantities. The
+            first is the Cramer-Rao bound — the width the DATA alone supports,
+            with no prior in it. The second includes the declared
+            ``Latent(prior=...)`` curvature and is what a NUTS chain over the
+            same space is a sample from. Comparing the two as if they were one
+            quantity is the failure this field exists to make visible: under an
+            informative prior they can differ by orders of magnitude, and both
+            are finite, correctly shaped and plausible.
+
+            ``"matrix"`` is the default for anything constructed by hand.
         names, spans, shapes: per-parameter name, ``(start, stop)`` span in the
             flat vector, and original shape. ``None`` for unnamed pytrees.
     """
@@ -122,14 +159,20 @@ class FlatMatrix(eqx.Module):
     def sigma(self, name: str) -> jax.Array:
         """Marginal standard deviation(s) of one named parameter.
 
-        Only meaningful on a covariance: raises on a Fisher matrix rather than
-        returning ``sqrt(diag(F))``, which looks like an error bar and is not
-        one — inverting is exactly the step that couples the parameters.
+        Only meaningful on a covariance: raises on either precision kind rather
+        than returning ``sqrt(diag(.))``, which looks like an error bar and is
+        not one — inverting is exactly the step that couples the parameters.
+
+        What it reports depends on :attr:`kind` and the caller has to know
+        which: on a ``"covariance"`` it is the Cramer-Rao bound from the
+        likelihood alone, on a ``"posterior_covariance"`` it is the posterior
+        width including the declared priors.
         """
-        if self.kind == "fisher":
+        if self.kind in _PRECISION_KINDS:
             raise StateValidationError(
-                "sqrt(diag(F)) of a Fisher matrix is not a standard deviation — it ignores "
-                "every parameter degeneracy. Invert it with parameter_covariance() first."
+                f"sqrt(diag(.)) of {_PRECISION_KINDS[self.kind]} is not a standard "
+                "deviation — it ignores every parameter degeneracy. Invert it with "
+                "parameter_covariance() first."
             )
         index = self._index(name)
         start, stop = self.spans[index]
@@ -173,7 +216,13 @@ def _flat_forward(
     return f_flat, x0, forward(params)
 
 
-def as_noise_model(noise_std: Any, flags: jax.Array | None = None) -> NoiseModel:
+def as_noise_model(
+    noise_std: Any,
+    flags: jax.Array | None = None,
+    *,
+    prediction_shape: Any | None = None,
+    caller: str = "as_noise_model",
+) -> NoiseModel:
     """Normalize a ``noise_std`` argument into a :class:`NoiseModel`.
 
     A bare scalar or array becomes :class:`HomoscedasticNoise`; a noise model
@@ -184,7 +233,21 @@ def as_noise_model(noise_std: Any, flags: jax.Array | None = None) -> NoiseModel
     The discrimination is by ``depends_on_prediction``, not by ``std``: jax and
     numpy arrays both *have* a ``.std`` method, so the protocol's data member
     is the only unambiguous marker.
+
+    Args:
+        noise_std: a scalar, an array, or a :class:`NoiseModel`.
+        flags: optional boolean mask; ``True`` = not observed.
+        prediction_shape: the shape the model predicts, when the caller knows
+            it. Supplying it turns on
+            :func:`~rheplicant.inference.noise.check_noise_std_axis`, which
+            refuses a 1-D sigma whose axis the prediction cannot settle.
+            Optional because this function is also called from inside a NumPyro
+            model body, *before* the prediction exists; omitting it is the old
+            behaviour exactly.
+        caller: the exit to name if that check refuses.
     """
+    if prediction_shape is not None:
+        check_noise_std_axis(noise_std, prediction_shape, caller)
     noise = (
         noise_std
         if isinstance(noise_std, NoiseModel)
@@ -217,27 +280,138 @@ def _log_sigma_curvature(
     return jac.T @ jac
 
 
+def _prior_precision(
+    space: ParameterSpace,
+    names: tuple[str, ...] | None,
+    spans: tuple[tuple[int, int], ...] | None,
+    shapes: tuple[tuple, ...] | None,
+    size: int,
+) -> jax.Array:
+    """``-d2 log p(theta)/dtheta2`` of the declared priors, over the flat vector.
+
+    For a Gaussian ``N(m, s)`` the log-density's curvature is ``1/s^2``,
+    independent of where it is evaluated — the one prior family whose
+    contribution to the information is a constant matrix and not a function of
+    the expansion point. That is exactly the family
+    :func:`~rheplicant.inference.linear.wiener_solve` calls conjugate, so
+    reading the SAME declaration here is what keeps the Fisher forecast and the
+    conjugate solve talking about one posterior.
+
+    Anything else is refused rather than approximated. Substituting a
+    Uniform's variance would report a crisp Gaussian posterior for a prior with
+    no curvature at all, narrower than the truth wherever the declared prior is
+    bounded — the identical failure the conjugate exits already refuse, in the
+    identical words.
+    """
+    # Imported where it is used rather than at module scope: `linear` is the
+    # module that owns what "a Gaussian prior ON THE LATENT" means (it refuses
+    # LogNormal, which carries .loc/.scale and a Normal .base_dist while being
+    # Gaussian in log x), and a function-local import keeps the two modules
+    # free to depend on each other in the other direction later.
+    from rheplicant.inference.linear import _gaussian_parameters
+
+    if names is None or spans is None or shapes is None:
+        raise StateValidationError(
+            "fisher_information was given a ParameterSpace, but these params are not "
+            "named — they came from a plain pytree, so there is no span to add each "
+            "latent's prior curvature at and placing it by position would be a guess. "
+            "Build the forward function with ParameterSpace.forward_fn, whose params "
+            "are the {name: array} dict this matrix's rows are named from."
+        )
+    if tuple(sorted(names)) != tuple(sorted(space.names)):
+        raise ParameterSpaceError(
+            f"fisher_information was given params named {list(names)} but a "
+            f"ParameterSpace declaring {list(space.names)} — the two do not match, so "
+            "some latent's prior would be added at another latent's span, or dropped. "
+            "Pass the params that ParameterSpace.forward_fn returned for this space."
+        )
+
+    precision = jnp.zeros(size)
+    for name, (start, stop), shape in zip(names, spans, shapes, strict=True):
+        prior = space.latent(name).prior
+        if prior is None:
+            raise ParameterSpaceError(
+                f"fisher_information was given a ParameterSpace in which latent "
+                f"{name!r} declares no prior, so what it returns would be a posterior "
+                "precision for every latent but that one — a matrix that is part "
+                "likelihood and part posterior, reported under a single name. A "
+                "prior-free latent is a free parameter: fine for the calibrators and "
+                "for the likelihood Fisher (drop `space=` and you get exactly that), "
+                "meaningless in a posterior. Declare Latent(prior=dist.Normal(...)), "
+                "or ask for the likelihood matrix and say so."
+            )
+        gaussian = _gaussian_parameters(prior)
+        if gaussian is None:
+            raise ParameterSpaceError(
+                f"fisher_information was given a ParameterSpace, but latent {name!r} "
+                f"declares a {type(prior).__name__} prior, which has no quadratic form. "
+                "A Fisher matrix with a prior in it is -d2 log p/dtheta2 summed over "
+                "likelihood and prior, and the second derivative of this prior is not a "
+                "constant matrix; substituting the distribution's mean and variance "
+                "would return a finite, confident posterior precision for a prior you "
+                "did not declare — narrower than the truth wherever the declared prior "
+                "is skewed or bounded. Sample this space with to_numpyro_model + NUTS "
+                "instead, which honours the prior as written, or drop `space=` and read "
+                "the result as the likelihood Fisher it then is."
+            )
+        _, scale = gaussian
+        variance = jnp.ravel(jnp.broadcast_to(jnp.asarray(scale), shape)) ** 2
+        precision = precision.at[start:stop].set(1.0 / variance)
+    return jnp.diag(precision)
+
+
 def fisher_information(
     forward: Callable[[Any], jax.Array],
     params: Any,
     noise_std: Any,
     flags: jax.Array | None = None,
+    *,
+    space: ParameterSpace | None = None,
 ) -> jax.Array:
-    """Fisher information matrix at ``params``, for independent Gaussian noise.
+    """Fisher information at ``params`` — **likelihood-only unless given a space**.
+
+    With ``space=None`` (the default, and what this function has always done)
+    the matrix is ``F = J^T N^-1 J``: the information the DATA carries, and
+    nothing else. It is not a posterior precision, and its inverse is a
+    Cramer-Rao bound rather than an error bar you could compare with a NUTS
+    posterior run under informative priors. That distinction used to be
+    invisible, and it mattered: ``Latent(prior=...)`` is the package's one
+    statement of what a latent is a priori and every other exit reads it —
+    :func:`~rheplicant.inference.linear.wiener_solve` solves with it as ``S``
+    and refuses a prior-free linear latent by name — while this function never
+    saw the :class:`~rheplicant.inference.parameters.ParameterSpace` at all.
+    Tightening a declared prior by a factor of 5,000,000 moved the reported
+    error bar by exactly zero.
+
+    Pass ``space=`` and the declared Gaussian priors' own curvature is added at
+    each latent's span, giving the **posterior precision** at ``params``; the
+    result is tagged ``kind="posterior_precision"`` and its inverse
+    ``kind="posterior_covariance"``, so which quantity was reported survives
+    into the object rather than living in the caller's memory.
 
     Args:
         forward: ``f(params) -> prediction``.
         params: where to evaluate.
-        noise_std: standard deviation — scalar or broadcastable to the
-            prediction — **or** a :class:`~rheplicant.inference.noise.NoiseModel`.
+        noise_std: standard deviation — a scalar, or an array whose axes say
+            which axis of the prediction it runs along (``(n, 1)`` / ``(1, n)``;
+            see :func:`~rheplicant.inference.noise.check_noise_std_axis`) —
+            **or** a :class:`~rheplicant.inference.noise.NoiseModel`.
         flags: optional boolean mask; flagged samples carry zero weight, the
             same convention as
             :class:`~rheplicant.inference.likelihood.MaskedGaussianLikelihood`.
+        space: the declaration ``params`` was built from. Optional, and its
+            absence is a real answer rather than a missing argument — the
+            likelihood Fisher is the standard forecasting quantity. When given,
+            every latent must declare a Gaussian prior: a prior-free one, or one
+            with no quadratic form (a Uniform, a Half-Normal, a LogNormal),
+            raises :class:`~rheplicant.core.errors.ParameterSpaceError` by name
+            rather than being approximated away.
 
     Returns:
-        A :class:`FlatMatrix` — the ``(n_params, n_params)`` Fisher matrix
+        A :class:`FlatMatrix` — the ``(n_params, n_params)`` matrix
         (``.matrix``) over the flattened parameter vector, tagged with the
-        parameter structure it belongs to.
+        parameter structure it belongs to and with ``kind`` saying which
+        quantity it is.
 
     Note:
         **When the noise depends on the parameters, ``J^T N^-1 J`` is not the
@@ -258,16 +432,25 @@ def fisher_information(
     """
     f_flat, x0, prediction = _flat_forward(forward, params)
     jacobian = jax.jacfwd(f_flat)(x0)  # (n_data, n_params)
-    noise = as_noise_model(noise_std, flags)
+    noise = as_noise_model(
+        noise_std,
+        flags,
+        prediction_shape=jnp.shape(prediction),
+        caller="fisher_information",
+    )
     weights = jnp.ravel(inverse_variance(noise, prediction))
     matrix = jacobian.T @ (weights[:, None] * jacobian)
     if noise.depends_on_prediction:
         matrix = matrix + 2.0 * _log_sigma_curvature(noise, f_flat, x0, prediction)
     names, spans, shapes = _named_spans(params)
+    kind = "fisher"
+    if space is not None:
+        matrix = matrix + _prior_precision(space, names, spans, shapes, x0.size)
+        kind = "posterior_precision"
     return FlatMatrix(
         matrix=matrix,
         structure=jax.tree_util.tree_structure(params),
-        kind="fisher",
+        kind=kind,
         names=names,
         spans=spans,
         shapes=shapes,
@@ -275,18 +458,30 @@ def fisher_information(
 
 
 def parameter_covariance(fisher: FlatMatrix, jitter: float = 0.0) -> FlatMatrix:
-    """Invert a Fisher matrix into a parameter covariance (Cramer-Rao bound).
+    """Invert a Fisher matrix (or a posterior precision) into a covariance.
+
+    Inversion does not change *which* quantity is being inverted, so ``kind``
+    is carried across rather than reset: a likelihood Fisher gives a
+    ``"covariance"`` — the Cramer-Rao bound, what the data alone can do — and a
+    ``"posterior_precision"`` gives a ``"posterior_covariance"``, whose
+    :meth:`FlatMatrix.sigma` is a posterior width comparable with a NUTS chain
+    run under the same declaration. The two are different numbers and used to
+    come back under the same label.
 
     Args:
         fisher: output of :func:`fisher_information`.
         jitter: optional Tikhonov term added to the diagonal for
             near-degenerate parameter combinations (prior-like regularizer).
+            Note what it is on a likelihood Fisher: an undeclared Gaussian
+            prior of width ``1/sqrt(jitter)``, chosen for numerical comfort
+            rather than declared. ``fisher_information(..., space=...)`` is the
+            same regularization with the prior written down.
     """
     n = fisher.matrix.shape[0]
     return FlatMatrix(
         matrix=jnp.linalg.inv(fisher.matrix + jitter * jnp.eye(n)),
         structure=fisher.structure,
-        kind="covariance",
+        kind=_INVERSE_KIND.get(fisher.kind, "covariance"),
         names=fisher.names,
         spans=fisher.spans,
         shapes=fisher.shapes,
