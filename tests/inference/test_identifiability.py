@@ -22,6 +22,7 @@ import subprocess
 import sys
 from typing import ClassVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -441,6 +442,27 @@ class TestConditionalBlocks:
         assert there.rank == 0
         assert there.weakest_identified == 0.0
         assert here.weakest_identified > 0.0
+
+    def test_it_works_through_a_raw_bind_space(self, state):
+        """``ParameterSpace.raw`` is the escape hatch, and it reaches the model
+        by a different route (an opaque bind function rather than compiled
+        ``Bind`` blocks). Everything here goes through ``forward_fn``, so it
+        should not care — pinned rather than assumed, because "should not care"
+        is how untested paths get described right up until they break.
+        """
+        pipeline = make_pipeline(0.0)
+        space = ParameterSpace.raw(
+            latents=[Latent("gain", init=GAIN0), Latent("t_coeff", init=COEFF0)],
+            bind=lambda p, v: eqx.tree_at(
+                lambda q: (q["gain"].gain, q["t_ant"].t_ant),
+                p,
+                (v["gain"], TIME_BASIS @ v["t_coeff"] @ FREQ_BASIS.T),
+            ),
+        )
+        report = identifiability(space, pipeline, state)
+        assert (report.n_par, report.rank, report.nullity) == (17, 16, 1)
+        share = report.participation(0)
+        assert share["gain"] == pytest.approx(0.5, abs=0.05)
 
     def test_at_rejects_an_unknown_name(self, state):
         with pytest.raises(ParameterSpaceError, match="not a latent"):

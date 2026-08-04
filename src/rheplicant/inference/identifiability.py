@@ -432,6 +432,13 @@ def identifiability(
             return jnp.ravel(forward({**values0, **block}))
 
         jacobian = jax.jacfwd(f_flat)(x0)  # (n_data, n_par)
+        # This catches a model that pins its OUTPUT to single precision, which
+        # is the way it actually happens (one astype in one operator). It cannot
+        # catch a model that rounds an INTERMEDIATE to float32 and promotes back
+        # — the dtype is then honest and the digits are gone anyway. Nothing
+        # cheap distinguishes that from a genuinely float64 model, so the limit
+        # is stated rather than papered over: if a model does that, its
+        # `weakest_identified` will sit near 1e-7 and should not be believed.
         if jacobian.dtype != jnp.float64:
             raise StateValidationError(
                 f"This model computes its prediction in {jacobian.dtype} even with x64 "
