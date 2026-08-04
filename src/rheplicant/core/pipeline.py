@@ -74,7 +74,7 @@ def resolve_names(
 
 
 def check_stage_ordering(
-    stages: Sequence[AbstractOperator], names: Sequence[str], owner: str = "Pipeline"
+    stages: Sequence[AbstractOperator], names: Sequence[str]
 ) -> None:
     """Enforce ``must_precede`` against THIS SEQUENCE, for composition by hand.
 
@@ -113,7 +113,10 @@ def check_stage_ordering(
       sequence has.
     * mean anything for the combinators. ``SumOperator`` and ``SelectOperator``
       run their branches in parallel on the same input, so "precede" is not a
-      relation between two of them and they deliberately do not call this.
+      relation between two of them and they deliberately do not call this —
+      which is why this takes no ``owner`` argument the way
+      :func:`validate_operators` and :func:`resolve_names` do. A sequence is
+      the only thing it has anything to say about.
 
     **Cost.** Called from ``Pipeline.__init__``, which equinox does NOT go
     through when it rebuilds a Module: ``tree_unflatten`` reconstructs directly,
@@ -129,7 +132,7 @@ def check_stage_ordering(
                 continue
             because = f" {stage.must_precede_because}" if stage.must_precede_because else ""
             raise PipelineError(
-                f"{owner} stage {index} ({type(stage).__name__}, named {name!r}) "
+                f"Pipeline stage {index} ({type(stage).__name__}, named {name!r}) "
                 f"declares must_precede={list(stage.must_precede)}, but {target!r} "
                 f"is stage {at} of this sequence — it runs BEFORE this one, so "
                 f"nothing this operator contributes ever passes through {target!r}, "
