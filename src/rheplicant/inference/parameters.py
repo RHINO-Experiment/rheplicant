@@ -115,6 +115,13 @@ class Latent(eqx.Module):
         prior: a NumPyro distribution, or ``None``. ``None`` means a *free*
             parameter: usable by the optimizers, rejected by the Bayesian
             bridge (a parameter with no prior has no place in a posterior).
+            Read by every inference exit, not only the sampler: a Gaussian
+            declared here is the ``S`` that
+            :func:`~rheplicant.inference.linear.wiener_solve` and
+            :func:`~rheplicant.inference.linear.gcr_sample` solve with, so the
+            two routes to a posterior cannot drift apart. A prior with no
+            conjugate Gaussian form is fine — it is simply an error at those
+            exits rather than silently ignored there.
         linear: assert that the prediction is an **affine** function of this
             latent, holding the others fixed. Unlocks
             :func:`~rheplicant.inference.linear.linear_operator` and the

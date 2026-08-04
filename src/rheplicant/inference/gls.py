@@ -104,7 +104,7 @@ def iterative_gls(
     observed: jax.Array,
     *,
     noise: NoiseModel,
-    prior_std: Any,
+    prior_std: Any = None,
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
@@ -123,9 +123,12 @@ def iterative_gls(
         block: from :func:`~rheplicant.inference.linear.linear_operator`.
         observed: the data, shaped like ``block.offset``.
         noise: the noise model — supplies sigma at each prediction.
-        prior_std: prior standard deviation on the latent. Required, for the
-            reason :func:`wiener_solve` requires it.
-        prior_mean: centre of the prior; defaults to zero.
+        prior_std: prior standard deviation on the latent. Defaults to the
+            latent's declared prior, and required only when there is none, for
+            the reason :func:`wiener_solve` requires it. Resolved once here and
+            passed down explicitly, so every inner solve sees the same ``S``.
+        prior_mean: centre of the prior; defaults to the declared prior's
+            location, and to zero when nothing is declared.
         tol: CG tolerance for each inner solve.
         maxiter: CG iteration cap for each inner solve.
         reweight_tol: stop when the latent's relative change falls below this.
@@ -173,7 +176,9 @@ def iterative_gls(
         a fixed point, so implicit differentiation — not unrolling — is the
         right way to take a gradient through it.
     """
-    _check_solve_arguments(block, observed, prior_std, "iterative_gls")
+    prior_mean, prior_std = _check_solve_arguments(
+        block, observed, prior_mean, prior_std, "iterative_gls"
+    )
     if not 1 <= min_reweights <= max_reweights:
         raise ParameterSpaceError(
             f"iterative_gls needs 1 <= min_reweights <= max_reweights, got "
