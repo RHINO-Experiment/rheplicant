@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+### A twin that draws its own noise is refused at every inference exit
+
+**Breaking, for one shape of call.** Handing a forward model containing a
+stochastic stage to any inference entry point now raises `ParameterSpaceError`
+naming the stage. `NoiseOperator` and `RFIOperator` are the two shipped
+operators affected. Generating data with them is unchanged and is what they are
+for — it is the *fit target* that may not contain one.
+
+**What was wrong.** Inference closes the model over one template state, so an
+operator consuming the PRNG draws ONE realisation and adds that same frozen
+field to every prediction compared against the data. Measured on an 8×8 grid in
+float64, `observed` generated from the honest model at g = 1.1 plus independent
+2 K scatter, the only difference between the rows being whether
+`NoiseOperator(sigma=20)` sits in the twin:
+
+```
+clean twin: estimate 1.101511  posterior 1.101545 +/- 0.002451   (truth 1.100000)
+noisy twin: estimate 1.082393  posterior 1.082427 +/- 0.002451   (truth 1.100000)
+```
+
+**7.8 σ of bias, reported with an error bar identical to every digit.** The
+magnitude is the draw; the invisibility is structural. Adding a constant field
+is exactly affine, so `check_linearity` sees residual 0.0 and `identifiability`
+reports full rank. There is no numerical symptom for any diagnostic to find,
+which is why the detector is the operators' own declaration.
+
+**`'key'` in `requires` is now a contract rather than a note.** `requires` and
+`provides` were declared by 31 classes and read by nothing;
+`rheplicant.core.contract` is the consumer. `refuse_stochastic_stages` walks the
+assembled tree and refuses, and two call sites —`ParameterSpace.validate` and
+`build_forward_fn` — cover all ten pipeline-accepting entry points:
+`check_linearity`, `linear_operator` (hence `wiener_solve`, `gcr_sample`,
+`iterative_gls`), `identifiability`, `to_numpyro_model`, `predict_from_samples`,
+`SamplingPlan.estimate`, `SamplingPlan.sample`, `build_forward_fn` (hence both
+calibrators) and `simulate_pairs`. A new stochastic operator is covered the day
+it declares what it reads.
+
+The rest of `requires`/`provides` stays descriptive, and the class docstring now
+says so with its reasons instead of promising a checker. Threading available
+State paths forward is not implementable against the shipped set:
+`GroundPickupOperator` declares `"env.temperature"` and documents a `t_ground`
+fallback for when it is absent, so the declaration means "reads if present".
+And `provides` is `("data",)` on 26 of the 31 declaring classes.
+
+### `Assembly.without(node_id)`, and two entry points that took objects they could not use
+
+`replace_node(node, None)` returned a live `Assembly` whose `lit` and whose
+mermaid rendering both still claimed the stage was there, and which then died
+with `TypeError: 'NoneType' object is not callable`. There was no `without()`
+anywhere, so "take this stage out" had no supported spelling. `replace_node`
+now refuses `None` by name and points at `without()`; any other non-operator
+goes through the same `validate_operators` screen `Pipeline` and the combinators
+use.
+
+`assemble()` calls that screen too. Before `must_precede` landed, a
+non-operator reached the fold and failed there; the ordering work turned it into
+`AttributeError: 'Bare' object has no attribute 'must_precede'`.
+`assemble(At('t1', Bare()))` now says what `Pipeline(Bare())` has always said.
+
+`Assembly.without(node_id)` re-runs `assemble()` over the remaining operators
+rather than editing the tree, so the result is exactly the assembly that not
+providing the operator would have given — honest
+`lit`/`skipped`/`has_source`/`materialized`, and every assembly-time refusal
+re-run. Dropping a source a summed branch needed gives assemble's own "no live
+source upstream". A region is dropped whole and re-placed over its whole path;
+a `many` node is dropped whole. The new static `Assembly.placements` field
+records the recipe as addresses, sorted by template order so that argument
+order stays irrelevant.
+
 ### The CW tone is a line now, and both ends of "how wide" are guarded
 
 **Breaking, twice.** `CWCalibrationOperator` no longer models the tone as one
