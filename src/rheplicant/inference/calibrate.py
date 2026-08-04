@@ -14,8 +14,13 @@ from typing import Any
 import equinox as eqx
 import jax
 
-from rheplicant.core.errors import StateValidationError
-from rheplicant.inference.likelihood import check_observed_shape, mean_squared_error
+from rheplicant.core.errors import ParameterSpaceError, StateValidationError
+from rheplicant.inference.likelihood import (
+    MAXIMIZE,
+    check_observed_shape,
+    mean_squared_error,
+    sense_of,
+)
 
 
 def _refuse_mis_shaped_observed(
@@ -35,6 +40,79 @@ def _refuse_mis_shaped_observed(
     check_observed_shape(
         jax.numpy.shape(prediction), observed, predictor="this forward model"
     )
+
+
+def _refuse_a_score_the_optimizer_would_walk_away_from(
+    loss_fn: Callable[[jax.Array, jax.Array], jax.Array],
+    forward: Callable[[Any], jax.Array],
+    params0: Any,
+    observed: jax.Array,
+) -> None:
+    """Refuse a scoring function whose optimum lies the wrong way.
+
+    Both calibrators MINIMIZE. A log-density has the same signature as an
+    error and must be MAXIMIZED, so passing one type-checks, runs, and
+    descends a function unbounded below while the loss history — the only
+    evidence a user has — looks like textbook convergence. Measured on a
+    one-parameter gain fit with truth ``g = 1.0``::
+
+        mean_squared_error       ->  g = +0.9999    loss  2499  ->  0.002617
+        GaussianLikelihood(0.05) ->  g = -30.7349   loss -3.2e7 -> -1.3e11
+
+    The check is in two parts, and the second is the one that matters.
+
+    **Declared.** :func:`~rheplicant.inference.likelihood.sense_of` reads a
+    ``sense`` attribute. Cheap, exact, and gives the best message — but it
+    only sees objects that declare it, so on its own it is a whitelist, and a
+    whitelist is wrong about precisely the code it has not met.
+
+    **Measured.** A scoring function is evaluated where it is unambiguous: at
+    the *perfect* prediction, ``loss_fn(observed, observed)``. An error attains
+    its minimum there; a log-density attains its maximum. So if scoring the
+    perfect prediction returns a value ABOVE the score at the starting
+    parameters, the function increases toward the truth and a minimizer will
+    run away from it. That holds for any callable, including a user's own
+    likelihood class and a bare lambda, with no declaration at all.
+
+    Costs one extra evaluation of ``forward`` and two of ``loss_fn`` on
+    concrete arrays, once, at entry — negligible against a fit, and outside
+    the ``lax.scan`` the optimizers run.
+
+    Raises:
+        ParameterSpaceError: if the sense is wrong by either test, or if the
+            score at the starting parameters is not finite. The last is not
+            scope creep: a non-finite score makes the comparison unable to
+            judge, and NaN compares False against everything, so treating it
+            as "cannot tell, proceed" would let the case this guard exists for
+            through whenever it arrives with a NaN attached.
+    """
+    if sense_of(loss_fn) == MAXIMIZE:
+        raise ParameterSpaceError(
+            f"{type(loss_fn).__name__} declares sense={MAXIMIZE!r}: it is a "
+            "log-density, and this calibrator minimizes. Minimizing a log-density "
+            "walks away from the truth while reporting an improving loss. Pass "
+            "`lambda p, o: -likelihood(p, o)`, or use a likelihood-aware route "
+            "(numpyro_bridge, SamplingPlan)."
+        )
+
+    at_start = jax.numpy.asarray(loss_fn(forward(params0), observed))
+    at_truth = jax.numpy.asarray(loss_fn(observed, observed))
+    if not jax.numpy.isfinite(at_start) or not jax.numpy.isfinite(at_truth):
+        raise ParameterSpaceError(
+            f"the loss is not finite at entry (start={at_start}, perfect-fit="
+            f"{at_truth}). A fit cannot begin from here, and the sense of the "
+            "scoring function cannot be established either — a non-finite score "
+            "compares False against everything."
+        )
+    if at_truth > at_start:
+        raise ParameterSpaceError(
+            f"{getattr(loss_fn, '__name__', type(loss_fn).__name__)} scores a "
+            f"PERFECT prediction ({at_truth}) higher than the starting one "
+            f"({at_start}), so it increases toward the truth and must be "
+            "maximized — but this calibrator minimizes, and will walk away from "
+            "the answer while the loss history improves. Negate it: "
+            "`lambda p, o: -score(p, o)`."
+        )
 
 
 class GradientCalibrator(eqx.Module):
@@ -69,10 +147,14 @@ class GradientCalibrator(eqx.Module):
 
         Raises:
             ParameterSpaceError: if ``observed`` is not shaped exactly like
-                ``forward(params0)``. A broadcastable mismatch minimizes a
-                different objective and reports a small, converged loss for it.
+                ``forward(params0)``, or if ``loss_fn`` is a log-density rather
+                than an error. Both minimize something other than what was
+                asked and report a small, converged loss for it.
         """
         _refuse_mis_shaped_observed(forward, params0, observed)
+        _refuse_a_score_the_optimizer_would_walk_away_from(
+            loss_fn, forward, params0, observed
+        )
 
         def loss(params: Any) -> jax.Array:
             return loss_fn(forward(params), observed)
@@ -134,9 +216,13 @@ class AdamCalibrator(eqx.Module):
 
         Raises:
             ParameterSpaceError: if ``observed`` is not shaped exactly like
-                ``forward(params0)`` — see :meth:`GradientCalibrator.fit`.
+                ``forward(params0)``, or if ``loss_fn`` is a log-density rather
+                than an error — see :meth:`GradientCalibrator.fit`.
         """
         _refuse_mis_shaped_observed(forward, params0, observed)
+        _refuse_a_score_the_optimizer_would_walk_away_from(
+            loss_fn, forward, params0, observed
+        )
 
         def loss(params: Any) -> jax.Array:
             return loss_fn(forward(params), observed)

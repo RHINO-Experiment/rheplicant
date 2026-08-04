@@ -28,34 +28,60 @@ def _declared_error_names() -> set[str]:
     }
 
 
-@pytest.mark.parametrize("surface", [rheplicant, rheplicant.core], ids=["rheplicant", "core"])
-def test_every_error_is_re_exported(surface):
-    """The whole family reaches the top, or the odd one out gets noticed.
+#: Which public surface owns each error, and therefore must export it.
+#:
+#: Not "every surface exports everything". ``rheplicant.core`` is the
+#: domain-agnostic layer and its vocabulary is deliberately its own -- see
+#: ``tests/core/test_basis.py::TestWhichErrorTheRefusalsRaise``, which pins
+#: ``ParameterSpaceError`` OUT of ``rheplicant.core.__all__`` precisely so that
+#: "a core module must not raise it" is a rule with teeth rather than a
+#: preference. So the inference layer's error is exported by the inference
+#: layer.
+#:
+#: (The first version of this test asserted the flat rule and pushed
+#: ``ParameterSpaceError`` into core, which that basis test caught. The
+#: layering argument was the better one; this table is what it looks like
+#: written down.)
+OWNERS = {
+    "ParameterSpaceError": "rheplicant.inference",
+}
+DEFAULT_OWNER = "rheplicant.core"
 
-    ``ParameterSpaceError`` was the one class here that neither surface
-    exported, and it is the error the entire inference layer raises -- the
-    stochastic-twin refusal, the linearity refusal, the partition check, the
-    identifiability verdict. A user writing ``except ParameterSpaceError`` had
-    to import from ``rheplicant.core.errors`` while ``except PipelineError``
-    worked from the top, which reads as "this one is internal" and is exactly
-    backwards.
 
-    Deriving the expected set from the module rather than listing it is what
-    makes this worth having: a new error class is re-exported or this fails,
-    so the gap cannot reopen by omission the way it opened the first time.
+def _surface(dotted: str):
+    import importlib
+
+    return importlib.import_module(dotted)
+
+
+@pytest.mark.parametrize("name", sorted(_declared_error_names()))
+def test_each_error_is_exported_by_the_layer_that_owns_it(name):
+    """Every declared error has exactly one documented public home.
+
+    Deriving the set from the module rather than listing it is what makes this
+    worth having: a new error class has to be assigned an owner or this fails,
+    so it cannot end up importable only from ``rheplicant.core.errors`` -- a
+    path that reads as internal -- the way ``ParameterSpaceError`` did.
     """
-    missing = _declared_error_names() - set(surface.__all__)
-    assert not missing, f"{surface.__name__} does not export {sorted(missing)}"
+    owner = _surface(OWNERS.get(name, DEFAULT_OWNER))
+    assert name in owner.__all__, (
+        f"{name} is not exported by {owner.__name__}. Export it there, or add "
+        f"it to OWNERS with the layer that should own it."
+    )
+    # Not merely a name that resolves: a shadowing look-alike would satisfy the
+    # line above and break every `except` clause written against it, silently,
+    # because the raise site and the catch site would compare different objects.
+    assert getattr(owner, name) is getattr(errors_module, name)
 
 
-@pytest.mark.parametrize("surface", [rheplicant, rheplicant.core], ids=["rheplicant", "core"])
-def test_the_re_export_is_the_same_class(surface):
-    """Not merely a name that resolves.
+def test_core_keeps_its_own_error_vocabulary():
+    """The negative half, stated here so both halves live together.
 
-    A re-export that shadowed the class with a look-alike would satisfy the
-    test above and break every ``except`` clause written against it, silently,
-    because the raise site and the catch site would be comparing different
-    objects.
+    Without this, someone reading only the table above would reasonably "fix"
+    the asymmetry by exporting everything everywhere, and the layering claim
+    would evaporate without a single test turning red.
     """
-    for name in _declared_error_names():
-        assert getattr(surface, name) is getattr(errors_module, name), name
+    for name, owner in OWNERS.items():
+        if owner != DEFAULT_OWNER:
+            assert name not in rheplicant.core.__all__, name
+            assert name not in rheplicant.__all__, name

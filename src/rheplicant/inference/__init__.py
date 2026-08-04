@@ -1,5 +1,6 @@
 """Inference / calibration layer: treats a Pipeline as data, never lives inside it."""
 
+from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
 from rheplicant.inference.forward import build_forward_fn
 from rheplicant.inference.gls import GLSResult, iterative_gls
@@ -66,6 +67,7 @@ from rheplicant.inference.uncertainty import (
 
 __all__ = [
     "DEFAULT_RANK_RTOL",
+    "ParameterSpaceError",
     "AdamCalibrator",
     "Bind",
     "Block",

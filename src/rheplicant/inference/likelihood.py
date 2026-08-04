@@ -14,7 +14,7 @@ conjugate-Gaussian solves) calls it at its own entry point rather than
 re-deriving the refusal.
 """
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import equinox as eqx
 import jax
@@ -25,9 +25,61 @@ from rheplicant.core.errors import ParameterSpaceError
 
 @runtime_checkable
 class Likelihood(Protocol):
-    """Contract: ``logp = likelihood(prediction, observed)`` (scalar)."""
+    """Contract: ``logp = likelihood(prediction, observed)`` (scalar).
+
+    The Protocol cannot express the one thing a caller most needs to know
+    about a scoring function — whether it is to be **maximized** or
+    **minimized** — because both senses have exactly this signature.
+    ``isinstance(mean_squared_error, Likelihood)`` is ``True``, and so is
+    ``isinstance(GaussianLikelihood(1.0), Likelihood)``, while handing the
+    second to a minimizer walks a log-density unbounded below and reports a
+    beautifully improving loss the whole way down (measured: g = -30.7 against
+    a truth of 1.0, loss -3.2e+07 -> -1.3e+11).
+
+    So the sense is carried as an attribute instead. ``sense`` is
+    ``"maximize"`` on every likelihood in this package and absent on plain
+    error functions, which default to ``"minimize"``. It is advisory — a
+    caller may declare nothing — which is why
+    :mod:`rheplicant.inference.calibrate` also *measures* the sense at entry
+    rather than trusting the declaration alone.
+    """
+
+    #: ``"maximize"`` for a log-density, ``"minimize"`` for an error. Optional;
+    #: an object that does not declare it is read as ``"minimize"``.
+    sense: str
 
     def __call__(self, prediction: jax.Array, observed: jax.Array) -> jax.Array: ...
+
+
+#: Read from a scoring function that does not declare :attr:`Likelihood.sense`.
+#: ``"minimize"`` because the un-annotated case is a plain error function --
+#: a bare ``lambda p, o: jnp.mean((p - o) ** 2)`` -- and because defaulting the
+#: other way would refuse every such lambda in every example in the package.
+DEFAULT_SENSE = "minimize"
+MAXIMIZE, MINIMIZE = "maximize", "minimize"
+
+
+def sense_of(scoring_function: Any) -> str:
+    """The declared sense of a scoring function, or the default.
+
+    Args:
+        scoring_function: any callable ``(prediction, observed) -> scalar``.
+
+    Returns:
+        ``"maximize"`` or ``"minimize"``.
+
+    Raises:
+        ParameterSpaceError: if ``sense`` is present but is neither. A typo in
+            a declaration must not silently read as the default, which is the
+            permissive direction and the one that loses a fit.
+    """
+    declared = getattr(scoring_function, "sense", DEFAULT_SENSE)
+    if declared not in (MAXIMIZE, MINIMIZE):
+        raise ParameterSpaceError(
+            f"{type(scoring_function).__name__}.sense is {declared!r}; it must be "
+            f"{MAXIMIZE!r} (a log-density) or {MINIMIZE!r} (an error)."
+        )
+    return declared
 
 
 def check_observed_shape(
@@ -74,7 +126,12 @@ class GaussianLikelihood(eqx.Module):
     Attributes:
         noise_std: noise standard deviation — scalar or broadcastable to the
             data shape; a differentiable leaf (so it can itself be inferred).
+        sense: ``"maximize"``. This is a log-density: it is unbounded below,
+            so a minimizer handed this object walks away from the truth and
+            reports an improving loss the entire way.
     """
+
+    sense: ClassVar[str] = MAXIMIZE
 
     noise_std: jax.Array
 
@@ -95,7 +152,10 @@ class MaskedGaussianLikelihood(eqx.Module):
         noise_std: noise standard deviation — scalar or broadcastable.
         flags: boolean mask, True = excluded; ``None`` behaves exactly like
             :class:`GaussianLikelihood`.
+        sense: ``"maximize"`` — see :class:`GaussianLikelihood`.
     """
+
+    sense: ClassVar[str] = MAXIMIZE
 
     noise_std: jax.Array
     flags: jax.Array | None = None
@@ -109,5 +169,9 @@ class MaskedGaussianLikelihood(eqx.Module):
 
 
 def mean_squared_error(prediction: jax.Array, observed: jax.Array) -> jax.Array:
-    """Plain MSE — the default loss for quick gradient calibration."""
+    """Plain MSE — the default loss for quick gradient calibration.
+
+    Declares no ``sense``, and so reads as ``"minimize"``: the un-annotated
+    case is a plain error function, which is what a minimizer wants.
+    """
     return jnp.mean((prediction - observed) ** 2)
