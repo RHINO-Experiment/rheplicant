@@ -35,9 +35,22 @@ class AbstractOperator(eqx.Module):
         provides: dotted State paths this operator writes, e.g. ``("data",)``.
         graph_node: home node on a SignalGraph template (assembly); ``None``
             means "place explicitly with At(node, op)".
+        must_precede: node ids this operator's contribution must flow
+            THROUGH — an ordering constraint on the signal path, checked by
+            :func:`~rheplicant.core.graph.assemble`.
+        must_precede_because: the physics behind that constraint, in one
+            sentence, quoted back by the refusal. Empty is allowed and the
+            refusal still names the operator, the constraint and the actual
+            placement; it just cannot say what the wrong placement costs.
 
     The requires/provides tuples are documentation today and the hook for a
-    future ``pipeline.validate()`` static checker.
+    future ``pipeline.validate()`` static checker. ``must_precede`` is NOT one
+    of their consumers and is deliberately a third declaration: requires and
+    provides speak in State paths, and every operator on the receiver chain
+    reads ``"data"`` and writes ``"data"``, so "before the gain" is not a
+    sentence that vocabulary can form. Position on the signal path is the
+    graph's subject, so the constraint is stated in the graph's nouns (node
+    ids) and enforced where the graph is compiled.
 
     Rules for implementors:
         * Never mutate the input state — return ``state.replace(...)`` /
@@ -55,6 +68,12 @@ class AbstractOperator(eqx.Module):
     # through the MRO so subclasses inherit their base's slot. Documented in
     # the class docstring's Attributes section.
     graph_node: ClassVar[str | None] = None
+
+    # Ordering constraints on the signal path, in the graph's own nouns
+    # (node ids). Enforced by rheplicant.core.graph.assemble; documented in
+    # the class docstring's Attributes section.
+    must_precede: ClassVar[tuple[str, ...]] = ()
+    must_precede_because: ClassVar[str] = ""
 
     @abc.abstractmethod
     def __call__(self, state: State) -> State:

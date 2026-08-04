@@ -24,6 +24,15 @@ Operators declare their home node via the ``graph_node`` ClassVar (resolved
 through the MRO, so subclasses inherit it); :class:`At` overrides placement
 per instance.
 
+**Ordering.** An operator whose physics depends on *where* it sits — a
+calibration tone that only tracks a gain it passes through — declares that in
+the graph's own nouns with
+:attr:`~rheplicant.core.operator.AbstractOperator.must_precede`, and
+:func:`assemble` refuses a placement that violates it. Because ``At`` can put
+any operator at any node, an ordering constraint stated only in a docstring is
+one nothing checks: the tone assembles cleanly downstream of the gain, and its
+gain response silently drops to 1.0.
+
 **Addressing.** ``assembly[node_id]`` reaches the operator at a node whatever
 the fold did with it. A ``many`` node holding several instances is the one
 case a single id cannot answer for, so its instances are named ``x_1``,
@@ -736,6 +745,80 @@ def _validate_region(graph: SignalGraph, path: tuple[str, ...], op: AbstractOper
                 )
 
 
+def _descendants(graph: SignalGraph, node: str) -> set[str]:
+    """Every node the signal leaving ``node`` can reach, following the edges."""
+    seen: set[str] = set()
+    frontier = [node]
+    while frontier:
+        for successor in graph._out[frontier.pop()]:
+            if successor not in seen:
+                seen.add(successor)
+                frontier.append(successor)
+    return seen
+
+
+def _check_ordering(
+    graph: SignalGraph,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> None:
+    """Enforce every placed operator's ``must_precede`` against the template.
+
+    The constraint is REACHABILITY, not a toposort index. A toposort is a total
+    order over a DAG, so it also orders nodes on branches that never meet, and
+    "cw_tone happens to sort before bandpass" would be satisfied by a placement
+    whose output never reaches the bandpass at all. What the physics asks is
+    that this operator's contribution flows THROUGH the named stage, and that
+    is exactly a directed path.
+
+    A constraint is checked only against nodes that are LIT. An absent node
+    contracts to identity, so there is no bandpass to pass through and nothing
+    to violate — refusing there would reject a sky-only assembly for the sake
+    of a stage it never asked for.
+
+    A node id the template does not have is refused rather than skipped: an
+    unenforceable declaration is prose in a ClassVar, which is the condition
+    this mechanism exists to end.
+    """
+    covered = {n for path, _ in regions for n in path}
+    lit = set(placement) | covered
+    slots: list[tuple[tuple[str, ...], AbstractOperator]] = [
+        ((node,), op) for node, ops_at in placement.items() for op in ops_at
+    ]
+    slots += list(regions)
+    for path, op in slots:
+        required = op.must_precede
+        if not required:
+            continue
+        downstream = _descendants(graph, path[-1])
+        for target in required:
+            if target not in graph.nodes:
+                raise AssemblyError(
+                    f"{type(op).__name__} declares must_precede={list(required)}, but "
+                    f"{target!r} is not a node of graph {graph.name!r}; known nodes: "
+                    f"{list(graph.nodes)}. An ordering constraint naming a node the "
+                    "template does not have can never be checked, so it would sit in "
+                    "the class as unenforced prose."
+                )
+            if target not in lit or target in path:
+                continue
+            if target not in downstream:
+                because = (
+                    f" {op.must_precede_because}" if op.must_precede_because else ""
+                )
+                raise AssemblyError(
+                    f"{type(op).__name__} declares must_precede="
+                    f"{list(required)}, but this assembly places it at "
+                    f"{path[-1]!r}, from which {target!r} is not reachable on graph "
+                    f"{graph.name!r} — so nothing this operator contributes ever "
+                    f"passes through {target!r}, and whatever {target!r} does to the "
+                    f"signal is absent from it.{because} Place it at a node upstream "
+                    f"of {target!r} (its declared home is "
+                    f"{getattr(type(op), 'graph_node', None)!r}), or drop {target!r} "
+                    "from the assembly if the stage genuinely is not there."
+                )
+
+
 def _resolve(
     graph: SignalGraph, operators: Sequence[AbstractOperator | At]
 ) -> tuple[dict[str, list[AbstractOperator]], list[tuple[tuple[str, ...], AbstractOperator]]]:
@@ -806,8 +889,10 @@ def assemble(
 
     See the module docstring for the contraction rules. Raises
     :class:`AssemblyError` on unknown/ambiguous placement, junction slots,
-    duplicate single-instance nodes, or a transform-rooted branch feeding a
-    materialized junction (a sum branch must contain a source).
+    duplicate single-instance nodes, a transform-rooted branch feeding a
+    materialized junction (a sum branch must contain a source), or a violated
+    :attr:`~rheplicant.core.operator.AbstractOperator.must_precede` ordering
+    constraint.
 
     **Limitation — the envelope is in-trees.** The package's promise is that
     any assembled graph serves both forward modelling *and* inference. That
@@ -831,6 +916,7 @@ def assemble(
     if not operators:
         raise AssemblyError("assemble() needs at least one operator.")
     placement, regions = _resolve(graph, operators)
+    _check_ordering(graph, placement, regions)
     region_of: dict[str, int] = {}
     for idx, (path, _) in enumerate(regions):
         for n in path:
