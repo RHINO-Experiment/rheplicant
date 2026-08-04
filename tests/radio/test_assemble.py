@@ -221,6 +221,56 @@ class TestSwitchedCalibration:
         assert jnp.isfinite(g["cal_loads"].t_load) and g["cal_loads"].t_load != 0
 
 
+class TestSelectorFoldReplacement:
+    """``replace_node`` on a materialized SELECTOR, on the shipped graph.
+
+    ``cal_loads -> receiver_input`` is the multi-instance path the calibration
+    and noise-wave examples tell users to read, and a materialized
+    ``SelectOperator`` is exactly as replaceable as a materialized
+    ``SumOperator``: not at all. ``eqx.tree_at`` would swap the whole switch for
+    one operator, deleting both the antenna chain and the load from the forward
+    model with no error and no shape change — the assembly would still return
+    an (n_time, n_freq) array, just of one constant.
+    """
+
+    @pytest.fixture
+    def switched(self, template_state):
+        """Sky through the switch against a load, then gain. Both branches live."""
+        switch = jnp.array([0, 1, 0, 0, 1, 0, 0, 1])
+        state = template_state.replace(
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
+        )
+        o = ops()
+        twin = assemble(o["fg"], CalLoadOperator(t_load=jnp.array(300.0)), o["gn"])
+        return twin, state, switch
+
+    def test_the_selector_really_materialized(self, switched):
+        twin, state, switch = switched
+        assert twin.materialized == ("receiver_input",)
+        assert isinstance(twin["receiver_input"], SelectOperator)
+        assert twin["receiver_input"].names == ("foregrounds", "cal_loads")
+        # both positions are genuinely in the output: load rows are 300 * 1.1
+        out = twin(state).data
+        assert jnp.allclose(out[switch == 1], 330.0)
+        assert not jnp.any(jnp.isclose(out[switch == 0], 330.0))
+
+    def test_replace_node_on_the_selector_refuses(self, switched):
+        twin, state, _ = switched
+        before = twin(state).data
+        with pytest.raises(AssemblyError) as excinfo:
+            twin.replace_node("receiver_input", CalLoadOperator(t_load=jnp.array(0.0)))
+        message = str(excinfo.value)
+        assert "SelectOperator" in message
+        assert "foregrounds" in message and "cal_loads" in message
+        # physics, not shape: the forward model is byte-for-byte what it was
+        assert jnp.array_equal(twin(state).data, before)
+
+    def test_reading_the_selector_still_works(self, switched):
+        """Reading the fold is how you inspect switch order; only writing lies."""
+        twin, _, _ = switched
+        assert twin["receiver_input"].switch_key == "receiver_input"
+
+
 class TestRegistryCompleteness:
     def test_every_concrete_operator_is_placeable(self):
         """Every exported radio operator class has a valid graph_node."""
