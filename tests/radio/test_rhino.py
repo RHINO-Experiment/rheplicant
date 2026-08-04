@@ -151,19 +151,34 @@ def test_settled_is_false_for_settle_seconds_after_each_transition(tmp_path):
     np.testing.assert_array_equal(obs.settled, expected)
 
 
-def test_samples_before_the_first_transition_are_dropped_and_counted(tmp_path):
+def test_samples_before_the_first_transition_are_dropped_counted_and_cut_everywhere(
+    tmp_path,
+):
+    # Merged from two tests that built this identical fixture: one pinned the
+    # drop COUNT plus four arrays' shapes, the other pinned that every array on
+    # the sample axis -- thermistors included -- comes back the same length as
+    # time_s. They are one claim about one read, and keeping them apart hid
+    # that neither covered the two OPTIONAL sample-axis arrays: the ADC
+    # monitors are cut by the same mask, and dropping that cut survived the
+    # whole suite (the only test that reads them uses a file with nothing to
+    # drop, where cut and uncut are the same array).
     early = np.concatenate([[998.0, 999.0], TIME_S])
     obs = read_rhino_observation(
-        make_file(tmp_path / "early.hd5f", times=early),
+        make_file(tmp_path / "early.hd5f", times=early, with_adc=True),
         freq_unit="MHz",
         thermistor_columns=COLUMNS,
         settle_seconds=0.0,
     )
     assert obs.n_leading_dropped == 2
     assert obs.time_s.shape == (12,)
-    assert obs.waterfall.shape == (12, 3)
-    assert obs.switch_label.shape == (12,)
-    assert obs.settled.shape == (12,)
+    n = obs.time_s.size
+    assert obs.waterfall.shape == (n, 3)
+    assert obs.switch_label.shape == (n,)
+    assert obs.settled.shape == (n,)
+    assert obs.adc_max_i.shape == (n,)
+    assert obs.adc_max_q.shape == (n,)
+    for label, series in obs.thermistor_k.items():
+        assert series.shape == (n,), label
 
 
 def test_non_finite_frequencies_raise(tmp_path):
@@ -245,6 +260,25 @@ def test_a_non_finite_switch_time_raises_rather_than_losing_its_state(tmp_path):
             freq_unit="MHz",
             thermistor_columns=COLUMNS,
             settle_seconds=0.0,
+        )
+
+
+@pytest.mark.parametrize("shape", [(len(TIME_S) * 3,), (len(TIME_S), 3, 1)])
+def test_a_waterfall_that_is_not_2d_raises(tmp_path, shape):
+    # The sibling of the channel-count check below, and the branch nothing
+    # pinned: deleting `waterfall.ndim != 2` left the whole suite green. The
+    # two directions fail differently and neither is benign. A 1-D waterfall
+    # falls through to the channel check, which indexes shape[1] and raises a
+    # bare IndexError -- not a DataIngestionError, so a caller catching this
+    # package's ingestion error catches nothing. A 3-D one PASSES the channel
+    # check outright, because shape[1] is still n_freq, and reads back as a
+    # well-formed recording carrying a spare axis.
+    bad = np.zeros(shape, dtype=float)
+    with pytest.raises(DataIngestionError, match="2-D"):
+        read_rhino_observation(
+            make_file(tmp_path / "notmatrix.hd5f", waterfall=bad),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
         )
 
 
@@ -401,23 +435,6 @@ def test_a_non_default_column_order_reads_back_correctly(tmp_path):
     )
     np.testing.assert_allclose(obs.thermistor_k["heated_load"], 100.0 + 273.15)
     np.testing.assert_allclose(obs.thermistor_k["internal_load"], 20.0 + 273.15)
-
-
-def test_every_time_axis_array_keeps_the_same_length_after_the_leading_drop(tmp_path):
-    early = np.concatenate([[998.0, 999.0], TIME_S])
-    obs = read_rhino_observation(
-        make_file(tmp_path / "early.hd5f", times=early),
-        freq_unit="MHz",
-        thermistor_columns=COLUMNS,
-        settle_seconds=0.0,
-    )
-    n = len(obs.time_s)
-    assert n == 12
-    assert obs.waterfall.shape[0] == n
-    assert obs.switch_label.shape == (n,)
-    assert obs.settled.shape == (n,)
-    for label, series in obs.thermistor_k.items():
-        assert series.shape == (n,), label
 
 
 def test_adc_monitors_are_passed_through_when_present(tmp_path):
@@ -580,6 +597,71 @@ def test_to_state_indexes_sources_and_inverts_the_settling_mask(tmp_path):
     # instruction calls for.
     expected = np.broadcast_to((~obs.settled)[:, None], flags.shape)
     np.testing.assert_array_equal(flags, expected)
+    assert flags.sum() == 6 * obs.freq_hz.size
+
+
+def test_to_state_after_a_leading_drop_attributes_and_flags_the_kept_samples(tmp_path):
+    # Nothing combined a leading drop with to_state, and the two halves of the
+    # seam are exactly where this file has already shipped a Critical bug: a
+    # non-finite switch_time silently lost an entire switch state with no
+    # exception, nothing dropped and every array the right shape. So anchor on
+    # what the forward pass would SEE -- which source each sample is attributed
+    # to, which waterfall rows survived, and which cells are flagged -- not on
+    # shapes, which would not have caught that bug either.
+    #
+    # Every axis of this fixture is asymmetric on purpose, so an off-by-the-drop
+    # shift, a transposed source order or an inverted mask each change a number
+    # rather than only a shape: 3 samples dropped (not 2), blocks of 2/5/4 kept
+    # samples (not 4/4/4), 11 samples against 3 channels (not square), 6 flagged
+    # against 5 unflagged (not 6/6), and a source_order that is not the order
+    # the file switches in.
+    kept_times = np.arange(1000.0, 1011.0)
+    times = np.concatenate([[995.0, 996.0, 997.0], kept_times])
+    waterfall = np.arange(len(times) * 3, dtype=float).reshape(len(times), 3) * 7.0
+    obs = read_rhino_observation(
+        make_file(
+            tmp_path / "drop_then_state.hd5f",
+            times=times,
+            waterfall=waterfall,
+            switch_times=np.array([1000.0, 1002.0, 1007.0]),
+            switch_states=[b"internal_load", b"antenna", b"heated_load"],
+        ),
+        freq_unit="MHz",
+        thermistor_columns=COLUMNS,
+        settle_seconds=2.0,
+    )
+    assert obs.n_leading_dropped == 3
+
+    # Named in an order the file never switches in: an index built from the
+    # order the labels APPEAR in reads back as [0,0,1,1,1,1,1,2,2,2,2], which
+    # is a different array of the same shape and dtype.
+    state = to_state(obs, source_order=("heated_load", "antenna", "internal_load"))
+
+    index = np.asarray(state.coords.extra["receiver_input"])
+    np.testing.assert_array_equal(index, [2, 2] + [1] * 5 + [0] * 4)
+
+    # The rows that survived are the LAST 11 of 14, not the first 11. Both are
+    # (11, 3) and they share no element.
+    np.testing.assert_allclose(np.asarray(state.data), waterfall[3:])
+    np.testing.assert_allclose(np.asarray(state.coords.time), kept_times)
+
+    # Settling is measured from each transition, on the samples that were KEPT:
+    # computing it against the head of the un-dropped axis instead shifts every
+    # elapsed time by the drop and marks the whole recording unsettled.
+    expected_settled = np.array(
+        [False, False]  # internal_load, t = 1000, 1001
+        + [False, False, True, True, True]  # antenna, t = 1002 .. 1006
+        + [False, False, True, True]  # heated_load, t = 1007 .. 1010
+    )
+    np.testing.assert_array_equal(obs.settled, expected_settled)
+
+    # True-means-bad, broadcast across the 3 channels. The 6/5 split is the
+    # point of the fixture: an inverted mask reports 15 flagged cells, not 18.
+    flags = np.asarray(state.aux["flags"])
+    assert flags.shape == (kept_times.size, obs.freq_hz.size)
+    np.testing.assert_array_equal(
+        flags, np.broadcast_to(~expected_settled[:, None], flags.shape)
+    )
     assert flags.sum() == 6 * obs.freq_hz.size
 
 
