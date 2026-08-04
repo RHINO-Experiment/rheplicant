@@ -118,10 +118,12 @@ def refuse_stochastic_stages(pipeline: AbstractOperator, caller: str) -> None:
     that draws randomness without declaring ``"key"`` is invisible here, and so
     is one hidden inside a static field (a ``LambdaOperator`` whose ``fn``
     closes over a draw). Nothing static can see either: there is no numerical
-    symptom, which is the premise of this whole guard. Every operator shipped in
-    this package declares honestly, and
-    ``tests/core/test_contract.py`` pins that the two that draw are exactly the
-    two that say so. A user-written operator is the user's declaration to make.
+    symptom, which is the premise of this whole guard. What CAN be checked is
+    that the shipped operators declare honestly, and
+    ``tests/test_operator_declarations.py`` does exactly that, mechanically:
+    consuming the PRNG and declaring ``"key"`` must agree for every operator in
+    the package, and the drawing set is pinned. A user-written operator is the
+    user's declaration to make.
 
     Args:
         pipeline: the forward model.
