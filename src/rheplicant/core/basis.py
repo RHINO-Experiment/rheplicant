@@ -306,12 +306,17 @@ class SeparableBasis:
     directly; see :class:`~rheplicant.radio.t_sys.BasisTemperatureOperator`.
 
     ``eq=False`` is ordinary hygiene for a value object holding arrays, and it
-    is worth stating exactly what it does and does not buy. A frozen dataclass
-    defaults to ``eq=True``, which compares the fields elementwise: ``basis_a ==
-    basis_b`` then RAISES ``ValueError: the truth value of an array with more
-    than one element is ambiguous`` rather than answering, and ``__hash__``
-    becomes ``None``. ``eq=False`` gives identity semantics for both, so the two
-    ordinary things you can do to any Python object stay ordinary. It is NOT
+    is worth stating exactly what it does and does not buy — measured, because
+    the plausible version of this paragraph is wrong twice. A frozen dataclass
+    defaults to ``eq=True``, which compares the fields elementwise. Then
+    ``basis_a == basis_b`` answers ``True`` when the two hold the *same array
+    objects* and raises ``ValueError: the truth value of an array with more than
+    one element is ambiguous`` only when they hold distinct-but-equal ones — so
+    the failure is intermittent, which is worse than always. And ``__hash__``
+    does not become ``None``: on a *frozen* dataclass it is generated and raises
+    ``TypeError: unhashable type: 'ArrayImpl'``. ``eq=False`` gives identity
+    semantics for both, so the two ordinary things you can do to any Python
+    object stay ordinary and stay predictable. It is NOT
     what makes ``fn=basis.expand`` safe as a static field — a bound method
     compares and hashes its ``__self__`` by POINTER, so that route works either
     way. Being an ``eqx.Module`` is the thing that would break it.

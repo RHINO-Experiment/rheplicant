@@ -60,7 +60,9 @@ ordering constraint. The tone tracks ``g(t)`` only by passing through it, so
 ``must_precede = ("bandpass", "gain")`` and ``assemble()`` refuses a placement
 that breaks it — ``At("noise", cw)`` used to compile cleanly and drop the
 tone's gain response to exactly 1.0. Everything downstream of ``cw_tone``
-inherits the tone's protected channel through ``aux`` (see
+inherits the tone's protected channels through ``aux`` — a set, since a tone
+with a line width wets more than one, and an ``(n_time, n_freq)`` waterfall
+once it drifts between them (see
 :mod:`rheplicant.radio.protection`), which is what keeps ``flagging`` — sitting
 on the same trunk — from removing the calibrator as RFI.
 

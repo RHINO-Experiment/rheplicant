@@ -24,14 +24,17 @@ the tone's own channels included.
 RHINO's central design choice (paper Sect. 4) therefore only pays once
 ``T_ant`` is frequency-smooth, and this operator is where that smoothness is
 made structural: there is no way to write a free-per-cell fit through it except
-by handing it a complete basis on both axes, which is the identity matrix and
-says so.
+by handing it a basis that is *complete* on both axes — any square invertible
+pair, of which the identity is the obvious one but complete Legendre matrices
+do it just as well, as the free-per-cell row of the table below is built.
 
 The user has confirmed RHINO's antenna temperature IS frequency-smooth, so the
 route is physically sound. Which axis matters is measured rather than assumed,
 and it is frequency: a basis complete in frequency makes the tone worth nothing
-whatever the time axis does (nullity 1 either way), while a basis complete in
-time is still rescued by it. See
+whatever the time axis does — the nullity is the same with the tone on and off,
+whatever that nullity happens to be on the grid in hand (1 on the square fixture
+below, 7 on the 7x5 one) — while a basis complete in time is still rescued by
+it. What is invariant is that the tone changes nothing, not the number. See
 :mod:`rheplicant.core.basis` for the full sweep.
 
 **The gain and these coefficients cannot share a linear block.** Each is affine

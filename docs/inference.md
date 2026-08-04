@@ -725,7 +725,7 @@ per-block numbers were doing at the time:
 ```text
 SamplingPlan.estimate did not converge: after 4 sweeps the JOINT chi-squared is
 still falling by 728774 per sweep (chi2 = 2.31316e+06), which is above
-tol=1e-14. Note what this does NOT show up in: every conjugate block's own CG
+tol=1e-08. Note what this does NOT show up in: every conjugate block's own CG
 residual is 4.18e-07 or better, because a per-block residual is computed from
 the block and converges at every sweep of an alternation that is going nowhere.
 ```
@@ -832,7 +832,10 @@ inner step count now sets the mixing. `steps=` reads as a performance knob and
 is a statistical assumption.
 
 Measured on the plan's other fixture (`amp` conjugate, `centre` gradient, 120
-sweeps, truth `centre = 0.350`, `init = 0.100`):
+sweeps, truth `centre = 0.350`, `init = 0.100`, `key=jax.random.key(1)` — the
+one table on this page that does not use `key(0)`, because a stuck chain is a
+sampling accident and `key(0)` happens to escape at `steps=2`; that it depends
+on the seed is the point, not a caveat):
 
 | `steps` | `rhat` | `converged` | posterior `centre` |
 |---|---|---|---|
@@ -857,7 +860,8 @@ Latents ['gain', 't_coeff'] are each declared linear=True, but the prediction is
 not affine in them JOINTLY [...]. Each conditional of a bilinear model is affine
 on its own, which is why this is not caught one latent at a time — and why these
 two cannot share one linear block. Split them into separate blocks and alternate,
-or re-parameterize so the joint map really is affine.
+or re-parameterize so the joint map really is affine. identifiability(space,
+pipeline, state) will tell you what the split costs before you choose it.
 ```
 
 Grouping works when the joint map really is affine — several noise-wave
