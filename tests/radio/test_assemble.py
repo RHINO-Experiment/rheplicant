@@ -486,3 +486,33 @@ class TestManyNodeSurvivesASibling:
         assert jnp.allclose(
             swapped(template_state).data, 1.1 * b(template_state).data
         )
+
+    def test_a_fold_buried_in_a_pipeline_branch_is_caught_too(self, template_state):
+        """The hardest shape for the old lookup: the many-instance Sum is not
+        the assembly root, it is stage 0 of a Pipeline that a sibling Sum
+        labels by the same node id. Closure check: zeroing one instance must
+        equal re-assembling without it."""
+        f1 = ForegroundOperator(
+            amplitude=jnp.array(10.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        f2 = ForegroundOperator(
+            amplitude=jnp.array(20.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        io = IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6)
+        gd = GroundPickupOperator(
+            coupling=jnp.array(0.01), t_ground=jnp.array(300.0)
+        )
+        asm = assemble(f1, f2, io, gd)
+        assert isinstance(asm.operator, SumOperator)
+        assert isinstance(asm.operator.branches[0], Pipeline)  # not the root
+        with pytest.raises(AmbiguousNodeError):
+            asm["foregrounds"]
+
+        zero = ForegroundOperator(
+            amplitude=jnp.array(0.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+        )
+        without_f2 = asm.replace_node("foregrounds_2", zero)
+        f1_only = assemble(f1, io, gd)
+        assert jnp.allclose(
+            without_f2(template_state).data, f1_only(template_state).data
+        )
