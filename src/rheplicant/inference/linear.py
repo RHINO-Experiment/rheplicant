@@ -91,6 +91,7 @@ from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
 from rheplicant.inference.likelihood import check_observed_shape
+from rheplicant.inference.noise import check_noise_std_axis
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
@@ -979,14 +980,29 @@ def _check_solve_arguments(
     prior_mean: Any,
     prior_std: Any,
     caller: str,
+    *,
+    noise_std: Any = None,
 ) -> tuple[Any, Any]:
     """Shared preconditions for the mean and the draw, plus the resolved prior.
 
     Returns the ``(prior_mean, prior_std)`` the solve should actually use: the
     keywords when they were given, the latent's declaration when they were not,
     and an exception when the two disagree.
+
+    ``noise_std`` is checked here only for the axis contract
+    (:func:`~rheplicant.inference.noise.check_noise_std_axis`), and only when
+    the caller passes it. **OWED: unification.** Every other exit reaches that
+    rule through :func:`~rheplicant.inference.uncertainty.as_noise_model`, which
+    is the one place a ``noise_std`` argument is normalized — but this module
+    does not call it, taking the bare array straight into ``_weights``. Until
+    the solves are routed through ``as_noise_model`` the rule has two homes,
+    and the default of ``None`` is what keeps that gap honest rather than
+    silent: :func:`gcr_sample` does not pass it yet, so the draw is NOT covered
+    while the mean is.
     """
     check_observed_shape(jnp.shape(block.offset), observed)
+    if noise_std is not None:
+        check_noise_std_axis(noise_std, jnp.shape(block.offset), caller)
     prior_mean, prior_std = _resolve_prior(block, prior_mean, prior_std, caller)
     _require_prior_std(block, prior_std, caller)
     if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):
@@ -1031,8 +1047,15 @@ def wiener_solve(
     Args:
         block: from :func:`linear_operator`.
         observed: the data, shaped like ``block.offset``.
-        noise_std: noise standard deviation — scalar or broadcastable to the
-            data.
+        noise_std: noise standard deviation — a scalar, or an array whose
+            SHAPE says which axis of the data it runs along: ``(n_time, 1)``
+            for a per-time sigma, ``(1, n_freq)`` for a per-channel one. A bare
+            1-D vector is accepted only where its length matches a single axis
+            of the data; on a square grid it matches two, both readings are
+            legitimate, and the one broadcasting picks is not the one most
+            callers mean — so that case raises rather than being resolved by
+            trailing-axis alignment. See
+            :func:`~rheplicant.inference.noise.check_noise_std_axis`.
         prior_std: prior standard deviation on the latent — scalar or
             broadcastable to it. **Defaults to the latent's declared prior**;
             required only when there is none, because without a prior the
@@ -1105,7 +1128,7 @@ def wiener_solve(
         Uniform) raises here as well; NUTS is where that space belongs.
     """
     prior_mean, prior_std = _check_solve_arguments(
-        block, observed, prior_mean, prior_std, "wiener_solve"
+        block, observed, prior_mean, prior_std, "wiener_solve", noise_std=noise_std
     )
     return _conjugate_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
