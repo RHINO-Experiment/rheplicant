@@ -165,6 +165,36 @@ class TestDescribeStages:
         assert describe_stages(stages_requiring(lone, RANDOMNESS)) == "Loud"
 
 
+class TestTheLimitOfADeclarationCheck:
+    """Name the hole rather than let a reader assume there is none.
+
+    These two cases are NOT caught, and nothing static could catch them: there
+    is no numerical symptom of a frozen draw, which is the premise of the whole
+    guard. If either of these ever starts raising, this file is the place that
+    says the contract changed.
+    """
+
+    def test_an_undeclared_draw_is_not_detected(self):
+        class Sneaky(AbstractOperator):
+            requires: ClassVar[tuple[str, ...]] = ("data",)  # a lie
+            scale: jax.Array
+
+            def __call__(self, state):
+                subkey, state = state.next_key()
+                return state.with_data(self.scale * jax.random.normal(subkey, (4,)))
+
+        assert stages_requiring(Sneaky(scale=jnp.array(7.0)), RANDOMNESS) == ()
+
+    def test_a_draw_hidden_in_a_static_field_is_not_detected(self):
+        """`LambdaOperator.fn` is static, so no pytree walk reaches inside it."""
+        from rheplicant.core.operator import LambdaOperator
+
+        hidden = LambdaOperator(
+            fn=lambda state: state.with_data(jax.random.normal(jax.random.key(0), (4,)))
+        )
+        assert stages_requiring(Pipeline(hidden), RANDOMNESS) == ()
+
+
 def test_the_declaration_matches_what_the_operator_actually_does():
     """The contract is only worth enforcing if it is true of the shipped set.
 

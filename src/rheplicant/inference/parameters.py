@@ -114,6 +114,15 @@ def refuse_stochastic_stages(pipeline: AbstractOperator, caller: str) -> None:
     stochastic operator is covered the day it declares what it reads, with
     nothing here to update.
 
+    **What it therefore cannot catch, stated rather than implied.** An operator
+    that draws randomness without declaring ``"key"`` is invisible here, and so
+    is one hidden inside a static field (a ``LambdaOperator`` whose ``fn``
+    closes over a draw). Nothing static can see either: there is no numerical
+    symptom, which is the premise of this whole guard. Every operator shipped in
+    this package declares honestly, and
+    ``tests/core/test_contract.py`` pins that the two that draw are exactly the
+    two that say so. A user-written operator is the user's declaration to make.
+
     Args:
         pipeline: the forward model.
         caller: what to name in the message.
