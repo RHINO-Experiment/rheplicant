@@ -35,7 +35,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `AtmosphericEmissionOperator` *(P)* | `atmosphere` | beam-averaged atmospheric emission (`t_ant_sum` branch) | `t_atm` |
 | — | `ground_field` | *reserved leaf*: ground as a pre-beam field to convolve | — |
 | — | `atmosphere_field` | *reserved transform*: radiative transfer on the astro sky, pre-beam | — |
-| — | `t_sys_extra` | *reserved leaf (multi-instance)*: generic effective T_sys entry | — |
+| `BasisTemperatureOperator` | `t_sys_extra` (multi-instance) | effective T_sys smooth in (time, frequency) by construction: `time_basis @ coeff @ freq_basis.T`. Parameterized by COEFFICIENTS, not cells — which is what makes the CW tone worth anything at all (see `rheplicant.core.basis`) | `coeff` |
 
 ## Instrument (trunk order = graph order)
 

@@ -38,6 +38,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.core.basis
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.core.render
    :members:
 
@@ -141,6 +145,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :show-inheritance:
 
 .. automodule:: rheplicant.radio.instrument.adc
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.radio.t_sys
    :members:
    :show-inheritance:
 

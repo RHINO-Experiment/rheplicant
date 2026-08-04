@@ -11,6 +11,7 @@ Core principle: **everything is an Operator acting on a State.**
 from importlib.metadata import PackageNotFoundError, version
 
 from rheplicant.core import (
+    BASIS_KINDS,
     AbstractOperator,
     AmbiguousNodeError,
     Assembly,
@@ -26,11 +27,13 @@ from rheplicant.core import (
     Pipeline,
     PipelineError,
     SelectOperator,
+    SeparableBasis,
     SignalGraph,
     SnapshotOperator,
     State,
     StateValidationError,
     SumOperator,
+    basis_matrix,
 )
 
 # Single source of truth is pyproject.toml; read it back from the installed
@@ -41,6 +44,7 @@ except PackageNotFoundError:  # running from a source tree with no install
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "BASIS_KINDS",
     "AbstractOperator",
     "AmbiguousNodeError",
     "Assembly",
@@ -60,6 +64,8 @@ __all__ = [
     "SelectOperator",
     "State",
     "StateValidationError",
+    "SeparableBasis",
     "SumOperator",
+    "basis_matrix",
     "__version__",
 ]

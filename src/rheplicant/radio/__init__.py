@@ -93,6 +93,7 @@ from rheplicant.radio.sky import (
     UniformSkyModel,
 )
 from rheplicant.radio.surrogate import NeuralOperator
+from rheplicant.radio.t_sys import BasisTemperatureOperator
 from rheplicant.radio.touchstone import Touchstone, interpolate_onto, read_touchstone
 
 __all__ = [
@@ -104,6 +105,7 @@ __all__ = [
     "ApplyCalibrationOperator",
     "AtmosphericEmissionOperator",
     "BackendOperator",
+    "BasisTemperatureOperator",
     "BeamOperator",
     "BeamSpillOperator",
     "CWCalibrationOperator",

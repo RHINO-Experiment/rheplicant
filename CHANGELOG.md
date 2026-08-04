@@ -2,6 +2,91 @@
 
 ## Unreleased
 
+### A smooth (ν, t) basis, and the antenna temperature that uses it
+
+`identifiability()` refuses a free-per-cell model and tells the caller what to
+do about it — "a smooth basis in place of one free parameter per cell is the
+usual repair". `rheplicant.core.basis` is that basis, and
+`rheplicant.radio.BasisTemperatureOperator` puts it on the reserved
+`t_sys_extra` node, where it is parameterized by **coefficients, not cells**.
+
+```python
+basis = SeparableBasis(
+    time=basis_matrix("legendre", n=n_time, n_basis=3),
+    freq=basis_matrix("legendre", n=n_freq, n_basis=2),
+)
+twin = assemble(BasisTemperatureOperator.from_basis(basis, basis.fit(t_ant0)),
+                CWCalibrationOperator(...), GainOperator(gain=g0))
+plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+```
+
+**Why these are one change and not two.** Measured through the operator, on the
+assembled graph, with a known 5000 K CW tone against a gain free per time
+sample (`n_time=7`, `n_freq=5`, at a generic coefficient point):
+
+```
+free-per-cell T_ant,  tone ON  (5000 K)   n_par=42 rank=35 nullity=7
+free-per-cell T_ant,  tone OFF            n_par=42 rank=35 nullity=7
+(3,2)-basis T_ant,    tone ON  (5000 K)   n_par=13 rank=13 nullity=0
+(3,2)-basis T_ant,    tone OFF            n_par=13 rank=12 nullity=1
+```
+
+Against a free-per-cell antenna temperature **the tone buys exactly nothing** —
+nullity is `n_time` either way, because the free cells absorb the whole of
+`g[t] × (tone profile)` sample by sample. So the basis has to reach `T_ant`
+itself; smoothing the noise waves alone would leave the tone useless. This
+reproduces the synthetic probe quoted in `identifiability`'s own docstring
+(there at `n_time=8`: nullity 8 either way, `s[rank-1]/s[0]` = 7.071e-01 — the
+identical number, since the free-per-cell null space is exactly null).
+
+**And it is the FREQUENCY axis that does the work** — new, and not something
+the earlier probe could see. Varying which axis is restricted:
+
+```
+n_k              n_j                nullity, tone ON   tone OFF
+3                2                  0                  1
+7 (complete)     2                  0                  7
+3                5 (complete)       1                  1
+7 (complete)     5 (complete)       7                  7
+```
+
+A basis complete in *frequency* makes the tone worth nothing whatever the time
+axis does: the tone's profile is then inside the span and is reabsorbed,
+nullity 1 with it and 1 without. A basis complete in *time* is still rescued by
+it. So "frequency-smooth" is the condition, and `n_j < n_freq` is what it
+means. `n_basis == n` is therefore legal rather than refused — the matrix is
+perfectly well conditioned, and whether it costs anything is a joint property
+of the model that only `identifiability()` can answer.
+
+**The framework needed nothing new.** A basis expansion was already a `Bind`
+with an `fn` over a `linear=True` latent, which `check_linearity` verifies and
+both conjugate exits drive. What was missing was the matrices, which are a
+modelling choice. `SeparableBasis.expand` is a drop-in `Bind` function — that
+is the route the noise-wave temperatures need, since those leaves belong to
+`NoiseWaveOperator` and are full-grid by its contract — and it always returns
+`(n_time, n_freq)`, the one temperature shape that operator's guards can never
+misread.
+
+**`legendre` and `polynomial` span the same functions and are not
+interchangeable.** Measured `cond(design)` at `n=32, n_basis=16`: 7.86 against
+2.81e+05. That number lands on κ of the block's normal operator, which is what
+`wiener_solve`'s error guard divides by.
+
+**Two conditionally-linear blocks, not one.** `gain × T_ant` is bilinear, so
+`check_linearity(names=("gain", "t_coeff"))` refuses the group — verified, not
+assumed — and the two are separate `Block`s of one plan. `plan.estimate` and
+`plan.sample` then agree with each other and with the truth, while the
+free-per-cell version of the same model is refused before a sweep runs with the
+degenerate direction named as `gain 0.50, t_coeff 0.50`.
+
+**Where it lives.** `rheplicant.core.basis`, not `rheplicant.inference.basis`.
+It reads like an inference utility, but the design matrices are held by an
+operator that sits on the signal path, so `radio` would have had to import
+`inference` — which nothing in this package does, and which the inference
+layer's own premise forbids. `core` is the one layer both may depend on, and it
+fits: no `State`, no radio physics, and `Coordinates` already names the `time`
+and `freq` axes there.
+
 ### `SamplingPlan`: one declared partition, two exits
 
 A point estimate and a posterior sample are two exits from one workflow, not
