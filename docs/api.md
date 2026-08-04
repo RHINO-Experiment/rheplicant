@@ -144,6 +144,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.radio.protection
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.radio.backend.flagging
    :members:
    :show-inheritance:

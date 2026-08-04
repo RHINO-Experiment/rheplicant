@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+### The CW tone: a position the graph checks, a level it knows, a channel it keeps
+
+`calibration.py` stated its ordering constraint in a module docstring — the
+tone must sit *before* the bandpass and gain, because it tracks `g(t)` only by
+passing through it. Nothing enforced it. `At("noise", cw)` assembled cleanly
+and the tone's gain response dropped to **exactly 1.0**: a calibrator that
+monitors nothing, in a model that runs, differentiates, and looks healthy.
+
+**`must_precede` on `AbstractOperator`**, checked by `assemble()`. An operator
+whose physics depends on where it sits declares that in the graph's own nouns
+(node ids), with an optional `must_precede_because` the refusal quotes back.
+The check is **reachability, not a toposort index**: a toposort totally orders
+a DAG, so it also orders nodes on branches that never meet, and "sorts earlier"
+would be satisfied by a placement whose output never reaches the constrained
+stage at all. An absent stage is not a violation (nothing to pass through); a
+node id the template does not have *is* one, because an unenforceable
+declaration is prose in a ClassVar. This is a third declaration alongside
+`requires`/`provides`, not a consumer of them — those speak in State paths, and
+every operator on the receiver chain reads `"data"` and writes `"data"`, so
+"before the gain" is not a sentence that vocabulary can form.
+
+**The tone's amplitude is now static.** It was a differentiable leaf, which
+quietly contradicted the premise of the whole calibration route: a tone of
+unknown level constrains nothing, because the gain it is meant to track absorbs
+it exactly. `eqx.field(static=True)` with a validating converter, so
+`eqx.partition(op, eqx.is_inexact_array)` cannot pick it up. A non-scalar
+amplitude is refused (it would broadcast into the tone's channel and model a
+per-sample tone), and so is a traced one.
+
+**And `tone_freq` is checked against the observing band.** `argmin` always
+returns *some* channel, so a tone at 200 MHz against a 60–85 MHz band landed on
+the top edge channel and modelled a bright spike that calibrates nothing. The
+band arrives per call, so the check is at the same boundary and uses the same
+concreteness escape as `DriftScanProjector._validate_uniform_grid`: it fires at
+trace time for a closed-over band and skips, rather than crashing, for a
+genuinely traced one.
+
+### The bandpass/gain scalar degeneracy, measured
+
+`b -> c*b, g -> g/c` leaves every prediction invariant, so a free bandpass and
+a free gain are separately unidentifiable up to one scalar. Nothing in the
+design record mentions it. `identifiability()` now says so by name:
+
+```
+b free (5 ch) + g free (6 samples), T_ant known
+    n_par=11 rank=10 nullity=1     null singular value 8.4e-17 of s_max
+    participation                  {'bandpass': 0.50, 'gain': 0.50}
+    direction(0)['bandpass'] / b   +0.2206 in every channel
+    direction(0)['gain']     / g   -0.2206 in every sample
+```
+
+That last pair *is* the trade, read off the report rather than asserted.
+
+**The convention: the bandpass carries only shape (mean 1), the gain carries
+the level.** `unit_mean_bandpass` (and its companion `unit_mean_free`) takes
+`n_freq - 1` free values and expands them onto the mean-1 hyperplane —
+`n_par=10 rank=10 nullity=0`, weakest identified direction 0.41. Unit mean
+rather than pinning a reference channel because the reference is then a band
+average: its noise falls as `sqrt(n_freq)`, and it survives the channel being
+flagged. RHINO flags channels; a convention anchored to one channel makes the
+absolute gain scale hostage to whichever channel RFI sits in.
+
+The trap is documented because it is measured: normalising *inside the binding*
+(`fn=lambda b: b / mean(b)`) with all `n_freq` parameters kept does **not**
+remove the degeneracy — `n_par=11 rank=10 nullity=1`, with `participation` now
+`{'bandpass': 1.00, 'gain': 0.00}`. It moved out of the b/g trade and into the
+bandpass latent's own scale ray. Removing a degeneracy means removing a
+parameter.
+
+### The flaggers no longer erase the tone
+
+`FlaggingOperator` and `MomentRFIFlaggingOperator` both flagged the tone's
+channel at fraction **1.0** — correctly, from their point of view, since a
+narrow persistent spike is what RFI looks like — and flagging sits downstream
+of `cw_tone` on the same trunk.
+
+New `rheplicant.radio.protection`: `PROTECTED_KEY`, `protect`,
+`unflag_protected`. The mask rides in `state.aux` and is written by the
+operator that **injected** the tone, because that operator is the one that
+knows which channel it went into; a flagger has no way to tell a calibration
+tone from RFI, and a `protected=` setting on the flagger is one the user must
+remember for every run, failing as a slightly worse calibration rather than as
+an error. Measured on the real MomentRFI flagger: fraction 1.0 → 0.0 on the
+tone's channel, with genuine RFI elsewhere still flagged.
+
+Two things it does not claim. It removes the flag, not the tone's influence on
+MomentRFI's own surface fit. And a protected channel is one where real RFI now
+survives — the deliberate trade, since a flagger's verdict on a known-bright
+channel carries no information anyway.
+
 ### An ingestion layer, and what checking it against the original found
 
 rheplicant can now read real RHINO recordings. Two thin adapters, flat under

@@ -66,7 +66,10 @@ from rheplicant.radio.instrument import (
     NoiseOperator,
     NoiseWaveOperator,
     ReceiverOperator,
+    unit_mean_bandpass,
+    unit_mean_free,
 )
+from rheplicant.radio.protection import PROTECTED_KEY, protect, unflag_protected
 from rheplicant.radio.rhino import (
     RhinoObservation,
     read_rhino_observation,
@@ -117,6 +120,7 @@ __all__ = [
     "NeuralOperator",
     "NoiseOperator",
     "NoiseWaveOperator",
+    "PROTECTED_KEY",
     "PointSourceOperator",
     "PowerLawSkyModel",
     "RFIOperator",
@@ -126,6 +130,10 @@ __all__ = [
     "SkySourceOperator",
     "SkySpaceFilter",
     "UniformSkyModel",
+    "protect",
+    "unflag_protected",
+    "unit_mean_bandpass",
+    "unit_mean_free",
 ]
 
 from rheplicant.radio.graph import RADIO_GRAPH, assemble  # noqa: E402  (needs operators above)

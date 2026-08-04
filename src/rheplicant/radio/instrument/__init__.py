@@ -24,7 +24,11 @@ from rheplicant.radio.instrument.emi import EMIOperator
 from rheplicant.radio.instrument.gain import GainOperator
 from rheplicant.radio.instrument.noise import NoiseOperator
 from rheplicant.radio.instrument.noise_wave import NoiseWaveOperator
-from rheplicant.radio.instrument.receiver import ReceiverOperator
+from rheplicant.radio.instrument.receiver import (
+    ReceiverOperator,
+    unit_mean_bandpass,
+    unit_mean_free,
+)
 
 __all__ = [
     "ADCOperator",
@@ -39,4 +43,6 @@ __all__ = [
     "NoiseOperator",
     "NoiseWaveOperator",
     "ReceiverOperator",
+    "unit_mean_bandpass",
+    "unit_mean_free",
 ]

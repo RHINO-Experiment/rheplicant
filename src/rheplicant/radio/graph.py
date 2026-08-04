@@ -54,6 +54,16 @@ always three. ``assemble()`` expresses any of them directly: one
 ``cal_loads_1`` / ``cal_loads_2``; the bare ``cal_loads`` is an address only
 while there is exactly one (see :mod:`rheplicant.core.graph`).
 
+``cw_tone`` is the one node on this template whose operator declares an
+ordering constraint. The tone tracks ``g(t)`` only by passing through it, so
+:class:`~rheplicant.radio.instrument.calibration.CWCalibrationOperator` sets
+``must_precede = ("bandpass", "gain")`` and ``assemble()`` refuses a placement
+that breaks it — ``At("noise", cw)`` used to compile cleanly and drop the
+tone's gain response to exactly 1.0. Everything downstream of ``cw_tone``
+inherits the tone's protected channel through ``aux`` (see
+:mod:`rheplicant.radio.protection`), which is what keeps ``flagging`` — sitting
+on the same trunk — from removing the calibrator as RFI.
+
 ``beam_spill`` (v1.4) is the horizon split of a beam that does not stop at the
 horizon: the part below it sees ground, not sky. It is the trunk stage of the
 ASTRO branch — the two equivalent astro entrances (``beam``,

@@ -10,6 +10,12 @@ processing* operator living in the same pipeline formalism — which is exactly
 how "processing steps introduce their own issues" becomes modellable. The
 placeholder thresholds the data and stores a boolean mask in ``state.aux``
 (the traced side-channel), leaving the data itself untouched.
+
+Both flaggers honour :mod:`rheplicant.radio.protection` — without it they flag
+a CW calibration tone at fraction 1.0, correctly by their own lights and
+fatally for the calibration, since flagging sits downstream of ``cw_tone`` on
+the same trunk. Read that module for why the protection is declared by the
+operator injecting the tone rather than configured on the flagger.
 """
 
 from typing import ClassVar
@@ -22,6 +28,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.core.frozen import FrozenMapping
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.radio.protection import unflag_protected
 
 
 class FlaggingOperator(AbstractOperator):
@@ -29,6 +36,10 @@ class FlaggingOperator(AbstractOperator):
 
     ``True`` marks a flagged (bad) sample. Data is not modified; downstream
     operators (averaging, likelihoods) decide how to use the mask.
+
+    Channels declared in ``state.aux["protected"]`` are never flagged — a CW
+    calibration tone is a bright narrow spike and would otherwise trip this
+    threshold in every sample (see :mod:`rheplicant.radio.protection`).
 
     Attributes:
         threshold: flag samples with ``data > threshold`` (static
@@ -42,7 +53,7 @@ class FlaggingOperator(AbstractOperator):
     threshold: float = eqx.field(static=True)
 
     def __call__(self, state: State) -> State:
-        flags = state.data > self.threshold
+        flags = unflag_protected(state.data > self.threshold, state.aux)
         return state.replace(aux={**state.aux, "flags": flags})
 
 
@@ -59,6 +70,10 @@ class MomentRFIFlaggingOperator(AbstractOperator):
           waterfall (MomentRFI works on log10 internally).
         * Existing ``aux["flags"]`` are passed as MomentRFI's ``prior_mask``
           and included in the output — flaggers compose instead of clobbering.
+        * Channels in ``aux["protected"]`` are cleared from the result. Note
+          what that does and does not do: the tone is not flagged, but it still
+          biased the surface fit that produced the flags. See
+          :mod:`rheplicant.radio.protection`.
         * The result is written back to ``aux["flags"]`` (True = flagged).
 
     The flags reach inference by wrapping the noise model, which is where a
@@ -101,7 +116,9 @@ class MomentRFIFlaggingOperator(AbstractOperator):
             prior = jnp.zeros(state.data.shape, dtype=bool)
         out_spec = jax.ShapeDtypeStruct(state.data.shape, jnp.bool_)
         flags = jax.pure_callback(self._host_fit, out_spec, state.data, prior)
-        return state.replace(aux={**state.aux, "flags": flags})
+        return state.replace(
+            aux={**state.aux, "flags": unflag_protected(flags, state.aux)}
+        )
 
     def _host_fit(self, waterfall, prior_mask):  # numpy land
         import numpy as np

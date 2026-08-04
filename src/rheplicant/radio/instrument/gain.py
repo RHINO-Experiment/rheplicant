@@ -4,6 +4,14 @@ Real physics to come (port of limTOD / hydra-tod gain models): multiplicative
 gain g(t) with 1/f flicker fluctuations. The gain is the primary calibration
 target — it must stay a differentiable leaf so gradient-based and Bayesian
 calibration can infer it.
+
+THIS GAIN CARRIES THE ABSOLUTE LEVEL. Inferred jointly with a free bandpass,
+``g(t)`` and ``b(nu)`` are separately unidentifiable: only their product enters
+the prediction, so ``b -> c*b, g -> g/c`` changes nothing and the pair has one
+exactly null direction. The package's convention puts the whole scale here and
+leaves the bandpass as pure shape — declare the bandpass latent with
+:func:`~rheplicant.radio.instrument.receiver.unit_mean_bandpass`, which is
+where the measurement and the reasoning are written down.
 """
 
 from typing import ClassVar
