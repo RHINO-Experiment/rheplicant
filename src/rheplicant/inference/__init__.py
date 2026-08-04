@@ -42,6 +42,15 @@ from rheplicant.inference.numpyro_bridge import (
     to_numpyro_model,
 )
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
+from rheplicant.inference.plan import (
+    Block,
+    Draws,
+    Estimate,
+    PlanDiagnostics,
+    PlanResult,
+    SamplingPlan,
+    split_rhat,
+)
 from rheplicant.inference.uncertainty import (
     as_noise_model,
     fisher_information,
@@ -54,6 +63,9 @@ __all__ = [
     "DEFAULT_RANK_RTOL",
     "AdamCalibrator",
     "Bind",
+    "Block",
+    "Draws",
+    "Estimate",
     "FlaggedNoise",
     "GLSResult",
     "GaussianLikelihood",
@@ -68,7 +80,10 @@ __all__ = [
     "NoiseModel",
     "NoiseModelLikelihood",
     "ParameterSpace",
+    "PlanDiagnostics",
+    "PlanResult",
     "RadiometerNoise",
+    "SamplingPlan",
     "as_noise_model",
     "build_forward_fn",
     "check_linearity",
@@ -86,6 +101,7 @@ __all__ = [
     "predict_from_samples",
     "propagate_covariance",
     "simulate_pairs",
+    "split_rhat",
     "push_forward",
     "to_numpyro_model",
     "train_posterior",
