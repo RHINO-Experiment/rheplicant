@@ -7,6 +7,7 @@ from rheplicant.inference.likelihood import (
     GaussianLikelihood,
     Likelihood,
     MaskedGaussianLikelihood,
+    check_observed_shape,
     mean_squared_error,
 )
 from rheplicant.inference.linear import (
@@ -64,6 +65,7 @@ __all__ = [
     "as_noise_model",
     "build_forward_fn",
     "check_linearity",
+    "check_observed_shape",
     "condition_estimate",
     "fisher_information",
     "gcr_sample",

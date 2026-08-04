@@ -59,6 +59,7 @@ from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
+from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
@@ -341,12 +342,7 @@ def _check_solve_arguments(
     block: LinearBlock, observed: jax.Array, prior_std: Any, caller: str
 ) -> None:
     """Shared preconditions for the mean and the draw."""
-    if jnp.shape(observed) != jnp.shape(block.offset):
-        raise ParameterSpaceError(
-            f"observed has shape {jnp.shape(observed)} but this block predicts "
-            f"{jnp.shape(block.offset)}. Broadcasting these would solve a different "
-            "problem and return a perfectly finite answer."
-        )
+    check_observed_shape(jnp.shape(block.offset), observed)
     if prior_std is None:
         raise ParameterSpaceError(
             f"{caller} needs prior_std: with no prior the normal operator AᵀN⁻¹A can be "

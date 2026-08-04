@@ -15,7 +15,26 @@ import equinox as eqx
 import jax
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.inference.likelihood import mean_squared_error
+from rheplicant.inference.likelihood import check_observed_shape, mean_squared_error
+
+
+def _refuse_mis_shaped_observed(
+    forward: Callable[[Any], jax.Array], params0: Any, observed: jax.Array
+) -> None:
+    """Entry guard shared by both calibrators.
+
+    ``jax.eval_shape`` asks the forward model what it predicts without
+    evaluating it — one abstract trace, the same instrument
+    :meth:`~rheplicant.inference.parameters.ParameterSpace.validate` uses, and
+    negligible against a fit. It belongs HERE and not inside ``step``: the
+    optimizers run their loop under ``lax.scan``, so a check in the loss would
+    be re-traced with every recompilation and, worse, would only refuse after
+    the calibrator had already been asked to run.
+    """
+    prediction = jax.eval_shape(forward, params0)
+    check_observed_shape(
+        jax.numpy.shape(prediction), observed, predictor="this forward model"
+    )
 
 
 class GradientCalibrator(eqx.Module):
@@ -47,7 +66,13 @@ class GradientCalibrator(eqx.Module):
         Returns:
             ``(params_fit, losses)``: the fitted parameter pytree and the
             per-step loss history, shape ``(n_steps,)``.
+
+        Raises:
+            ParameterSpaceError: if ``observed`` is not shaped exactly like
+                ``forward(params0)``. A broadcastable mismatch minimizes a
+                different objective and reports a small, converged loss for it.
         """
+        _refuse_mis_shaped_observed(forward, params0, observed)
 
         def loss(params: Any) -> jax.Array:
             return loss_fn(forward(params), observed)
@@ -106,7 +131,12 @@ class AdamCalibrator(eqx.Module):
         Returns:
             ``(params_fit, losses)``: fitted parameters and per-step loss
             history, shape ``(n_steps,)``.
+
+        Raises:
+            ParameterSpaceError: if ``observed`` is not shaped exactly like
+                ``forward(params0)`` — see :meth:`GradientCalibrator.fit`.
         """
+        _refuse_mis_shaped_observed(forward, params0, observed)
 
         def loss(params: Any) -> jax.Array:
             return loss_fn(forward(params), observed)

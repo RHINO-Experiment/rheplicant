@@ -42,6 +42,7 @@ import jax.numpy as jnp
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
@@ -100,7 +101,12 @@ def to_numpyro_model(
         A NumPyro model ``model(observed=None)`` — condition by passing
         ``observed=data``; run without it for prior-predictive checks. The
         noiseless prediction is recorded at the deterministic site
-        ``"prediction"``.
+        ``"prediction"``. A conditioning ``observed`` whose shape is not
+        exactly the prediction's is refused
+        (:func:`~rheplicant.inference.likelihood.check_observed_shape`) while
+        the model is traced, before any sample is drawn: broadcasting it would
+        give NUTS a different posterior to explore, and it would explore it
+        successfully.
 
     Note:
         **A prediction-dependent sigma brings its log-determinant with it, and
@@ -131,6 +137,13 @@ def to_numpyro_model(
             for latent in space.latents
         }
         prediction = space.bind(pipeline, values)(state_template).data
+        # Trace time, not run time: both shapes are static, so this compiles
+        # away entirely and NUTS refuses before it draws a single sample.
+        # `observed=None` is the prior-predictive call, not a mismatch.
+        if observed is not None:
+            check_observed_shape(
+                jnp.shape(prediction), observed, predictor="this model"
+            )
         numpyro.deterministic("prediction", prediction)
 
         noise = as_noise_model(
