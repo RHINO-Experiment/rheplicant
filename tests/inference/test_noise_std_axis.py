@@ -30,7 +30,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant import Coordinates, Environment, State
-from rheplicant.core.errors import StateValidationError
+from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.inference import (
     Bind,
     FlaggedNoise,
@@ -42,7 +42,7 @@ from rheplicant.inference import (
     linear_operator,
     wiener_solve,
 )
-from rheplicant.inference.noise import check_noise_std_axis
+from rheplicant.inference.noise import check_noise_std_axis, inverse_variance
 from rheplicant.inference.uncertainty import (
     as_noise_model,
     fisher_information,
@@ -395,3 +395,127 @@ class TestBothExitsAgree:
             value, _ = run()
             assert value.shape == (N,)
             assert jnp.all(jnp.isfinite(value))
+
+
+class TestWhyTheRuleHasTwoHomes:
+    """The two measurements behind not unifying the noise_std path.
+
+    ``inference/linear.py`` does not call ``as_noise_model``; it takes the bare
+    array to ``1 / sigma**2``. That duplication looks like debt, and was
+    recorded as OWED until it was assessed. It is not debt, and these tests
+    exist so the next author to reach for the unification meets the two
+    consequences instead of rediscovering them.
+
+    If the unification IS made deliberately, delete this class along with the
+    paragraphs it supports in ``_check_solve_arguments`` -- a test pinning a
+    difference that no longer exists is worse than no test.
+    """
+
+    @pytest.fixture
+    def square_block(self, square_state):
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(SKY)),
+            GainOperator(gain=jnp.ones(N)),
+        )
+        space = ParameterSpace(
+            latents=[Latent("gt", init=jnp.ones(N), linear=True)],
+            bindings=[Bind("gt", into=lambda p: p["gain"].gain)],
+        )
+        return linear_operator(space, twin, square_state)
+
+    @pytest.mark.parametrize(
+        ("label", "sigma"),
+        [
+            pytest.param("finite", 0.5, id="finite"),
+            pytest.param("inf", jnp.inf, id="inf"),
+            pytest.param("zero", 0.0, id="zero"),
+            pytest.param("negative", -0.5, id="negative"),
+        ],
+    )
+    def test_the_two_weight_formulas_agree_everywhere_except_nan(self, label, sigma):
+        """Everything the two paths have in common, asserted first.
+
+        Without these rows the NaN row below would be indistinguishable from
+        "the two formulas are simply different", which is not the claim.
+        """
+        sigma_array = jnp.full((3,), sigma)
+        direct = 1.0 / jnp.asarray(sigma_array) ** 2
+        via_model = inverse_variance(HomoscedasticNoise(sigma_array), jnp.ones((3,)))
+        assert jnp.array_equal(direct, via_model), (label, direct, via_model)
+
+    def test_a_nan_sigma_is_loud_in_the_solve_and_silent_through_the_noise_model(self):
+        """The reason the solves keep their own arithmetic.
+
+        ``inverse_variance`` reads a non-finite sigma as "not observed" and
+        returns weight 0. That is right for a flagged sample and wrong for a
+        corrupt one, and it cannot tell them apart. In a conjugate solve a
+        dropped sample moves the posterior WIDTH, not only the point, so the
+        difference is not cosmetic: NaN in, NaN out is the behaviour that gets
+        noticed.
+        """
+        sigma = jnp.full((3,), jnp.nan)
+        direct = 1.0 / jnp.asarray(sigma) ** 2
+        via_model = inverse_variance(HomoscedasticNoise(sigma), jnp.ones((3,)))
+
+        assert jnp.all(jnp.isnan(direct)), direct
+        assert jnp.all(via_model == 0.0), via_model
+
+    def test_a_prediction_dependent_model_has_no_fixed_weights_to_give_a_solve(self):
+        """The second obstacle: the solve has no prediction to evaluate it at.
+
+        Pinned as a ratio rather than as two values so the test says what
+        matters -- that the weights genuinely move with the prediction, by a
+        lot -- rather than pinning a radiometer constant that is not the point.
+        """
+        noise = RadiometerNoise(channel_width=1e6, integration_time=1.0)
+        assert noise.depends_on_prediction
+
+        cold = inverse_variance(noise, jnp.full((2, 2), 100.0))
+        warm = inverse_variance(noise, jnp.full((2, 2), 300.0))
+        assert float(cold[0, 0] / warm[0, 0]) == pytest.approx(9.0, rel=1e-3)
+
+    def test_a_constant_noise_model_is_refused_by_name_not_by_TypeError(
+        self, square_block
+    ):
+        """The seam this whole assessment is about, asserted rather than implied.
+
+        ``check_noise_std_axis`` accepts a noise model, because every other
+        exit passes one. Before the branded refusal, a model reached
+        ``jnp.asarray`` here and came back as ``TypeError: Value
+        'HomoscedasticNoise(sigma=weak_f32[])' with dtype object is not a valid
+        JAX array type`` -- which names the wrong layer and reads like a bug in
+        the package rather than a wrong argument.
+        """
+        observed = jnp.full((N, N), SKY)
+        with pytest.raises(ParameterSpaceError, match="takes a plain sigma array"):
+            wiener_solve(
+                square_block,
+                observed,
+                noise_std=HomoscedasticNoise(jnp.asarray(0.5)),
+                prior_std=1.0,
+            )
+
+    def test_a_prediction_dependent_model_gets_the_longer_refusal(self, square_block):
+        """Two branches, two messages, because they are different mistakes.
+
+        A constant model is a packaging problem -- unwrap it and pass the
+        array. A prediction-dependent one cannot be accepted at all, and the
+        message has to say why rather than suggesting an unwrap that would
+        silently freeze sigma at a tuple nobody chose.
+        """
+        observed = jnp.full((N, N), SKY)
+        noise = RadiometerNoise(channel_width=1e6, integration_time=1.0)
+        with pytest.raises(ParameterSpaceError, match="no prediction to evaluate it"):
+            wiener_solve(square_block, observed, noise_std=noise, prior_std=1.0)
+
+    def test_both_exits_refuse_a_noise_model(self, square_block):
+        """The same asymmetry this file already caught once, not reintroduced."""
+        observed = jnp.full((N, N), SKY)
+        model = HomoscedasticNoise(jnp.asarray(0.5))
+        with pytest.raises(ParameterSpaceError, match="wiener_solve"):
+            wiener_solve(square_block, observed, noise_std=model, prior_std=1.0)
+        with pytest.raises(ParameterSpaceError, match="gcr_sample"):
+            gcr_sample(
+                square_block, observed, noise_std=model, prior_std=1.0,
+                key=jax.random.PRNGKey(0),
+            )

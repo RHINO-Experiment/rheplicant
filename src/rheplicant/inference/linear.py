@@ -91,7 +91,7 @@ from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
 from rheplicant.inference.likelihood import check_observed_shape
-from rheplicant.inference.noise import check_noise_std_axis
+from rheplicant.inference.noise import NoiseModel, check_noise_std_axis
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
@@ -974,6 +974,43 @@ def _require_prior_std(block: LinearBlock, prior_std: Any, caller: str) -> None:
     )
 
 
+def _refuse_a_noise_model_at_the_conjugate_seam(noise_std: Any, caller: str) -> None:
+    """Say why a :class:`NoiseModel` does not belong here, instead of TypeError.
+
+    ``check_noise_std_axis`` accepts a noise model -- it has to, since every
+    other exit in the package passes one. This module does not: the conjugate
+    solves take ``1 / sigma**2`` from a plain array. Without this refusal a
+    model reaches ``jnp.asarray`` and comes back as
+    ``TypeError: Value 'HomoscedasticNoise(sigma=weak_f32[])' with dtype
+    object is not a valid JAX array type``, which names the wrong layer and
+    reads like a bug in the package rather than a wrong argument.
+
+    A prediction-dependent model gets the longer sentence because it is not a
+    packaging problem: a conjugate solve has no prediction to evaluate one at,
+    the prediction being what it solves for. Freezing sigma at some parameter
+    tuple is a real choice with a statistical consequence -- see
+    :mod:`rheplicant.inference.plan` -- and it belongs to the caller who knows
+    which tuple, never to a silent unwrap here.
+    """
+    if not isinstance(noise_std, NoiseModel):
+        return
+    if getattr(noise_std, "depends_on_prediction", False):
+        raise ParameterSpaceError(
+            f"{caller} was given {type(noise_std).__name__}, whose sigma depends on "
+            "the prediction — but a conjugate solve has no prediction to evaluate it "
+            "at, because the prediction is what it solves for. Freeze it yourself at "
+            "the parameter tuple you mean (`noise.std(prediction)`) and pass that "
+            "array, which also makes explicit that the result is an exact draw at "
+            "THAT covariance and not from the full model's conditional. A "
+            "SamplingPlan does this per sweep."
+        )
+    raise ParameterSpaceError(
+        f"{caller} takes a plain sigma array, not a {type(noise_std).__name__}. "
+        "The conjugate solves compute 1/sigma**2 directly; pass `noise.std(...)`, "
+        "or the sigma you built the model from."
+    )
+
+
 def _check_solve_arguments(
     block: LinearBlock,
     observed: jax.Array,
@@ -996,17 +1033,46 @@ def _check_solve_arguments(
     inputs, because a rule enforced on the mean and not on the draw is worse
     than no rule: it teaches that the argument is checked.
 
-    **OWED: unification.** Every other exit reaches that rule through
-    :func:`~rheplicant.inference.uncertainty.as_noise_model`, which is the one
-    place a ``noise_std`` argument is normalized — but this module does not
-    call it, taking the bare array straight into ``_weights``. Until the solves
-    are routed through ``as_noise_model`` the rule has two homes. The keyword
-    stays optional so an internal caller that has already normalized need not
-    pay for it twice.
+    **Two homes, and it stays that way.** Every other exit reaches that rule
+    through :func:`~rheplicant.inference.uncertainty.as_noise_model`, the one
+    place a ``noise_std`` argument is normalized. This module does not call it:
+    :func:`_conjugate_solve` and :func:`condition_estimate` take the bare array
+    to ``1 / sigma**2`` directly. Routing them through ``as_noise_model`` would
+    leave one home, and it was assessed and rejected for two measured reasons.
+
+    **The weight formulas disagree on NaN, in the dangerous direction.**
+    ``1 / sigma**2`` and
+    :func:`~rheplicant.inference.noise.inverse_variance` agree on every finite
+    sigma, on ``inf`` (both give exactly ``0``), on ``0`` and on a negative
+    sigma. They differ on ``nan``: this module propagates it, so the solution
+    comes back NaN and the caller knows; ``inverse_variance`` maps it to weight
+    ``0.0``, which *means* "unobserved". Switching would turn "your sigma array
+    has a NaN in it" from a loud failure into a silently dropped sample — and
+    in a conjugate solve a dropped sample moves the posterior WIDTH, not only
+    the point, with nothing reporting how many went.
+
+    **A conjugate solve has no prediction to give it.**
+    ``inverse_variance(noise, prediction)`` needs one, and for a
+    ``depends_on_prediction`` model it genuinely matters: a
+    :class:`~rheplicant.inference.noise.RadiometerNoise`'s weights move 9x
+    between a 100 K and a 300 K prediction. But the prediction is what the
+    solve is *for*. So the solves would have to freeze ``N`` at some arbitrary
+    point, and :mod:`rheplicant.inference.plan` already documents what freezing
+    costs: an exact draw from a linear-Gaussian conditional *at that
+    covariance*, which is not the full model's conditional. Accepting a
+    ``NoiseModel`` at this seam would invite precisely that mistake by making
+    it type-check.
+
+    The duplication is therefore deliberate rather than owed.
+    ``tests/inference/test_noise_std_axis.py::TestWhyTheRuleHasTwoHomes`` pins
+    both measurements, so an author who unifies them anyway meets the two
+    consequences rather than rediscovering them. The keyword stays optional so
+    an internal caller that has already normalized need not pay for it twice.
     """
     check_observed_shape(jnp.shape(block.offset), observed)
     if noise_std is not None:
         check_noise_std_axis(noise_std, jnp.shape(block.offset), caller)
+        _refuse_a_noise_model_at_the_conjugate_seam(noise_std, caller)
     prior_mean, prior_std = _resolve_prior(block, prior_mean, prior_std, caller)
     _require_prior_std(block, prior_std, caller)
     if jnp.issubdtype(jnp.asarray(block.offset).dtype, jnp.complexfloating):

@@ -42,11 +42,22 @@ or by just providing the operators::
                     beam, ground_pickup, atmosphere, noise_wave, cw_tone,
                     bandpass, gain, noise, emi, adc, flagging, averaging)
 
-The two spellings compile to the same composition, but they are not
-interchangeable in what they *check*: an operator may declare an ordering
-constraint (``must_precede``), and only ``assemble`` enforces it. The hand-built
-pipeline above is correct because its order happens to satisfy the tone's
-constraint; write it in a different order and nothing objects. See D27.
+The two spellings compile to the same composition, and both now *check* the
+ordering an operator declares (``must_precede``) — ``Pipeline`` refuses a
+violating sequence at construction, ``assemble`` refuses a violating placement
+on the graph. They differ in how much they can say: the graph knows the tone
+landed on ``noise`` and names the node, a sequence knows only its own stages,
+so the two raise ``AssemblyError`` and ``PipelineError`` respectively. Both
+derive from ``DirtError`` and from ``ValueError``, so one ``except`` catches
+either.
+
+One limit worth knowing before relying on the sequence route: it binds through
+stage NAMES. ``Pipeline(..., names=(...))`` and the auto-derived names are what
+a ``must_precede`` entry is matched against, so ``GainOperator`` → ``"gain"``
+binds the tone's ``"gain"`` constraint, while ``ReceiverOperator`` →
+``"receiver"`` does not bind its ``"bandpass"`` one. A domain-agnostic sequence
+has no graph vocabulary to do better. ``assemble`` has no such gap, because
+placement is on the node itself. See D27.
 
 Physics is deliberately placeholder where the operator's own docstring says so
 — 17 of the 29 concrete operator classes here, a count pinned by
