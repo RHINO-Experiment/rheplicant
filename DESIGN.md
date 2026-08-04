@@ -485,6 +485,7 @@ Astrophysical
   21cm global signal (const LST, smooth ν) radio/sky/global_signal.py
   diffuse foregrounds (LST & ν variable)   radio/sky/foregrounds.py
   bright point sources (beam-diluted)      radio/sky/point_sources.py
+  simplest constant sky (the SkyOperator)  radio/sky/uniform.py
 Environmental
   ionosphere (distorts astro signal)       radio/environment/ionosphere.py
   atmosphere (emission; RT reserved, D13)  radio/environment/atmosphere.py
@@ -492,6 +493,9 @@ Environmental
   RFI (narrow+wideband, stochastic)        radio/environment/rfi.py
 Instrumental
   beam (convolution, chromatic)            radio/instrument/beam.py
+  horizon spill / ground mixing (D17)      radio/instrument/beam_spill.py
+  antenna ohmic loss + emission (D16)      radio/instrument/antenna_loss.py
+  extra T_sys on a separable basis (D28)   radio/t_sys.py
   DI gains (1/f + slower drifts)           radio/instrument/gain.py
   reflections + bandpass                   radio/instrument/receiver.py
   noise-wave T/Γ terms (GCR draft Eq. 1)   radio/instrument/noise_wave.py
@@ -503,11 +507,22 @@ Processing
   flagging (MomentRFI)                     radio/backend/flagging.py
   averaging / integration                  radio/backend/averaging.py
   calibration application                  radio/instrument/calibration.py
+  known-calibrator protection contract     radio/protection.py
   sidereal / sky-space / Fourier filters   radio/filters/
 Modular sky machinery (D8)
   sky models (params -> maps)              radio/sky/model.py
   projection engines (maps -> TOD)         radio/sky/projection.py
+  drift-scan m-mode engine (D20)           radio/sky/driftscan.py
+  general-pointing engine (D20)            radio/sky/general_pointing.py
+  CST far-field -> HEALPix seam (D25)      radio/beams.py
   composed sky slot                        radio/sky/source.py
+Ingestion (files -> State)
+  RHINO spectrometer HDF5 observations     radio/rhino.py
+  Touchstone .sNp reflection sweeps        radio/touchstone.py
+Learned stages
+  MLP as an operator (D12)                 radio/surrogate.py
+Shared numerics (domain-agnostic)
+  separable (t, ν) design matrices (D28)   core/basis.py
 Graph-guided assembly (D11)
   SignalGraph template + folder            core/graph.py
   canonical single-antenna graph              radio/graph.py
@@ -1016,6 +1031,159 @@ have refused a fully capable install, and refused it with a message about
 upgrading something already newer than asked for. The two checks are not
 redundant — the floor describes what to install, the symbol describes what is
 actually there.
+
+### D26 — A plan is one declared partition, two exits, and two guards no per-block number can replace
+
+`wiener_solve` and `gcr_sample` already answer for **one** block, and they
+already share an implementation (`_conjugate_solve`, `key=None | k`).
+`SamplingPlan` promotes that to the level a whole model is inferred at: one
+declared partition of the space into `Block`s, swept to a fixed point by
+`estimate` or drawn from by `sample`.
+
+**Two methods rather than a mode flag.** `key=None | k` is the right
+*implementation* and the wrong *interface*: a caller's intent is "give me the
+best fit" or "give me draws", not "here is a PRNG key". Two signatures make the
+invalid combinations unrepresentable instead of merely validated — `key` is
+required on one and absent from the other, `n_sweeps`/`warmup` belong to one and
+`max_iter`/`tol` to the other. What they share is everything up to the last
+step, which is exactly where the layer below already diverges.
+
+**The engine is derived, never restated.** `Latent(..., linear=True)` already
+says which machinery a latent can take, so `Block` does not ask again. One case
+is genuinely ambiguous — a block mixing declared-linear and non-linear members —
+and it is refused rather than guessed; `engine=` exists for that override and
+for nothing else. `steps=` on a conjugate block raises, because a Wiener solve
+has no inner steps and accepting the argument would silently ignore it.
+
+**The partition is strict, and the omission is the dangerous half.** Every
+latent of the space in exactly one block. A latent in two blocks would have its
+second update each sweep solving a conditional the first had just invalidated. A
+latent in *none* sits frozen at its declared init for the whole run while the
+sweep converges and every other number looks healthy — so both are refused by
+name.
+
+**Why the joint χ² and the rank test are two guards and not one.** A CG residual
+`‖Mx − b‖` and a condition number `κ(AᵀN⁻¹A + S⁻¹)` are both computed *from the
+block being solved*, so neither can see a degeneracy whose two halves live in
+different blocks. `check_linearity` cannot see it either, and is right not to:
+each conditional of a bilinear model genuinely is affine. On the package's own
+`gain × T_ant` fixture with a free antenna temperature per (time, frequency)
+cell, an alternating solve lands well over a thousand kelvin from the truth
+while every per-block number reports green.
+
+The two things that can see it work on different objects and at different
+cadences, which is why neither subsumes the other:
+
+* **`identifiability()`** is a rank test on the Jacobian of the prediction with
+  respect to **all** the parameters at once. It is a property of the *model at a
+  point*, runs before a sweep at both exits, and names the null directions as
+  combinations of latents. The point estimate needs it more, not less: a chain
+  at least has `r_hat` to scream with, while CG converges quietly onto an
+  arbitrary point of the null space.
+* **The joint χ² across sweeps** is a property of the *run*. It is the number
+  that keeps falling while every block's own residual has already settled, and
+  it is tested on the **decrease**, not on `|χ²[k] − χ²[k−1]|` — consecutive
+  sweeps differ by the inner solver's own noise whatever the outer iteration is
+  doing, the same trap `iterative_gls` documents for its `reweight_tol`.
+
+`check_identifiability="once" | "each_sweep" | False` is the caller's explicit
+choice with the cost documented at both ends, not a size heuristic: for a small
+model the per-sweep check is cheap *and* strictly more informative, since a
+nonlinear model's identifiability is a property of where you are.
+
+**A plan does not nest `iterative_gls`.** σ is re-evaluated at the current joint
+prediction before every block update, so for a `RadiometerNoise` the sweep *is*
+the reweighting iteration; nesting would run one fixed point inside another at
+the product of their costs. `PlanDiagnostics.noise_depends_on_prediction`
+records when that applied.
+
+**NUTS-within-Gibbs is stated, not hidden.** A conjugate block's GCR draw is an
+exact conditional draw, so a plan of conjugate blocks is an exact Gibbs sampler.
+A finite number of NUTS steps merely leaves the conditional invariant, which
+makes the scheme Metropolis-within-Gibbs — still valid, and `Block(..., steps=)`
+therefore looks like a performance knob while being a statistical assumption.
+The kernel adapts through warmup and is frozen afterwards, since a kernel that
+keeps adapting from the states it visits is no longer a valid transition.
+
+### D27 — Ordering is declared by the operator, in the graph's own nouns
+
+`calibration.py` stated its ordering constraint in a module docstring: the CW
+tone must sit *before* the bandpass and the gain, because it tracks `g(t)` only
+by passing through it. Nothing enforced it, and `At("noise", cw)` assembled
+cleanly with the tone's gain response dropping to exactly 1.0 — a calibrator
+that monitors nothing, in a model that runs, differentiates and looks healthy.
+
+`must_precede: ClassVar[tuple[str, ...]]` on `AbstractOperator` is that
+constraint moved into a place `assemble()` can check, with an optional
+`must_precede_because` the refusal quotes back.
+
+**The check is reachability, not a toposort index.** A toposort totally orders a
+DAG, so it also orders nodes on branches that never meet, and "sorts earlier"
+would be satisfied by a placement whose output never reaches the constrained
+stage at all. An **absent** stage is not a violation — there is nothing to pass
+through. A node id the template does not have **is** one, because an
+unenforceable declaration is prose in a ClassVar.
+
+**It is a third declaration alongside `requires`/`provides`, not a consumer of
+them.** Those speak in `State` paths, and every operator on the receiver chain
+reads `"data"` and writes `"data"` — so "before the gain" is not a sentence that
+vocabulary can form. Keeping them separate is what lets `requires`/`provides`
+stay a single-shape contract (see *Known deferred issues*).
+
+**Known limit, recorded rather than implied.** Enforcement lives in
+`assemble()`. The `Pipeline` route that `rheplicant.radio`'s own module
+docstring calls "equivalently, by just providing the operators" is equivalent in
+*result*, not in *checking*: `Pipeline(sky, bandpass, gain, cw_tone)` builds and
+runs the placement `assemble` refuses. `Pipeline` and both combinators call
+`validate_operators`; none of them applies `must_precede`, because a bare
+sequence has no reachability structure to test against — degrading the test to
+"this stage's index precedes every named stage present in this sequence" is
+possible and is not implemented. Until it is, `assemble()` is the enforcing
+route and the only one.
+
+### D28 — A smooth basis is the identifiability repair, so it belongs to `core`
+
+`identifiability()` refuses a free-per-cell model and tells the caller what to do
+about it — "a smooth basis in place of one free parameter per cell is the usual
+repair". A diagnostic that names a repair the package does not ship is half a
+feature, so `rheplicant.core.basis` (`SeparableBasis`, `basis_matrix`) is that
+basis and `rheplicant.radio.BasisTemperatureOperator` puts it on the reserved
+`t_sys_extra` node, parameterized by **coefficients, not cells**.
+
+**Why the basis and the operator are one change and not two.** Measured through
+the operator on the assembled graph, with a known 5000 K CW tone against a gain
+free per time sample (`n_time=7`, `n_freq=5`, at a generic coefficient point):
+
+```
+free-per-cell T_ant,  tone ON  (5000 K)   n_par=42 rank=35 nullity=7
+free-per-cell T_ant,  tone OFF            n_par=42 rank=35 nullity=7
+(3,2)-basis T_ant,    tone ON  (5000 K)   n_par=13 rank=13 nullity=0
+(3,2)-basis T_ant,    tone OFF            n_par=13 rank=12 nullity=1
+```
+
+Against a free-per-cell antenna temperature the tone buys **exactly nothing** —
+nullity is `n_time` either way, because the free cells absorb the whole of
+`g[t] × (tone profile)` sample by sample. The basis therefore has to reach
+`T_ant` itself; smoothing the noise waves alone would leave the tone useless.
+
+**It is the frequency axis that does the work.** A basis complete in *frequency*
+makes the tone worth nothing whatever the time axis does — the tone's profile is
+then inside the span and is reabsorbed. A basis complete in *time* is still
+rescued by it. So "frequency-smooth" is the condition and `n_j < n_freq` is what
+it means; `n_basis == n` is legal rather than refused, because the design matrix
+is perfectly well conditioned and whether completeness costs anything is a joint
+property of the model that only `identifiability()` can answer.
+
+**`legendre` and `polynomial` span the same functions and are not
+interchangeable**: `cond(design)` at `n=32, n_basis=16` is 7.86 against 2.81e+05,
+and that number lands on the κ of the block's normal operator.
+
+**Where it lives.** `rheplicant.core.basis`, not `rheplicant.inference.basis`. It
+reads like an inference utility, but the design matrices are held by an operator
+on the signal path, so `radio` would have had to import `inference` — which
+nothing in this package does and which the inference layer's own premise
+forbids. `core` is the one layer both may depend on, and it fits: no `State`, no
+radio physics, and `Coordinates` already names the `time` and `freq` axes there.
 
 ## Known deferred issues
 

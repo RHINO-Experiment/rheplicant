@@ -82,11 +82,13 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
    beam, one gain tied across three stages — never means editing an
    operator.
 
-6. **Interfaces first, physics second.** Every operator ships as a
+6. **Interfaces first, physics second.** An operator may ship as a
    trivial-but-runnable placeholder whose *contract* (shapes, PRNG
    consumption, linearity in calibration parameters) is real and tested.
    Real physics replaces function bodies, never interfaces — the native
-   differentiable limTOD sky engine arrived exactly this way.
+   differentiable limTOD sky engine, the horizon split and the noise-wave
+   reflection terms all arrived exactly that way. [Status](#status) says
+   which operators are still placeholders and which are not.
 
 7. **Loud failure over silent wrongness.** Structural validation at every
    boundary, trace-time (jit-safe) shape checks, provenance-tagged
@@ -183,26 +185,42 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 | Document | What it covers |
 |---|---|
 | [Guided tour](docs/tour.md) | The complete API, top to bottom, with runnable snippets |
+| [Inferring anything](docs/inference.md) | Parameter spaces, linear blocks, `SamplingPlan`, identifiability — the rules the tutorials cite |
+| [The canonical signal path](docs/signal-path.md) | The 32-node graph: node kinds, the rules that follow, custom templates |
 | [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
 | [Sky engines](docs/sky-engines.md) | The limTOD ports: m-mode drift scan, beam normalization, the horizon |
 | [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
 | [Tutorial: GCR](docs/tutorial-gcr.md) | 256 sky pixels by exact conjugate solve, with iterative GLS for the covariance |
 | [Tutorial: NUTS](docs/tutorial-nuts.md) | Gradient MCMC, MCMC diagnostics, and what a broken posterior looks like |
-| [Architecture](DESIGN.md) | Design decisions D1–D25, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D28, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Thirteen end-to-end runnable demos |
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(682 tests, ~97 % coverage, jit+grad+vmap through the full twin; assembly
+(1354 tests, ~97 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
-*physics* is deliberately placeholder pending ports from limTOD and friends
-— except the sky engines, which are real: a general differentiable limTOD
-port and a drift-scan m-mode fast path that agrees with it to float64
-roundoff while running ~1000x faster on RHINO's geometry (see
-[sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)).
-Conventions:
+*physics* is deliberately placeholder where the docstring says so — 17 of the
+29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
+and friends. The other twelve no longer carry that wording: the sky engines
+are real (a general differentiable limTOD port and a drift-scan m-mode fast
+path that agrees with it to float64 roundoff while running ~1000x faster on
+RHINO's geometry — see
+[sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)),
+and so are the horizon split, the horn's ohmic loss, the noise-wave reflection
+terms of the GCR draft's Eq. 1, the CW calibration tone, and the
+separable-basis antenna temperature; the Touchstone and RHINO-HDF5 readers are
+an ingestion layer, not a stand-in for one.
+
+Three of the seventeen are load-bearing even so. `ReceiverOperator`,
+`GainOperator` and `CalLoadOperator` have placeholder *bodies* — no flicker,
+no measured band shape, no load reflection or telemetry — but real shape and
+contract: `unit_mean_bandpass` / `unit_mean_free` on the receiver are the
+bandpass/gain identifiability convention, the gain's exact linearity in `gain`
+is what `Latent(..., linear=True)` claims about it, and
+`CWCalibrationOperator.must_precede == ('bandpass', 'gain')` names the two
+nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 

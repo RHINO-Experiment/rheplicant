@@ -96,6 +96,10 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.radio.environment.atmosphere
+   :members:
+   :show-inheritance:
+
 .. automodule:: rheplicant.radio.environment.ground
    :members:
    :show-inheritance:
@@ -185,6 +189,22 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
    :show-inheritance:
 ```
 
+## Ingestion
+
+Readers for the two file formats RHINO records: the spectrometer's HDF5
+observations, and the Touchstone `.sNp` sweeps that supply the reflection
+coefficients the noise-wave model consumes.
+
+```{eval-rst}
+.. automodule:: rheplicant.radio.rhino
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.radio.touchstone
+   :members:
+   :show-inheritance:
+```
+
 ## rheplicant.inference
 
 ```{eval-rst}
@@ -232,4 +252,13 @@ domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
 .. automodule:: rheplicant.inference.uncertainty
    :members:
    :show-inheritance:
+```
+
+```{eval-rst}
+.. automodule:: rheplicant.inference.plan
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.engines
+   :members:
 ```
