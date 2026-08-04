@@ -49,6 +49,26 @@ intersphinx_mapping = {
     "numpyro": ("https://num.pyro.ai/en/stable", None),
 }
 
+# Targets that a nitpicky build (`sphinx-build -n`) can never resolve, because
+# they belong to packages with no published objects.inv. Listed one by one
+# rather than silenced with a wildcard: a NEW unresolved target in this package
+# is a documented promise pointing at nothing, and `-n` is how it gets caught.
+#
+# equinox/jaxlib entries come from autodoc rendering base classes and
+# annotations, not from anything written by hand here. The limTOD ones are
+# genuine cross-package references in docstrings, to an optional dependency.
+nitpick_ignore = [
+    ("py:class", "equinox._module._module.Module"),
+    ("py:class", "equinox.nn._mlp.MLP"),
+    ("py:class", "jaxlib._jax.pytree.PyTreeDef"),
+    ("py:mod", "limTOD.cstbeam"),
+    ("py:func", "limTOD.cstbeam.cst_beam_maps"),
+    ("py:func", "limTOD.cstbeam.cst_frequency_table"),
+    ("py:func", "limTOD.cstbeam.read_cst_farfield"),
+    ("py:func", "limtod_jax.horizon_beam_fraction"),
+    ("py:func", "limtod_jax.horizon_truncated_beam"),
+]
+
 html_theme = "furo"
 html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
 html_static_path = ["_static"]
@@ -229,8 +249,12 @@ try:
         "```\n\n"
         "A fuller twin — nine operators including RFI, ground pickup, "
         "atmospheric emission, and switched calibration loads (the `sw` "
-        "selector node); note the two dashed reserved entrances "
-        "(`atmosphere_field`, `t_sys_extra`) staying dim:\n\n"
+        "selector node); note the three dashed entrances (`atmosphere_field`, "
+        "`ground_field`, `t_sys_extra`) staying dim, because this twin "
+        "provides none of them. Two of the three are genuinely reserved — no "
+        "shipped operator declares them. `t_sys_extra` is not: "
+        "`BasisTemperatureOperator` sits on it, and it is only the node's "
+        "`reserved` flag that has yet to catch up.\n\n"
         "```{figure} signal-path-fuller.svg\n"
         ":alt: Fuller twin with nine lit operators\n\n"
         "Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.\n"

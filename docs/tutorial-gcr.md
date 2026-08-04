@@ -43,7 +43,7 @@ STEP 1  the world
   data      (256, 4) = 1024 samples
   unknowns  256 sky pixels (64 x 4 channels)
   beam      FWHM 8.6 deg = 1.5 pixels
-  noise     fractional 0.0100, so sigma spans 2.57 .. 4.08 K
+  noise     fractional 0.0100, so sigma spans 2.48 .. 4.14 K
 ```
 
 The noise is **multiplicative** — `d = prediction × (1 + w)`. That is what makes

@@ -702,8 +702,9 @@ integer latent, and a model that pins its own prediction to float32.
 
 ### Two inference tutorials, and a sampler bug they found
 
-New [`docs/tutorial-gcr.md`](docs/tutorial-gcr.md) and
-[`docs/tutorial-nuts.md`](docs/tutorial-nuts.md), backed by
+New [`docs/tutorial-gcr.md`](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tutorial-gcr.md)
+and [`docs/tutorial-nuts.md`](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tutorial-nuts.md),
+backed by
 `examples/tutorial_gcr.py` and `examples/tutorial_nuts.py`. One ring toy, two
 opposite questions: 256 sky pixels by exact conjugate solve, three beam
 parameters by gradient MCMC. Every number in both pages is the script's real

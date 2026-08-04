@@ -350,7 +350,7 @@ the loads. A scalar $\sigma$ would weight them equally and throw that away.
 
 ```text
 simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (Eq. 8)
-   antenna   32 samples    1220.02 K mean   232.68 K rms
+   antenna   32 samples    1220.03 K mean   232.68 K rms
    ambient   32 samples     586.66 K mean    21.42 K rms
    hot       32 samples     522.62 K mean    14.20 K rms
 ```
@@ -404,7 +404,7 @@ underneath on a ±0.45 K scale. The spectra come back to ~0.1 K out of spreads o
 linearity check: worst relative departure 6.7e-13
 condition_estimate: kappa = 4.00e+01
 
-Wiener mean (Eq. 30), CG residual 5.1e-11:
+Wiener mean (Eq. 30), CG residual 2.9e-11:
    T_unc  RMS error   0.134 K   ( 0.33% of its 40 K spread)
    T_cos  RMS error   0.113 K   ( 0.19% of its 60 K spread)
    T_sin  RMS error   0.110 K   ( 1.40% of its  8 K spread)
