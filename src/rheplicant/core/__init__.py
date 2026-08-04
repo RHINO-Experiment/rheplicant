@@ -13,6 +13,7 @@ from rheplicant.core.errors import (
     DataIngestionError,
     DirtError,
     MissingKeyError,
+    ParameterSpaceError,
     PipelineError,
     StateValidationError,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "FrozenMapping",
     "LambdaOperator",
     "MissingKeyError",
+    "ParameterSpaceError",
     "Pipeline",
     "SnapshotOperator",
     "PipelineError",

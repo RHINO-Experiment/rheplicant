@@ -121,8 +121,10 @@ class Conditioning:
         rather than in a block: it is computed from the whole parameter tuple
         against the whole data set, so it is the one number in a Gibbs scheme
         that no partition can hide anything from. A per-block CG residual read
-        1.7e-07 on an answer 2288 K wrong, and it was not lying — it simply
-        cannot see across the partition it is computed inside.
+        ~1e-7 on an answer thousands of kelvin wrong — and read the SAME
+        ~1e-7 on the run that was right, which is the sharper complaint.
+        It was not lying; it simply cannot see across the partition it is
+        computed inside (``tests/inference/test_degenerate_partition.py``).
 
         An unobserved sample (infinite sigma, from
         :class:`~rheplicant.inference.noise.FlaggedNoise`) contributes exactly

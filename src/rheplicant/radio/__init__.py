@@ -1,16 +1,30 @@
-"""Generic single-antenna radio telescope operators (placeholder physics for now).
+"""Generic single-antenna radio telescope operators.
 
-Organized by the element taxonomy (see ``DESIGN.md``):
+Organized by the element taxonomy (see ``DESIGN.md``). The operator packages:
 
 - ``rheplicant.radio.sky`` — astrophysical: 21 cm global signal, foregrounds,
-  point sources (+ the simplest uniform ``SkyOperator``).
+  point sources (+ the simplest uniform ``SkyOperator``), and the sky engines
+  that convolve a model with a beam.
 - ``rheplicant.radio.environment`` — ionosphere, atmospheric emission, ground
   pickup, RFI.
-- ``rheplicant.radio.instrument`` — beam, noise-wave / reflection terms, bandpass,
-  gain, CW calibration tone, thermal noise, self-generated EMI, digitisation.
+- ``rheplicant.radio.instrument`` — beam, horizon split, antenna ohmic loss,
+  switched calibration loads, noise-wave / reflection terms, bandpass, gain,
+  CW calibration tone, thermal noise, self-generated EMI, digitisation.
 - ``rheplicant.radio.backend`` — flagging, averaging.
+- ``rheplicant.radio.filters`` — sidereal / sky-space / Fourier linear filters.
+- ``rheplicant.radio.t_sys`` — a separable ``(nu, t)`` basis as an effective
+  temperature, which is how a smooth ``T_ant`` reaches the antenna sum.
+- ``rheplicant.radio.surrogate`` — a learned stand-in for an expensive stage.
+
+and the supporting modules, which ship no operators:
+
+- ``rheplicant.radio.graph`` — the canonical signal-path graph and
+  :func:`~rheplicant.radio.graph.assemble`.
 - ``rheplicant.radio.protection`` — the ``aux`` contract that keeps a known
   calibrator (the CW tone) out of the flags it would otherwise trip.
+- ``rheplicant.radio.touchstone`` / ``rheplicant.radio.rhino`` — readers for
+  measured S-parameters and for RHINO's HDF5 observations.
+- ``rheplicant.radio.beams`` — readers for CST far-field exports.
 
 A forward model composes them with the two core combinators, following the
 canonical signal-path graph (``rheplicant.radio.graph``; RFI enters as a
@@ -22,18 +36,29 @@ pre-beam field, ground pickup as a post-beam effective temperature)::
     twin  = Pipeline(t_ant, noise_wave, cw_tone, bandpass, gain,
                      noise, emi, adc, flagging, averaging)
 
-or, equivalently, by just providing the operators::
+or by just providing the operators::
 
     twin = assemble(signal, foregrounds, point_sources, ionosphere, rfi_field,
                     beam, ground_pickup, atmosphere, noise_wave, cw_tone,
                     bandpass, gain, noise, emi, adc, flagging, averaging)
 
-Every operator is a trivial-but-runnable placeholder that establishes the
-contract. The real physics will be ported from limTOD (single-antenna TOD
-simulation, itself to be rewritten in JAX + Equinox) and the related family —
-see DESIGN.md for the roadmap. Instrument-specific parameters (e.g. RHINO's)
-enter later as concrete operator configurations, never as framework
-assumptions.
+The two spellings compile to the same composition, but they are not
+interchangeable in what they *check*: an operator may declare an ordering
+constraint (``must_precede``), and only ``assemble`` enforces it. The hand-built
+pipeline above is correct because its order happens to satisfy the tone's
+constraint; write it in a different order and nothing objects. See D27.
+
+Physics is deliberately placeholder where the operator's own docstring says so
+— 17 of the 29 concrete operator classes here, a count pinned by
+``tests/radio/test_placeholder_census.py`` so that it moves when the physics
+does. Real physics replaces function bodies, never interfaces: the sky
+engines, the horizon split, the antenna's ohmic loss, the noise-wave
+reflection terms, the CW tone and the separable-basis antenna temperature all
+arrived that way, ported from limTOD (single-antenna TOD simulation, itself
+rewritten in JAX + Equinox) and the related family — see ``DESIGN.md`` for the
+roadmap and the README's Status section for the current split.
+Instrument-specific parameters (e.g. RHINO's) enter as concrete operator
+configurations, never as framework assumptions.
 """
 
 from rheplicant.radio.backend import BackendOperator, FlaggingOperator, MomentRFIFlaggingOperator

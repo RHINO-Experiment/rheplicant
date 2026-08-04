@@ -46,19 +46,27 @@ holds. Both are refused by name.
 
 **What this exists to prevent.** A hand-rolled alternating solve over a bilinear
 ``gain x T_ant`` model, with a free antenna temperature per (time, frequency)
-cell, lands 1500-2300 K from the truth while every guard this package ships
-reports green — CG residual 7e-08, per-block condition number 1.6,
+cell, lands thousands of kelvin from the truth while every guard this package
+ships reports green — CG residual ~1e-7, per-block condition number ~1.47,
 ``check_linearity`` passing at every sweep because each conditional genuinely
 *is* affine. Nothing in the sweep is wrong. The **partition** is, and no
 per-block number is entitled to notice: a residual and a condition number are
 both computed from the block being solved.
+
+"Thousands" rather than a number, because the distance is the *initial offset*
+carried along the null direction, not a property of the model: 27 K from a
+1 %-off start, 2962 K from a 100 %-off start, and the guards read alike in
+both (``tests/inference/test_degenerate_partition.py``). Iterating does not
+help either — the answer at five sweeps and at two hundred agrees to four
+figures, because the solve reaches the solution manifold at once and then has
+nowhere left to move.
 
 Two things here can notice, and both are on by default.
 :func:`~rheplicant.inference.identifiability.identifiability` sees across
 blocks and refuses the model before a sweep runs, naming the degenerate
 directions by latent; and the convergence monitor is the **joint** chi-squared
 at the current parameter tuple across sweeps, never a per-block residual — which
-is precisely the number that read 1.7e-07 on an answer 2288 K wrong.
+is precisely the number that read ~1e-7 on an answer thousands of kelvin wrong.
 
 **The identifiability check costs a dense Jacobian and a dense SVD**, ``n_data x
 n_par`` float64 words, so ``check_identifiability=`` is the caller's explicit
@@ -317,8 +325,8 @@ class PlanDiagnostics:
         block_residuals: each conjugate block's last relative CG residual, and
             each gradient block's last conditional potential. Recorded because
             it is worth having and **not** because it is a verdict: these are
-            the numbers that read 1.7e-07 on an answer 2288 K wrong. Read
-            :attr:`chi2`.
+            the numbers that read ~1e-7 on an answer thousands of kelvin
+            wrong. Read :attr:`chi2`.
         identifiability: the last rank report taken, or ``None`` when the check
             was disabled.
         noise_depends_on_prediction: whether sigma was re-evaluated at the

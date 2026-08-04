@@ -10,9 +10,20 @@ of a bilinear model genuinely is affine.
 
 The failure that follows is silent and large. An alternating solve over
 ``gain × T_ant`` with a free antenna temperature per (time, frequency) cell
-reports ``κ = 1`` and a CG residual of 1.7e-7 while sitting 2288 K from the
-truth. Nothing in the sweep is wrong; the *partition* is, and no per-block
-number is entitled to say so.
+reports ``κ ≈ 1.47`` and a CG residual of ~1e-7 while sitting thousands of
+kelvin from the truth. Nothing in the sweep is wrong; the *partition* is, and
+no per-block number is entitled to say so.
+
+How far from the truth is not a property of the degeneracy — it is the initial
+offset, carried along the null direction and left there. Measured in
+``tests/inference/test_degenerate_partition.py``: start 1 % off and land 27 K
+out, start 100 % off and land 2962 K out, start ON the truth and stay. The
+guards read the same in all three, to within 3 % on ``κ`` and an order of
+magnitude on a residual already at 1e-7 — so they do not merely miss the
+error, they are blind to four decades of it, including the difference between
+the run that is right and the run that is catastrophically wrong. That is why
+the remedy is a different measurement and not a tighter tolerance: there is no
+threshold to put between those rows.
 
 What can say so is the rank of the Jacobian of the prediction with respect to
 **all** the parameters at once::

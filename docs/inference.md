@@ -764,10 +764,30 @@ this same bilinear model, with a free antenna temperature per `(time, frequency)
 cell, lands hundreds to thousands of kelvin from the truth while **every
 per-block guard this package ships reports green**: `check_linearity` passes at
 every sweep, because each conditional genuinely *is* affine; the per-block
-condition number is ≈1.6; and the CG residual reads `1.7e-07` on an answer
-2288 K wrong. Nothing in the sweep is wrong. The *partition* is, and no
-per-block number is entitled to notice — a residual and a condition number are
-both computed from the block being solved.
+condition number is ≈1.47; and the CG residual reads ~`1e-7`. Nothing in the
+sweep is wrong. The *partition* is, and no per-block number is entitled to
+notice — a residual and a condition number are both computed from the block
+being solved.
+
+How far from the truth is not a property of the degeneracy but of where the
+solve started, because the answer is the initial offset carried along the null
+direction and left there. Measured in
+`tests/inference/test_degenerate_partition.py`:
+
+| start | rms error | CG residual | κ |
+|---|---|---|---|
+| at the truth | 0.014 K | 1.3e-07 | 1.467 |
+| 1 % off | 27.4 K | 1.1e-07 | 1.466 |
+| 25 % off | 704 K | 1.0e-07 | 1.452 |
+| 100 % off | 2962 K | 9.6e-07 | 1.432 |
+
+Four decades of error, and the guards read alike down the column — including
+across the gap between the row that is right and the row that is
+catastrophically wrong. There is no threshold to place between them, which is
+why the remedy is a different measurement rather than a tighter tolerance.
+Iterating is not one either: five sweeps and two hundred agree to four figures,
+because the solve reaches the solution manifold at once and then has nowhere
+left to move.
 
 So the monitored quantity is the **joint** χ² at the current parameter tuple,
 across sweeps. When it has not settled, the refusal says so and names what the

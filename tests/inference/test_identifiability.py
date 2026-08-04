@@ -5,7 +5,10 @@ per-block guard this package ships passes at every sweep: ``check_linearity``
 because each conditional genuinely is affine, the CG residual because it is
 computed from the block, ``condition_estimate`` because it returns kappa of the
 block's own normal operator. The joint model is nevertheless degenerate, and
-the solve lands 2288 K from the truth.
+the solve lands thousands of kelvin from the truth -- how many is the initial
+offset carried along the null direction, measured across four decades in
+``test_degenerate_partition.py``, which is also where the guards are shown
+reading alike on the best and worst runs.
 
 A block-local diagnostic cannot see that, by construction. A rank test over the
 JOINT Jacobian can, and these tests pin that it does — including the part that
