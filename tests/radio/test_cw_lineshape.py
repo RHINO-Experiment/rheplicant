@@ -20,6 +20,10 @@ and silent if it goes wrong:
 Fixtures are deliberately non-square (4 x 11), the tone channel is not the
 middle one, and the drift moves the line by a whole number of channels, so a
 transposed axis or a stuck index shows up as a different number.
+
+The time AXIS the drift is measured against — its precision, its anchor, and
+the waterfall mask it leaves behind — is pinned separately, in
+``tests/radio/test_cw_time_axis.py``.
 """
 
 import warnings
@@ -100,7 +104,9 @@ class TestTheInjectedTotalIsTheKnownLevel:
 
     def test_the_total_does_not_move_when_the_line_widens(self, state):
         narrow = _injected(_tone(lineshape="gaussian", line_width=0.5 * CHANNEL), state)
-        wide = _injected(_tone(lineshape="gaussian", line_width=3.0 * CHANNEL), state)
+        # 2.4 channels: nearly five times the narrow one, and just inside the
+        # width ceiling this band imposes (0.25 x 10 MHz = 2.5 channels).
+        wide = _injected(_tone(lineshape="gaussian", line_width=2.4 * CHANNEL), state)
         assert np.allclose(narrow.sum(), wide.sum(), rtol=1e-4)
         # ... and the widening is real: the peak channel drops a long way.
         assert wide[0, TONE_CHANNEL] < 0.5 * narrow[0, TONE_CHANNEL]
@@ -227,6 +233,66 @@ class TestTheWidthIsAWidthThisGridCouldHaveProduced:
         with pytest.raises(StateValidationError, match="narrower than the channel"):
             _tone(lineshape="sinc2", line_width=half)(state)
 
+    def test_a_line_wider_than_a_quarter_of_the_band_is_refused(self, state):
+        """The ceiling, which the floor's own docstring implies and nothing
+        enforced: past it the injection is a pedestal across the band, every
+        channel clears ``protect_floor``, and the flagger is off for the run."""
+        with pytest.raises(StateValidationError, match="wider than a LINE") as excinfo:
+            _tone(line_width=2.51 * CHANNEL)(state)
+        message = str(excinfo.value)
+        assert "PEDESTAL" in message
+        # ... and it names the number the caller probably wanted instead
+        assert "one channel here is 1e+06 Hz" in message
+
+    def test_a_line_of_exactly_a_quarter_of_the_band_is_accepted(self, state):
+        """The other side of the same boundary: 0.25 x 10 MHz = 2.5 channels."""
+        assert np.isfinite(_injected(_tone(line_width=2.5 * CHANNEL), state)).all()
+
+    def test_the_band_the_typo_produces_is_the_one_that_is_refused(self, state):
+        """``line_width=25e6`` where ``25e6 / (N_FREQ - 1)`` was meant — one
+        keystroke, and the whole band becomes a single uniform pedestal."""
+        with pytest.raises(StateValidationError, match="wider than a LINE"):
+            _tone(line_width=float(FREQ[-1] - FREQ[0]))(state)
+
+    def test_a_coarse_grid_does_not_make_a_one_channel_line_too_wide(self):
+        """Four channels: a quarter of the band is three quarters of ONE
+        channel, so a pure band-fraction ceiling would refuse the width the
+        floor calls canonical. The ceiling never falls below two channels."""
+        coarse_freq = 60e6 + 8e6 * jnp.arange(4, dtype=float)   # span 24 MHz
+        coarse = State(
+            data=jnp.full((N_TIME, 4), 10.0),
+            coords=Coordinates(time=TIME, freq=coarse_freq),
+            meta={"obs_id": "coarse"},
+        )
+        out = _tone(tone_freq=float(coarse_freq[1]), line_width=8e6)(coarse)
+        injected = np.asarray(out.data - coarse.data)
+        assert np.isclose(injected[0].sum(), TONE_KELVIN, rtol=1e-4)
+
+    def test_a_descending_frequency_grid_is_still_measured_by_its_spacing(self):
+        """``median(diff)`` is negative on a descending grid, and a negative
+        floor passes every width. Only ``median(|diff|)`` refuses this."""
+        down = State(
+            data=jnp.full((N_TIME, N_FREQ), 10.0),
+            coords=Coordinates(time=TIME, freq=FREQ[::-1]),
+            meta={"obs_id": "descending"},
+        )
+        with pytest.raises(StateValidationError, match="narrower than the channel"):
+            _tone(line_width=0.5 * CHANNEL)(down)
+
+    def test_a_non_uniform_grid_is_measured_by_the_median_spacing(self):
+        """One narrow channel at the bottom, ten ordinary ones. The FIRST
+        spacing is 0.1 MHz and the MEAN is 0.9 MHz; the median is 1.0 MHz, and
+        the two widths below separate all three."""
+        edges = jnp.array([60.0, 60.1] + [60.0 + k for k in range(1, 10)]) * 1e6
+        ragged = State(
+            data=jnp.full((N_TIME, N_FREQ), 10.0),
+            coords=Coordinates(time=TIME, freq=edges),
+            meta={"obs_id": "ragged"},
+        )
+        for width in (0.5 * CHANNEL, 0.95 * CHANNEL):
+            with pytest.raises(StateValidationError, match="narrower than the channel"):
+                _tone(tone_freq=float(edges[4]), line_width=width)(ragged)
+
     def test_a_single_channel_grid_cannot_establish_a_spacing(self):
         """One channel has no spacing to compare against, so the check steps
         aside rather than inventing one — and steps aside QUIETLY.
@@ -279,6 +345,26 @@ class TestTheCentreDrifts:
         injected = _injected(_tone(drift_rate=DRIFT_PER_CHANNEL), state)
         assert list(injected.argmax(axis=-1)) == [4, 5, 6, 7]
         # and it really is the whole tone moving, not a smear
+        assert np.allclose(injected.max(axis=-1), TONE_KELVIN, rtol=1e-5)
+
+    @pytest.mark.parametrize("anchor", [0.0, 43200.0, 1.0e6])
+    def test_the_drift_is_measured_from_the_first_sample_not_from_zero(
+        self, state, anchor
+    ):
+        """The anchor, pinned — every other fixture in this file starts its
+        time axis at zero, where ``t`` and ``t - t[0]`` are the same array.
+
+        Both places that compute the anchor are covered by this one test, and
+        they must agree: with the injection anchored and the band guard not,
+        the guard validates a RELATIVE centre while the operator places an
+        ABSOLUTE one, and passes a tone it then puts hundreds of MHz out of
+        band. Noon (43200 s) and 1e6 s are both real ways to tag a run, and
+        both are far enough from zero that a dropped anchor is a refusal, not
+        a small error.
+        """
+        shifted = state.replace(coords=state.coords.replace(time=TIME + anchor))
+        injected = _injected(_tone(drift_rate=DRIFT_PER_CHANNEL), shifted)
+        assert list(injected.argmax(axis=-1)) == [4, 5, 6, 7]
         assert np.allclose(injected.max(axis=-1), TONE_KELVIN, rtol=1e-5)
 
     def test_without_drift_the_line_stays_put(self, state):
@@ -376,6 +462,21 @@ class TestTheLevelDrifts:
         with pytest.raises(StateValidationError, match="stops being a tone"):
             _tone(amplitude_drift_rate=-4e-3)(state)
 
+    def test_a_level_that_reaches_exactly_zero_is_refused(self):
+        """The closed side of that boundary, and the case ``<=`` was written
+        for: the tone does not go negative, it VANISHES at the last sample —
+        and the mask is still written, so the flagger is told to keep a channel
+        with no tone left in it. Times and rate are powers of two so the last
+        level is exactly 0.0 rather than a rounding away from it."""
+        powers = State(
+            data=jnp.full((N_TIME, N_FREQ), 10.0),
+            coords=Coordinates(time=jnp.array([0.0, 128.0, 256.0, 512.0]), freq=FREQ),
+            meta={"obs_id": "exact-zero"},
+        )
+        assert 1.0 + (-1.0 / 512.0) * 512.0 == 0.0     # the arithmetic, pinned
+        with pytest.raises(StateValidationError, match="stops being a tone"):
+            _tone(amplitude_drift_rate=-1.0 / 512.0)(powers)
+
     def test_a_level_drift_alone_leaves_the_mask_one_dimensional(self, state):
         """Nothing moves in frequency, so the contaminated channels do not
         change — a waterfall mask here would cost n_time x n_freq for nothing."""
@@ -456,8 +557,10 @@ class TestADriftingToneProtectsADriftingSetOfChannels:
         """Half a channel per sample: the line alternates between sitting on a
         channel and sitting between two, so the samples have genuinely
         different peak levels (1.0 and 0.42 of the total). A protection floor
-        taken against the run's global peak instead of each sample's own would
-        protect one channel where two are wet."""
+        taken against the run's global peak instead of each sample's own gives
+        counts [1, 0, 1, 0] — measured: on the two samples where the line sits
+        between channels it protects NOTHING at all, and hands both wet
+        channels to the flagger."""
         mask = np.asarray(
             _tone(drift_rate=0.5 * DRIFT_PER_CHANNEL, protect_floor=0.9)(state)
             .aux[PROTECTED_KEY]
@@ -563,10 +666,11 @@ class TestWhatAWideToneActuallyMeasures:
         )
         assert np.allclose(total, expected, rtol=1e-4)
         # ... and it is NOT the bandpass at the tone's own channel: on this
-        # curve the weighted average sits ~4% high, which is the bias.
+        # curve the weighted average sits 2.37% high (0.9213 against 0.9000),
+        # in float32 and float64 alike, and that is the bias.
         centre = TONE_KELVIN * float(self.BANDPASS[TONE_CHANNEL]) * np.asarray(self.GAIN)
         assert not np.allclose(total, centre, rtol=1e-2)
-        assert 1.02 < float(total[0] / centre[0]) < 1.10
+        assert 1.020 < float(total[0] / centre[0]) < 1.030
 
 
 # --------------------------------------------------------------- the honesty
@@ -604,22 +708,39 @@ class TestWideningTheLineCostsTheToneItsLeverage:
         return float(np.linalg.norm(profile - fit) / np.linalg.norm(profile))
 
     def test_a_wider_line_is_more_absorbable_by_a_smooth_basis(self):
-        """Measured, in channel widths: 0.84, 0.75, 0.43, 0.092, 0.017, 0.0038."""
+        """Measured, in channel widths: 0.84, 0.75, 0.43, 0.21, 0.092, 0.038.
+
+        The sweep stops at 2.5 channels because that is the widest line this
+        band admits at all (``MAX_WIDTH_IN_BAND_FRACTION`` x 10 MHz) — past it
+        the injection is a pedestal, not a line, and the operator refuses it.
+        The trend is already an order of magnitude inside the legal range.
+        """
         residuals = [
             self._residual_outside_a_smooth_basis(w * CHANNEL)
-            for w in (0.25, 0.5, 1.0, 2.0, 3.0, 4.0)
+            for w in (0.25, 0.5, 1.0, 1.5, 2.0, 2.5)
         ]
         assert residuals == sorted(residuals, reverse=True), residuals
         # a quarter-channel line is almost entirely outside the smooth basis;
-        # a four-channel line is almost entirely inside it — 220x less to gain.
+        # the widest legal line is mostly inside it — 22x less to gain.
         assert residuals[0] > 0.8
-        assert residuals[-1] < 5e-3
-        assert residuals[0] / residuals[-1] > 100
+        assert residuals[-1] < 0.05
+        assert residuals[0] / residuals[-1] > 20
 
 
 class TestItStillCompilesAndStillCarriesNoParameters:
     def test_the_new_settings_are_all_static(self):
+        """``tree_leaves(op)`` UNFILTERED, which is what "static" actually means.
+
+        ``eqx.filter(op, eqx.is_inexact_array)`` filters on ARRAYS, and every
+        one of these fields has already been coerced to a Python float or str
+        by its converter — so that assertion holds whether or not ``static=True``
+        is there, and it held for five separate mutations that each removed one.
+        The distinction is real and this is where it shows: with ``static=True``
+        the leaves are ``[]`` and ``jax.grad`` returns ``[]``; without it the
+        field is a leaf and ``jax.grad`` raises ``ConcretizationTypeError``.
+        """
         op = _tone(lineshape="gaussian", drift_rate=1.0, amplitude_drift_rate=1e-4)
+        assert jax.tree_util.tree_leaves(op) == []
         assert jax.tree_util.tree_leaves(eqx.filter(op, eqx.is_inexact_array)) == []
         hash(jax.tree_util.tree_structure(op))
 

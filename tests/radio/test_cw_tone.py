@@ -129,7 +129,13 @@ class TestTheAmplitudeIsKnownAndStatic:
 
         A free amplitude is absorbed exactly by the gain it is meant to track,
         so inferring it removes the only thing the tone contributes.
+
+        The unfiltered ``tree_leaves`` is the load-bearing one. ``eqx.filter(
+        op, eqx.is_inexact_array)`` filters on ARRAYS, and the converter has
+        already turned the amplitude into a Python float — so that assertion
+        passes with ``static=True`` removed, and this claim would go unpinned.
         """
+        assert jax.tree_util.tree_leaves(_tone()) == []
         assert jax.tree_util.tree_leaves(eqx.filter(_tone(), eqx.is_inexact_array)) == []
         assert isinstance(_tone().amplitude, float)
 
@@ -171,6 +177,19 @@ class TestTheToneFrequencyIsInsideTheBand:
     def test_a_tone_below_the_band_is_refused(self, state):
         with pytest.raises(StateValidationError, match="outside the observed band"):
             _tone(tone_freq=1e6)(state)
+
+    def test_a_tone_just_outside_the_band_is_refused_on_either_side(self, state):
+        """The refusing side AT the boundary, which 200 MHz does not pin.
+
+        A tone 115 MHz outside a 25 MHz band survives any amount of accidental
+        widening of the accepted interval; a hundredth of a channel (62.5 kHz)
+        does not, and that is what makes this a boundary test rather than a
+        smoke test.
+        """
+        for outside in (float(FREQ[-1]) + 0.01 * CHANNEL,
+                        float(FREQ[0]) - 0.01 * CHANNEL):
+            with pytest.raises(StateValidationError, match="outside the observed band"):
+                _tone(tone_freq=outside)(state)
 
     def test_the_band_edges_are_inside_it(self, state):
         """Closed interval: a tone at the first or last channel is legitimate."""

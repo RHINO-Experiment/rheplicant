@@ -115,16 +115,25 @@ def unflag_protected(flags: jax.Array, aux: dict[str, Any]) -> jax.Array:
     A no-op when nothing declared protection, so a flagger keeps working
     unchanged in a pipeline with no calibrator in it.
 
+    A waterfall mask is bound to the TIME AXIS it was written on: its row ``i``
+    names the channels the calibrator wet at sample ``i`` of the axis that
+    existed when the mask was built. Any stage that changes the number of
+    samples — averaging into chunks, selecting a subset — leaves it stale, and
+    a stale mask must be dropped or re-derived, not carried. That is why the
+    time axis is checked here and not only the channel one.
+
     Args:
         flags: ``(n_time, n_freq)`` boolean flags, ``True`` = flagged.
         aux: the state's aux mapping.
 
     Raises:
         StateValidationError: if the mask is neither a channel mask nor a full
-            waterfall mask, or if its channel axis does not match the flags'.
-            Both would otherwise broadcast — a ``(n_freq,)`` mask against a
-            transposed waterfall, or a mask built for a different band — and
-            silently protect the wrong channels.
+            waterfall mask, if its channel axis does not match the flags', or
+            if it is a waterfall over a different number of samples. All three
+            would otherwise broadcast — a ``(n_freq,)`` mask against a
+            transposed waterfall, a mask built for a different band, or a
+            single-row waterfall left over from a shape-changing stage — and
+            silently protect the wrong channels, or every one of them.
     """
     protected = aux.get(PROTECTED_KEY)
     if protected is None:
@@ -141,6 +150,19 @@ def unflag_protected(flags: jax.Array, aux: dict[str, Any]) -> jax.Array:
             f"flags have {flags.shape[-1]}. A mask built for a different band "
             "would broadcast against these flags only by accident, and protect "
             "whichever channels happened to line up."
+        )
+    if protected.ndim == 2 and protected.shape[0] != flags.shape[0]:
+        raise StateValidationError(
+            f"aux[{PROTECTED_KEY!r}] is a waterfall mask over "
+            f"{protected.shape[0]} time samples but the flags cover "
+            f"{flags.shape[0]}. A waterfall mask names which channels the "
+            "calibrator wet at each sample of the axis it was WRITTEN on, so a "
+            "stage that changed the number of samples (averaging into chunks, "
+            "selecting a subset) has left this one stale — row i no longer "
+            "refers to sample i. A single-row mask is the dangerous case, "
+            "because it would broadcast over every sample and protect the whole "
+            "run rather than fail; it is refused here for that reason. Drop the "
+            "mask or re-derive it after a stage that changes the time axis."
         )
     keep = protected if protected.ndim == 2 else protected[None, :]
     return flags & ~keep.astype(bool)

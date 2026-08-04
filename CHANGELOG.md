@@ -2,6 +2,95 @@
 
 ## Unreleased
 
+### The CW tone is a line now, and both ends of "how wide" are guarded
+
+**Breaking, twice.** `CWCalibrationOperator` no longer models the tone as one
+number in one channel.
+
+* `line_width` is now a **required** argument. Every existing
+  `CWCalibrationOperator(amplitude=..., tone_freq=...)` call raises `TypeError`
+  until it is given one. There is deliberately no default: the width is a
+  property of the spectrometer, nothing in this repository, `rhino-cal` or
+  `rhino_cal_jax` establishes RHINO's, and guessing it silently mis-sizes the
+  protection mask — the failure the operator exists to avoid. For a critically
+  sampled unwindowed FFT it is one channel spacing, `band / (n_freq - 1)` on a
+  linear grid.
+* `amplitude` **changed meaning**: it is the tone's TOTAL contribution summed
+  over channels, not the level added to one channel. The lineshape is
+  normalised over the sampled channels so the injected total is `amplitude`
+  whatever the width and wherever the line falls between two channels — the
+  tone's level is the one thing this operator knows, and a total that moved
+  with the channelisation would make the known quantity unknown. The price is
+  that the peak channel is no longer `amplitude`: a line halfway between two
+  channels keeps ~0.42 of it (half-bin scalloping, −3.8 dB), which is real and
+  is exactly the bias the delta-on-one-channel model hid. An on-centre `sinc2`
+  tone of one channel width is unchanged to 1e-6, so on-centre call sites keep
+  their old numbers.
+
+`lineshape` (`"sinc2"` | `"gaussian"`), `drift_rate` and
+`amplitude_drift_rate` are new, all KNOWN static settings rather than
+differentiable leaves. A tone that drifts in frequency writes a
+`(n_time, n_freq)` **waterfall** protection mask instead of a `(n_freq,)`
+channel mask, because the contaminated channels move with the line.
+
+**What a tone with width actually measures.** A delta probes `b(ν_cw) g(t)` —
+one bandpass value. A line with width probes `Σ_k w_k b(ν_k) g(t)`, the
+lineshape-weighted average of the bandpass across its wings. Measured on a
+realistically curved band for a 1.5-channel gaussian: **2.37 %** apart
+(0.9213 against 0.9000), in float32 and float64 alike. Widening the line also
+COSTS the tone leverage rather than adding any — the residual of its channel
+profile outside a degree-4 polynomial basis falls 0.84 → 0.038 from a quarter
+channel to the widest line the band admits. Realism here is not extra
+information.
+
+**`line_width` is now guarded from both sides.** `MIN_WIDTH_IN_CHANNELS` was
+already there; `MAX_WIDTH_IN_BAND_FRACTION` (0.25 of the band, never below
+`MIN_CEILING_IN_CHANNELS` = 2 channel spacings, so a coarse grid cannot make a
+one-channel line "too wide") is new. Past the ceiling the injection is not a
+line at all but a pedestal: measured on an 11-channel band, a width of 5
+channels puts every channel above `protect_floor`, so the mask covers the band
+and the RFI flagger is off for the whole run — genuine RFI surviving into the
+data. At 100000 channels the "tone" is a uniform `1/n_freq` floor. The number
+is where both shapes cross the default 1e-2 floor for the worst-case placement
+(gaussian `exp(-1/2f²)`, `sinc2` envelope `(f/π)²`, both ≈ 1.1e-2 at `f = 1/3`).
+`line_width = 25e6` where `25e6 / (N_FREQ - 1)` was meant is one keystroke, and
+it is now a refusal.
+
+**Fixed: a drift on a unix-second time axis was silently wrong.** `coords.time`
+is stored through `jnp.asarray` — float32 unless x64 is on — so an axis of unix
+seconds (~1.75e9, which is exactly what `read_rhino_observation` puts there
+from `obs.time_s`) is quantised onto a **128 s grid before** `t - t[0]` ever
+runs. The anchor cannot recover what the store already threw away, and because
+the injection and the band guard read the same corrupted elapsed values, the
+guard could not see it. Measured, 4 samples 100 s apart, `drift_rate` 1e4 Hz/s:
+
+```
+coords.time = [0,100,200,300]          elapsed [0,100,200,300]  peak ch [4,5,6,7]  protected 1,1,1,1 of 11
+coords.time = 1.75e9 + the same        elapsed [0,128,256,256]  peak ch [4,5,7,7]  protected 1,6,8,8 of 11
+```
+
+Two of four samples collapse onto the same time, the tone lands in the wrong
+channel, and the mask blows out from one channel to eight of eleven. Nothing
+raised, nothing was NaN, every shape was right; the same run under
+`JAX_ENABLE_X64=1` gives `[4,5,6,7]`, so the cause was precision, not logic. A
+drifting tone now **refuses** a time axis whose stored resolution exceeds
+`MAX_TIME_RESOLUTION_IN_SAMPLES` (1e-2) of the run's smallest sample interval,
+and the message names both remedies: pass times measured from the start of the
+run, or enable float64. Seconds from the start of the run, the day or the month
+all pass; seconds from the start of the year (2 s of error) do not.
+
+**Fixed: a waterfall protection mask went stale through a shape-changing
+stage.** `BackendOperator` updates `data` and `coords.time` together and leaves
+`aux` alone, so `Pipeline(CWCalibrationOperator(drift_rate=...),
+BackendOperator(n_chunk=2))` produced `(2, 11)` data beside a `(4, 11)` mask.
+`unflag_protected` checked only the channel axis and then broadcast: the
+mismatched case raised a raw `TypeError` from `&`, and a **one-row** mask —
+what a single-chunk average leaves behind — broadcast silently over every
+sample and unflagged the entire run (measured: 0 of 44 flags left). It now
+checks the time axis too and refuses both as a sentence naming the stale mask.
+A waterfall mask is bound to the time axis it was written on; a stage that
+changes the number of samples must drop or re-derive it.
+
 ### A smooth (ν, t) basis, and the antenna temperature that uses it
 
 `identifiability()` refuses a free-per-cell model and tells the caller what to
@@ -167,7 +256,7 @@ docstring. The kernel adapts through warmup and is **frozen** afterwards, since
 a kernel that keeps adapting from the states it visits is no longer a valid
 transition.
 
-### The CW tone: a position the graph checks, a level it knows, a channel it keeps
+### The CW tone: a position the graph checks, a level it knows, channels it keeps
 
 `calibration.py` stated its ordering constraint in a module docstring — the
 tone must sit *before* the bandpass and gain, because it tracks `g(t)` only by

@@ -184,10 +184,13 @@ class TestInstrumentComponents:
         assert jnp.all(out.data[:, 2] == 60.0)
         assert jnp.all(out.data[:, [0, 1, 3]] == 10.0)
 
-    def test_cw_tone_freq_validated(self):
+    @pytest.mark.parametrize("tone_freq", [-1.0, 0.0])
+    def test_cw_tone_freq_validated(self, tone_freq):
+        """Both sides of a CLOSED boundary: 0 Hz is not a frequency either, and
+        it is the value a missing setting defaults to."""
         with pytest.raises(StateValidationError, match="tone_freq"):
             CWCalibrationOperator(
-                amplitude=jnp.array(1.0), tone_freq=-1.0, line_width=1e6
+                amplitude=jnp.array(1.0), tone_freq=tone_freq, line_width=1e6
             )
 
     def test_emi_comb(self, data_state):

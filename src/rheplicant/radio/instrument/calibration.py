@@ -63,7 +63,7 @@ A delta on one channel probes ``b(nu_cw) * g(t)`` — one bandpass value, which
 is what the placeholder claimed and what an on-centre ``sinc2`` tone still
 delivers exactly. A line with width probes ``sum_k w_k b(nu_k) * g(t)``: the
 lineshape-weighted AVERAGE of the bandpass across the line's wings. On a
-curved bandpass those are different numbers — measured at ~4% apart for a
+curved bandpass those are different numbers — measured at 2.37% apart for a
 1.5-channel gaussian on a realistically curved band in
 ``tests/radio/test_cw_lineshape.py`` — and reading the second as the first
 biases the recovered bandpass at the tone's channel by the curvature times the
@@ -89,7 +89,9 @@ narrow line is not in the span of the smooth basis and cannot be reabsorbed.
 Giving the line a width makes that WORSE, not better, and the direction is
 measured in ``tests/radio/test_cw_lineshape.py``: the residual of the tone's
 channel profile outside a degree-4 polynomial basis falls by more than an
-order of magnitude between a quarter-channel line and a three-channel one.
+order of magnitude (0.84 -> 0.038) between a quarter-channel line and a line
+at ``MAX_WIDTH_IN_BAND_FRACTION`` of that band, which is the widest line the
+width guard admits at all.
 A wide line moves *into* the span of the smooth basis it was supposed to be
 distinguishable from. Realism here costs leverage; nothing in this module
 makes the tone independently sufficient, and no docstring should imply it.
@@ -144,6 +146,87 @@ MIN_WIDTH_IN_CHANNELS = {"sinc2": 1.0, "gaussian": 0.25}
 #: one width the convention names, over 1e-7, would be absurd. 1e-5 is many
 #: orders of magnitude below any width difference that changes a lineshape.
 WIDTH_FLOOR_RTOL = 1e-5
+
+#: Widest line, as a fraction of the observed band, that is still a LINE.
+#:
+#: The floor's mirror, and the other direction the class docstring already
+#: names as a silent failure. Past some width the injection stops being a
+#: narrow feature and becomes a pedestal across the whole band: every channel
+#: lands above ``protect_floor`` of the peak, the protection mask covers the
+#: band, and the RFI flagger is switched off for the entire run — genuine RFI
+#: surviving into the data, which is the "protect too much" half of the trade.
+#:
+#: The number is where that starts, at the default ``protect_floor`` of 1e-2,
+#: for the worst-case placement (tone at one band edge, channel at the other,
+#: an offset of the full band ``B``). For a gaussian of ``sigma = f B`` that
+#: channel keeps ``exp(-1/(2 f^2))`` of the peak; for a ``sinc2`` of width
+#: ``f B`` its envelope keeps ``(f/pi)^2``:
+#:
+#:     f       gaussian edge/peak    sinc2 envelope edge/peak
+#:     0.25    3.4e-4                6.3e-3      both BELOW the 1e-2 floor
+#:     1/3     1.1e-2                1.1e-2      both ABOVE it
+#:
+#: Both shapes cross the default floor within a percent of each other at
+#: ``f = 1/3``; 0.25 is the round value below that crossing, leaving the far
+#: side of the band outside the mask by 30x (gaussian) and 1.6x (sinc2).
+#:
+#: What this does NOT catch, stated because it is measured: a tone nearer the
+#: middle of a NARROW band saturates its mask sooner — on the 11-channel band
+#: of ``tests/radio/test_cw_lineshape.py`` with the tone on channel 4, a
+#: 2-channel gaussian (f = 0.2) already protects all 11. No fraction-of-band
+#: rule can express that, because it depends on where the tone sits and on
+#: ``protect_floor``. This ceiling refuses a width that is not a line on ANY
+#: placement; the level rule owns the rest.
+MAX_WIDTH_IN_BAND_FRACTION = 0.25
+
+#: Floor under the ceiling, in channel spacings, so a coarse grid cannot make
+#: a one-channel line "too wide".
+#:
+#: ``MAX_WIDTH_IN_BAND_FRACTION * (high - low)`` is ``0.25 * (n_freq - 1)``
+#: channels, which drops BELOW one channel once the grid has four channels or
+#: fewer — a 4-channel grid would refuse the critically-sampled width the floor
+#: calls canonical. Two channel spacings because an apodised polyphase channel
+#: has a wider main lobe than the unwindowed FFT the floor is written for (see
+#: ``lineshape`` above), and two is a generous bound on that. It binds only on
+#: coarse grids: ``0.25 * (n_freq - 1) >= 2`` from ``n_freq = 9`` up, so on any
+#: real spectrometer band the band fraction is the operative limit.
+MIN_CEILING_IN_CHANNELS = 2.0
+
+#: Largest fraction of one sample interval that ``coords.time``'s own
+#: representable resolution may occupy, before a drift is measured against
+#: times that are not there.
+#:
+#: ``coords.time`` is stored through ``jnp.asarray``, which is float32 unless
+#: x64 is enabled, and both the injection and the band guard read ``t - t[0]``.
+#: Subtracting the anchor cannot undo a rounding that already happened at STORE
+#: time: a unix-second axis (~1.75e9) has a float32 spacing of 128 s, so a
+#: 100 s cadence is quantised onto a 128 s grid BEFORE the subtraction. Both
+#: sides read the same corrupted values, so the band guard cannot see it.
+#: Measured on an 11-channel 1 MHz grid, 4 samples 100 s apart, ``drift_rate``
+#: 1e4 Hz/s — one channel per sample:
+#:
+#:     coords.time            elapsed              peak ch     protected/11
+#:     [0,100,200,300]        [0,100,200,300]      [4,5,6,7]   1, 1, 1, 1
+#:     1.75e9 + the same      [0,128,256,256]      [4,5,7,7]   1, 6, 8, 8
+#:
+#: Two of the four samples collapse onto the same time, the tone lands in the
+#: wrong channel, and the mask blows out from one channel to eight of eleven —
+#: this operator's own named silent failure. Nothing raises, nothing is NaN,
+#: every shape is right; the same run under ``JAX_ENABLE_X64=1`` gives
+#: ``[4,5,6,7]``, so the cause is precision, not logic. The axis is not
+#: hypothetical: :func:`~rheplicant.radio.rhino.read_rhino_observation` sets
+#: ``time=obs.time_s``, documented there as unix seconds.
+#:
+#: 1e-2 rather than something tighter because a sample is an AVERAGE over its
+#: own integration, so its time tag is only meaningful to within one interval
+#: to begin with; demanding the representation error be a hundredth of that
+#: leaves two orders of magnitude of headroom below what the axis itself means.
+#: At a ratio of 1.0 samples merge outright, which is the measured failure —
+#: 100x beyond this cut. Seconds from the start of the run, of the day
+#: (86400 -> 3.9e-5 of a 100 s interval) or of the month (2.6e6 -> 2.5e-3) all
+#: pass; seconds from the start of the YEAR (3.15e7 -> 2e-2) do not, and should
+#: not, because elapsed times there are already wrong by 2 s.
+MAX_TIME_RESOLUTION_IN_SAMPLES = 1e-2
 
 
 def _static_setting(name: str, array_why: str, traced_why: str):
@@ -254,11 +337,17 @@ class CWCalibrationOperator(AbstractOperator):
             to the first null — one channel spacing for a critically sampled
             unwindowed FFT. For ``"gaussian"`` it is the standard deviation
             (FWHM = 2.355 * line_width). No default: see the module docstring.
+            It is the CHANNEL response, not the band, and it is guarded from
+            both sides — ``MIN_WIDTH_IN_CHANNELS`` below,
+            ``MAX_WIDTH_IN_BAND_FRACTION`` above.
         lineshape: ``"sinc2"`` or ``"gaussian"``.
         drift_rate: centre-frequency drift [Hz/s], linear in ``coords.time``
-            from the first sample. Nonzero requires ``coords.time``.
+            from the first sample. Nonzero requires ``coords.time``, and
+            requires it to be an axis whose stored precision can express the
+            run's own cadence — see ``MAX_TIME_RESOLUTION_IN_SAMPLES``.
         amplitude_drift_rate: FRACTIONAL level drift [1/s], linear from the
-            first sample. Nonzero requires ``coords.time``.
+            first sample. Nonzero requires ``coords.time``, with the same
+            precision condition.
         protect_floor: protect every channel at or above this fraction of the
             tone's peak channel contribution. In (0, 1].
     """
@@ -340,10 +429,14 @@ class CWCalibrationOperator(AbstractOperator):
         all (a single-spectrum fit, say). Asking for it unconditionally would
         break those; not asking for it when it is needed would silently freeze
         the drift at zero, which looks exactly like a stable tone.
+
+        ``state.coords`` itself is not re-checked here: ``__call__`` refused a
+        state without coords before this ran, so the disjunct would be a branch
+        no input can reach and no test can pin.
         """
         if self.drift_rate == 0.0 and self.amplitude_drift_rate == 0.0:
             return None
-        if state.coords is None or state.coords.time is None:
+        if state.coords.time is None:
             raise StateValidationError(
                 "A drifting CW tone needs coords.time: drift_rate="
                 f"{self.drift_rate} Hz/s and amplitude_drift_rate="
@@ -405,7 +498,7 @@ class CWCalibrationOperator(AbstractOperator):
         readable inside a trace, and when they genuinely are traced arguments
         the checks skip rather than crashing.
 
-        Three silent failures live here.
+        Five silent failures live here.
 
         ``jnp.sinc`` and ``jnp.exp`` always return SOME number: a tone at
         200 MHz against a 60-85 MHz band still gets normalised weights, and
@@ -413,6 +506,13 @@ class CWCalibrationOperator(AbstractOperator):
 
         A tone that starts in band and DRIFTS out of it is worse, because a
         check at the first sample alone passes.
+
+        A line narrower than the grid can carry lands on the lineshape's own
+        nulls; a line WIDER than the band stops being a line at all and turns
+        the protection mask into a blanket over every channel.
+
+        A time axis whose stored precision cannot express the run's cadence
+        makes every elapsed time wrong before any of the above is computed.
 
         A fractional level drift steep enough to pass through zero turns the
         calibrator into a notch part-way through the run, which is finite,
@@ -439,6 +539,26 @@ class CWCalibrationOperator(AbstractOperator):
                     "below its own channel width: either widen line_width or "
                     "supply the finer frequency grid the width belongs to."
                 )
+            ceiling = max(
+                MAX_WIDTH_IN_BAND_FRACTION * (high - low),
+                MIN_CEILING_IN_CHANNELS * spacing,
+            )
+            if self.line_width > ceiling:
+                raise StateValidationError(
+                    f"line_width {self.line_width:.6g} Hz is wider than a LINE on "
+                    f"this band ({MAX_WIDTH_IN_BAND_FRACTION:g} x the "
+                    f"{high - low:.6g} Hz band, or {MIN_CEILING_IN_CHANNELS:g} x the "
+                    f"{spacing:.6g} Hz channel spacing, whichever is larger = "
+                    f"{ceiling:.6g} Hz). Nothing would raise: the weights would "
+                    "still normalise and the injected total would still be exactly "
+                    "the amplitude, but what they model is a PEDESTAL spread over "
+                    "the whole band rather than a line. Every channel then sits "
+                    "above protect_floor of the peak, so the protection mask covers "
+                    "the band and the RFI flagger is switched off for the entire "
+                    "run — genuine RFI surviving into the data, which is sky thrown "
+                    "away. line_width is the spectrometer's CHANNEL response, not "
+                    f"the band: one channel here is {spacing:.6g} Hz."
+                )
 
         first, last = 0.0, 0.0
         if self.drift_rate != 0.0 or self.amplitude_drift_rate != 0.0:
@@ -446,6 +566,8 @@ class CWCalibrationOperator(AbstractOperator):
                 times = np.asarray(time)
             except jax.errors.TracerArrayConversionError:
                 return  # traced times: the run's extent is unknowable here
+            if times.size > 1:
+                self._refuse_a_time_axis_it_cannot_resolve(times)
             elapsed = times - times[0]
             first, last = float(elapsed.min()), float(elapsed.max())
 
@@ -481,6 +603,51 @@ class CWCalibrationOperator(AbstractOperator):
                 "against. A fractional drift is a first-order model of a stable "
                 "source; a run long enough to cancel the source is outside it."
             )
+
+    @staticmethod
+    def _refuse_a_time_axis_it_cannot_resolve(times: np.ndarray) -> None:
+        """Refuse a ``coords.time`` whose STORED precision has eaten the cadence.
+
+        The one check here that is not about the tone at all: it is about the
+        axis the drift is measured against. ``np.spacing`` is taken on the
+        array's own scalar rather than on a Python float, deliberately — the
+        question is what the stored dtype can represent, and
+        ``np.spacing(float(x))`` answers it for float64 (2.4e-7 s at unix
+        seconds) no matter what the array actually holds (128 s in float32).
+
+        ``np.abs`` on both because an axis anchored on a future epoch is
+        negative — ``np.spacing`` of a negative number is negative, and a
+        negative resolution would compare below any positive threshold and
+        wave the axis through. On the gaps because the comparison is against
+        the MAGNITUDE of the sample interval, which a descending axis has just
+        as much as an ascending one.
+
+        The smallest gap rather than the median or the mean: rounding makes
+        every nonzero gap a multiple of the resolution, so a run that has
+        already lost samples to collision reports a smallest gap of exactly
+        zero and is refused by the same comparison, with the zero in the
+        message saying why.
+        """
+        resolution = float(np.spacing(np.abs(times).max()))
+        cadence = float(np.min(np.abs(np.diff(times))))
+        if resolution <= MAX_TIME_RESOLUTION_IN_SAMPLES * cadence:
+            return
+        raise StateValidationError(
+            f"coords.time is stored as {times.dtype} and reaches "
+            f"{float(np.abs(times).max()):.9g}, where consecutive representable "
+            f"numbers are {resolution:.6g} s apart — but the closest two samples "
+            f"in this run are {cadence:.6g} s apart, and this operator requires "
+            f"the first to be at most {MAX_TIME_RESOLUTION_IN_SAMPLES:g} of the "
+            "second. The rounding happened when the axis was STORED, so (t - t[0]) "
+            "cannot recover it: the drift is then computed against elapsed times "
+            "that are wrong, samples can collapse onto one another, and nothing "
+            "raises — the tone simply lands in the wrong channel and the "
+            "protection mask moves with it. read_rhino_observation sets "
+            "coords.time from obs.time_s, which is UNIX SECONDS (~1.75e9) and "
+            "quantises to a 128 s grid in float32. Either pass sample times "
+            "measured from the start of the run, or enable float64 "
+            "(JAX_ENABLE_X64=1, or jax.config.update('jax_enable_x64', True))."
+        )
 
 
 class CalLoadOperator(AbstractOperator):
