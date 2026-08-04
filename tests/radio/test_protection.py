@@ -50,9 +50,16 @@ def state():
     )
 
 
+# One channel spacing: the 'sinc2' response of a critically sampled unwindowed
+# FFT. On-centre tones then land entirely in their own channel, so the protected
+# set here is still a single index and these measurements are comparable with
+# the ones taken before the lineshape existed.
+CHANNEL = float(FREQ[1] - FREQ[0])
+
+
 def _tone():
     return CWCalibrationOperator(
-        amplitude=TONE_KELVIN, tone_freq=float(FREQ[TONE_CHANNEL])
+        amplitude=TONE_KELVIN, tone_freq=float(FREQ[TONE_CHANNEL]), line_width=CHANNEL
     )
 
 
@@ -159,6 +166,7 @@ class TestTheThresholdFlagger:
 MRFI_TIME, MRFI_FREQ = 48, 24
 MRFI_FREQ_AXIS = jnp.linspace(60e6, 90e6, MRFI_FREQ)
 MRFI_TONE_CHANNEL = 7
+MRFI_CHANNEL = float(MRFI_FREQ_AXIS[1] - MRFI_FREQ_AXIS[0])
 
 
 def _waterfall() -> jnp.ndarray:
@@ -191,7 +199,9 @@ class TestMomentRFI:
 
     def test_the_tone_channel_goes_from_fully_flagged_to_fully_kept(self):
         tone = CWCalibrationOperator(
-            amplitude=5000.0, tone_freq=float(MRFI_FREQ_AXIS[MRFI_TONE_CHANNEL])
+            amplitude=5000.0,
+            tone_freq=float(MRFI_FREQ_AXIS[MRFI_TONE_CHANNEL]),
+            line_width=MRFI_CHANNEL,
         )
         toned = tone(self._state())
 
@@ -209,7 +219,9 @@ class TestMomentRFI:
         state = self._state()
         state = state.with_data(state.data.at[10:14, rfi_channel].multiply(6.0))
         tone = CWCalibrationOperator(
-            amplitude=5000.0, tone_freq=float(MRFI_FREQ_AXIS[MRFI_TONE_CHANNEL])
+            amplitude=5000.0,
+            tone_freq=float(MRFI_FREQ_AXIS[MRFI_TONE_CHANNEL]),
+            line_width=MRFI_CHANNEL,
         )
         flags = np.asarray(self._flagger()(tone(state)).aux["flags"])
         assert flags[10:14, rfi_channel].all()

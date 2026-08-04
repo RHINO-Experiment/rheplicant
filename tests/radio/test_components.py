@@ -175,14 +175,20 @@ class TestInstrumentComponents:
 
     def test_cw_tone_hits_nearest_channel(self, data_state):
         freq = data_state.coords.freq  # linspace(60e6, 85e6, 4)
-        op = CWCalibrationOperator(amplitude=jnp.array(50.0), tone_freq=float(freq[2]))
+        op = CWCalibrationOperator(
+            amplitude=jnp.array(50.0),
+            tone_freq=float(freq[2]),
+            line_width=float(freq[1] - freq[0]),
+        )
         out = op(data_state)
         assert jnp.all(out.data[:, 2] == 60.0)
         assert jnp.all(out.data[:, [0, 1, 3]] == 10.0)
 
     def test_cw_tone_freq_validated(self):
         with pytest.raises(StateValidationError, match="tone_freq"):
-            CWCalibrationOperator(amplitude=jnp.array(1.0), tone_freq=-1.0)
+            CWCalibrationOperator(
+                amplitude=jnp.array(1.0), tone_freq=-1.0, line_width=1e6
+            )
 
     def test_emi_comb(self, data_state):
         out = EMIOperator(amplitude=jnp.array(5.0), period=2)(data_state)

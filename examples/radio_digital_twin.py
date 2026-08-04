@@ -39,6 +39,10 @@ from rheplicant.radio import (
 )
 
 N_TIME, N_FREQ = 128, 32
+# Channel spacing of the grid below. For the CW tone's default 'sinc2'
+# lineshape this is the first-null offset of a critically sampled unwindowed
+# FFT — the width has no default because it is a property of the spectrometer.
+CHANNEL_HZ = 25e6 / (N_FREQ - 1)
 
 # ------------------------------------------------------------ observation --
 state = State(
@@ -70,7 +74,9 @@ twin = assemble(
                       gamma_src_im=jnp.full((1, N_FREQ), 0.02),
                       gamma_rec_re=jnp.zeros(N_FREQ),
                       gamma_rec_im=jnp.zeros(N_FREQ)),
-    CWCalibrationOperator(amplitude=jnp.array(500.0), tone_freq=80e6),
+    CWCalibrationOperator(
+        amplitude=jnp.array(500.0), tone_freq=80e6, line_width=CHANNEL_HZ
+    ),
     ReceiverOperator(bandpass=jnp.ones(N_FREQ)),
     GainOperator(gain=jnp.array(1.1)),                         # the "true" gain
     NoiseOperator(sigma=jnp.array(0.5)),

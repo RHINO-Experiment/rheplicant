@@ -54,8 +54,20 @@ def state():
     )
 
 
+# One channel spacing, which for the default 'sinc2' lineshape is the response
+# of a critically sampled unwindowed FFT. Every tone in this file sits exactly
+# on a channel centre, where sinc() has a zero in every OTHER channel — so the
+# numbers below are the placeholder's numbers, unchanged, and that is the point:
+# giving the line a shape is not a regression for an on-centre tone.
+CHANNEL = float(FREQ[1] - FREQ[0])
+
+
 def _tone(**kwargs):
-    settings = {"amplitude": TONE_KELVIN, "tone_freq": TONE_FREQ}
+    settings = {
+        "amplitude": TONE_KELVIN,
+        "tone_freq": TONE_FREQ,
+        "line_width": CHANNEL,
+    }
     return CWCalibrationOperator(**{**settings, **kwargs})
 
 
@@ -171,6 +183,18 @@ class TestTheToneFrequencyIsInsideTheBand:
         with pytest.raises(StateValidationError, match="requires state.coords.freq"):
             _tone()(bare)
 
+    def test_coords_without_a_frequency_axis_are_refused(self):
+        """The other half of the same guard. Coordinates carrying only a time
+        axis is the ordinary shape of a pipeline that has not reached the
+        spectrometer yet, and it is not None."""
+        timed = State(
+            data=jnp.ones((N_TIME, N_FREQ)),
+            coords=Coordinates(time=jnp.arange(N_TIME, dtype=float)),
+            meta={"obs_id": "x"},
+        )
+        with pytest.raises(StateValidationError, match="requires state.coords.freq"):
+            _tone()(timed)
+
     def test_the_check_survives_jit_over_a_closed_over_band(self, state):
         """Layer 1, the pattern that matters: coords are a closure constant, so
         the values are still readable inside the trace and this raises at trace
@@ -189,9 +213,14 @@ class TestTheToneFrequencyIsInsideTheBand:
         run = eqx.filter_jit(lambda op, s: op(s))
         good = _tone()
         assert jnp.allclose(run(good, state).data, good(state).data)
-        # and the out-of-band tone is NOT caught here — this is the limit
-        out = run(_tone(tone_freq=200e6), state)
-        assert out.data[0, N_FREQ - 1] == 10.0 + TONE_KELVIN
+        # and the out-of-band tone is NOT caught here — this is the limit. It
+        # runs, and what it produces is worse than a spike in the wrong channel:
+        # 200 MHz is so far outside a 60-85 MHz band that the sinc2 wings are
+        # nearly flat across it, so the full 5000 K is smeared over the WHOLE
+        # band, in no channel the tone is anywhere near.
+        injected = run(_tone(tone_freq=200e6), state).data - state.data
+        assert jnp.isclose(injected[0].sum(), TONE_KELVIN, rtol=1e-3)
+        assert float(injected[0].min()) > 0.1 * float(injected[0].max())
 
 
 class TestTheToneProtectsItsOwnChannel:

@@ -1,10 +1,18 @@
 """Protected channels: keeping a known calibrator out of the RFI flags.
 
-A continuous-wave calibration tone is a narrow, bright, persistent spike in
-one channel — which is, from a flagger's point of view, the definition of RFI.
-Both shipped flaggers duly flag it at fraction 1.0, and flagging sits
-*downstream* of ``cw_tone`` on the same trunk, so the pipeline that is supposed
-to use the calibrator destroys it on the first observation.
+A continuous-wave calibration tone is a narrow, bright, persistent line —
+which is, from a flagger's point of view, the definition of RFI. Both shipped
+flaggers duly flag it at fraction 1.0, and flagging sits *downstream* of
+``cw_tone`` on the same trunk, so the pipeline that is supposed to use the
+calibrator destroys it on the first observation.
+
+"Narrow" is not "one channel". A tone is observed through the spectrometer's
+channel response, so it wets a set of channels, and if it drifts that set
+moves during the run. Both mask shapes below therefore matter in practice:
+``(n_freq,)`` for a line that stays put, ``(n_time, n_freq)`` for one that
+does not. Which channels a given tone actually wets is
+:class:`~rheplicant.radio.instrument.calibration.CWCalibrationOperator`'s to
+decide — it is the only thing on the path that knows the lineshape.
 
 The mechanism is an ``aux`` channel rather than a flagger setting, and that is
 the whole design decision:
@@ -52,11 +60,53 @@ def protect(aux: dict[str, Any], mask: jax.Array) -> dict[str, Any]:
     Composing rather than clobbering, for the same reason the flaggers compose
     their masks: two calibrators (a tone and a switched load, say) both need
     their channels kept, and whichever ran second would otherwise unprotect the
-    first.
+    first. A ``(n_freq,)`` channel mask composed with a ``(n_time, n_freq)``
+    waterfall gives a waterfall, which is right: a channel protected at all
+    times stays protected at all times.
+
+    The shape checks live here, at the WRITE, and not only in
+    :func:`unflag_protected`. Three reasons, all of them about where the error
+    lands. The operator that built the mask is still on the stack here, so the
+    traceback names it; a flagger three stages downstream can only say that
+    *something* wrote a bad mask. A pipeline with no flagger in it never calls
+    ``unflag_protected`` at all, so a malformed mask would ride in ``aux``
+    unexamined to the end of the run. And two masks that cannot compose fail
+    here as a sentence rather than as a raw broadcasting error from ``|``.
+
+    Args:
+        aux: the state's aux mapping.
+        mask: ``(n_freq,)`` channel mask or ``(n_time, n_freq)`` waterfall
+            mask, ``True`` = keep.
+
+    Raises:
+        StateValidationError: if ``mask`` is neither a channel mask nor a
+            waterfall mask, or if it cannot compose with a mask already there.
     """
+    mask = jnp.asarray(mask)
+    if mask.ndim not in (1, 2):
+        raise StateValidationError(
+            f"a protected mask must be a (n_freq,) channel mask or a "
+            f"(n_time, n_freq) waterfall mask, got ndim={mask.ndim}."
+        )
     previous = aux.get(PROTECTED_KEY)
-    combined = mask if previous is None else (previous | mask)
-    return {**aux, PROTECTED_KEY: combined}
+    if previous is None:
+        return {**aux, PROTECTED_KEY: mask}
+    previous = jnp.asarray(previous)
+    if previous.shape[-1] != mask.shape[-1]:
+        raise StateValidationError(
+            f"the protection already declared covers {previous.shape[-1]} channels "
+            f"but this mask covers {mask.shape[-1]}. Two calibrators on different "
+            "frequency grids cannot both be right about the same data, and OR-ing "
+            "them would either broadcast by accident or fail without saying whose "
+            "band is wrong."
+        )
+    if previous.ndim == 2 and mask.ndim == 2 and previous.shape[0] != mask.shape[0]:
+        raise StateValidationError(
+            f"the protection already declared covers {previous.shape[0]} time "
+            f"samples but this mask covers {mask.shape[0]}. Two drifting "
+            "calibrators must be describing the same run."
+        )
+    return {**aux, PROTECTED_KEY: previous | mask}
 
 
 def unflag_protected(flags: jax.Array, aux: dict[str, Any]) -> jax.Array:

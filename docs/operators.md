@@ -46,7 +46,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `AntennaLossOperator` | `antenna_loss` | antenna ohmic loss: `η T + (1−η) T_phys`, on the whole `t_ant_sum`, before the switch | `efficiency`, `t_physical` |
 | `CalLoadOperator` *(P)* | `cal_loads` | switched calibration load (via `receiver_input` selector) | `t_load` |
 | `NoiseWaveOperator` | `noise_wave` | full Eq. 1 (noise-wave GCR note) via `rhino_cal_jax`: reflection couplings + noise-wave temperatures, linear in `t_nw = (t_unc, t_cos, t_sin)` — the GCR structure | `t_unc`, `t_cos`, `t_sin`, `t_rx`, `gamma_src_re`, `gamma_src_im`, `gamma_rec_re`, `gamma_rec_im` |
-| `CWCalibrationOperator` *(P)* | `cw_tone` | CW tone injected before bandpass/gain (`must_precede`, enforced by `assemble`); protects its own channel from the flaggers | — (`amplitude` is a KNOWN static setting) |
+| `CWCalibrationOperator` | `cw_tone` | CW tone with a lineshape (`sinc2` / `gaussian`), a width, and linear frequency and level drift; injected before bandpass/gain (`must_precede`, enforced by `assemble`); protects every channel it wets, as a waterfall mask when it drifts | — (all settings are KNOWN static configuration) |
 | `ReceiverOperator` *(P)* | `bandpass` | frequency-dependent bandpass — declare it with `unit_mean_bandpass` when the gain is free too | `bandpass` |
 | `GainOperator` *(P)* | `gain` | multiplicative gain, scalar or per-time; carries the absolute level by convention | `gain` |
 | `NoiseOperator` *(P)* | `noise` | post-gain thermal noise (PRNG protocol) | `sigma` |
