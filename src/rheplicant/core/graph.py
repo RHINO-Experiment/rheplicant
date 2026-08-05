@@ -1254,7 +1254,17 @@ def assemble(
                 exprs[nid] = up
 
     final = exprs[graph.sink]
-    if final is None:
+    # Unreachable, and kept as an assertion rather than deleted. `assemble`
+    # refuses an empty operator list above, so at least one node is live; a
+    # template has exactly one sink and no cycles, so following out-edges from
+    # any node terminates at that sink; and liveness only ever propagates
+    # downstream -- an instance-less transform passes its parent through, a
+    # junction/selector with one live parent is traversed, and a region
+    # contributes a live branch at `path[-1]`, which is the only position a
+    # sink can occupy in a region (a sink has no out-edge to be interior by).
+    # `tests/core/test_graph_template_guards.py` searches every single-sink
+    # template on up to five nodes for a placement that empties the sink.
+    if final is None:  # pragma: no cover - unreachable; see the note above
         raise AssemblyError("Nothing to assemble: no provided node reaches the sink.")
 
     operator = final.to_operator()
