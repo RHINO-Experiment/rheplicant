@@ -139,7 +139,7 @@ class BeamSpillOperator(AbstractOperator):
         if state.data is None or jnp.asarray(state.data).ndim != 2:
             got = None if state.data is None else jnp.asarray(state.data).shape
             raise StateValidationError(
-                f"BeamSpillOperator expects (n_time, n_freq) data; got {got}."
+                f"{type(self).__name__} expects (n_time, n_freq) data; got {got}."
             )
         n_freq = state.data.shape[1]
         self._check_channels("sky_fraction", self.sky_fraction, n_freq)

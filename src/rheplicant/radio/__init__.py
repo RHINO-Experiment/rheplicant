@@ -128,6 +128,7 @@ from rheplicant.radio.instrument import (
 from rheplicant.radio.protection import PROTECTED_KEY, protect, unflag_protected
 from rheplicant.radio.rhino import (
     RhinoObservation,
+    cal_load_operators,
     read_rhino_observation,
 )
 from rheplicant.radio.rhino import (
@@ -210,6 +211,7 @@ __all__ += [
 ]
 __all__ += [
     "RhinoObservation",
+    "cal_load_operators",
     "read_rhino_observation",
     "rhino_to_state",
 ]

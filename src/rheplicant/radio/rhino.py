@@ -46,6 +46,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
@@ -677,3 +678,83 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
         aux={"flags": flags},
         meta={TIME_EPOCH_META_KEY: epoch},
     )
+
+
+def cal_load_operators(
+    obs: RhinoObservation, *, labels: Sequence[str] | None = None
+) -> dict[str, Any]:
+    """Build one :class:`~rheplicant.radio.instrument.calibration.CalLoadOperator`
+    per switched load, carrying that load's measured physical temperature.
+
+    This is the route from file to model that was missing. ``read_rhino_observation``
+    parses the thermistor log, interpolates it onto the SDR axis and refuses a
+    recording whose readings are short or non-finite -- and then ``to_state``
+    dropped it, because a ``State`` has nowhere to put a per-load temperature.
+    So the loads' temperatures were parsed, validated and discarded, and the
+    warm/hot-load noise-wave path had no way to reach the model from a
+    recording.
+
+    Kept OUT of :func:`to_state` deliberately, and the reason is a type rather
+    than a preference. ``to_state`` returns a ``State``; wiring operators from
+    it would either change that return type -- breaking the module's two-layer
+    split, where reading a file and building a model are separate steps a
+    caller composes -- or move the temperature into the ``State`` for the
+    operator to read, which changes ``CalLoadOperator.requires`` and therefore
+    what the operator declares about itself. A separate function costs the
+    caller one line and changes neither.
+
+    The temperature is passed as an explicit ``(n_time, 1)`` column, never a
+    bare ``(n_time,)``. A load's physical temperature drifts through a run, so
+    it IS per-sample; and on a square grid a bare 1-D array reads equally well
+    as per-channel, which
+    :class:`~rheplicant.radio.instrument.calibration.CalLoadOperator` resolves
+    by always reading 1-D as per-FREQUENCY. Spelling the column here is what
+    keeps this function from depending on ``n_time != n_freq``.
+
+    Args:
+        obs: a recording read WITH ``thermistor_columns``. Without it
+            ``obs.thermistor_k`` is empty and this raises rather than returning
+            nothing, since a caller asking for load operators and getting an
+            empty mapping would build a model with no loads and no warning.
+        labels: which switch labels to build for. ``None`` (the default) means
+            every label whose temperature this file actually carries. Naming
+            them explicitly is how a caller pins the switch ORDER, which is the
+            order ``gamma_src``'s rows must match -- see
+            :class:`~rheplicant.radio.instrument.calibration.CalLoadOperator`.
+
+    Returns:
+        ``label -> CalLoadOperator``, insertion-ordered by ``labels`` when
+        given and by ``obs.thermistor_k`` otherwise. Annotated ``Any`` rather
+        than the class: importing it at module level would make this reader
+        depend on the operator layer, which is the dependency the two-layer
+        split exists to avoid.
+
+    Raises:
+        DataIngestionError: if the recording carries no thermistor
+            temperatures at all, or if a requested label has none.
+    """
+    from rheplicant.radio.instrument.calibration import CalLoadOperator
+
+    if not obs.thermistor_k:
+        raise DataIngestionError(
+            "This observation carries no thermistor temperatures, so there is "
+            "nothing to build a load operator from. Pass `thermistor_columns=` "
+            "to read_rhino_observation; without it the temperature log is not "
+            "read at all (see read_rhino_observation)."
+        )
+    wanted = list(obs.thermistor_k) if labels is None else list(labels)
+    missing = [label for label in wanted if label not in obs.thermistor_k]
+    if missing:
+        raise DataIngestionError(
+            f"No thermistor temperature for switch label(s) {missing}. This "
+            f"file carries {sorted(obs.thermistor_k)}. A label the column map "
+            f"declares but the switch log never visited has no readings here, "
+            f"which is not the same as the log being unread."
+        )
+    return {
+        label: CalLoadOperator(
+            t_load=jnp.asarray(obs.thermistor_k[label], dtype=float)[:, None]
+        )
+        for label in wanted
+    }
+

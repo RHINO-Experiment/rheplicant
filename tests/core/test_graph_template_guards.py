@@ -91,19 +91,67 @@ def test_a_transform_with_one_parent_is_accepted():
     assert template.sink == "t"
 
 
-def test_a_parentless_transform_is_accepted_although_the_docstring_says_otherwise():
-    """Characterisation, not endorsement.
+def test_a_parentless_transform_is_permitted_and_the_docstring_now_says_so():
+    """The asymmetry was real; the resolution went the other way.
 
-    ``SignalGraph``'s own docstring says transforms have in-degree *exactly*
-    one; the guard only refuses in-degree above one, so a transform with no
-    parent builds. Assembly handles it -- such a node contracts to identity
-    when nothing is placed on it, and an operator placed there is fed
-    ``data=None`` and refused by ``_check_slot_kinds`` -- but the template-level
-    asymmetry is real and is pinned here so that tightening it later is a
-    visible decision rather than a silent one.
+    This began as characterisation: the docstring said transforms have
+    in-degree *exactly* one while the guard refused only in-degree above one.
+    Tightening the guard was tried and reverted, because the permissive form
+    is the correct one and the measurement says why:
+
+    * with nothing placed on the parentless transform, the node contracts to
+      identity and the model runs;
+    * with an operator placed on it, assembly refuses -- by the guard that
+      names the actual problem, "Transform 't' feeds junction 'j' with no live
+      source upstream — a branch must generate its own contribution".
+
+    So refusing at template construction would reject legitimate templates in
+    order to restate a check that already exists, from further away and with
+    less information to phrase it well. An existing fixture in
+    ``test_graph.py`` builds exactly such a template for an unrelated reason,
+    which is the evidence that "parentless" is a shape people write.
+
+    Both halves are asserted below, so the argument stays checkable.
     """
     template = SignalGraph("lonely-transform", {"t": NodeSpec(T)}, [])
     assert template.sink == "t"
+
+
+def test_the_downstream_guard_is_the_one_that_catches_a_placed_orphan():
+    """The half that makes the permissive template guard defensible.
+
+    If this refusal ever stops firing, the template-level check becomes the
+    only thing standing between a user and a silently unsourced branch, and
+    tightening it becomes the right call after all.
+    """
+    template = SignalGraph(
+        "orphan",
+        {"t": NodeSpec(T), "s": NodeSpec(S), "j": NodeSpec(J), "k": NodeSpec(T)},
+        [("t", "j"), ("s", "j"), ("j", "k")],
+    )
+    with pytest.raises(AssemblyError, match="no live source upstream"):
+        assemble(
+            template,
+            At("s", Src(value=jnp.array(3.0))),
+            At("t", Tr(factor=jnp.array(5.0))),
+        )
+
+
+def test_a_parentless_transform_with_nothing_on_it_contracts_to_identity():
+    """The other half of the same measurement: it is not merely tolerated.
+
+    The template above RUNS when the orphan carries no operator, which is why
+    refusing it at construction would be rejecting working models.
+    """
+    template = SignalGraph(
+        "orphan",
+        {"t": NodeSpec(T), "s": NodeSpec(S), "j": NodeSpec(J), "k": NodeSpec(T)},
+        [("t", "j"), ("s", "j"), ("j", "k")],
+    )
+    from rheplicant.core.state import State
+
+    out = assemble(template, At("s", Src(value=jnp.array(3.0))))(State(data=None))
+    assert jnp.allclose(out.data, 3.0)
 
 
 def test_the_three_in_degree_refusals_differ_from_each_other():

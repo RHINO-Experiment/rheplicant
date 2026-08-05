@@ -9,16 +9,20 @@ rather than absorbed.
 
 import dataclasses
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import DataIngestionError
+from rheplicant.core.state import State
 
 h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 
 from rheplicant.radio.rhino import (  # noqa: E402
     TIME_EPOCH_META_KEY,
     RhinoObservation,
+    cal_load_operators,
     read_rhino_observation,
     to_state,
 )
@@ -968,3 +972,138 @@ def test_the_public_names_are_reachable_from_the_subpackage():
     assert {"RhinoObservation", "read_rhino_observation", "rhino_to_state"}.issubset(
         radio.__all__
     )
+
+
+class TestCalLoadOperatorsFromARecording:
+    """The route from file to model, which used to stop at ``to_state``.
+
+    ``read_rhino_observation`` parses the thermistor log, interpolates it onto
+    the SDR axis, and refuses a recording whose readings are short or
+    non-finite. ``to_state`` then dropped it, because a ``State`` has nowhere
+    to put a per-load temperature -- so the loads' temperatures were parsed,
+    validated and discarded, and the warm/hot-load noise-wave path had no way
+    to reach a model from a recording at all.
+    """
+
+    #: A DRIFTING temperature log, not the module default. The default holds
+    #: each column constant, and a constant column cannot distinguish a
+    #: per-sample reading from a per-channel one -- which is the single thing
+    #: these tests are about. Both columns drift, by different amounts and in
+    #: opposite directions, so a swap between them is visible too.
+    TEMPS = np.stack(
+        [
+            np.linspace(19.0, 23.0, len(TIME_S)),   # ambient, rising
+            np.linspace(101.5, 98.0, len(TIME_S)),  # hot, falling
+        ],
+        axis=1,
+    )
+
+    def _obs(self, tmp_path, **kwargs):
+        kwargs.setdefault("temps", self.TEMPS)
+        return read_rhino_observation(
+            make_file(tmp_path / "obs.hd5f", **kwargs),
+            freq_unit="MHz",
+            thermistor_columns=COLUMNS,
+        )
+
+    def test_it_builds_one_operator_per_label_carrying_that_label_temperature(
+        self, tmp_path
+    ):
+        obs = self._obs(tmp_path)
+        operators = cal_load_operators(obs)
+
+        assert set(operators) == set(obs.thermistor_k)
+        for label, operator in operators.items():
+            # An explicit (n_time, 1) column, never a bare (n_time,): on a
+            # square grid the bare form reads equally well as per-channel.
+            assert operator.t_load.shape == (obs.time_s.shape[0], 1)
+            np.testing.assert_allclose(
+                np.asarray(operator.t_load)[:, 0],
+                obs.thermistor_k[label],
+                rtol=1e-6,
+            )
+
+    def test_the_temperature_varies_along_TIME_and_not_along_FREQUENCY(
+        self, tmp_path
+    ):
+        """The axis assertion, which is the whole reason for the column shape.
+
+        A per-sample temperature applied per-channel would be finite, correctly
+        shaped, and describe a different instrument. Checked on the operator's
+        OUTPUT rather than on its leaf, because the leaf's shape is what the
+        test above pins and this is about what the operator does with it.
+        """
+        obs = self._obs(tmp_path)
+        label = next(iter(obs.thermistor_k))
+        operator = cal_load_operators(obs)[label]
+
+        n_time, n_freq = obs.time_s.shape[0], obs.freq_hz.shape[0]
+        state = State(
+            data=jnp.zeros((n_time, n_freq)),
+            coords=Coordinates(
+                time=jnp.asarray(obs.time_s - obs.time_s[0]),
+                freq=jnp.asarray(obs.freq_hz),
+            ),
+        )
+        out = np.asarray(operator(state).data)
+
+        # every row constant across channels...
+        for row in out:
+            assert len(set(row.tolist())) == 1, row
+        # ...and the column reproduces the log, which is only a real assertion
+        # because the fixture's temperatures are not all equal.
+        np.testing.assert_allclose(out[:, 0], obs.thermistor_k[label], rtol=1e-6)
+        assert len(set(out[:, 0].tolist())) > 1, "the fixture must vary in time"
+
+    def test_labels_pins_the_switch_order(self, tmp_path):
+        """The order is the order ``gamma_src``'s rows must match.
+
+        Insertion order of a dict built from the file is an accident of the
+        file; naming the labels is how a caller makes it a declaration.
+        """
+        obs = self._obs(tmp_path)
+        both = [label for label in obs.thermistor_k]
+        assert len(both) >= 2, obs.thermistor_k
+        forward = list(cal_load_operators(obs, labels=both))
+        reverse = list(cal_load_operators(obs, labels=list(reversed(both))))
+        assert forward == both
+        assert reverse == list(reversed(both))
+
+    def test_a_recording_read_without_thermistor_columns_is_refused(self, tmp_path):
+        """Not "returns an empty mapping".
+
+        A caller asking for load operators and getting none back would build a
+        model with no loads and no warning, which is the failure this whole
+        route exists to remove.
+        """
+        obs = read_rhino_observation(
+            make_file(tmp_path / "obs.hd5f"), freq_unit="MHz"
+        )
+        assert obs.thermistor_k == {}
+        with pytest.raises(DataIngestionError, match="no thermistor temperatures"):
+            cal_load_operators(obs)
+
+    def test_a_label_this_file_never_switched_to_is_refused_by_name(self, tmp_path):
+        obs = self._obs(tmp_path)
+        with pytest.raises(DataIngestionError, match=r"\['nonexistent_load'\]"):
+            cal_load_operators(obs, labels=["nonexistent_load"])
+
+    def test_the_two_refusals_say_different_things(self, tmp_path):
+        """"Unread log" and "label not in this file" are different mistakes.
+
+        Both are DataIngestionError, and the reader's own docstring says the
+        caller distinguishes them by what it declared -- so the two messages
+        have to make that possible.
+        """
+        unread = read_rhino_observation(
+            make_file(tmp_path / "a.hd5f", temps=self.TEMPS), freq_unit="MHz"
+        )
+        read = self._obs(tmp_path)
+        with pytest.raises(DataIngestionError) as no_log:
+            cal_load_operators(unread)
+        with pytest.raises(DataIngestionError) as no_label:
+            cal_load_operators(read, labels=["nonexistent_load"])
+        assert str(no_log.value) != str(no_label.value)
+        assert "no thermistor temperatures" in str(no_log.value)
+        assert "no thermistor temperatures" not in str(no_label.value)
+

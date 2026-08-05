@@ -82,7 +82,7 @@ class NodeSpec:
 
     Attributes:
         kind: ``"source"`` (creates data; in-degree 0), ``"transform"``
-            (data -> data; in-degree 1), ``"junction"`` (sum point), or
+            (data -> data; in-degree at most 1), ``"junction"`` (sum point), or
             ``"selector"`` (switched point: one branch selected per time
             sample via ``coords.extra[<node_id>]``). Junctions and selectors
             have in-degree >= 2 and are never operator slots.
@@ -138,7 +138,8 @@ class SignalGraph:
 
     Validated at construction: DAG-ness; every node reaches a unique sink;
     junctions have in-degree >= 2; sources have in-degree 0; transforms have
-    in-degree exactly 1.
+    in-degree AT MOST 1 — a parentless transform is permitted, because it is
+    not a defect the template has to catch (see ``__check_init__``).
     """
 
     def __init__(
@@ -192,6 +193,15 @@ class SignalGraph:
             if spec.kind == "source" and indeg != 0:
                 raise AssemblyError(f"Source node {n!r} must have in-degree 0, got {indeg}.")
             if spec.kind == "transform" and indeg > 1:
+                # `> 1`, not `!= 1`, and deliberately. A PARENTLESS transform is
+                # not a defect this container has to refuse. Measured: with
+                # nothing placed on it the node contracts to identity and the
+                # model runs; with an operator placed on it, assembly refuses
+                # via the guard that names the real problem -- "Transform 't'
+                # feeds junction 'j' with no live source upstream". Refusing it
+                # here would reject legitimate templates in order to restate a
+                # check that already exists, from further away and with less
+                # information to phrase it well.
                 raise AssemblyError(
                     f"Transform node {n!r} must have in-degree <= 1, got {indeg}."
                 )

@@ -675,7 +675,25 @@ class CalLoadOperator(AbstractOperator):
     than assuming it: it is the order ``gamma_src``'s rows must match.
 
     Attributes:
-        t_load: load temperature [K] — differentiable scalar or ``(n_freq,)``.
+        t_load: load temperature [K], differentiable. Four accepted forms, and
+            which axis a 1-D array runs along is a convention this package
+            states once rather than guessing:
+
+            * scalar — one temperature for the whole run;
+            * ``(n_freq,)`` — per channel. A bare 1-D array is ALWAYS read this
+              way, matching
+              :class:`~rheplicant.radio.instrument.noise_wave.NoiseWaveOperator`'s
+              temperature leaves, so the two cannot disagree on a square grid;
+            * ``(n_time, 1)`` — per sample. This is the form a real recording
+              takes: a load's physical temperature drifts through a run and is
+              logged per sample, not per channel. Spelled as an explicit column
+              rather than a bare ``(n_time,)`` for the reason
+              :func:`~rheplicant.inference.noise.check_noise_std_axis` gives at
+              length — on a square grid ``(n,)`` reads equally well as either
+              axis, and NumPy settles it by aligning trailing axes, silently;
+
+            :func:`rheplicant.radio.rhino.cal_load_operators` builds the
+            ``(n_time, 1)`` form from a recording's thermistor log.
     """
 
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
@@ -697,11 +715,31 @@ class CalLoadOperator(AbstractOperator):
             if self.t_load.shape[0] != n_freq:
                 raise StateValidationError(
                     f"t_load has {self.t_load.shape[0]} channels but coords.freq "
-                    f"has {n_freq}."
+                    f"has {n_freq}. A 1-D t_load is always read as per-FREQUENCY "
+                    f"(the convention NoiseWaveOperator's temperatures use); for "
+                    f"a per-SAMPLE temperature pass an explicit ({n_time}, 1) "
+                    f"column, which is what a recording's thermistor log gives."
                 )
             return state.with_data(jnp.ones((n_time, 1)) * self.t_load[None, :])
+        if self.t_load.ndim == 2:
+            # `(n_time, 1)` only, not also `(n_time, n_freq)`. The demonstrated
+            # need is a load's PHYSICAL temperature, which drifts through a run
+            # and is logged per sample -- one number per sample, no spectrum.
+            # A load whose spectrum also moved would be a different model and
+            # is not one this placeholder has; a narrower guard is easier to
+            # widen when that arrives than to narrow after someone relies on it.
+            if self.t_load.shape != (n_time, 1):
+                raise StateValidationError(
+                    f"t_load has shape {tuple(self.t_load.shape)}; a 2-D t_load "
+                    f"is the per-SAMPLE form and must be exactly ({n_time}, 1), "
+                    f"one temperature per time sample."
+                )
+            return state.with_data(
+                jnp.broadcast_to(self.t_load, (n_time, n_freq))
+            )
         raise StateValidationError(
-            f"t_load must be scalar or (n_freq,), got ndim={self.t_load.ndim}."
+            f"t_load must be scalar, (n_freq,) or (n_time, 1); got "
+            f"ndim={self.t_load.ndim}."
         )
 
 
@@ -734,4 +772,7 @@ class ApplyCalibrationOperator(AbstractOperator):
                     f"{state.data.shape[0]} time samples."
                 )
             return state.with_data(state.data / self.gain[:, None])
-        raise StateValidationError(f"gain must be scalar or 1D, got ndim={self.gain.ndim}.")
+        raise StateValidationError(
+            f"{type(self).__name__}: gain must be scalar or 1D, got "
+            f"ndim={self.gain.ndim}."
+        )

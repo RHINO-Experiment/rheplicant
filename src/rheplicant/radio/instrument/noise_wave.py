@@ -275,7 +275,7 @@ class NoiseWaveOperator(AbstractOperator):
         if state.data is None or jnp.asarray(state.data).ndim != 2:
             got = None if state.data is None else jnp.asarray(state.data).shape
             raise StateValidationError(
-                f"NoiseWaveOperator expects (n_time, n_freq) data; got {got}."
+                f"{type(self).__name__} expects (n_time, n_freq) data; got {got}."
             )
         if state.data.shape[1] != self.gamma_rec_re.shape[0]:
             raise StateValidationError(

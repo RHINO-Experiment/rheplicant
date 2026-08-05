@@ -203,8 +203,15 @@ class TestSwitchedCalibration:
         assert jnp.array_equal(out.data[3], t_load)  # every time row = spectrum
         with pytest.raises(StateValidationError, match="channels"):
             CalLoadOperator(t_load=jnp.ones(N_FREQ + 1))(template_state)
-        with pytest.raises(StateValidationError, match="ndim"):
+        # 2-D is no longer refused outright -- `(n_time, 1)` is the per-sample
+        # form a recording's thermistor log takes -- but every OTHER 2-D shape
+        # still is, and the refusal now names the one that is accepted.
+        with pytest.raises(StateValidationError, match=r"must be exactly \(\d+, 1\)"):
             CalLoadOperator(t_load=jnp.ones((2, 2)))(template_state)
+        per_sample = jnp.linspace(280.0, 300.0, template_state.coords.time.shape[0])
+        out = CalLoadOperator(t_load=per_sample[:, None])(template_state)
+        assert jnp.allclose(out.data[:, 0], per_sample)      # varies along TIME
+        assert jnp.allclose(out.data[0], per_sample[0])      # flat along FREQ
 
     def test_load_only_observation(self, template_state):
         """Only the load provided: selector passes it through (all samples load)."""
