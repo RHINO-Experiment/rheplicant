@@ -1,0 +1,142 @@
+"""Write a memory to disk so that reading it back cannot lie about it.
+
+``eqx.tree_serialise_leaves`` walks the *arrays* of a pytree and takes
+everything else from the template it is given. Every static field of a stored
+term -- whether it is exact, which estimator it encodes, what support it claims,
+how many samples it saw -- therefore round-trips as whatever the template
+happened to hold, with no error and no warning. Measured on this repo's
+equinox 0.13.8: ``include_logdet=False`` comes back ``True``,
+``noise_frozen_at="gls"`` comes back ``"none"``, ``n_observed=777`` comes back
+``0``. A reloaded campaign would describe itself as a set of exact,
+full-likelihood factors regardless of what was written, and the whole premise
+of this layer is that the raw data is gone and cannot contradict it.
+
+So the manifest is not provenance. **It is the reconstruction spec**: the
+arrays come from the binary, and every static field, every dtype, and the
+writer's x64 state come from the JSON beside it. ``load_memory`` builds the
+template *from the manifest* and refuses -- not warns -- on any mismatch with
+the running environment.
+"""
+
+import json
+from pathlib import Path
+from typing import Any
+
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+
+from rheplicant.core.errors import StateValidationError
+from rheplicant.inference.compressed import QuadraticLikelihood
+from rheplicant.inference.factorize import Factorization
+from rheplicant.inference.sqrtinfo import SqrtInfo
+
+_FORMAT_VERSION = 1
+
+
+def _manifest_path(path: Path) -> Path:
+    return Path(path).with_suffix(".json")
+
+
+def _describe(term: QuadraticLikelihood) -> dict[str, Any]:
+    return {
+        "epoch_id": term.epoch_id,
+        "n_observed": term.n_observed,
+        "exact": term.exact,
+        "support": None if term.support is None else {
+            name: list(bounds) for name, bounds in term.support.items()
+        },
+        "include_logdet": term.include_logdet,
+        "noise_frozen_at": term.noise_frozen_at,
+        "prior_share": list(term.prior_share),
+        "rows": int(term.info.factor.shape[0]),
+        "dtype": str(term.info.factor.dtype),
+    }
+
+
+def save_memory(memory, path: str | Path) -> None:
+    """Write ``memory`` to ``path`` plus a manifest at ``path.json``."""
+    path = Path(path)
+    manifest = {
+        "format_version": _FORMAT_VERSION,
+        "jax_enable_x64": bool(jax.config.jax_enable_x64),
+        "global_names": list(memory.factorization.global_names),
+        "global_shapes": [list(shape) for shape in memory.factorization.global_shapes],
+        "accumulated_rows": int(memory.accumulated.factor.shape[0]),
+        "terms": [_describe(term) for term in memory.archive],
+    }
+    _manifest_path(path).write_text(json.dumps(manifest, indent=2))
+    eqx.tree_serialise_leaves(path, memory)
+
+
+def load_memory(path: str | Path, factorization: Factorization):
+    """Read a memory back, refusing anything the manifest says it cannot be."""
+    from rheplicant.inference.memory import BayesMemory
+
+    path = Path(path)
+    manifest = json.loads(_manifest_path(path).read_text())
+
+    if manifest["format_version"] != _FORMAT_VERSION:
+        raise StateValidationError(
+            f"Archive format version {manifest['format_version']}, this rheplicant "
+            f"writes {_FORMAT_VERSION}."
+        )
+    if not bool(jax.config.jax_enable_x64):
+        raise StateValidationError(
+            "This archive was written under jax_enable_x64=True but x64 is off here, "
+            "so every leaf would be silently demoted to float32 -- which annihilates "
+            'the quadratic form. Set jax.config.update("jax_enable_x64", True).'
+        )
+    for entry in manifest["terms"]:
+        if entry["dtype"] != "float64":
+            raise StateValidationError(
+                f"Term {entry['epoch_id']!r} declares dtype {entry['dtype']}; the "
+                "accumulation layer requires float64."
+            )
+    if list(factorization.global_names) != manifest["global_names"]:
+        raise StateValidationError(
+            f"This archive is over latents {manifest['global_names']}, but the "
+            f"factorization supplied is over {list(factorization.global_names)}. The "
+            "stored numbers are a quadratic form in a specific, ordered vector; "
+            "reading them against a different one is not a rename, it is a different "
+            "model."
+        )
+    if [list(s) for s in factorization.global_shapes] != manifest["global_shapes"]:
+        raise StateValidationError(
+            f"This archive's latent shapes {manifest['global_shapes']} do not match "
+            f"the factorization's {[list(s) for s in factorization.global_shapes]}."
+        )
+
+    names = factorization.global_names
+    shapes = factorization.global_shapes
+    width = sum(int(jnp.zeros(shape).size) for shape in shapes)
+
+    def _blank(rows: int) -> SqrtInfo:
+        return SqrtInfo(
+            factor=jnp.zeros((rows, width)),
+            target=jnp.zeros(rows),
+            offset=jnp.zeros(()),
+            names=names,
+            shapes=shapes,
+        )
+
+    template = BayesMemory(
+        factorization=factorization,
+        accumulated=_blank(manifest["accumulated_rows"]),
+        archive=tuple(
+            QuadraticLikelihood(
+                info=_blank(entry["rows"]),
+                epoch_id=entry["epoch_id"],
+                n_observed=entry["n_observed"],
+                exact=entry["exact"],
+                support=None if entry["support"] is None else {
+                    name: tuple(bounds) for name, bounds in entry["support"].items()
+                },
+                include_logdet=entry["include_logdet"],
+                noise_frozen_at=entry["noise_frozen_at"],
+                prior_share=tuple(entry["prior_share"]),
+            )
+            for entry in manifest["terms"]
+        ),
+    )
+    return eqx.tree_deserialise_leaves(path, template)
