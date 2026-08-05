@@ -120,6 +120,84 @@ A `fn` returning a single array is written to **every** selector in `into` —
 that is what makes tying one line. Returning a tuple addresses each selector
 separately.
 
+### The container type is the physics, so `fan=` lets you say which
+
+Read that last paragraph again as someone holding two leaves and a 2-vector.
+Both readings are available, they are **different physics**, and with the
+default `fan=None` the only thing separating them is a Python container type.
+Measured on two scalar leaves — an antenna efficiency and a gain, arranged so
+both enter the prediction as a bare product — driven by the same `[2, 5]`:
+
+| `fn` returns | mode | what each leaf gets | `pred[0, 0]` |
+|---|---|---|---|
+| `lambda v: v` | broadcast | both leaves get `[2, 5]` | **4.0** |
+| `lambda v: list(v)` | distribute | efficiency `2`, gain `5` | **10.0** |
+
+`v` and `list(v)` are the same numbers. One is a JAX array and one is a Python
+list of its elements, and that difference — invisible in the values, invisible
+in every shape, invisible to `check_linearity` and to `identifiability` —
+selects between a tie and an element-wise split. Someone who meant "write this
+whole vector into both leaves" and reached for `list(v)` gets a finite,
+correctly-shaped, silently wrong model: off by a factor of 2.5 here, and by
+whatever the leaves happen to be worth in general.
+
+`fan=` is that intent written down, and therefore checkable:
+
+```python
+into = (lambda p: p["loss"].efficiency, lambda p: p["gain"].gain)
+
+Bind("v", into=into, fn=lambda v: v, fan="broadcast")   # both leaves [2, 5] -> 4.0
+Bind("v", into=into, fn=list,        fan="distribute")  # 2 and 5        -> 10.0
+```
+
+A declaration that contradicts what `fn` actually produced is refused, naming
+both sides:
+
+```text
+Bind for ('v',) declares fan='broadcast' — ONE value written into all 2 `into`
+selectors — but `fn` returned a list of 2, which is a distribution. A tie writes
+one value into every leaf and a distribution gives each leaf its own, which is
+different physics — and the two spellings differ only by a Python container
+type, so nothing downstream would report the mismatch: the model would be
+finite, correctly shaped and wrong. Fix `fn`, or change the declaration to the
+mode you meant.
+```
+
+The mirror case — `fan="distribute"` where `fn` returned a single array, "which
+would be tied into all of them" — is refused the same way. An unknown mode is
+refused at construction, before anything evaluates, and names the two that
+exist; those two are also exported as `BROADCAST` and `DISTRIBUTE` if you prefer
+constants to literals.
+
+`fan=None` remains the default and keeps the inference. `Bind` is public and
+appears in every example on this page, so refusing by default would break all of
+them. What `fan=` buys is that the guess becomes a *claim* — and a claim can be
+wrong out loud.
+
+:::{note}
+**One case no inference can decide, even in principle.** With a *single* `into`
+selector, the length test that separates the modes — `len(produced) ==
+len(into)` — is satisfied by a length-1 container under **either** intent. So
+the container is unwrapped on a guess, and the guess is warned about rather than
+refused:
+
+```text
+AmbiguousFanWarning: Bind for ('v',) has one `into` selector and `fn` returned a
+list of 1, so which fan-out mode was meant cannot be told from the length: a
+1-container matches a single selector under 'distribute' AND under 'broadcast'.
+Unwrapping it, which is the only reading that can reach an array leaf — but say
+fan='distribute' to declare that, or fan='broadcast' to be refused here if this
+ever stops being a container.
+```
+
+A warning and not an error, deliberately. A Python list is not an array leaf, so
+unwrapping is the only reading that can yield a valid pipeline at all;
+broadcasting the container would change the pipeline's pytree structure and be
+refused by `validate()` a moment later. There is no wrong answer to prevent
+here, only an undeclared one — so refusing would break working code and buy no
+correctness. `fan="distribute"` declares it and the warning goes.
+:::
+
 ---
 
 ## A beam from two numbers
@@ -245,12 +323,92 @@ reason to make it skippable.
 | Binding preserves the pytree structure | `vmap`, `jit` and Fisher flattening all break |
 
 Every one of them raises `ParameterSpaceError`, and so does most of the rest of
-this page. It is **not** re-exported from `rheplicant` or
-`rheplicant.inference`, unlike its sibling error classes; the import path is
+this page. It is exported exactly where it is raised and nowhere else — from
+`rheplicant.inference`, but **not** from the top-level `rheplicant`, which is
+the mirror image of its sibling error classes (`AssemblyError`, `PipelineError`,
+`StateValidationError` and the rest are re-exported from `rheplicant` and not
+from `rheplicant.inference`). Either of these works; the second is the path that
+is uniform across all of them, since `rheplicant.core.errors` is where every one
+is defined:
 
 ```python
+from rheplicant.inference import ParameterSpaceError
 from rheplicant.core.errors import ParameterSpaceError
 ```
+
+### More refusals, at moments the table above cannot cover
+
+The table is `validate()`'s inventory, and `validate()` sees shapes at build
+time. Some failure modes are invisible to it and are checked where they *can* be
+seen — all with the same signature as everything above: finite, correctly
+shaped, and wrong.
+
+**A `fan=` that contradicts what `fn` produced** is caught when the binding
+evaluates, because that is the first moment anything knows what `fn` returned —
+see [the container type is the
+physics](#the-container-type-is-the-physics-so-fan-lets-you-say-which) above.
+
+**A forward model that draws its own randomness** is refused on the way *into*
+every inference exit. Inference closes the model over one template `State`, so a
+stage consuming the PRNG key draws **one** realisation and adds that same frozen
+field to every prediction compared against the data:
+
+```text
+build_forward_fn was given a forward model containing NoiseOperator at 'noise',
+which declares 'key' in `requires` and therefore draws randomness from the
+state's PRNG key. Inference closes the model over one template state, so that
+draw is made ONCE and the same frozen realisation is added to every prediction
+compared against the data — a bias in the fitted parameters that is reported
+with an unchanged error bar, because adding a constant field is exactly affine
+and so passes check_linearity, identifiability and every shape check untouched.
+Drop the stage from the twin you infer with: Assembly.without(node_id) for a
+graph assembly, or rebuild the Pipeline without it. Keep the stochastic pipeline
+for GENERATING data — that is where the noise belongs — and give the inference
+exits the deterministic model plus a noise_std / NoiseModel, which is how the
+scatter is meant to enter.
+```
+
+Read the middle clause: the corruption is *exactly affine*, so every guard on
+this page reports green through it. Measured on an 8×8 grid — sky 100 K, truth
+`g = 1.1`, 2 K measurement scatter, a `NoiseOperator(sigma=20)` left in the twin
+and nothing else changed — through `wiener_solve` for the estimate and
+`fisher_information` → `parameter_covariance` for the bar:
+
+| twin handed to the exit | `g` | reported σ |
+|---|---|---|
+| deterministic (`.without("noise")`) | 1.1002 | 0.002500 |
+| stochastic stage left in | **1.0735** | 0.002500 |
+
+The estimate moved by 10.6 of its own error bars, and the two bars are equal
+*bit for bit* — not to three digits, `sd_clean == sd_corrupt` is `True`. That is
+the failure mode in one line: both exits of the workflow wrong by the same
+amount, with no diagnostic moving. The magnitude is a property of the draw; the
+invisibility is structural.
+
+The repair the message names is one line, and it is the supported one:
+
+```python
+twin_for_inference = twin.without("noise")   # Assembly.without: re-runs assemble()
+```
+
+The detector is the operators' own declaration — `RANDOMNESS` in `requires` — so
+a new stochastic operator is covered the day it declares what it reads. What it
+therefore *cannot* see is an operator that draws without declaring `"key"`, or a
+draw closed over inside a static field — stated rather than implied, because
+there is no numerical symptom to fall back on. That the shipped operators
+declare honestly is itself checked, mechanically, in
+`tests/test_operator_declarations.py`.
+
+**An `observed` the prediction would have to broadcast against** is the third,
+and it is the one you are least likely to think about, because every shipped
+exit already applies it for you. `(24, 8) - (8,)` is legal NumPy and a wrong
+residual, with no symptom: the loss converges, the Fisher matrix inverts, the
+posterior looks healthy.
+
+Both of these last two are public and are the two you want if you are writing an
+exit of your own — `refuse_stochastic_stages(pipeline, caller)` and
+`check_observed_shape(prediction_shape, observed, predictor=...)`. The shipped
+exits call them already, so reach for them only when writing a new one.
 
 ---
 
@@ -669,6 +827,25 @@ It is the same iteratively-reweighted GLS as hydra-tod's
 algorithm runs on the block's JVP and VJP, which is what makes 10⁶ degrees of
 freedom possible at all.
 
+What comes back is a `GLSResult`, and it carries the fixed point's whole
+provenance rather than just the answer — on a 64×4 design at
+`RadiometerNoise(1e6, 1.0)`:
+
+```text
+solution   [11.999567 -4.997814  3.001249  7.997115]   # truth [12, -5, 3, 8]
+noise_std  shape (64,), 0.0054 .. 0.0625               # the σ the fixed point found
+residual   2.009e-07     iterations 5
+delta      2.394e-07     converged  True
+```
+
+`solution` and `noise_std` are the two halves of the answer — the second is what
+you hand to `gcr_sample` above. The other two numbers are separate fields
+because they measure different loops: `residual` is the *inner* CG residual of
+the final solve, `delta` the *outer* reweighting step `‖x_new - x‖ / ‖x_new‖`.
+`converged` reports on `delta` only — a tight CG residual says nothing about
+whether the covariance reached a fixed point, which is the whole distinction the
+`reweight_tol` warning below turns on.
+
 Check `found.converged`. A covariance that is not a fixed point is still a
 number, and a draw conditioned on it is still a draw.
 
@@ -992,6 +1169,18 @@ because they mean nothing to the other. Both return the same currency —
 `result.diagnostics` and `result.names` — so a caller can log or assert on a run
 without knowing which exit produced it.
 
+That shared currency has a name. `PlanResult` is the protocol both exits
+satisfy: `.diagnostics` is a `PlanDiagnostics`, `.names` are the latents. What
+differs is what the answer *is*, which is the honest difference between the two:
+
+| exit | returns | the answer |
+|---|---|---|
+| `plan.estimate` | `Estimate` | `.values` — one array per latent |
+| `plan.sample` | `Draws` | `.samples` — a chain per latent, plus `.n_draw`, `.mean`, `.std` (properties, not calls) |
+
+Annotate against `PlanResult` when a function of yours should take either, and
+against `Estimate` or `Draws` when it genuinely needs the values or the chain.
+
 Both exits on the fixture above, at `HomoscedasticNoise(1.0)`:
 
 ```text
@@ -1008,6 +1197,44 @@ The 93 sweeps and the `rhat = 1.434` are the same fact seen twice: these two
 blocks are strongly correlated, so the alternation moves slowly, and 30 kept
 draws are nowhere near stationarity. Neither exit hides it — `converged` is
 `False` on the short run and `PlanDiagnostics.rhat` says by how much.
+
+That diagnostic is computed by `split_rhat`, which is exported and worth
+reaching for on any chain you hold — cut the trace in half, treat the halves as
+two chains, compare the variance between them against the variance within:
+
+```python
+import jax, jax.numpy as jnp
+from rheplicant.inference import split_rhat
+
+split_rhat(jax.random.normal(jax.random.key(0), (200,)))   # 1.0043  — iid
+split_rhat(jnp.arange(200.0))                              # 2.6326  — pure drift
+```
+
+Two degenerate readings are deliberate rather than defensive: halves that are
+each constant at the *same* value give `1.0` (nothing to mix), and halves each
+constant at *different* values give `inf` (a chain that moved once and stopped).
+
+**A trace too short to halve is refused, not answered**, and that is the part
+worth knowing before you call it. The minimum is `MIN_DRAWS = 4` — two halves of
+two, and it lives in `rheplicant.inference.plan`, not on the package surface.
+Below it the diagnostic is not weak but undefined:
+
+```text
+split_rhat was given 3 value(s) and a split-r_hat needs at least 4 — two halves
+of two. Below that the mixing diagnostic is not weak, it is undefined: halves of
+one have no variance within them to divide by, so the answer came back as nan
+rather than as this refusal — and a nan passes no threshold test in either
+direction, which makes an undefined diagnostic read as whichever verdict the
+caller tested for. SamplingPlan.sample refuses the same count on
+(n_sweeps - warmup); this is that refusal, for the trace you brought yourself.
+```
+
+The middle clause is the reason this is an exception and not a `nan`: `rhat <=
+rhat_max` is `False` for a nan and so is `rhat > rhat_max`, so a threshold guard
+reads an undefined diagnostic as whichever answer it happened to test for.
+`SamplingPlan.sample` enforces the same minimum on `n_sweeps - warmup`, so
+reaching this by that route is not possible; `split_rhat` enforces it anyway,
+because it is public and does not trust its one in-package caller.
 
 ### Convergence is monitored on the joint χ², never a per-block residual
 
@@ -1104,6 +1331,23 @@ space. The degenerate directions, as shares of each latent:
 Read the shares: each blind direction is half gain and half `t_ant`, which is
 the bilinear degeneracy `gain × T_ant = (c·gain) × (T_ant/c)` written down. The
 repair is a re-parameterization — the `(3, 4)` basis — not a tighter tolerance.
+
+Called directly, `identifiability()` hands back an `IdentifiabilityReport`
+rather than raising, which is how you ask the question before committing to a
+partition. On a healthy 64×4 design:
+
+```text
+names ('coeffs',)   n_par 4   n_data 64
+rank  4             nullity 0
+rtol  1e-08         threshold 1.2210e-08
+singular_values [1.22098371 1.01958727 0.90795122 0.80328398]
+```
+
+`rank` and `nullity` are the verdict; `singular_values`, `null_space` and
+`column_norms` are what it was read off, so a borderline case can be inspected
+instead of argued about. `threshold` is `rtol × σ_max`, and `rtol` defaults to
+`DEFAULT_RANK_RTOL` (`1e-8`) — a *relative* cut, which is why it does not need
+retuning when the design's overall scale changes.
 
 `check_identifiability=` takes three values, and there is no size heuristic on
 purpose, because the cost is a dense Jacobian and a dense SVD, `n_data × n_par`

@@ -2,6 +2,93 @@
 
 ## Unreleased
 
+### Eleven public inference names reach the narrative docs, and the Status paragraph is re-measured
+
+`rheplicant.inference.__all__` has 51 names. **Thirteen** of them appeared in no
+narrative page — only in `docs/api.md`, where `automodule` renders a docstring
+to a reader who already knew what to look up. Eleven now have prose in
+`docs/inference.md`, each placed where the page was already teaching the thing
+it names:
+
+* **`Bind(fan=...)`**, with `BROADCAST`, `DISTRIBUTE` and
+  `AmbiguousFanWarning`. "The three shapes" used to end by stating the fan-out
+  inference — *a `fn` returning a single array is written to every selector* —
+  as though it were unambiguous. It is not, and the page never said so.
+  Re-measured on two scalar leaves driven by the same `[2, 5]`:
+  `fn = lambda v: v` gives `pred[0, 0] = 4.0`, `fn = lambda v: list(v)` gives
+  `10.0`. The same data, opposite physics, a Python container type between
+  them, and a factor of 2.5 in the answer. The new subsection carries that
+  table, both contradiction refusals, and the case a lone `into` selector
+  cannot decide even in principle.
+* **`refuse_stochastic_stages`** and **`check_observed_shape`**, in a new
+  subsection *after* the "What gets checked" table rather than inside it: that
+  table is `validate()`'s inventory and `validate()` sees shapes at build time,
+  so neither of these belongs in it. The frozen-draw bias is re-measured on the
+  8×8 fixture through `wiener_solve` and `fisher_information` — leaving a
+  `NoiseOperator(sigma=20)` in the twin moves the estimate from 1.1002 to
+  1.0735 against a truth of 1.1, **10.6 of its own error bars**, while the two
+  reported σ are equal *bit for bit* (`sd_clean == sd_corrupt` is `True`, not
+  "agree to four digits").
+* **`split_rhat`**, beside the `rhat` the plan section already quotes, with the
+  `MIN_DRAWS = 4` contract stated — including that `MIN_DRAWS` lives in
+  `rheplicant.inference.plan` and is *not* on the package surface, so the
+  refusal names a constant a caller cannot import.
+* **the result types** — `PlanResult` (the protocol behind the "same currency"
+  the page already described as `result.diagnostics` / `result.names` without
+  ever naming it), `Estimate`, `GLSResult` and `IdentifiabilityReport`, each
+  with its fields shown from a real run rather than listed. `DEFAULT_RANK_RTOL`
+  arrives with the report, as the `rtol` whose `threshold = rtol × σ_max` the
+  report exposes.
+
+**Two are deliberately left to `docs/api.md`.** `Likelihood` and
+`mean_squared_error` belong to the *sense* story — a Protocol that by
+construction cannot express whether its member is to be maximized or minimized,
+which is why `isinstance(mean_squared_error, Likelihood)` and
+`isinstance(GaussianLikelihood(...), Likelihood)` are both `True`. That is a
+real gap, but it is not this page's subject; `docs/inference.md` is parameter
+spaces, noise models, linear blocks and plans, and mentions the likelihood
+family exactly once in passing. (`Draws` was already documented.)
+
+**Two claims fixed on the way, both false rather than merely stale.**
+
+`docs/inference.md` said `ParameterSpaceError` is "**not** re-exported from
+`rheplicant` or `rheplicant.inference`, unlike its sibling error classes". It is
+exported from `rheplicant.inference`, and has been; the sibling classes
+(`AssemblyError`, `PipelineError`, `StateValidationError`, …) are the exact
+mirror image — re-exported from the top-level `rheplicant` and *not* from
+`rheplicant.inference`. Both import paths are now shown.
+
+`README.md` told a contributor to run `uv run pytest` and `uv run ruff check`,
+and the docs table to build with `uv run sphinx-build`. **None of the three
+resolves.** The `limtod` and `rfi` extras name requirements that are not on
+PyPI by design — the pyproject comment beside them says so — and `uv` resolves
+extras when it locks, so it refuses the project before running anything:
+`limtod[jax]>=1.10` against a `<=1.8.0` index. Replaced with the invocations
+that were verified to work here (`.venv/bin/python -m pytest`,
+`.venv/bin/python -m ruff check src tests`, and a `python -m sphinx` line), with
+the reason recorded so the next person does not re-derive it. `uv run --frozen`
+still works against an existing lock.
+
+**The Status numbers, re-measured rather than copied.** `1354 tests, ~97 %
+coverage` → **2113 tests, 99.7 %**: 2113 collected by summing
+`--collect-only -q` over 73 files, and 4371 statements with 14 missed
+(`99.68 %`) from a full run at exit 0, 713 s. The rest of that paragraph was
+checked against the tree and holds — 17 of the 29 concrete operator classes are
+placeholders, matching `tests/radio/test_placeholder_census.py`, which pins the
+prose against a census derived from the docstrings; 13 examples; `D1`–`D28` in
+`DESIGN.md`. One slip corrected: `unit_mean_bandpass` / `unit_mean_free` are
+functions in the receiver *module*, not attributes "on the receiver", and the
+sentence read as though `ReceiverOperator.unit_mean_bandpass` would resolve.
+
+**"What is in the box" gained four things it had shipped without mentioning**:
+`Assembly.replace_node` / `Assembly.without` (and that `without` re-runs
+`assemble` rather than doing tree surgery), `cal_load_operators`, `SamplingPlan`
+with its derived engines and joint-χ² convergence, and the stochastic-stage
+refusal. `core/fold.py` was considered and deliberately left out: every name in
+it is underscore-private and its module docstring says it is absent from
+`docs/api.md` on purpose, so a README feature bullet would advertise an API that
+does not exist.
+
 ### `names=` is the spelling the docs teach, and `as_dict` is the one-call wrap
 
 `linear_operator`, `check_linearity` and their exits take a singular `name=` and

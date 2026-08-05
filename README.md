@@ -156,11 +156,17 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
 
 - **Core** — `State` (immutable pytree context), `Pipeline` / `SumOperator` /
   `SelectOperator` composition, `SignalGraph` + `assemble` (graph-guided
-  auto-composition with lit/dim mermaid & HTML rendering).
+  auto-composition with lit/dim mermaid & HTML rendering), and
+  `Assembly.replace_node` / `Assembly.without` to swap or drop a stage by node
+  id — `without` re-runs `assemble` over the operators that remain rather than
+  doing tree surgery, so the result is exactly the assembly you would have got
+  by never providing that one.
 - **Radio** — a 32-node canonical signal-path graph covering every element of
   a single-antenna experiment: sky components, ionosphere, RFI, shared
   chromatic beam, horizon spill, antenna ohmic loss, noise-wave terms, CW tone
-  and switched calibration loads, gain, thermal noise, EMI, ADC, flagging, averaging —
+  and switched calibration loads (`cal_load_operators` builds one operator per
+  load straight from a RHINO observation, carrying its measured physical
+  temperature), gain, thermal noise, EMI, ADC, flagging, averaging —
   plus a modular sky engine — a general differentiable limTOD port and a
   drift-scan m-mode fast path that returns the same numbers orders of
   magnitude cheaper, alongside projection matrices and a numpy-limTOD
@@ -174,13 +180,21 @@ forecasts (`fisher_information`), and neural-surrogate training — see the
   pushforward, `NeuralOperator` surrogate stages, MomentRFI flagging bridge,
   masked likelihoods, iterative GLS for prediction-dependent covariances, and
   amortized simulation-based inference (`NeuralPosterior`) validated against
-  the exact conjugate sampler.
+  the exact conjugate sampler. `SamplingPlan` declares a whole model's Gibbs
+  loop as one partition into `Block`s — each block's engine *derived* from
+  `Latent(..., linear=True)` rather than restated — with two exits (a point
+  estimate and draws), convergence monitored on the joint χ² rather than any
+  per-block residual, and a cross-block identifiability check that refuses a
+  degenerate partition before a sweep runs. Every inference exit also refuses a
+  forward model that draws its own randomness: the frozen realisation biases the
+  fit while leaving `check_linearity`, `identifiability` and the reported error
+  bar untouched, so nothing downstream could report it.
 
 ## Documentation
 
 Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)**
 (Sphinx + furo; build locally with
-`uv run sphinx-build -b html docs docs/_build/html`).
+`cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`).
 
 | Document | What it covers |
 |---|---|
@@ -199,7 +213,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(1354 tests, ~97 % coverage, jit+grad+vmap through the full twin; assembly
+(2113 tests, 99.7 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -216,7 +230,7 @@ an ingestion layer, not a stand-in for one.
 Three of the seventeen are load-bearing even so. `ReceiverOperator`,
 `GainOperator` and `CalLoadOperator` have placeholder *bodies* — no flicker,
 no measured band shape, no load reflection or telemetry — but real shape and
-contract: `unit_mean_bandpass` / `unit_mean_free` on the receiver are the
+contract: the receiver module's `unit_mean_bandpass` / `unit_mean_free` are the
 bandpass/gain identifiability convention, the gain's exact linearity in `gain`
 is what `Latent(..., linear=True)` claims about it, and
 `CWCalibrationOperator.must_precede == ('bandpass', 'gain')` names the two
@@ -224,7 +238,18 @@ nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
-No CI yet — run `uv run pytest` and `uv run ruff check` before pushing.
+No CI yet — run the suite and the linter in the project venv before pushing:
+
+```bash
+.venv/bin/python -m pytest          # 2113 tests, ~12 min with coverage
+.venv/bin/python -m ruff check src tests
+```
+
+**Not** plain `uv run`: the `limtod` and `rfi` extras name requirements that are
+not on PyPI *by design* (see the comment beside them in `pyproject.toml`), so
+`uv` cannot resolve the project and refuses before running anything —
+`limtod[jax]>=1.10` against a `<=1.8.0` index. `uv run --frozen` works against
+an existing lock.
 
 ## Developers and maintainers
 
