@@ -525,6 +525,27 @@ def read_rhino_observation(
         switch_time = np.asarray(f["switches/switch_times"][:], dtype=float)
         switch_raw = f["switches/switch_states"][:]
         if want_thermistors:
+            # Named before it is opened. h5py answers a missing path with
+            # `KeyError: 'Unable to synchronously open object (component not
+            # found)'` -- which names no dataset, no file and no argument, and
+            # was the one unbranded failure left in a module where every other
+            # refusal says what to do about it. The distinction the message has
+            # to draw is that this file is READABLE, just not for what the
+            # caller asked: omitting `thermistor_columns` returns the waterfall.
+            # `dataset`, not `path`: the module's refusals are prefixed with the
+            # FILE, and a loop variable named `path` shadows the argument that
+            # holds it -- caught by reading the emitted message rather than by
+            # checking that the right exception type came out.
+            for dataset in ("temperatures/temperatures", "temperatures/temperature_times"):
+                if dataset not in f:
+                    raise DataIngestionError(
+                        f"{path}: thermistor_columns was given, but the file "
+                        f"has no /{dataset}. The temperature log is opt-in precisely "
+                        f"so a recording is not refused over a column nothing "
+                        f"consumes -- omit thermistor_columns and the waterfall, "
+                        f"the two axes, the switch cycle and the settling mask "
+                        f"all read normally, with thermistor_k left empty."
+                    )
             temps_raw = np.asarray(f["temperatures/temperatures"][:], dtype=float)
             temp_time = np.asarray(f["temperatures/temperature_times"][:], dtype=float)
         adc_i = np.asarray(f["sdr/max_i_adc"][:], dtype=float) if "sdr/max_i_adc" in f else None

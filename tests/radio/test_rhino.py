@@ -1107,3 +1107,77 @@ class TestCalLoadOperatorsFromARecording:
         assert "no thermistor temperatures" in str(no_log.value)
         assert "no thermistor temperatures" not in str(no_label.value)
 
+
+class TestAMissingTemperatureGroupIsNamed:
+    """The module's one unbranded failure, closed.
+
+    Asking for the thermistor log from a file that has no ``/temperatures``
+    group used to leak h5py's ``KeyError: 'Unable to synchronously open object
+    (component not found)'`` -- which names no dataset, no file and no
+    argument, in a module where every other refusal says what to do about it.
+
+    The distinction the message has to draw is that the file is READABLE, just
+    not for what was asked: the temperature log is opt-in precisely so that a
+    recording is not refused over a column nothing consumes.
+    """
+
+    def _file_without_temperatures(self, tmp_path):
+        path = tmp_path / "no_temps.hd5f"
+        with h5py.File(path, "w") as f:
+            sdr = f.create_group("sdr")
+            # Asymmetric and every value distinct: a reader that transposed the
+            # waterfall or mixed the axes would not survive the shape checks.
+            sdr.create_dataset("sdr_freqs", data=FREQ_MHZ)
+            sdr.create_dataset("sdr_times", data=TIME_S)
+            sdr.create_dataset(
+                "sdr_waterfall",
+                data=np.arange(len(TIME_S) * len(FREQ_MHZ), dtype=float).reshape(
+                    len(TIME_S), len(FREQ_MHZ)
+                ),
+            )
+            sw = f.create_group("switches")
+            sw.create_dataset("switch_times", data=np.asarray(SWITCH_TIMES, dtype=float))
+            sw.create_dataset("switch_states", data=np.array(SWITCH_STATES, dtype="S16"))
+            # deliberately no /temperatures group at all
+        return path
+
+    def test_asking_for_the_log_names_the_file_and_the_dataset(self, tmp_path):
+        with pytest.raises(DataIngestionError) as excinfo:
+            read_rhino_observation(
+                self._file_without_temperatures(tmp_path),
+                freq_unit="MHz",
+                thermistor_columns=COLUMNS,
+            )
+        message = str(excinfo.value)
+        # The FILE, not the dataset. A loop variable named `path` shadowed the
+        # argument holding it in the first draft, so the message named
+        # "temperatures/temperatures" as though that were the file -- it raised
+        # the right type and said the wrong thing, which a type-only assertion
+        # would have passed.
+        assert message.startswith(str(tmp_path)), message
+        assert "no_temps.hd5f:" in message, message
+        assert "/temperatures/temperatures" in message, message
+        assert "omit thermistor_columns" in message, message
+
+    def test_omitting_the_map_reads_the_same_file_normally(self, tmp_path):
+        """The other branch, and the one the message points at.
+
+        Without this the refusal above could be satisfied by a guard that
+        refused the file outright, which is the opposite of the documented
+        behaviour.
+        """
+        obs = read_rhino_observation(
+            self._file_without_temperatures(tmp_path), freq_unit="MHz"
+        )
+        assert obs.thermistor_k == {}
+        assert obs.waterfall.shape == (len(TIME_S), len(FREQ_MHZ))
+        assert obs.time_s.shape == (len(TIME_S),)
+
+    def test_a_file_that_HAS_the_group_is_unaffected(self, tmp_path):
+        """The guard must not fire on the ordinary case."""
+        obs = read_rhino_observation(
+            make_file(tmp_path / "ok.hd5f"), freq_unit="MHz", thermistor_columns=COLUMNS
+        )
+        assert set(obs.thermistor_k) <= set(COLUMNS)
+        assert obs.thermistor_k, "the fixture must actually carry temperatures"
+
