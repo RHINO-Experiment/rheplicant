@@ -98,6 +98,77 @@ class SqrtInfo(eqx.Module):
         resid = self.factor @ self.ravel(values) - self.target
         return self.offset - 0.5 * jnp.sum(resid**2)
 
+    @classmethod
+    def null(
+        cls,
+        names: tuple[str, ...],
+        shapes: tuple[tuple[int, ...], ...],
+    ) -> "SqrtInfo":
+        """A term that says nothing -- the identity of :meth:`combine`.
+
+        Square rather than zero-row so the accumulator's pytree keeps a fixed
+        treedef across a whole campaign, which is what stops ``jit`` retracing
+        once per epoch.
+        """
+        width = sum(_size(shape) for shape in shapes)
+        return cls(
+            factor=jnp.zeros((width, width)),
+            target=jnp.zeros(width),
+            offset=jnp.zeros(()),
+            names=names,
+            shapes=shapes,
+        )
+
+    @classmethod
+    def combine(cls, first: "SqrtInfo", second: "SqrtInfo") -> "SqrtInfo":
+        """The term whose log-density is the sum of the two given ones.
+
+        Stack the augmented factors and re-triangularise. Writing ``y = [x; -1]``
+        so that ``[R | z] y = R x - z``, the stacked product has the same norm
+        as its triangular factor because ``Q`` has orthonormal columns::
+
+            ||R_a x - z_a||^2 + ||R_b x - z_b||^2 = ||R_tot x - z_tot||^2 + rho^2
+
+        ``rho`` is the corner of the triangular factor -- the part of the two
+        residuals that no single quadratic form in ``x`` can express. It is a
+        constant, so it belongs in the offset; dropping it leaves every
+        combined term wrong by an amount that grows with the campaign and is
+        invisible in the posterior's shape.
+        """
+        if first.names != second.names or first.shapes != second.shapes:
+            raise StateValidationError(
+                "Cannot combine two terms over different latents: "
+                f"{list(first.names)} vs {list(second.names)}. A ledger of terms "
+                "declared against different parameter sets is not a likelihood."
+            )
+        width = first.factor.shape[1]
+        stacked = jnp.concatenate(
+            [
+                jnp.concatenate([first.factor, first.target[:, None]], axis=1),
+                jnp.concatenate([second.factor, second.target[:, None]], axis=1),
+            ],
+            axis=0,
+        )
+        upper = jnp.linalg.qr(stacked, mode="r")
+        keep = min(upper.shape[0], width)
+        corner = upper[keep:, width]
+        return cls(
+            factor=upper[:keep, :width],
+            target=upper[:keep, width],
+            offset=first.offset + second.offset - 0.5 * jnp.sum(corner**2),
+            names=first.names,
+            shapes=first.shapes,
+        )
+
+    def fisher(self) -> jax.Array:
+        """``F = R^T R`` -- the Fisher information this term carries.
+
+        May legitimately be singular: a single epoch usually constrains only a
+        subspace, and only the campaign total plus the prior need be positive
+        definite.
+        """
+        return self.factor.T @ self.factor
+
 
 def _size(shape: tuple[int, ...]) -> int:
     size = 1
