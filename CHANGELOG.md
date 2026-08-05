@@ -2,6 +2,73 @@
 
 ## Unreleased
 
+### Eighteen construction-time refusals had never been executed — and six of them let NaN through
+
+**Tests only; no behaviour in `src/` changed.** The raise audit
+(`tools/raise_audit.py`) found 18 `raise` statements in the construction-time
+configuration-validation family that the suite had never run: the guards that
+refuse `n_pix=0`, `validation_fraction=1.0`, an empty `ParameterSpace`, a
+`cg_maxiter` that is not an int. They are now covered by
+`tests/inference/test_inference_construction_guards.py` (57 tests) and
+`tests/radio/test_radio_construction_guards.py` (20).
+
+**This family is not the coords family, and the difference was measured rather
+than assumed.** `tests/radio/test_coords_guard_family.py` derives its population
+from the source because its guard is one sentence copy-pasted nine times, so one
+case per carrier reaches every raise in the family. Enumerating `__check_init__`
+with `ast` here finds **31 classes carrying 70 raises across 62 distinct
+messages** — one case per class would reach 31 of 70, and a table claiming to be
+the family would be honest about under half of it. Five of the eighteen raises
+covered are not in a `__check_init__` at all (`NeuralPosterior.create` validates
+in a classmethod, `train_posterior` in a module-level function,
+`ParameterSpace._resolve_targets` at validate time), so a `__check_init__`-derived
+table would also have excluded them while looking complete. The cases are
+therefore hand-written — with one exception. Seven of the 62 messages *are*
+copy-pasted, four of them in this batch, and those get the derived treatment:
+`test_the_copied_guards_have_not_grown_a_new_copy` enumerates the carriers of
+`ref_freq must be > 0` (three copies, two previously tested), `n_pix must be a
+positive int`, `learning_rate must be > 0` and `n_steps must be a positive int`
+(two copies each, one previously tested each) and fails, naming the offender, if
+a further copy appears.
+
+**Finding, recorded and not fixed: `nan` defeats every comparison-based guard
+here.** `nan <= 0` is `False`, so `if x <= 0: raise` does not fire and the NaN
+becomes configuration. Six sites:
+
+| site | `nan` accepted | what happens next |
+|---|---|---|
+| `AdamCalibrator.learning_rate` | yes | every Adam iterate is NaN |
+| `GradientCalibrator.learning_rate` | yes | same guard, copied |
+| `RadiometerNoise.floor` | yes | **the floor is silently dropped** — `if self.floor > 0.0` is also False, so `std` is finite, correctly shaped and simply un-floored |
+| `RadiometerNoise.channel_width` / `integration_time` | yes | every noise weight is NaN |
+| `IonosphereOperator.ref_freq` | yes | the whole band is NaN |
+| `PowerLawSkyModel.ref_freq` / `ForegroundOperator.ref_freq` | yes | the same guard, copied twice more |
+
+`RadiometerNoise.floor` is the one worth reading twice: it is the only case that
+produces no NaN downstream at all, so a caller who passes `floor=nan` gets a
+working noise model with their argument quietly discarded.
+
+The package already contains the one-line fix and uses it twice —
+`if not 0.0 <= self.beta1 < 1.0` and `if not 0.0 <= validation_fraction < 1.0`
+both refuse NaN correctly. It was **not** applied to the six, because refusing a
+NaN that is accepted today is a behaviour change and this batch is scoped to
+tests. The current behaviour is pinned instead, in tests named and documented as
+pinning a gap rather than a contract, so that applying the inversion shows up
+here as a deliberate change.
+
+Two smaller notes. `n_components`, `n_steps` in `train_posterior` and the
+`isinstance`-typed guards (`n_pix`, `cg_maxiter`, `AdamCalibrator.n_steps`) do
+refuse NaN, but the last three do it by the type check rather than the
+comparison beneath it — correct by accident, so pinned separately. And
+`AdamCalibrator(n_steps=True)` is accepted as one step, since `isinstance(True,
+int)`.
+
+**Test file basenames must be unique across `tests/`.** There is no
+`__init__.py` under `tests/`, so pytest imports test modules by bare basename
+and two files sharing one cannot both be collected — an `EXIT=2` at collection
+that appears only when both are in the same run, which is why the directory
+name is carried in the basename of both files above.
+
 ### `coords.time` is refused when the dtype it is stored in cannot carry it
 
 **Breaking, and deliberately so.** `Coordinates.__check_init__` now raises
