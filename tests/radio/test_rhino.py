@@ -45,6 +45,7 @@ def make_file(
     switch_times=SWITCH_TIMES,
     switch_states=SWITCH_STATES,
     waterfall=None,
+    temperature_group=("temperatures", "temperature_times"),
 ):
     n_time, n_freq = len(times), len(freqs)
     if temps is None:
@@ -70,9 +71,18 @@ def make_file(
         sw = f.create_group("switches")
         sw.create_dataset("switch_times", data=np.asarray(switch_times, dtype=float))
         sw.create_dataset("switch_states", data=np.array(switch_states, dtype="S16"))
-        tg = f.create_group("temperatures")
-        tg.create_dataset("temperature_times", data=np.asarray(temp_times, dtype=float))
-        tg.create_dataset("temperatures", data=temps)
+        # `temperature_group` names which of the two datasets to write, so a
+        # test can omit the whole group -- pass () -- or one dataset of it,
+        # without restating the schema. A test that built its own file would
+        # drift from this one silently the next time the schema moves.
+        if temperature_group:
+            tg = f.create_group("temperatures")
+            if "temperature_times" in temperature_group:
+                tg.create_dataset(
+                    "temperature_times", data=np.asarray(temp_times, dtype=float)
+                )
+            if "temperatures" in temperature_group:
+                tg.create_dataset("temperatures", data=temps)
     return path
 
 
@@ -1121,25 +1131,16 @@ class TestAMissingTemperatureGroupIsNamed:
     recording is not refused over a column nothing consumes.
     """
 
-    def _file_without_temperatures(self, tmp_path):
-        path = tmp_path / "no_temps.hd5f"
-        with h5py.File(path, "w") as f:
-            sdr = f.create_group("sdr")
-            # Asymmetric and every value distinct: a reader that transposed the
-            # waterfall or mixed the axes would not survive the shape checks.
-            sdr.create_dataset("sdr_freqs", data=FREQ_MHZ)
-            sdr.create_dataset("sdr_times", data=TIME_S)
-            sdr.create_dataset(
-                "sdr_waterfall",
-                data=np.arange(len(TIME_S) * len(FREQ_MHZ), dtype=float).reshape(
-                    len(TIME_S), len(FREQ_MHZ)
-                ),
-            )
-            sw = f.create_group("switches")
-            sw.create_dataset("switch_times", data=np.asarray(SWITCH_TIMES, dtype=float))
-            sw.create_dataset("switch_states", data=np.array(SWITCH_STATES, dtype="S16"))
-            # deliberately no /temperatures group at all
-        return path
+    def _file_without_temperatures(self, tmp_path, keep=()):
+        """The module's own fixture, minus the temperature group.
+
+        Built through ``make_file`` rather than by hand: a second copy of the
+        schema in this class would keep passing after the real one changed,
+        which is the failure mode a fixture is supposed to remove.
+        """
+        return make_file(
+            tmp_path / "no_temps.hd5f", temperature_group=keep
+        )
 
     def test_asking_for_the_log_names_the_file_and_the_dataset(self, tmp_path):
         with pytest.raises(DataIngestionError) as excinfo:
@@ -1172,6 +1173,35 @@ class TestAMissingTemperatureGroupIsNamed:
         assert obs.thermistor_k == {}
         assert obs.waterfall.shape == (len(TIME_S), len(FREQ_MHZ))
         assert obs.time_s.shape == (len(TIME_S),)
+
+    @pytest.mark.parametrize(
+        ("keep", "absent"),
+        [
+            pytest.param((), "temperatures/temperatures", id="no-group-at-all"),
+            pytest.param(
+                ("temperatures",), "temperatures/temperature_times", id="log-times-only"
+            ),
+            pytest.param(
+                ("temperature_times",), "temperatures/temperatures", id="readings-only"
+            ),
+        ],
+    )
+    def test_half_a_temperature_group_is_named_too(self, tmp_path, keep, absent):
+        """Either dataset missing, not just the whole group.
+
+        The guard loops over both paths, and a version checking only the group
+        -- or only the first dataset -- would pass a whole-group test while
+        still leaking h5py's KeyError on a file carrying one half. That file is
+        the likelier one in practice: a writer that crashed mid-flush leaves a
+        group with one dataset in it, not no group.
+        """
+        with pytest.raises(DataIngestionError) as excinfo:
+            read_rhino_observation(
+                self._file_without_temperatures(tmp_path, keep=keep),
+                freq_unit="MHz",
+                thermistor_columns=COLUMNS,
+            )
+        assert f"/{absent}" in str(excinfo.value), str(excinfo.value)
 
     def test_a_file_that_HAS_the_group_is_unaffected(self, tmp_path):
         """The guard must not fire on the ordinary case."""

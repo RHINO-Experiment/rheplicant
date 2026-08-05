@@ -52,6 +52,7 @@ from rheplicant.inference.parameters import (
     refuse_stochastic_stages,
 )
 from rheplicant.inference.plan import (
+    MIN_DRAWS,
     Block,
     Draws,
     Estimate,
@@ -71,6 +72,7 @@ from rheplicant.inference.uncertainty import (
 __all__ = [
     "BROADCAST",
     "DEFAULT_RANK_RTOL",
+    "MIN_DRAWS",
     "DISTRIBUTE",
     "ParameterSpaceError",
     "AdamCalibrator",

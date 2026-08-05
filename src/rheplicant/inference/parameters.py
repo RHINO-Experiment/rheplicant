@@ -122,13 +122,28 @@ def refuse_stochastic_stages(pipeline: AbstractOperator, caller: str) -> None:
     adding a constant field is exactly affine, so
     :func:`~rheplicant.inference.linear.check_linearity` sees residual 0.0 and
     :func:`~rheplicant.inference.identifiability.identifiability` reports full
-    rank. Measured on an 8x8 grid with a ``NoiseOperator(sigma=20)`` in the
-    twin and nothing else changed: the point estimate moved from 1.1015 to
-    1.0824 against a truth of 1.1, and BOTH exits reported the same error bar,
-    0.002451, to every digit. That is 7.8 sigma of bias for this draw — the
-    magnitude is the realisation, the invisibility is structural. Both exits of
-    the workflow wrong by the same amount, with no diagnostic moving, is the
-    failure this refusal exists for.
+    rank. Measured on the fixture in
+    ``tests/inference/test_stochastic_twin.py`` — an 8x8 grid, ``key(0)``,
+    data from the honest model at g = 1.1 plus 2 K scatter at ``key(7)``, and a
+    ``NoiseOperator(sigma=20)`` the only difference between the two twins:
+
+    ==========  ==========  ==========
+    twin        estimate    error bar
+    ==========  ==========  ==========
+    clean       1.100162    0.0025000
+    stochastic  1.073513    0.0025000
+    ==========  ==========  ==========
+
+    That is **10.6 sigma** of bias, and BOTH exits report the same error bar to
+    every digit. The magnitude is the realisation; the invisibility is
+    structural. Both exits of the workflow wrong by the same amount, with no
+    diagnostic moving, is the failure this refusal exists for.
+
+    The digits are pinned in ``test_stochastic_twin.py`` rather than left here
+    alone. An earlier version of this paragraph quoted 1.1015 -> 1.0824,
+    0.002451 and 7.8 sigma, which two independent re-measurements could not
+    reproduce — numbers in a docstring that nothing executes are exactly the
+    claim this package refuses to make about anything else.
 
     The detector is the operators' own declaration —
     :data:`~rheplicant.core.contract.RANDOMNESS` in ``requires`` — so a new

@@ -33,6 +33,7 @@ from rheplicant.inference import (
     to_numpyro_model,
     wiener_solve,
 )
+from rheplicant.inference.uncertainty import fisher_information, parameter_covariance
 from rheplicant.radio import (
     GainOperator,
     NoiseOperator,
@@ -211,3 +212,73 @@ class TestTheMechanismTheGuardExistsFor:
         assert jnp.allclose(two - one, one - base, atol=1e-4)
         # ...and the offset is not zero, which is the whole problem.
         assert not jnp.allclose(base, 0.0)
+
+
+class TestTheMagnitudeTheDocstringQuotes:
+    """The numbers in ``refuse_stochastic_stages``' docstring, executed.
+
+    This file already pinned the MECHANISM -- that every exit refuses a twin
+    containing a drawing stage. It did not pin the magnitudes, and the
+    docstring quoted 1.1015 -> 1.0824 with an error bar of 0.002451 and 7.8
+    sigma, which two independent re-measurements could not reproduce. A number
+    in a docstring that nothing executes is exactly the claim this package
+    refuses to make anywhere else.
+
+    So the digits live here now, and the docstring points at this class. The
+    load-bearing assertion is not the bias -- that is one PRNG realisation --
+    but that the two error bars are **equal to every digit**: the estimate
+    moves and the diagnostic does not, which is the whole reason a refusal was
+    needed rather than a warning.
+    """
+
+    @staticmethod
+    def _solve(space, twin, state, observed, monkeypatch):
+        """One exit, with the refusal lifted so the bias is measurable at all."""
+        import rheplicant.inference.parameters as parameters_module
+
+        monkeypatch.setattr(
+            parameters_module, "refuse_stochastic_stages", lambda *a, **k: None
+        )
+        block = linear_operator(space, twin, state, names=("g",))
+        value, _ = wiener_solve(block, observed, noise_std=SIGMA_MEAS)
+        forward, _ = space.forward_fn(twin, state)
+        covariance = parameter_covariance(
+            fisher_information(forward, {"g": value["g"]}, noise_std=SIGMA_MEAS)
+        )
+        return float(value["g"]), float(jnp.sqrt(covariance.matrix[0, 0]))
+
+    def test_the_clean_twin_recovers_the_truth(
+        self, space, clean, state, observed, monkeypatch
+    ):
+        estimate, sigma = self._solve(space, clean, state, observed, monkeypatch)
+        assert estimate == pytest.approx(1.100162, abs=5e-6)
+        assert sigma == pytest.approx(0.0025000, abs=5e-8)
+
+    def test_the_stochastic_twin_is_biased_by_ten_sigma(
+        self, space, stochastic, state, observed, monkeypatch
+    ):
+        estimate, sigma = self._solve(space, stochastic, state, observed, monkeypatch)
+        assert estimate == pytest.approx(1.073513, abs=5e-6)
+        assert abs(estimate - TRUTH) / sigma == pytest.approx(10.6, abs=0.1)
+
+    def test_both_error_bars_agree_to_every_digit(
+        self, space, clean, stochastic, state, observed, monkeypatch
+    ):
+        """The assertion the refusal exists for.
+
+        Asserted as exact equality, not `approx`: the point is that no
+        diagnostic moves at all, and a tolerance would let a small movement --
+        which WOULD be a usable signal -- pass as if it were none.
+        """
+        _, clean_sigma = self._solve(space, clean, state, observed, monkeypatch)
+        _, noisy_sigma = self._solve(space, stochastic, state, observed, monkeypatch)
+        assert clean_sigma == noisy_sigma
+
+    def test_the_docstring_quotes_these_digits(self):
+        """The two must not drift apart again, which is how this started."""
+        import rheplicant.inference.parameters as parameters_module
+
+        doc = parameters_module.refuse_stochastic_stages.__doc__ or ""
+        for digits in ("1.100162", "1.073513", "0.0025000", "10.6 sigma"):
+            assert digits in doc, digits
+
