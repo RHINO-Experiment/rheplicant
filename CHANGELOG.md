@@ -12,7 +12,7 @@
   template. Per-epoch linear-Gaussian nuisances are marginalised analytically
   at compression, validated against the dense `N(mu, N + A S A^T)` density.
   `Latent.scope` and `Factorization` declare what is global, what is per-epoch
-  and what is linked. See D26.
+  and what is linked. See D29.
 
 **Why the manifest is the reconstruction spec, not provenance.**
 `eqx.tree_serialise_leaves` walks a pytree's *arrays* and takes everything else

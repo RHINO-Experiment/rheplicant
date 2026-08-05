@@ -1246,6 +1246,66 @@ nothing in this package does and which the inference layer's own premise
 forbids. `core` is the one layer both may depend on, and it fits: no `State`, no
 radio physics, and `Coordinates` already names the `time` and `freq` axes there.
 
+### D29 — A memory holds likelihood factors and exactly one prior
+
+A campaign that archives each night's recording must keep something, and the
+tempting something is "that night's posterior". It is the wrong object twice
+over. Multiply N of them and the prior appears N times: the credible interval
+narrows by `sqrt((F+N P)/(F+P))`, the mean pulls toward the prior mean, and
+nothing in the output says so. And a posterior is a normalised density, so it
+cannot represent the normal case — an epoch that constrains a two-dimensional
+subspace of a twenty-dimensional θ.
+
+So `BayesMemory` stores `CompressedLikelihood` terms, the word is in the type
+name, and `log_posterior` applies the prior exactly once. Rank deficiency is
+representable because the stored form is `[R | z]` with `log L = -½‖Rθ − z‖²`:
+a term constraining `r` directions is an `R` with `r` rows, `F = RᵀR` is PSD by
+construction, and the working condition number is `sqrt(kappa(F))`.
+Accumulation is the QR of stacked factors, so order-invariance and
+associativity are properties of the representation rather than tests.
+
+Two constants are the whole difficulty, and both are invisible in the
+posterior's *shape* — they shift the log-density without touching its gradient
+or curvature, so every moment-based check passes while the evidence is wrong.
+The QR's corner term `rho²` must be folded into the offset: dropped, each
+combined term is wrong by a positive amount that grows with the campaign
+(measured at 0.16 to 5.3 nats for a single pair). And marginalising a
+per-epoch nuisance contributes **two** constants, not one — `-Σlog|R_pp,ii|`
+off the discarded block *and* `-Σlog(std)`, the nuisance prior's own Gaussian
+normalisation. Only the `(n_φ/2)log(2π)` halves cancel. Omitting the second
+costs 1.07 nats for three nuisances at `std=0.7` and 27.5 for twenty-five at
+`std=3`; it is exactly zero when `std=1`, which is how it survives a probe
+built on unit priors.
+
+Three refusals, each guarding a smooth wrong answer. **The same night twice** —
+terms carry the recording's data hash, and `remember` refuses a repeat unless
+`duplicate=True`, the posture D17 takes on beam-spill double counting. **Two
+estimators** — a GLS term and a full-likelihood term (D21/D23) are different
+estimators and their sum is neither. **A tempered term** — a factor carrying a
+share of the prior would make `log_posterior` apply it twice, so the streaming
+path refuses one.
+
+The archive gets its own decision, because `eqx.tree_serialise_leaves` reverts
+every `eqx.field(static=True)` member to the template's value with no error:
+measured on equinox 0.13.8, `include_logdet=False` reads back `True`,
+`noise_frozen_at="gls"` reads back `"none"`, `n_observed=777` reads back `0`.
+All of a term's provenance lives in such fields and the raw data is gone, so
+nothing could contradict a reloaded memory describing itself as a set of exact,
+full-likelihood factors. The manifest is therefore a **reconstruction spec** —
+the arrays come from the binary, every static field and dtype and the writer's
+x64 state come from the JSON — and `load_memory` builds the template from it
+and refuses on any mismatch.
+
+The layer requires float64 and the suite does not run there. A stored offset is
+the time–bandwidth product (~7.2e11 for one RHINO night) against a difference
+of ~1e5, which float32 annihilates rather than rounds; but float32 is this
+package's production dtype, and eighteen tests assert refusals only float32
+forces. `jax_enable_x64` is process-global with no scoped form in jax 0.11, so
+`tests/evidence/` is a second session, and `tests/test_evidence_session.py`
+runs it as a subprocess from the default suite — asserting a positive passed
+count and no skips, because a child that collected nothing exits 0 exactly like
+a healthy one.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`
