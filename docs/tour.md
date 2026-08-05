@@ -130,10 +130,25 @@ exactly the three combinators of §3.
 
 The default template, `rheplicant.radio.RADIO_GRAPH` (32 nodes), is **RHINO's**
 structure — a single-antenna, switched-load, drift-scanning horn. It is not the
-framework: `SignalGraph`/`register_graph` are public and domain-agnostic, and
-another instrument is another template. See
+framework: `SignalGraph`/`register_graph`/`get_graph` are public and
+domain-agnostic, and another instrument is another template. See
 [the canonical signal path](signal-path.md) for the node kinds, the two rules
 that follow from them, and the custom-graph sketch.
+
+`register_graph` fills one process-global registry and `get_graph` reads it by
+name, so a template is visible exactly once its module has been imported —
+`get_graph("single-antenna")` raises `KeyError` (listing what *is* registered)
+until something has imported `rheplicant.radio`:
+
+```python
+from rheplicant.core import get_graph
+from rheplicant.radio import RADIO_GRAPH
+
+print(get_graph("single-antenna") is RADIO_GRAPH, len(RADIO_GRAPH.nodes))
+```
+```text
+True 32
+```
 
 ```python
 from rheplicant.radio import assemble, IonosphereOperator, BeamOperator
@@ -293,6 +308,18 @@ matched-filter rounds). Its flags reach inference by wrapping the noise model �
 `FlaggedNoise(RadiometerNoise(...), flags)` — rather than as a separate
 argument to every consumer.
 
+Both flaggers honour one contract you should know exists before you build a
+calibrated pipeline. A CW calibration tone is a narrow, bright, persistent line
+— to a flagger, the definition of RFI — and `flagging` sits downstream of
+`cw_tone` on the same trunk, so without a contract the pipeline that is meant
+to *use* the calibrator destroys it on the first observation. The injecting
+operator writes the channels it wet into `aux["protected"]` (`protect`), the
+flaggers clear those channels from their verdict (`unflag_protected`), and
+`reduce_protection` re-derives a drifting tone's mask across a stage that
+reshapes the time axis. See
+[the protection contract](contracts.md#protected-channels-keeping-a-known-calibrator-out-of-the-flags),
+which also covers the two things it deliberately does not do.
+
 ## 8. Inference
 
 Everything connects through one seam: `forward(params) -> prediction`, with
@@ -305,7 +332,9 @@ what [Inferring anything](inference.md) is about:
 ```python
 from rheplicant.inference import ParameterSpace
 
-model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
+# `.without("noise")`: `twin` draws randomness, and every inference exit refuses
+# such a model — the draw would be made once and frozen into every prediction.
+model = twin.without("noise").replace_node("gain", GainOperator(gain=jnp.array(1.0)))
 space = ParameterSpace.direct("log_gain", init=0.0,
                               into=lambda p: p["gain"].gain, fn=jnp.exp)
 forward, params0 = space.forward_fn(model, state)   # params0: {"log_gain": 0.0}
@@ -490,9 +519,11 @@ placeholder says what the real model should be.
 |---|---|
 | Angles | degrees in public APIs, radians internally |
 | Metadata | strings → `meta` (static); numbers/arrays → `coords`/`env`/`aux` (traced) |
-| Randomness | `subkey, state = state.next_key()`; return the advanced state |
+| Randomness | `subkey, state = state.next_key()`; return the advanced state — and declare `"key"` in `requires`, which is what makes the stage findable ([contracts](contracts.md#reading-a-trees-own-declarations)) |
 | Data grid | radio convention: `data` is `(n_time, n_freq)`; `State` itself takes any pytree |
 | Updates | functional only — `replace`, `with_data`, `replace_stage/branch/node`, `eqx.tree_at` |
 | Validation | structural only inside `__call__` (jit-safe); loud errors over silent breakage |
+| Errors | every refusal derives from `DirtError`, and each also from its closest builtin — so `except ValueError` catches all of them but `MissingKeyError` ([contracts](contracts.md#one-base-class-for-every-refusal)) |
 | Noise in Bayes | stochastic operators stay OUT of twins handed to `to_numpyro_model` |
+| Protected channels | the operator that injects a calibrator writes the channels it wet to `aux['protected']`; flaggers clear them ([contracts](contracts.md#protected-channels-keeping-a-known-calibrator-out-of-the-flags)) |
 | Layering | `rheplicant.core` never imports `rheplicant.radio` / `rheplicant.inference` (enforced by test) |

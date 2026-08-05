@@ -83,6 +83,7 @@ each principle; start reading the docs with the [guided tour](tour.md).
 tour
 operators
 signal-path
+contracts
 sky-engines
 sky-to-receiver
 ingestion

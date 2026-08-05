@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+### Three contracts get a page, and the tour's inference section starts running again
+
+Twelve public names sat in `rheplicant.core.__all__` (nine) and
+`rheplicant.radio.__all__` (three) with `automodule` docstrings and nothing
+narrative anywhere: `walk_operators`, `stages_requiring`, `RANDOMNESS`,
+`get_graph`, `BASIS_KINDS`, four members of the `DirtError` family, and — the
+ones with a user consequence — `PROTECTED_KEY`, `unflag_protected`,
+`reduce_protection`. New page **`docs/contracts.md`**, in the toctree after
+`signal-path`.
+
+**Why a page rather than a section.** All three are agreements between stages
+that never import each other, and none of them is an operator — so none belongs
+in `docs/operators.md`, which is a catalog of things you place on the graph, and
+none survives the tour's constraint that every block builds on the last.
+
+* **The protection contract.** A CW calibration tone is, to a flagger, the
+  definition of RFI, and `flagging` sits downstream of `cw_tone` on the same
+  trunk, so without this the pipeline meant to *use* the calibrator destroys it
+  on the first observation — measured on the page rather than asserted: strip
+  `aux['protected']` from an otherwise identical run and the same
+  `FlaggingOperator` flags 12 samples, every sample of the two channels the
+  5000 K line peaks in. The write side (`protect`), the read side
+  (`unflag_protected`), the two mask shapes, and `reduce_protection` as the
+  re-derivation `unflag_protected`'s refusal tells you to perform — with the
+  real refusal text, and with the fact that `BackendOperator` already does it
+  for you on the trunk, so the function is for the stages that are not it.
+* **The error hierarchy.** One `except DirtError` catches everything the package
+  refuses; each subclass also derives from its closest builtin. The fact worth
+  the page: `MissingKeyError` is the single member that is a `RuntimeError` and
+  not a `ValueError`, so `except ValueError` catches every other refusal and
+  walks past exactly that one. Also recorded: `ParameterSpaceError` is defined
+  in `core/errors.py` but is deliberately absent from `core`'s surface, reaching
+  callers through `rheplicant.inference`.
+* **`walk_operators` / `stages_requiring` / `RANDOMNESS`.** How the
+  stochastic-stage refusal finds a drawing operator inside a nested composite,
+  with the real label output (`'astro_sum/foregrounds'`; the `Assembly` and the
+  trunk `Pipeline` both `''`, being spine with no name of their own), why the
+  walk is by pytree position rather than the composite spine, and the shape of a
+  caller's own guard.
+
+**`docs/tour.md` §8 could not run.** `model = twin.replace_node("gain", ...)`
+built its inference target from a `twin` that still contained `NoiseOperator`,
+and three separate exits refuse such a model — `space.forward_fn`,
+`build_forward_fn` and `identifiability`, all `ParameterSpaceError`, measured
+one at a time. The section's own linear-block snippet twelve lines further down
+already said `twin.without("noise")` with the reason in a comment; §8's first
+line did not. Fixed there. The tour now runs top to bottom with exit 0 — 23
+python blocks, one placeholder skipped (`DriftScanProjector.from_beam_maps`
+needs a `beam_maps` the reader supplies).
+
+Also in the tour: `get_graph` named in §4 with the property that makes it fail
+in practice — `register_graph` fills one process-global registry as an import
+side effect, so `get_graph("single-antenna")` raises `KeyError` until something
+has imported `rheplicant.radio`; a pointer to the protection contract in §7;
+and three rows in the §10 conventions table.
+
+**`DESIGN.md`'s module map was accurate and incomplete.** Every path it cites
+exists, every `radio/` module on disk is in it, and the `core/fold.py` row added
+with the fold extraction is correct. But it covered 3 of the 13 `core/` modules,
+and nothing else in the repository described the `core/` layout at all — so
+`core/contract.py` and `core/errors.py`, both created or moved this session, had
+no home in any map. A second block now lists all thirteen. The `radio/graph.py`
+row's column alignment is fixed on the way past.
+
+D28 gains the third basis kind. `BASIS_KINDS` is
+`("legendre", "polynomial", "fourier")`, and the section discussed only the
+first two — which reads as though they are the whole vocabulary, when `fourier`
+is a different *span* and a claim about periodicity rather than a conditioning
+choice. The two condition numbers already there (7.86 against 2.81e+05 at
+`n=32, n_basis=16`) were re-measured and are exact; `fourier` at the same size
+is 1.41.
+
+**One stale number, and it was never right.** `core/contract.py`'s module
+docstring said "26 of the 31 declaring classes provide exactly `("data",)`". An
+AST census of `src/rheplicant/` gives 25 of 31 — and gives 25 of 31 at
+`bc1b4e0` too, the commit that wrote the sentence, so this is an off-by-one at
+authorship rather than drift. Corrected to 25.
+
+Every code block on the new page and every block added to the tour was executed
+before being written down, and all 19 lines of claimed output were checked
+verbatim against the real run. Sphinx: 29 warnings before, 29 after.
+
 ### Eleven public inference names reach the narrative docs, and the Status paragraph is re-measured
 
 `rheplicant.inference.__all__` has 51 names. **Thirteen** of them appeared in no

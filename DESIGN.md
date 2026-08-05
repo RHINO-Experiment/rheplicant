@@ -521,13 +521,45 @@ Ingestion (files -> State)
   Touchstone .sNp reflection sweeps        radio/touchstone.py
 Learned stages
   MLP as an operator (D12)                 radio/surrogate.py
-Shared numerics (domain-agnostic)
-  separable (t, ν) design matrices (D28)   core/basis.py
 Graph-guided assembly (D11)
-  SignalGraph template + assembly          core/graph.py
-  the fold (template + set -> tree)        core/fold.py
-  canonical single-antenna graph              radio/graph.py
+  canonical single-antenna graph           radio/graph.py
 ```
+
+`rheplicant.core` is not part of that taxonomy — it is the layer the taxonomy
+is written in, and nothing in it names a radio element. Its own map, complete
+as of this listing (thirteen modules, `__init__.py` aside):
+
+```
+Core layer (never imports radio / inference)  Module
+────────────────────────────────────────────  ───────────────────────────────
+The state
+  State: the scientific context               core/state.py
+  time / frequency axes (+ their guards)      core/coordinates.py
+  ambient conditions riding along             core/environment.py
+  hashable mapping for the static channel     core/frozen.py
+The operator contract
+  AbstractOperator, Lambda-, Snapshot-        core/operator.py
+  cascade (Pipeline)                          core/pipeline.py
+  sum and switch (Sum-, SelectOperator)       core/combinators.py
+Graph-guided assembly (D11)
+  SignalGraph template + assembly             core/graph.py
+  the fold (template + set -> tree)           core/fold.py
+  lit / dim rendering of an assembly          core/render.py
+Contracts
+  reading a tree's own declarations           core/contract.py
+  the DirtError hierarchy                     core/errors.py
+Shared numerics
+  separable (t, ν) design matrices (D28)      core/basis.py
+```
+
+The last two are the ones with no home in the element taxonomy and no obvious
+one anywhere else: `contract.py` consumes the `requires`/`provides` ClassVars
+(`walk_operators`, `stages_requiring`, `RANDOMNESS`) so a caller can refuse a
+composition on what its stages say about themselves, and `errors.py` holds the
+exception hierarchy every layer raises into. Both are narrated in
+[`docs/contracts.md`](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/contracts.md),
+alongside the one contract that lives on the radio side rather than here —
+`radio/protection.py`.
 
 Composition follows the physics, per the canonical signal-path graph
 (`rheplicant/radio/graph.py`, D11): astrophysical components sum
@@ -1194,6 +1226,18 @@ property of the model that only `identifiability()` can answer.
 **`legendre` and `polynomial` span the same functions and are not
 interchangeable**: `cond(design)` at `n=32, n_basis=16` is 7.86 against 2.81e+05,
 and that number lands on the κ of the block's normal operator.
+
+There is a third kind, and it is a different KIND of choice. `BASIS_KINDS` is
+the public tuple `("legendre", "polynomial", "fourier")`, and picking between
+the first two is a conditioning decision over one span, while picking `fourier`
+changes the span: its condition number at the same size is a flat 1.41, because
+its harmonics are orthogonal on the grid it is evaluated on (`i/n`, endpoint
+**excluded** — the endpoint-included grid puts the first and last sample one
+full period apart, and the coefficients come back correlated with no shape
+changing). Choosing it asserts that the quantity is *periodic* on this axis — a
+sidereal cycle, a standing wave in a cable — and on a non-periodic axis its
+constant-plus-harmonics span forces the two ends to agree, which is a statement
+about the physics rather than a numerical detail.
 
 **Where it lives.** `rheplicant.core.basis`, not `rheplicant.inference.basis`. It
 reads like an inference utility, but the design matrices are held by an operator

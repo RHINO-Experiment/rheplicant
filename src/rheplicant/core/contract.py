@@ -21,7 +21,7 @@ against the shipped operator set, and the counter-example is in the package:
 ``GroundPickupOperator`` declares ``"env.temperature"`` and then documents a
 ``t_ground`` fallback for when it is missing, so the declaration means "reads
 if present", not "needs". A blanket availability rule would refuse a model the
-package itself describes as legitimate. ``provides`` is weaker still: 26 of the
+package itself describes as legitimate. ``provides`` is weaker still: 25 of the
 31 declaring classes provide exactly ``("data",)``, so threading it forward
 distinguishes almost nothing that the graph's own source/transform kinds do not
 already say. Both stay as documentation of intent, and the class docstring on
