@@ -140,13 +140,18 @@ class GeneralPointingProjector(AbstractSkyProjector):
         same rotation and produces the same silent zero map. ``selfrot_deg`` is
         checked when supplied, for the same reason and no other.
 
-        Traced arrays are stepped over rather than forced, following
+        Traced arrays are stepped over **per field**, following
         :meth:`rheplicant.core.coordinates.Coordinates.__check_init__`: under
         jit there are no values to compare, and calling ``np.asarray`` on a
-        tracer is the error rather than the pointing. A jitted caller therefore
-        keeps the old behaviour, which is the honest limit of a value check on
-        a differentiable path -- and the reason this is stated here rather than
-        implied.
+        tracer is the error rather than the pointing. Per field matters --
+        a mixed call, where the jitted argument is traced and the rest of the
+        coordinates are concrete, is the common one, and skipping the concrete
+        fields because a sibling was traced would leave the check protecting
+        nothing in exactly that case.
+
+        A caller who traces ALL of these still keeps the old behaviour, which
+        is the honest limit of a value check on a differentiable path -- and
+        the reason it is stated here rather than implied.
         """
         fields = {
             "coords.pointing": coords.pointing,
@@ -159,7 +164,13 @@ class GeneralPointingProjector(AbstractSkyProjector):
             try:
                 concrete = np.asarray(values)
             except jax.errors.TracerArrayConversionError:
-                return  # genuinely traced: no values to compare against
+                # `continue`, not `return`. A `return` here ends the whole loop,
+                # so the FIRST traced field would disable the check on every
+                # later one -- measured: jit over `pointing` with a concrete
+                # all-NaN `lst_deg` produced exactly the finite, identically
+                # ZERO map this refusal exists to prevent, and whether it was
+                # caught depended on dict insertion order.
+                continue  # genuinely traced: no values to compare against
             if concrete.size and not np.all(np.isfinite(concrete)):
                 bad = int(np.count_nonzero(~np.isfinite(concrete)))
                 raise StateValidationError(

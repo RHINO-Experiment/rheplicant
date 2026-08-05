@@ -675,9 +675,13 @@ class CalLoadOperator(AbstractOperator):
     than assuming it: it is the order ``gamma_src``'s rows must match.
 
     Attributes:
-        t_load: load temperature [K], differentiable. Four accepted forms, and
+        t_load: load temperature [K], differentiable. Three accepted forms, and
             which axis a 1-D array runs along is a convention this package
-            states once rather than guessing:
+            states once rather than guessing. ``(n_time, n_freq)`` is NOT one
+            of them: it is explicit and unambiguous, but a load whose spectrum
+            also moves is a different model than this placeholder has, and a
+            narrow guard is easier to widen when that arrives than to narrow
+            after someone relies on it.
 
             * scalar — one temperature for the whole run;
             * ``(n_freq,)`` — per channel. A bare 1-D array is ALWAYS read this

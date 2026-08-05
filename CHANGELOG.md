@@ -2,9 +2,50 @@
 
 ## Unreleased
 
-### Eighteen construction-time refusals had never been executed — and six of them let NaN through
+### A non-finite pointing is refused, because the adjoint would not be loud
 
-**Tests only; no behaviour in `src/` changed.** The raise audit
+`GeneralPointingProjector` validated that `coords.pointing` and
+`coords.extra["lst_deg"]` were *present*, never that they were finite. The two
+directions then failed asymmetrically, measured on one fixture:
+
+| direction | result on all-NaN pointing |
+|---|---|
+| `forward` | every TOD sample NaN — loud, a user notices |
+| `adjoint` | a finite, correctly shaped, identically **zero** map (the honest answer is 11.4) |
+
+Map-making on corrupted pointing returned a clean-looking empty result and every
+downstream `isfinite` check passed. Both directions now refuse, from the entry
+they share; the message names the field and counts the bad samples, since one
+dropped ephemeris row in an otherwise good run is the realistic case.
+
+The check reads concrete values, so it steps over traced arrays **per field** —
+a mixed call, where the jitted argument is traced and the rest of the
+coordinates are concrete, is the common one. With every field traced nothing is
+checked, which is the honest limit of a value check on a differentiable path and
+is pinned as such.
+
+### `CalLoadOperator` takes a per-sample temperature, and a recording can supply it
+
+`read_rhino_observation` parsed the thermistor log, interpolated it onto the SDR
+axis and refused a recording whose readings were short or non-finite — and then
+`to_state` dropped it, so the loads' temperatures were parsed, validated and
+discarded and the warm/hot-load noise-wave path had no route from a recording.
+
+`t_load` now also accepts an explicit `(n_time, 1)` column, and
+`rheplicant.radio.cal_load_operators(obs)` builds one operator per switched
+load from a recording. A bare 1-D array is still read as per-**frequency**,
+matching `NoiseWaveOperator`'s temperature leaves; `(n_time, n_freq)` is
+deliberately **not** accepted.
+
+**Breaking:** `rhino.to_state` now stores `coords.time` as seconds since the
+first kept sample, with the absolute epoch in `meta["time_epoch_unix_s"]`. Code
+reading `coords.time` as a unix epoch is wrong by ~1.75e9 and nothing raises.
+The change is what makes a float32 time axis usable at all — a unix-second axis
+has 128 s of float32 resolution, which merged samples before averaging.
+
+### Eighteen construction-time refusals had never been executed — and eight of them let NaN through
+
+The raise audit
 (`tools/raise_audit.py`) found 18 `raise` statements in the construction-time
 configuration-validation family that the suite had never run: the guards that
 refuse `n_pix=0`, `validation_fraction=1.0`, an empty `ParameterSpace`, a
@@ -31,30 +72,30 @@ positive int`, `learning_rate must be > 0` and `n_steps must be a positive int`
 (two copies each, one previously tested each) and fails, naming the offender, if
 a further copy appears.
 
-**Finding, recorded and not fixed: `nan` defeats every comparison-based guard
-here.** `nan <= 0` is `False`, so `if x <= 0: raise` does not fire and the NaN
-becomes configuration. Six sites:
+**`nan` defeated every comparison-based guard here, and it is now fixed.**
+`nan <= 0` is `False`, so `if x <= 0: raise` did not fire and the NaN became
+configuration. Eight sites, all now inverted to `if not x > 0`:
 
-| site | `nan` accepted | what happens next |
-|---|---|---|
-| `AdamCalibrator.learning_rate` | yes | every Adam iterate is NaN |
-| `GradientCalibrator.learning_rate` | yes | same guard, copied |
-| `RadiometerNoise.floor` | yes | **the floor is silently dropped** — `if self.floor > 0.0` is also False, so `std` is finite, correctly shaped and simply un-floored |
-| `RadiometerNoise.channel_width` / `integration_time` | yes | every noise weight is NaN |
-| `IonosphereOperator.ref_freq` | yes | the whole band is NaN |
-| `PowerLawSkyModel.ref_freq` / `ForegroundOperator.ref_freq` | yes | the same guard, copied twice more |
+| site | what used to happen |
+|---|---|
+| `AdamCalibrator.learning_rate` | every Adam iterate NaN |
+| `GradientCalibrator.learning_rate` | same guard, copied |
+| `RadiometerNoise.floor` | **the floor was silently dropped** — `if self.floor > 0.0` is also False, so `std` came back finite, correctly shaped and simply un-floored |
+| `RadiometerNoise.channel_width` / `integration_time` | every noise weight NaN |
+| `NeuralPosterior.create(n_components=)` | refused three frames deeper by `eqx.nn.MLP`, with a `TypeError` about shape sequences instead of the sentence written for the caller |
+| `IonosphereOperator.ref_freq` | the whole band NaN |
+| `PowerLawSkyModel.ref_freq` / `ForegroundOperator.ref_freq` | the same guard, copied twice more |
 
-`RadiometerNoise.floor` is the one worth reading twice: it is the only case that
-produces no NaN downstream at all, so a caller who passes `floor=nan` gets a
-working noise model with their argument quietly discarded.
+`RadiometerNoise.floor` is the one worth reading twice, and it is why "NaN
+poisons the output anyway" was not a defence: it was the only case producing no
+NaN downstream at all, so a caller passing `floor=nan` got a working noise model
+with their argument quietly discarded.
 
-The package already contains the one-line fix and uses it twice —
-`if not 0.0 <= self.beta1 < 1.0` and `if not 0.0 <= validation_fraction < 1.0`
-both refuse NaN correctly. It was **not** applied to the six, because refusing a
-NaN that is accepted today is a behaviour change and this batch is scoped to
-tests. The current behaviour is pinned instead, in tests named and documented as
-pinning a gap rather than a contract, so that applying the inversion shows up
-here as a deliberate change.
+The package already contained the one-line fix and used it three times —
+`if not 0.0 <= self.beta1 < 1.0`, `if not 0.0 <= validation_fraction < 1.0` and
+`if not 0.0 <= self.occupancy <= 1.0`. The tests that pinned the gap were
+written to fail when it was closed, with the remedy named in each docstring, so
+the fix arrived as a deliberate test change rather than a silent one.
 
 Two smaller notes. `n_components`, `n_steps` in `train_posterior` and the
 `isinstance`-typed guards (`n_pix`, `cg_maxiter`, `AdamCalibrator.n_steps`) do

@@ -36,9 +36,12 @@ a smaller scale, and :func:`test_the_copied_guards_have_not_grown_a_new_copy`
 is scoped to exactly it. The census is a source scan, so it covers the radio
 copies too and lives here rather than being cut in half across two files.
 
-**One finding is recorded here rather than fixed**: six of these guards compare
-against a threshold, and ``nan`` fails every comparison, so a NaN configuration
-is accepted in silence. See :class:`TestNaNIsNotRefusedByComparisonGuards`.
+**One finding was recorded here and has since been fixed**: eight of these
+guards compared against a threshold, and ``nan`` fails every comparison, so
+a NaN configuration was accepted in silence. All eight now use the NaN-safe
+form the package already used elsewhere. See
+:class:`TestNaNIsRefusedByEveryComparisonGuard`, which kept the measurement
+that motivated it.
 """
 
 import ast

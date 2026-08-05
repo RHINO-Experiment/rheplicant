@@ -14,11 +14,11 @@ from a transposed one. The ``tod`` test below passes ``(n_freq, n_time)`` --
 the exact transpose of the valid shape -- which is only a distinguishable
 input because ``5 != 3``.
 
-The fourth section records what the coordinate guard does NOT do. It is a
-PRESENCE check, not a value check: it asks whether ``lst_deg`` and
-``pointing`` are there, never whether they are finite. NaN passes it, and the
-two directions then behave very differently -- see ``TestNaNPassesTheGuard``.
-That is reported, not fixed; the fix is a source change.
+The fourth section records what the coordinate guard DOES: it is a value
+check as well as a presence check, so a NaN pointing or lst_deg is refused
+rather than turned into an identically zero map by the adjoint. It began as
+characterisation of the opposite -- see ``TestANonFinitePointingIsRefused``,
+which keeps the measurement that motivated the change.
 """
 
 import jax
@@ -307,3 +307,72 @@ class TestANonFinitePointingIsRefused:
         honest = projector.adjoint(_tod(), _coords())
         assert bool(jnp.all(jnp.isfinite(honest)))
         assert float(jnp.max(jnp.abs(honest))) > 1.0, "the fixture must be non-trivial"
+
+
+class TestTheGuardUnderTracing:
+    """The mixed call: one field traced, the rest concrete.
+
+    The file had no jit/vmap/grad case at all, and that omission hid a real
+    defect for the length of one commit. The escape for a traced field was
+    written as ``return``, which ends the whole loop -- so the FIRST traced
+    field disabled the check on every later one. Measured on the shipped code
+    before the fix, with ``pointing`` as the jit argument and a concrete
+    all-NaN ``lst_deg`` closed over::
+
+        return    -> RAN, finite=True, max|.| = 0.0   (the silent empty map)
+        continue  -> StateValidationError naming lst_deg
+
+    Whether the corruption was caught depended on dict insertion order, which
+    is not a property anyone should have to reason about.
+
+    Note what the probe requires: the NaN array must be built OUTSIDE the
+    jitted function. ``jnp.full(..., nan)`` written inside one is itself
+    traced, so a probe that builds it there demonstrates only the documented
+    all-traced limit and passes either way. Two attempts at this test were
+    wrong for exactly that reason before the third measured anything.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _needs_limtod(self):
+        pytest.importorskip("limtod_jax", reason="limTOD[jax] not installed")
+
+    def test_a_concrete_nan_field_is_still_caught_when_a_sibling_is_traced(
+        self, projector
+    ):
+        import numpy as np
+
+        bad_lst = np.full((N_TIME,), np.nan)  # concrete, closed over
+
+        def run(pointing):
+            return projector.adjoint(
+                _tod(), _coords(pointing=pointing, lst=bad_lst)
+            )
+
+        with pytest.raises(StateValidationError, match=r"lst_deg.*non-finite"):
+            jax.jit(run)(_coords().pointing)
+
+    def test_the_all_valid_case_still_jits(self, projector):
+        """The other branch: the guard must not break a jitted caller."""
+
+        def run(pointing):
+            return projector.adjoint(_tod(), _coords(pointing=pointing))
+
+        out = jax.jit(run)(_coords().pointing)
+        assert bool(jnp.all(jnp.isfinite(out)))
+        assert float(jnp.max(jnp.abs(out))) > 1.0, "the fixture must be non-trivial"
+
+    def test_fully_traced_coordinates_keep_the_documented_limit(self, projector):
+        """Stated rather than implied: with every field traced, nothing is checked.
+
+        This is the honest limit of a value check on a differentiable path. It
+        is pinned so that if the limit is ever removed, the docstring claiming
+        it has to be updated in the same change.
+        """
+
+        def run(pointing, lst):
+            return projector.adjoint(_tod(), _coords(pointing=pointing, lst=lst))
+
+        out = jax.jit(run)(_coords().pointing, jnp.full((N_TIME,), jnp.nan))
+        assert bool(jnp.all(jnp.isfinite(out)))
+        assert float(jnp.max(jnp.abs(out))) == 0.0
+

@@ -11,10 +11,15 @@ guards that no test has ever reached.
 The three families, by their sentence:
 
 ``A``  ``"{leaf} must be scalar or (n_freq,), got ndim=..."``
-       BeamSpill, AntennaLoss, CalLoad. Note these do not all raise at the
-       same moment: two check in ``__check_init__`` and one in ``__call__``,
-       so the tests below construct *and* call before deciding nothing was
-       refused. Splitting that per-member is what let the difference hide.
+       BeamSpill and AntennaLoss. ``CalLoadOperator`` was a member and LEFT
+       when ``t_load`` gained a per-sample column, which the source-derived
+       membership check is what noticed -- a member leaving is as visible as
+       one arriving. Its own forms are pinned in ``TestCalLoadRankForms``.
+       Note the two remaining members do not raise at the same moment: the
+       check sits in ``__check_init__``, but the family's third member used to
+       raise in ``__call__``, so the helper below constructs *and* calls before
+       deciding nothing was refused. Splitting that per-member is what let the
+       difference hide.
 
 ``B``  ``"{Operator}: gain must be scalar or 1D, got ndim=..."``
        Gain, ApplyCalibration. These two sentences used to be
@@ -109,7 +114,7 @@ LEAF_RANK_GUARDED: dict[str, dict[str, float]] = {
 #: noticed. Its ``t_load`` now also accepts a per-sample ``(n_time, 1)`` column
 #: -- the form a recording's thermistor log takes -- so its refusal no longer
 #: says "must be scalar or (n_freq,)" and it is no longer a member of the
-#: sentence this file is about. Its own four forms are pinned in
+#: sentence this file is about. Its own accepted forms are pinned in
 #: ``TestCalLoadRankForms`` below rather than left to the family that dropped
 #: it, which is the whole point of deriving membership from the source: a
 #: member leaving is as visible as a member arriving.
@@ -391,8 +396,12 @@ class TestDataRankFamily:
     def test_the_data_refusal_names_the_operator_that_raised_it(self, name):
         """The check that catches a rename that did not happen.
 
-        These three sentences hardcode the class name into the f-string --
-        they do NOT read ``type(self).__name__``. A fourth operator pasted in
+        These three sentences interpolate ``type(self).__name__``; they used to
+        hardcode the class name, which is why this check exists at all. A
+        pasted-in fourth operator now gets its own name automatically, so
+        what this pins is that the interpolation is still there and still
+        resolves per class -- one that resolved to a constant would satisfy
+        "names an operator" and restore the collision. A fourth operator pasted in
         from one of them would raise the right exception with another
         operator's name on it, and every other assertion in this file would
         still pass.
