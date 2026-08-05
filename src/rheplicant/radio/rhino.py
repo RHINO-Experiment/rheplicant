@@ -267,13 +267,33 @@ def _thermistors_in_kelvin(
 
     The other direction -- wiring ``thermistor_k`` onto
     ``CalLoadOperator.t_load`` so the defended quantity does reach the signal
-    path -- remains open, and is the one worth taking. It is larger than it
-    looks: ``t_load`` is a scalar or ``(n_freq,)``, while a load's physical
-    temperature is per-SAMPLE, so the operator needs a ``(n_time,)`` case whose
-    disambiguation from ``(n_freq,)`` is not free when the two are equal; and
-    ``to_state`` returns a State, so wiring an operator from it either changes
-    its return type or moves the load temperature into the State for the
-    operator to read, which changes that operator's ``requires`` declaration.
+    path -- is now :func:`cal_load_operators`, and the two things that looked
+    like blockers each resolved into a convention this package already had.
+
+    ``t_load`` was a scalar or ``(n_freq,)`` while a load's physical
+    temperature is per-SAMPLE. It now also takes an explicit ``(n_time, 1)``
+    column -- spelled as a column rather than a bare ``(n_time,)`` for the
+    reason :func:`~rheplicant.inference.noise.check_noise_std_axis` gives at
+    length, that on a square grid a bare 1-D array reads equally well as
+    either axis and NumPy settles it silently.
+
+    The second looked worse and is the one worth recording, because the
+    obvious resolution is the wrong one. ``to_state`` returns a ``State``, so
+    wiring an operator from it would either change that return type or move
+    the load temperature INTO the State for the operator to read -- and the
+    second is what a reader reaches for first, since it makes the dependency
+    explicit in ``CalLoadOperator.requires``. It should not be done. A load's
+    physical temperature is a property of the INSTRUMENT's configuration, not
+    of the observation: it belongs to one load among several, and a ``State``
+    has no place to key it by load without inventing one. Putting it there
+    would also make the operator's declared requirement unsatisfiable by any
+    state this reader produces for a model with two loads, since both would
+    read the same path.
+
+    So neither: :func:`cal_load_operators` is a separate function, ``to_state``
+    keeps its return type, and ``CalLoadOperator.requires`` is unchanged. The
+    caller pays one line and the two layers stay separable, which is what this
+    module's split is for.
 
     The reference (``rhino-cal/gcr/data_processing.py``) takes
     ``heated_load_index=1, ambient_load_index=0`` and routes every state
