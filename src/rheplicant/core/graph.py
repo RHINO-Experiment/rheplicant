@@ -55,25 +55,19 @@ import equinox as eqx
 import jax
 
 from rheplicant.core.combinators import SelectOperator, SumOperator
-from rheplicant.core.errors import DirtError
+from rheplicant.core.errors import AmbiguousNodeError, AssemblyError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline, validate_operators
 from rheplicant.core.state import State
 
+# Re-exported, not defined here. They moved to `core/errors.py` -- where every
+# other error in the package lives -- so that a module wanting to raise one
+# need not import `core/graph.py` and take its whole dependency tree with it.
+# `graph.py` keeps them importable because that is where they were defined for
+# the package's history and thirteen files still reach for them here.
+__all__ = ["AmbiguousNodeError", "AssemblyError"]
 
-class AssemblyError(DirtError, ValueError):
-    """A provided operator set cannot be assembled on the signal graph."""
 
-
-class AmbiguousNodeError(AssemblyError):
-    """A node id was used as an address, but it holds more than one operator.
-
-    Raised by :meth:`Assembly.__getitem__` / :meth:`Assembly.replace_node` for
-    a ``many=True`` node carrying several instances. Answering with one of
-    them (or with the fold over all of them) would silently pick a different
-    operator than the caller means — and, through ``replace_node``, silently
-    delete the siblings. The message names every instance id instead.
-    """
 
 
 @dataclasses.dataclass(frozen=True)

@@ -54,6 +54,7 @@ import numpy as np
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import DataIngestionError
 from rheplicant.core.state import State
+from rheplicant.radio.backend.flagging import FLAGS_KEY
 from rheplicant.radio.touchstone import _interp_strict
 
 #: ``state.meta`` key under which :func:`to_state` records the unix second the
@@ -695,7 +696,7 @@ def to_state(obs: RhinoObservation, *, source_order: Sequence[str]) -> State:
             freq=obs.freq_hz,
             extra={"receiver_input": jnp.asarray(index)},
         ),
-        aux={"flags": flags},
+        aux={FLAGS_KEY: flags},
         meta={TIME_EPOCH_META_KEY: epoch},
     )
 

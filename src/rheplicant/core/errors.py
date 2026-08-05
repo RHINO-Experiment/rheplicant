@@ -52,3 +52,18 @@ class DataIngestionError(DirtError, ValueError):
     wrong with the shape of what was read, only with what it means. Both would
     otherwise propagate as a finite, correctly-shaped, wrong answer.
     """
+
+class AssemblyError(DirtError, ValueError):
+    """A provided operator set cannot be assembled on the signal graph."""
+
+
+class AmbiguousNodeError(AssemblyError):
+    """A node id was used as an address, but it holds more than one operator.
+
+    Raised by :meth:`~rheplicant.core.graph.Assembly.__getitem__` /
+    :meth:`~rheplicant.core.graph.Assembly.replace_node` for a ``many=True``
+    node carrying several instances. Answering with one of them (or with the
+    fold over all of them) would silently pick a different operator than the
+    caller means -- and, through ``replace_node``, silently delete the
+    siblings. The message names every instance id instead.
+    """

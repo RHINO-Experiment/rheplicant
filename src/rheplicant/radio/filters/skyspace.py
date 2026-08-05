@@ -27,6 +27,7 @@ import jax.numpy as jnp
 
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.state import State
+from rheplicant.radio.backend.flagging import FLAGS_KEY
 from rheplicant.radio.filters.base import AbstractLinearFilter
 from rheplicant.radio.sky.projection import AbstractSkyProjector
 
@@ -64,7 +65,7 @@ class SkySpaceFilter(AbstractLinearFilter):
 
     def project(self, data: jax.Array, state: State) -> jax.Array:
         coords = state.coords
-        flags = state.aux.get("flags")
+        flags = state.aux.get(FLAGS_KEY)
         weights = 1.0 - flags.astype(data.dtype) if flags is not None else jnp.ones_like(data)
 
         def normal_op(sky: jax.Array) -> jax.Array:

@@ -30,6 +30,19 @@ from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.radio.protection import unflag_protected
 
+#: ``state.aux`` key carrying the RFI flag mask (``True`` = flagged).
+#:
+#: It lives here because this is where it is WRITTEN -- both flaggers below
+#: put a mask under it -- and a contract is easiest to keep honest next to its
+#: producer. It is read by :class:`~rheplicant.inference.noise.FlaggedNoise`,
+#: :class:`~rheplicant.radio.filters.skyspace.SkySpaceFilter` and
+#: :class:`~rheplicant.radio.backend.averaging.BackendOperator`, and written
+#: again by :func:`rheplicant.radio.rhino.to_state`, which turns a recording's
+#: settling mask into flags. Naming it once is what makes those five sites
+#: greppable as one contract rather than as five string literals.
+FLAGS_KEY = "flags"
+
+
 
 class FlaggingOperator(AbstractOperator):
     """Store a threshold-based flag mask in ``state.aux["flags"]`` (placeholder).
@@ -54,7 +67,7 @@ class FlaggingOperator(AbstractOperator):
 
     def __call__(self, state: State) -> State:
         flags = unflag_protected(state.data > self.threshold, state.aux)
-        return state.replace(aux={**state.aux, "flags": flags})
+        return state.replace(aux={**state.aux, FLAGS_KEY: flags})
 
 
 class MomentRFIFlaggingOperator(AbstractOperator):
@@ -79,7 +92,7 @@ class MomentRFIFlaggingOperator(AbstractOperator):
     The flags reach inference by wrapping the noise model, which is where a
     sample that was not observed belongs (D21)::
 
-        noise = FlaggedNoise(RadiometerNoise(dnu, tau), state.aux["flags"])
+        noise = FlaggedNoise(RadiometerNoise(dnu, tau), state.aux[FLAGS_KEY])
 
     That one object then carries them into the likelihood, the Fisher matrix,
     the weights of a Wiener solve or GCR draw, and a NumPyro observation scale.

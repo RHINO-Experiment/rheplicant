@@ -16,13 +16,8 @@ import jax.numpy as jnp
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.radio.backend.flagging import FLAGS_KEY
 from rheplicant.radio.protection import PROTECTED_KEY, reduce_protection
-
-#: ``state.aux`` key carrying the RFI flag mask (``True`` = flagged), written by
-#: both flaggers in :mod:`rheplicant.radio.backend.flagging` and read by
-#: :class:`~rheplicant.inference.noise.FlaggedNoise` and
-#: :class:`~rheplicant.radio.filters.skyspace.SkySpaceFilter`.
-FLAGS_KEY = "flags"
 
 #: Prefix of the keys :meth:`~rheplicant.core.state.State.checkpoint` writes.
 SNAPSHOT_PREFIX = "snapshot/"
