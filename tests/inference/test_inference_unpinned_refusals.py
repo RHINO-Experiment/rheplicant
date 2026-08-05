@@ -203,8 +203,30 @@ class TestCovarianceProvenanceBeyondTheTreeStructure:
         cov, _ = self._covariance_for(N_TIME)
         # Same key, so the tree STRUCTURE matches and the first guard passes.
         other = {"amp": jnp.linspace(1.0, 2.0, N_TIME + 1)}
-        with pytest.raises(StateValidationError, match="the flattened orderings differ"):
+        with pytest.raises(StateValidationError, match=r"was computed for \{'amp'"):
             propagate_covariance(self._forward_for(N_TIME + 1), other, cov)
+
+    def test_it_is_the_SHAPES_guard_that_fires_and_not_the_structure_one(self):
+        """The two guards share their opening and closing sentences.
+
+        Both begin "param_cov was computed for" and both end "the flattened
+        orderings differ and the numbers would be wrong"; they differ only in
+        the middle, where one says "parameter structure" and quotes treedefs
+        and the other quotes a name-to-shape mapping. A test matching either
+        shared sentence passes when the WRONG guard fires -- and since the
+        structure guard runs first, a regression that made it over-eager would
+        be invisible to exactly the test written to cover the second one.
+
+        This is the "three substring matches satisfied by one over-broad
+        message" hazard, and the first version of the test above had it.
+        """
+        cov, _ = self._covariance_for(N_TIME)
+        other = {"amp": jnp.linspace(1.0, 2.0, N_TIME + 1)}
+        with pytest.raises(StateValidationError) as excinfo:
+            propagate_covariance(self._forward_for(N_TIME + 1), other, cov)
+        message = str(excinfo.value)
+        assert "parameter structure" not in message, message
+        assert "was computed for {'amp'" in message, message
 
     def test_the_message_quotes_both_shapes(self):
         """Naming only one of them leaves the reader to work out which is

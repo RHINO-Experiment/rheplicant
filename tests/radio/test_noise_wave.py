@@ -137,6 +137,57 @@ class TestRejections:
             make_operator(gamma_src_re=jnp.zeros(N_FREQ),
                           gamma_src_im=jnp.zeros(N_FREQ))
 
+    def test_mismatched_gamma_rec_real_and_imaginary_shapes_are_refused(self):
+        """The receiver's counterpart of the ``gamma_src`` check above.
+
+        Both halves of the reflection coefficient are separate leaves so that
+        each stays real and differentiable; nothing in the type system ties
+        their shapes together, and a mismatch here would otherwise broadcast
+        into a complex gamma of the wrong length.
+
+        ``N_FREQ + 1`` rather than a second axis: this must fail on LENGTH
+        while both parts are still 1-D, or it would be indistinguishable from
+        the rank check below.
+        """
+        with pytest.raises(StateValidationError, match="gamma_rec real/imaginary"):
+            make_operator(gamma_rec_im=jnp.zeros(N_FREQ + 1))
+
+    def test_a_two_dimensional_gamma_rec_is_refused(self):
+        """Reaching this needs BOTH parts reshaped -- see the order test."""
+        with pytest.raises(StateValidationError, match="gamma_rec_re must be 1D"):
+            make_operator(gamma_rec_re=jnp.zeros((2, N_FREQ)),
+                          gamma_rec_im=jnp.zeros((2, N_FREQ)))
+
+    def test_the_shape_agreement_check_precedes_the_rank_check(self):
+        """A raise-order dependency the two tests above are built on.
+
+        With only ``gamma_rec_re`` made 2-D, the parts disagree AND the rank
+        is wrong. Which sentence comes back is decided by the order of the
+        two ``if``s in ``__check_init__``, not by which fault is worse. If
+        that order is ever swapped, the rank test above stops reaching the
+        line it was written for and starts passing for the wrong reason --
+        silently, because both raises are ``StateValidationError`` and both
+        mention ``gamma_rec``.
+        """
+        with pytest.raises(StateValidationError) as excinfo:
+            make_operator(gamma_rec_re=jnp.zeros((2, N_FREQ)))
+        assert "real/imaginary" in str(excinfo.value), str(excinfo.value)
+        assert "must be 1D" not in str(excinfo.value), str(excinfo.value)
+
+    def test_a_well_formed_receiver_gamma_is_accepted(self):
+        """The arm the three refusals above cannot distinguish themselves from.
+
+        Per-channel and non-constant: a flat gamma would survive an operator
+        that collapsed the spectrum to its first channel.
+        """
+        operator = make_operator(
+            gamma_rec_re=jnp.linspace(0.08, 0.05, N_FREQ),
+            gamma_rec_im=jnp.linspace(-0.03, -0.01, N_FREQ),
+        )
+        out = operator(make_state(np.arange(N_TIME) % N_SOURCE))
+        assert out.data.shape == (N_TIME, N_FREQ)
+        assert bool(jnp.all(jnp.isfinite(out.data)))
+
     def test_data_whose_channels_disagree_with_gamma_is_refused(self):
         state = make_state(np.arange(N_TIME) % N_SOURCE,
                            data=jnp.full((N_TIME, N_FREQ + 2), 300.0))
