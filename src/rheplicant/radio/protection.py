@@ -168,4 +168,56 @@ def unflag_protected(flags: jax.Array, aux: dict[str, Any]) -> jax.Array:
     return flags & ~keep.astype(bool)
 
 
-__all__ = ["PROTECTED_KEY", "protect", "unflag_protected"]
+def reduce_protection(mask: jax.Array, n_chunk: int) -> jax.Array:
+    """Bring a protection mask across an average into chunks of ``n_chunk``.
+
+    The re-derivation :func:`unflag_protected` tells the caller to perform.
+    That message names the two ways out of a stale waterfall mask — drop it or
+    re-derive it — and only one of them keeps the calibrator protected, so the
+    re-derivation belongs here, next to the convention it depends on, rather
+    than being re-invented by every stage that reshapes a run.
+
+    The two mask shapes go different ways, and that asymmetry is the whole
+    content of the function:
+
+    * a ``(n_freq,)`` **channel** mask is returned unchanged. It names channels,
+      not samples, so no change to the time axis can stale it — the same reason
+      :func:`unflag_protected` broadcasts it over every row.
+    * a ``(n_time, n_freq)`` **waterfall** mask is reduced with ``any`` over each
+      chunk. A chunk is protected in a channel if the calibrator wet that
+      channel at ANY sample the chunk merged, because the chunk's average
+      carries that sample's power whether or not the tone was on for the rest
+      of it. ``all`` would unprotect a chunk the tone contaminated in two rows
+      of three, which is the failure protection exists to prevent.
+
+    Args:
+        mask: ``(n_freq,)`` channel mask or ``(n_time, n_freq)`` waterfall mask,
+            ``True`` = keep.
+        n_chunk: samples merged into each output chunk.
+
+    Raises:
+        StateValidationError: if ``mask`` is neither a channel mask nor a
+            waterfall mask, or if its time axis is not divisible by ``n_chunk``
+            — a partial chunk has no honest reduction, and padding one would
+            protect samples that were never observed.
+    """
+    mask = jnp.asarray(mask)
+    if mask.ndim not in (1, 2):
+        raise StateValidationError(
+            f"a protected mask must be a (n_freq,) channel mask or a "
+            f"(n_time, n_freq) waterfall mask, got ndim={mask.ndim}."
+        )
+    if mask.ndim == 1:
+        return mask
+    n_time = mask.shape[0]
+    if n_time % n_chunk != 0:
+        raise StateValidationError(
+            f"a waterfall protection mask over {n_time} time samples cannot be "
+            f"reduced into chunks of {n_chunk}: {n_time} is not divisible by "
+            f"{n_chunk}. The mask and the data it protects must be describing "
+            "the same run, so this is a mask left over from a different one."
+        )
+    return mask.reshape(n_time // n_chunk, n_chunk, mask.shape[1]).any(axis=1)
+
+
+__all__ = ["PROTECTED_KEY", "protect", "reduce_protection", "unflag_protected"]

@@ -196,28 +196,46 @@ class TestTheTimeAxisMustBeAbleToExpressItsOwnCadence:
             _tone(drift_rate=DRIFT_PER_CHANNEL)(self._at(state, -1.75e9))
 
 
-class TestADriftingMaskGoesStaleThroughAShapeChangingStage:
+class TestADriftingMaskThroughAShapeChangingStage:
     """What a TIME-INDEXED mask costs that a channel mask never did.
 
     ``aux[PROTECTED_KEY]`` became a waterfall when the tone learned to drift,
     and the stages that reshape a run — ``BackendOperator`` averaging into
-    chunks, say — update ``data`` and ``coords.time`` together and leave ``aux``
-    alone. Row ``i`` of the mask then names the channels the tone wet at sample
-    ``i`` of an axis that no longer exists.
+    chunks, say — used to update ``data`` and ``coords.time`` together and leave
+    ``aux`` alone, so row ``i`` of the mask named the channels the tone wet at
+    sample ``i`` of an axis that no longer existed. Two failures were measured
+    on this fixture at ``n_chunk=2``, in this order: first a raw ``TypeError``
+    out of ``&`` ("incompatible shapes for broadcasting: (2, 11), (4, 11)"),
+    then — once ``unflag_protected`` grew its own guard — a branded refusal
+    naming the staleness. The mask now comes across the average instead, and
+    the guard below stays as the backstop for a mask that arrives from
+    somewhere this operator never saw.
     """
 
-    def test_averaging_after_a_drifting_tone_leaves_a_mask_the_flagger_refuses(
-        self, state
-    ):
-        """Measured before the check: a raw ``TypeError`` out of ``&``,
-        "incompatible shapes for broadcasting: (2, 11), (4, 11)"."""
+    def test_averaging_after_a_drifting_tone_brings_the_mask_with_it(self, state):
+        """One channel per 100 s sample, chunks of two, so the reduced mask
+        protects a PAIR of channels per chunk — the union of what the tone wet
+        while the chunk was integrating, which is what the chunk mean contains.
+        """
         out = Pipeline(
             _tone(drift_rate=DRIFT_PER_CHANNEL), BackendOperator(n_chunk=2)
         )(state)
         assert out.data.shape == (N_TIME // 2, N_FREQ)
-        assert np.asarray(out.aux[PROTECTED_KEY]).shape == (N_TIME, N_FREQ)
+        mask = np.asarray(out.aux[PROTECTED_KEY])
+        assert mask.shape == (N_TIME // 2, N_FREQ)
+        assert [np.flatnonzero(row).tolist() for row in mask] == [[4, 5], [6, 7]]
+
+        kept = np.asarray(unflag_protected(jnp.ones(out.data.shape, dtype=bool), out.aux))
+        assert [np.flatnonzero(~row).tolist() for row in kept] == [[4, 5], [6, 7]]
+
+    def test_a_mask_from_an_axis_nobody_reduced_is_still_refused(self, state):
+        """The backstop, unchanged: a waterfall mask that reached the flags
+        without passing through the stage that reshaped them."""
+        stale = jnp.ones((N_TIME, N_FREQ), dtype=bool)
         with pytest.raises(StateValidationError, match="stale"):
-            unflag_protected(jnp.zeros(out.data.shape, dtype=bool), out.aux)
+            unflag_protected(
+                jnp.zeros((N_TIME // 2, N_FREQ), dtype=bool), {PROTECTED_KEY: stale}
+            )
 
     def test_a_static_tone_survives_the_same_stage(self, state):
         """The contrast, and the reason this is not a blanket refusal: a

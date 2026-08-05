@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Averaging brings `aux` across the chunk axis, or refuses the key it cannot
+
+`BackendOperator` averaged `data` into time chunks and rewrote `coords.time`,
+and left `state.aux` alone. Every per-time array in `aux` was stale the moment
+it did. Measured on one `(6, 4)` fixture at `n_chunk=3`:
+
+| `aux` entry | before | after |
+|---|---|---|
+| `aux["flags"]` | carried at `(6, 4)`; `FlaggedNoise.std` refused two stages later | reduced to `(2, 4)` |
+| `aux["protected"]`, 2-D waterfall | carried at `(6, 4)`; the next `FlaggingOperator` refused it, naming the staleness | reduced to `(2, 4)` |
+| `aux["switch"] = [0,1,0,1,0,1]` | carried at `(6,)`, **no error anywhere**, and each chunk spanned both switch positions | refused, by name |
+
+The third is why this is a defect rather than an inconvenience. The first two
+are loud only because something downstream knows what shape those keys are
+supposed to have; a key the package has never heard of has no such consumer, so
+a wrong-length array rides to the end of the run misaligned with `data` and
+`coords.time` and nothing can tell.
+
+Both reductions are `any` over the chunk, and for the same reason: this
+placeholder averages every sample in the chunk, flagged ones included, so the
+chunk mean is contaminated if ANY sample in it was. `all` would call a chunk
+clean with two of three samples RFI-blasted. When the mean learns to exclude
+flagged samples the two must change together. The protection half lives in
+`rheplicant.radio.protection.reduce_protection` — the re-derivation that
+module's own refusal already told the caller to perform — where a `(n_freq,)`
+channel mask comes back unchanged because it names channels, not samples.
+
+**The refusal is on shape, not on values.** The register's proposal was to
+refuse an integer per-time array whose chunk is not constant; that is a value
+check, so it could not run under `jit`, and NaN walks through any comparison
+built on it. Refusing by leading axis is simpler, jit-safe, and strictly
+stronger — a constant `[7,7,7,9,9,9]` is refused too, because averaging it
+would hand back `[7.0, 9.0]`, a float where an index was.
+
+It is deliberately conservative: an array whose leading axis merely *coincides*
+with `n_time` is refused as well, since nothing distinguishes it from a
+genuinely per-time one. Two escapes are in the message (reduce it first, or pop
+it and put the reduced version back), and two cases are exempt — `n_chunk=1`,
+which does not change the axis at all, and `aux["snapshot/..."]`, which is
+deliberately a record of the axis that existed before and is the one entry
+whose staleness is the point.
+
+`provides` and `requires` now name `aux.flags` and `aux.protected`.
+
 ### A non-finite pointing is refused, because the adjoint would not be loud
 
 `GeneralPointingProjector` validated that `coords.pointing` and
