@@ -213,7 +213,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2125 tests, 99.7 % coverage, jit+grad+vmap through the full twin; assembly
+(2128 tests, 99.7 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -241,9 +241,19 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet — run the suite and the linter in the project venv before pushing:
 
 ```bash
-.venv/bin/python -m pytest          # 2125 tests, ~12 min with coverage
+.venv/bin/python -m pytest          # 2128 tests, ~12 min with coverage
+JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```
+
+The second line is not optional work you might skip — plain `pytest` already
+runs it for you, in a subprocess, via `tests/test_evidence_session.py`. It is
+listed because that is how you run those tests directly when one of them fails.
+The evidence layer needs float64 (a stored factor's offset scalar is the
+time-bandwidth product, ~7.2e11 for one night, against a difference of ~1e5),
+while the rest of the suite must stay at float32 — eighteen tests assert
+refusals that only float32 forces — and `jax_enable_x64` is process-global, so
+the two cannot share an interpreter.
 
 **Not** plain `uv run`: the `limtod` and `rfi` extras name requirements that are
 not on PyPI *by design* (see the comment beside them in `pyproject.toml`), so
