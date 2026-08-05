@@ -37,7 +37,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.compressed import CompressedLikelihood
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
-from rheplicant.inference.uncertainty import FlatMatrix
+from rheplicant.inference.uncertainty import FlatMatrix, _named_spans
 
 
 class BayesMemory(eqx.Module):
@@ -145,24 +145,53 @@ class BayesMemory(eqx.Module):
         Excludes the prior's curvature, so it may legitimately be singular at
         small N: a single epoch usually constrains only a subspace, and that is
         exactly what the square-root form is for.
+
+        **Permuted into flatten order, not left in declared order.** A
+        :class:`~rheplicant.inference.uncertainty.FlatMatrix` carries the
+        treedef its rows were flattened against, and ``jax`` sorts a dict's
+        keys, while ``SqrtInfo``'s columns follow the order the latents were
+        *declared* in. For a space declared ``("width", "depth")`` the two
+        disagree, and returning the raw accumulator would hand back a matrix
+        whose ``structure`` field describes an ordering the numbers do not
+        have. Measured on that space with per-latent information 9 and 49:
+        unpermuted, ``matrix`` reads ``diag(9, 49)`` against
+        ``names=("width", "depth")`` while ``structure`` says
+        ``{'depth', 'width'}``.
+
+        Nothing downstream returns wrong numbers today -- ``sigma`` and
+        ``block`` read ``names`` and ``spans`` together, and
+        ``propagate_covariance`` catches the mismatch on its ``_named_spans``
+        check. But it catches it as "computed for {'width': (), 'depth': ()}
+        but params is {'depth': (), 'width': ()}", which reads as a shape
+        disagreement between two identical shapes. Permuting here removes the
+        cause instead: every other named matrix in the package derives its
+        names from the actual flattening, deliberately "rather than from an
+        assumption about dict ordering", and this was the one place that did
+        not.
         """
         names = self.factorization.global_names
         shapes = self.factorization.global_shapes
-        spans, offset = [], 0
-        for shape in shapes:
-            size = int(jnp.zeros(shape).size)
-            spans.append((offset, offset + size))
-            offset += size
         template = {
             name: jnp.zeros(shape) for name, shape in zip(names, shapes, strict=True)
         }
+        flat_names, flat_spans, flat_shapes = _named_spans(template)
+
+        declared: dict[str, range] = {}
+        offset = 0
+        for name, shape in zip(names, shapes, strict=True):
+            size = int(jnp.zeros(shape).size)
+            declared[name] = range(offset, offset + size)
+            offset += size
+        order = jnp.asarray(
+            [column for name in flat_names for column in declared[name]], dtype=int
+        )
         return FlatMatrix(
-            matrix=self.accumulated.fisher(),
+            matrix=self.accumulated.fisher()[jnp.ix_(order, order)],
             structure=jax.tree.structure(template),
             kind="fisher",
-            names=names,
-            spans=tuple(spans),
-            shapes=shapes,
+            names=flat_names,
+            spans=flat_spans,
+            shapes=flat_shapes,
         )
 
     def audit(self) -> dict[str, Any]:

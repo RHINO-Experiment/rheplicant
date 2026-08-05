@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.inference import Bind, Latent, ParameterSpace
+from rheplicant.inference import (
+    Bind,
+    Latent,
+    ParameterSpace,
+    parameter_covariance,
+    propagate_covariance,
+)
 from rheplicant.inference.compressed import QuadraticLikelihood
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.memory import BayesMemory
@@ -146,13 +152,18 @@ def test_fisher_is_named_and_refuses_to_pretend_to_be_a_covariance():
 
 
 def test_fisher_spans_index_the_flat_vector_not_the_latent_list():
-    """A (4,) latent covers four columns, not one.
+    """A (4,) latent covers four columns, not one -- and after the permutation.
 
     ``spans`` is what ``block`` and ``sigma`` slice with, so an off-by-one here
     reports a neighbouring parameter's number under this parameter's name --
     finite, correctly shaped, and wrong. Pinned against a non-scalar latent
     because every other test in this file uses scalars, where a span-per-latent
     bug and a span-per-element bug agree.
+
+    The latents are declared ``("depth", "alms")`` and flatten as
+    ``("alms", "depth")``, so this also pins the two properties together: the
+    spans must be measured per ELEMENT and in FLATTEN order. Declared order
+    would put ``depth`` first and give ``alms`` the span ``(1, 5)``.
     """
     latents = (
         Latent("depth", init=-0.5, prior=_Normal(0.0, 1.0)),
@@ -166,9 +177,10 @@ def test_fisher_spans_index_the_flat_vector_not_the_latent_list():
         ),
     )
     fisher = BayesMemory(Factorization(space)).fisher()
-    assert fisher.spans == ((0, 1), (1, 5))
+    assert fisher.names == ("alms", "depth")
+    assert fisher.spans == ((0, 4), (4, 5))
     assert fisher.matrix.shape == (5, 5)
-    assert fisher.span("alms") == (1, 5)
+    assert fisher.span("alms") == (0, 4)
     assert fisher.block("alms").shape == (4, 4)
 
 
@@ -182,3 +194,97 @@ def test_audit_reports_the_epoch_count_and_the_conditioning():
     assert report["prior_shares_sum"] == 0
     assert np.isfinite(report["fisher_lambda_min"])
     assert np.isfinite(report["fisher_condition"])
+
+
+def test_fisher_is_permuted_into_flatten_order_not_declared_order():
+    """The bug the fixture above cannot see, because its names are alphabetical.
+
+    ``SqrtInfo``'s columns follow DECLARED order; ``FlatMatrix`` carries the
+    treedef its rows were flattened against, and jax sorts a dict's keys. When
+    a space is declared in non-alphabetical order the two disagree, and an
+    unpermuted matrix would describe itself with a ``structure`` its numbers do
+    not have. Per-latent information is 9 and 49 here so the two orders are
+    told apart by value, not only by position.
+
+    Every other test in this file declares ``("depth", "width")`` -- already
+    sorted -- where the permutation is the identity and a missing permutation
+    is indistinguishable from a correct one.
+    """
+    latents = (
+        Latent("width", init=1.0, prior=_Normal(0.0, 2.0)),
+        Latent("depth", init=-0.5, prior=_Normal(0.0, 1.0)),
+    )
+    space = ParameterSpace(
+        latents=latents,
+        bindings=tuple(
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
+            for latent in latents
+        ),
+    )
+    factorization = Factorization(space)
+    assert factorization.global_names == ("width", "depth"), "declared order"
+
+    memory = BayesMemory(factorization).remember(
+        QuadraticLikelihood(
+            info=SqrtInfo(
+                factor=jnp.asarray([[3.0, 0.0], [0.0, 7.0]]),
+                target=jnp.zeros(2),
+                offset=jnp.array(0.0),
+                names=factorization.global_names,
+                shapes=factorization.global_shapes,
+            ),
+            epoch_id="e",
+            n_observed=1,
+        )
+    )
+    fisher = memory.fisher()
+
+    assert fisher.names == ("depth", "width")
+    assert fisher.structure == jax.tree.structure(
+        {"width": jnp.zeros(()), "depth": jnp.zeros(())}
+    )
+    # width carried 3**2, depth 7**2; after the permutation depth leads.
+    np.testing.assert_allclose(np.diag(np.asarray(fisher.matrix)), [49.0, 9.0])
+    assert fisher.span("width") == (1, 2)
+
+
+def test_the_permuted_fisher_composes_with_propagate_covariance():
+    """What the permutation is actually for, run end to end.
+
+    Unpermuted, this raised StateValidationError reporting
+    ``{'width': (), 'depth': ()}`` against ``{'depth': (), 'width': ()}`` -- a
+    shape disagreement between two identical shapes, which is not a diagnosis
+    anyone can act on.
+    """
+    latents = (
+        Latent("width", init=1.0, prior=_Normal(0.0, 2.0)),
+        Latent("depth", init=-0.5, prior=_Normal(0.0, 1.0)),
+    )
+    space = ParameterSpace(
+        latents=latents,
+        bindings=tuple(
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
+            for latent in latents
+        ),
+    )
+    factorization = Factorization(space)
+    memory = BayesMemory(factorization).remember(
+        QuadraticLikelihood(
+            info=SqrtInfo(
+                factor=jnp.asarray([[3.0, 0.0], [0.0, 7.0]]),
+                target=jnp.zeros(2),
+                offset=jnp.array(0.0),
+                names=factorization.global_names,
+                shapes=factorization.global_shapes,
+            ),
+            epoch_id="e",
+            n_observed=1,
+        )
+    )
+    covariance = parameter_covariance(memory.fisher())
+    params = {"width": jnp.array(1.0), "depth": jnp.array(-0.5)}
+
+    # A prediction sensitive to `width` alone, so its propagated width is
+    # exactly sigma(width) = 1/3 and picking up `depth` instead would give 1/7.
+    sigma = propagate_covariance(lambda p: jnp.stack([p["width"]]), params, covariance)
+    np.testing.assert_allclose(np.asarray(sigma), [1.0 / 3.0], rtol=1e-12)
