@@ -82,6 +82,9 @@ BROADCAST: str = "broadcast"
 #: The declarable fan-out modes.
 FAN_MODES: tuple[str, ...] = (DISTRIBUTE, BROADCAST)
 
+#: The extents over which a latent may be constant. See :class:`Latent.scope`.
+_SCOPES = frozenset({"global", "per_epoch", "linked"})
+
 
 class AmbiguousFanWarning(UserWarning):
     """A :class:`Bind` whose fan-out mode could not be inferred from what it
@@ -225,16 +228,34 @@ class Latent(eqx.Module):
             conjugate-Gaussian machinery built on it. The claim is checkable —
             see :func:`~rheplicant.inference.linear.check_linearity` — and is
             checked before it is exploited.
+        scope: over what extent of data this quantity is constant.
+            ``"global"`` (default) -- one value for the whole campaign.
+            ``"per_epoch"`` -- re-drawn independently each epoch, and integrated
+            out at compression time, which is why it must have a prior.
+            ``"linked"`` -- a Markov chain across epochs, which needs a declared
+            transition. Like ``linear``, this is a checkable claim about the
+            quantity itself and not a statement about the pipeline: whether a
+            gain is re-drawn nightly is as physical as whether the prediction
+            is affine in it. Declaring a slowly-drifting quantity
+            ``"per_epoch"`` marginalises one physical fluctuation N times
+            against independent priors, injecting information that is not
+            there.
     """
 
     name: str = eqx.field(static=True)
     init: jax.Array = eqx.field(converter=jnp.asarray)
     prior: Any = None
     linear: bool = eqx.field(static=True, default=False)
+    scope: str = eqx.field(static=True, default="global")
 
     def __check_init__(self):
         if not isinstance(self.name, str) or not self.name:
             raise ParameterSpaceError(f"Latent name must be a non-empty string, got {self.name!r}.")
+        if self.scope not in _SCOPES:
+            raise ParameterSpaceError(
+                f"Latent {self.name!r}: scope must be one of {sorted(_SCOPES)}, got "
+                f"{self.scope!r}."
+            )
         # Duck-typed so that declaring a space costs no numpyro import.
         prior_shape = getattr(self.prior, "shape", None) if self.prior is not None else None
         if callable(prior_shape):

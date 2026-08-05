@@ -66,6 +66,14 @@ class TestDeclaration:
         )
         assert space.names == ("b", "a")
 
+    def test_scope_defaults_to_global(self):
+        """The default is the pre-scope meaning: one value for the whole campaign."""
+        assert Latent("a", init=1.0).scope == "global"
+
+    def test_scope_accepts_the_three_declared_values(self):
+        for scope in ("global", "per_epoch", "linked"):
+            assert Latent("a", init=1.0, scope=scope).scope == scope
+
 
 class TestBinding:
     def test_direct_placement(self, twin):
@@ -219,6 +227,13 @@ class TestDeclarationValidation:
         prior = pytest.importorskip("numpyro.distributions")
         with pytest.raises(ParameterSpaceError, match="shape"):
             Latent("g", init=1.0, prior=prior.Normal(jnp.zeros(3), 1.0))
+
+    def test_an_unknown_scope_is_refused(self):
+        """A plausible synonym is exactly the spelling to refuse: "nightly" reads
+        like "per_epoch" and would otherwise sit in the declaration meaning
+        nothing, with every scope partition silently treating it as global."""
+        with pytest.raises(ParameterSpaceError, match="scope"):
+            Latent("a", init=1.0, scope="nightly")
 
 
 class TestFanOut:
