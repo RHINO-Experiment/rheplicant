@@ -12,6 +12,13 @@ first two never executed. As with the lookup family, the population is derived
 from the source rather than listed, so the next container to grow a ``dict``
 field cannot ship the guard untested.
 
+Covering them turned up a limit worth knowing: for the three ``eqx.Module``
+containers the branded message is only produced for a dict whose keys are
+*uniformly* non-string. Mix an ``int`` key in among ``str`` ones and JAX's
+pytree flattening -- which sorts dictionary keys -- raises a comparator
+``ValueError`` first, naming neither the field nor the key.
+``test_what_a_mixture_of_key_types_actually_does`` pins that.
+
 Deliberately NOT folded into that family: ``"Operator names must be strings."``
 in ``resolve_names``. It reads similarly and it was grouped with these in the
 brief, but it guards a *sequence of labels* rather than the keys of a mapping,
@@ -60,53 +67,72 @@ GOOD_KEY = "one"
 
 
 class _KeyGuarded:
-    """How to build one member of the family with a given key."""
+    """How to build one member of the family from a whole contents dict.
+
+    A whole dict rather than a single key, because the guard is an ``all(...)``
+    and the mutation that matters -- ``all`` -> ``any`` -- is invisible to a
+    dict with only good keys or only bad ones. It shows up on a mixture, and a
+    mixture is only expressible if the fixture builds more than one entry.
+    """
 
     def __init__(
         self,
-        build: Callable[[Any], Any],
+        build: Callable[[dict], Any],
         error: type[Exception],
         contents: Callable[[Any], dict],
         expected_in_message: str,
+        values: tuple[Any, Any],
     ):
         self.build = build
         self.error = error
         self.contents = contents
         self.expected_in_message = expected_in_message
+        self.values = values
 
 
 #: Class name -> how to exercise its key guard. Values are distinct per member
-#: so that a "the good key round-tripped" assertion cannot be satisfied by some
-#: other container's contents.
+#: and distinct within a member, so a "the good key round-tripped" assertion
+#: cannot be satisfied by the wrong entry or by another container's contents.
+#: ``FrozenMapping`` takes strings because it also requires values to be
+#: hashable, and an array there would fail a different guard first.
 KEY_GUARDED: dict[str, _KeyGuarded] = {
     "Coordinates": _KeyGuarded(
-        build=lambda key: Coordinates(time=jnp.arange(3.0), extra={key: jnp.full(3, 2.0)}),
+        build=lambda contents: Coordinates(time=jnp.arange(3.0), extra=contents),
         error=StateValidationError,
         contents=lambda c: c.extra,
         expected_in_message="coords.extra",
+        values=(jnp.full(3, 2.0), jnp.full(3, 3.0)),
     ),
     "Environment": _KeyGuarded(
-        build=lambda key: Environment(temperature=jnp.asarray(290.0),
-                                      extra={key: jnp.full(3, 3.0)}),
+        build=lambda contents: Environment(temperature=jnp.asarray(290.0), extra=contents),
         error=StateValidationError,
         contents=lambda c: c.extra,
         expected_in_message="env.extra",
+        values=(jnp.full(3, 5.0), jnp.full(3, 7.0)),
     ),
     "State": _KeyGuarded(
-        build=lambda key: State(data=jnp.zeros(3), aux={key: jnp.full(3, 5.0)}),
+        build=lambda contents: State(data=jnp.zeros(3), aux=contents),
         error=StateValidationError,
         contents=lambda c: c.aux,
         expected_in_message="State.aux",
+        values=(jnp.full(3, 11.0), jnp.full(3, 13.0)),
     ),
     "FrozenMapping": _KeyGuarded(
-        build=lambda key: FrozenMapping({key: "seven"}),
+        build=FrozenMapping,
         error=TypeError,
         contents=dict,
         expected_in_message="FrozenMapping",
+        values=("seventeen", "nineteen"),
     ),
 }
 
 KEY_GUARDED_IDS = sorted(KEY_GUARDED)
+
+
+def _built_with(name: str, *keys):
+    """Build the container of ``name`` with one entry per key, values distinct."""
+    member = KEY_GUARDED[name]
+    return member.build(dict(zip(keys, member.values, strict=False)))
 
 
 def _classes_in_core():
@@ -152,9 +178,8 @@ def test_the_table_is_the_family_and_the_family_is_the_table():
 
 @pytest.mark.parametrize("name", KEY_GUARDED_IDS)
 def test_a_non_string_key_is_refused(name):
-    member = KEY_GUARDED[name]
-    with pytest.raises(member.error):
-        member.build(BAD_KEY)
+    with pytest.raises(KEY_GUARDED[name].error):
+        _built_with(name, BAD_KEY)
 
 
 @pytest.mark.parametrize("name", KEY_GUARDED_IDS)
@@ -169,7 +194,7 @@ def test_the_refusal_names_the_container_it_came_from(name):
     """
     member = KEY_GUARDED[name]
     with pytest.raises(member.error) as excinfo:
-        member.build(BAD_KEY)
+        _built_with(name, BAD_KEY)
     message = str(excinfo.value)
     assert member.expected_in_message in message, message
     assert "keys must be strings" in message, message
@@ -186,7 +211,7 @@ def test_the_four_refusals_differ_pairwise():
     for name in KEY_GUARDED_IDS:
         member = KEY_GUARDED[name]
         with pytest.raises(member.error) as excinfo:
-            member.build(BAD_KEY)
+            _built_with(name, BAD_KEY)
         messages[name] = str(excinfo.value)
     assert len(set(messages.values())) == len(messages), messages
 
@@ -196,28 +221,62 @@ def test_a_string_key_gets_past_the_guard(name):
     """The other branch.
 
     A container whose ``__check_init__`` raised unconditionally would satisfy
-    every test above. The guard is a one-character mutation away from that:
-    ``all(...)`` -> ``any(...)`` inverts it, and an empty ``extra`` -- the
-    default -- makes ``all`` vacuously true, so nothing else in the suite
-    notices.
+    every test above, and an empty ``extra`` -- the default everywhere else in
+    the suite -- makes the guard vacuously true, so nothing would notice.
     """
     member = KEY_GUARDED[name]
-    container = member.build(GOOD_KEY)
-    assert GOOD_KEY in member.contents(container)
+    contents = member.contents(_built_with(name, GOOD_KEY))
+    assert list(contents) == [GOOD_KEY]
+    assert contents[GOOD_KEY] is member.values[0], "the good key kept the wrong value"
 
 
 @pytest.mark.parametrize("name", KEY_GUARDED_IDS)
-def test_a_mixed_dict_is_refused_for_the_one_bad_key(name):
-    """One bad key among good ones still fails: the guard is ``all``, not ``any``.
+def test_an_empty_container_is_accepted(name):
+    """The input that separates ``all`` from ``any``, which a mixture cannot.
 
-    Distinct from the test above in the mutation it catches -- ``all`` -> ``any``
-    passes "every key is bad" and "every key is good" alike, and only shows up
-    on a mixture.
+    Measured: with a single-entry fixture, ``all(...)`` -> ``any(...)`` was the
+    one mutation in this file's set that survived -- an all-bad dict and an
+    all-good dict behave identically under it. The obvious discriminator is a
+    mixture, and for three of these four containers a mixture never reaches the
+    guard at all (see below). The empty dict does: ``all`` is vacuously true
+    and accepts, ``any`` is vacuously false and refuses. It is also the default
+    every other test in the suite constructs with, which is precisely why an
+    inverted guard here would be loud rather than subtle.
     """
     member = KEY_GUARDED[name]
-    with pytest.raises(member.error):
-        member.build(BAD_KEY)
-    assert GOOD_KEY in member.contents(member.build(GOOD_KEY))
+    assert member.contents(_built_with(name)) == {}
+
+
+@pytest.mark.parametrize("name", KEY_GUARDED_IDS)
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_what_a_mixture_of_key_types_actually_does(name, bad_first):
+    """Measured, and not what the guard's shape suggests.
+
+    ``FrozenMapping`` is a plain mapping, so a dict with one bad key among good
+    ones reaches its check and gets the branded sentence. The other three are
+    ``eqx.Module`` fields, and a dict whose keys are not mutually comparable
+    fails inside JAX's pytree flattening -- which sorts dictionary keys -- before
+    ``__check_init__`` is ever called. The user gets a ``ValueError`` about a
+    comparator, naming neither the field nor the offending key.
+
+    So the branded message covers the homogeneously-wrong dict only. That is a
+    real limit on a guard whose wording ("keys must be strings") implies it
+    catches every violation, and it is recorded here rather than left for
+    somebody to discover from a comparator traceback.
+    """
+    keys = (BAD_KEY, GOOD_KEY) if bad_first else (GOOD_KEY, BAD_KEY)
+    member = KEY_GUARDED[name]
+    with pytest.raises((TypeError, ValueError)) as excinfo:
+        _built_with(name, *keys)
+    if name == "FrozenMapping":
+        assert isinstance(excinfo.value, member.error)
+        assert "keys must be strings" in str(excinfo.value)
+    else:
+        assert not isinstance(excinfo.value, StateValidationError), (
+            "the guard now reaches mixed dicts -- update this test and the "
+            "module docstring, the limit it records has been lifted"
+        )
+        assert "sorting pytree dictionary keys" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
