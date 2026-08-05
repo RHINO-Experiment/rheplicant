@@ -96,7 +96,7 @@ def check_stage_ordering(
     ``names``. So the question it can ask is sequence-local: *if a named stage
     is present here, it must come after me*. A stage that is not present is not
     a violation — the identical rule
-    :func:`~rheplicant.core.graph._check_ordering` applies to a node that was
+    :func:`~rheplicant.core.fold._check_ordering` applies to a node that was
     never lit, and the reason is the same: an absent stage is one there is
     nothing to pass through, and refusing there would reject every partial
     model for the sake of a stage it never asked for.

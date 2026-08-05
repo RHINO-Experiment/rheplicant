@@ -524,7 +524,8 @@ Learned stages
 Shared numerics (domain-agnostic)
   separable (t, ν) design matrices (D28)   core/basis.py
 Graph-guided assembly (D11)
-  SignalGraph template + folder            core/graph.py
+  SignalGraph template + assembly          core/graph.py
+  the fold (template + set -> tree)        core/fold.py
   canonical single-antenna graph              radio/graph.py
 ```
 
