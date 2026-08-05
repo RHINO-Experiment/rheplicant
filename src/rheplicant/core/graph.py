@@ -41,7 +41,8 @@ gain response silently drops to 1.0.
 **Addressing.** ``assembly[node_id]`` reaches the operator at a node whatever
 the fold did with it. A ``many`` node holding several instances is the one
 case a single id cannot answer for, so its instances are named ``x_1``,
-``x_2``, … and the bare ``x`` raises :class:`AmbiguousNodeError` listing them.
+``x_2``, … and the bare ``x`` raises
+:class:`~rheplicant.core.errors.AmbiguousNodeError` listing them.
 With one instance nothing changes — ``x`` is still the address, and a
 :class:`~rheplicant.inference.parameters.ParameterSpace` written against it is
 untouched until a sibling actually arrives.
@@ -60,12 +61,19 @@ from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline, validate_operators
 from rheplicant.core.state import State
 
-# Re-exported, not defined here. They moved to `core/errors.py` -- where every
-# other error in the package lives -- so that a module wanting to raise one
-# need not import `core/graph.py` and take its whole dependency tree with it.
-# `graph.py` keeps them importable because that is where they were defined for
-# the package's history and thirteen files still reach for them here.
-__all__ = ["AmbiguousNodeError", "AssemblyError"]
+# `AmbiguousNodeError` and `AssemblyError` are imported above, not defined
+# here: they moved to `core/errors.py` -- where every other error in the
+# package lives -- so a module wanting to raise one need not import this file
+# and take its whole dependency tree along. They stay importable from here
+# because that is where they were defined for the package's history and
+# thirteen files still reach for them at this path.
+#
+# Deliberately NO `__all__`. Adding one listing just those two truncated
+# `automodule:: rheplicant.core.graph` to exactly those two members --
+# SignalGraph, NodeSpec, At, Assembly, assemble, register_graph and get_graph
+# all vanished from the API page, silently, because a member that is not
+# documented raises no warning. If an `__all__` is ever wanted here it has to
+# be the module's whole public surface.
 
 
 
@@ -407,7 +415,7 @@ class Assembly(AbstractOperator):
 
         Raises rather than swapping when ``node_id`` names something that is
         not one operator: a ``many`` node carrying several instances
-        (:class:`AmbiguousNodeError`), a junction/selector that assembly
+        (:class:`~rheplicant.core.errors.AmbiguousNodeError`), a junction/selector that assembly
         materialized as a combinator, or a node the fold embedded at more than
         one position. In all three ``eqx.tree_at`` would happily rewrite one
         position — dropping live branches from the forward model, or leaving
@@ -735,8 +743,8 @@ def _check_promised_ids(
     fold by several paths — so the collision is reported as what it is rather
     than as a naming accident. An id that resolves to something other than the
     operator placed there would be handed to the caller BY
-    :class:`AmbiguousNodeError` and then written through, which is worse than
-    saying nothing.
+    :class:`~rheplicant.core.errors.AmbiguousNodeError` and then written
+    through, which is worse than saying nothing.
     """
     for nid, names in multi.items():
         if nid in duplicates:
@@ -835,7 +843,7 @@ def _instance_names(node_id: str, count: int) -> tuple[str, ...]:
     :func:`_find_named` resolves that collision to the fold: ``assembly[x]``
     then hands back a ``SumOperator`` and ``replace_node(x, ...)`` overwrites
     every instance with one operator. Making the bare id name nothing turns
-    that into :class:`AmbiguousNodeError`, which can say what to write.
+    that into :class:`~rheplicant.core.errors.AmbiguousNodeError`, which can say what to write.
     """
     if count == 1:
         return (node_id,)
@@ -1429,7 +1437,7 @@ def assemble(
     """Compile a set of operators into the sub-pipeline they induce on ``graph``.
 
     See the module docstring for the contraction rules. Raises
-    :class:`AssemblyError` on unknown/ambiguous placement, junction slots,
+    :class:`~rheplicant.core.errors.AssemblyError` on unknown/ambiguous placement, junction slots,
     duplicate single-instance nodes, an operator placed on a node of the other
     kind (:func:`_check_slot_kinds` — a source at a transform node or the
     reverse), a transform-rooted branch feeding a materialized junction (a sum

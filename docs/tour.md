@@ -343,7 +343,7 @@ from rheplicant.inference import ParameterSpace, to_numpyro_model, predict_from_
 bayes_twin = assemble(SkyOperator(amplitude=jnp.array(100.0)),
                       GainOperator(gain=jnp.array(1.0)))
 space = ParameterSpace.direct("gain", init=1.0, into=lambda p: p["gain"].gain,
-                              prior=dist.Normal(1.0, 0.3))
+                              prior=dist.Normal(1.0, 0.3), linear=True)
 numpyro_model = to_numpyro_model(bayes_twin, state, space, noise_std=0.5)
 
 mcmc = numpyro.infer.MCMC(numpyro.infer.NUTS(numpyro_model),
@@ -371,11 +371,10 @@ target = twin.without("noise").replace_node("gain", GainOperator(gain=jnp.array(
 
 check_linearity(space, target, state, names=("gain",))   # the claim, checked first
 block = linear_operator(space, target, state, names=("gain",))
-solved, residual = wiener_solve(
-    block, observation.data, noise_std=0.5, prior_std={"gain": 1e3}
-)
-# solved == {"gain": Array(1.1001223, dtype=float32)}, truth 1.1 — hand it
-# straight back to forward(...); residual 1.8e-07
+solved, residual = wiener_solve(block, observation.data, noise_std=0.5)
+# solved == {"gain": Array(1.1001209, dtype=float32)}, truth 1.1 — hand it
+# straight back to forward(...); residual 1.8e-07. No `prior_std=`: the latent
+# declares `prior=dist.Normal(1.0, 0.3)` and the solve reads S from there.
 ```
 
 `gcr_sample` takes the same block and returns an exact posterior *draw*, one CG

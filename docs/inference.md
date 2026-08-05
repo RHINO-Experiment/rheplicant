@@ -781,10 +781,10 @@ Measured across the exits, one call per cell:
 |---|---|---|---|---|
 | `wiener_solve` | `noise_std=` | ✅ | ❌ named refusal | ❌ named refusal |
 | `gcr_sample` | `noise_std=` | ✅ | ❌ named refusal | ❌ named refusal |
-| `condition_estimate` | `noise_std=` | ✅ | ❌ bare `TypeError` | ❌ bare `TypeError` |
+| `condition_estimate` | `noise_std=` | ✅ | ❌ named refusal | ❌ named refusal |
 | `fisher_information` | `noise_std=` | ✅ | ✅ | ✅ |
 | `to_numpyro_model` | `noise_std=` | ✅ | ✅ | ✅ |
-| `iterative_gls` | `noise=` | ❌ `AttributeError` | ✅ | ✅ |
+| `iterative_gls` | `noise=` | ❌ named refusal | ✅ | ✅ |
 | `SamplingPlan.estimate` | `noise=` | ✅ | ✅ | ✅ |
 | `SamplingPlan.sample` | `noise=` | ✅ | ✅ | ✅ |
 
@@ -794,17 +794,31 @@ Three edges that table makes visible, and none of them softens the split:
   model anyway. They can — both *have* a prediction, so `as_noise_model`
   normalizes and `noise.std(prediction)` is answerable. The keyword says what
   the argument is; where both readings are usable, both are accepted.
-* `condition_estimate` refuses a model, but with `TypeError: Value
-  'HomoscedasticNoise(...)' with dtype object is not a valid JAX array type`
-  rather than the sentence its two siblings give. It does not run the shared
-  `_check_solve_arguments`, so neither the seam refusal nor the 1-D axis check
-  reaches it. Same rule, worse message.
-* `iterative_gls` writes `noise=` and takes **only** a model — a bare array
-  raises `AttributeError: 'ArrayImpl' object has no attribute
-  'depends_on_prediction'`. It is the one `noise=` exit that does not route
-  through `as_noise_model`. With a constant σ there is nothing to reweight and
-  `wiener_solve` is what you wanted; wrap it as `HomoscedasticNoise(sigma)` if
-  you want the fixed-point machinery regardless.
+* `condition_estimate` refuses a model with the same sentence its two siblings
+  give. It used to refuse with `TypeError: Value 'HomoscedasticNoise(...)' with
+  dtype object is not a valid JAX array type`, because it never ran the shared
+  `_check_solve_arguments` — so neither the seam refusal nor the 1-D axis check
+  reached it. Both run now, and the second matters more than the message did:
+  this is the function a caller is told to consult to pick `tol` for those
+  solves, and a κ computed under a different reading of the same 1-D σ answers
+  a different question than the solve it was computed for. Measured, the two
+  explicit readings give different condition numbers.
+* `iterative_gls` writes `noise=` and takes **only** a model — a bare array is
+  refused by name. It used to raise `AttributeError: 'ArrayImpl' object has no
+  attribute 'depends_on_prediction'`, an attribute the caller never wrote, from
+  a layer they were not thinking about. It is the one `noise=` exit that does
+  not route through `as_noise_model`, and that is deliberate rather than an
+  oversight: its whole subject is the fixed point a prediction-dependent σ
+  implies, so a decided array leaves it nothing to iterate. Accepting one
+  silently would answer a question nobody asked. The refusal names both ways
+  out — `wiener_solve` for what a constant σ actually wants, or
+  `HomoscedasticNoise(sigma)` if you want the fixed-point machinery anyway, in
+  which case it returns after one step with `converged=True`.
+
+  Note the direction: this exit refuses an **array** and wants a model, while
+  the conjugate solves refuse a **model** and want an array. Both are the same
+  rule seen from two sides — whether the exit has a prediction at which a
+  prediction-dependent σ could be evaluated.
 
 The rest of the argument lives in two docstrings, and was measured rather than
 asserted. `_refuse_a_noise_model_at_the_conjugate_seam` carries the messages

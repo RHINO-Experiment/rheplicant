@@ -60,9 +60,13 @@ class AssemblyError(DirtError, ValueError):
 class AmbiguousNodeError(AssemblyError):
     """A node id was used as an address, but it holds more than one operator.
 
-    Raised by :meth:`~rheplicant.core.graph.Assembly.__getitem__` /
-    :meth:`~rheplicant.core.graph.Assembly.replace_node` for a ``many=True``
-    node carrying several instances. Answering with one of them (or with the
+    Raised by :class:`~rheplicant.core.graph.Assembly`'s ``__getitem__`` and
+    ``replace_node`` for a ``many=True`` node carrying several instances.
+    (Those two are literals rather than ``:meth:`` roles: ``__getitem__`` is a
+    dunder, which ``automodule`` emits no target for, so the role would be a
+    nitpicky-build warning rather than a link. Inside ``graph.py`` the same
+    text was an UNQUALIFIED role and was never checked -- moving the class
+    here is what exposed it.) Answering with one of them (or with the
     fold over all of them) would silently pick a different operator than the
     caller means -- and, through ``replace_node``, silently delete the
     siblings. The message names every instance id instead.
