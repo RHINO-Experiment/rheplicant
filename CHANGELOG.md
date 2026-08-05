@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+### The fold reads as a dispatch, and `core/graph.py` did not split
+
+`assemble` was one function at cyclomatic complexity 27, 29 branches and 92
+statements — by a wide margin the worst in the package, and the place three
+enforcement rules landed in a single day, each inside or beside its 91-statement
+loop. The per-node-kind bodies are now four named helpers — `_fold_region`,
+`_fold_junction`, `_fold_source`, `_fold_transform` — behind a `_fold_graph`
+loop that does nothing but dispatch on what the node is. `_resolve`, the only
+other function in the file over threshold, gave up `_claimed_nodes`,
+`_place_at_node` and `_check_disjoint_claims` on the same principle, in the
+raise order it already depended on.
+
+| | before | after |
+|---|---|---|
+| `assemble` | 27 complexity, 29 branches, 92 statements | 3 |
+| `_resolve` | 13 complexity, 13 branches | 3 |
+| worst function in the file | 27 | 8 (`_fold_graph`) |
+| functions over any complexity threshold | 2 | 0 |
+
+Every accumulator a helper writes into is named in its signature rather than
+closed over, so what each one records is readable without reading the loop.
+
+**Zero behaviour change, checked rather than asserted.** Three assemblies —
+two on the shipped `single-antenna` template, one on a synthetic template
+carrying a region — cover every branch of the fold between them: many-source
+summed into a junction, many-source fanned into a selector, many-transform
+chained, junctions materialized and traversed, and a region entered, traversed
+and closed. Fixtures are asymmetric (every instance a distinct value) and
+include a stochastic stage, whose per-branch PRNG split makes a reordered fold
+numerically visible and not merely structurally different. Before and after
+agree **byte for byte** on the pytree treedef (which carries every static field
+and every fold name), on each array leaf, and on the forward output.
+
+**The file did not split, and the measurement is why.** The seam previously
+proposed — template in `graph.py`, addressing in `assembly.py`, compilation in
+`assemble.py` — is not a layering. `Assembly.without` calls `assemble`, and
+`assemble` constructs `Assembly` and calls `_fold_duplicates`; the addressing
+and compilation halves are mutually recursive, so that cut needs a deferred
+import inside `without` to exist at all. The one genuinely one-directional
+seam is the template, and it is the part that is *not* growing.
+
+Two further constraints bind any cut. Seven modules outside `core/graph.py`
+reference its symbols by full path, including two that import private names at
+runtime (`core/render.py` takes `_live_span`, `inference/parameters.py` takes
+`_aliased_leaf_paths`) and four that cross-reference public ones in docstrings
+Sphinx resolves. And two tests reach through the module object itself —
+`_GRAPHS` and `_check_promised_ids` are monkeypatched on `rheplicant.core.graph`
+— so moving either silently breaks the isolation it provides. Moving any public
+name also changes its `__module__`, which shows in tracebacks and in
+`docs/api.md`'s `automodule`.
+
+The extraction did not shrink the file: 1351 → 1540 lines, because named
+helpers cost signatures and docstrings. So the 800-line ceiling is still
+unmet and is recorded as an accepted exception rather than a closed item. The
+prerequisite for a clean cut is moving `AssemblyError` to `core/errors.py`,
+where the other error types already live — that is what would let a fold module
+exist without importing back into `graph.py`.
+
+### The Assembly repr names fan-out nodes
+
+`Assembly.__repr__` printed `lit` and `skipped` but not `aliased`, and `aliased`
+is the one condition the framework cannot refuse its way out of. `replace_node`
+and `ParameterSpace.validate` both consult it by name, so every framework write
+path is covered; a hand-rolled `eqx.tree_at(lambda a: a[nid].x, ...)` goes
+through neither, and rewrites one copy of a node the fold embedded several
+times — leaving a finite, correctly-shaped, half-updated model with no shape
+change and no complaint.
+
+```
+# fan-out present
+Assembly(graph='fork-rejoin', lit=['x'], skipped-as-identity=[],
+         aliased-at-several-positions=['x'])
+
+# the common case, unchanged to the character
+Assembly(graph='test-graph', lit=['a', 'b'], skipped-as-identity=[])
+```
+
+The field appears only when it is non-empty, and the asymmetry is the point:
+`aliased` is empty for every shipped graph and for every user graph whose nodes
+each reach the sink by one path, so an always-present `aliased=[]` would spend
+a field on the answer "nothing here" and teach the reader straight past the one
+place the warning can appear. The empty form is what `docs/sky-to-receiver.md`
+shows a reader, so it is pinned whole, not by substring.
+
+No out-degree refusal was added. Fan-out is a supported shape, around thirty
+tests construct it deliberately, and reading such a node is honest — only
+writing is not.
+
 ### Averaging brings `aux` across the chunk axis, or refuses the key it cannot
 
 `BackendOperator` averaged `data` into time chunks and rewrote `coords.time`,
