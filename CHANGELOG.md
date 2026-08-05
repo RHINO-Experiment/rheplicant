@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### A campaign can be accumulated, archived and sampled after the recordings are gone
+
+- **Streaming evidence accumulation.** `compress_linear` turns one epoch of a
+  linear-Gaussian model into a prior-free sufficient statistic; `BayesMemory`
+  accumulates factors by QR in square-root information form and applies the
+  prior exactly once; `save_memory` / `load_memory` archive a campaign with a
+  manifest that reconstructs every static field rather than trusting the
+  template. Per-epoch linear-Gaussian nuisances are marginalised analytically
+  at compression, validated against the dense `N(mu, N + A S A^T)` density.
+  `Latent.scope` and `Factorization` declare what is global, what is per-epoch
+  and what is linked. See D26.
+
+**Why the manifest is the reconstruction spec, not provenance.**
+`eqx.tree_serialise_leaves` walks a pytree's *arrays* and takes everything else
+from the template it is given, so a stored term's static fields round-trip as
+whatever the template held — with no error and no warning. Measured on this
+repo's equinox 0.13.8, writing a term and reading it back against a
+defaults template: `epoch_id='night-042'` → `'x'`, `n_observed=777` → `0`,
+`exact=False` → `True`, `include_logdet=False` → `True`,
+`noise_frozen_at='gls'` → `'none'`, `support={...}` → `None`; the arrays
+themselves survive exactly, in float64. A reloaded campaign would therefore
+describe itself as a set of exact, full-likelihood factors regardless of what
+was written, and this layer's whole premise is that the raw data is gone and
+cannot contradict it. So `load_memory` builds the template *from the JSON*, and
+refuses — rather than warns — on a foreign `format_version`, on a term
+declaring a dtype other than float64, on a reader whose `jax_enable_x64` is
+off, and on a factorization over different latent names or shapes.
+
+**`BayesMemory.to_numpyro_model()`** samples the global latents against the
+accumulated factors — no pipeline, no observed data, no noise model, because
+the terms absorbed all three. `noise_std=` is refused rather than ignored:
+ignoring it would let a caller believe they had changed the likelihood when
+recompression is what that takes. Pinned by NUTS over an eight-epoch memory
+against the analytic Gaussian posterior read off `jax.hessian` and `jax.grad`
+of `log_posterior`.
+
+`rheplicant.inference` now exports `BayesMemory`, `CompressedLikelihood`,
+`Factorization`, `QuadraticLikelihood`, `SqrtInfo`, `compress_linear`,
+`load_memory` and `save_memory`.
+
 ### Three contracts get a page, and the tour's inference section starts running again
 
 Twelve public names sat in `rheplicant.core.__all__` (nine) and

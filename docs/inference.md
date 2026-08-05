@@ -1559,6 +1559,79 @@ first.
 
 ---
 
+## A campaign, after the recordings are gone
+
+Every engine above holds the data. A multi-year campaign cannot: the recordings
+are archived, or deleted, long before the last night is observed. What survives
+is a **memory** — one epoch's data compressed into a factor of the campaign
+likelihood, accumulated as they arrive.
+
+`compress_linear` does the compressing. For a model affine in every global
+latent with Gaussian noise, the factor it returns is a *sufficient statistic*:
+no anchor, no validity region, order-invariant, exact. Per-epoch nuisances are
+integrated out right there, analytically. `BayesMemory` accumulates the factors
+by QR in square-root information form, and applies the prior **exactly once**,
+at the end — which is why a stored term carries no prior at all and a tempered
+one is refused by name.
+
+```python
+from rheplicant.inference import BayesMemory, Factorization, compress_linear
+
+memory = BayesMemory(Factorization(space))
+for night in nights:                       # one night, then archive the recording
+    memory = memory.remember(
+        compress_linear(
+            design=night.design, observed=night.data, noise_std=night.sigma,
+            shapes=shapes, epoch_id=night.data_hash,
+        )
+    )
+mcmc.run(key)                              # kernel over memory.to_numpyro_model()
+print(memory.audit())
+```
+
+A sketch, not a runnable block: `space`, `nights`, `shapes`, `mcmc` and `key`
+are yours. `examples/` has no campaign demo yet; `tests/evidence/` runs the real
+thing.
+
+`Latent(scope=...)` is what makes the loop possible — `"global"` for the
+quantities sampled against the whole campaign, `"per_epoch"` for the nuisances
+integrated away inside one, `"linked"` for a Markov chain across them.
+`Factorization` partitions the space by scope and exposes the global view;
+`memory.to_numpyro_model()` opens a sample site per global latent and adds the
+accumulated factor. There is no pipeline and no `observed=` anywhere in that
+call, because the terms already absorbed the forward evaluation, the data and
+the noise. `save_memory` / `load_memory` put the whole campaign on disk and get
+it back.
+
+The evidence layer needs float64 — a stored factor's offset is the
+time-bandwidth product, ~7.2e11 for one RHINO night, against a difference of
+~1e5, which float32 annihilates rather than merely rounds. Set
+`jax.config.update("jax_enable_x64", True)`, or run under `JAX_ENABLE_X64=1`.
+
+:::{danger}
+**Do not point `fisher_information` at `memory.log_posterior`.** It type-checks,
+runs, and returns a matrix. `fisher_information` forms `J^T N^-1 J` from
+`jacfwd` of a *forward function*, and a log-density is a scalar, so `J` is
+`(1, n)` and the product is a rank-1 outer product — one number's worth of
+information, and at the mode that number is the gradient, which is zero.
+
+Measured on the eight-epoch memory in `tests/evidence/test_memory_numpyro.py`,
+evaluated at its own mode: the returned 2×2 matrix has eigenvalues
+`[3.7e-44, 1.3e-25]` and rank 1, `parameter_covariance` inverts it to a matrix
+with **negative** diagonal (≈ −4.7e43), and `sigma("x")` comes back
+`[nan, nan]`. **No exception is raised anywhere in that chain.**
+
+Use `memory.fisher()`, which is `sum_e R_e^T R_e` with named rows, permuted into
+flatten order. On the same memory it gives `sigma = [0.0143, 0.0134]`, matching
+the NUTS posterior's standard deviations to better than 3 %.
+
+`GradientCalibrator` and `NeuralPosterior` do not apply either — they consume
+predictions and simulations, and a memory has neither. Fitting or simulating
+again means going back to the data, which is the thing that is gone.
+:::
+
+---
+
 ## When the blocks are not enough
 
 `ParameterSpace.raw` takes a bind function outright:

@@ -194,6 +194,40 @@ class BayesMemory(eqx.Module):
             shapes=flat_shapes,
         )
 
+    def to_numpyro_model(self, **unsupported: Any):
+        """A NumPyro model that samples the global latents against this memory.
+
+        Unlike :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`
+        there is no pipeline, no observed data and no noise model here: the
+        terms already absorbed all three. Passing ``noise_std=`` is therefore
+        refused rather than ignored -- silently ignoring it would let a caller
+        believe they had changed the likelihood.
+        """
+        if unsupported:
+            raise StateValidationError(
+                f"BayesMemory.to_numpyro_model takes no {sorted(unsupported)} -- the "
+                "noise model, the data and the forward evaluation are already inside "
+                "the stored terms. Changing the noise now would mean recompressing."
+            )
+        try:
+            import numpyro
+        except ImportError as exc:  # pragma: no cover - exercised by the import guard
+            raise ImportError(
+                'BayesMemory.to_numpyro_model needs numpyro: pip install '
+                '"rheplicant[numpyro]"'
+            ) from exc
+
+        priors = self.factorization.global_priors
+        accumulated = self.accumulated
+
+        def model():
+            values = {
+                name: numpyro.sample(name, prior) for name, prior in priors.items()
+            }
+            numpyro.factor("campaign", accumulated.log_prob(values))
+
+        return model
+
     def audit(self) -> dict[str, Any]:
         """What the memory can say about its own trustworthiness."""
         fisher = jnp.asarray(self.accumulated.fisher())
