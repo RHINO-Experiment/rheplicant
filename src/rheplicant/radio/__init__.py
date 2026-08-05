@@ -125,7 +125,12 @@ from rheplicant.radio.instrument import (
     unit_mean_bandpass,
     unit_mean_free,
 )
-from rheplicant.radio.protection import PROTECTED_KEY, protect, unflag_protected
+from rheplicant.radio.protection import (
+    PROTECTED_KEY,
+    protect,
+    reduce_protection,
+    unflag_protected,
+)
 from rheplicant.radio.rhino import (
     RhinoObservation,
     cal_load_operators,
@@ -190,6 +195,7 @@ __all__ = [
     "SkySpaceFilter",
     "UniformSkyModel",
     "protect",
+    "reduce_protection",
     "unflag_protected",
     "unit_mean_bandpass",
     "unit_mean_free",
