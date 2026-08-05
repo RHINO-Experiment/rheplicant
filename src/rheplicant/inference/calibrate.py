@@ -127,7 +127,7 @@ class GradientCalibrator(eqx.Module):
     n_steps: int = eqx.field(static=True, default=100)
 
     def __check_init__(self):
-        if self.learning_rate <= 0:
+        if not self.learning_rate > 0:  # `not >` so a NaN rate is refused too
             raise StateValidationError(f"learning_rate must be > 0, got {self.learning_rate}.")
         if not isinstance(self.n_steps, int) or self.n_steps < 1:
             raise StateValidationError(f"n_steps must be a positive int, got {self.n_steps!r}.")
@@ -192,7 +192,7 @@ class AdamCalibrator(eqx.Module):
     eps: float = eqx.field(static=True, default=1e-8)
 
     def __check_init__(self):
-        if self.learning_rate <= 0:
+        if not self.learning_rate > 0:  # `not >` so a NaN rate is refused too
             raise StateValidationError(f"learning_rate must be > 0, got {self.learning_rate}.")
         if not isinstance(self.n_steps, int) or self.n_steps < 1:
             raise StateValidationError(f"n_steps must be a positive int, got {self.n_steps!r}.")

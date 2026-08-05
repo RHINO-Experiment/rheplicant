@@ -146,14 +146,14 @@ class RadiometerNoise(eqx.Module):
     floor: float = eqx.field(static=True, default=0.0)
 
     def __check_init__(self):
-        if self.channel_width <= 0.0 or self.integration_time <= 0.0:
+        if not (self.channel_width > 0.0 and self.integration_time > 0.0):
             raise StateValidationError(
                 "RadiometerNoise needs a positive channel_width [Hz] and "
                 f"integration_time [s], got {self.channel_width} and "
                 f"{self.integration_time}. Their product sets the fractional "
                 "noise 1/sqrt(delta_nu * tau)."
             )
-        if self.floor < 0.0:
+        if not self.floor >= 0.0:  # `not >=` so a NaN floor is refused too
             raise StateValidationError(f"floor must be >= 0, got {self.floor}.")
 
     @property

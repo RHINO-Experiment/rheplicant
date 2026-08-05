@@ -76,7 +76,7 @@ class PowerLawSkyModel(AbstractSkyModel):
     n_pix: int = eqx.field(static=True)
 
     def __check_init__(self):
-        if self.ref_freq <= 0:
+        if not self.ref_freq > 0:  # `not >` so a NaN ref_freq is refused too
             raise StateValidationError(f"ref_freq must be > 0, got {self.ref_freq}.")
         if not isinstance(self.n_pix, int) or self.n_pix < 1:
             raise StateValidationError(f"n_pix must be a positive int, got {self.n_pix!r}.")

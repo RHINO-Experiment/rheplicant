@@ -202,7 +202,7 @@ class NeuralPosterior(eqx.Module):
                 f"thetas has {thetas.shape[0]} simulations but data has "
                 f"{data.shape[0]}; they must be the same pairs."
             )
-        if n_components < 1:
+        if not n_components >= 1:  # `not >=` so a NaN count is refused too
             raise StateValidationError(
                 f"n_components must be positive, got {n_components}."
             )

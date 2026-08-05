@@ -42,7 +42,6 @@ is accepted in silence. See :class:`TestNaNIsNotRefusedByComparisonGuards`.
 """
 
 import ast
-import math
 import pathlib
 from typing import ClassVar
 
@@ -619,47 +618,65 @@ def test_the_same_selector_on_an_array_leaf_validates():
 # --------------------------------------------------------------------------
 
 
-class TestNaNIsNotRefusedByComparisonGuards:
-    """A NaN configuration is accepted in silence by every ``<``/``<=`` guard.
+class TestNaNIsRefusedByEveryComparisonGuard:
+    """Every numeric configuration guard in this family refuses NaN.
 
-    ``nan <= 0`` is False, so ``if x <= 0: raise`` does not fire and the NaN
-    becomes configuration. This package already knows the NaN-safe form and uses
-    it twice -- ``if not 0.0 <= self.beta1 < 1.0`` and ``if not 0.0 <=
-    validation_fraction < 1.0`` both refuse NaN correctly, and are pinned below
-    so the contrast is visible. Six sites in this family do not use it.
+    It did not always. ``nan <= 0`` is False, so ``if x <= 0: raise`` does not
+    fire and the NaN quietly becomes configuration -- and this class was first
+    written to pin that as a **gap**, with the one-line remedy named in each
+    docstring. The remedy has since been applied at all seven sites
+    (``if not x > 0``), and these tests now pin the contract instead. That
+    transition is the reason they were written down rather than reported.
 
-    **These tests pin a gap, not a contract.** They exist so the gap is
-    executable and dated rather than a sentence in a report. The fix in each
-    case is a one-line inversion (``if not self.learning_rate > 0``); when one
-    lands, move that parameter up into the refusal tables above and delete its
-    case from here. A failure in this class means the behaviour changed, which
-    is the point of writing it down.
+    The worst of the seven is worth keeping in view, because it is the reason
+    "NaN poisons the output anyway" is not a defence. ``RadiometerNoise.std``
+    applies its floor under ``if self.floor > 0.0``, which is ALSO False for
+    NaN -- so ``floor=nan`` used to yield a noise model that was finite,
+    correctly shaped, and simply un-floored, with nothing downstream to hint
+    the argument had been dropped. Every other case at least produced a NaN
+    somewhere.
+
+    The package already knew the safe form and used it twice
+    (``if not 0.0 <= self.beta1 < 1.0``, ``if not 0.0 <= validation_fraction <
+    1.0``); those are pinned below too, so the contrast that motivated the fix
+    stays visible.
     """
 
     NAN = float("nan")
 
-    def test_a_nan_learning_rate_is_accepted_by_both_calibrators(self):
-        """The guard is copy-pasted, so the gap is copy-pasted with it."""
-        assert math.isnan(AdamCalibrator(learning_rate=self.NAN).learning_rate)
-        assert math.isnan(GradientCalibrator(learning_rate=self.NAN).learning_rate)
+    def test_a_nan_learning_rate_is_refused_by_both_calibrators(self):
+        """The guard is copy-pasted, so the fix had to be applied twice.
 
-    def test_a_nan_floor_is_accepted_and_then_silently_ignored(self):
-        """The worst of the six: nothing downstream is NaN either.
-
-        ``std`` applies the floor under ``if self.floor > 0.0``, which is also
-        False for NaN. So a caller who passes ``floor=nan`` gets a noise model
-        that is finite, correctly shaped, and simply un-floored -- with no NaN
-        anywhere to hint that the argument was dropped. Compare
-        ``channel_width=nan`` below, which at least poisons the output.
+        Asserting both is what distinguishes a real fix from one applied to
+        whichever copy the author happened to open.
         """
-        noise = RadiometerNoise(channel_width=1e5, integration_time=2.0, floor=self.NAN)
-        assert math.isnan(noise.floor)
-        prediction = jnp.array([0.5, 2.5])
-        assert jnp.allclose(noise.std(prediction), prediction * noise.fractional)
+        for calibrator in (AdamCalibrator, GradientCalibrator):
+            with pytest.raises(StateValidationError, match="learning_rate must be > 0"):
+                calibrator(learning_rate=self.NAN)
 
-    def test_a_nan_channel_width_is_accepted_and_poisons_every_weight(self):
-        noise = RadiometerNoise(channel_width=self.NAN, integration_time=2.0)
-        assert jnp.all(jnp.isnan(noise.std(jnp.array([0.5, 2.5]))))
+    def test_a_nan_floor_is_refused_rather_than_silently_ignored(self):
+        with pytest.raises(StateValidationError, match="floor must be >= 0"):
+            RadiometerNoise(channel_width=1e5, integration_time=2.0, floor=self.NAN)
+
+    def test_a_legitimate_floor_still_applies(self):
+        """The other branch: the inversion must not have made the guard total.
+
+        ``if not self.floor >= 0.0`` has to keep accepting 0.0 -- the boundary
+        the message itself quotes -- and any positive floor.
+        """
+        for floor in (0.0, 0.25):
+            noise = RadiometerNoise(channel_width=1e5, integration_time=2.0, floor=floor)
+            assert float(noise.floor) == floor
+            assert jnp.all(jnp.isfinite(noise.std(jnp.array([0.5, 2.5]))))
+
+    def test_a_nan_channel_width_is_refused_before_it_can_poison_a_weight(self):
+        with pytest.raises(StateValidationError, match="channel_width"):
+            RadiometerNoise(channel_width=self.NAN, integration_time=2.0)
+
+    def test_a_nan_integration_time_is_refused_too(self):
+        """The guard is an ``and`` over two fields; one inverted arm is not a fix."""
+        with pytest.raises(StateValidationError, match="integration_time"):
+            RadiometerNoise(channel_width=1e5, integration_time=self.NAN)
 
     def test_the_isinstance_guards_do_refuse_nan(self):
         """Not every guard here has the gap -- these refuse NaN as a side effect.
@@ -691,15 +708,15 @@ class TestNaNIsNotRefusedByComparisonGuards:
                 validation_fraction=self.NAN,
             )
 
-    def test_a_nan_component_count_gets_past_the_guard_and_dies_in_jax(self, bank):
-        """Refused, but by ``eqx.nn.MLP`` rather than by the guard that exists.
+    def test_a_nan_component_count_is_refused_by_the_guard_written_for_it(self, bank):
+        """It used to be refused by ``eqx.nn.MLP`` three frames deeper.
 
-        ``nan < 1`` is False, so ``n_components must be positive`` never fires;
-        the caller gets a ``TypeError`` about shape sequences from three frames
-        deeper instead of the sentence written for them.
+        ``nan < 1`` is False, so ``n_components must be positive`` never fired
+        and the caller got a ``TypeError`` about shape sequences instead of the
+        sentence written for them. The inversion means the sentence arrives.
         """
         thetas, data = bank
-        with pytest.raises(TypeError, match="1D sequences of concrete values"):
+        with pytest.raises(StateValidationError, match="n_components must be positive"):
             NeuralPosterior.create(
                 thetas, data, key=jax.random.key(0), n_components=self.NAN, width=4, depth=1
             )

@@ -22,8 +22,6 @@ Two of the three guards are the ones a copy census cannot help with anyway.
 covered, which is exactly the split the census exists to stop widening.
 """
 
-import math
-
 import jax.numpy as jnp
 import pytest
 
@@ -31,6 +29,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.core.state import State
 from rheplicant.radio.environment.ionosphere import IonosphereOperator
 from rheplicant.radio.filters.skyspace import SkySpaceFilter
+from rheplicant.radio.sky.foregrounds import ForegroundOperator
 from rheplicant.radio.sky.model import PowerLawSkyModel
 from rheplicant.radio.sky.projection import MatrixProjector
 
@@ -208,25 +207,44 @@ def test_several_pixels_stay_distinguishable(coords):
 
 
 # --------------------------------------------------------------------------
-# The finding, radio half.
+# The finding, radio half -- fixed, and pinned at all three copies.
 # --------------------------------------------------------------------------
 
 
-def test_a_nan_reference_frequency_is_accepted_and_poisons_the_band(coords):
-    """``nan <= 0`` is False, so the guard does not fire.
+@pytest.mark.parametrize(
+    ("label", "build"),
+    [
+        ("IonosphereOperator", lambda: IonosphereOperator(
+            delta=jnp.array(0.5), ref_freq=float("nan"))),
+        ("ForegroundOperator", lambda: ForegroundOperator(
+            amplitude=jnp.array(120.0), spectral_index=jnp.array(-2.6),
+            ref_freq=float("nan"))),
+        ("PowerLawSkyModel", lambda: PowerLawSkyModel(
+            amplitude=jnp.arange(1.0, 4.0), spectral_index=jnp.array(-2.6),
+            ref_freq=float("nan"), n_pix=3)),
+    ],
+)
+def test_a_nan_reference_frequency_is_refused_at_every_copy(label, build):
+    """``nan <= 0`` was False, so this guard did not fire at any of its copies.
 
-    Pins a gap, not a contract -- see the class of the same purpose in
-    ``tests/inference/test_inference_construction_guards.py`` for the fix
-    (``if not self.ref_freq > 0``) and for the two places in this package that
-    already use the NaN-safe form. This guard is copy-pasted three times, so the
-    gap is in ``ForegroundOperator`` and ``PowerLawSkyModel`` too; when the
-    inversion lands, move ``nan`` into the refusal parametrizations above and
-    delete this.
+    A NaN ``ref_freq`` became configuration and every channel of the band came
+    back NaN. The remedy is ``if not self.ref_freq > 0``, the form this package
+    already used twice elsewhere, and it had to be applied three times -- which
+    is why all three copies are asserted here rather than the one whose file
+    the finding came from.
     """
-    operator = IonosphereOperator(delta=jnp.array(0.5), ref_freq=float("nan"))
-    assert math.isnan(operator.ref_freq)
+    with pytest.raises(StateValidationError, match="ref_freq must be > 0"):
+        build()
+
+
+def test_a_legitimate_reference_frequency_still_builds_and_is_chromatic(coords):
+    """The other branch, so the inversion is demonstrably not a total refusal."""
+    operator = IonosphereOperator(delta=jnp.array(0.5), ref_freq=70e6)
     state = State(data=jnp.ones((coords.time.shape[0], coords.freq.shape[0])), coords=coords)
-    assert jnp.all(jnp.isnan(operator(state).data))
+    out = operator(state).data
+    assert jnp.all(jnp.isfinite(out))
+    # chromatic: a constant input does not come back constant across channels
+    assert len(set(out[0].tolist())) == coords.freq.shape[0]
 
 
 @pytest.mark.parametrize(

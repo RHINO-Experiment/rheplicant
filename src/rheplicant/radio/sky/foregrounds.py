@@ -41,7 +41,7 @@ class ForegroundOperator(AbstractOperator):
     ref_freq: float = eqx.field(static=True)
 
     def __check_init__(self):
-        if self.ref_freq <= 0:
+        if not self.ref_freq > 0:  # `not >` so a NaN ref_freq is refused too
             raise StateValidationError(f"ref_freq must be > 0, got {self.ref_freq}.")
 
     def __call__(self, state: State) -> State:
