@@ -334,7 +334,9 @@ class Assembly(AbstractOperator):
             can see is a hand-rolled ``eqx.tree_at(lambda a: a[nid].x, ...)``:
             that call goes through no framework code, so nothing intercepts it
             and it still rewrites one copy only. Consult ``.aliased`` yourself
-            before writing one.
+            before writing one — ``repr(assembly)`` names these nodes when
+            there are any, and says nothing when there are none, so the
+            condition reaches a reader who did not know to ask for it.
         placements: the recipe :meth:`without` re-assembles from, as
             ``(template nodes, address)`` per placed operator, in template
             order. Addresses rather than operators on purpose — see the field's
@@ -545,9 +547,24 @@ class Assembly(AbstractOperator):
         lit = [
             f"{nid} x{counts[nid]}" if nid in counts else nid for nid in self.lit
         ]
+        # `aliased` appears ONLY when it is non-empty, and the asymmetry is the
+        # point. It is empty for every shipped graph and for every user graph
+        # whose nodes each reach the sink by one path, so an always-present
+        # `aliased=[]` would spend a field on the answer "nothing here" and
+        # teach the reader to skip past the one place the warning can appear.
+        # Non-empty, it names the nodes the fold embedded at several positions:
+        # `replace_node` and `ParameterSpace.validate` already refuse to write
+        # through them, but a hand-rolled `eqx.tree_at` goes through neither and
+        # rewrites one copy only. Seeing them here is how that is noticed
+        # without knowing to ask -- see the `aliased` attribute for the rest.
+        fan_out = (
+            f", aliased-at-several-positions={list(self.aliased)}"
+            if self.aliased
+            else ""
+        )
         return (
             f"Assembly(graph={self.graph_name!r}, lit={lit}, "
-            f"skipped-as-identity={list(self.skipped)})"
+            f"skipped-as-identity={list(self.skipped)}{fan_out})"
         )
 
 
@@ -1040,6 +1057,87 @@ def _check_ordering(
                 )
 
 
+def _claimed_nodes(
+    graph: SignalGraph, item: AbstractOperator | At
+) -> tuple[str, ...]:
+    """The template nodes ``item`` claims: from ``At(...)``, or its registration.
+
+    One node for an ordinary placement, several for a region claim. Every id is
+    checked against the template here, before anything downstream asks what kind
+    of node it is — an unknown id has no kind to answer with, and the message
+    that names the known nodes is the one a typo needs.
+    """
+    if isinstance(item, At):
+        node, op = item.node, item.op
+    else:
+        op = item
+        node = _declared_node(op)
+        if node is None:
+            raise AssemblyError(
+                f"{type(op).__name__} declares no graph_node and no At(...) wrapper "
+                f"was given; wrap it as At(node_id, op). Known nodes: {list(graph.nodes)}"
+            )
+    nodes = (node,) if isinstance(node, str) else tuple(node)
+    for n in nodes:
+        if n not in graph.nodes:
+            raise AssemblyError(
+                f"{type(op).__name__}: {n!r} is not a node of graph "
+                f"{graph.name!r}; known nodes: {list(graph.nodes)}"
+            )
+    return nodes
+
+
+def _place_at_node(
+    graph: SignalGraph,
+    node: str,
+    op: AbstractOperator,
+    placement: dict[str, list[AbstractOperator]],
+) -> None:
+    """Record ``op`` at a single-node slot, refusing what is not one.
+
+    Junctions and selectors are never slots — they materialize from the branches
+    that reach them — and a node that is not ``many`` holds one operator, so a
+    second one is a mistake rather than a composition.
+    """
+    spec = graph.nodes[node]
+    if spec.kind in ("junction", "selector"):
+        raise AssemblyError(
+            f"Node {node!r} is a {spec.kind} — junctions/selectors are never "
+            "operator slots; they materialize automatically as "
+            "SumOperator/SelectOperator."
+        )
+    existing = placement.setdefault(node, [])
+    if existing and not spec.many:
+        raise AssemblyError(
+            f"Two operators provided for node {node!r} "
+            f"({type(existing[0]).__name__} and {type(op).__name__}); this node "
+            "accepts a single instance. Compose them explicitly and wrap with "
+            "At(...) if that is intended."
+        )
+    existing.append(op)
+
+
+def _check_disjoint_claims(
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> None:
+    """Regions are atomic: no node may belong to two claims of any kind.
+
+    Checked over the whole provided set rather than per item, because the
+    conflict is between claims and either one may be read first.
+    """
+    seen: dict[str, str] = {n: f"operator at {n!r}" for n in placement}
+    for path, op in regions:
+        for n in path:
+            if n in seen:
+                raise AssemblyError(
+                    f"Node {n!r} is claimed both by the region {path} of "
+                    f"{type(op).__name__} and by {seen[n]} — claims must be disjoint."
+                )
+        for n in path:
+            seen[n] = f"the region {path} of {type(op).__name__}"
+
+
 def _resolve(
     graph: SignalGraph, operators: Sequence[AbstractOperator | At]
 ) -> tuple[dict[str, list[AbstractOperator]], list[tuple[tuple[str, ...], AbstractOperator]]]:
@@ -1053,57 +1151,282 @@ def _resolve(
     placement: dict[str, list[AbstractOperator]] = {}
     regions: list[tuple[tuple[str, ...], AbstractOperator]] = []
     for item in operators:
-        if isinstance(item, At):
-            node, op = item.node, item.op
-        else:
-            op = item
-            node = _declared_node(op)
-            if node is None:
-                raise AssemblyError(
-                    f"{type(op).__name__} declares no graph_node and no At(...) wrapper "
-                    f"was given; wrap it as At(node_id, op). Known nodes: {list(graph.nodes)}"
-                )
-        nodes = (node,) if isinstance(node, str) else tuple(node)
-        for n in nodes:
-            if n not in graph.nodes:
-                raise AssemblyError(
-                    f"{type(op).__name__}: {n!r} is not a node of graph "
-                    f"{graph.name!r}; known nodes: {list(graph.nodes)}"
-                )
+        op = item.op if isinstance(item, At) else item
+        nodes = _claimed_nodes(graph, item)
         if len(nodes) > 1:
             _validate_region(graph, nodes, op)
             regions.append((nodes, op))
-            continue
-        (node,) = nodes
-        spec = graph.nodes[node]
-        if spec.kind in ("junction", "selector"):
-            raise AssemblyError(
-                f"Node {node!r} is a {spec.kind} — junctions/selectors are never "
-                "operator slots; they materialize automatically as "
-                "SumOperator/SelectOperator."
-            )
-        existing = placement.setdefault(node, [])
-        if existing and not spec.many:
-            raise AssemblyError(
-                f"Two operators provided for node {node!r} "
-                f"({type(existing[0]).__name__} and {type(op).__name__}); this node "
-                "accepts a single instance. Compose them explicitly and wrap with "
-                "At(...) if that is intended."
-            )
-        existing.append(op)
-
-    # Regions are atomic: no node may belong to two claims of any kind.
-    seen: dict[str, str] = {n: f"operator at {n!r}" for n in placement}
-    for path, op in regions:
-        for n in path:
-            if n in seen:
-                raise AssemblyError(
-                    f"Node {n!r} is claimed both by the region {path} of "
-                    f"{type(op).__name__} and by {seen[n]} — claims must be disjoint."
-                )
-        for n in path:
-            seen[n] = f"the region {path} of {type(op).__name__}"
+        else:
+            _place_at_node(graph, nodes[0], op, placement)
+    _check_disjoint_claims(placement, regions)
     return placement, regions
+
+
+# ---------------------------------------------------------------------------
+# the fold: one helper per node kind, dispatched from _fold_graph's loop
+#
+# Each helper answers one question -- "what branch does THIS node contribute?"
+# -- and returns it, so the loop below is a dispatch on node kind and nothing
+# else. The accumulators a helper records into (`skipped`, `materialized`,
+# `fan`, `entry`) are named in its signature rather than closed over, so what
+# each one writes is readable without reading the loop.
+# ---------------------------------------------------------------------------
+
+
+def _upstream_of(
+    graph: SignalGraph,
+    nid: str,
+    exprs: dict[str, "_Branch | None"],
+    fan: dict[str, list[_Branch]],
+) -> list[_Branch]:
+    """The live branches arriving at ``nid``, in the template's in-edge order.
+
+    A fanned ``many`` source contributes one branch per instance (see
+    :func:`_fold_source`); every other live parent contributes its single
+    folded branch. Dead parents contribute nothing, which is how an absent
+    node prunes rather than propagating a hole.
+    """
+    out: list[_Branch] = []
+    for parent in graph._in[nid]:
+        if parent in fan:
+            out.extend(fan[parent])
+        elif exprs[parent] is not None:
+            out.append(exprs[parent])
+    return out
+
+
+def _fold_region(
+    graph: SignalGraph,
+    nid: str,
+    path: tuple[str, ...],
+    region_op: AbstractOperator,
+    upstream: list[_Branch],
+    exprs: dict[str, "_Branch | None"],
+    entry: dict[int, "_Branch | None"],
+    idx: int,
+) -> "_Branch | None":
+    """Fold one node of a region claim: record its entry, close it at its end.
+
+    A region is ONE operator covering a contiguous run of template nodes, so
+    only the last node contributes a branch — the interior ones fold to
+    ``None`` and the operator is appended once, at the end, onto whatever
+    entered at ``path[0]``. ``entry[idx]`` carries that entering branch across
+    the nodes in between.
+
+    :func:`_validate_region` already checked the template side of atomicity at
+    resolve time; this is the assembly-time half, which only the *provided set*
+    can violate. A live branch reaching the region's interior would have its
+    signal silently dropped, because the covering operator is handed the entry
+    branch and nothing else.
+
+    ``sourced`` is read off the region's FIRST node, not its last: entering on a
+    source node is what makes the whole region generate its own contribution.
+    """
+    if nid == path[0]:
+        entry[idx] = upstream[0] if upstream else None
+    else:
+        for parent in graph._in[nid]:
+            if parent not in path and exprs[parent] is not None:
+                raise AssemblyError(
+                    f"Live branch from {parent!r} feeds node {nid!r}, which is "
+                    f"covered by the region {path} of "
+                    f"{type(region_op).__name__} — regions are atomic; drop "
+                    "the branch or use component operators instead."
+                )
+    if nid != path[-1]:
+        return None
+    up = entry[idx]
+    stages = (list(up.stages) if up else []) + [(nid, region_op)]
+    sourced = graph.nodes[path[0]].kind == "source" or (up.sourced if up else False)
+    return _Branch(stages, sourced, origin=path[0])
+
+
+def _fold_junction(
+    nid: str,
+    spec: NodeSpec,
+    upstream: list[_Branch],
+    skipped: list[str],
+    materialized: list[str],
+) -> "_Branch | None":
+    """Fold a junction/selector: prune, pass through, or materialize a combinator.
+
+    Zero live branches and the node is not there at all; one and it is
+    *traversed* (recorded in ``skipped`` — the signal passes through unchanged);
+    two or more and it becomes the ``SumOperator``/``SelectOperator`` the
+    template says it is, recorded in ``materialized`` so
+    :meth:`Assembly.replace_node` can refuse to overwrite it and drop the
+    branches feeding it.
+
+    Branch order is ``graph._in`` order — the template's edge declaration order,
+    never the call-site order — so the same provided set always folds to the
+    same tree: same names, same PRNG stream, same jit cache entry.
+
+    Every summed branch must carry its own source. A transform-rooted branch
+    arriving here generates nothing, so it would contribute the identity of
+    whatever reached IT — which is the upstream branch, added to the sum a
+    second time.
+    """
+    if not upstream:
+        return None
+    if len(upstream) == 1:
+        skipped.append(nid)  # traversed pass-through junction/selector
+        return upstream[0]
+    unsourced = [b for b in upstream if not b.sourced]
+    if unsourced:
+        bad = unsourced[0].origin or unsourced[0].stages[0][0]
+        raise AssemblyError(
+            f"Transform {bad!r} feeds {spec.kind} {nid!r} with no live "
+            "source upstream — a branch must generate its own "
+            "contribution. Provide a source on that branch or drop it."
+        )
+    branch_names = _dedup([b.label for b in upstream])
+    branch_ops = [b.to_operator() for b in upstream]
+    if spec.kind == "junction":
+        combined: AbstractOperator = SumOperator(*branch_ops, names=branch_names)
+    else:
+        combined = SelectOperator(*branch_ops, names=branch_names, switch_key=nid)
+    materialized.append(nid)
+    return _Branch([(nid, combined)], sourced=True)
+
+
+def _fold_source(
+    graph: SignalGraph,
+    nid: str,
+    instances: list[AbstractOperator],
+    fan: dict[str, list[_Branch]],
+) -> "_Branch | None":
+    """Fold a source node: nothing, one operator, or several composed by consumer.
+
+    Several instances at a ``many`` source compose the way their CONSUMER
+    composes. Feeding only selectors they stay separate branches — a switch
+    picks one per sample, it does not add them up — and reach their consumers
+    through ``fan``; anything else sums them here. ``exprs`` still gets the
+    first fanned branch as a liveness marker, because that is what tells a
+    downstream node the source is live at all; the consumer reads ``fan``.
+    """
+    if not instances:
+        return None
+    if len(instances) == 1:
+        return _Branch([(nid, instances[0])], sourced=True)
+    names = _instance_names(nid, len(instances))
+    if _feeds_only_selectors(graph, nid):
+        fan[nid] = [
+            _Branch([(name, op)], sourced=True, origin=nid)
+            for name, op in zip(names, instances, strict=True)
+        ]
+        return fan[nid][0]  # liveness marker; consumers read `fan`
+    return _Branch([(nid, SumOperator(*instances, names=names))], sourced=True)
+
+
+def _fold_transform(
+    nid: str,
+    instances: list[AbstractOperator],
+    upstream: list[_Branch],
+    skipped: list[str],
+) -> "_Branch | None":
+    """Fold a transform node: chain its instances onto the incoming branch.
+
+    With no operator the node contracts to identity and the parent branch
+    passes through unchanged — recorded in ``skipped`` only when there IS a
+    parent, since a node with nothing upstream was never on the signal path to
+    report a skip on. Several instances (the ``filters``-style ``many``
+    transform) chain in call order.
+
+    The branch keeps the PARENT's provenance: ``sourced`` and ``origin`` are
+    what :func:`_fold_junction` reads to decide whether this branch may join a
+    sum, and to name it if it may not.
+    """
+    up = upstream[0] if upstream else None
+    if not instances:
+        if up is not None:
+            skipped.append(nid)
+        return up
+    stages = list(up.stages) if up else []
+    stages += list(zip(_instance_names(nid, len(instances)), instances, strict=True))
+    return _Branch(
+        stages,
+        sourced=up.sourced if up else False,
+        origin=up.origin if up else nid,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _Fold:
+    """What folding a graph over a provided set produced.
+
+    Attributes:
+        final: the branch standing at the sink — the whole forward model.
+        skipped: nodes traversed as identity, in fold order.
+        multi: ``{node id: instance ids}`` for nodes carrying several operators.
+        materialized: junction/selector nodes that became a combinator.
+    """
+
+    final: "_Branch | None"
+    skipped: list[str]
+    multi: dict[str, tuple[str, ...]]
+    materialized: list[str]
+
+
+def _fold_graph(
+    graph: SignalGraph,
+    placement: dict[str, list[AbstractOperator]],
+    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
+) -> _Fold:
+    """Walk the template in topological order, folding each node to a branch.
+
+    The loop is a dispatch on what the node IS — covered by a region, a
+    junction/selector, a source, or a transform — and each arm is one named
+    helper above. Nodes are visited in ``graph._topo`` order, so every parent
+    has folded before its children ask for it.
+    """
+    region_of: dict[str, int] = {}
+    for idx, (path, _) in enumerate(regions):
+        for n in path:
+            region_of[n] = idx
+    region_entry: dict[int, _Branch | None] = {}
+
+    exprs: dict[str, _Branch | None] = {}
+    # A `many` source whose consumers are all selectors contributes one branch
+    # PER INSTANCE rather than one summed branch — a switch picks a source per
+    # sample, it does not add them up. Kept beside `exprs` rather than widening
+    # it so that every other path folds bit-for-bit as before (SumOperator's
+    # per-branch PRNG splitting makes a flatter tree a different run, not just
+    # a different shape).
+    fan: dict[str, list[_Branch]] = {}
+    skipped: list[str] = []
+    # Addressing bookkeeping, both static: which node ids carry several
+    # operator instances (so the bare id addresses none of them in particular),
+    # and which junction/selector nodes actually materialized as a combinator
+    # (so replace_node there would discard every branch feeding it).
+    multi: dict[str, tuple[str, ...]] = {}
+    materialized: list[str] = []
+
+    for nid in graph._topo:
+        spec = graph.nodes[nid]
+        instances = placement.get(nid, [])
+        upstream = _upstream_of(graph, nid, exprs, fan)
+        if len(instances) > 1:
+            multi[nid] = _instance_names(nid, len(instances))
+
+        if nid in region_of:
+            idx = region_of[nid]
+            path, region_op = regions[idx]
+            exprs[nid] = _fold_region(
+                graph, nid, path, region_op, upstream, exprs, region_entry, idx
+            )
+        elif spec.kind in ("junction", "selector"):
+            exprs[nid] = _fold_junction(nid, spec, upstream, skipped, materialized)
+        elif spec.kind == "source":
+            exprs[nid] = _fold_source(graph, nid, instances, fan)
+        else:
+            exprs[nid] = _fold_transform(nid, instances, upstream, skipped)
+
+    return _Fold(
+        final=exprs[graph.sink],
+        skipped=skipped,
+        multi=multi,
+        materialized=materialized,
+    )
 
 
 def assemble(
@@ -1144,126 +1467,9 @@ def assemble(
     placement, regions = _resolve(graph, operators)
     _check_slot_kinds(graph, placement, regions)
     _check_ordering(graph, placement, regions)
-    region_of: dict[str, int] = {}
-    for idx, (path, _) in enumerate(regions):
-        for n in path:
-            region_of[n] = idx
-    region_entry: dict[int, _Branch | None] = {}
+    fold = _fold_graph(graph, placement, regions)
 
-    exprs: dict[str, _Branch | None] = {}
-    # A `many` source whose consumers are all selectors contributes one branch
-    # PER INSTANCE rather than one summed branch — a switch picks a source per
-    # sample, it does not add them up. Kept beside `exprs` rather than widening
-    # it so that every other path folds bit-for-bit as before (SumOperator's
-    # per-branch PRNG splitting makes a flatter tree a different run, not just
-    # a different shape).
-    fan: dict[str, list[_Branch]] = {}
-    skipped: list[str] = []
-    # Addressing bookkeeping, both static: which node ids carry several
-    # operator instances (so the bare id addresses none of them in particular),
-    # and which junction/selector nodes actually materialized as a combinator
-    # (so replace_node there would discard every branch feeding it).
-    multi: dict[str, tuple[str, ...]] = {}
-    materialized: list[str] = []
-
-    def upstream_of(nid: str) -> list[_Branch]:
-        out: list[_Branch] = []
-        for parent in graph._in[nid]:
-            if parent in fan:
-                out.extend(fan[parent])
-            elif exprs[parent] is not None:
-                out.append(exprs[parent])
-        return out
-    for nid in graph._topo:
-        spec = graph.nodes[nid]
-        instances = placement.get(nid, [])
-        upstream = upstream_of(nid)
-        if len(instances) > 1:
-            multi[nid] = _instance_names(nid, len(instances))
-
-        if nid in region_of:
-            idx = region_of[nid]
-            path, region_op = regions[idx]
-            if nid == path[0]:
-                region_entry[idx] = upstream[0] if upstream else None
-            else:
-                for parent in graph._in[nid]:
-                    if parent not in path and exprs[parent] is not None:
-                        raise AssemblyError(
-                            f"Live branch from {parent!r} feeds node {nid!r}, which is "
-                            f"covered by the region {path} of "
-                            f"{type(region_op).__name__} — regions are atomic; drop "
-                            "the branch or use component operators instead."
-                        )
-            if nid == path[-1]:
-                up = region_entry[idx]
-                stages = (list(up.stages) if up else []) + [(nid, region_op)]
-                sourced = graph.nodes[path[0]].kind == "source" or (
-                    up.sourced if up else False
-                )
-                exprs[nid] = _Branch(stages, sourced, origin=path[0])
-            else:
-                exprs[nid] = None
-            continue
-
-        if spec.kind in ("junction", "selector"):
-            if len(upstream) == 0:
-                exprs[nid] = None
-            elif len(upstream) == 1:
-                skipped.append(nid)  # traversed pass-through junction/selector
-                exprs[nid] = upstream[0]
-            else:
-                unsourced = [b for b in upstream if not b.sourced]
-                if unsourced:
-                    bad = unsourced[0].origin or unsourced[0].stages[0][0]
-                    raise AssemblyError(
-                        f"Transform {bad!r} feeds {spec.kind} {nid!r} with no live "
-                        "source upstream — a branch must generate its own "
-                        "contribution. Provide a source on that branch or drop it."
-                    )
-                branch_names = _dedup([b.label for b in upstream])
-                branch_ops = [b.to_operator() for b in upstream]
-                if spec.kind == "junction":
-                    combined = SumOperator(*branch_ops, names=branch_names)
-                else:
-                    combined = SelectOperator(
-                        *branch_ops, names=branch_names, switch_key=nid
-                    )
-                materialized.append(nid)
-                exprs[nid] = _Branch([(nid, combined)], sourced=True)
-        elif spec.kind == "source":
-            if not instances:
-                exprs[nid] = None
-            elif len(instances) == 1:
-                exprs[nid] = _Branch([(nid, instances[0])], sourced=True)
-            elif _feeds_only_selectors(graph, nid):
-                names = _instance_names(nid, len(instances))
-                fan[nid] = [
-                    _Branch([(name, op)], sourced=True, origin=nid)
-                    for name, op in zip(names, instances, strict=True)
-                ]
-                exprs[nid] = fan[nid][0]  # liveness marker; consumers read `fan`
-            else:
-                names = _instance_names(nid, len(instances))
-                exprs[nid] = _Branch(
-                    [(nid, SumOperator(*instances, names=names))], sourced=True
-                )
-        else:  # transform
-            up = upstream[0] if upstream else None
-            if instances:
-                stages = list(up.stages) if up else []
-                names = _instance_names(nid, len(instances))
-                stages += list(zip(names, instances, strict=True))
-                exprs[nid] = _Branch(
-                    stages, sourced=up.sourced if up else False,
-                    origin=up.origin if up else nid,
-                )
-            else:
-                if up is not None:
-                    skipped.append(nid)
-                exprs[nid] = up
-
-    final = exprs[graph.sink]
+    final = fold.final
     # Unreachable, and kept as an assertion rather than deleted. `assemble`
     # refuses an empty operator list above, so at least one node is live; a
     # template has exactly one sink and no cycles, so following out-edges from
@@ -1283,20 +1489,20 @@ def assemble(
     # through at all. Both are decided on the BUILT tree, so they cannot drift
     # from what `_find_named`/`eqx.tree_at` actually do to it.
     duplicates = _fold_duplicates(operator, placement, regions)
-    _check_promised_ids(operator, multi, placement, duplicates)
+    _check_promised_ids(operator, fold.multi, placement, duplicates)
 
-    claimed = set(placement) | set(region_of)
+    claimed = set(placement) | {n for path, _ in regions for n in path}
     lit = tuple(n for n in graph.nodes if n in claimed)
     live_span = _live_span(graph, lit)
     return Assembly(
         operator=operator,
         graph_name=graph.name,
         lit=lit,
-        skipped=tuple(n for n in skipped if n in live_span),
+        skipped=tuple(n for n in fold.skipped if n in live_span),
         has_source=final.sourced,
         root_label=final.stages[0][0] if len(final.stages) == 1 else "",
-        instances=tuple((nid, names) for nid, names in multi.items()),
-        materialized=tuple(materialized),
+        instances=tuple((nid, names) for nid, names in fold.multi.items()),
+        materialized=tuple(fold.materialized),
         aliased=tuple(n for n in graph.nodes if n in duplicates),
         placements=_placement_addresses(graph, placement, regions),
     )

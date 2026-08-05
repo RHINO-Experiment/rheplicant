@@ -771,3 +771,55 @@ class TestAliasedNodeIsNotWritable:
         assert jnp.array_equal(asm(State()).data, jnp.full(3, 20.0))
         swapped = asm.replace_node("a", SrcA(value=jnp.array(0.0)))
         assert jnp.array_equal(swapped(State()).data, jnp.full(3, 10.0))
+
+
+class TestReprSurfacesFanOut:
+    """The repr names fan-out nodes, and stays silent when there are none.
+
+    ``aliased`` is the one condition the framework cannot refuse its way out of.
+    ``replace_node`` and ``ParameterSpace.validate`` both consult it by name, so
+    every framework write path is covered; a hand-rolled
+    ``eqx.tree_at(lambda a: a[nid].x, ...)`` goes through neither, and still
+    rewrites one copy of a node the fold embedded several times — leaving a
+    finite, correctly-shaped, half-updated model. Printing the condition is how
+    a user meets it without already knowing to ask.
+    """
+
+    def test_a_fan_out_node_is_named_in_the_repr(self, fork_rejoin_graph):
+        """``x`` reaches the sink by two paths, so the fold embeds it twice."""
+        asm = assemble(fork_rejoin_graph, At("x", Src(value=jnp.array(10.0))))
+        assert asm.aliased == ("x",)
+        assert "aliased-at-several-positions=['x']" in repr(asm)
+
+    def test_the_ordinary_assembly_grows_no_empty_field(self, graph):
+        """The common case is ``aliased == ()``.
+
+        A field reporting that on every assembly would be noise in its own
+        right, and would train the reader straight past the one place the
+        warning can ever appear.
+        """
+        asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
+        assert asm.aliased == ()
+        assert "aliased" not in repr(asm)
+
+    def test_the_empty_repr_is_unchanged(self, graph):
+        """Pin the whole string, not a substring.
+
+        The empty form is what ``docs/sky-to-receiver.md`` shows a reader, so
+        it is a published interface: adding ``aliased`` must not have moved a
+        character of it.
+        """
+        asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
+        assert repr(asm) == (
+            "Assembly(graph='test-graph', lit=['a', 'b'], skipped-as-identity=[])"
+        )
+
+    def test_the_non_empty_repr_is_the_empty_one_plus_one_field(
+        self, fork_rejoin_graph
+    ):
+        """The new field is appended, so nothing a reader already parses moves."""
+        asm = assemble(fork_rejoin_graph, At("x", Src(value=jnp.array(10.0))))
+        assert repr(asm) == (
+            "Assembly(graph='fork-rejoin', lit=['x'], skipped-as-identity=[], "
+            "aliased-at-several-positions=['x'])"
+        )
