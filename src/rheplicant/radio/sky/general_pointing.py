@@ -35,6 +35,7 @@ float32-stable, but the projector as a whole inherits the transform error
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import StateValidationError
@@ -113,6 +114,62 @@ class GeneralPointingProjector(AbstractSkyProjector):
                 'GeneralPointingProjector requires coords.extra["lst_deg"] '
                 "(n_time,) in degrees."
             )
+        self._refuse_a_pointing_the_adjoint_would_silently_zero(coords)
+
+    @staticmethod
+    def _refuse_a_pointing_the_adjoint_would_silently_zero(coords: Coordinates) -> None:
+        """Refuse a non-finite pointing, because the adjoint will not.
+
+        The two directions fail asymmetrically, and only one of them is safe to
+        leave alone. Measured on an ``(n_time, 2)`` pointing of NaN, against the
+        same fixture with valid angles
+        (``tests/radio/test_general_pointing_guards.py``)::
+
+            forward   -> every TOD sample NaN            max|.| = nan
+            adjoint   -> a finite, correctly shaped map  max|.| = 0.0
+                         (the honest answer is 11.4)
+
+        The forward direction is loud and a user notices. The adjoint returns
+        an **empty map that passes every** ``isfinite`` **check downstream** --
+        map-making on corrupted pointing produces a clean-looking result with
+        no signal in it, and nothing anywhere says why. That is the failure
+        this refusal exists for; the presence checks above cannot see it,
+        because the arrays are present, correctly shaped, and the wrong values.
+
+        Both fields are read, not only ``pointing``: ``lst_deg`` reaches the
+        same rotation and produces the same silent zero map. ``selfrot_deg`` is
+        checked when supplied, for the same reason and no other.
+
+        Traced arrays are stepped over rather than forced, following
+        :meth:`rheplicant.core.coordinates.Coordinates.__check_init__`: under
+        jit there are no values to compare, and calling ``np.asarray`` on a
+        tracer is the error rather than the pointing. A jitted caller therefore
+        keeps the old behaviour, which is the honest limit of a value check on
+        a differentiable path -- and the reason this is stated here rather than
+        implied.
+        """
+        fields = {
+            "coords.pointing": coords.pointing,
+            'coords.extra["lst_deg"]': coords.extra["lst_deg"],
+        }
+        if coords.extra.get("selfrot_deg") is not None:
+            fields['coords.extra["selfrot_deg"]'] = coords.extra["selfrot_deg"]
+
+        for name, values in fields.items():
+            try:
+                concrete = np.asarray(values)
+            except jax.errors.TracerArrayConversionError:
+                return  # genuinely traced: no values to compare against
+            if concrete.size and not np.all(np.isfinite(concrete)):
+                bad = int(np.count_nonzero(~np.isfinite(concrete)))
+                raise StateValidationError(
+                    f"{name} has {bad} non-finite value(s) of {concrete.size}. "
+                    "The forward direction would return an all-NaN TOD, which is "
+                    "loud; the ADJOINT returns a finite, correctly shaped, "
+                    "identically ZERO map, which is not — map-making would hand "
+                    "back a clean-looking empty result and every isfinite check "
+                    "downstream would pass."
+                )
 
     def _zyz(self, ltj, coords: Coordinates) -> jax.Array:
         assert coords.pointing is not None  # _validate_coords ran first

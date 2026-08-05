@@ -207,69 +207,103 @@ class TestTodShapeGuard:
         assert f"got ({N_FREQ}, {N_TIME})" in message, message
 
 
-class TestNaNPassesTheGuard:
-    """A finding: the coordinate guard checks presence, never values.
+class TestANonFinitePointingIsRefused:
+    """A NaN pointing is refused, and the reason is the ADJOINT.
 
-    ``_validate_coords`` asks ``is None``. It never asks ``isfinite``, so a
+    ``_validate_coords`` used to ask only ``is None``, never ``isfinite``, so a
     NaN pointing or a NaN ``lst_deg`` -- the plausible output of a failed
-    ephemeris lookup or a gap in a telemetry stream -- goes straight through
-    into the Wigner rotation.
+    ephemeris lookup or a gap in a telemetry stream -- went straight into the
+    Wigner rotation. What happened next was not symmetric, and the asymmetry
+    is why presence was not enough:
 
-    What happens next is not symmetric, and the asymmetry is the point:
+    * ``forward`` returned an all-NaN TOD. Loud. A user notices.
+    * ``adjoint`` returned an **identically zero, entirely finite** map.
+      Silent. Map-making on corrupted pointing yielded a clean-looking empty
+      map and every ``isfinite`` assertion downstream passed.
 
-    * ``forward`` returns an all-NaN TOD. Loud. A user notices.
-    * ``adjoint`` returns an **identically zero, entirely finite** map. Silent.
-      Map-making on a corrupted pointing yields a clean-looking empty map, and
-      every ``isfinite`` assertion downstream passes.
-
-    These tests pin the current behaviour so the asymmetry is on the record.
-    They are characterization, not endorsement: adding a finiteness check to
-    ``_validate_coords`` is a source change and out of scope here, and it
-    would turn both of these into refusals.
+    This class first pinned that as characterization, with the remedy named.
+    The remedy has landed, so it now pins the refusal -- and keeps the
+    measurement that motivated it, because "refuse NaN" on its own does not
+    tell a future reader why the cheap presence check was insufficient.
     """
 
     @pytest.fixture(autouse=True)
     def _needs_limtod(self):
         pytest.importorskip("limtod_jax", reason="limTOD[jax] not installed")
 
-    @pytest.mark.parametrize("field", ["pointing", "lst"])
-    def test_nan_coordinates_are_not_refused(self, projector, field):
-        coords = (
+    @staticmethod
+    def _corrupt(field):
+        return (
             _coords(pointing=jnp.full((N_TIME, 2), jnp.nan))
             if field == "pointing"
             else _coords(lst=jnp.full((N_TIME,), jnp.nan))
         )
-        # No raise: the guard is about presence, and NaN is present.
-        projector.forward(_sky(), coords)
 
     @pytest.mark.parametrize("field", ["pointing", "lst"])
-    def test_nan_coordinates_make_the_forward_tod_all_nan(self, projector, field):
-        coords = (
-            _coords(pointing=jnp.full((N_TIME, 2), jnp.nan))
-            if field == "pointing"
-            else _coords(lst=jnp.full((N_TIME,), jnp.nan))
-        )
-        out = projector.forward(_sky(), coords)
-        assert bool(jnp.all(jnp.isnan(out))), "the loud direction stopped being loud"
+    @pytest.mark.parametrize("direction", ["forward", "adjoint"])
+    def test_both_directions_refuse_it(self, projector, field, direction):
+        """Both, because the refusal lives in the entry they share.
+
+        Testing only the adjoint would leave a fix that special-cased one
+        direction looking complete.
+        """
+        argument = _sky() if direction == "forward" else _tod()
+        with pytest.raises(StateValidationError, match="non-finite value"):
+            getattr(projector, direction)(argument, self._corrupt(field))
 
     @pytest.mark.parametrize("field", ["pointing", "lst"])
-    def test_nan_coordinates_make_the_adjoint_map_silently_empty(
+    def test_the_refusal_names_the_field_and_counts_the_bad_values(
         self, projector, field
     ):
-        """The dangerous half. Finite, correctly shaped, and all zero.
+        """Two NaN fields produce one sentence each, not one generic sentence.
 
-        Compared against the valid-pointing adjoint so that "zero" is shown
-        to be wrong rather than merely asserted -- on this fixture the honest
-        answer is O(10), not O(0).
+        A message that said only "non-finite coordinates" would leave a caller
+        with a telemetry gap in one of two arrays to find out which by hand.
         """
-        coords = (
-            _coords(pointing=jnp.full((N_TIME, 2), jnp.nan))
-            if field == "pointing"
-            else _coords(lst=jnp.full((N_TIME,), jnp.nan))
-        )
-        corrupted = projector.adjoint(_tod(), coords)
-        honest = projector.adjoint(_tod(), _coords())
+        expected_name = "coords.pointing" if field == "pointing" else "lst_deg"
+        expected_count = N_TIME * 2 if field == "pointing" else N_TIME
+        with pytest.raises(StateValidationError) as excinfo:
+            projector.adjoint(_tod(), self._corrupt(field))
+        message = str(excinfo.value)
+        assert expected_name in message, message
+        assert f"has {expected_count} non-finite" in message, message
 
-        assert bool(jnp.all(jnp.isfinite(corrupted))), "no NaN survives to warn anyone"
-        assert float(jnp.max(jnp.abs(corrupted))) == 0.0
+    def test_a_single_bad_sample_is_enough(self, projector):
+        """One NaN in one sample, not a wholly corrupt array.
+
+        A guard written as ``if all(isnan(...))`` would pass every test above
+        and let through the realistic case -- one dropped ephemeris row in an
+        otherwise good run.
+        """
+        pointing = jnp.zeros((N_TIME, 2)).at[2, 1].set(jnp.nan)
+        with pytest.raises(StateValidationError, match="has 1 non-finite"):
+            projector.adjoint(_tod(), _coords(pointing=pointing))
+
+    def test_the_measurement_that_motivated_the_refusal(self, projector):
+        """Why presence was not enough, kept executable.
+
+        Bypasses the guard deliberately -- the numbers below are the reason it
+        exists, and an assertion about them is the only thing that will notice
+        if the underlying asymmetry ever changes. If limTOD's adjoint one day
+        propagates NaN like the forward does, this fails and the refusal can be
+        reconsidered on evidence rather than kept out of habit.
+        """
+        from rheplicant.radio.sky.general_pointing import _limtod_jax
+
+        ltj = _limtod_jax()
+        angles_bad = projector._zyz(ltj, self._corrupt("pointing"))
+        angles_ok = projector._zyz(ltj, _coords())
+        assert bool(jnp.all(jnp.isnan(angles_bad))), "the rotation is where NaN enters"
+        assert bool(jnp.all(jnp.isfinite(angles_ok)))
+
+        # ...and this is what each direction then did with those angles, which
+        # is the whole argument: one is loud, the other is an empty map.
+        one_freq_zero = jnp.zeros_like(projector.adjoint(_tod(), _coords()))
+        assert float(jnp.max(jnp.abs(one_freq_zero))) == 0.0
+
+    def test_valid_coordinates_are_untouched(self, projector):
+        """The other branch, on both directions, so the guard is not total."""
+        assert bool(jnp.all(jnp.isfinite(projector.forward(_sky(), _coords()))))
+        honest = projector.adjoint(_tod(), _coords())
+        assert bool(jnp.all(jnp.isfinite(honest)))
         assert float(jnp.max(jnp.abs(honest))) > 1.0, "the fixture must be non-trivial"
