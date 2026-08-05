@@ -266,3 +266,27 @@ coefficients the noise-wave model consumes.
 .. automodule:: rheplicant.inference.engines
    :members:
 ```
+
+```{eval-rst}
+.. automodule:: rheplicant.inference.sqrtinfo
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.factorize
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.compressed
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.compress
+   :members:
+
+.. automodule:: rheplicant.inference.memory
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.archive
+   :members:
+```

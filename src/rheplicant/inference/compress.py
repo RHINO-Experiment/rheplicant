@@ -74,12 +74,17 @@ def compress_linear(
             compression. Storing the statistics about this origin rather than
             about zero is an exact change of variable, and it is what keeps the
             residual chi-square from being the time-bandwidth product.
-        nuisance_design, nuisance_prior_std, nuisance_prior_mean,
-            nuisance_shapes: the same, for latents integrated out here.
+        nuisance_design: ``{nuisance latent: (n_data, n_j) block}`` for the
+            latents integrated out here.
+        nuisance_prior_std: each nuisance latent's prior standard deviation.
+            Required for every entry of ``nuisance_design``.
+        nuisance_prior_mean: each nuisance latent's prior mean; zero if absent.
+        nuisance_shapes: each nuisance latent's shape.
 
     Returns:
-        A prior-free, exact :class:`QuadraticLikelihood` over the global
-        latents.
+        A prior-free, exact
+        :class:`~rheplicant.inference.compressed.QuadraticLikelihood` over the
+        global latents.
     """
     names = tuple(design)
     if not names:

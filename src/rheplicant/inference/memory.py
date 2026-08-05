@@ -46,7 +46,8 @@ class BayesMemory(eqx.Module):
     Attributes:
         factorization: the single declaration -- which latents are global, and
             the campaign's only prior.
-        accumulated: the running :class:`SqrtInfo`. Fixed treedef.
+        accumulated: the running
+            :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`. Fixed treedef.
         archive: the terms as remembered, kept for diagnostics, re-anchoring
             and the smoother. Never re-summed on the sampling path.
     """

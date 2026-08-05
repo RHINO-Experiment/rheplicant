@@ -15,7 +15,7 @@ term built with the covariance frozen at the ``iterative_gls`` solution encodes
 *generalized least squares*, while one built with the log-determinant live
 encodes the full Gaussian posterior (D23). They are different estimators.
 Adding them produces a finite, correctly-shaped, meaningless number, so
-:attr:`estimator` exists and the memory refuses to mix.
+:attr:`QuadraticLikelihood.estimator` exists and the memory refuses to mix.
 """
 
 from fractions import Fraction
@@ -46,7 +46,8 @@ class CompressedLikelihood(Protocol):
 
 
 class QuadraticLikelihood(eqx.Module):
-    """A log-quadratic factor: a :class:`SqrtInfo` plus what it means.
+    """A log-quadratic factor: a :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`
+    plus what it means.
 
     Attributes:
         info: the square-root information form carrying the numbers.
