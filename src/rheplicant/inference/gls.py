@@ -176,6 +176,22 @@ def iterative_gls(
         a fixed point, so implicit differentiation — not unrolling — is the
         right way to take a gradient through it.
     """
+    if not isinstance(noise, NoiseModel):
+        # A bare sigma array used to reach `noise.depends_on_prediction` and
+        # come back as `AttributeError: 'ArrayImpl' object has no attribute
+        # 'depends_on_prediction'` -- an attribute name the caller never wrote,
+        # from a layer they were not thinking about. This exit is the ONLY one
+        # in the package that requires a model rather than accepting one: its
+        # whole subject is the fixed point a prediction-dependent sigma
+        # implies, and a constant sigma has no fixed point to find.
+        raise ParameterSpaceError(
+            f"iterative_gls needs a NoiseModel, not a bare sigma; got "
+            f"{type(noise).__name__}. It solves for the covariance a "
+            f"PREDICTION-DEPENDENT sigma implies, so a decided array leaves it "
+            f"nothing to iterate. Wrap it -- HomoscedasticNoise(sigma) -- and "
+            f"it will return after one step with converged=True, or pass the "
+            f"array to wiener_solve, which is what a constant sigma wants."
+        )
     prior_mean, prior_std = _check_solve_arguments(
         block, observed, prior_mean, prior_std, "iterative_gls"
     )

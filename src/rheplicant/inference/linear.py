@@ -1353,12 +1353,14 @@ def condition_estimate(
             :class:`~rheplicant.inference.noise.NoiseModel` is as wrong here as
             it is there — a κ is the conditioning of one particular normal
             operator, so it needs the covariance settled, not a rule for
-            producing one. Note that this exit does **not** run
-            ``_check_solve_arguments``, so neither the seam refusal nor the
-            1-D axis check fires: a model reaches ``jnp.asarray`` and comes back
-            as ``TypeError: Value 'HomoscedasticNoise(...)' with dtype object is
-            not a valid JAX array type``, which names the wrong layer. Pass
-            ``noise.std(prediction)``.
+            producing one. Both refusals the solves apply run here too: a model
+            is refused by name, and a 1-D sigma whose axis the prediction
+            cannot settle is refused by
+            :func:`~rheplicant.inference.noise.check_noise_std_axis`. They have
+            to, because this is the function a caller is told to consult in
+            order to choose ``tol`` for those solves — a κ computed under a
+            different reading of the same array answers a different question
+            than the solve it was computed for.
         prior_std: as for :func:`wiener_solve` — it defaults to the latent's
             declared prior, so the κ reported here is the κ of the system those
             solves will build rather than of a system nobody solves.
@@ -1370,6 +1372,8 @@ def condition_estimate(
     Returns:
         The estimated condition number, as a scalar array.
     """
+    check_noise_std_axis(noise_std, jnp.shape(block.offset), "condition_estimate")
+    _refuse_a_noise_model_at_the_conjugate_seam(noise_std, "condition_estimate")
     _, prior_std = _resolve_prior(block, None, prior_std, "condition_estimate")
     _require_prior_std(block, prior_std, "condition_estimate")
     return _condition_number(

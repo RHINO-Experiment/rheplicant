@@ -366,10 +366,16 @@ downstream consumer takes.
 ```python
 from rheplicant.inference import check_linearity, linear_operator, wiener_solve
 
-check_linearity(space, model, state, names=("gain",))    # the claim, checked first
-block = linear_operator(space, model, state, names=("gain",))
-solved, residual = wiener_solve(block, observation.data, noise_std=0.5)
-# solved == {"gain": Array(1.09999272)} — hand it straight back to forward(...)
+# `twin` draws noise, so it is not a fit target — drop the stage that draws.
+target = twin.without("noise").replace_node("gain", GainOperator(gain=jnp.array(1.0)))
+
+check_linearity(space, target, state, names=("gain",))   # the claim, checked first
+block = linear_operator(space, target, state, names=("gain",))
+solved, residual = wiener_solve(
+    block, observation.data, noise_std=0.5, prior_std={"gain": 1e3}
+)
+# solved == {"gain": Array(1.1001223, dtype=float32)}, truth 1.1 — hand it
+# straight back to forward(...); residual 1.8e-07
 ```
 
 `gcr_sample` takes the same block and returns an exact posterior *draw*, one CG

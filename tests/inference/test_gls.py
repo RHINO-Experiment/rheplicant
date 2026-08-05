@@ -415,3 +415,47 @@ class TestWhyItIsNeeded:
         rms_gls = float(jnp.sqrt(jnp.mean(jnp.array([a for a, _ in pairs]) ** 2)))
         rms_frozen = float(jnp.sqrt(jnp.mean(jnp.array([b for _, b in pairs]) ** 2)))
         assert rms_frozen / rms_gls > 1.5, f"only {rms_frozen / rms_gls:.2f}x"
+
+
+class TestABareSigmaIsRefusedByName:
+    """``iterative_gls`` is the one exit that REQUIRES a model, not accepts one.
+
+    A bare array used to reach ``noise.depends_on_prediction`` and come back as
+    ``AttributeError: 'ArrayImpl' object has no attribute
+    'depends_on_prediction'`` -- an attribute name the caller never wrote, from
+    a layer they were not thinking about.
+
+    The asymmetry is worth stating because it runs the opposite way to every
+    other ``noise``/``noise_std`` argument in the package: the conjugate solves
+    refuse a MODEL and want an array, this refuses an ARRAY and wants a model.
+    Both refusals are the same rule seen from two sides -- whether the exit has
+    a prediction at which a prediction-dependent sigma could be evaluated.
+    Here the whole subject is the fixed point such a sigma implies, and a
+    decided array leaves nothing to iterate.
+    """
+
+    def test_a_bare_array_is_refused(self, block, observed):
+        with pytest.raises(ParameterSpaceError, match="needs a NoiseModel"):
+            iterative_gls(block, observed, noise=0.5, prior_std=1.0)
+
+    def test_the_message_names_the_wrapper_and_the_alternative(self, block, observed):
+        """A refusal that names the defect without naming the way out sends the
+        reader to the source, which is what the sentence exists to avoid."""
+        with pytest.raises(ParameterSpaceError) as excinfo:
+            iterative_gls(block, observed, noise=jnp.full((N_DATA,), 0.5), prior_std=1.0)
+        message = str(excinfo.value)
+        assert "HomoscedasticNoise" in message, message
+        assert "wiener_solve" in message, message
+
+    def test_the_wrapped_constant_is_accepted_and_converges_at_once(
+        self, block, observed
+    ):
+        """The remedy the message offers has to work, and to do the right thing.
+
+        A constant sigma has no fixed point to find, so the honest answer is
+        one step and ``converged=True`` -- not an error, and not a loop.
+        """
+        result = iterative_gls(
+            block, observed, noise=HomoscedasticNoise(jnp.asarray(0.5)), prior_std=1.0
+        )
+        assert result.converged

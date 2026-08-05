@@ -38,6 +38,7 @@ from rheplicant.inference import (
     Latent,
     ParameterSpace,
     RadiometerNoise,
+    condition_estimate,
     gcr_sample,
     linear_operator,
     wiener_solve,
@@ -519,3 +520,97 @@ class TestWhyTheRuleHasTwoHomes:
                 square_block, observed, noise_std=model, prior_std=1.0,
                 key=jax.random.PRNGKey(0),
             )
+
+
+class TestConditionEstimateRunsTheSameRules:
+    """The third exit, which had the same keyword and neither check.
+
+    ``condition_estimate`` takes ``noise_std=`` like ``wiener_solve`` and
+    ``gcr_sample``, but never called ``_check_solve_arguments`` -- so a
+    ``NoiseModel`` reached ``jnp.asarray`` and came back as a bare ``TypeError``
+    naming a jax dtype, and an ambiguous 1-D sigma was silently given whichever
+    reading NumPy's trailing-axis rule produced.
+
+    It matters more here than the message quality suggests: this is the
+    function a caller is told to consult in order to pick ``tol`` for the
+    guarded solves. A kappa computed under a different reading of the same
+    array answers a different question than the solve it was computed for, and
+    nothing would have said so.
+    """
+
+    @pytest.fixture
+    def square_block(self, square_state):
+        twin = assemble(
+            SkyOperator(amplitude=jnp.array(SKY)),
+            GainOperator(gain=jnp.ones(N)),
+        )
+        space = ParameterSpace(
+            latents=[Latent("gt", init=jnp.ones(N), linear=True)],
+            bindings=[Bind("gt", into=lambda p: p["gain"].gain)],
+        )
+        return linear_operator(space, twin, square_state)
+
+    def test_the_ambiguous_vector_is_refused_and_names_this_exit(self, square_block):
+        with pytest.raises(StateValidationError, match="condition_estimate"):
+            condition_estimate(square_block, noise_std=SIGMA_VECTOR, prior_std=1.0)
+
+    def test_a_noise_model_is_refused_by_name(self, square_block):
+        with pytest.raises(ParameterSpaceError, match="takes a plain sigma array"):
+            condition_estimate(
+                square_block,
+                noise_std=HomoscedasticNoise(jnp.asarray(0.5)),
+                prior_std=1.0,
+            )
+
+    @pytest.mark.parametrize(
+        "reading",
+        [
+            pytest.param(SIGMA_VECTOR[:, None], id="explicit-column"),
+            pytest.param(SIGMA_VECTOR[None, :], id="explicit-row"),
+            pytest.param(0.5, id="scalar"),
+        ],
+    )
+    def test_an_unambiguous_noise_std_still_gives_a_number(self, square_block, reading):
+        kappa = condition_estimate(square_block, noise_std=reading, prior_std=1.0)
+        assert jnp.isfinite(kappa) and float(kappa) >= 1.0
+
+    def test_the_two_explicit_readings_give_different_condition_numbers(
+        self, square_block
+    ):
+        """Which is why leaving the axis to broadcasting was not harmless here.
+
+        If the two readings agreed, the missing check would be a cosmetic
+        message problem. They do not.
+        """
+        per_time = condition_estimate(
+            square_block, noise_std=SIGMA_VECTOR[:, None], prior_std=1.0
+        )
+        per_freq = condition_estimate(
+            square_block, noise_std=SIGMA_VECTOR[None, :], prior_std=1.0
+        )
+        assert not jnp.allclose(per_time, per_freq, rtol=1e-3), (per_time, per_freq)
+
+    def test_all_three_exits_now_refuse_the_same_input(self, square_block):
+        """The symmetry assertion, which is what stops the third one drifting again.
+
+        ``gcr_sample`` was missing this rule once and was fixed; then
+        ``condition_estimate`` turned out to be missing it too. Asserting the
+        set rather than each member is what makes a fourth exit's omission
+        visible.
+        """
+        observed = jnp.full((N, N), SKY)
+        exits = {
+            "wiener_solve": lambda: wiener_solve(
+                square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0
+            ),
+            "gcr_sample": lambda: gcr_sample(
+                square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0,
+                key=jax.random.PRNGKey(0),
+            ),
+            "condition_estimate": lambda: condition_estimate(
+                square_block, noise_std=SIGMA_VECTOR, prior_std=1.0
+            ),
+        }
+        for name, run in exits.items():
+            with pytest.raises(StateValidationError, match=name):
+                run()
