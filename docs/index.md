@@ -85,6 +85,7 @@ operators
 signal-path
 sky-engines
 sky-to-receiver
+ingestion
 inference
 tutorial-gcr
 tutorial-nuts
