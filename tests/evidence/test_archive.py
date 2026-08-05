@@ -128,3 +128,67 @@ def test_the_restored_memory_gives_the_same_log_posterior(tmp_path):
     assert float(restored.log_posterior(probe)) == pytest.approx(
         float(original.log_posterior(probe)), abs=1e-12
     )
+
+
+class TestLoadReRunsTheRefusalsRememberEnforces:
+    """The manifest is an editable text file, so it is a second way in.
+
+    ``BayesMemory.remember`` refuses a repeated epoch, a mixed estimator and a
+    tempered term. ``load_memory`` calls ``BayesMemory(archive=...)`` directly,
+    which validates nothing -- so before this guard, a hand-edited manifest
+    loaded silently, ``audit()["estimator"]`` reported one estimator for an
+    archive holding two (it reads ``archive[0]``), and ``remember`` then
+    admitted further terms of whichever estimator sat at index 0.
+    """
+
+    def _saved(self, tmp_path, mutate):
+        path = tmp_path / "campaign.rhep"
+        save_memory(_memory_with_non_default_provenance(), path)
+        manifest_path = path.with_suffix(".json")
+        manifest = json.loads(manifest_path.read_text())
+        mutate(manifest)
+        manifest_path.write_text(json.dumps(manifest))
+        return path
+
+    def test_a_repeated_epoch_id_is_refused(self, tmp_path):
+        def duplicate(manifest):
+            manifest["terms"].append(dict(manifest["terms"][0]))
+
+        path = self._saved(tmp_path, duplicate)
+        with pytest.raises(StateValidationError, match="more than once"):
+            load_memory(path, _factorization())
+
+    def test_a_mixed_estimator_archive_is_refused(self, tmp_path):
+        def mix(manifest):
+            other = dict(manifest["terms"][0])
+            other["epoch_id"] = "night-043"
+            other["include_logdet"] = not other["include_logdet"]
+            manifest["terms"].append(other)
+
+        path = self._saved(tmp_path, mix)
+        with pytest.raises(StateValidationError, match="mixes estimators"):
+            load_memory(path, _factorization())
+
+    def test_a_tempered_term_is_refused(self, tmp_path):
+        def temper(manifest):
+            manifest["terms"][0]["prior_share"] = [1, 300]
+
+        path = self._saved(tmp_path, temper)
+        with pytest.raises(StateValidationError, match="prior_share"):
+            load_memory(path, _factorization())
+
+    def test_the_refusal_happens_before_any_array_is_read(self, tmp_path):
+        """Deleting the binary must not change which error comes out.
+
+        The manifest is checked first precisely so that a bad archive is
+        refused on its own description rather than on whatever the reader
+        happens to trip over in the payload.
+        """
+
+        def duplicate(manifest):
+            manifest["terms"].append(dict(manifest["terms"][0]))
+
+        path = self._saved(tmp_path, duplicate)
+        path.unlink()
+        with pytest.raises(StateValidationError, match="more than once"):
+            load_memory(path, _factorization())

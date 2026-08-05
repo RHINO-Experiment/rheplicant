@@ -174,3 +174,84 @@ def test_a_rank_deficient_epoch_is_representable_and_not_an_error():
         shapes={"x": (2,)}, epoch_id="e0",
     )
     assert int(np.linalg.matrix_rank(np.asarray(term.info.fisher()), tol=1e-9)) == 1
+
+
+class TestANaNAtAFlaggedSampleMustNotReachTheTerm:
+    """The mask has to SELECT, because `0.0 * nan` is `nan`.
+
+    A flagged sample is exactly where a bad value lives -- that is usually why
+    it was flagged. Multiplying it by a zero weight propagates the very number
+    the mask exists to discard, and the damage is asymmetric in the worst way:
+    the poison reaches ``target`` and ``offset`` while ``factor`` stays finite,
+    so curvature looks perfect. Measured on the earlier implementation, with
+    one NaN at a flagged sample: ``log_likelihood`` nan, while ``audit()``
+    reported ``fisher_lambda_min`` 94.06, ``fisher_condition`` 7.11 and
+    ``all_exact`` True -- a healthy, well-conditioned campaign whose every
+    density is NaN. Combining is a QR, so it is irreversible.
+    """
+
+    def _noise(self, flags):
+        from rheplicant.inference import FlaggedNoise, HomoscedasticNoise
+
+        return FlaggedNoise(HomoscedasticNoise(jnp.array(0.1)), flags)
+
+    def _design_and_data(self):
+        a_theta, _ = _design(jax.random.key(20), n_data=8, n_theta=2, n_phi=1)
+        return a_theta, np.asarray(jax.random.normal(jax.random.key(21), (8,)))
+
+    @pytest.mark.parametrize("poisoned", [np.nan, np.inf, -np.inf])
+    def test_a_nonfinite_observation_at_a_flagged_sample_is_discarded(self, poisoned):
+        a_theta, data = self._design_and_data()
+        flags = jnp.array([False, True, False, False, False, False, True, False])
+        clean = compress_linear(
+            design={"x": a_theta}, observed=jnp.asarray(data),
+            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="clean",
+        )
+        spiked = data.copy()
+        spiked[1] = poisoned  # index 1 is flagged
+        poisonedterm = compress_linear(
+            design={"x": a_theta}, observed=jnp.asarray(spiked),
+            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="spiked",
+        )
+        probe = {"x": jnp.array([0.3, -0.7])}
+        # Not merely finite -- EQUAL. A flagged sample contributes nothing, so
+        # its value cannot matter at all.
+        assert float(poisonedterm(probe)) == pytest.approx(float(clean(probe)), abs=1e-12)
+        assert poisonedterm.n_observed == clean.n_observed == 6
+
+    def test_a_nan_in_a_design_row_at_a_flagged_sample_is_discarded(self):
+        """The other half: the poison reaching `factor` defeats audit()'s own guard.
+
+        ``audit()`` reports ``inf`` when the Fisher is singular via
+        ``smallest <= 0``, and ``nan <= 0`` is False -- so a NaN curvature
+        reports ``fisher_condition = nan`` and takes the "healthy" branch.
+        """
+        a_theta, data = self._design_and_data()
+        flags = jnp.array([False, True, False, False, False, False, True, False])
+        spiked = np.asarray(a_theta).copy()
+        spiked[1, :] = np.nan  # flagged row
+        term = compress_linear(
+            design={"x": jnp.asarray(spiked)}, observed=jnp.asarray(data),
+            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="e",
+        )
+        assert np.all(np.isfinite(np.asarray(term.info.fisher())))
+        assert np.isfinite(float(term({"x": jnp.zeros(2)})))
+
+    def test_a_nan_noise_std_is_refused_rather_than_read_as_a_flag(self):
+        """`inf` means not observed; NaN means the noise model broke.
+
+        ``jnp.isfinite`` cannot tell them apart, so an unguarded NaN sigma is
+        silently reclassified as a flag: measured, eight samples in and one
+        sigma NaN gave a perfectly finite term built on seven, with nothing
+        anywhere reporting the loss.
+        """
+        from rheplicant.core.errors import StateValidationError
+
+        a_theta, data = self._design_and_data()
+        sigma = np.full(8, 0.1)
+        sigma[3] = np.nan
+        with pytest.raises(StateValidationError, match="NaN"):
+            compress_linear(
+                design={"x": a_theta}, observed=jnp.asarray(data),
+                noise_std=jnp.asarray(sigma), shapes={"x": (2,)}, epoch_id="e",
+            )

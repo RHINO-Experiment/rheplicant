@@ -107,16 +107,40 @@ def compress_linear(
         jnp.zeros_like(observed) if offset_prediction is None else offset_prediction
     )
     sigma = jnp.broadcast_to(noise.std(prediction), observed.shape)
+    if bool(jnp.any(jnp.isnan(sigma))):
+        raise StateValidationError(
+            "noise_std produced NaN for at least one sample. `inf` is this "
+            "package's encoding of 'not observed' (FlaggedNoise); NaN is a "
+            "broken noise model, and the two are only the same to "
+            "`jnp.isfinite`. Left to that test the sample would be counted as "
+            "flagged, silently shrinking n_observed and building the epoch's "
+            "sufficient statistic on the rest -- finite, self-consistent, and "
+            "quietly short of data. Fix the noise model, or mask the sample "
+            "explicitly with FlaggedNoise."
+        )
     seen = jnp.isfinite(sigma)
     weight = jnp.where(seen, 1.0 / jnp.where(seen, sigma, 1.0), 0.0)
     n_observed = int(jnp.sum(seen))
 
-    residual = (observed - prediction) * weight
-    global_block = _stack(design, names) * weight[:, None]
+    # SELECT on `seen`, never multiply by a zero weight. A flagged sample is
+    # exactly where a NaN lives -- that is usually why it was flagged -- and
+    # `0.0 * nan` is `nan`, so multiplying propagates the value the mask exists
+    # to discard. The poison then reaches `target` and `offset` while `factor`
+    # stays finite, so every density is NaN while `audit()` reports a
+    # well-conditioned campaign: measured lambda_min 94.06, condition 7.11,
+    # all_exact True, log_likelihood nan. Once combined into the accumulator it
+    # is irreversible. Every other masked path in the package already selects
+    # (noise.py, engines.py, likelihood.py); this was the one copy that did not.
+    masked = jnp.where(seen, observed - prediction, 0.0)
+    residual = masked * weight
+    global_block = jnp.where(seen[:, None], _stack(design, names), 0.0) * weight[:, None]
     width = global_block.shape[1]
 
     if nuisance_names:
-        nuisance_block = _stack(nuisance_design, nuisance_names) * weight[:, None]
+        nuisance_block = (
+            jnp.where(seen[:, None], _stack(nuisance_design, nuisance_names), 0.0)
+            * weight[:, None]
+        )
         n_nuisance = nuisance_block.shape[1]
         prior_rows, prior_target, prior_log_std = [], [], []
         for name in nuisance_names:

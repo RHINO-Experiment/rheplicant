@@ -54,6 +54,62 @@ def _describe(term: QuadraticLikelihood) -> dict[str, Any]:
     }
 
 
+def _reject_bad_archive(terms: list[dict[str, Any]]) -> None:
+    """Re-run, on the manifest, the three refusals ``remember`` enforces.
+
+    ``BayesMemory.remember`` refuses a repeated ``epoch_id``, a mixed
+    estimator and a tempered term, and its docstring calls those three "worth
+    the words they cost". None of them was checked here, and ``load_memory`` is
+    a *second* way to build an archive -- it calls ``BayesMemory(archive=...)``
+    directly, which validates nothing. Since this module's own premise is that
+    the manifest is the reconstruction spec and therefore an editable text file,
+    the bypass is reachable by the very mechanism the format documents.
+
+    Measured before this check existed: a manifest with the same ``epoch_id``
+    twice, one term ``include_logdet=True`` and one ``False``, loaded without
+    complaint; ``audit()["estimator"]`` then reported ``("full", "none")`` for
+    an archive holding both, because it reads ``archive[0]``; and ``remember``
+    admitted further terms of whichever estimator happened to sit at index 0.
+
+    Checked on the manifest rather than on the rebuilt terms so that a bad
+    archive is refused before any array is read.
+    """
+    seen: set[str] = set()
+    for entry in terms:
+        epoch_id = entry["epoch_id"]
+        if epoch_id in seen:
+            raise StateValidationError(
+                f"This archive holds epoch {epoch_id!r} more than once. Loading it "
+                "would count that recording's data twice, narrowing the posterior "
+                "with nothing to show for it. A memory built by `remember` cannot "
+                "contain this unless duplicate=True was passed deliberately, so the "
+                "manifest has most likely been edited or concatenated."
+            )
+        seen.add(epoch_id)
+
+    estimators = {
+        ("full" if entry["include_logdet"] else "gls", entry["noise_frozen_at"])
+        for entry in terms
+    }
+    if len(estimators) > 1:
+        raise StateValidationError(
+            f"This archive mixes estimators {sorted(estimators)}. Generalized least "
+            "squares and the full Gaussian likelihood (D21/D23) are different "
+            "estimators; their sum is neither, and audit() would report only the "
+            "first one it finds."
+        )
+
+    tempered = [
+        entry["epoch_id"] for entry in terms if tuple(entry["prior_share"])[0] != 0
+    ]
+    if tempered:
+        raise StateValidationError(
+            f"Term(s) {tempered} carry a nonzero prior_share, but a streaming memory "
+            "stores prior-free factors: log_posterior applies the prior exactly once, "
+            "so a tempered term would apply it twice."
+        )
+
+
 def save_memory(memory, path: str | Path) -> None:
     """Write ``memory`` to ``path`` plus a manifest at ``path.json``."""
     path = Path(path)
@@ -106,6 +162,7 @@ def load_memory(path: str | Path, factorization: Factorization):
             f"This archive's latent shapes {manifest['global_shapes']} do not match "
             f"the factorization's {[list(s) for s in factorization.global_shapes]}."
         )
+    _reject_bad_archive(manifest["terms"])
 
     names = factorization.global_names
     shapes = factorization.global_shapes
