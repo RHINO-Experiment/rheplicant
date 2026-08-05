@@ -2,6 +2,73 @@
 
 ## Unreleased
 
+### `names=` is the spelling the docs teach, and `as_dict` is the one-call wrap
+
+`linear_operator`, `check_linearity` and their exits take a singular `name=` and
+a plural `names=`, and the split is deliberate: `name='gain'` builds a block
+whose `x` is one array, `names=('gain',)` a group of one whose `x` — and whose
+solve — is `{'gain': array}`. Both stay. What changed is which one the
+documentation introduces, because the bare form is the one nothing downstream
+accepts.
+
+**Measured, not assumed.** Six consumers reject the bare array, with six
+different exceptions and not one of them naming the actual mistake:
+`space.forward_fn`'s `forward` and `ParameterSpace.bind` (`TypeError: JAX does
+not support string indexing; got idx='gain'`), `identifiability(at=)` and
+`linear_operator(at=)` (`TypeError: iteration over a 0-d array`),
+`conditional_potential` (`TypeError: 'jaxlib._jax.ArrayImpl' object is not a
+mapping`) and `fisher_information` (the string-indexing one again, from inside a
+`jacfwd` trace). None of them accepts it. So the helper earned its place rather
+than being added on the strength of the proposal:
+
+* **`LinearBlock.as_dict(x)`** returns `{name: x}` for a one-latent block and
+  the group's own dict unchanged for a group — idempotent across the two
+  spellings, so one call is correct whichever built the block. A group refuses
+  anything that is not a dict over its own members by name, since that is
+  another block's answer and wrapping it would file an array under a name it
+  does not belong to.
+* `wiener_solve` and `gcr_sample` say in their `Returns:` which shape comes
+  back and name the six consumers that need the wrap.
+* `docs/inference.md` and `examples/inferring_anything.py` now introduce
+  `names=`, including for one latent, with the friction stated: a grouped block
+  takes `prior_std` **per member**, because `S` is block-diagonal over the group
+  rather than a multiple of the identity.
+
+`tests/inference/test_linear_block_as_dict.py` pins both halves — the wrap, and
+that the six consumers really do reject the unwrapped form — so if any of them
+ever starts accepting it, that is a test going red rather than a paragraph going
+quietly stale.
+
+Two stale numbers fixed on the way: the page claimed the one-latent gain solve
+returns `Array(1.09999272)` on a `(128, 32)` grid. Re-measured, it is
+`Array(1.099999)` on `(8, 4)`, which is the grid that model actually has.
+
+### `noise=` and `noise_std=` are two types, and the rename is rejected
+
+A previous recommendation was to rename `noise_std=` (`fisher_information`,
+`wiener_solve`, `gcr_sample`, `condition_estimate`, `to_numpyro_model`) to
+`noise=` (`SamplingPlan.estimate`, `SamplingPlan.sample`, `iterative_gls`),
+keeping the old spelling as a deprecated alias. **Rejected**, and the reason is
+now written where a reader meets it — a subsection of `docs/inference.md` and a
+cross-reference from the `noise_std` argument docs of all three conjugate exits
+— rather than living in a review nobody can find. No signature changed.
+
+`noise_std=` names a σ that has already been decided; `noise=` names the *rule*
+that decides one. At the conjugate solves the two are not interchangeable,
+because there is nothing for a rule to be evaluated at: `noise.std(prediction)`
+needs a prediction, and a Wiener solve's prediction is what it solves for. The
+keyword is therefore the signal, and renaming it would make the wrong call
+type-check without making it meaningful.
+
+The acceptance matrix was re-measured cell by cell, and it is sharper than the
+proposal assumed in both directions. `fisher_information` and `to_numpyro_model`
+write `noise_std=` and accept a `NoiseModel` anyway — they *have* a prediction,
+so `as_noise_model` can normalize. `iterative_gls` writes `noise=` and accepts
+**only** a model: a bare array raises `AttributeError: 'ArrayImpl' object has no
+attribute 'depends_on_prediction'`, because it is the one `noise=` exit that
+does not route through `as_noise_model`. Both edges are now in the table on the
+page.
+
 ### The fold reads as a dispatch, and `core/graph.py` did not split
 
 `assemble` was one function at cyclomatic complexity 27, 29 branches and 92

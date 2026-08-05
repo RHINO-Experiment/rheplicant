@@ -285,8 +285,10 @@ answers the question, and every route takes it:
   - inherited
 :::
 
-Anywhere the package writes `noise_std=`, a noise model is accepted in its
-place — the argument is polymorphic, so nothing downstream changed signature:
+Wherever an exit **has a prediction to evaluate the model at**, `noise_std=`
+takes one in the bare array's place and no signature changed to allow it —
+`fisher_information` and `to_numpyro_model` both normalize through
+`as_noise_model`:
 
 ```python
 from rheplicant.inference import RadiometerNoise, FlaggedNoise
@@ -296,6 +298,13 @@ noise = FlaggedNoise(RadiometerNoise(channel_width=61e3, integration_time=1.0),
 
 fisher_information(forward, params, noise_std=noise)
 ```
+
+The conjugate solves are the exception, and the exception is the interesting
+part: they have no prediction — it is what they solve for — so `wiener_solve`,
+`gcr_sample` and `condition_estimate` take a decided σ array and refuse a model
+rather than freezing it at an arbitrary point. That is the whole of the
+[`noise=` / `noise_std=` split](#noise-or-noise_std-the-keyword-is-the-type),
+below.
 
 `FlaggedNoise` is how RFI flags reach the covariance: by **wrapping a noise
 model**, not by threading a `flags=` keyword through five separate functions. An
@@ -364,10 +373,29 @@ space = ParameterSpace.direct(
     fn=lambda delta: mean_sky + delta,      # affine, not just linear
     linear=True,
 )
-check_linearity(space, twin, state)          # compares against its own linearization
-block = linear_operator(space, twin, state)  # A, Aᵀ and the offset — no matrix formed
-solved, residual = wiener_solve(block, observed, noise_std=0.02, prior_std=1.0)
+check_linearity(space, twin, state, names=("sky_delta",))   # against its own linearization
+block = linear_operator(space, twin, state, names=("sky_delta",))  # A, Aᵀ, offset
+solved, residual = wiener_solve(block, observed, noise_std=0.02,
+                                prior_std={"sky_delta": 1.0})
+solved["sky_delta"]                          # the answer, under its own name
 ```
+
+`names=` is the spelling to reach for, including — as here — for a block of
+**one** latent. Its answer is a `{name: array}` dict, which is the shape
+everything downstream reads; the singular `name="sky_delta"` is legitimate and
+different, and is covered [below](#one-latent-or-a-group). Note what the plural
+costs and what it buys: `prior_std` becomes one entry per member, because `S` is
+block-diagonal over a group rather than a multiple of the identity — and one
+number spread across a noise-wave temperature in kelvin and a gain of order one
+would be a prior nobody declared. Omit it entirely and each latent's own
+`Latent(prior=...)` drives the solve.
+
+That snippet is a fragment — `maps`, `mean_sky`, `twin`, `state` and `observed`
+come from your own model — so it is not run as written. The four calls in it, at
+exactly this spelling, are what
+[`examples/inferring_anything.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/inferring_anything.py)
+executes end to end; the [next section](#one-latent-or-a-group) has the
+self-contained version with its real output.
 
 :::{figure} _static/inference-linear-light.svg
 :figclass: only-light
@@ -436,20 +464,71 @@ solved            # {"t_unc": Array, "t_cos": Array, "t_sin": Array}
 A group's `x` is a `{name: array}` dict, and so is the answer. That is the
 point: the physical names survive the solve instead of the caller slicing an
 anonymous stacked vector — and the dict is the shape the rest of the package
-consumes. Measured on the tour's one-latent gain model:
+consumes. Run both spellings against one model and the difference is not in the
+number, it is in what the number can be handed to:
+
+```python
+from rheplicant.core.pipeline import Pipeline
+from rheplicant.radio import GainOperator, SkyOperator
+
+state = State(coords=Coordinates(time=jnp.linspace(0.0, 60.0, 8),
+                                 freq=jnp.linspace(60e6, 85e6, 4)),
+              env=Environment(temperature=jnp.array(280.0)), key=jax.random.key(0),
+              meta={"telescope": "my-antenna", "obs_id": "tour-001"})
+twin = Pipeline(SkyOperator(amplitude=jnp.array(100.0)),
+                GainOperator(gain=jnp.array(1.0)), names=("sky", "gain"))
+space = ParameterSpace.direct("gain", init=1.0, into=lambda p: p["gain"].gain,
+                              prior=dist.Normal(1.0, 0.3), linear=True)
+forward, _ = space.forward_fn(twin, state)
+observed = forward({"gain": jnp.array(1.1)})
+
+grouped = linear_operator(space, twin, state, names=("gain",))
+singular = linear_operator(space, twin, state, name="gain")
+many, _ = wiener_solve(grouped, observed, noise_std=0.5)
+one, _ = wiener_solve(singular, observed, noise_std=0.5)
+
+print("many:", many, "| forward(many) ->", jnp.shape(forward(many)))
+print("one: ", repr(one))
+forward(one)
+```
 
 ```text
-names=('gain',)  -> {'gain': Array(1.09999272)}   forward(solved) -> (128, 32)
-name='gain'      -> Array(1.09999272)             forward(x) -> TypeError: JAX
-                                                  does not support string
-                                                  indexing; got idx='gain'
+many: {'gain': Array(1.099999, dtype=float32)} | forward(many) -> (8, 4)
+one:  Array(1.099999, dtype=float32)
+TypeError: JAX does not support string indexing; got idx='gain'
 ```
 
 `names=("gain",)` is a legitimate **group of one**, and is how a partition holds
 one-latent and many-latent blocks without special-casing either; the plan's own
-engine always spells it that way. Prefer `names=` unless you specifically want
-the bare array — if you have one, wrap it as `{block.name: x}` before it meets
-anything downstream.
+engine always spells it that way. Reach for `names=` by default. The singular is
+not deprecated and is not going away — it is the one-latent shorthand, and its
+bare array is the right thing when you are about to do linear algebra with it
+rather than put it back into the model.
+
+When you do have a bare one, wrap it as `{block.name: x}` before it meets
+anything else. `LinearBlock.as_dict` is that call, and it is a no-op on the
+grouped form, so it is correct whichever spelling built the block:
+
+```python
+print(singular.as_dict(one), "| forward(...) ->",
+      jnp.shape(forward(singular.as_dict(one))))
+print("grouped.as_dict(many) == many:", grouped.as_dict(many) == many)
+```
+
+```text
+{'gain': Array(1.099999, dtype=float32)} | forward(...) -> (8, 4)
+grouped.as_dict(many) == many: True
+```
+
+Six consumers need that wrap, and none of their exceptions names the actual
+mistake: `space.forward_fn`'s `forward` and `space.bind` raise the `TypeError`
+above, `identifiability(at=)` and `linear_operator(at=)` raise `TypeError:
+iteration over a 0-d array`, `conditional_potential` raises `TypeError:
+'jaxlib._jax.ArrayImpl' object is not a mapping`, and `fisher_information`
+raises the string-indexing one again from inside a `jacfwd` trace.
+`tests/inference/test_linear_block_as_dict.py` pins all six, so if any of them
+ever starts accepting the bare form, that is a test going red rather than a
+paragraph going quietly stale.
 
 **Solving a group jointly is not the same as alternating over its members.** Two
 latents the data barely tells apart are resolved in one CG here, where
@@ -480,7 +559,8 @@ itself, so `x = M⁻¹b` carries the posterior mean **and** covariance
 
 ```python
 sample, residual = gcr_sample(block, observed, noise_std=0.02,
-                              prior_std=1.0, key=jax.random.key(0))
+                              prior_std={"sky_delta": 1.0}, key=jax.random.key(0))
+sample["sky_delta"]                         # same shape the solve returned
 ```
 
 Both take `prior_mean=`, which defaults to zero — wrong for most physical
@@ -501,7 +581,7 @@ space = ParameterSpace.direct(
     into=lambda p: p["rx"].noise_wave_temps,
     prior=dist.Normal(250.0, 50.0), linear=True,
 )
-block = linear_operator(space, pipeline, template)
+block = linear_operator(space, pipeline, template, names=("t_nw",))
 mean, _ = wiener_solve(block, observed, noise_std=sigma)   # S is already known
 ```
 
@@ -513,9 +593,9 @@ also raises here: these routines solve `(AᵀN⁻¹A + S⁻¹)x = b`, and substi
 such a prior's mean and variance would hand back a finite, confident posterior
 for a model you did not declare. Sample that space with NUTS instead.
 
-With several latents in the space, `linear_operator(..., name="gain")` carries
-**that** latent's declaration — each block gets its own `S`, which is what
-makes the Gibbs sweep below sound. And the contradiction check reads the two
+With several latents in the space, `linear_operator(..., names=("gain",))`
+carries **that** latent's declaration — each block gets its own `S`, which is
+what makes the Gibbs sweep below sound. And the contradiction check reads the two
 values, not the context: concrete numbers are compared normally under `jit`,
 `eqx.filter_jit` and inside `iterative_gls`'s reweighting loop. Only a keyword
 that is *itself* a tracer is refused as undecidable, because then there is no
@@ -533,17 +613,28 @@ rebuild it wherever they currently are, and check the linearity claim once
 outside the loop:
 
 ```python
-check_linearity(space, twin, state, "sky_alms")        # once
+check_linearity(space, twin, state, names=("sky_alms",))   # once
 for _ in range(n_sweeps):
-    block = linear_operator(space, twin, state, "sky_alms",
-                            at=values, check=False)     # every sweep
-    values["sky_alms"], _ = gcr_sample(block, observed, noise_std=sigma,
-                                       prior_std=s, key=next(keys))
-    values = update_the_nonlinear_ones(values)          # NUTS, MH, optimize...
+    block = linear_operator(space, twin, state, names=("sky_alms",),
+                            at=values, check=False)         # every sweep
+    drawn, _ = gcr_sample(block, observed, noise_std=sigma,
+                          prior_std={"sky_alms": s}, key=next(keys))
+    values = {**values, **drawn}                            # the dict merges straight in
+    values = update_the_nonlinear_ones(values)              # NUTS, MH, optimize...
 ```
+
+That merge is the grouped spelling paying for itself: `drawn` is already keyed
+by latent, so the update is one `{**values, **drawn}` and stays right when the
+block later grows a second member. It is exactly what `SamplingPlan`'s conjugate
+engine does internally, which is why that engine always spells the block
+`names=` even for one latent.
 
 Omitting `at=` is silent, not loud: the block keeps describing the model at its
 declared starting point, which is right for exactly one sweep.
+
+The sketch is not runnable as written — `update_the_nonlinear_ones` is yours —
+but its shape is: a grouped draw merges into `values` and `at=values` rebuilds
+the block from it, with no unpacking anywhere in the loop.
 
 That loop is what [`SamplingPlan`](#a-plan-one-partition-two-exits) declares, so
 you do not write it — including the two things a hand-rolled version leaves out,
@@ -620,6 +711,111 @@ the right thing to condition a constrained realization on, because a GCR draw
 *is* a draw from a linear-Gaussian posterior at a given covariance. If you want
 the full likelihood's mode or posterior, that is a gradient sampler's job.
 
+### `noise=` or `noise_std=`: the keyword is the type
+
+Two spellings have now run past each other on this page — `iterative_gls(...,
+noise=RadiometerNoise(...))` on one line and `gcr_sample(...,
+noise_std=found.noise_std)` on the next — and they are **not** two names for one
+argument.
+
+* **`noise_std=`** names a σ that has already been decided: an array.
+  It appears on `wiener_solve`, `gcr_sample`, `condition_estimate`,
+  `fisher_information` and `to_numpyro_model`.
+* **`noise=`** names the *rule that decides* one: a `NoiseModel`.
+  It appears on `iterative_gls`, `SamplingPlan.estimate` and
+  `SamplingPlan.sample`.
+
+A previous recommendation was to rename `noise_std=` to `noise=` throughout,
+keeping the old spelling as a deprecated alias. **It is rejected**, and the
+reason is written here rather than left in a review nobody can find: at the
+conjugate solves the two are not interchangeable, because there is nothing for a
+rule to be evaluated *at*. `noise.std(prediction)` needs a prediction; a Wiener
+solve's prediction is exactly what it is solving for. Renaming the keyword would
+make the wrong call type-check without making it meaningful — the solve would
+have to freeze σ at some arbitrary point and hand back the result as a
+posterior.
+
+So the conjugate seam refuses a model **by name**, and says which of the two
+problems it is. Both calls below were run against the self-contained model in
+[One latent, or a group](#one-latent-or-a-group); the refusal fires on the
+argument's *type* and the exit's own name, before anything block-specific, so it
+reads the same for any block:
+
+```python
+from rheplicant.inference import HomoscedasticNoise
+
+wiener_solve(block, observed, noise_std=HomoscedasticNoise(sigma=0.5))
+```
+
+```text
+ParameterSpaceError: wiener_solve takes a plain sigma array, not a
+HomoscedasticNoise. The conjugate solves compute 1/sigma**2 directly; pass
+`noise.std(...)`, or the sigma you built the model from.
+```
+
+```python
+wiener_solve(block, observed,
+             noise_std=RadiometerNoise(channel_width=61e3, integration_time=1.0))
+```
+
+```text
+ParameterSpaceError: wiener_solve was given RadiometerNoise, whose sigma
+depends on the prediction — but a conjugate solve has no prediction to
+evaluate it at, because the prediction is what it solves for. Freeze it
+yourself at the parameter tuple you mean (`noise.std(prediction)`) and pass
+that array, which also makes explicit that the result is an exact draw at
+THAT covariance and not from the full model's conditional. A SamplingPlan
+does this per sweep.
+```
+
+The second message is longer because that case is not a packaging problem.
+Freezing σ is a real statistical choice with a stated consequence — an exact
+draw at *that* covariance, which is not the full model's conditional — and it
+belongs to whoever knows which parameter tuple to freeze at. `iterative_gls`
+is that choice made by fixed point, `SamplingPlan` is it made per sweep, and
+both take `noise=` for precisely that reason.
+
+Measured across the exits, one call per cell:
+
+| exit | keyword | bare σ array | `HomoscedasticNoise` | `RadiometerNoise` |
+|---|---|---|---|---|
+| `wiener_solve` | `noise_std=` | ✅ | ❌ named refusal | ❌ named refusal |
+| `gcr_sample` | `noise_std=` | ✅ | ❌ named refusal | ❌ named refusal |
+| `condition_estimate` | `noise_std=` | ✅ | ❌ bare `TypeError` | ❌ bare `TypeError` |
+| `fisher_information` | `noise_std=` | ✅ | ✅ | ✅ |
+| `to_numpyro_model` | `noise_std=` | ✅ | ✅ | ✅ |
+| `iterative_gls` | `noise=` | ❌ `AttributeError` | ✅ | ✅ |
+| `SamplingPlan.estimate` | `noise=` | ✅ | ✅ | ✅ |
+| `SamplingPlan.sample` | `noise=` | ✅ | ✅ | ✅ |
+
+Three edges that table makes visible, and none of them softens the split:
+
+* `fisher_information` and `to_numpyro_model` write `noise_std=` and take a
+  model anyway. They can — both *have* a prediction, so `as_noise_model`
+  normalizes and `noise.std(prediction)` is answerable. The keyword says what
+  the argument is; where both readings are usable, both are accepted.
+* `condition_estimate` refuses a model, but with `TypeError: Value
+  'HomoscedasticNoise(...)' with dtype object is not a valid JAX array type`
+  rather than the sentence its two siblings give. It does not run the shared
+  `_check_solve_arguments`, so neither the seam refusal nor the 1-D axis check
+  reaches it. Same rule, worse message.
+* `iterative_gls` writes `noise=` and takes **only** a model — a bare array
+  raises `AttributeError: 'ArrayImpl' object has no attribute
+  'depends_on_prediction'`. It is the one `noise=` exit that does not route
+  through `as_noise_model`. With a constant σ there is nothing to reweight and
+  `wiener_solve` is what you wanted; wrap it as `HomoscedasticNoise(sigma)` if
+  you want the fixed-point machinery regardless.
+
+The rest of the argument lives in two docstrings, and was measured rather than
+asserted. `_refuse_a_noise_model_at_the_conjugate_seam` carries the messages
+above; `_check_solve_arguments` carries why this seam is deliberately *not*
+routed through `as_noise_model`, which is that `1/σ²` and `inverse_variance`
+agree on every finite σ, on `inf` (both exactly `0`), on `0` and on a negative
+σ — and disagree on **NaN**, where the conjugate solves propagate it and the
+caller finds out, while `inverse_variance` maps it to weight `0.0`, which
+*means* "unobserved". In a conjugate solve a silently dropped sample moves the
+posterior **width**, not only the point, with nothing reporting how many went.
+
 ---
 
 ## Conditioning: why a residual is not an accuracy
@@ -689,12 +885,12 @@ inside, the same bargain `linear_operator`'s `check` argument offers for
 kappa = condition_estimate(block, noise_std=sigma, prior_std=s)  # once
 tol = target_error / kappa
 for _ in range(n_sweeps):
-    block = linear_operator(space, twin, state, "sky_alms",
+    block = linear_operator(space, twin, state, names=("sky_alms",),
                             at=values, check=False)
-    values["sky_alms"], _ = gcr_sample(block, observed, noise_std=sigma,
-                                       prior_std=s, tol=tol, maxiter=4000,
-                                       require_convergence=None,
-                                       key=next(keys))
+    drawn, _ = gcr_sample(block, observed, noise_std=sigma,
+                          prior_std={"sky_alms": s}, tol=tol, maxiter=4000,
+                          require_convergence=None, key=next(keys))
+    values = {**values, **drawn}
 ```
 :::
 
@@ -1024,15 +1220,16 @@ Rows carry their names.
 
 :::{grid-item-card} Solve or sample exactly
 ```python
-block = linear_operator(space, twin, state)
+block = linear_operator(
+    space, twin, state, names=("sky_delta",))
 mean, _ = wiener_solve(
-    block, data, noise_std=0.02, prior_std=1.0)
+    block, data, noise_std=0.02)
 draw, _ = gcr_sample(
-    block, data, noise_std=0.02, prior_std=1.0,
+    block, data, noise_std=0.02,
     key=jax.random.key(0))
 ```
 +++
-For blocks too big for a gradient sampler.
+Answers keyed by latent; too big for a gradient sampler.
 :::
 ::::
 

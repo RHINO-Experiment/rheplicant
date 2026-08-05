@@ -181,6 +181,46 @@ class LinearBlock:
         """The latents in this block, in the caller's order — one, or several."""
         return self.name if isinstance(self.name, tuple) else (self.name,)
 
+    def as_dict(self, x: Any) -> dict[str, Any]:
+        """``x`` as the ``{name: array}`` mapping every consumer downstream reads.
+
+        A solve returns this block's own domain — a bare array for a ``name=``
+        block, a ``{name: array}`` dict for a ``names=`` group — and only the
+        second is the shape anything else takes. ``space.forward_fn``'s
+        ``forward``, :meth:`~rheplicant.inference.parameters.ParameterSpace.bind`,
+        :func:`~rheplicant.inference.uncertainty.fisher_information`,
+        :func:`~rheplicant.inference.identifiability.identifiability`'s ``at=``,
+        :func:`linear_operator`'s ``at=`` and
+        :func:`~rheplicant.inference.engines.conditional_potential` all index by
+        latent name, and all six raise on the bare form — with six *different*
+        exceptions, none of which names the actual mistake
+        (``TypeError: JAX does not support string indexing; got idx='gain'`` is
+        the friendliest of them, and it arrives from inside a trace).
+
+        So this is the wrap, and it is deliberately **idempotent over the two
+        spellings**: the same one call is correct whether the block was built
+        with ``name=`` or with ``names=``, which is what lets calling code stop
+        caring which it was. It returns a new dict; the block is untouched.
+
+        Raises:
+            ParameterSpaceError: for a group, if ``x`` is not a dict with one
+                entry per member — that is someone else's solution, and
+                wrapping it would put an array under a name it does not belong
+                to.
+        """
+        if not self.grouped:
+            return {self.name: x}
+        if isinstance(x, dict) and set(x) == set(self.names):
+            return dict(x)
+        raise ParameterSpaceError(
+            f"This block groups {list(self.names)}, so its solution is already a dict "
+            f"with one entry per member and as_dict() has nothing to wrap; it was given "
+            f"{type(x).__name__}"
+            + (f" keyed by {sorted(x)}" if isinstance(x, dict) else "")
+            + ". A bare array here is another block's answer, and wrapping it would file "
+            "it under a name it does not belong to."
+        )
+
 
 #: Refusal shared by every entry point that takes both spellings. Named rather
 #: than repeated so the two exits cannot drift into saying different things.
@@ -1126,6 +1166,19 @@ def wiener_solve(
             callers mean — so that case raises rather than being resolved by
             trailing-axis alignment. See
             :func:`~rheplicant.inference.noise.check_noise_std_axis`.
+
+            **An array, never a** :class:`~rheplicant.inference.noise.NoiseModel`,
+            and the keyword name is the signal rather than an accident of
+            history. ``noise_std=`` is a sigma that has already been decided;
+            ``noise=`` — on :func:`~rheplicant.inference.gls.iterative_gls` and
+            on :class:`~rheplicant.inference.plan.SamplingPlan` — is the *rule*
+            that decides one. A conjugate solve has no prediction to evaluate a
+            rule at, the prediction being what it solves for, so a model is
+            refused here by name rather than quietly frozen at some arbitrary
+            point: see ``_refuse_a_noise_model_at_the_conjugate_seam`` for
+            the message and ``_check_solve_arguments`` for the two measured
+            reasons this seam is not routed through ``as_noise_model``. Freeze
+            it yourself — ``noise.std(prediction)`` — and pass that array.
         prior_std: prior standard deviation on the latent — scalar or
             broadcastable to it. **Defaults to the latent's declared prior**;
             required only when there is none, because without a prior the
@@ -1162,6 +1215,19 @@ def wiener_solve(
         ``(x̂, relative_residual)``, the residual being ``‖M x̂ - b‖ / ‖b‖``
         over the real degrees of freedom. Note that this is the residual, not
         the error; multiply by :func:`condition_estimate` for the error bound.
+
+        ``x̂`` is the block's own domain, so its shape follows the spelling that
+        built the block: a ``{name: array}`` dict for ``names=``, and a **bare
+        array** for ``name=``. The bare form is not what anything downstream
+        reads — ``space.forward_fn``'s ``forward``,
+        :meth:`~rheplicant.inference.parameters.ParameterSpace.bind`,
+        :func:`~rheplicant.inference.uncertainty.fisher_information`,
+        :func:`~rheplicant.inference.identifiability.identifiability`'s ``at=``,
+        :func:`linear_operator`'s own ``at=`` and
+        :func:`~rheplicant.inference.engines.conditional_potential` all index by
+        latent name and all six raise on it. Wrap it as ``{block.name: x̂}``
+        first; :meth:`LinearBlock.as_dict` is that call, and does nothing to the
+        grouped form, so it is correct either way.
 
     Note:
         **Conditioning, and why ``tol`` is not accuracy.** Residual and error
@@ -1283,10 +1349,19 @@ def condition_estimate(
 
     Args:
         block: from :func:`linear_operator`.
-        noise_std, prior_std: as for :func:`wiener_solve`, ``prior_std``
-            included — it defaults to the latent's declared prior, so the κ
-            reported here is the κ of the system those solves will build rather
-            than of a system nobody solves.
+        noise_std: the same decided sigma array those solves take, and a
+            :class:`~rheplicant.inference.noise.NoiseModel` is as wrong here as
+            it is there — a κ is the conditioning of one particular normal
+            operator, so it needs the covariance settled, not a rule for
+            producing one. Note that this exit does **not** run
+            ``_check_solve_arguments``, so neither the seam refusal nor the
+            1-D axis check fires: a model reaches ``jnp.asarray`` and comes back
+            as ``TypeError: Value 'HomoscedasticNoise(...)' with dtype object is
+            not a valid JAX array type``, which names the wrong layer. Pass
+            ``noise.std(prediction)``.
+        prior_std: as for :func:`wiener_solve` — it defaults to the latent's
+            declared prior, so the κ reported here is the κ of the system those
+            solves will build rather than of a system nobody solves.
         iterations: power-iteration steps per end of the spectrum. The default
             is comfortable; the estimate typically settles within three.
         key: PRNG key for the starting vectors. Fixed by default, so the
@@ -1481,7 +1556,14 @@ def gcr_sample(
     Args:
         block: from :func:`linear_operator`.
         observed: the data, shaped like ``block.offset``.
-        noise_std: noise standard deviation — scalar or broadcastable to the data.
+        noise_std: noise standard deviation, exactly as for
+            :func:`wiener_solve` — the same axis contract on a 1-D sigma
+            (both exits share ``_check_solve_arguments``, so a shape one refuses
+            the other refuses), and the same refusal of a
+            :class:`~rheplicant.inference.noise.NoiseModel` at this seam. The
+            keyword is the signal: ``noise_std=`` takes a decided sigma,
+            ``noise=`` takes the rule that decides one, and a draw has no
+            prediction to evaluate a rule at any more than the mean does.
         prior_std: prior standard deviation on the latent. Defaults to the
             latent's declared prior, as for :func:`wiener_solve`, and required
             only when there is none. For a complex latent this is the width of
@@ -1507,6 +1589,10 @@ def gcr_sample(
         directions left unresolved are the prior-dominated ones that should
         have carried the most scatter — so ``require_convergence`` is on by
         default here too.
+
+        ``x`` carries the block's domain, dict or bare array, exactly as
+        :func:`wiener_solve`'s does; see the note there, and
+        :meth:`LinearBlock.as_dict` for the wrap.
 
     Note:
         ``S`` is read off ``Latent(prior=...)`` when the keywords are omitted;

@@ -208,26 +208,44 @@ sky_space = ParameterSpace.direct(
     fn=lambda delta: MEAN_SKY + delta,
     linear=True,
 )
-errors = check_linearity(sky_space, calibrated, state)
+# `names=` rather than `name=` throughout, including for this block of ONE
+# latent: the answer then comes back as {"sky_delta": array} and can be handed
+# straight to sky_space.forward_fn / bind / identifiability. The singular
+# spelling returns a bare array, which all of those reject -- see
+# docs/inference.md, "One latent, or a group". A grouped block also takes its
+# prior PER MEMBER, since S is block-diagonal over the group.
+SKY_BLOCK = ("sky_delta",)
+SKY_PRIOR = {"sky_delta": SKY_SCALE}
+
+errors = check_linearity(sky_space, calibrated, state, names=SKY_BLOCK)
 print("3. the sky map as a declared-linear block")
 print(f"   linearity check passed: worst relative departure {max(errors.values()):.1e} "
       f"over probes\n      spanning {min(errors):g}x - {max(errors):g}x "
       "(the small-probe figure is roundoff, below the absolute floor)")
 
-block = linear_operator(sky_space, calibrated, state)
-solved, residual = wiener_solve(block, observed, noise_std=NOISE, prior_std=SKY_SCALE)
+block = linear_operator(sky_space, calibrated, state, names=SKY_BLOCK)
+answer, residual = wiener_solve(block, observed, noise_std=NOISE, prior_std=SKY_PRIOR)
+solved = answer["sky_delta"]
 recovered = MEAN_SKY + solved
 before = jnp.sqrt(jnp.mean((MEAN_SKY - true_maps) ** 2))
 after = jnp.sqrt(jnp.mean((recovered - true_maps) ** 2))
 print(f"   CG solved {solved.size} degrees of freedom, residual {float(residual):.1e}")
 print(f"   RMS vs truth: {float(before):.3f} K (prior mean) -> {float(after):.3f} K")
+# The answer is keyed by latent, so it goes back into the model with no
+# unpacking: forward(answer) is the prediction at the posterior mean.
+sky_forward, _ = sky_space.forward_fn(calibrated, state)
+print(f"   and it feeds straight back: forward(answer) -> "
+      f"{jnp.shape(sky_forward(answer))}, chi2/N "
+      f"{float(jnp.mean(((observed - sky_forward(answer)) / NOISE) ** 2)):.3f}")
 
 # ...and the posterior is not just its mean. gcr_sample adds a fluctuation term
 # to the SAME right-hand side, which makes each solve an exact, independent
 # posterior draw — no chain, no burn-in, same cost as the mean.
 keys = jax.random.split(jax.random.key(9), 200)
 draws = jax.vmap(
-    lambda k: gcr_sample(block, observed, noise_std=NOISE, prior_std=SKY_SCALE, key=k)[0]
+    lambda k: gcr_sample(
+        block, observed, noise_std=NOISE, prior_std=SKY_PRIOR, key=k
+    )[0]["sky_delta"]
 )(keys)
 spread = draws.std(axis=0)
 print(f"   {keys.shape[0]} exact posterior draws: per-pixel sigma spans "
