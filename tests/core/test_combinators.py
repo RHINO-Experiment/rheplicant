@@ -287,6 +287,34 @@ class TestSelectOperator:
         with pytest.raises(PipelineError, match="SelectOperator branch"):
             op(self._state([0, 1]))
 
+    @pytest.mark.parametrize("none_first", [True, False])
+    def test_a_branch_that_produces_no_data_is_refused(self, none_first):
+        """The SelectOperator half of a refusal SumOperator already had tested.
+
+        Both combinators strip ``data`` to None before calling a branch, so a
+        transform-shaped branch contributes None and there is nothing to select
+        from. SumOperator's copy of this guard was covered and this one was
+        not, and they are separate lines carrying separate messages.
+
+        Parametrized over position because the guard sits inside the branch
+        loop while the accumulator is still None on the first iteration: a
+        version that tested the accumulator instead of the contribution would
+        pass with the passthrough second and fail with it first.
+        """
+        from rheplicant.core.combinators import SelectOperator
+
+        passthrough = _Identity()
+        source = self._branch(2.0)
+        branches = (passthrough, source) if none_first else (source, passthrough)
+        names = ("dead", "live") if none_first else ("live", "dead")
+        op = SelectOperator(*branches, names=names)
+        with pytest.raises(PipelineError) as excinfo:
+            op(self._state([0, 1, 0]))
+        # Names the combinator and the offending branch: SumOperator's copy of
+        # the sentence differs only in the first word, and a message that named
+        # the wrong branch would still match on "produced no data".
+        assert "SelectOperator branch 'dead' produced no data" in str(excinfo.value)
+
 
 class TestReplaceBranch:
     def test_swaps_and_preserves_names(self):
