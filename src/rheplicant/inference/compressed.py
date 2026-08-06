@@ -285,3 +285,129 @@ class RawLikelihood(eqx.Module):
         return quadratic - 0.5 * jnp.sum(
             jnp.where(seen, jnp.log(2.0 * jnp.pi * safe**2), 0.0)
         )
+
+
+#: The name the coefficient vector is carried under inside a T1 term's
+#: ``SqrtInfo``. Not a latent: it is the vector ``c(theta)`` the basis expands
+#: the prediction in, and it is named so that accumulating T1 terms uses exactly
+#: Plan A's QR rather than a parallel implementation of it.
+COEFFICIENTS = "__basis_coefficients__"
+
+
+class ReducedBasisLikelihood(eqx.Module):
+    """T1 -- one epoch's likelihood as a quadratic in the basis coefficients.
+
+    ``-2 log L_e(theta) = || S_e^T (c(theta) - c_ref) - r_e ||^2 + const``, which
+    is ``compress_linear``'s arithmetic with the whitened basis rows in place of
+    a design matrix. The consequence worth stating: the stored numbers are a
+    :class:`~rheplicant.inference.sqrtinfo.SqrtInfo` over an ``(n_S,)`` vector,
+    so **everything Plan A proved of that form transfers** -- ``F = R^T R`` is
+    PSD by construction, a rank-deficient epoch is a short ``R``, accumulation
+    is the QR of stacked factors, and the QR's corner is a constant that belongs
+    in the offset.
+
+    §4.1's ``(chi2_r, p, R)`` is the same triple in different coordinates:
+    ``chi2_r = ||z||^2 + rho^2`` and ``p = R^T z``.
+
+    **The two constants in the offset are the whole reason this class is tested
+    against absolute log-densities.** On the RHINO fixture the masked
+    normalisation ``-0.5 sum log(2 pi sigma^2)`` is ``+200.738`` nats and the QR
+    corner ``-0.5 rho^2`` is ``-51.321``; both are pure offsets, so a term built
+    without either has exactly the right shape, the right gradient and the right
+    curvature, and the wrong evidence. Plan A shipped both errors once. The
+    measured gap between this tier and T0 at probes one prior sigma from the
+    truth is at most ``1.3e-6`` nats -- eight orders below either constant -- so
+    comparing absolute densities to a thousandth of a nat has room to see a
+    dropped term and no room to be fooled by the truncation.
+
+    **The basis is shared, not copied.** ``basis`` is a reference to one
+    :class:`~rheplicant.inference.reduced_basis.ReducedBasis` per campaign, so N
+    epochs cost ``n_S * n_data`` once plus ``O(n_S^2)`` each.
+
+    **``exact=False``, always.** T1 is exact where ``mu`` lies in the span, and
+    nothing can certify that for every ``theta``. The honest guard is §5
+    requirement 6's: ``support`` is the region the *training bank* populated, the
+    projection error is uniformly bounded there, and the operative diagnostic is
+    re-measuring fidelity at draws from the accumulated posterior -- which needs
+    the forward model, not the raw data, and therefore survives archiving.
+
+    Attributes:
+        basis: the shared dictionary and the live coefficient map.
+        info: the epoch's statistics, over :data:`COEFFICIENTS`.
+        joint: the **un-marginalised** block over ``(phi_e, coefficients)``, or
+            ``None`` when the epoch declared no nuisance. Stored even though
+            :attr:`info` is what evaluation reads, because the Schur complement
+            destroys precisely the quantity whose time correlation would falsify
+            a ``per_epoch`` declaration -- and once the raw data is gone, a
+            mis-declaration that cannot be falsified is permanent (§4.2).
+        nuisance_names, nuisance_shapes: what ``joint`` was marginalised over.
+        epoch_id, n_observed, support, include_logdet, noise_frozen_at,
+            prior_share: as on
+            :class:`QuadraticLikelihood`, and read by the same code.
+    """
+
+    basis: Any
+    info: SqrtInfo
+    joint: SqrtInfo | None
+    epoch_id: str = eqx.field(static=True)
+    n_observed: int = eqx.field(static=True)
+    support: dict[str, tuple[float, float]] = eqx.field(static=True)
+    nuisance_names: tuple[str, ...] = eqx.field(static=True, default=())
+    nuisance_shapes: tuple[tuple[int, ...], ...] = eqx.field(static=True, default=())
+    include_logdet: bool = eqx.field(static=True, default=True)
+    noise_frozen_at: str = eqx.field(static=True, default="none")
+    prior_share: tuple[int, int] = eqx.field(static=True, default=(0, 1))
+
+    def __check_init__(self):
+        for name, leaf in (
+            ("factor", self.info.factor),
+            ("target", self.info.target),
+            ("offset", self.info.offset),
+        ):
+            if jnp.asarray(leaf).dtype != jnp.float64:
+                raise StateValidationError(
+                    f"ReducedBasisLikelihood.info.{name} is "
+                    f"{jnp.asarray(leaf).dtype}, not float64. The residual "
+                    "chi-square this term stores is the epoch's whole weighted sum "
+                    "of squares while the difference of interest is a few units, so "
+                    "in float32 the quadratic form is annihilated rather than merely "
+                    'imprecise. Enable x64: jax.config.update("jax_enable_x64", '
+                    "True)."
+                )
+        if self.info.names != (COEFFICIENTS,):
+            raise StateValidationError(
+                f"A T1 term's info must be over ({COEFFICIENTS!r},); got "
+                f"{list(self.info.names)}. It is a quadratic in the basis "
+                "coefficients, not in theta -- c(theta) is nonlinear, which is the "
+                "reason this tier exists."
+            )
+        if not self.support:
+            raise StateValidationError(
+                "A ReducedBasisLikelihood needs a support. It is an expansion, and "
+                "the region the training bank populated is the only place its "
+                "fidelity was ever measured: the projection error is uniformly "
+                "bounded over the prior box, but the coefficient map is a surrogate "
+                "whose error is a prior-weighted in-distribution average, blind to "
+                "a sparsely-sampled corner the accumulated posterior can and does "
+                "move into as a campaign grows."
+            )
+
+    @property
+    def latents(self) -> tuple[str, ...]:
+        """The global latents the coefficient map consumes."""
+        return tuple(self.basis.seeded)
+
+    @property
+    def exact(self) -> bool:
+        return False
+
+    @property
+    def estimator(self) -> tuple[str, ...]:
+        return ("full" if self.include_logdet else "gls", self.noise_frozen_at)
+
+    def coefficient_shift(self, values: dict[str, jax.Array]) -> jax.Array:
+        """``Delta_c = c(theta) - c_ref`` -- the live half, one forward call."""
+        return self.basis.coefficients(values) - self.basis.c_ref
+
+    def __call__(self, values: dict[str, jax.Array]) -> jax.Array:
+        return self.info.log_prob({COEFFICIENTS: self.coefficient_shift(values)})

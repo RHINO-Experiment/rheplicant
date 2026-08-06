@@ -36,7 +36,11 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.inference.compressed import QuadraticLikelihood
+from rheplicant.inference.compressed import (
+    COEFFICIENTS,
+    QuadraticLikelihood,
+    ReducedBasisLikelihood,
+)
 from rheplicant.inference.sqrtinfo import SqrtInfo
 from rheplicant.inference.uncertainty import as_noise_model
 
@@ -44,6 +48,67 @@ from rheplicant.inference.uncertainty import as_noise_model
 def _stack(design: Mapping[str, jax.Array], names: tuple[str, ...]) -> jax.Array:
     """Column-concatenate the per-latent design blocks in declared order."""
     return jnp.concatenate([jnp.atleast_2d(design[name]) for name in names], axis=1)
+
+
+def _refuse_traced_sigma(sigma: jax.Array, caller: str) -> None:
+    """The jit guard, narrowed to sigma. Shared by both compressors.
+
+    It tests whether *sigma* is traced, not whether the data is: ``n_observed``
+    is a Python int recorded on the term and written to the archive manifest, so
+    under a trace the number of unflagged samples is not known and the term
+    could only be built by inventing one. Testing the data instead would refuse
+    ``jax.grad`` and ``jax.vmap`` over ``observed``, which work and are useful --
+    that narrowing is the fix Plan A had to make after shipping the broad
+    version, and it is why there is now one copy of this guard rather than two
+    that can drift apart.
+
+    Left unguarded the symptom was a raw ``TracerBoolConversionError`` out of the
+    NaN check on the line below, which names neither the cause nor the remedy.
+    """
+    if isinstance(sigma, jax.core.Tracer):
+        raise StateValidationError(
+            f"{caller} cannot run under jit: the flag pattern is traced, and "
+            "n_observed is STATIC provenance -- a Python int recorded on the term "
+            "and written to the archive manifest, not an array. Under a trace the "
+            "number of unflagged samples is not known, so the term could only be "
+            "built by inventing one.\n\n"
+            "What does work, measured: jax.grad and jax.vmap over `observed`, "
+            "because a concrete noise model keeps sigma concrete and only the data "
+            "is traced. What does not: a FlaggedNoise whose flags are themselves "
+            "traced. Compression is a once-per-epoch step AROUND a jitted forward "
+            "model, not a step to put inside one -- jit the model that produces "
+            "the prediction and the data, then call this on the results."
+        )
+
+
+def _epoch_weights(
+    noise: Any, reference: jax.Array, observed: jax.Array, caller: str
+) -> tuple[jax.Array, jax.Array, jax.Array, int]:
+    """``(sigma, seen, weight, n_observed)`` for one epoch, with both guards.
+
+    ``inf`` and NaN are separated here rather than downstream. ``inf`` is this
+    package's encoding of "not observed"; NaN is a broken noise model, and the
+    two are the same only to ``jnp.isfinite``. Left to that test a NaN sigma
+    would be counted as a flag, silently shrinking ``n_observed`` and building
+    the epoch's statistics on the rest -- finite, self-consistent, and quietly
+    short of data.
+    """
+    sigma = jnp.broadcast_to(noise.std(reference), observed.shape)
+    _refuse_traced_sigma(sigma, caller)
+    if bool(jnp.any(jnp.isnan(sigma))):
+        raise StateValidationError(
+            f"{caller}: the noise model produced NaN for at least one sample. "
+            "`inf` is this package's encoding of 'not observed' (FlaggedNoise); "
+            "NaN is a broken noise model, and the two are only the same to "
+            "`jnp.isfinite`. Left to that test the sample would be counted as "
+            "flagged, silently shrinking n_observed and building the epoch's "
+            "statistics on the rest -- finite, self-consistent, and quietly short "
+            "of data. Fix the noise model, or mask the sample explicitly with "
+            "FlaggedNoise."
+        )
+    seen = jnp.isfinite(sigma)
+    weight = jnp.where(seen, 1.0 / jnp.where(seen, sigma, 1.0), 0.0)
+    return sigma, seen, weight, int(jnp.sum(seen))
 
 
 def compress_linear(
@@ -106,37 +171,9 @@ def compress_linear(
     prediction = (
         jnp.zeros_like(observed) if offset_prediction is None else offset_prediction
     )
-    sigma = jnp.broadcast_to(noise.std(prediction), observed.shape)
-    if isinstance(sigma, jax.core.Tracer):
-        raise StateValidationError(
-            "compress_linear cannot run under jit: the flag pattern is traced, and "
-            "n_observed is STATIC provenance -- a Python int recorded on the term "
-            "and written to the archive manifest, not an array. Under a trace the "
-            "number of unflagged samples is not known, so the term could only be "
-            "built by inventing one. Left unguarded this surfaced as a raw "
-            "TracerBoolConversionError from an unrelated line.\n\n"
-            "What does work, measured: jax.grad and jax.vmap over `observed`, "
-            "because a concrete noise_std keeps sigma concrete and only the data "
-            "is traced. What does not: jit of any kind, and a FlaggedNoise whose "
-            "flags are themselves traced. Compression is a once-per-epoch step "
-            "around a jitted forward model, not a step to put inside one -- jit "
-            "the model that produces `design` and `observed`, then call this on "
-            "the results."
-        )
-    if bool(jnp.any(jnp.isnan(sigma))):
-        raise StateValidationError(
-            "noise_std produced NaN for at least one sample. `inf` is this "
-            "package's encoding of 'not observed' (FlaggedNoise); NaN is a "
-            "broken noise model, and the two are only the same to "
-            "`jnp.isfinite`. Left to that test the sample would be counted as "
-            "flagged, silently shrinking n_observed and building the epoch's "
-            "sufficient statistic on the rest -- finite, self-consistent, and "
-            "quietly short of data. Fix the noise model, or mask the sample "
-            "explicitly with FlaggedNoise."
-        )
-    seen = jnp.isfinite(sigma)
-    weight = jnp.where(seen, 1.0 / jnp.where(seen, sigma, 1.0), 0.0)
-    n_observed = int(jnp.sum(seen))
+    sigma, seen, weight, n_observed = _epoch_weights(
+        noise, prediction, observed, "compress_linear"
+    )
 
     # SELECT on `seen`, never multiply by a zero weight. A flagged sample is
     # exactly where a NaN lives -- that is usually why it was flagged -- and
@@ -211,4 +248,116 @@ def compress_linear(
     )
     return QuadraticLikelihood(
         info=info, epoch_id=epoch_id, n_observed=n_observed, exact=True
+    )
+
+
+def compress_reduced_basis(
+    basis: Any,
+    observed: jax.Array,
+    noise: Any,
+    epoch_id: str,
+    *,
+    support: dict[str, tuple[float, float]] | None = None,
+    noise_frozen_at: str = "none",
+) -> ReducedBasisLikelihood:
+    """Compress one epoch against a shared reduced basis -- section 4.1's T1.
+
+    The prediction is expanded in the basis and the epoch's likelihood becomes a
+    quadratic in the coefficient vector. That is ``compress_linear``'s QR with
+    ``S_e^T`` in place of the design matrix, so the rank-deficiency handling, the
+    masked normalisation and the retained corner term are the same three lines
+    rather than a second implementation of them.
+
+    **The metric is the epoch's, the dictionary is the campaign's.** ``S_e`` is
+    the shared rows whitened by *this* epoch's sigma, so the stored form is the
+    exact likelihood of the model ``S^T c`` under ``N_e``. The coefficient map
+    ``c(theta)`` was built in the reference metric and is shared, which is what
+    makes evaluation ``O(n_S^2)`` per epoch instead of ``O(n_S n_data)``; the
+    mismatch that buys is what the bias budget measures per epoch.
+
+    **Sigma comes from the basis's reference prediction, not from this epoch's
+    data.** That looks as though it should make this call jittable where
+    ``compress_linear`` is not -- ``rows^T c_ref`` is concrete numbers carried on
+    the dictionary, so the flag pattern is known before the data arrives. It does
+    not, and the reason is omnistaging: inside a ``jax.jit`` trace *every*
+    ``jnp`` call is staged into the jaxpr whether or not its operands are traced,
+    so ``broadcast_to`` of a concrete sigma still returns a tracer and the guard
+    fires. Under ``jax.grad`` and ``jax.vmap`` it does not, because those traces
+    lift only values that are actually traced -- which is the same split
+    ``compress_linear`` has, reached by a different route, and the reason the
+    guard tests sigma rather than the data.
+
+    Args:
+        basis: the shared
+            :class:`~rheplicant.inference.reduced_basis.ReducedBasis`.
+        observed: this epoch's data.
+        noise: this epoch's :class:`~rheplicant.inference.noise.NoiseModel`,
+            evaluated at the basis's reference prediction. Under
+            ``RadiometerNoise`` that evaluation *is* the frozen-N step of
+            section 8, and ``noise_frozen_at`` is how the term says so.
+        epoch_id: the recording's data hash.
+        support: overrides the basis's. Refused if neither supplies one.
+        noise_frozen_at: provenance. ``"none"`` for a genuinely fixed
+            covariance, ``"reference"`` for a sigma frozen at the basis's
+            reference prediction, ``"gls"`` for one from
+            :func:`~rheplicant.inference.gls.iterative_gls`. Two terms with
+            different values are different estimators and ``BayesMemory``
+            refuses to sum them.
+
+    Returns:
+        A prior-free, approximate
+        :class:`~rheplicant.inference.compressed.ReducedBasisLikelihood` over
+        the basis coefficients.
+    """
+    observed = jnp.ravel(jnp.asarray(observed))
+    reference = basis.rows.T @ basis.c_ref
+    sigma, seen, weight, n_observed = _epoch_weights(
+        noise, reference, observed, "compress_reduced_basis"
+    )
+    support = support if support is not None else basis.support
+    if not support:
+        raise StateValidationError(
+            "compress_reduced_basis needs a support: the region the training bank "
+            "populated, which is the only region this basis's fidelity was ever "
+            "measured in. Pass support= to build_reduced_basis so it travels with "
+            "the dictionary, or to this call."
+        )
+
+    # SELECT on `seen`, never multiply by a zero weight: a flagged sample is
+    # usually flagged BECAUSE it holds a NaN, and `0.0 * nan` is `nan`. The
+    # poison reaches `target` and `offset` while `factor` stays finite, so every
+    # density is NaN while audit() reports a well-conditioned campaign.
+    residual = jnp.where(seen, observed - reference, 0.0) * weight
+    design = jnp.where(seen[None, :], basis.rows, 0.0).T * weight[:, None]
+    width = design.shape[1]
+
+    upper = jnp.linalg.qr(
+        jnp.concatenate([design, residual[:, None]], axis=1), mode="r"
+    )
+    keep = min(upper.shape[0], width)
+    # The corner is the part of the residual no coefficient can reach. It is a
+    # constant in theta, so leaving it out changes no gradient and no curvature
+    # and every density by the same amount -- measured at -51.321 nats on the
+    # RHINO fixture, which is why Plan A's dropped corner survived a probe built
+    # on shapes. The masked normalisation below is the other such constant,
+    # +200.738 nats on the same epoch.
+    corner = upper[keep:, width]
+    normalisation = -0.5 * jnp.sum(
+        jnp.where(seen, jnp.log(2.0 * jnp.pi * jnp.where(seen, sigma, 1.0) ** 2), 0.0)
+    )
+    info = SqrtInfo(
+        factor=upper[:keep, :width],
+        target=upper[:keep, width],
+        offset=normalisation - 0.5 * jnp.sum(corner**2),
+        names=(COEFFICIENTS,),
+        shapes=((width,),),
+    )
+    return ReducedBasisLikelihood(
+        basis=basis,
+        info=info,
+        joint=None,
+        epoch_id=epoch_id,
+        n_observed=n_observed,
+        support=dict(support),
+        noise_frozen_at=noise_frozen_at,
     )
