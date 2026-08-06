@@ -21,8 +21,8 @@ The physics and its conventions live upstream:
 * :func:`limtod_jax.horizon_truncated_beam` — the horizon cut and the surviving
   sky fraction.
 
-Needs ``healpy`` and ``scipy``, both already required by ``limTOD``, so the
-``rheplicant[limtod]`` extra covers this module.
+Needs ``healpy`` and ``scipy``, both already required by ``limTOD``, which is
+a dependency of this package, so nothing extra is needed for this module.
 """
 
 from __future__ import annotations
@@ -49,8 +49,9 @@ def _require_limtod_jax(feature: str):
         import limtod_jax
     except ImportError as exc:  # pragma: no cover - exercised by the import guard
         raise ImportError(
-            f"rheplicant.radio.beams.{feature} needs limTOD's JAX package: "
-            'pip install "rheplicant[limtod]"'
+            f"rheplicant.radio.beams.{feature} needs limTOD's JAX package. It is a\n"
+            "dependency, so this means the install is broken or limTOD was removed: "
+            'pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"'
         ) from exc
     if not hasattr(limtod_jax, feature):
         raise ImportError(
@@ -80,8 +81,9 @@ def _require_cstbeam():
         raise ImportError(
             "rheplicant.radio.beams needs limTOD.cstbeam, which is where the CST "
             "far-field reader lives (limTOD >= 1.10). The installed limTOD does "
-            'not have it: pip install "rheplicant[limtod]", or reinstall limTOD '
-            "from source if you are tracking it there."
+            'not have it: pip install "limTOD[jax] @ '
+            'git+https://github.com/zzhang0123/limTOD", or reinstall limTOD from '
+            "source if you are tracking it there."
         ) from exc
     return cstbeam
 

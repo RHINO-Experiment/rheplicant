@@ -10,6 +10,11 @@ sphinx:
 
 python:
   install:
+    # limTOD first, from source: it is a dependency of rheplicant but PyPI
+    # carries only <=1.8.0 against a >=1.10 floor, so `pip install .` alone
+    # fails to resolve and the build never reaches Sphinx. See the comment in
+    # docs/requirements.txt.
+    - requirements: docs/requirements.txt
     - method: pip
       path: .
       extra_requirements:

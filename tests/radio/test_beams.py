@@ -31,7 +31,7 @@ from rheplicant.radio import (
     read_cst_farfield,
 )
 
-hp = pytest.importorskip("healpy", reason="healpy comes with rheplicant[limtod]")
+hp = pytest.importorskip("healpy", reason="healpy comes with limTOD")
 pytest.importorskip("scipy")
 pytest.importorskip("limTOD.cstbeam", reason="the CST reader lives in limTOD")
 

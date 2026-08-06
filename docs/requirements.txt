@@ -1,0 +1,11 @@
+# Documentation-build requirements for ReadTheDocs, installed BEFORE the package.
+#
+# limTOD is a hard dependency of rheplicant (the sky engines are the forward
+# model, not an accessory), but PyPI carries only <=1.8.0 while the floor is
+# 1.10 -- so `pip install .` cannot resolve it on its own and the docs build
+# would fail at the install step, before Sphinx ever runs. Installing it from
+# source first satisfies the floor, and the subsequent `pip install .` finds the
+# requirement already met.
+#
+# Keep the ref in step with the floor in pyproject.toml's `dependencies`.
+limTOD[jax] @ git+https://github.com/zzhang0123/limTOD@main

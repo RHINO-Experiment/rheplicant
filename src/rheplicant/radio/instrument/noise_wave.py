@@ -109,7 +109,7 @@ def _rhino_cal_jax():
         import rhino_cal_jax
     except ImportError as exc:  # pragma: no cover - exercised by the import guard
         raise ImportError(
-            "NoiseWaveOperator needs the rhino_cal_jax package: install it with "
+            "NoiseWaveOperator needs the rhino_cal_jax package (the 'cal' extra): "
             "pip install 'rhino-cal-jax @ "
             "git+https://github.com/RHINO-Experiment/rhino-cal.git'"
         ) from exc

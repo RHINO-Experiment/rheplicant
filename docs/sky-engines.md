@@ -299,13 +299,15 @@ the expected way to switch engines.
 :::
 
 Both engines are backed by the `limtod_jax` package that ships with
-[limTOD](https://pypi.org/project/limTOD/), available as an extra:
+[limTOD](https://github.com/zzhang0123/limTOD). It is a **dependency**, not an
+extra — the engines are the forward model rather than an accessory — but PyPI
+carries only ≤ 1.8.0 against a ≥ 1.10 floor, so it installs from source:
 
 ```bash
-pip install "rheplicant[limtod]"
+pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
 ```
 
-The extra pins **limTOD ≥ 1.8**, so a fresh install gets every fast path. The
+The floor is **limTOD ≥ 1.10**, so a fresh install gets every fast path. The
 individual floors, if you are pinning by hand: `GeneralPointingProjector`
 needs any version providing `limtod_jax`; `DriftScanProjector` needs **1.6**;
 `uniform_sampling=True` the FFT synthesis from **1.7**; and the hoisted Wigner
@@ -381,7 +383,7 @@ beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
 That is a thin pass-through to `limtod_jax.horizon_truncated_beam` (limTOD ≥
 1.9), and deliberately so: how a beam weights the sky, where the horizon falls
 in it and what share survives are limTOD's subject, the same way the noise-wave
-data model is `rhino_cal_jax`'s (D15). This package's job is to place the
+data model is `rhino_cal_jax`'s ([D15](design.md)). This package's job is to place the
 result on a signal path. The conventions and their numerical locks — including
 the painted-ground closure that decides them — live upstream.
 
@@ -451,7 +453,7 @@ against the general engine, time all three configurations, read off the
 m-modes, and differentiate the result with respect to the beam.
 
 ```bash
-uv run python examples/driftscan_mmode.py
+uv run --frozen python examples/driftscan_mmode.py
 ```
 
 [`examples/sky_to_noise_wave.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/sky_to_noise_wave.py)
@@ -460,5 +462,5 @@ takes it one stage further: the drift-scan TOD becomes the noise-wave model's
 are recovered in closed form with the sky treated as known data.
 
 ```bash
-uv run python examples/sky_to_noise_wave.py
+uv run --frozen python examples/sky_to_noise_wave.py
 ```
