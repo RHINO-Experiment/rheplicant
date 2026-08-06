@@ -469,3 +469,80 @@ def compress_reduced_basis(
         nuisance_shapes=tuple(shapes),
         noise_frozen_at=noise_frozen_at,
     )
+
+
+def compress(
+    observed: jax.Array,
+    epoch_id: str,
+    *,
+    design: Mapping[str, jax.Array] | None = None,
+    basis: Any = None,
+    noise: Any = None,
+    noise_std: Any = None,
+    shapes: Mapping[str, tuple[int, ...]] | None = None,
+    **tier_arguments: Any,
+) -> Any:
+    """Route one epoch to the tier that can represent it -- section 4's ladder.
+
+    Two methods exist today and the choice is structural rather than a
+    heuristic: a model affine in every latent has a sufficient statistic (T2),
+    and one that is not needs a dictionary to be expanded in (T1). Anything
+    else -- an emulator (T3), a Monte Carlo integral (T4) -- is refused by name
+    rather than approximated by whichever of these two is nearer, because a
+    finite plausible number from the wrong tier is exactly the failure the tier
+    ladder exists to prevent.
+
+    Being a dispatcher makes this subject to boundary validation: the tiers must
+    agree at every threshold and at extreme parameter values, which
+    ``tests/evidence/test_tier_boundaries.py`` checks by calling each tier
+    **directly** rather than through this function -- routing one input to one
+    method can only show the function's own continuity, never that two methods
+    agree.
+
+    Args:
+        observed: this epoch's data.
+        epoch_id: the recording's data hash.
+        design: ``{latent: block}`` -- the claim that the model is affine in
+            every latent. Routes to :func:`compress_linear`.
+        basis: a :class:`~rheplicant.inference.reduced_basis.ReducedBasis` --
+            the claim that the prediction is expanded in this dictionary. Routes
+            to :func:`compress_reduced_basis`.
+        noise: the noise model, for the reduced route.
+        noise_std: the noise scale, for the linear route.
+        shapes: each latent's shape, for the linear route.
+        **tier_arguments: passed through to whichever tier was chosen, so a
+            keyword the tier does not take is a TypeError naming that tier
+            rather than a silently ignored argument here.
+
+    Raises:
+        StateValidationError: if neither a design nor a basis is given, or if
+            both are.
+    """
+    if design is not None and basis is not None:
+        raise StateValidationError(
+            "compress was given both a design and a basis. They are different "
+            "claims about the same model -- 'affine in every latent' and 'expanded "
+            "in this dictionary' -- and silently preferring one would hide a "
+            "modelling disagreement inside a routing decision. Pass exactly one."
+        )
+    if design is not None:
+        return compress_linear(
+            design=design,
+            observed=observed,
+            noise_std=noise_std,
+            shapes=shapes or {},
+            epoch_id=epoch_id,
+            **tier_arguments,
+        )
+    if basis is not None:
+        return compress_reduced_basis(
+            basis, observed=observed, noise=noise, epoch_id=epoch_id, **tier_arguments
+        )
+    raise StateValidationError(
+        "compress needs either design= (T2: the model is affine in every latent, "
+        "and the term is a sufficient statistic) or basis= (T1: the prediction is "
+        "expanded in a reduced basis). T3 (EmulatedLikelihood) and T4 "
+        "(SampledLikelihood) are named in the design and are not built, so a model "
+        "that is neither is refused here rather than routed to whichever of the two "
+        "is nearer."
+    )
