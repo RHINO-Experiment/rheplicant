@@ -42,7 +42,7 @@ There are only two ingredients. **Operators** — each one `State in, State out`
 A *canonical signal path* is then just a template saying which operators exist
 and which structure joins them: node kinds `source`, `transform`, `junction`
 and `selector` map one-to-one onto "creates data", cascade, sum and switch. You
-provide a set of operators, and [`assemble`](tour.md#4-graph-assembly) folds
+provide a set of operators, and [`assemble`](tour.md#graph-assembly) folds
 them into exactly those three combinators — so composition is a consequence of
 the physics you declared rather than something you wrote out.
 

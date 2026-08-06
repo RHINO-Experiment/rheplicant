@@ -58,6 +58,30 @@ Two explicit channels instead of one ambiguous one — and `FrozenMapping`
 rejects unhashable values at construction, so jit-cache corruption is
 impossible by construction.
 
+**The cost that rule buys, stated once.** "Recompiles on change" is the
+correct behaviour for a label that changes what the program *is* (`telescope`,
+`band`, a mode switch): one entry per distinct program is what a cache is for.
+It is the wrong behaviour for a label that merely *identifies a run*, because
+the compiled program is identical and the cache grows by one entry per
+observation — monotonically, for the lifetime of the process, and every call
+pays a full compile. The sharper test than "string or number?" is: **would the
+emitted XLA differ if this field differed?** If no, the field does not belong
+in `meta`, whatever its type.
+
+One field in this package fails that test on purpose. `to_state` writes
+`meta["time_epoch_unix_s"]` (`radio/rhino.py`), a different float for every
+recording, because the epoch must survive in float64 and `Coordinates` stores
+through `jnp.asarray`, which is float32 — the argument is in
+`docs/ingestion.md`.
+That is a deliberate trade, and it is safe only as long as no hot loop passes
+such a `State` into a jitted function as an argument. Today none does: `src/`
+contains no `jax.jit` at all, and the tests jit a fixed template state. The
+obligation therefore falls on whoever writes the first per-observation loop —
+see the constraint recorded in the streaming-evidence plan, which is where
+that loop will first exist. The remedy is cheap and local: normalise `meta`
+down to the invariant keys at the jit boundary, and let per-run numbers travel
+traced in `aux`.
+
 ### D2 — Functional updates via `dataclasses.replace`
 
 `state.replace(...)` re-runs converters and `__check_init__` on every update,

@@ -4,7 +4,7 @@ Every shipped operator, its home on the canonical single-antenna graph, and
 its differentiable parameters. Placeholder physics is marked *(P)* — the
 contract is real and tested; the docstring of each class records the physics
 that will replace the body. Graph topology and assembly rules: see
-[the tour](tour.md#4-graph-assembly) and `rheplicant/radio/graph.py`.
+[the tour](tour.md#graph-assembly) and `rheplicant/radio/graph.py`.
 
 ## Sky (astrophysical sources → `astro_sum`)
 

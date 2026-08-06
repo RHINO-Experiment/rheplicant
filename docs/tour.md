@@ -4,15 +4,16 @@ Everything RHEPLICANT can do, in order, with runnable snippets. Each block build
 on the previous ones; pasted top to bottom they form a working script.
 
 - [1. State — the scientific context](#1-state)
-- [2. Operators — the one contract](#2-operators)
-- [3. Composition — cascade, sum, switch](#3-composition-the-three-structures)
-- [4. Graph assembly — the signal path knows](#4-graph-assembly)
-- [5. Seeing the signal path](#5-rendering)
-- [6. The modular sky engine](#6-sky-engine)
-- [7. Analysis: snapshots, calibration, filters](#7-analysis)
-- [8. Inference — one seam, many engines](#8-inference)
-- [9. Writing your own operator](#9-extending)
-- [10. Conventions cheat sheet](#10-conventions)
+- [2. Operators — one contract, and how they compose](#2-operators)
+  - [The contract](#the-contract)
+  - [Composition — cascade, sum, switch](#composition-cascade-sum-switch)
+  - [Graph assembly — the signal path knows](#graph-assembly)
+  - [Rendering — seeing the signal path](#rendering)
+- [3. The modular sky engine](#3-sky-engine)
+- [4. Analysis: snapshots, calibration, filters](#4-analysis)
+- [5. Inference — one seam, many engines](#5-inference)
+- [6. Writing your own operator](#6-extending)
+- [7. Conventions cheat sheet](#7-conventions)
 
 ## 1. State
 
@@ -48,11 +49,41 @@ subkey, s4 = state.next_key()                     # the PRNG protocol: split, ad
 raw_kept = s3.checkpoint("raw")                   # zero-copy snapshot into aux
 ```
 
+:::{admonition} "A new State on every update — doesn't that cost memory?"
+:class: tip
+**No, because a `State` does not hold your data — it holds *references* to it.**
+A `State` is a small collection of pointers to buffers. `replace` builds a new
+collection; the buffers are the same ones. The only thing allocated is the
+outer shell, 48 bytes, so `s2.coords is state.coords` — a 16 MB array is never
+duplicated by an update that did not name it. Sharing is safe precisely because
+JAX arrays are immutable: no holder of a buffer can edit it. That is why
+`checkpoint("raw")` is free — the snapshot *is* the same buffer, listed under a
+second name.
+
+**Then when is the data actually freed?** When no collection lists it any more.
+`state = state.with_data(d * 2)` drops the last reference to the old buffer and
+it goes; `checkpoint` keeps one on purpose, and `history.append(state)` keeps
+one by accident. If memory grows through a long run, look for the list, dict,
+or closure that is collecting states — never at `replace`.
+
+**Is anything about this expensive, then?** One thing, and it is not memory.
+`meta` is static, so it is part of the jit cache key: a *different* `meta` means
+a *different* compiled program, kept for the life of the process. That is right
+for a label that changes what the program is (`telescope`, `band`) and wrong
+for one that merely names a run. The test is not "string or number?" but
+**would the compiled program differ?** If not, keep it out of `meta`.
+:::
+
 ## 2. Operators
 
-Every transformation satisfies one contract — a pure `State -> State`
-callable, implemented as an `equinox.Module`. Array-valued fields are
-automatically differentiable parameters; there is no registration machinery.
+One contract, and everything else in this section is how instances of it come
+together: by hand, or — better — by letting the signal path say so.
+
+### The contract
+
+Every transformation is a pure `State -> State` callable implemented as an
+`equinox.Module`. Array-valued fields are automatically differentiable
+parameters; there is no registration machinery.
 
 ```python
 from rheplicant import LambdaOperator
@@ -65,17 +96,20 @@ out = gain(state.with_data(jnp.ones((8, 4))))
 assert jnp.allclose(out.data, 1.1)
 ```
 
-Operators declare what they touch (`requires` / `provides` — documentation
-today, a validation hook tomorrow) and follow three rules: never mutate the
-input state, draw randomness only via `state.next_key()` (returning the
-advanced state), and validate structure only (shapes/dtypes — value checks
-would break under jit).
+Three rules for implementors: never mutate the input state; draw randomness
+only via `state.next_key()`, returning the advanced state; validate structure
+only (shapes/dtypes — value checks break under jit).
 
-## 3. Composition: the three structures
+Operators also *declare* things — `requires` / `provides` (which `State` paths
+they read and write), `graph_node` (where they belong on a template) and
+`must_precede` (what their contribution must flow through). Only two of those
+are enforced, and the frame at the end of this section says which, and why the
+others are descriptive on purpose.
 
-Operators are one ingredient; composing them is the other, and there are
-exactly **three** structures — cascade, sum, switch. Each is itself an
-operator, so they nest arbitrarily, and each corresponds to one node kind in a
+### Composition: cascade, sum, switch
+
+There are exactly **three** structures. Each is itself an operator, so they
+nest arbitrarily, and each corresponds to one node kind in a
 [canonical signal path](signal-path.md): a chain of `transform` nodes, a
 `junction`, a `selector`. Nothing else composes anything.
 
@@ -119,14 +153,14 @@ Alternatives *replace*, they do not add; that is the whole difference from
 `SumOperator`, and it is why the two are different node kinds rather than a
 flag.
 
-## 4. Graph assembly
+### Graph assembly
 
 Explicit composition is always available — but composition is *implicit in
 the signal path*. A canonical graph is a template of **operator slots plus the
 structure joining them**: `source` nodes create data, `transform` nodes
 cascade, `junction` nodes sum, `selector` nodes switch. You provide a **set** of
 operators and `assemble` compiles the sub-path they induce, folding it into
-exactly the three combinators of §3.
+exactly the three combinators above.
 
 The default template, `rheplicant.radio.RADIO_GRAPH` (32 nodes), is **RHINO's**
 structure — a single-antenna, switched-load, drift-scanning horn. It is not the
@@ -219,7 +253,7 @@ switched = assemble(
 # sample t: antenna signal where cycle==0, load where cycle==1
 ```
 
-## 5. Rendering
+### Rendering
 
 Every assembly can draw itself on the full graph — lit nodes are what you
 provided, half-lit nodes are traversed as identity, everything else is dim:
@@ -233,7 +267,39 @@ svg = twin.to_svg()                                 # embeddable figure
 
 Rendered examples live on [the signal-path page](signal-path.md#lit-and-dim-what-an-assembly-simulates).
 
-## 6. Sky engine
+:::{admonition} "Which composition do I write, and what gets checked?"
+:class: tip
+**`Pipeline` or `assemble`?** Both build the same thing — an `Assembly` *is*
+the nesting it compiles to, with nothing extra at runtime. Write `Pipeline`
+when you mean a specific chain. Reach for `assemble` when the chain is a
+consequence of physics you have already declared: it prunes what you did not
+provide, and it fixes branch order from the graph rather than from your
+argument order, so **the same set of operators always folds to the same tree**
+— same names, same PRNG stream, same jit cache entry.
+
+**Are `requires` / `provides` checked?** No — with one exception, and the
+exception is the point. `"key"` in `requires` is a *contract*: it says this
+operator draws randomness, and the inference layer refuses a model containing
+one, because a frozen draw from the template key would be added to every
+prediction alike — a bias that is exactly affine and full rank, so no shape
+check, no linearity check and no rank test can see it. The rest is descriptive
+by decision, not by omission: `provides` is `("data",)` on 26 of 31 declaring
+classes, so enforcing it would distinguish nothing, and operators that read a
+field *if present* would be wrongly refused.
+
+**Then what protects placement?** `must_precede`, and you have to declare it.
+`At(node, op)` can put any operator anywhere, so an ordering rule written only
+in prose is one nothing checks — a calibration tone placed *after* the gain
+assembles cleanly, every shape correct, and its gain response is silently
+exactly 1.0, monitoring nothing. Stated as `must_precede = ("bandpass",
+"gain")`, `assemble` refuses the placement instead. The test is
+**reachability** — does my contribution flow *through* that node — not sort
+order, which is why it needs the graph's node ids rather than `State` paths:
+every operator on the receiver chain reads `data` and writes `data`, so
+"before the gain" is not a sentence that vocabulary can form.
+:::
+
+## 3. Sky engine
 
 The sky term factorizes: **what the sky is** (`AbstractSkyModel`:
 parameters → maps) × **how it is seen** (`AbstractSkyProjector`:
@@ -261,13 +327,21 @@ numbers to float64 roundoff while rotating the beam once for the whole scan
 instead of once per sample:
 
 ```python
+# needs-extra: limtod_jax
 from rheplicant.radio.sky import DriftScanProjector
 
-projector = DriftScanProjector.from_beam_maps(
-    beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0, lmax=191)
+beam_maps = jnp.ones((4, 768))                      # (n_freq, n_pix) HEALPix RING, nside=8
+drift = DriftScanProjector.from_beam_maps(          # a real beam is nside=64, lmax=191
+    beam_maps, lat_deg=53.2, az_deg=0.0, el_deg=90.0, lmax=23)
 ```
 
-Both need the limTOD engine: `pip install "rheplicant[limtod]"`. The third engine takes the
+Pass beam *maps*, not alms: the beam needs true alms while the sky path uses
+quadrature ones, and picking the visible transform silently rescales the beam
+by `npix/4π` — this constructor makes the correct choice the easy one.
+
+Both need the limTOD engine: `pip install "rheplicant[limtod]"` — the marker
+comment is what lets `tests/test_tour_runs.py` skip the block when the extra is
+absent rather than fail. The third engine takes the
 projection as data instead of computing it: `MatrixProjector` (a precomputed
 sky→TOD matrix — pure einsum, no optional dependency, valid while pointing
 and beam are fixed). See [sky engines](sky-engines.md) for the comparison,
@@ -276,7 +350,7 @@ benchmarks, and figures.
 `SkySourceOperator` enters the graph at `observed_astro_sky` (post-beam: its
 output is already convolved).
 
-## 7. Analysis
+## 4. Analysis
 
 Data processing is the same formalism. Preserve raw data, apply a
 calibration solution, project onto physically meaningful subspaces — every
@@ -320,7 +394,7 @@ reshapes the time axis. See
 [the protection contract](contracts.md#protected-channels-keeping-a-known-calibrator-out-of-the-flags),
 which also covers the two things it deliberately does not do.
 
-## 8. Inference
+## 5. Inference
 
 Everything connects through one seam: `forward(params) -> prediction`, with
 the twin closed over. Two ways to say which parameters, for two different
@@ -482,7 +556,7 @@ See `examples/neural_surrogate.py` for the full recovery of a rippled
 bandpass (< 1 % error) and `examples/bayesian_and_uncertainty.py` for the
 NUTS-vs-Fisher cross-check.
 
-## 9. Extending
+## 6. Extending
 
 A new physical effect is one small class:
 
@@ -513,7 +587,7 @@ place with `At(...)`. To port real physics into a shipped placeholder,
 replace the function body and keep the contract — the docstring of every
 placeholder says what the real model should be.
 
-## 10. Conventions
+## 7. Conventions
 
 | Topic | Rule |
 |---|---|
