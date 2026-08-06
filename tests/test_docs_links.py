@@ -67,14 +67,22 @@ def _slugs(text: str) -> set[str]:
 def _anchors_of(path: Path) -> set[str]:
     """Every anchor a page offers.
 
-    ``{include}`` is deliberately NOT followed. ``docs/design.md`` and
-    ``docs/changelog.md`` are two-line ``{include}`` stubs, and myst does not
-    register heading anchors for included content: the built ``design.html``
-    carries docutils ids for all 31 D-decisions and not one myst anchor, so
-    ``design.md#d15-...`` cannot resolve however it is spelled. Following the
-    include would make this test bless links that Sphinx rejects -- which is the
-    mistake it caught the first time it was run. Link such pages without a
-    fragment.
+    Only heading slugs count. Two things that look like anchors are deliberately
+    NOT collected, because neither satisfies a ``](page.md#fragment)`` link:
+
+    * **Explicit MyST targets**, ``(label)=``. Measured: ``tour.md`` carried
+      ``(graph-assembly)=`` above a reworded heading and the build still emitted
+      three ``local id not found in doc 'tour': 'graph-assembly'`` warnings.
+      They work for ``{ref}`` roles, not for fragments.
+    * **``{include}``d content.** ``docs/design.md`` and ``docs/changelog.md``
+      are two-line stubs, and myst registers no heading anchors for what they
+      pull in: the built ``design.html`` carries docutils ids for all 31
+      D-decisions and not one myst anchor, so ``design.md#d15-...`` cannot
+      resolve however it is spelled.
+
+    Collecting either would make this test bless links that Sphinx rejects,
+    which is the failure it caught the first time it ran. Link such pages
+    without a fragment.
     """
     anchors: set[str] = set()
     in_fence = False
@@ -87,9 +95,6 @@ def _anchors_of(path: Path) -> set[str]:
         heading = re.match(r"^(#{1,6})\s+(.*)$", line)
         if heading and len(heading.group(1)) <= _MAX_ANCHOR_LEVEL:
             anchors |= _slugs(heading.group(2))
-        target_line = re.match(r"^\((\S+)\)=\s*$", line)
-        if target_line:
-            anchors.add(target_line.group(1))
     return anchors
 
 

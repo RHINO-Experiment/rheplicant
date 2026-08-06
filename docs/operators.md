@@ -54,6 +54,30 @@ that will replace the body. Graph topology and assembly rules: see
 | `ADCOperator` *(P)* | `adc` | scale + clip digitisation | `scale` |
 | `NeuralOperator` | *(explicit `At(...)`)* | learned positive spectral response `exp(MLP(freq))` — hybrid physics+ML | MLP weights |
 
+`AntennaLossOperator` sits on the trunk between `t_ant_sum` and
+`receiver_input`, so it acts on everything the beam collected and on nothing
+that connects downstream — the calibration loads arrive unattenuated.
+`beam_spill` instead sits on the ASTRO branch
+(`beam | observed_astro_sky → astro_ant_sum → beam_spill → t_ant_sum`), because
+the split applies to the thing that genuinely is a beam integral over the
+celestial sphere and not to the effective temperatures that join at `t_ant_sum`.
+See [D16](design.md) and [D17](design.md).
+
+It is a *different* loss from `NoiseWaveOperator`'s `c_s = (1−|Γ|²)|F|²` —
+ohmic dissipation inside the antenna versus impedance mismatch at the receiver
+input. They multiply, and only the ohmic one emits `(1−η) T_phys`. The two are
+worked against `BeamSpillOperator`'s mixing-without-loss in
+[Step 3](sky-to-receiver.md#step-3--three-effects-none-standing-in-for-another).
+
+Get `f_sky` from `DriftScanProjector.horizon_fraction()`, or let
+`BeamSpillOperator.from_projector(projector, t_ground=...)` read it off the same
+beam that supplies the sky — that is the one call the weight and the sky average
+cannot get out of step. `BeamSpillOperator` already supplies the below-horizon
+ground term, so a `GroundPickupOperator` alongside it is a *second*, additional
+one.
+
+### The noise-wave model, and what it needs from the graph
+
 `NoiseWaveOperator` requires the optional `rhino_cal_jax` package — see
 `noise_wave.py`'s import guard for the install command, since it is not yet on
 PyPI. It carries `Γ` **per source** (`gamma_src_re`/`gamma_src_im`, shape
@@ -66,9 +90,23 @@ exercised as a checked linear block (Wiener mean and exact GCR draws) and [D15](
 in `DESIGN.md` for why the per-source placement is what makes per-channel
 noise-wave temperatures identifiable at all.
 
-**The CW tone has two hard limits.** Both used to be stated nowhere but the
-source comments beside the constants; both now refuse by name, and the second
-of them refuses at a different place than it used to.
+Read the row order of `gamma_src` off `twin["receiver_input"].names`. The
+selector's branch order and the order the loads were provided are independent,
+and a transposition is shape-legal — it is Join 2 of
+[From the sky to the receiver](sky-to-receiver.md#the-one-identification),
+measured there at 46 K peak on a 545 K signal.
+
+An out-of-range switch value used to be a fourth: the eager range check in
+`SwitchCycle` is skipped under tracing, and JAX's gather would clamp the coupling
+lookup to a neighbouring source while the selector selected nothing.
+`SwitchCycle.gather` now fills those samples with NaN instead, so the two
+consumers of the switch array can no longer disagree in silence.
+
+### `line_width` is boxed on both sides, and the window is narrow
+
+The CW tone has two hard limits, and both used to be stated nowhere but the
+source comments beside the constants. This is the first; the axis it drifts
+along is the second, below.
 
 `line_width` is boxed on both sides, as a multiple of the channel spacing.
 Below `MIN_WIDTH_IN_CHANNELS` (1 channel for `"sinc2"`, 0.25 for `"gaussian"`)
@@ -87,39 +125,23 @@ for the band in hand; there is no default because guessing it silently
 mis-sizes the protection mask, which is the one thing this operator exists to
 avoid.
 
-`coords.time`'s STORED precision is a second, independent limit, and it is no
-longer the CW tone's to enforce. `coords.time` goes through `jnp.asarray`,
-float32 unless x64 is on, and a unix-second axis (~1.75e9) has ~128 s of
-float32 resolution — so at RHINO's ~100 s cadence two samples land on the same
-stored value before any operator runs. That is a property of how the axis is
-STORED, not of what the tone does with it, so
-`Coordinates.__check_init__` now refuses such an axis at construction
-(`MAX_TIME_RESOLUTION_IN_SAMPLES` = 1e-2 of the smallest distinct gap):
+### `coords.time` is checked where it is stored, and twice
 
-```python
-Coordinates(time=jnp.asarray(unix_seconds), freq=freq)   # 100 s cadence
-# StateValidationError: coords.time is stored as float32 and reaches
-# 1.75000064e+09, where consecutive representable numbers are 128 apart — but
-# the closest two distinct samples on this axis are 128 apart, and coords.time
-# must resolve its own sampling to at most 0.01 of that. ...
-```
+`coords.time` goes through `jnp.asarray`, float32 unless x64 is on, and a
+unix-second axis (~1.75e9) has ~128 s of float32 resolution — so at RHINO's
+~100 s cadence two samples land on the same stored value before any operator
+runs. That is a property of how the axis is STORED, not of what the tone does
+with it, so `Coordinates.__check_init__` refuses such an axis at construction
+(`MAX_TIME_RESOLUTION_IN_SAMPLES` = 1e-2 of the smallest **distinct** gap). The
+refusal quotes the two resolutions and is reproduced, with the reading of it, in
+[ingestion](ingestion.md#coordstime-is-relative) — which is also where you find
+why a freshly ingested RHINO recording no longer produces such an axis.
 
-Read the two "128"s: the second is not the cadence you asked for. The samples
-have *already* been snapped onto the 128 s grid by the time anything can look
-at them, which is why the check is on the stored axis and why no later
-subtraction recovers the 100 s you meant.
-
-Two consequences worth knowing before you build anything on this.
-
-**The ingestion path no longer trips it, because it no longer produces that
-axis.** `to_state` stores seconds since the first kept sample and puts the
-absolute epoch in `meta["time_epoch_unix_s"]`
-(`rheplicant.radio.rhino.TIME_EPOCH_META_KEY`); the subtraction happens in
-float64 before the store, and `meta[key] + coords.time == obs.time_s` exactly.
-A drifting tone on a freshly ingested RHINO recording now runs at default
-precision, with no x64 and nothing to configure. (This is a change: it
-previously stored the raw unix axis, and a drifting tone on it computed the
-wrong centre frequency and protected the wrong channels, silently.)
+The tone keeps a second, stricter check of its own: the smallest gap
+**including zero**. The container cannot tell a genuinely repeated timestamp
+from a collision and has no business refusing the first; this operator can,
+because it subtracts times, so two samples sharing an elapsed value means the
+tone silently stops drifting across them — which is precisely its named failure.
 
 **The guard is unit-agnostic, which means MJD is not exempt.** It compares
 stored resolution against the axis's own smallest distinct gap, so it judges a
@@ -138,33 +160,7 @@ never reads `coords.time` at all, but the container check still applies,
 because the axis is wrong for every other consumer too — `BackendOperator`'s
 chunk timestamps were measured off by up to 78 s out of a 100 s cadence.
 
-**The sky as `T_src`.** On the antenna branch `T_src` *is* the beam-convolved
-sky, so a `SkySourceOperator` upstream feeds the receiver directly. The full
-walkthrough is [From the sky to the receiver](sky-to-receiver.md); the three
-joins that carry no structural guard, in short:
-
-- the projector must return a **temperature**. Both sky engines default to
-  `normalize_beam=False` (numpy limTOD's convention), which returns `∫BT`, not
-  `∫BT/∫B`. Pass `normalize_beam=True` when the output feeds `T_src`. A beam
-  normalized by hand to unit pixel sum is *still* biased — 0.2 % at
-  nside 16 / lmax 47, ~4 % at nside 8 with a 20° beam — because the band-limit
-  truncates the denominator as well.
-- `gamma_src`'s **row order must match the selector's branch order**, which is
-  the graph's in-edge declaration (antenna, then `cal_loads`). Both objects are
-  `(n_source, n_freq)`, so swapping them is shape-legal; it moves the answer by
-  tens of kelvin. Read the order off the assembly:
-  `twin["receiver_input"].names`.
-- if you hand-wire a branch at all, it needs `SumOperator`, not `Pipeline`: a
-  `Pipeline` of *source-type* operators replaces the data at each stage, so only
-  the last source survives. `assemble()` gets this right by construction — the
-  graph is what knows that leaves into a junction add — so the safest advice is
-  not to hand-wire, and to check it against `assemble()` when you must.
-
-An out-of-range switch value used to be a fourth: the eager range check in
-`SwitchCycle` is skipped under tracing, and JAX's gather would clamp the coupling
-lookup to a neighbouring source while the selector selected nothing.
-`SwitchCycle.gather` now fills those samples with NaN instead, so the two
-consumers of the switch array can no longer disagree in silence.
+### A `many` node with two instances loses its bare id
 
 **Multi-load switching comes out of `assemble()`.** `cal_loads` is `many=True`
 and feeds only the `receiver_input` selector, so its instances compose the way
@@ -178,14 +174,9 @@ twin["receiver_input"].names   # ('observed_astro_sky', 'cal_loads_1', 'cal_load
 
 A switching cycle of any length comes out of `assemble()` this way, so nothing
 about the configuration needs hand-wiring. How long it has to be for an
-identifiable fit is `NoiseWaveOperator`'s module docstring to say and is stated
-once there: `min(n_src, k) × n_freq` over the `k` **free** temperature families
-while they are free per channel — so three loads suffice only with `T_rx` held
-known, and a basis parameterization has no counting rule at all and must be
-measured with `identifiability()`. The folding rule
-generalizes: `many` instances fold as sibling **Sum** branches into a junction
-and as sibling **selector** branches into a selector, and a selector with only
-one live branch is traversed as identity — no switch array required.
+identifiable fit is `NoiseWaveOperator`'s module docstring to say, and is worked
+with the rank arithmetic in
+[Step 4](sky-to-receiver.md#step-4--a-real-switching-cycle).
 
 Reach any parameter by its graph node, wherever the fold put it:
 `eqx.tree_at(lambda t: t["observed_astro_sky"].sky_model.maps, twin, new_maps)`.
@@ -200,36 +191,6 @@ would overwrite *both* loads with one operator — the same forward shape, one
 component of the instrument gone. `assembly.instances` reports the multiplicity,
 and the signal-path renderings label such a node `(x2)`.
 
-**Three losses on the antenna path, none standing in for another.** They
-compose in this order, and each has a distinct signature:
-
-| stage | what it is | signature |
-|---|---|---|
-| `BeamSpillOperator` | part of the beam is looking at ground, not sky | **mixing, no loss** — sky and ground at the same temperature give that temperature |
-| `AntennaLossOperator` | ohmic dissipation inside the antenna | loss **and** its own emission `(1−η) T_phys` |
-| `c_s = (1−\|Γ\|²)\|F\|²` in `NoiseWaveOperator` | impedance mismatch at the receiver input | loss, nothing added |
-
-The first two share the arithmetic `a x + (1−a) b` and are deliberately not one
-operator: merging them would make an efficiency and a spill fraction
-indistinguishable in a fit. Get `f_sky` from
-`DriftScanProjector.horizon_fraction()`, or let
-`BeamSpillOperator.from_projector(projector, t_ground=...)` read it off the same
-beam that supplies the sky — that is the one call the weight and the sky average
-cannot get out of step. Note that `BeamSpillOperator` already supplies the
-below-horizon ground term, so a `GroundPickupOperator` alongside it is a
-*second*, additional one.
-
-`AntennaLossOperator` is a *different* loss from `NoiseWaveOperator`'s
-`c_s = (1−|Γ|²)|F|²`: ohmic dissipation inside the antenna versus impedance
-mismatch at the receiver input. They multiply, and only the ohmic one adds
-emission of its own (`(1−η) T_phys`). The node sits on the trunk between
-`t_ant_sum` and `receiver_input`, so it acts on everything the beam collected
-and on nothing that connects downstream — the calibration loads arrive
-unattenuated. `beam_spill` instead sits on the ASTRO branch
-(`beam | observed_astro_sky → astro_ant_sum → beam_spill → t_ant_sum`), because
-the split applies to the thing that genuinely is a beam integral over the
-celestial sphere and not to the effective temperatures that join at `t_ant_sum`.
-See [D16](design.md) and [D17](design.md).
 
 ## Beam data
 

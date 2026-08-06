@@ -293,7 +293,8 @@ The ingestion path no longer trips it, because it no longer produces that axis.
 For what the guard means for a *hand-built* axis — including that it is
 unit-agnostic, so MJD is not exempt, and roughly how many samples a relative
 float32 axis carries before you need `JAX_ENABLE_X64=1` — see
-[the CW-tone section of the operator guide](operators.md#instrument-trunk-order--graph-order).
+[the operator guide](operators.md#coordstime-is-checked-where-it-is-stored-and-twice), which
+also states the tone's own, stricter check.
 
 ## `thermistor_columns` is opt-in
 

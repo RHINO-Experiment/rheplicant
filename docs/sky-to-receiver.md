@@ -1,12 +1,15 @@
 # From the sky to the receiver
 
 The [sky engines](sky-engines.md) produce an antenna temperature. The
-[noise-wave model](operators.md#instrument-trunk-order--graph-order) consumes
+[noise-wave model](operators.md#the-noise-wave-model-and-what-it-needs-from-the-graph) consumes
 one. This page joins them end to end on RHINO's actual horn, and is a
 walkthrough of
 [`examples/sky_to_noise_wave.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/sky_to_noise_wave.py),
-which runs everything shown below. Every number and every figure here comes
-from that path being executed, not from illustrating it.
+which runs everything shown below. Steps 1-6 are that script's own six blocks,
+in its order; their numbers and figures come from that path being executed, not
+from illustrating it. The two sections after Step 6 are the measured evidence
+behind Step 1's $f_\mathrm{sky}$, and their numbers come from the test suites
+named there rather than from the script.
 
 ```bash
 uv run --frozen python examples/sky_to_noise_wave.py
@@ -112,7 +115,7 @@ Not one line of the `assemble()` call says any of this — the
 
 ---
 
-## 1. The horn
+## Step 1 — the horn
 
 RHINO ships its horn as CST Studio far-field ASCII exports, one file per
 frequency, holding total directivity in dBi on a regular $(\theta, \phi)$ grid.
@@ -192,7 +195,7 @@ really is that bright, which is why the calibration problem is hard.
 
 ---
 
-## 2. The antenna chain, assembled from the graph
+## Step 2 — the antenna chain, assembled from the graph
 
 ```python
 twin = assemble(
@@ -242,7 +245,7 @@ assembled twin vs Eq. 1 by hand: 2.7e-16 relative — roundoff
 
 ---
 
-## 3. Three effects, none standing in for another
+## Step 3 — three effects, none standing in for another
 
 The sky is modified three times on its way to the receiver. They are easy to
 confuse, they compose, and each has a distinct signature:
@@ -295,7 +298,7 @@ in place of the antenna.
 
 ---
 
-## 4. A real switching cycle
+## Step 4 — a real switching cycle
 
 An identifiable per-channel noise-wave fit needs several sources with genuinely
 different $\Gamma$. Each switch position contributes exactly **one equation per
@@ -308,8 +311,9 @@ $$
 
 where $k$ is the number of **free temperature families**: four when $T_{rx}$ is
 fitted alongside $T_{unc}, T_{cos}, T_{sin}$, three only when it is held known.
-So the three loads assembled below make a three-family fit square and leave a
-four-family one deficient by exactly $n_\mathrm{freq}$.
+So the three sources assembled in Step 2 — the antenna and two loads — make a
+three-family fit square and leave a four-family one deficient by exactly
+$n_\mathrm{freq}$.
 
 :::{warning}
 That count is per-channel and nothing more. The moment the temperatures become
@@ -323,7 +327,7 @@ for the measured numbers.
 
 `cal_loads` is `many=True` and feeds only the selector, so each
 `CalLoadOperator` becomes its own switch position rather than being summed with
-its sibling. The `assemble()` call in §2 *is* the whole switching cycle.
+its sibling. The `assemble()` call in Step 2 *is* the whole switching cycle.
 
 :::{admonition} If you hand-wire a branch anyway
 :class: warning
@@ -357,7 +361,7 @@ simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (Eq. 8)
 
 ---
 
-## 5. Closing the loop
+## Step 5 — closing the loop
 
 The sky is **data** here, not a parameter: limTOD supplies it and its only job
 is to be right. That is exactly why the block stays linear in the noise-wave
@@ -421,7 +425,7 @@ rather than returning a prior-driven posterior that looks converged.
 
 ---
 
-## 6. One differentiable object
+## Step 6 — one differentiable object
 
 From the HEALPix sky map, through the beam convolution, the horizon split, the
 ohmic loss, the switch and Eq. 1 — one gradient, no finite differences anywhere.
@@ -443,8 +447,9 @@ d(sum P^2)/d(eta):        4.752e+08
 
 ## The horizon split, measured
 
-$f_\mathrm{sky}$ gets its own section because it was got wrong twice before it
-was got right, and only measurement settled it. With a truncated beam (or
+The walkthrough ends at Step 6. $f_\mathrm{sky}$ gets its own section after it
+because it was got wrong twice before it was got right, and only measurement
+settled it. With a truncated beam (or
 `horizon_mask=True`) the projector gives the beam average over the *visible*
 sky, and the rest of the antenna temperature is ground:
 
