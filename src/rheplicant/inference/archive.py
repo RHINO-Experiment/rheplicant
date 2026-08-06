@@ -30,6 +30,24 @@ count. So the pair ``(memory, tuple(memory.archive))`` is serialised
 explicitly, and ``_FORMAT_VERSION`` moved to 2 because the byte layout changed
 -- a version-1 file read by this code would deserialise the memory and then run
 off the end of the file.
+
+Version 3 adds section 9.3's per-epoch residual summary and section 9.5's input
+provenance. Both are on the term because both must outlive the recording: the
+summary is computed where the data still exists, and the provenance is what the
+memory's conditional-independence refusal reads. ``residual_dof``,
+``template_names`` and ``inputs`` are static and therefore go in the manifest --
+``eqx.tree_serialise_leaves`` would take them from whatever template it was
+handed, which for ``inputs`` means a reloaded campaign that has forgotten which
+nights shared a calibration solution and will cheerfully sum them.
+
+``template_projections`` needs one more field than its name suggests.
+``template_names = ()`` with ``None`` and ``template_names = ()`` with a
+length-zero array are the same claim to a reader and **different pytrees** to
+equinox: one has a leaf at that position and the other has an empty subtree, so
+a template built with the wrong one reads every later leaf from the wrong
+offset. ``QuadraticLikelihood.__check_init__`` refuses the empty-array spelling
+outright, and ``n_template_projections`` records ``None`` or a length so the
+template is reconstructed from the file rather than from a convention.
 """
 
 import json
@@ -45,9 +63,11 @@ from rheplicant.inference.compressed import QuadraticLikelihood
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
 
-#: 2 since the archive became an opaque pytree leaf and had to be written
-#: alongside the memory rather than inside it -- see the module docstring.
-_FORMAT_VERSION = 2
+#: 3 since section 9.3's residual summary and section 9.5's input provenance
+#: joined the term -- see the module docstring. The byte layout changed with
+#: them: `residual_chi2` and `template_projections` are dynamic, so a version-2
+#: file read by this code would run off the end.
+_FORMAT_VERSION = 3
 
 
 def _manifest_path(path: Path) -> Path:
@@ -67,6 +87,16 @@ def _describe(term: QuadraticLikelihood) -> dict[str, Any]:
         "prior_share": list(term.prior_share),
         "rows": int(term.info.factor.shape[0]),
         "dtype": str(term.info.factor.dtype),
+        "residual_dof": int(term.residual_dof),
+        "template_names": list(term.template_names),
+        # Not derivable from `template_names`: see the module docstring on the
+        # None-versus-empty-array pytree split.
+        "n_template_projections": (
+            None
+            if term.template_projections is None
+            else int(jnp.asarray(term.template_projections).shape[0])
+        ),
+        "inputs": [list(pair) for pair in term.inputs],
     }
 
 
@@ -256,6 +286,18 @@ def load_memory(path: str | Path, factorization: Factorization):
                 include_logdet=entry["include_logdet"],
                 noise_frozen_at=entry["noise_frozen_at"],
                 prior_share=tuple(entry["prior_share"]),
+                # A zero of the right shape and dtype, for the same reason
+                # `_blank` builds one: equinox reads the arrays out of the
+                # binary and takes everything else from here.
+                residual_chi2=jnp.zeros(()),
+                template_projections=(
+                    None
+                    if entry["n_template_projections"] is None
+                    else jnp.zeros(entry["n_template_projections"])
+                ),
+                residual_dof=entry["residual_dof"],
+                template_names=tuple(entry["template_names"]),
+                inputs=tuple(tuple(pair) for pair in entry["inputs"]),
             )
             for entry in manifest["terms"]
         ),

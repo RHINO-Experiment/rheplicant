@@ -112,6 +112,82 @@ def _epoch_weights(
     return sigma, seen, weight, int(jnp.sum(seen))
 
 
+def _residual_summary(
+    whitened_design: jax.Array,
+    whitened_residual: jax.Array,
+    seen: jax.Array,
+    weight: jax.Array,
+    templates: Mapping[str, jax.Array] | None,
+) -> tuple[jax.Array, int, tuple[str, ...], jax.Array | None]:
+    """Section 9.3's ~100 bytes: chi-square, DOF, and named template projections.
+
+    The residual is taken **after** the epoch's own best fit, so what is left is
+    the part no value of theta could have absorbed. That is the half of a
+    coherent error a diagnostic can see: the in-span half biases theta
+    identically in every epoch and leaves nothing here at all, which is why
+    sections 9.4 and 9.5 are refusals based on a declaration rather than reports
+    based on the data.
+
+    Under the null the projections are standard normal -- the whitened residual
+    has unit-variance components by construction -- so a campaign's mean over
+    epochs is a z-score at sqrt(N) with no calibration step.
+
+    Templates are projected onto the part of themselves that is also out of
+    span. A template lying entirely inside the design's column space projects to
+    exactly zero and says so, rather than reporting a small number that reads
+    like a null result.
+
+    **``whitened_design`` must carry every column the epoch fits, nuisances
+    included.** The plan wrote this call with the *global* block alone, which is
+    wrong wherever ``nuisance_design=`` is used and wrong in a way no shape
+    would catch: the nuisance's contribution stays in the residual, so the
+    chi-square is inflated by whatever the nuisance explained while the DOF is
+    over-counted by its rank. Measured over 4000 clean epochs of a two-global
+    design with a three-column nuisance: including the nuisance gives
+    ``dof = 3`` and a mean chi-square of ``3.0000``, and excluding it gives
+    ``dof = 6`` against a mean chi-square of ``28.44`` -- a nine-sigma-per-epoch
+    detection of nothing at all, on data with no fault in it.
+
+    The projector is the flat-prior one: everything the columns *could* explain
+    is removed, where the marginalisation itself is taken against a proper
+    prior. That is the conservative direction -- it can only make a template
+    quieter, never louder -- and it is what makes the null exact rather than
+    prior-dependent.
+    """
+    projector = whitened_design @ jnp.linalg.pinv(whitened_design)
+    perpendicular = whitened_residual - projector @ whitened_residual
+    chi2 = jnp.sum(perpendicular**2)
+    dof = int(jnp.sum(seen)) - int(jnp.linalg.matrix_rank(whitened_design))
+    names = tuple(templates or ())
+    if not names:
+        return chi2, dof, (), None
+    rows = []
+    for name in names:
+        # SELECT on `seen` before weighting: a template is supplied in the
+        # model's own units and a flagged sample is usually flagged because it
+        # holds a NaN, and `0.0 * nan` is `nan`.
+        column = jnp.where(seen, jnp.ravel(jnp.asarray(templates[name])), 0.0) * weight
+        column = column - projector @ column
+        norm = jnp.linalg.norm(column)
+        # `norm > 0` selects, and the division uses `safe`, so a template lying
+        # entirely in span never divides by zero -- and never produces the NaN
+        # that would defeat every downstream comparison guard.
+        safe = jnp.where(norm > 0.0, norm, 1.0)
+        rows.append(jnp.where(norm > 0.0, column @ perpendicular / safe, 0.0))
+    return chi2, dof, names, jnp.stack(rows)
+
+
+def _sorted_inputs(inputs: Mapping[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """``{product: hash}`` as a sorted tuple of pairs -- hashable, and static.
+
+    Sorted so that two epochs built from the same products compare equal
+    whatever order the caller happened to write them in. Section 9.5's refusal
+    is an equality test on these pairs, and an order-dependent one would let two
+    nights that share a calibration solution be summed as independent.
+    """
+    return tuple(sorted((inputs or {}).items()))
+
+
 def compress_linear(
     design: Mapping[str, jax.Array],
     observed: jax.Array,
@@ -123,6 +199,8 @@ def compress_linear(
     nuisance_prior_std: Mapping[str, Any] | None = None,
     nuisance_prior_mean: Mapping[str, jax.Array] | None = None,
     nuisance_shapes: Mapping[str, tuple[int, ...]] | None = None,
+    templates: Mapping[str, jax.Array] | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> QuadraticLikelihood:
     """Compress one epoch of a linear-Gaussian model into a sufficient statistic.
 
@@ -146,6 +224,15 @@ def compress_linear(
             Required for every entry of ``nuisance_design``.
         nuisance_prior_mean: each nuisance latent's prior mean; zero if absent.
         nuisance_shapes: each nuisance latent's shape.
+        templates: ``{name: (n_data,) shape}`` -- named systematic templates the
+            epoch's residual is projected onto, in the model's own units.
+            Section 9.3, and it can only be done here: ``audit()`` runs after
+            the recording is archived, and the residual is gone by then.
+        inputs: ``{product: content hash}`` for the shared products this epoch
+            was built from -- one calibration solution, one beam model, one flag
+            table. Section 9.5's conditional-independence refusal reads these,
+            and a campaign that has forgotten which nights shared a solution
+            will cheerfully sum them.
 
     Returns:
         A prior-free, exact
@@ -190,11 +277,16 @@ def compress_linear(
     global_block = jnp.where(seen[:, None], _stack(design, names), 0.0) * weight[:, None]
     width = global_block.shape[1]
 
+    fitted_block = global_block
     if nuisance_names:
         nuisance_block = (
             jnp.where(seen[:, None], _stack(nuisance_design, nuisance_names), 0.0)
             * weight[:, None]
         )
+        # Every column the epoch fits, for section 9.3's projector. A nuisance
+        # marginalised here is part of this night's best fit, so leaving it out
+        # would report as unexplained a residual the model did explain.
+        fitted_block = jnp.concatenate([global_block, nuisance_block], axis=1)
         n_nuisance = nuisance_block.shape[1]
         prior_rows, prior_target, prior_log_std = [], [], []
         for name in nuisance_names:
@@ -247,8 +339,19 @@ def compress_linear(
         names=names,
         shapes=tuple(shapes[name] for name in names),
     )
+    chi2, dof, template_names, projections = _residual_summary(
+        fitted_block, residual, seen, weight, templates
+    )
     return QuadraticLikelihood(
-        info=info, epoch_id=epoch_id, n_observed=n_observed, exact=True
+        info=info,
+        epoch_id=epoch_id,
+        n_observed=n_observed,
+        exact=True,
+        residual_chi2=chi2,
+        template_projections=projections,
+        residual_dof=dof,
+        template_names=template_names,
+        inputs=_sorted_inputs(inputs),
     )
 
 
@@ -433,6 +536,8 @@ def compress_reduced_basis(
     nuisance_prior_mean: Mapping[str, jax.Array] | None = None,
     nuisance_shapes: Mapping[str, tuple[int, ...]] | None = None,
     nuisance_tolerance: float = 1e-6,
+    templates: Mapping[str, jax.Array] | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> ReducedBasisLikelihood:
     """Compress one epoch against a shared reduced basis -- section 4.1's T1.
 
@@ -504,6 +609,15 @@ def compress_reduced_basis(
             block's column count as a flat vector.
         nuisance_tolerance: how far outside the basis a nuisance column may lie
             before it is refused, as a fraction of its own ``N^-1`` norm.
+        templates: ``{name: (n_data,) shape}`` -- named systematic templates the
+            epoch's residual is projected onto, in the model's own units
+            (section 9.3). Here "the epoch's best fit" is the best the
+            *dictionary* can do, so a template lying inside the basis's span
+            projects to zero: at T1 the residual summary is blind to exactly
+            what the basis can absorb, which is a wider blindness than T2's and
+            is the honest reading of the number.
+        inputs: ``{product: content hash}`` for this epoch's shared input
+            products. Section 9.5.
 
     Returns:
         A prior-free, approximate
@@ -718,6 +832,14 @@ def compress_reduced_basis(
         return _evaluate(info, basis, probe) - oracle(probe)
 
     gradient = jax.grad(_fidelity_residual)(dict(values))
+    chi2, dof, template_names, projections = _residual_summary(
+        design if nuisance_block is None
+        else jnp.concatenate([design, nuisance_block], axis=1),
+        residual,
+        seen,
+        weight,
+        templates,
+    )
     return ReducedBasisLikelihood(
         basis=basis,
         info=info,
@@ -733,6 +855,11 @@ def compress_reduced_basis(
             [jnp.ravel(gradient[name]) for name in bias_names]
         ),
         bias_names=bias_names,
+        residual_chi2=chi2,
+        template_projections=projections,
+        residual_dof=dof,
+        template_names=template_names,
+        inputs=_sorted_inputs(inputs),
     )
 
 

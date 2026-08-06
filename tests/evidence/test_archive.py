@@ -25,6 +25,15 @@ def _memory_with_non_default_provenance():
         epoch_id="night-042", n_observed=777,
         exact=False, support={"depth": (-2.0, 2.0), "width": (-1.0, 3.0)},
         include_logdet=False, noise_frozen_at="gls",
+        # Format 3's five. Every one non-default, and the two static ones
+        # deliberately unguessable from anything else in this term: a template
+        # built from a convention rather than from the manifest would reproduce
+        # `()` and `()` here without erroring.
+        residual_chi2=jnp.array(7.5),
+        template_projections=jnp.array([1.25, -0.5]),
+        residual_dof=13,
+        template_names=("gain_ripple", "ground_pickup"),
+        inputs=(("beam_model", "sha256:b3ee"), ("cal_solution", "sha256:0f17")),
     )
     return memory.remember(term)
 
@@ -44,6 +53,20 @@ def test_every_static_field_survives_a_round_trip(tmp_path):
     assert after.include_logdet is False
     assert after.noise_frozen_at == "gls"
     assert after.prior_share == (0, 1)
+    # Format 3. `residual_dof`, `template_names` and `inputs` are static, so
+    # they come from the manifest; without their entries there they would come
+    # back 0, () and () -- a campaign that had forgotten which nights shared a
+    # calibration solution, and would cheerfully sum them.
+    assert after.residual_dof == before.residual_dof == 13
+    assert after.template_names == ("gain_ripple", "ground_pickup")
+    assert after.inputs == (
+        ("beam_model", "sha256:b3ee"),
+        ("cal_solution", "sha256:0f17"),
+    )
+    assert float(after.residual_chi2) == 7.5
+    np.testing.assert_array_equal(
+        np.asarray(after.template_projections), np.asarray([1.25, -0.5])
+    )
     np.testing.assert_array_equal(
         np.asarray(after.info.factor), np.asarray(before.info.factor)
     )
@@ -85,8 +108,8 @@ def test_a_manifest_from_another_format_version_is_refused(tmp_path):
     save_memory(memory, path)
     manifest_path = path.with_suffix(".json")
     manifest = json.loads(manifest_path.read_text())
-    assert manifest["format_version"] == 2, "the version this code writes"
-    manifest["format_version"] = 3
+    assert manifest["format_version"] == 3, "the version this code writes"
+    manifest["format_version"] = 4
     del manifest["terms"][0]["noise_frozen_at"]  # what a later layout may drop
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(StateValidationError, match="format version"):

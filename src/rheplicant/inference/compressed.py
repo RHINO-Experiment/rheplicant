@@ -46,6 +46,15 @@ class CompressedLikelihood(Protocol):
     ``exact`` and ``n_observed`` are read by ``audit()``; ``prior_share`` by
     ``remember``'s tempering refusal. A published contract that omits them is
     an invitation to write a class that cannot work.
+
+    The last five are section 9's per-epoch residual summary and section 9.5's
+    input provenance, and they are on the contract for the same reason: they are
+    read after the term has been folded irreversibly into a QR -- three of them
+    by :func:`~rheplicant.inference.archive.save_memory`'s manifest, two by
+    :mod:`rheplicant.inference.diagnostics`. :class:`RawLikelihood` carries them
+    as structurally empty properties rather than being dropped from the
+    contract, so that the refusal a caller of T0 actually needs -- ``info``'s,
+    which names the tier and its remedy -- is the one they reach.
     """
 
     @property
@@ -66,12 +75,36 @@ class CompressedLikelihood(Protocol):
     @property
     def prior_share(self) -> tuple[int, int]: ...
 
+    @property
+    def residual_chi2(self) -> Any: ...
+
+    @property
+    def residual_dof(self) -> int: ...
+
+    @property
+    def template_names(self) -> tuple[str, ...]: ...
+
+    @property
+    def template_projections(self) -> Any: ...
+
+    @property
+    def inputs(self) -> tuple[tuple[str, str], ...]: ...
+
     def __call__(self, values: dict[str, jax.Array]) -> jax.Array: ...
 
 
-#: What :class:`~rheplicant.inference.memory.BayesMemory` reads off a term.
-#: Checked by name at ``remember`` so an incomplete term is refused at the door
-#: rather than at a diagnostic, and listed here so the two cannot drift.
+#: What :class:`~rheplicant.inference.memory.BayesMemory` and the code that
+#: outlives it read off a term. Checked by name at ``remember`` so an incomplete
+#: term is refused at the door rather than at a diagnostic, and listed here so
+#: this tuple and the protocol above cannot drift.
+#:
+#: The last five are section 9's, and they are on this list for the reason the
+#: first six are: they are read *after* the QR that made the term
+#: irreversible -- ``residual_dof``, ``template_names`` and ``inputs`` by
+#: :func:`~rheplicant.inference.archive.save_memory`'s manifest, the other two
+#: by :mod:`rheplicant.inference.diagnostics`. A term admitted without them
+#: contributes to the accumulated density and then raises ``AttributeError``
+#: from a diagnostic, by which time the campaign already depends on it.
 REQUIRED_TERM_MEMBERS = (
     "latents",
     "epoch_id",
@@ -79,7 +112,50 @@ REQUIRED_TERM_MEMBERS = (
     "n_observed",
     "exact",
     "prior_share",
+    "residual_chi2",
+    "residual_dof",
+    "template_names",
+    "template_projections",
+    "inputs",
 )
+
+
+def _check_template_summary(term: Any) -> None:
+    """The one invariant both quadratic tiers share about section 9.3's fields.
+
+    Two failures, and the second is the one an implementation reaches for:
+
+    * a count mismatch. The summary is read **by name across a whole campaign**,
+      so a term naming two templates and storing three projections would
+      silently attribute one night's ripple to another night's template.
+    * an empty array where ``None`` is meant. ``()`` names and a length-zero
+      array are the same claim to a reader and a *different pytree* to
+      ``equinox``: one has a leaf there and the other has an empty subtree, so
+      an archive written from one and reloaded against the other reads every
+      subsequent leaf from the wrong offset. The manifest records which it was
+      (:mod:`rheplicant.inference.archive`), and this keeps the two spellings
+      from both being reachable in the first place.
+    """
+    stored = term.template_projections
+    if not term.template_names:
+        if stored is not None:
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} names no systematic template but stores a "
+                f"projection array of shape {jnp.shape(stored)}. Spell 'no "
+                "templates' as template_projections=None: a length-zero array and "
+                "None are the same claim to a reader and different pytrees to "
+                "equinox, and an archive written as one and reloaded as the other "
+                "reads every later leaf from the wrong offset."
+            )
+        return
+    if stored is None or int(jnp.asarray(stored).shape[0]) != len(term.template_names):
+        found = "None" if stored is None else str(int(jnp.asarray(stored).shape[0]))
+        raise StateValidationError(
+            f"Term {term.epoch_id!r} names {len(term.template_names)} systematic "
+            f"template(s) but stores {found} projection(s). The summary is read by "
+            "name across a whole campaign, so a mismatch here would silently "
+            "attribute one night's ripple to another night's template."
+        )
 
 
 class QuadraticLikelihood(eqx.Module):
@@ -109,6 +185,14 @@ class QuadraticLikelihood(eqx.Module):
             the only value the streaming path produces. Stored as integers so
             that "the shares sum to one" is a statement that can be true for
             any N and any summation routine, which a float equality is not.
+        residual_chi2, residual_dof, template_names, template_projections:
+            section 9.3's per-epoch residual summary, computed by
+            :func:`~rheplicant.inference.compress.compress_linear` while the
+            data still exists. Each field carries its own note on why it is
+            dynamic or static.
+        inputs: ``((product, content hash), ...)`` for this epoch's shared input
+            products, sorted. A tuple of pairs rather than a mapping so it is
+            hashable and can be static.
     """
 
     info: SqrtInfo
@@ -119,8 +203,24 @@ class QuadraticLikelihood(eqx.Module):
     include_logdet: bool = eqx.field(static=True, default=True)
     noise_frozen_at: str = eqx.field(static=True, default="none")
     prior_share: tuple[int, int] = eqx.field(static=True, default=(0, 1))
+    #: Section 9.3's per-epoch residual summary, computed where the data still
+    #: exists and stored because ``audit()`` runs after it is gone. Dynamic, not
+    #: static: it is a function OF THE DATA, so concretising it at compression
+    #: would turn ``jax.grad`` and ``jax.vmap`` over ``observed`` -- both pinned
+    #: in Plan B's tests -- into a ConcretizationTypeError.
+    residual_chi2: jax.Array | float = 0.0
+    #: ``(n_templates,)``, or ``None`` when the epoch named none. Dynamic for
+    #: the reason above, and additionally because equinox puts a static field
+    #: into the treedef, where array ``__eq__`` decides treedef equality.
+    template_projections: jax.Array | None = None
+    #: Static: a sample count minus a rank, computable from sigma and the design
+    #: alone, exactly as ``n_observed`` is.
+    residual_dof: int = eqx.field(static=True, default=0)
+    template_names: tuple[str, ...] = eqx.field(static=True, default=())
+    inputs: tuple[tuple[str, str], ...] = eqx.field(static=True, default=())
 
     def __check_init__(self):
+        _check_template_summary(self)
         for name, leaf in (
             ("factor", self.info.factor),
             ("target", self.info.target),
@@ -262,6 +362,36 @@ class RawLikelihood(eqx.Module):
     def estimator(self) -> tuple[str, ...]:
         return ("full" if self.include_logdet else "gls", self.noise_frozen_at)
 
+    # Section 9.3's five members, structurally empty here and present anyway.
+    # A fixed-size summary exists because the data is about to be released, and
+    # T0 is the tier that refuses to release it: it is neither storable nor
+    # accumulable, so there is nothing for one to buy. They are empty rather
+    # than computed, and they are here rather than absent so that
+    # `reject_bad_term`'s member check passes and the refusal a caller of T0
+    # actually needs -- `info` below, which names the tier and its remedy -- is
+    # the one they reach. Without them the message is a list of missing
+    # attributes instead.
+
+    @property
+    def residual_chi2(self) -> float:
+        return 0.0
+
+    @property
+    def residual_dof(self) -> int:
+        return 0
+
+    @property
+    def template_names(self) -> tuple[str, ...]:
+        return ()
+
+    @property
+    def template_projections(self) -> None:
+        return None
+
+    @property
+    def inputs(self) -> tuple[tuple[str, str], ...]:
+        return ()
+
     @property
     def info(self) -> SqrtInfo:
         raise StateValidationError(
@@ -393,8 +523,20 @@ class ReducedBasisLikelihood(eqx.Module):
     # for the same reason.
     bias_gradient: jax.Array | None = None
     bias_names: tuple[str, ...] = eqx.field(static=True, default=())
+    #: Section 9.3's per-epoch residual summary, on the same terms as
+    #: :class:`QuadraticLikelihood`'s. The residual is the one perpendicular to
+    #: the epoch-whitened **basis rows**, not to a design matrix, which is the
+    #: only difference between the two tiers here: a T1 epoch's "best fit" is
+    #: the best the dictionary can do, and what is left over is what no
+    #: coefficient vector could have absorbed.
+    residual_chi2: jax.Array | float = 0.0
+    template_projections: jax.Array | None = None
+    residual_dof: int = eqx.field(static=True, default=0)
+    template_names: tuple[str, ...] = eqx.field(static=True, default=())
+    inputs: tuple[tuple[str, str], ...] = eqx.field(static=True, default=())
 
     def __check_init__(self):
+        _check_template_summary(self)
         for name, leaf in (
             ("factor", self.info.factor),
             ("target", self.info.target),
