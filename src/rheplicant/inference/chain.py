@@ -28,6 +28,36 @@ under filtering; a :class:`HyperTransition` holds a builder and is resolved
 the recursion is traceable either way -- which is also why the fixed case is
 validated by the same tests rather than by a second implementation of the same
 arithmetic.
+
+**The constant bookkeeping is not optional, and it is where this module can be
+wrong while looking right.** Six constants reach the answer; the recursion's
+shape, gradient and curvature are correct without any of them. Measured on
+``tests/evidence/chain_bank.py`` at ``theta = (0.4, -1.1)``, the cost of
+dropping one:
+
+===================================================  ==============
+dropped                                              nats
+===================================================  ==============
+initial ``zeta`` prior normalisation                 +0.9189
+per-transition ``-0.5 logdet(2 pi Q)``, five of them +2.8618
+the spec's shorthand for it (``0.5 logdet Q^-1``)    +4.5947
+marginalisation constant, six of them                +7.2619
+the fold corner ``-0.5 rho^2``, six of them          +45.9502
+the masked data normalisation                        -6.8408
+===================================================  ==============
+
+Two of those belong to nobody else. The corner is
+:meth:`~rheplicant.inference.sqrtinfo.SqrtInfo.combine`'s and the data
+normalisation is :mod:`~rheplicant.inference.compress`'s, and a reader will
+assume the rest are handled elsewhere too; the **initial prior normalisation**
+and the **final marginalisation** are new here.
+
+Note also what does *not* appear: the marginalisation's own corner is exactly
+zero in this recursion, because that QR is square and ``upper[keep:, width]`` is
+a length-zero slice. Measured through the filter, deleting it moves the answer by
+0.0 nats bit for bit. A test asserting it matters would pass vacuously, so
+``tests/evidence/test_chain_filter.py`` pins the zero instead and pins the
+**fold's** corner as the one that is worth 45.95.
 """
 
 from collections.abc import Callable, Sequence
@@ -38,6 +68,7 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.core.errors import StateValidationError
+from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise_arrays
 
 
 class LinearGaussianTransition(eqx.Module):
@@ -121,16 +152,25 @@ class LinearGaussianTransition(eqx.Module):
             # about -- see the class docstring.
             if isinstance(spread, jax.core.Tracer):
                 continue
-            if not bool(jnp.all(spread > 0.0)):
+            # `not (... > 0)` rather than `... <= 0`, because every comparison
+            # against NaN is False and the second form waves a NaN spread
+            # through. `isfinite` is separate rather than folded in for the same
+            # reason: `inf > 0` is True, and an infinite spread makes
+            # `1 / process_std` zero, which is a transition row of zeros -- the
+            # density comes back -inf from the log-determinant, a thousand epochs
+            # after the declaration that caused it.
+            if not bool(jnp.all(jnp.isfinite(spread) & (spread > 0.0))):
                 raise StateValidationError(
-                    f"{name} must be strictly positive; got {spread}. These rows "
-                    "are what constrain zeta at each marginalisation, so a zero "
-                    "leaves the Gaussian integral over that epoch divergent -- and "
-                    "inside a lax.scan finite arithmetic returns a large plausible "
-                    "number for it rather than an infinity anyone would notice. A "
-                    "chain that genuinely does not move is process_std=1e-9, not "
-                    "0.0; a quantity that is constant across the campaign is "
-                    'scope="global".'
+                    f"{name} must be finite and strictly positive; got {spread}. "
+                    "These rows are what constrain zeta at each marginalisation, so "
+                    "a zero leaves the Gaussian integral over that epoch divergent "
+                    "-- and inside a lax.scan finite arithmetic returns a large "
+                    "plausible number for it rather than an infinity anyone would "
+                    "notice. A chain that genuinely does not move is "
+                    "process_std=1e-9, not 0.0; one that is effectively unlinked is "
+                    "1e12, not inf, which would zero the transition rows and send "
+                    "the whole campaign's density to -inf; and a quantity that is "
+                    'constant across the campaign is scope="global".'
                 )
 
     @property
@@ -213,3 +253,206 @@ class HyperTransition(eqx.Module):
                 "shaped against the declared number and cannot be re-cut now."
             )
         return resolved
+
+
+def _initial_log_norm(transition: LinearGaussianTransition) -> jax.Array:
+    """``-0.5 logdet(2 pi P0)`` -- the prior on ``zeta_1``.
+
+    A module-level function rather than three inline terms so that a test can
+    delete exactly this constant and measure what it was worth. It belongs to
+    nobody else: the per-epoch blocks know nothing about the chain, and
+    :func:`~rheplicant.inference.sqrtinfo.marginalise_arrays` carries only the
+    integral's own constant. Measured cost of dropping it: +0.9189 nats, which is
+    exactly ``0.5 log(2 pi)`` for a scalar chain at ``P0 = 1``.
+    """
+    return -0.5 * transition.width * jnp.log(2.0 * jnp.pi) - jnp.sum(
+        jnp.log(transition.initial_std)
+    )
+
+
+def _transition_log_norm(transition: LinearGaussianTransition) -> jax.Array:
+    """``-0.5 logdet(2 pi Q)`` -- one per augmentation.
+
+    Section 6 names only ``0.5 logdet Q^-1``, and the ``2 pi`` half is not
+    optional: it cancels against the marginalisation's ``+0.5 n log(2 pi)``,
+    which is why the shorthand reads plausible. Keeping only the log-determinant
+    while calling :func:`~rheplicant.inference.sqrtinfo.marginalise_arrays`
+    leaves ``+0.5 log(2 pi)`` per transition -- measured +4.5947 nats over this
+    fixture's five transitions, so +918 nats over a thousand-epoch campaign, and
+    no effect on any posterior mean, width or gradient. Dropping the whole term
+    instead costs +2.8618.
+    """
+    return -0.5 * transition.width * jnp.log(2.0 * jnp.pi) - jnp.sum(
+        jnp.log(transition.process_std)
+    )
+
+
+def _fold(
+    factor: jax.Array,
+    target: jax.Array,
+    offset: jax.Array,
+    block: tuple[jax.Array, jax.Array, jax.Array],
+    width: int,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Add one epoch's evidence to the running joint form.
+
+    :meth:`~rheplicant.inference.sqrtinfo.SqrtInfo.combine`'s arithmetic on raw
+    arrays, because a ``lax.scan`` carry cannot afford a name lookup and a
+    re-validation per epoch. The corner is the largest of the six constants --
+    measured +45.9502 nats over six epochs, and it grows with the campaign.
+    """
+    block_factor, block_target, block_offset = block
+    upper = jnp.linalg.qr(
+        jnp.concatenate(
+            [
+                jnp.concatenate([factor, target[:, None]], axis=1),
+                jnp.concatenate([block_factor, block_target[:, None]], axis=1),
+            ],
+            axis=0,
+        ),
+        mode="r",
+    )
+    keep = min(upper.shape[0], width)
+    corner = upper[keep:, width]
+    return (
+        upper[:keep, :width],
+        upper[:keep, width],
+        offset + block_offset - 0.5 * jnp.sum(corner**2),
+    )
+
+
+def chain_marginal(
+    blocks: tuple[jax.Array, jax.Array, jax.Array],
+    transition: Any,
+    values: dict[str, jax.Array],
+    names: tuple[str, ...],
+    shapes: tuple[tuple[int, ...], ...],
+) -> SqrtInfo:
+    """``zeta_1:N`` integrated out exactly, leaving a quadratic form in theta.
+
+    Args:
+        blocks: ``(factor (N, w, w), target (N, w), offset (N,))`` -- one square
+            per-epoch joint form over ``(*names, zeta)``, ``zeta``'s columns
+            **last**. Square rather than ragged because ``lax.scan`` needs one
+            shape per iteration; ``SqrtInfo.combine(SqrtInfo.null(...), info)``
+            is the padding, and it is the same QR the accumulator uses, so the
+            offset it produces is the one this consumes, corner included.
+        transition: a :class:`LinearGaussianTransition` or a
+            :class:`HyperTransition`. Resolved once, here, against ``values`` --
+            which is what makes an inferred correlation time inferred rather
+            than pinned at compression time.
+        values: the global latents. Read for the transition's hyperparameters
+            and for the returned form's evaluation point.
+        names: the global latents, in the same column order the blocks were
+            built in.
+        shapes: each of those latents' shapes, in the same order.
+
+    Returns:
+        A :class:`~rheplicant.inference.sqrtinfo.SqrtInfo` over ``names`` whose
+        ``log_prob`` is ``log p(d_1:N | theta)``. Prior-free, like every other
+        stored factor in this layer.
+
+    **Why the scan stops one short, and what that is *not* about.** The plan this
+    was built from warned that scanning over all ``N`` blocks and then
+    marginalising once more would integrate a ``zeta_{N+1}`` no data constrained
+    and come back "finite and wrong by one transition's worth of constants".
+    Measured, by writing it that way: it comes back **exact**, 4.5e-13 from the
+    dense oracle at all four probes -- because the extra transition density
+    integrates to one over its own argument, so its normalisation and the extra
+    marginalisation's constant cancel term for term. The reason to stop one short
+    is therefore cost, one QR per call, not correctness. What the extra step does
+    change is the *count* of each constant, five transitions becoming six and six
+    marginalisations becoming seven, which is what
+    ``test_the_transition_normalisation_is_the_whole_density_not_half_of_it`` and
+    ``test_the_marginalisation_constant_is_carried`` notice and the exactness
+    tests cannot.
+    """
+    factors, targets, offsets = blocks
+    resolved = transition.at(values)
+    n_zeta = resolved.width
+    n_theta = sum(int(jnp.zeros(shape).size) for shape in shapes)
+    width = n_theta + n_zeta
+    if factors.shape[-1] != width:
+        raise StateValidationError(
+            f"The stored blocks are {factors.shape[-1]} columns wide but "
+            f"{list(names)} plus a width-{n_zeta} chain is {width}. The blocks are "
+            "a quadratic form in a specific ordered vector; reading them against a "
+            "different one is not a rename, it is a different model."
+        )
+
+    inverse_process = 1.0 / resolved.process_std
+    inverse_initial = 1.0 / resolved.initial_std
+
+    # zeta_1's prior, and nothing else: theta's prior lives on the
+    # Factorization, and a stored factor is prior-free in theta by construction.
+    carry_factor = (
+        jnp.zeros((width, width)).at[n_theta:, n_theta:].set(jnp.diag(inverse_initial))
+    )
+    carry_target = (
+        jnp.zeros(width).at[n_theta:].set(inverse_initial * resolved.initial_mean)
+    )
+    carry_offset = _initial_log_norm(resolved)
+
+    # `[zeta_e | theta | zeta_{e+1}]`: marginalise_arrays takes the block first.
+    augment_order = jnp.asarray(
+        list(range(n_theta, width))
+        + list(range(n_theta))
+        + list(range(width, width + n_zeta)),
+        dtype=int,
+    )
+    final_order = jnp.asarray(
+        list(range(n_theta, width)) + list(range(n_theta)), dtype=int
+    )
+    # `Q^-1/2 (zeta_{e+1} - phi zeta_e)`, with zero response to theta: condition
+    # C1b's locality, written into the rows rather than assumed. The scaling is
+    # `diag(1/q) @ phi`, not `phi @ diag(1/q)`; the two coincide for a scalar
+    # chain, which is why a wide chain is what tests the ordering.
+    transition_rows = jnp.concatenate(
+        [
+            jnp.zeros((n_zeta, n_theta)),
+            -inverse_process[:, None] * resolved.phi,
+            jnp.diag(inverse_process),
+        ],
+        axis=1,
+    )
+    transition_constant = _transition_log_norm(resolved)
+
+    def step(carry, block):
+        factor, target, offset = _fold(*carry, block, width)
+        widened = jnp.concatenate(
+            [factor, jnp.zeros((factor.shape[0], n_zeta))], axis=1
+        )
+        joint = jnp.concatenate([widened, transition_rows], axis=0)[:, augment_order]
+        joint_target = jnp.concatenate([target, jnp.zeros(n_zeta)])
+        factor, target, offset, _ = marginalise_arrays(
+            joint, joint_target, offset + transition_constant, n_zeta
+        )
+        return (factor, target, offset), None
+
+    # Every epoch but the last is folded and then advanced; the last is folded
+    # and then integrated out, because it has no successor to hand the chain to.
+    (factor, target, offset), _ = jax.lax.scan(
+        step,
+        (carry_factor, carry_target, carry_offset),
+        (factors[:-1], targets[:-1], offsets[:-1]),
+    )
+    factor, target, offset = _fold(
+        factor, target, offset, (factors[-1], targets[-1], offsets[-1]), width
+    )
+    factor, target, offset, _ = marginalise_arrays(
+        factor[:, final_order], target, offset, n_zeta
+    )
+    return SqrtInfo(
+        factor=factor, target=target, offset=offset, names=names, shapes=shapes
+    )
+
+
+def chain_log_likelihood(
+    blocks: tuple[jax.Array, jax.Array, jax.Array],
+    transition: Any,
+    values: dict[str, jax.Array],
+    names: tuple[str, ...],
+    shapes: tuple[tuple[int, ...], ...],
+) -> jax.Array:
+    """``log p(d_1:N | theta)``, the chain integrated out exactly. No prior."""
+    return chain_marginal(blocks, transition, values, names, shapes).log_prob(values)

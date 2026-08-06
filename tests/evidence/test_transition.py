@@ -61,10 +61,37 @@ def test_a_non_positive_process_std_is_refused_at_construction(bad):
         LinearGaussianTransition(phi=0.8, process_std=bad, initial_std=1.0)
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_a_non_finite_process_std_is_refused_at_construction(bad):
+    """The two ways `spread <= 0` would have waved a bad chain through.
+
+    NaN defeats every comparison, so `if spread <= 0` is False for it and the
+    chain is built; the check is written `not (... > 0)` for that reason. And
+    `inf > 0` is True, so positivity alone accepts an infinite spread, which
+    makes `1 / process_std` zero -- a transition row of zeros and a campaign
+    density of -inf, discovered a thousand epochs after the declaration that
+    caused it. Both were measured against the first draft of this guard: NaN was
+    already refused, `+inf` was accepted.
+    """
+    with pytest.raises(StateValidationError, match="finite and strictly positive"):
+        LinearGaussianTransition(phi=0.8, process_std=bad, initial_std=1.0)
+
+
 def test_a_legitimately_tiny_process_std_is_accepted():
     """The nearest legitimate case: a chain that barely moves is still a chain."""
     transition = LinearGaussianTransition(phi=0.999, process_std=1e-9, initial_std=1.0)
     assert float(transition.process_std[0]) == 1e-9
+
+
+def test_a_legitimately_enormous_process_std_is_accepted():
+    """The other nearest legitimate case, on the far side of the finiteness check.
+
+    A chain whose innovation dwarfs everything else is effectively unlinked, and
+    that is a model somebody may mean. `1e12` is finite and must pass; only `inf`
+    is refused.
+    """
+    transition = LinearGaussianTransition(phi=0.5, process_std=1e12, initial_std=1e12)
+    assert float(transition.process_std[0]) == 1e12
 
 
 def test_a_mismatched_phi_is_refused_rather_than_broadcast():
