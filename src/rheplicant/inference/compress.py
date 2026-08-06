@@ -278,6 +278,90 @@ def _evaluate(info: SqrtInfo, basis: Any, values: dict[str, jax.Array]) -> jax.A
     return info.log_prob({COEFFICIENTS: basis.coefficients(values) - basis.c_ref})
 
 
+def _support_corners(
+    values: Mapping[str, jax.Array], support: Mapping[str, tuple[float, float]]
+) -> list[dict[str, jax.Array]]:
+    """The centre, and each latent pushed to each end of its declared box.
+
+    ``2 n_theta + 1`` probes rather than the ``2^n_theta`` corners: the cost is
+    linear in the parameter count, and a per-axis extreme is what a frozen
+    covariance is actually sensitive to -- sigma is proportional to the
+    prediction, so it is the latent that scales the prediction that moves it,
+    not a joint excursion of all of them. Named here rather than inlined so the
+    boundary-validation task can use the same points.
+    """
+    probes = [dict(values)]
+    for name, (low, high) in support.items():
+        if name not in values:
+            continue
+        probes.extend({**values, name: jnp.asarray(edge)} for edge in (low, high))
+    return probes
+
+
+def _frozen_noise_residual(
+    basis: Any,
+    observed: jax.Array,
+    sigma: jax.Array,
+    noise: Any,
+    values: Mapping[str, jax.Array],
+    support: Mapping[str, tuple[float, float]],
+    epoch_id: str,
+) -> jax.Array:
+    """What freezing ``N`` cost this epoch, in nats, over the declared support.
+
+    Section 8 makes the correction mandatory *with a measured residual*, and
+    recording ``noise_frozen_at`` is provenance rather than detection: it says
+    the covariance was frozen, not what freezing did.
+
+    **Frozen T0 against live T0, not T1 against live T0.** The projection error
+    is section 7's, measured as a gradient and budgeted there; folding it in
+    here would inflate this number by something a larger ``n_basis`` fixes and
+    make the refusal below name the wrong remedy. Measured on the RHINO fixture
+    under a constant sigma, where freezing costs exactly nothing: this returns
+    ``0.0`` while T1 still differs from the raw likelihood by 8.2e-6 nats.
+
+    Computed for **every** noise model rather than behind a branch on
+    ``depends_on_prediction``. A branch would make the zero a skipped code path
+    instead of an arithmetic fact, and the test for that claim would then pass
+    with the whole measurement deleted.
+
+    **Returned as a traced scalar, and stored as a dynamic leaf.** Casting it to
+    a Python float here would concretise the data, which breaks ``jax.grad`` and
+    ``jax.vmap`` over ``observed`` -- the two traces this module documents as
+    working, and which ``_refuse_traced_sigma`` was deliberately narrowed to
+    keep. Measured: the float cast turned both of
+    ``test_reduced_basis_likelihood.py``'s trace pins into a
+    ``ConcretizationTypeError``. So the reduction stays in ``jnp``, and only the
+    tolerance comparison -- which genuinely needs a concrete answer -- asks for
+    one.
+    """
+    frozen = RawLikelihood(
+        predict=basis.predict,
+        observed=observed,
+        sigma=sigma,
+        names=tuple(values),
+        epoch_id=epoch_id,
+    )
+    gaps = []
+    for probe in _support_corners(values, support):
+        live = RawLikelihood(
+            predict=basis.predict,
+            observed=observed,
+            sigma=jnp.broadcast_to(
+                noise.std(basis.predict(probe)), jnp.shape(observed)
+            ),
+            names=tuple(values),
+            epoch_id=epoch_id,
+        )
+        gaps.append(jnp.abs(frozen(probe) - live(probe)))
+    # `jnp.max`, never the builtin `max` over floats: with a NaN among the gaps
+    # the builtin's answer depends on which element the NaN happened to be, so
+    # the same broken epoch would refuse or pass according to the iteration
+    # order of `support`. `jnp.max` propagates the NaN; `jnp.nanmax` would hide
+    # it, which is the opposite of what this measurement is for.
+    return jnp.max(jnp.stack(gaps))
+
+
 def _phi_marginal_raw_density(
     basis: Any,
     observed: jax.Array,
@@ -329,6 +413,7 @@ def compress_reduced_basis(
     *,
     support: dict[str, tuple[float, float]] | None = None,
     noise_frozen_at: str = "none",
+    frozen_tolerance: float | None = None,
     nuisance_design: Mapping[str, jax.Array] | None = None,
     nuisance_prior_std: Mapping[str, Any] | None = None,
     nuisance_prior_mean: Mapping[str, jax.Array] | None = None,
@@ -385,7 +470,13 @@ def compress_reduced_basis(
             reference prediction, ``"gls"`` for one from
             :func:`~rheplicant.inference.gls.iterative_gls`. Two terms with
             different values are different estimators and ``BayesMemory``
-            refuses to sum them.
+            refuses to sum them. Not overridden for a noise model that does not
+            depend on the prediction: a sigma computed by ``iterative_gls`` and
+            handed back as ``HomoscedasticNoise`` is constant *and* frozen at
+            the GLS solution, and ``"gls"`` is the true answer there.
+        frozen_tolerance: refuse when freezing the covariance costs more than
+            this many nats anywhere in ``support``. ``None`` measures and
+            records without refusing.
         nuisance_design: ``{nuisance latent: (n_data, n_j) block}`` for the
             per-epoch latents integrated out here. Every column must lie inside
             the basis -- pass the same block to ``build_reduced_basis`` as
@@ -417,6 +508,49 @@ def compress_reduced_basis(
             "populated, which is the only region this basis's fidelity was ever "
             "measured in. Pass support= to build_reduced_basis so it travels with "
             "the dictionary, or to this call."
+        )
+
+    # The storage origin, read once. Everything measured below -- the frozen-N
+    # residual and section 7's bias gradient -- is anchored here, so it is
+    # resolved before any of it rather than twice in two places.
+    values = _reference_values(basis)
+
+    # Section 8, mandatory WITH A MEASURED RESIDUAL. Under RadiometerNoise sigma
+    # tracks the prediction (D21), so N^-1 depends on theta and the stored
+    # statistics are not constants until it is frozen -- and D23 records that
+    # the converged answer is then generalized least squares, not the maximum of
+    # the full Gaussian likelihood. Freezing is exact at the anchor and costs
+    # something away from it; that cost is measured here at the extremes of the
+    # declared support, not bounded by an argument.
+    frozen_residual = _frozen_noise_residual(
+        basis, observed, sigma, noise, values, support, epoch_id
+    )
+    if frozen_tolerance is not None and isinstance(frozen_residual, jax.core.Tracer):
+        raise StateValidationError(
+            "frozen_tolerance cannot be enforced under a trace over the data: the "
+            "residual is the epoch's own log-density gap, so it is traced too, and "
+            "a comparison against it has no concrete answer to branch on. "
+            "jax.grad and jax.vmap over `observed` do work here and are pinned -- "
+            "what does not is refusing inside one. Drop frozen_tolerance and read "
+            "term.frozen_noise_residual afterwards; the measurement is still taken "
+            "and still stored."
+        )
+    # `not <=`, never `>`: a zero sigma makes the quadratic -inf and the
+    # log-determinant +inf, so the density is NaN -- and `nan > tolerance` is
+    # False, which is the one answer that lets a broken epoch past.
+    if frozen_tolerance is not None and not bool(frozen_residual <= frozen_tolerance):
+        raise StateValidationError(
+            f"Freezing the covariance costs {float(frozen_residual):.6g} nats over the "
+            f"declared support, against a tolerance of {frozen_tolerance}. Under "
+            "RadiometerNoise sigma is a function of the very quantity being "
+            "inferred (D21), so a frozen N makes the stored statistics constants "
+            "at the price of a theta-dependent error -- and D23 records that the "
+            "converged answer is then generalized least squares, not the maximum "
+            "of the full Gaussian likelihood. This number is the freezing cost "
+            "alone; the projection error is section 7's bias budget and a larger "
+            "n_basis is its remedy, not this one. Narrow the support, re-anchor "
+            "the basis nearer the accumulated posterior, or declare a larger "
+            "tolerance knowing this is a coherent error across every epoch."
         )
 
     # SELECT on `seen`, never multiply by a zero weight: a flagged sample is
@@ -544,7 +678,6 @@ def compress_reduced_basis(
     # as N^-1/2 and the ratio grows as sqrt(N). One JVP and n_theta floats, and
     # it can only be taken here -- the oracle needs the raw data, and the next
     # line of the campaign releases it.
-    values = _reference_values(basis)
     bias_names = tuple(sorted(values))
     if nuisance_names:
         oracle = _phi_marginal_raw_density(
@@ -581,6 +714,7 @@ def compress_reduced_basis(
         nuisance_names=nuisance_names,
         nuisance_shapes=tuple(shapes),
         noise_frozen_at=noise_frozen_at,
+        frozen_noise_residual=frozen_residual,
         bias_gradient=jnp.concatenate(
             [jnp.ravel(gradient[name]) for name in bias_names]
         ),

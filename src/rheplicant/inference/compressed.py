@@ -341,6 +341,15 @@ class ReducedBasisLikelihood(eqx.Module):
             a ``per_epoch`` declaration -- and once the raw data is gone, a
             mis-declaration that cannot be falsified is permanent (§4.2).
         nuisance_names, nuisance_shapes: what ``joint`` was marginalised over.
+        frozen_noise_residual: the largest ``|log L_frozen - log L_live|``, in
+            nats, over ``2 n_theta + 1`` probes spanning :attr:`support` --
+            section 8's mandatory measurement of what freezing ``N`` cost this
+            epoch. ``0.0`` exactly for a noise model that does not depend on the
+            prediction, arithmetically rather than by a skipped branch, because
+            the two sigma arrays are then the same array. It deliberately
+            excludes the projection error, which is section 7's
+            :attr:`bias_gradient`: a single number covering both would make the
+            refusal's message name the wrong remedy.
         bias_gradient: ``d/dtheta [ this term - the oracle ]`` at the storage
             origin, ravelled in **flatten** order -- section 7's whole budget in
             ``n_theta`` floats. It is a gradient and not a magnitude because a
@@ -371,6 +380,13 @@ class ReducedBasisLikelihood(eqx.Module):
     include_logdet: bool = eqx.field(static=True, default=True)
     noise_frozen_at: str = eqx.field(static=True, default="none")
     prior_share: tuple[int, int] = eqx.field(static=True, default=(0, 1))
+    # Dynamic, unlike `n_observed` beside it, and for the opposite reason:
+    # `n_observed` is computable from sigma alone, while this is a gap between
+    # two log-densities OF THE DATA. Making it a static Python float would mean
+    # concretising the data at compression, which turns `jax.grad` and
+    # `jax.vmap` over `observed` -- both pinned in
+    # `test_reduced_basis_likelihood.py` -- into a ConcretizationTypeError.
+    frozen_noise_residual: jax.Array | float = 0.0
     # Dynamic, unlike every static field above it: it is an array, and equinox
     # puts a static field into the treedef, where array `__eq__` decides
     # treedef equality. `ReducedBasis.reference_values` carries the same note
