@@ -173,6 +173,97 @@ class SqrtInfo(eqx.Module):
         return self.factor.T @ self.factor
 
 
+def marginalise_arrays(
+    factor: jax.Array,
+    target: jax.Array,
+    offset: jax.Array,
+    n_block: int,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """The Schur complement in square-root form, with no Python control flow.
+
+    The block is the **leading** ``n_block`` columns; permuting is the caller's
+    job, because a caller that already knows its layout should not pay for a
+    name lookup once per epoch inside a ``lax.scan``.
+
+    This exists because :func:`marginalise` cannot be traced. It concretises
+    twice -- ``float(jnp.max(...))`` for the pivot scale and
+    ``np.finfo(...)`` on a materialised dtype for the floor -- and the chain
+    filter evaluates this arithmetic **inside** the theta likelihood, under
+    ``jax.lax.scan``, differentiating it with respect to the transition's own
+    parameters. Measured on the checked path, on a ``(6, 4)`` term::
+
+        eager  0.2497233081987414
+        jit    ConcretizationTypeError
+        grad   ConcretizationTypeError
+
+    ``grad`` is the half that matters. A correlation time that is inferred
+    rather than pinned at compression time is differentiated on every leapfrog
+    step, so a ``marginalise`` that could be jitted but not differentiated would
+    still be unusable here.
+
+    **The refusal is not weakened, it is moved -- and this function cannot make
+    it.** What :func:`marginalise` catches is a block that does not constrain
+    itself, which makes the integral divergent. Under a trace that judgement is
+    unavailable: it needs a comparison against a value, and there is no value.
+    What that costs, measured on one term with its block column rescaled:
+
+    ========================  ==============  ==================
+    block column              this function   :func:`marginalise`
+    ========================  ==============  ==================
+    healthy (scale 1)         +0.203 nats     accepted
+    rounding-scale (1e-10)    **+23.23 nats** refused
+    identically zero          ``+inf``        refused
+    ========================  ==============  ==================
+
+    The zero column is the easy half: ``-log|pivot|`` is a true ``+inf`` and any
+    finiteness check downstream catches it. The dangerous half is the middle
+    row, which is what a genuinely near-degenerate night looks like -- finite,
+    the right sign, the right order of magnitude for a good night's evidence,
+    growing as ``-log(pivot)`` (27.8 at 1e-12) and unbounded in principle.
+    Nothing downstream tests for that. Pinned by
+    ``test_the_kernel_cannot_see_what_the_checked_path_refuses``.
+
+    What it hands back instead is the evidence: ``pivots``, as data. An eager
+    caller judges them (:func:`marginalise` does). A chain does not need to,
+    because :class:`~rheplicant.inference.chain.LinearGaussianTransition`
+    refuses a non-positive ``process_std`` or ``initial_std`` at construction
+    and those rows are what constrain every ``zeta_e`` -- one eager check at
+    declaration instead of one traced check per epoch. A caller that has
+    neither owns the gap, and should look at ``pivots`` itself.
+
+    Args:
+        factor: ``(r, n)`` array ``R``, block columns first.
+        target: ``(r,)`` array ``z``.
+        offset: scalar; the constant this term already carries.
+        n_block: how many leading columns to integrate out. ``0`` is legal and
+            is the identity on the density -- the re-triangularisation folds any
+            excess rows into the corner and the offset absorbs it.
+
+    Returns:
+        ``(factor, target, offset, pivots)`` -- the retained form, the offset
+        with the Gaussian integral's constant folded in, and ``|diag(R)|`` of
+        the re-triangularisation so a checked caller can test it.
+    """
+    width = factor.shape[1]
+    upper = jnp.linalg.qr(jnp.concatenate([factor, target[:, None]], axis=1), mode="r")
+    keep = min(upper.shape[0], width)
+    # The part of the residual no quadratic form in the retained columns can
+    # express. A constant, so it belongs in the offset.
+    corner = upper[keep:, width]
+    pivots = jnp.abs(jnp.diag(upper))
+    constant = (
+        0.5 * n_block * jnp.log(2.0 * jnp.pi)
+        - jnp.sum(jnp.log(pivots[:n_block]))
+        - 0.5 * jnp.sum(corner**2)
+    )
+    return (
+        upper[n_block:keep, n_block:width],
+        upper[n_block:keep, width],
+        offset + constant,
+        pivots,
+    )
+
+
 def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
     """Integrate named latents out of a square-root information form, exactly.
 
@@ -192,9 +283,18 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
     posterior's shape, so the tests for this function compare absolute
     log-densities against a dense oracle and use a non-unit prior.
 
-    Written once here rather than at each caller because section 6's chain
-    filter marginalises ``zeta_e`` by the same three lines, and two copies of a
+    Written once here rather than at each caller because the chain filter
+    marginalises ``zeta_e`` by the same three lines, and two copies of a
     constant is how one of them gets fixed.
+
+    The arithmetic itself lives in :func:`marginalise_arrays`, which takes arrays
+    and can be traced; this function is that call plus the two checks, which
+    cannot -- **calling this one under** ``jit`` **or** ``grad`` **raises**
+    ``ConcretizationTypeError``, and :func:`marginalise_arrays` is what to reach
+    for there. The chain filter calls the kernel directly from inside a
+    ``lax.scan``. There is still exactly one copy of the constant, and
+    ``test_the_kernel_and_the_checked_path_return_the_same_numbers`` compares the
+    two paths element-wise rather than trusting this sentence.
 
     Marginalising **every** name is legal and returns a zero-width term --
     ``factor`` shape ``(0, 0)``, ``names=()`` -- whose ``log_prob({})`` is the
@@ -245,32 +345,42 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
     columns += [column for name in kept for column in spans[name]]
     n_block = sum(len(spans[name]) for name in block)
     width = info.factor.shape[1]
+    permuted = info.factor[:, jnp.asarray(columns, dtype=int)]
 
-    upper = jnp.linalg.qr(
-        jnp.concatenate(
-            [info.factor[:, jnp.asarray(columns, dtype=int)], info.target[:, None]],
-            axis=1,
-        ),
-        mode="r",
-    )
     if n_block:
-        if upper.shape[0] < n_block:
+        # A shape fact, available before any arithmetic: the re-triangularised
+        # factor has min(rows, width + 1) rows -- width + 1, not width, because
+        # the target column is part of the matrix being factorised -- and fewer
+        # than n_block of them means the block cannot constrain its own
+        # directions. Writing `width` here would refuse a term with exactly
+        # `width` independent rows and a full-rank block, which is the normal
+        # case for a square padded epoch block.
+        if min(permuted.shape[0], width + 1) < n_block:
             raise StateValidationError(
-                f"This term has {upper.shape[0]} independent rows but {n_block} "
-                f"columns in the block {list(block)}, so the block does not "
-                "constrain itself and the integral over it diverges. A per-epoch "
-                "latent is integrated exactly once, which is why condition C3 "
-                "requires its prior to be part of the model rather than an "
-                "optional regulariser: append the prior rows before marginalising."
+                f"This term has {min(permuted.shape[0], width + 1)} independent "
+                f"rows but {n_block} columns in the block {list(block)}, so the "
+                "block does not constrain itself and the integral over it "
+                "diverges. A per-epoch latent is integrated exactly once, which "
+                "is why condition C3 requires its prior to be part of the model "
+                "rather than an optional regulariser: append the prior rows "
+                "before marginalising."
             )
-        pivots = jnp.abs(jnp.diag(upper)[:n_block])
+
+    factor, target, offset, pivots = marginalise_arrays(
+        permuted, info.target, info.offset, n_block
+    )
+
+    if n_block:
         # Compared against the LARGEST pivot, not against an absolute floor: the
         # rows are whitened data, so their scale is the epoch's 1/sigma and an
         # absolute threshold would refuse a well-constrained low-noise block and
         # wave through a badly-constrained high-noise one.
-        scale = float(jnp.max(jnp.abs(jnp.diag(upper))))
-        floor = float(np.sqrt(np.finfo(np.asarray(upper).dtype).eps)) * scale
-        if bool(jnp.any(pivots <= floor)):
+        #
+        # These two lines are why this function cannot be traced, and why the
+        # arithmetic above it can.
+        scale = float(jnp.max(pivots))
+        floor = float(np.sqrt(np.finfo(permuted.dtype).eps)) * scale
+        if bool(jnp.any(pivots[:n_block] <= floor)):
             raise StateValidationError(
                 f"The block {list(block)} does not constrain one of its own "
                 "directions, so the Gaussian integral over it diverges and the "
@@ -279,22 +389,11 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
                 "downstream tests for it. Give the block a proper prior "
                 "(condition C3) and append its rows before marginalising."
             )
-        log_pivots = jnp.sum(jnp.log(pivots))
-    else:
-        log_pivots = jnp.zeros(())
 
-    keep = min(upper.shape[0], width)
-    # The part of the residual no quadratic form in the retained columns can
-    # express. A constant, so it belongs in the offset; dropped, every term is
-    # wrong by an amount that grows with the campaign and changes no gradient.
-    corner = upper[keep:, width]
-    constant = (
-        0.5 * n_block * jnp.log(2.0 * jnp.pi) - log_pivots - 0.5 * jnp.sum(corner**2)
-    )
     return SqrtInfo(
-        factor=upper[n_block:keep, n_block:width],
-        target=upper[n_block:keep, width],
-        offset=info.offset + constant,
+        factor=factor,
+        target=target,
+        offset=offset,
         names=kept,
         shapes=tuple(info.shapes[info.names.index(name)] for name in kept),
     )
