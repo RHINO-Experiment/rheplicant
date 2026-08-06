@@ -341,6 +341,20 @@ class ReducedBasisLikelihood(eqx.Module):
             a ``per_epoch`` declaration -- and once the raw data is gone, a
             mis-declaration that cannot be falsified is permanent (§4.2).
         nuisance_names, nuisance_shapes: what ``joint`` was marginalised over.
+        bias_gradient: ``d/dtheta [ this term - the oracle ]`` at the storage
+            origin, ravelled in **flatten** order -- section 7's whole budget in
+            ``n_theta`` floats. It is a gradient and not a magnitude because a
+            constant offset has exactly zero effect on a posterior while an
+            arbitrarily small theta-dependent tilt has unbounded effect. It is
+            taken at compression because that is the last moment T0 exists: the
+            next line of a campaign releases the raw data.
+        bias_names: the latent names :attr:`bias_gradient`'s blocks are in,
+            **sorted**, because that is the order ``jax`` flattens a dict into
+            and therefore the order every named matrix in this package is built
+            in. Stored rather than re-derived so that
+            :meth:`~rheplicant.inference.memory.BayesMemory.audit` can check
+            them against its own instead of trusting that two callers agreed --
+            a permutation here is silent, since the shapes still match.
         epoch_id, n_observed, support, include_logdet, noise_frozen_at,
             prior_share: as on
             :class:`QuadraticLikelihood`, and read by the same code.
@@ -357,6 +371,12 @@ class ReducedBasisLikelihood(eqx.Module):
     include_logdet: bool = eqx.field(static=True, default=True)
     noise_frozen_at: str = eqx.field(static=True, default="none")
     prior_share: tuple[int, int] = eqx.field(static=True, default=(0, 1))
+    # Dynamic, unlike every static field above it: it is an array, and equinox
+    # puts a static field into the treedef, where array `__eq__` decides
+    # treedef equality. `ReducedBasis.reference_values` carries the same note
+    # for the same reason.
+    bias_gradient: jax.Array | None = None
+    bias_names: tuple[str, ...] = eqx.field(static=True, default=())
 
     def __check_init__(self):
         for name, leaf in (

@@ -45,6 +45,7 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.compressed import (
@@ -287,7 +288,80 @@ class BayesMemory(eqx.Module):
 
     # ------------------------------------------------------------ diagnostics --
 
-    def fisher(self) -> FlatMatrix:
+    def _flatten_layout(
+        self,
+    ) -> tuple[
+        dict[str, jax.Array],
+        tuple[str, ...],
+        tuple[tuple[int, int], ...],
+        tuple[tuple[int, ...], ...],
+        jax.Array,
+    ]:
+        """``(template, names, spans, shapes, order)`` for the global latents.
+
+        ``order`` permutes a matrix built in **declared** column order -- which
+        is what ``SqrtInfo`` carries -- into **flatten** order, which is what
+        every named matrix in this package is labelled in. One copy, read by
+        both :meth:`fisher` and :meth:`audit`, so the two cannot disagree about
+        which is which: the permutation is the identity exactly when the
+        latents happen to be alphabetical, so a second copy that drifted would
+        pass every test written against an alphabetical fixture.
+        """
+        names = self.factorization.global_names
+        shapes = self.factorization.global_shapes
+        template = {
+            name: jnp.zeros(shape) for name, shape in zip(names, shapes, strict=True)
+        }
+        flat_names, flat_spans, flat_shapes = _named_spans(template)
+        declared: dict[str, range] = {}
+        offset = 0
+        for name, shape in zip(names, shapes, strict=True):
+            size = int(jnp.zeros(shape).size)
+            declared[name] = range(offset, offset + size)
+            offset += size
+        order = jnp.asarray(
+            [column for name in flat_names for column in declared[name]], dtype=int
+        )
+        return template, flat_names, flat_spans, flat_shapes, order
+
+    def _permuted(self, matrix: jax.Array) -> jax.Array:
+        """A declared-order square matrix, re-indexed into flatten order."""
+        order = self._flatten_layout()[4]
+        return matrix[jnp.ix_(order, order)]
+
+    def _theta_fisher(self, at: dict[str, jax.Array] | None) -> jax.Array:
+        """``sum_e F_e`` over theta, in DECLARED order.
+
+        A reduced-basis term's information lives in coefficient space, and
+        ``c(theta)`` is nonlinear, so pulling it back needs a point. That is why
+        ``at`` is required here rather than defaulted: a single fixed Jacobian
+        would be a linearisation nobody declared, and it would be invisible --
+        the returned matrix is finite, symmetric and positive semi-definite
+        whichever point it was taken at.
+        """
+        fisher = jnp.asarray(self.accumulated.fisher())
+        if self.coefficients is None:
+            return fisher
+        if at is None:
+            raise StateValidationError(
+                "This memory holds reduced-basis terms, whose information is a "
+                "quadratic in the basis coefficients rather than in theta. Pulling "
+                "it back needs a point, because c(theta) is nonlinear -- that "
+                "nonlinearity is the reason the tier exists, and a default point "
+                "would be a linearisation nobody declared. Pass at=, e.g. "
+                "at=dict(memory.basis.reference_values) for the storage origin."
+            )
+        jacobian = jax.jacfwd(self.basis.coefficients)(dict(at))
+        columns = jnp.concatenate(
+            [
+                jnp.reshape(jacobian[name], (jacobian[name].shape[0], -1))
+                for name in self.factorization.global_names
+            ],
+            axis=1,
+        )
+        return fisher + columns.T @ jnp.asarray(self.coefficients.fisher()) @ columns
+
+    def fisher(self, at: dict[str, jax.Array] | None = None) -> FlatMatrix:
         """``sum_e F_e`` over the stored terms, with named rows.
 
         Excludes the prior's curvature, so it may legitimately be singular at
@@ -316,25 +390,17 @@ class BayesMemory(eqx.Module):
         names from the actual flattening, deliberately "rather than from an
         assumption about dict ordering", and this was the one place that did
         not.
-        """
-        names = self.factorization.global_names
-        shapes = self.factorization.global_shapes
-        template = {
-            name: jnp.zeros(shape) for name, shape in zip(names, shapes, strict=True)
-        }
-        flat_names, flat_spans, flat_shapes = _named_spans(template)
 
-        declared: dict[str, range] = {}
-        offset = 0
-        for name, shape in zip(names, shapes, strict=True):
-            size = int(jnp.zeros(shape).size)
-            declared[name] = range(offset, offset + size)
-            offset += size
-        order = jnp.asarray(
-            [column for name in flat_names for column in declared[name]], dtype=int
-        )
+        Args:
+            at: where to pull a reduced-basis term's coefficient-space
+                information back into theta. Required once the memory holds
+                one, and refused rather than defaulted -- see
+                :meth:`_theta_fisher`. Ignored for a memory of T2 terms alone,
+                whose information is already a quadratic in theta.
+        """
+        template, flat_names, flat_spans, flat_shapes, _ = self._flatten_layout()
         return FlatMatrix(
-            matrix=self.accumulated.fisher()[jnp.ix_(order, order)],
+            matrix=self._permuted(self._theta_fisher(at)),
             structure=jax.tree.structure(template),
             kind="fisher",
             names=flat_names,
@@ -391,7 +457,71 @@ class BayesMemory(eqx.Module):
 
         return model
 
-    def audit(self) -> dict[str, Any]:
+    def _bias_report(
+        self, at: dict[str, jax.Array] | None
+    ) -> tuple[dict[str, float], tuple[str, ...]]:
+        """``({name: |bias| / sigma_N}, unconstrained)`` -- section 7's budget.
+
+        **Marginalised, not raw.** ``bias = F^-1 sum_e grad(delta_e)`` propagates
+        the tilt through the parameter correlations, and the width it is divided
+        by is ``sqrt(diag(F^-1))`` -- the error bar left after the foreground
+        latents are integrated out, which is the one a result is quoted with. A
+        raw gradient amplitude is a derivative of nats with respect to whatever
+        units a latent happens to carry, and it ranks the directions
+        differently: measured over eight RHINO epochs it calls ``running`` 9.4x
+        more compromised than ``t21_depth``, while the marginalised ratio calls
+        ``t21_depth`` 4.0x worse than ``running``. The orderings are reversed,
+        and only the second one is a scientific error.
+
+        A direction whose width is exactly zero has a ratio of ``0/0``. That is
+        a young campaign, not a failure -- an epoch flagged end to end has a
+        stored factor of exactly zero and constrains nothing at all -- so it is
+        named rather than refused. A multi-component latent with one such
+        component is named too: hiding a dead component behind its live ones is
+        the failure this whole section exists to make visible.
+        """
+        gradients = [
+            (term.bias_names, term.bias_gradient)
+            for term in self.archive
+            if getattr(term, "bias_gradient", None) is not None
+        ]
+        if not gradients:
+            return {}, ()
+
+        _, names, spans, _, _ = self._flatten_layout()
+        stray = {stored for stored, _ in gradients if tuple(stored) != names}
+        if stray:
+            raise StateValidationError(
+                f"A stored bias_names is {sorted(stray)[0]} but this memory "
+                f"accumulates {list(names)}. Summing the two gradients would be "
+                "wrong by a permutation or short by a block, and it is silent in "
+                "both cases because the shapes still match -- which is Plan A's "
+                "fisher() bug one layer along. Recompress the epoch against a "
+                "basis over this memory's latents."
+            )
+
+        covariance = jnp.linalg.pinv(self._permuted(self._theta_fisher(at)))
+        bias = covariance @ jnp.sum(
+            jnp.stack([gradient for _, gradient in gradients]), axis=0
+        )
+        width = jnp.sqrt(jnp.diag(covariance))
+        ratios: dict[str, float] = {}
+        unconstrained: list[str] = []
+        for name, (start, stop) in zip(names, spans, strict=True):
+            widths = np.asarray(width[start:stop])
+            if not np.all(widths > 0.0):
+                unconstrained.append(name)
+                continue
+            ratios[name] = float(
+                np.max(np.abs(np.asarray(bias[start:stop])) / widths)
+            )
+        return ratios, tuple(unconstrained)
+
+    def audit(
+        self,
+        at: dict[str, jax.Array] | None = None,
+        bias_tolerance: float | None = None,
+    ) -> dict[str, Any]:
         """What the memory can say about its own trustworthiness.
 
         ``fisher_lambda_min`` and ``fisher_condition`` describe the **theta**
@@ -403,7 +533,47 @@ class BayesMemory(eqx.Module):
         archive holding both would say ``fisher_lambda_min = 0`` and
         ``fisher_condition = inf`` for a T1-only campaign, which reads as a
         degenerate memory when the memory is simply not quadratic in theta.
+
+        ``bias_over_sigma`` is section 7's budget, per named direction, and
+        ``unconstrained`` names the directions whose ratio is ``0/0``.
+
+        Args:
+            at: where to pull the coefficient-space information back into theta
+                for the bias ratio. Defaults to the basis's recorded
+                ``reference_values`` -- and that default is the point, not a
+                convenience: the stored gradients were taken at the storage
+                origin, so a Fisher taken anywhere else makes the ratio a
+                quotient of two different linearisations. :meth:`fisher`
+                refuses to default it for exactly the opposite reason -- there
+                the question has no privileged point.
+            bias_tolerance: refuse when any **constrained** direction's
+                ``|bias| / sigma_N`` exceeds this. Directions the campaign does
+                not yet constrain are listed under ``"unconstrained"`` instead
+                of refused: their ratio is ``0/0``, and treating that as a
+                failure would refuse every young campaign.
         """
+        if at is None and self.basis is not None and self.basis.reference_values:
+            at = dict(self.basis.reference_values)
+        ratios, unconstrained = self._bias_report(at)
+        if bias_tolerance is not None:
+            # `not <=`, never `>`: NaN loses every comparison, so `ratio >
+            # tolerance` is False for a poisoned campaign and the guard waves it
+            # through while reporting the NaN in the same dict.
+            bad = {n: r for n, r in ratios.items() if not r <= bias_tolerance}
+            if bad:
+                listed = ", ".join(f"{n}={r:.3e}" for n, r in sorted(bad.items()))
+                raise StateValidationError(
+                    f"Compression bias exceeds the declared budget: {listed} "
+                    f"against {bias_tolerance}. This is the theta-GRADIENT of the "
+                    "fidelity residual, not its magnitude: a constant offset has "
+                    "exactly zero effect on the posterior, and because one basis "
+                    "and one instrument model serve every epoch the tilt is "
+                    "coherent, so the bias is N-independent while sigma_N falls as "
+                    "N^-1/2 and the ratio above grows as sqrt(N). Raise n_basis, "
+                    "re-anchor the basis nearer the accumulated posterior, or "
+                    "declare a larger budget knowing what it costs."
+                )
+
         fisher = jnp.asarray(self.accumulated.fisher())
         eigenvalues = jnp.linalg.eigvalsh(fisher)
         largest = float(eigenvalues[-1])
@@ -433,4 +603,6 @@ class BayesMemory(eqx.Module):
             "basis_fingerprint": None if self.basis is None else self.basis.fingerprint(),
             "coefficient_lambda_min": coefficient_lambda_min,
             "coefficient_condition": coefficient_condition,
+            "bias_over_sigma": ratios,
+            "unconstrained": unconstrained,
         }

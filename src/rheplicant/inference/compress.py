@@ -39,6 +39,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.compressed import (
     COEFFICIENTS,
     QuadraticLikelihood,
+    RawLikelihood,
     ReducedBasisLikelihood,
 )
 from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise
@@ -251,6 +252,75 @@ def compress_linear(
     )
 
 
+def _reference_values(basis: Any) -> dict[str, jax.Array]:
+    """The latent values the basis's reference prediction was taken at.
+
+    Read off the basis rather than re-derived, so that section 7's bias
+    gradient and the storage origin every epoch's statistics are centred on are
+    the same point by construction rather than by two callers agreeing to use
+    the same one. ``ReducedBasis`` records them for exactly this reason.
+    """
+    if not basis.reference_values:
+        raise StateValidationError(
+            "This basis records no reference_values, so it was built by hand "
+            "rather than by build_reduced_basis. The bias gradient must be taken "
+            "at the point the storage origin was taken at; taken anywhere else it "
+            "is a finite, plausible number about nothing -- it would report the "
+            "slope of the compression error somewhere the epoch's statistics are "
+            "not centred, which is neither the truncation nor the metric "
+            "mismatch. Pass reference_values= when constructing the basis."
+        )
+    return dict(basis.reference_values)
+
+
+def _evaluate(info: SqrtInfo, basis: Any, values: dict[str, jax.Array]) -> jax.Array:
+    """T1's density from the pieces, before the term object exists."""
+    return info.log_prob({COEFFICIENTS: basis.coefficients(values) - basis.c_ref})
+
+
+def _phi_marginal_raw_density(
+    basis: Any,
+    observed: jax.Array,
+    seen: jax.Array,
+    weight: jax.Array,
+    nuisance_block: jax.Array,
+    prior_block: jax.Array,
+    prior_target: jax.Array,
+) -> Any:
+    """The oracle for an epoch that integrated a nuisance out, up to a constant.
+
+    T1's stored ``info`` is a function of theta alone -- ``phi_e`` was
+    marginalised out of it -- so comparing it against a raw density that still
+    carries ``phi_e`` would measure the marginalisation rather than the
+    compression, and the gradient section 7 stores would be about the wrong
+    thing entirely. The honest oracle is the raw likelihood with the *same*
+    block integrated out against the *same* prior.
+
+    Marginalising a Gaussian over ``phi`` leaves
+    ``-0.5 ||(I - P) y(theta)||^2`` plus ``-sum(log|diag R_M|)`` and the prior's
+    own normalisation, where ``M`` stacks the whitened nuisance columns on the
+    prior rows and ``P`` projects onto its range. Only the first term depends on
+    theta; ``M`` is built from the design and the prior, neither of which moves.
+    So the constants are dropped here and the returned callable is the raw
+    marginal **up to an additive constant** -- which is exactly enough, because
+    the only thing taken of it is a theta-gradient. Writing it any other way
+    would mean re-deriving two normalisations that cancel.
+    """
+    stacked = jnp.concatenate([nuisance_block, prior_block], axis=0)
+    orthonormal = jnp.linalg.qr(stacked, mode="reduced")[0]
+
+    def density(values: dict[str, jax.Array]) -> jax.Array:
+        prediction = jnp.reshape(basis.predict(values), observed.shape)
+        # Select on `seen`, then multiply. Same rule as everywhere else here:
+        # a flagged sample is usually flagged BECAUSE it holds a NaN, and
+        # `0.0 * nan` is `nan`.
+        residual = jnp.where(seen, observed - prediction, 0.0) * weight
+        target = jnp.concatenate([residual, prior_target])
+        return -0.5 * jnp.sum((target - orthonormal @ (orthonormal.T @ target)) ** 2)
+
+    return density
+
+
 def compress_reduced_basis(
     basis: Any,
     observed: jax.Array,
@@ -291,6 +361,14 @@ def compress_reduced_basis(
     lift only values that are actually traced -- which is the same split
     ``compress_linear`` has, reached by a different route, and the reason the
     guard tests sigma rather than the data.
+
+    **The bias gradient is taken here because here is where the oracle still
+    exists.** Section 7 budgets the theta-*gradient* of the compression error,
+    not its magnitude, and evaluating that needs the epoch's raw data. This is
+    the last moment the raw data is in hand, so ``bias_gradient`` is computed
+    before the return and stored as ``n_theta`` floats;
+    :meth:`~rheplicant.inference.memory.BayesMemory.audit` turns the campaign's
+    sum of them into a bias per named direction.
 
     Args:
         basis: the shared
@@ -399,8 +477,8 @@ def compress_reduced_basis(
         targets.append(mean / std)
         log_std.append(jnp.sum(jnp.log(std)))
 
+    nuisance_block = jnp.concatenate(columns, axis=1) if columns else None
     if nuisance_names:
-        nuisance_block = jnp.concatenate(columns, axis=1)
         n_nuisance = nuisance_block.shape[1]
         # Triangularise the data rows first so the stored joint is O((n_phi +
         # n_S)^2) rather than O(n_data * n_S) -- storing the raw rows would
@@ -458,6 +536,41 @@ def compress_reduced_basis(
             shapes=((width,),),
         )
 
+    # Section 7: what the posterior sees of the compression error is its
+    # theta-GRADIENT. A constant offset has exactly zero effect; a small
+    # theta-dependent tilt has unbounded effect, and because one basis, one
+    # instrument model and one estimator serve every epoch the tilt is coherent,
+    # so the induced bias -F^-1 grad(delta) is N-independent while sigma_N falls
+    # as N^-1/2 and the ratio grows as sqrt(N). One JVP and n_theta floats, and
+    # it can only be taken here -- the oracle needs the raw data, and the next
+    # line of the campaign releases it.
+    values = _reference_values(basis)
+    bias_names = tuple(sorted(values))
+    if nuisance_names:
+        oracle = _phi_marginal_raw_density(
+            basis,
+            observed,
+            seen,
+            weight,
+            nuisance_block,
+            jax.scipy.linalg.block_diag(*priors),
+            jnp.concatenate(targets),
+        )
+    else:
+        oracle = RawLikelihood(
+            predict=basis.predict,
+            observed=observed,
+            sigma=sigma,
+            names=tuple(values),
+            epoch_id=epoch_id,
+            noise_frozen_at=noise_frozen_at,
+        )
+
+    def _fidelity_residual(chosen: dict[str, jax.Array]) -> jax.Array:
+        probe = {**values, **chosen}
+        return _evaluate(info, basis, probe) - oracle(probe)
+
+    gradient = jax.grad(_fidelity_residual)(dict(values))
     return ReducedBasisLikelihood(
         basis=basis,
         info=info,
@@ -468,6 +581,10 @@ def compress_reduced_basis(
         nuisance_names=nuisance_names,
         nuisance_shapes=tuple(shapes),
         noise_frozen_at=noise_frozen_at,
+        bias_gradient=jnp.concatenate(
+            [jnp.ravel(gradient[name]) for name in bias_names]
+        ),
+        bias_names=bias_names,
     )
 
 
