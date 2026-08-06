@@ -456,3 +456,292 @@ def chain_log_likelihood(
 ) -> jax.Array:
     """``log p(d_1:N | theta)``, the chain integrated out exactly. No prior."""
     return chain_marginal(blocks, transition, values, names, shapes).log_prob(values)
+
+
+def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
+    """One epoch's joint form, permuted into ``order`` and padded to square.
+
+    Square because ``lax.scan`` needs one shape per iteration, and by
+    ``combine(null, info)`` rather than by ``jnp.pad`` because that is the QR the
+    accumulator already uses: the offset it returns is the one the filter
+    consumes, corner included. Padding with zeros would produce the same factor
+    and a **different offset**, which is exactly the class of error section 6 is
+    most exposed to -- the fold's corner is the largest of the six constants at
+    +45.95 nats over this fixture's six epochs.
+    """
+    if tuple(info.names) != order:
+        shapes = dict(zip(info.names, info.shapes, strict=True))
+        columns: dict[str, range] = {}
+        position = 0
+        for name, shape in zip(info.names, info.shapes, strict=True):
+            size = int(jnp.zeros(shape).size)
+            columns[name] = range(position, position + size)
+            position += size
+        permutation = jnp.asarray(
+            [column for name in order for column in columns[name]], dtype=int
+        )
+        info = SqrtInfo(
+            factor=info.factor[:, permutation],
+            target=info.target,
+            offset=info.offset,
+            names=order,
+            shapes=tuple(shapes[name] for name in order),
+        )
+    return SqrtInfo.combine(SqrtInfo.null(info.names, info.shapes), info)
+
+
+class _Epochs:
+    """The remembered terms and their ids, as ONE pytree leaf rather than N.
+
+    The same device :class:`~rheplicant.inference.memory._Archive` uses and for
+    the same measured reason: equinox wraps every bound method as a ``Module``
+    whose constructor flattens ``self``, so a memory holding N terms as pytree
+    children pays for every array in every term before executing a line of its
+    own body. Unregistered means leaf.
+    """
+
+    __slots__ = ("terms", "ids")
+
+    def __init__(self, terms: Sequence[Any] = (), ids: frozenset[str] | None = None):
+        self.terms = tuple(terms)
+        self.ids = (
+            frozenset(term.epoch_id for term in self.terms) if ids is None else ids
+        )
+
+    def appended(self, term: Any) -> "_Epochs":
+        """A new record holding ``term`` last. The original is unchanged."""
+        return _Epochs(self.terms + (term,), self.ids | {term.epoch_id})
+
+    # `is`, never `==`: an opaque leaf lands on `filter_jit`'s static side, where
+    # this decides whether a cached trace is reused, and comparing terms by value
+    # would call `==` on arrays.
+    def __eq__(self, other: Any) -> bool:
+        return (
+            type(other) is _Epochs
+            and len(self.terms) == len(other.terms)
+            and all(a is b for a, b in zip(self.terms, other.terms, strict=True))
+        )
+
+    def __hash__(self) -> int:
+        return hash((len(self.terms), self.ids))
+
+
+class ChainMemory(eqx.Module):
+    """A campaign whose nuisance drifts across epochs. **Ordered.**
+
+    The difference from :class:`~rheplicant.inference.memory.BayesMemory` is one
+    sentence: a bag is exchangeable and a chain is not, so a bag can fold each
+    term into a running QR and forget it, while a chain must keep the per-epoch
+    blocks and run the recursion. Section 6 puts that distinction in the type
+    rather than in a flag, and the two refusals are symmetric --
+    ``BayesMemory.remember`` refuses a term carrying a linked latent's columns,
+    and this one requires it.
+
+    **The stack grows, and a jitted density therefore retraces once per night.**
+    Section 11's compile-cost measurement applies to the bag's fixed-treedef
+    accumulator; a chain cannot have one, because section 6 spends O(N) *work per
+    likelihood call* by design -- that is what buys an exact inferred correlation
+    time. Measured: one trace per ``remember`` and none thereafter. During a NUTS
+    run N is fixed, so the cost is one compilation, not one per step.
+
+    Attributes:
+        factorization: the single declaration. Its ``linked`` entry supplies the
+            transition, and ``__check_init__`` has already refused a transition
+            built from anything that is not global.
+        stacked: ``(factor (N, w, w), target (N, w), offset (N,))``, epochs in
+            the order they were remembered, ``zeta``'s columns last.
+    """
+
+    factorization: Any
+    stacked: tuple[jax.Array, jax.Array, jax.Array]
+    _epochs: Any = eqx.field(default=None)
+
+    def __init__(
+        self,
+        factorization: Any,
+        stacked: tuple[jax.Array, jax.Array, jax.Array] | None = None,
+        epochs: Any = (),
+    ):
+        self.factorization = factorization
+        if len(factorization.linked_names) != 1:
+            raise StateValidationError(
+                f"ChainMemory carries exactly one linked latent; this factorization "
+                f"declares {list(factorization.linked_names)}. Two independent "
+                "chains are two memories -- accumulating them together would need "
+                "one joint transition, which is a different model from two, and "
+                "silently so."
+            )
+        width = self._width(factorization)
+        self.stacked = (
+            (jnp.zeros((0, width, width)), jnp.zeros((0, width)), jnp.zeros((0,)))
+            if stacked is None
+            else stacked
+        )
+        self._epochs = epochs if isinstance(epochs, _Epochs) else _Epochs(epochs)
+
+    @staticmethod
+    def _width(factorization: Any) -> int:
+        globals_width = sum(
+            int(jnp.zeros(shape).size) for shape in factorization.global_shapes
+        )
+        transition = factorization.linked[factorization.linked_names[0]]
+        return globals_width + transition.width
+
+    @property
+    def linked_name(self) -> str:
+        """The one latent that is a Markov chain across epochs."""
+        return self.factorization.linked_names[0]
+
+    @property
+    def transition(self) -> Any:
+        """Its transition -- fixed, or a builder resolved inside the likelihood."""
+        return self.factorization.linked[self.linked_name]
+
+    @property
+    def archive(self) -> tuple[Any, ...]:
+        """The stored terms, oldest first."""
+        return self._epochs.terms
+
+    @property
+    def epoch_ids(self) -> tuple[str, ...]:
+        """The recordings' data hashes, in the order they were remembered."""
+        return tuple(term.epoch_id for term in self._epochs.terms)
+
+    @property
+    def column_order(self) -> tuple[str, ...]:
+        """What a stored block is a quadratic form in, ``zeta`` last."""
+        return self.factorization.global_names + (self.linked_name,)
+
+    def remember(self, term: Any, duplicate: bool = False) -> "ChainMemory":
+        """A new memory holding this epoch **last**. The original is unchanged.
+
+        Order is the content here, not a convenience: epoch *e*'s drift is
+        correlated with *e-1*'s and not with *e+3*'s, so appending out of order
+        is a different model rather than the same one shuffled. Measured on
+        ``tests/evidence/chain_bank.py``, swapping two adjacent epochs moves the
+        campaign's log-likelihood by 0.3675 nats; a bag's ``remember`` moves it
+        by roundoff, which is what its own tests pin.
+
+        Args:
+            term: one epoch's compressed likelihood, over this memory's globals
+                **and** its linked latent.
+            duplicate: allow an ``epoch_id`` already present. Off by default,
+                because the common cause is a retried run.
+        """
+        from rheplicant.inference.memory import reject_bad_term
+
+        reject_bad_term(
+            term,
+            self._epochs.terms,
+            self._epochs.ids,
+            duplicate,
+            self._latents_ok,
+        )
+        square = _square_block(term.info, self.column_order)
+        factors, targets, offsets = self.stacked
+        return ChainMemory(
+            self.factorization,
+            (
+                jnp.concatenate([factors, square.factor[None]], axis=0),
+                jnp.concatenate([targets, square.target[None]], axis=0),
+                jnp.concatenate([offsets, jnp.asarray(square.offset)[None]], axis=0),
+            ),
+            self._epochs.appended(term),
+        )
+
+    def _latents_ok(self, term: Any) -> None:
+        """A chain's half of the admission rules -- the mirror of the bag's."""
+        from rheplicant.inference.memory import _stored_names
+
+        stored = _stored_names(term)
+        if self.linked_name not in stored:
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} is over {list(stored)}, which does not "
+                f"include the linked latent {self.linked_name!r}. A chain memory "
+                "integrates that latent out itself, across epochs -- a term that "
+                "already marginalised it against an independent prior has spent "
+                "the correlation, and folding it in here would add the chain's "
+                "prior a second time. Compress the epoch with the linked latent "
+                "among its design blocks, or use BayesMemory."
+            )
+        declared = set(self.column_order)
+        stray = [name for name in stored if name not in declared]
+        if stray:
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} is over {stray}, which this memory does "
+                f"not declare; it accumulates {list(self.column_order)}."
+            )
+
+    def log_likelihood(self, values: dict[str, jax.Array]) -> jax.Array:
+        """``log p(d_1:N | theta)`` with the chain integrated out. No prior."""
+        return chain_log_likelihood(
+            self.stacked,
+            self.transition,
+            values,
+            names=self.factorization.global_names,
+            shapes=self.factorization.global_shapes,
+        )
+
+    def log_posterior(self, values: dict[str, jax.Array]) -> jax.Array:
+        """The chain's likelihood plus the prior, applied exactly once."""
+        total = self.log_likelihood(values)
+        for name, prior in self.factorization.global_priors.items():
+            total = total + jnp.sum(prior.log_prob(values[name]))
+        return total
+
+    def marginal(self, values: dict[str, jax.Array]) -> SqrtInfo:
+        """The campaign's quadratic form in theta, at these transition values."""
+        return chain_marginal(
+            self.stacked,
+            self.transition,
+            values,
+            names=self.factorization.global_names,
+            shapes=self.factorization.global_shapes,
+        )
+
+    def fisher(self, at: dict[str, jax.Array]):
+        """``sum_e F_e`` after the chain is integrated out, with named rows.
+
+        ``at`` is required rather than defaulted, for the reason
+        :meth:`~rheplicant.inference.memory.BayesMemory.fisher` refuses to
+        default it one layer along: with a :class:`HyperTransition` the marginal
+        curvature is a function of theta, and a fixed default point would be a
+        linearisation nobody declared and nothing could see -- the matrix comes
+        back finite, symmetric and PSD whichever point it was taken at.
+
+        The permutation into flatten order is
+        :meth:`~rheplicant.inference.memory.BayesMemory.fisher`'s, reached by
+        wrapping the marginal in a throwaway bag rather than by building a
+        ``FlatMatrix`` here. A second copy would reintroduce Plan A's own bug
+        invisibly: ``chain_marginal`` returns columns in *declared* order, and
+        the two orders coincide exactly when the latents are alphabetical.
+        """
+        from rheplicant.inference.memory import BayesMemory
+
+        return BayesMemory(self.factorization, self.marginal(at)).fisher()
+
+    def to_numpyro_model(self, **unsupported: Any):
+        """Sample the globals against this chain. Refuses a ``noise_std=``.
+
+        The closure is over the stacked blocks and the transition -- the density
+        path -- and not over ``self``, which also holds the archive. That archive
+        grows with the campaign, but the stack does too (deviation 12), so what
+        this buys is one retrace per ``remember`` rather than none: N is fixed
+        for the whole of a sampling run, and the compilation is paid once.
+        """
+        from rheplicant.inference.memory import BayesMemory
+
+        stacked = self.stacked
+        transition = self.transition
+        names = self.factorization.global_names
+        shapes = self.factorization.global_shapes
+
+        def density(values: dict[str, jax.Array]) -> jax.Array:
+            return chain_log_likelihood(
+                stacked, transition, values, names=names, shapes=shapes
+            )
+
+        return BayesMemory(
+            self.factorization,
+            SqrtInfo.null(names, shapes),
+        )._numpyro_model(density, **unsupported)

@@ -72,6 +72,7 @@ not, silently, so :mod:`rheplicant.inference.archive` now writes
 ``(memory, tuple(memory.archive))`` and says so in its format version.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import equinox as eqx
@@ -109,6 +110,89 @@ def _is_reduced(term: Any) -> bool:
     except StateValidationError:
         return False
     return isinstance(info, SqrtInfo) and tuple(info.names) == (COEFFICIENTS,)
+
+
+def _stored_names(term: Any) -> tuple[str, ...]:
+    """Which columns this term's STORED quadratic form is over, or ``()``.
+
+    Read from ``term.info`` rather than from ``term.latents`` because those are
+    two different facts: ``latents`` is what a T1 term's *coefficient map*
+    consumes, while what decides whether a factor may be summed -- or handed to
+    a chain -- is which columns its numbers are a quadratic in.
+
+    ``()`` for a tier that has no stored form at all. T0 raises from ``info``
+    rather than returning one, and that refusal is swallowed here for the reason
+    :func:`_is_reduced` swallows it: the quadratic path reads ``info`` a few
+    lines later and re-raises the message that names the remedy, and answering
+    the scope question first would replace it with a worse one.
+    """
+    try:
+        info = term.info
+    except StateValidationError:
+        return ()
+    return tuple(getattr(info, "names", ()))
+
+
+def reject_bad_term(
+    term: CompressedLikelihood,
+    held: tuple[CompressedLikelihood, ...],
+    ids: frozenset[str],
+    duplicate: bool,
+    latents_ok: Callable[[CompressedLikelihood], None],
+) -> None:
+    """The admission rules every accumulator shares.
+
+    ``latents_ok`` is the one question a bag and a chain answer differently: a
+    bag refuses a term carrying a linked latent's columns, a chain requires one.
+    Everything else -- the protocol members, the prior share, the estimator, the
+    repeated epoch -- is identical, and identical is what it has to be, because
+    a rule enforced in one accumulator and not the other is a rule with a way
+    round it.
+
+    Args:
+        term: the candidate.
+        held: the terms already accumulated, oldest first. Only the first is
+            read, for the estimator.
+        ids: their epoch ids, as a set.
+        duplicate: allow an ``epoch_id`` already present.
+        latents_ok: raises if this term's columns do not belong here.
+    """
+    absent = [name for name in REQUIRED_TERM_MEMBERS if not hasattr(term, name)]
+    if absent:
+        raise StateValidationError(
+            f"This term is missing {absent}, which the accumulator reads. "
+            f"CompressedLikelihood requires {list(REQUIRED_TERM_MEMBERS)} plus "
+            "__call__. Checked here rather than where each is first read, "
+            "because accumulation is a QR: a term admitted now is folded "
+            "irreversibly into the running factor, and the omission would "
+            "surface later as an AttributeError out of audit() or "
+            "save_memory(), by which time the campaign already depends on it."
+        )
+    latents_ok(term)
+    if getattr(term, "prior_share", (0, 1))[0] != 0:
+        raise StateValidationError(
+            f"Term {term.epoch_id!r} carries prior_share={term.prior_share}, but "
+            "a streaming memory stores prior-free factors: log_posterior applies "
+            "the prior exactly once, so a tempered term would apply it twice. "
+            "Divide the temper back out at compression, or use the batch "
+            "consensus path."
+        )
+    if held:
+        estimator = held[0].estimator
+        if term.estimator != estimator:
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} was built with estimator {term.estimator} "
+                f"but this memory holds {estimator}. Generalized least squares and "
+                "the full Gaussian likelihood are different estimators (D21/D23); "
+                "their sum is neither."
+            )
+    if not duplicate and term.epoch_id in ids:
+        raise StateValidationError(
+            f"Epoch {term.epoch_id!r} is already in this memory. Adding it "
+            "again would count its data twice, narrowing the posterior with "
+            "nothing to show for it. Pass duplicate=True if that is genuinely "
+            "what you mean."
+        )
 
 
 class _Archive:
@@ -336,16 +420,39 @@ class BayesMemory(eqx.Module):
         )
 
     def _reject_bad_term(self, term: CompressedLikelihood, duplicate: bool) -> None:
-        absent = [name for name in REQUIRED_TERM_MEMBERS if not hasattr(term, name)]
-        if absent:
+        reject_bad_term(
+            term,
+            self._archive.terms,
+            self._archive.ids,
+            duplicate,
+            self._latents_ok,
+        )
+
+    def _latents_ok(self, term: CompressedLikelihood) -> None:
+        """A bag's half of the admission rules: whose columns may be summed here.
+
+        The linked check comes **first**, and not for tidiness: a term carrying
+        a chain's columns also fails the exact-match branch below, so putting it
+        second would answer "this term is over different latents from the
+        memory", which reads as a typo when what happened is that a Markov
+        chain was about to be summed as though its epochs were independent.
+        """
+        linked = [
+            name
+            for name in _stored_names(term)
+            if name in self.factorization.linked_names
+        ]
+        if linked:
             raise StateValidationError(
-                f"This term is missing {absent}, which BayesMemory reads. "
-                f"CompressedLikelihood requires {list(REQUIRED_TERM_MEMBERS)} plus "
-                "__call__. Checked here rather than where each is first read, "
-                "because accumulation is a QR: a term admitted now is folded "
-                "irreversibly into the running factor, and the omission would "
-                "surface later as an AttributeError out of audit() or "
-                "save_memory(), by which time the campaign already depends on it."
+                f"Term {term.epoch_id!r} carries the linked latent(s) {linked}. A "
+                "BayesMemory is a bag: it sums factors as though the epochs were "
+                "conditionally independent, and a linked latent is exactly the "
+                "claim that two of them are not. Summed here, one physical "
+                "fluctuation would be marginalised once per epoch against "
+                "independent priors -- condition C1b -- and the posterior would "
+                "come back narrower, centred, and with nothing visible. Use "
+                "ChainMemory, which keeps the epochs in order and integrates the "
+                "chain exactly."
             )
         declared = self.factorization.global_names
         if _is_reduced(term):
@@ -369,31 +476,6 @@ class BayesMemory(eqx.Module):
                 f"This term is over different latents from the memory: term has "
                 f"{list(term.latents)}, memory accumulates "
                 f"{list(declared)}. Summing them is not a likelihood."
-            )
-        if getattr(term, "prior_share", (0, 1))[0] != 0:
-            raise StateValidationError(
-                f"Term {term.epoch_id!r} carries prior_share={term.prior_share}, but "
-                "a streaming memory stores prior-free factors: log_posterior applies "
-                "the prior exactly once, so a tempered term would apply it twice. "
-                "Divide the temper back out at compression, or use the batch "
-                "consensus path."
-            )
-        held_terms = self._archive.terms
-        if held_terms:
-            held = held_terms[0].estimator
-            if term.estimator != held:
-                raise StateValidationError(
-                    f"Term {term.epoch_id!r} was built with estimator {term.estimator} "
-                    f"but this memory holds {held}. Generalized least squares and the "
-                    "full Gaussian likelihood are different estimators (D21/D23); "
-                    "their sum is neither."
-                )
-        if not duplicate and term.epoch_id in self._archive.ids:
-            raise StateValidationError(
-                f"Epoch {term.epoch_id!r} is already in this memory. Adding it "
-                "again would count its data twice, narrowing the posterior with "
-                "nothing to show for it. Pass duplicate=True if that is genuinely "
-                "what you mean."
             )
 
     # --------------------------------------------------------------- densities --
@@ -560,35 +642,57 @@ class BayesMemory(eqx.Module):
         and deliberately not over ``self``: ``archive`` grows with the campaign,
         and capturing it would retrace the sampler's log-density once per epoch.
         """
+        accumulated = self.accumulated
+        coefficients = self.coefficients
+        basis = self.basis
+
+        def density(values: dict[str, jax.Array]) -> jax.Array:
+            total = accumulated.log_prob(values)
+            if coefficients is not None:
+                total = total + coefficients.log_prob(
+                    {coefficients.names[0]: basis.coefficients(values) - basis.c_ref}
+                )
+            return total
+
+        return self._numpyro_model(density, **unsupported)
+
+    def _numpyro_model(
+        self, density: Callable[[dict[str, jax.Array]], jax.Array], **unsupported: Any
+    ):
+        """Sample this factorization's globals against an already-closed density.
+
+        Split out of :meth:`to_numpyro_model` so that
+        :class:`~rheplicant.inference.chain.ChainMemory` reuses the ``noise_std=``
+        refusal, the import guard and the "closes over the density path, not over
+        ``self``" property, instead of restating three things that a second copy
+        would eventually restate differently.
+
+        Args:
+            density: ``{name: value} -> log density``, closed over whatever it
+                needs. The point of passing it in rather than reading ``self`` is
+                that the closure must not capture the archive, which grows.
+            unsupported: anything at all, and all of it is refused.
+        """
         if unsupported:
             raise StateValidationError(
-                f"BayesMemory.to_numpyro_model takes no {sorted(unsupported)} -- the "
-                "noise model, the data and the forward evaluation are already inside "
+                f"to_numpyro_model takes no {sorted(unsupported)} -- the noise "
+                "model, the data and the forward evaluation are already inside "
                 "the stored terms. Changing the noise now would mean recompressing."
             )
         try:
             import numpyro
         except ImportError as exc:  # pragma: no cover - exercised by the import guard
             raise ImportError(
-                'BayesMemory.to_numpyro_model needs numpyro: pip install '
-                '"rheplicant[numpyro]"'
+                'to_numpyro_model needs numpyro: pip install "rheplicant[numpyro]"'
             ) from exc
 
         priors = self.factorization.global_priors
-        accumulated = self.accumulated
-        coefficients = self.coefficients
-        basis = self.basis
 
         def model():
             values = {
                 name: numpyro.sample(name, prior) for name, prior in priors.items()
             }
-            total = accumulated.log_prob(values)
-            if coefficients is not None:
-                total = total + coefficients.log_prob(
-                    {coefficients.names[0]: basis.coefficients(values) - basis.c_ref}
-                )
-            numpyro.factor("campaign", total)
+            numpyro.factor("campaign", density(values))
 
         return model
 
