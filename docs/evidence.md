@@ -148,3 +148,83 @@ as separate numbers rather than summed into one.
 `RawLikelihood` is the oracle the tiers are validated against. It keeps the raw
 data and a live forward model, so it belongs in a test and not in a campaign,
 and it refuses to be remembered or archived by name.
+
+### When a nuisance drifts across epochs
+
+A receiver transient that runs over midnight, or a gain solution partly derived
+from the previous night's calibrator pass, is **not** re-drawn each epoch.
+Declaring it `per_epoch` marginalises one physical fluctuation N times against
+independent priors — the posterior narrows for nothing, and nothing shows.
+
+```python
+from rheplicant.inference import ChainMemory, Factorization, ornstein_uhlenbeck
+
+factorization = Factorization(
+    space,                                        # t_rx_drift declared scope="linked"
+    linked={"t_rx_drift": ornstein_uhlenbeck(tau=4.0, sigma=0.3)},
+)
+memory = ChainMemory(factorization)
+for night in campaign:
+    memory = memory.remember(compress(...))       # zeta among the design blocks
+print(memory.log_likelihood(values))              # the chain integrated out exactly
+```
+
+A `ChainMemory` is **ordered** where a `BayesMemory` is a bag: the transition
+connects epoch *e* to epoch *e+1*, so the same two nights remembered the other
+way round are a different model. The two refusals are symmetric — a bag refuses a
+term carrying a linked latent's columns, and a chain requires one.
+
+If the correlation time is itself inferred, declare a `HyperTransition` instead:
+the blocks are then rebuilt from theta on every likelihood call, inside a
+differentiable `lax.scan`, which is what keeps the answer exact rather than
+pinned at the value the first night happened to see.
+
+`smooth(memory.stacked, ...)` returns what the drift actually did, per epoch,
+with its width.
+
+The recursion's whole risk is its constants — six of them, and the shape, the
+gradient and the curvature are all correct with any one missing. Measured on the
+six-epoch fixture, dropping one costs +0.9189, +2.8618, +6.2764, +0.9855,
++45.9502 or −6.8408 nats, and each has its own test carrying its own number. See
+[D32](design.md) for what they are and which two exist nowhere else in the
+package.
+
+### What the diagnostics can and cannot see
+
+`sigma ∝ N^-1/2` is **not** a check. For a Gaussian model `sigma_N` does not read
+the data, so the relation holds by construction: measured, the fitted power is
+`-0.49991034` on a clean campaign and the identical number on one whose answer is
+wrong by 52.568 sigma, from per-N sigma arrays equal element for element.
+`shrinkage_report` returns it with `detects_coherent_bias: False` in the same
+dictionary.
+
+What does fire on a shared, deterministic error is the mean of a per-epoch
+summary:
+
+```python
+from rheplicant.inference import coherent_mode
+report = coherent_mode(memory.archive)
+report["chi2_z"]                              # +31.92 biased, +0.45 clean, at N = 640
+report["templates"]["gain_ripple"]["z"]       # +52.55 biased, +1.72 clean
+```
+
+The template projection's *scatter* is what a mean-level fault leaves alone —
+1.00200 in both campaigns, the fault entering as a pure additive shift of
+2.00937 with an epoch-to-epoch spread of 5.6e-16. The chi-square's scatter is
+**not** preserved: it is inflated by noncentrality, measured 5.5467 against
+`sqrt(2 x dof) = 3.4641`. Read the z, and read the scatter only where it is the
+template's.
+
+`held_out_z` scores one night against the rest and is the right tool for a single
+rogue epoch. It is **blind** to a common mode when every night shares a design,
+which is the usual case — the clean and biased campaigns return the same scores,
+the largest disagreement over all 640 epochs being 4.93e-05 — so read it beside
+`coherent_mode`, never instead of it.
+
+The half of a shared error that lies inside the design's column space is
+detectable by nothing at all: it biases theta identically every night and leaves
+no residual anywhere. That is why the last two guards are declarations rather
+than measurements — `audit(systematic_floor={...})` refuses to quote an error bar
+below a shared product's declared width, and `remember` refuses two epochs that
+share an input-product hash unless `Factorization(represents=...)` says the
+product is modelled.

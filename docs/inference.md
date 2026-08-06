@@ -32,7 +32,8 @@ belongs in the inference layer, not in the instrument description.
     as a loop. Also the four routes, and inference with no likelihood at all.
 * - [Evidence](evidence.md)
   - Accumulating likelihood factors across a campaign so the recordings can be
-    thrown away.
+    thrown away — including a nuisance that drifts from night to night, and
+    which campaign diagnostics can and cannot see a shared error.
 :::
 
 Two tutorials work one problem each end to end, and are the fastest way in:

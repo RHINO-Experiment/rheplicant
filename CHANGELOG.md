@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### A nuisance that drifts across epochs
+
+- **The linked scope.** `ChainMemory` accumulates a campaign whose nuisance is a
+  Markov chain rather than a fresh draw each night, exactly and in one pass: a
+  joint square-root factor over `(theta, zeta_e)`, folded and advanced by QR,
+  with `zeta_e` marginalised at each step. `ornstein_uhlenbeck` and
+  `LinearGaussianTransition` declare a fixed chain; `HyperTransition` declares
+  one whose correlation time is inferred, resolved inside the theta likelihood by
+  a differentiable `lax.scan` so it is not silently pinned at compression time.
+  `smooth` returns the drift's smoothed marginals. A chain refuses to be summed
+  as a bag and a bag refuses a term that carries one. `marginalise_arrays` is the
+  traceable kernel underneath both it and Plan B's `marginalise`. See D32.
+- **Campaign diagnostics.** `coherent_mode` reads a per-epoch residual summary —
+  chi-square, DOF, and the residual projected onto named systematic templates,
+  computed at compression and stored in ~100 bytes an epoch — and reports the
+  campaign's *mean* at sqrt(N). `held_out_z` scores each night against the rest.
+  `shrinkage_report` returns `sigma ∝ N^-1/2` with `detects_coherent_bias: False`
+  attached to it, because it is data-independent and cannot fire. `audit` gains
+  `systematic_floor=`, refusing to quote an error bar below a declared shared
+  product's width, and `remember` refuses two epochs that share an input-product
+  hash unless the product is represented among the global latents.
+- Archive format version **3**: the per-epoch residual summary and the input
+  provenance are on the term, so they outlive the recording.
+
 ### An epoch whose model is not linear can be compressed too
 
 - **Reduced-basis compression.** `build_reduced_basis` expands the prediction in

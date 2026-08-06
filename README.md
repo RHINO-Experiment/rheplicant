@@ -210,14 +210,14 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 | [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
 | [Tutorial: GCR](docs/tutorial-gcr.md) | 256 sky pixels by exact conjugate solve, with iterative GLS for the covariance |
 | [Tutorial: NUTS](docs/tutorial-nuts.md) | Gradient MCMC, MCMC diagnostics, and what a broken posterior looks like |
-| [Architecture](DESIGN.md) | Design decisions D1–D31, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D32, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Fourteen end-to-end runnable demos |
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2602 tests, 87.7 % coverage, jit+grad+vmap through the full twin; assembly
+(2602 tests, 82.4 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -259,13 +259,13 @@ while the rest of the suite must stay at float32 — eighteen tests assert
 refusals that only float32 forces — and `jax_enable_x64` is process-global, so
 the two cannot share an interpreter.
 
-That split is also why the stated coverage fell from 99.7 % to 87.7 % when the
+That split is also why the stated coverage fell from 99.7 % to 82.4 % as the
 evidence layer landed, without any code going untested. The second session runs
 `--no-cov` in its own process, so its 431 passing tests contribute nothing to the
 default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
-`memory.py`, `archive.py` and `reduced_basis.py` show 12–63 % there, and
-**633 of the default report's 647 uncovered statements are those seven files**.
-Measured, on the run the number above comes from.
+`memory.py`, `archive.py`, `reduced_basis.py`, `chain.py` and `diagnostics.py`
+show 11–64 % there, and **1005 of the default report's 1019 uncovered statements
+are those nine files**. Measured, on the run the number above comes from.
 
 **Not** plain `uv run`, and **not** plain `uv sync`: `limTOD[jax]>=1.10` is a
 dependency, `rfi` and `cal` name requirements that are not on PyPI *by design*

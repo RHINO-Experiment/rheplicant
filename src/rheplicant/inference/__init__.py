@@ -3,6 +3,15 @@
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference.archive import load_memory, save_memory
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
+from rheplicant.inference.chain import (
+    ChainMemory,
+    HyperTransition,
+    LinearGaussianTransition,
+    chain_log_likelihood,
+    chain_marginal,
+    ornstein_uhlenbeck,
+    smooth,
+)
 from rheplicant.inference.compress import (
     compress,
     compress_linear,
@@ -15,6 +24,16 @@ from rheplicant.inference.compressed import (
     QuadraticLikelihood,
     RawLikelihood,
     ReducedBasisLikelihood,
+)
+from rheplicant.inference.diagnostics import (
+    EpochResidual,
+    HeldOut,
+    coherent_mode,
+    epoch_residuals,
+    held_out_z,
+    shrinkage_power,
+    shrinkage_report,
+    systematic_floor,
 )
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.forward import build_forward_fn
@@ -89,7 +108,7 @@ from rheplicant.inference.reduced_basis import (
     select_greedy,
     select_svd,
 )
-from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise
+from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise, marginalise_arrays
 from rheplicant.inference.uncertainty import (
     as_noise_model,
     fisher_information,
@@ -111,8 +130,10 @@ __all__ = [
     "BayesMemory",
     "Bind",
     "Block",
+    "ChainMemory",
     "CompressedLikelihood",
     "Draws",
+    "EpochResidual",
     "Estimate",
     "Factorization",
     "FidelityReport",
@@ -120,10 +141,13 @@ __all__ = [
     "GLSResult",
     "GaussianLikelihood",
     "GradientCalibrator",
+    "HeldOut",
     "HomoscedasticNoise",
+    "HyperTransition",
     "IdentifiabilityReport",
     "Latent",
     "LinearBlock",
+    "LinearGaussianTransition",
     "Likelihood",
     "MaskedGaussianLikelihood",
     "NeuralPosterior",
@@ -143,14 +167,19 @@ __all__ = [
     "basis_fidelity",
     "build_forward_fn",
     "build_reduced_basis",
+    "chain_log_likelihood",
+    "chain_marginal",
     "check_linearity",
     "check_observed_shape",
+    "coherent_mode",
     "compress",
     "compress_linear",
     "compress_reduced_basis",
     "condition_estimate",
+    "epoch_residuals",
     "fisher_information",
     "gcr_sample",
+    "held_out_z",
     "identifiability",
     "init_to_declared",
     "inverse_variance",
@@ -158,8 +187,10 @@ __all__ = [
     "linear_operator",
     "load_memory",
     "marginalise",
+    "marginalise_arrays",
     "mean_squared_error",
     "numerical_rank",
+    "ornstein_uhlenbeck",
     "orthonormal_transform",
     "orthonormalise",
     "parameter_covariance",
@@ -170,8 +201,12 @@ __all__ = [
     "score_directions",
     "select_greedy",
     "select_svd",
+    "shrinkage_power",
+    "shrinkage_report",
     "simulate_pairs",
+    "smooth",
     "split_rhat",
+    "systematic_floor",
     "push_forward",
     "to_numpyro_model",
     "train_posterior",

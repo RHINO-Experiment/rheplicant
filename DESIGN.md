@@ -1472,6 +1472,97 @@ continuity, which is smooth for anything analytic. The claim being checked is
 that two methods return the same number at the same point, and a dispatcher
 cannot be asked that question.
 
+### D32 — A drifting nuisance is a chain, not N independent draws, and the constants are the whole risk
+
+A quantity whose natural interval straddles an epoch boundary — a receiver
+thermal transient over midnight, night *e*'s gain partly derived from night
+*e−1*'s calibrator pass — declared `per_epoch` is one physical fluctuation
+marginalised N times against independent priors. That injects information which
+is not there, and it is silent: the posterior comes back centred and narrower.
+Condition C1b names it; `scope="linked"` is the declaration, and this decision is
+what the declaration buys.
+
+**The recursion.** Carry a joint square-root factor over `(theta, zeta_e)`, fold
+an epoch in by stacking rows and re-triangularising, advance by appending the
+transition's rows and marginalising `zeta_e` — which *is* the Schur complement,
+exactly. `theta` is never marginalised, so what comes back is
+`log p(d_1:N | theta)`. Measured against a dense oracle that integrates `zeta`
+analytically and shares no code with the recursion: agreement of **1.1e-13,
+5.7e-14, 9.1e-13, 9.1e-13 nats** across four theta probes, against a density of
+about −2506 nats.
+
+**The constants are the whole risk, and there are six.** The recursion's shape,
+gradient and curvature are all correct with any of them missing, which is this
+codebase's recurring defect in its purest form. Measured cost of dropping one, on
+the six-epoch fixture in `tests/evidence/chain_bank.py` at `theta = (0.4, −1.1)`:
+the initial `zeta` prior normalisation **+0.9189**; the five per-transition
+`−½ logdet(2πQ)` **+2.8618**; the five in-chain marginalisation constants
+**+6.2764**; the final marginalisation's own **+0.9855** (the two sites together
+are the **+7.2619** the module's table quotes); the six fold corners
+**+45.9502**; the masked data normalisation **−6.8408**. Four of the six are
+somebody else's arithmetic reaching one layer further than its owner expected —
+the corner is D29's and the data normalisation is `compress`'s — and a reader
+will assume the remaining two are handled elsewhere too. They are not: the
+initial `zeta` prior normalisation and the *final* marginalisation exist only
+here, and the final one is nearly a nat on its own. And
+the design's shorthand is wrong by half a term: §6 names the augmentation's
+`½ logdet Q⁻¹`, but a transition is a *density*, so it carries `−½ logdet(2πQ)`;
+the `2π` cancels against the marginalisation's `+½ n log 2π`, and keeping only
+the log-determinant leaves `+0.9189` per epoch — **+4.5947 over this fixture's
+five transitions, +918 nats over a thousand-epoch campaign** — with no effect on
+any posterior mean, width or gradient. One test per constant, each carrying its
+measured cost, so that "the constants matter" cannot pass vacuously. One of them
+is measured at exactly zero and pinned as such: the *marginalisation's* corner is
+a length-zero slice, because that QR is square, so deleting it moves the answer
+by 0.0 nats bit for bit. The corner worth +45.95 is the **fold's**. One phrase,
+two sites, and a plan that wrote it once would have shipped half a test.
+
+**Two sub-scopes, distinguished by the transition's type.** An OU with an
+inferred correlation time is still linear-Gaussian, so a caveat phrased that way
+is satisfied while its claim fails — `Q(theta)` and the Schur complement become
+functions of theta and a filter run at compression time pins them, Trap 3 one
+scope along. A `LinearGaussianTransition` holds numbers; a `HyperTransition`
+holds a builder and is resolved *inside* the theta likelihood. One `lax.scan`
+serves both, differentiable in the transition's own parameters — the analytic
+gradient in `tau` and a central difference agree to **2.0e-9 relative**, which is
+the step's own truncation error — which required extracting `marginalise_arrays`
+from `marginalise`: the checked path concretises twice and raises
+`ConcretizationTypeError` under `grad` as well as under `jit`. The refusal it
+carries is not weakened but **moved**, to a strictly-positive `process_std`
+checked once at declaration, which is what makes every `zeta_e` block
+constrained by construction rather than by inspection at each of a thousand
+steps. A chain is also *ordered* where a bag is not: `BayesMemory` sums terms in
+any order and refuses one carrying a linked latent's columns, while `ChainMemory`
+requires one and keeps the epochs in the sequence they arrived, because the
+transition connects epoch *e* to epoch *e+1* and nothing else.
+
+**§9's diagnostics, and the one the design promoted that cannot see the case it
+was promoted for.** `sigma_N = (Σ F_e)^{-1/2}` does not read the data, so
+`sigma ∝ N^{-1/2}` holds by construction — measured, the fitted power is
+`−0.49991034` on a clean campaign and `−0.49991034` on one biased by 52.568
+sigma, the same number, from per-N sigma arrays equal element for element. A
+deterministic common mode contributes no variance at all. Measured on a repeated
+nightly design, which is the realistic case: the **in-span** half of such an
+error biases theta identically every night, leaves no residual, and is invisible
+to per-epoch chi-square scatter, to split-half, to leave-one-out **and to the
+held-out posterior-predictive z the design promotes to primary** — the clean and
+the biased campaign return the same held-out scores, the largest disagreement
+over all 640 epochs being **4.93e-05**, which itself falls as 1/N. The
+**out-of-span** half does show, in the per-epoch chi-square (`z = +31.9231`
+against `+0.4457` clean, at N = 640) and in a named systematic template's
+projection (`z = +52.5498` against `+1.7163`, at unchanged scatter 1.00200),
+which is why §9.3's per-epoch summary is computed at compression, stored in
+~100 bytes, and read as a *mean* at √N. The chi-square's own scatter is **not**
+preserved — measured 5.5467 against `sqrt(2 dof) = 3.4641`, which is
+noncentrality and not injected randomness, `sqrt(2(dof + 2 lambda)) = 5.3057` at
+the measured `lambda = 4.0376` — so the scatter that is quoted as unchanged is
+the template projection's, not the chi-square's. Because the in-span half is
+undetectable in principle, §9.4 and §9.5 are **refusals over a declaration**
+rather than reports
+over the data: a campaign refuses to quote an error bar below its declared
+systematic floor, and a memory refuses to sum two epochs that share an
+input-product hash unless the product is represented among the global latents.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`

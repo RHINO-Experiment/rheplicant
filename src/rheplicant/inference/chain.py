@@ -35,16 +35,16 @@ shape, gradient and curvature are correct without any of them. Measured on
 ``tests/evidence/chain_bank.py`` at ``theta = (0.4, -1.1)``, the cost of
 dropping one:
 
-===================================================  ==============
-dropped                                              nats
-===================================================  ==============
-initial ``zeta`` prior normalisation                 +0.9189
-per-transition ``-0.5 logdet(2 pi Q)``, five of them +2.8618
-the spec's shorthand for it (``0.5 logdet Q^-1``)    +4.5947
-marginalisation constant, six of them                +7.2619
-the fold corner ``-0.5 rho^2``, six of them          +45.9502
-the masked data normalisation                        -6.8408
-===================================================  ==============
+====================================================  ========
+dropped                                               nats
+====================================================  ========
+initial ``zeta`` prior normalisation                  +0.9189
+per-transition ``-0.5 logdet(2 pi Q)``, five of them  +2.8618
+the spec's shorthand for it (``0.5 logdet Q^-1``)     +4.5947
+marginalisation constant, six of them                 +7.2619
+the fold corner ``-0.5 rho^2``, six of them           +45.9502
+the masked data normalisation                         -6.8408
+====================================================  ========
 
 Two of those belong to nobody else. The corner is
 :meth:`~rheplicant.inference.sqrtinfo.SqrtInfo.combine`'s and the data
@@ -622,7 +622,7 @@ def smooth(
         per-epoch covariances because that is what the diagnostics read and
         because a full one invites the reader to believe the cross-epoch blocks
         are in there; they are not returned, though the joint form has them and
-        :func:`_joint_covariance` is where the tests get at them.
+        ``_joint_covariance`` is where the tests get at them.
     """
     triangular, rhs, n_epochs, n_zeta = _zeta_joint(
         blocks, transition, values, names, shapes

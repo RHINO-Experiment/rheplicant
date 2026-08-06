@@ -207,13 +207,13 @@ def marginalise_arrays(
     unavailable: it needs a comparison against a value, and there is no value.
     What that costs, measured on one term with its block column rescaled:
 
-    ========================  ==============  ==================
-    block column              this function   :func:`marginalise`
-    ========================  ==============  ==================
-    healthy (scale 1)         +0.203 nats     accepted
-    rounding-scale (1e-10)    **+23.23 nats** refused
-    identically zero          ``+inf``        refused
-    ========================  ==============  ==================
+    ========================  ===============  ==================
+    block column              this function    :func:`marginalise`
+    ========================  ===============  ==================
+    healthy (scale 1)         +0.203 nats      accepted
+    rounding-scale (1e-10)    **+23.23 nats**  refused
+    identically zero          ``+inf``         refused
+    ========================  ===============  ==================
 
     The zero column is the easy half: ``-log|pivot|`` is a true ``+inf`` and any
     finiteness check downstream catches it. The dangerous half is the middle

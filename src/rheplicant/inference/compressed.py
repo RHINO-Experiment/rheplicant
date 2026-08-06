@@ -213,8 +213,11 @@ class QuadraticLikelihood(eqx.Module):
     #: the reason above, and additionally because equinox puts a static field
     #: into the treedef, where array ``__eq__`` decides treedef equality.
     template_projections: jax.Array | None = None
-    #: Static: a sample count minus a rank, computable from sigma and the design
-    #: alone, exactly as ``n_observed`` is.
+    #: A static field, exactly as ``n_observed`` is -- a sample count minus a
+    #: rank, computable from sigma and the design alone. (Do not open this
+    #: comment with a word and a colon: napoleon reads the first line of an
+    #: attribute docstring as ``type: description`` and emits ``:type: Static``,
+    #: which is a py:class Sphinx then cannot resolve.)
     residual_dof: int = eqx.field(static=True, default=0)
     template_names: tuple[str, ...] = eqx.field(static=True, default=())
     inputs: tuple[tuple[str, str], ...] = eqx.field(static=True, default=())
