@@ -43,11 +43,41 @@ class Factorization(eqx.Module):
             integrated at compression time (the hyperparameter would be
             frozen); the joint block is stored instead and the integral is done
             at evaluation.
+        represents: ``{input product: global latent names}`` -- which shared
+            calibration products the campaign actually models. Section 9.5's
+            refusal reads it: two epochs that share an input-product hash are
+            not conditionally independent, and the memory refuses to sum them as
+            though they were unless the product is represented here. This
+            mechanises section 1's "shared structure belongs in theta" instead of
+            leaving it as advice, and it is a *declaration* because no
+            data-driven diagnostic can recover it -- the in-span half of a
+            coherent error biases theta identically in every epoch and leaves no
+            residual anywhere.
     """
 
     space: ParameterSpace
-    linked: Mapping[str, Any] = eqx.field(static=True, default_factory=dict)
+    # Dynamic, unlike `hyper` and `represents`. This field held a placeholder
+    # with no arrays in it until a transition became a real type; a
+    # LinearGaussianTransition carries `phi`, `process_std` and `initial_std` as
+    # arrays, and a static field goes into the *treedef*, where array `__eq__`
+    # decides equality. Equinox warns for exactly that -- "A JAX array is being
+    # set as static" -- and `memory.py` records the same warning as what marks
+    # `eqx.field(static=True)` the wrong home for stored terms, alongside
+    # `BayesMemory.basis` and `ReducedBasis.reference_values`.
+    #
+    # Measured before changing it, because the obvious harm turned out not to be
+    # the one present: with the field static, two Factorizations built from
+    # bit-identical transitions still compared treedef-equal at chain widths 1
+    # and 3, so this is not a retrace storm. What it is instead is that the
+    # treedef's identity is then decided by the *values* of the blocks -- which
+    # is precisely what a HyperTransition makes vary -- and that the warning
+    # fires on every construction. Dynamic keeps the blocks on the leaf side,
+    # where identity rather than contents is compared.
+    linked: Mapping[str, Any] = eqx.field(default_factory=dict)
     hyper: Mapping[str, tuple[tuple[str, ...], Callable]] = eqx.field(
+        static=True, default_factory=dict
+    )
+    represents: Mapping[str, tuple[str, ...]] = eqx.field(
         static=True, default_factory=dict
     )
 
@@ -109,6 +139,39 @@ class Factorization(eqx.Module):
                     "latents. A hyperparameter shared across epochs must itself be "
                     "global, or every epoch would integrate against a different, "
                     "unrecorded prior."
+                )
+
+        for name, transition in self.linked.items():
+            declared = tuple(getattr(transition, "hyper", ()))
+            if name in declared:
+                raise ParameterSpaceError(
+                    f"The transition for {name!r} is built from its own state. A "
+                    "Markov transition is a statement about how zeta moves; making "
+                    "it a function of zeta makes the chain nonlinear and the "
+                    "filter's answer is then neither exact nor approximate, it is "
+                    "a different model. Move the parameter to a global latent."
+                )
+            outside = [source for source in declared if source not in global_names]
+            if outside:
+                raise ParameterSpaceError(
+                    f"The transition for {name!r} is built from {outside}, which "
+                    "are not global latents. A transition parameter that changes "
+                    "between epochs is not a transition -- and section 6's "
+                    "linked_hyper sub-scope exists precisely so an INFERRED "
+                    "correlation time stays inferred instead of being pinned at "
+                    "compression time, which requires it to be one value for the "
+                    "whole campaign."
+                )
+
+        for product, latents in self.represents.items():
+            outside = [name for name in latents if name not in global_names]
+            if outside:
+                raise ParameterSpaceError(
+                    f"represents[{product!r}] names {outside}, which are not global "
+                    "latents. A shared input product is modelled by making it a "
+                    "parameter of the campaign; naming a per-epoch or linked latent "
+                    "would claim the opposite -- that the product is re-drawn, "
+                    "which is what having one solution for every night denies."
                 )
 
     # -------------------------------------------------------- the global view --
