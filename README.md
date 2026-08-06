@@ -114,9 +114,9 @@ cd rheplicant && uv sync --frozen   # NOT plain `uv sync` -- see below
 ```
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
-name are the same: `rheplicant`. The `limtod` extra pulls in
-[limTOD](https://pypi.org/project/limTOD/)`[jax]`, which the two real sky
-engines are built on; everything else works without it.
+name are the same: `rheplicant`. Full instructions, the four extras and the
+two-session test split are on the
+[install page](https://rheplicant.readthedocs.io/en/latest/install.html).
 
 ## Sixty seconds of RHEPLICANT
 

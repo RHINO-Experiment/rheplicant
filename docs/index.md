@@ -85,6 +85,8 @@ each principle.
 
 * - You want to…
   - Start here
+* - install it
+  - [Install](install.md) — limTOD comes from source, and `uv` needs `--frozen`
 * - understand the whole thing in one sitting
   - [The guided tour](tour.md) — one worked example, simulated then inferred
 * - simulate an instrument
@@ -108,6 +110,7 @@ each principle.
 :maxdepth: 2
 :caption: Start here
 
+install
 tour
 ingestion
 ```
