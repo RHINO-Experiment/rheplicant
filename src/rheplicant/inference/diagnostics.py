@@ -30,6 +30,12 @@ from typing import Any
 
 import numpy as np
 
+_PRIOR_REMEDY = (
+    "pass prior_fisher over the same latents in the same column order -- "
+    "section 2.2 says a single epoch legitimately constrains only a subspace, "
+    "so the leave-one-out information is singular at small N without one."
+)
+
 
 @dataclass(frozen=True)
 class EpochResidual:
@@ -194,3 +200,178 @@ def coherent_mode(terms: Sequence[Any]) -> dict[str, Any]:
         }
         del index
     return report
+
+
+@dataclass(frozen=True)
+class HeldOut:
+    """One night's row of section 9.1's table.
+
+    A frozen dataclass for the same reason :class:`EpochResidual` is one: a
+    report is never differentiated, never jitted and never stored.
+
+    Attributes:
+        epoch_id: the recording's identity, as the term carries it.
+        chi2: ``m^T (I + V)^-1 m`` for the held-out residual ``m``.
+        dof: rows of the epoch's factor -- the dimension of ``m``.
+        z: ``(chi2 - dof) / sqrt(2 dof)``, a standard normal under the model.
+    """
+
+    epoch_id: str
+    chi2: float
+    dof: int
+    z: float
+
+
+def _campaign_arrays(
+    terms: Sequence[Any],
+) -> tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...], int]:
+    """``(factors, targets, width)`` for a campaign, with the latents checked.
+
+    The columns of every stored factor are positional. Two terms declared over
+    different latents -- or the same names in a different order -- have
+    compatible shapes and incompatible contents, so summing their information
+    would produce a finite, plausible posterior about nothing. That is the same
+    failure :func:`_refuse_mixed_templates` refuses one level along, and it is
+    refused here rather than in ``numpy``, which would only complain when the
+    widths happened to differ too.
+    """
+    if not terms:
+        raise ValueError(
+            "held_out_z needs at least one epoch. An empty campaign has no night "
+            "to hold out, and an empty result would read as 'no epoch was "
+            "surprising'."
+        )
+    declared = {(term.info.names, term.info.shapes) for term in terms}
+    if len(declared) > 1:
+        raise ValueError(
+            "These epochs are over different latents: "
+            f"{sorted(names for names, _ in declared)}. A stored factor's columns "
+            "are positional, so a campaign scored across two parameter sets would "
+            "add one epoch's information to another epoch's columns -- finite, "
+            "plausible and about nothing. Score the subsets separately."
+        )
+    factors = tuple(np.asarray(term.info.factor, dtype=float) for term in terms)
+    targets = tuple(np.asarray(term.info.target, dtype=float) for term in terms)
+    return factors, targets, factors[0].shape[1]
+
+
+def held_out_z(
+    terms: Sequence[Any], prior_fisher: Any, prior_mean: Any = None
+) -> tuple[HeldOut, ...]:
+    """Section 9.1: how surprising is each night to the rest of the campaign?
+
+    For a linear-Gaussian model this is exact and needs no simulation. Write the
+    leave-one-out posterior ``N(mu_{-e}, Sigma_{-e})`` and the epoch's own factor
+    ``[R_e | z_e]``. Then ``z_e = R_e theta_true + eps`` with unit-covariance
+    ``eps`` -- that is what the square-root form means -- and ``mu_{-e} -
+    theta_true`` is independent of ``eps``, so
+
+        ``m = R_e mu_{-e} - z_e  ~  N(0, I + R_e Sigma_{-e} R_e^T)``
+
+    and ``m^T (I + V)^-1 m`` is chi-square on ``rank(R_e)`` degrees of freedom.
+    The returned ``z`` is that, standardised.
+
+    Computed from the archive rather than by downdating the accumulator: a QR
+    accumulation cannot be un-summed stably. The campaign total is formed once
+    in ``(F, b)`` form and one epoch's contribution subtracted per row, which is
+    ``O(N)`` rather than ``O(N^2)`` and loses at most ``log10(N)`` digits of the
+    sixteen float64 carries -- affordable because this is an offline diagnostic,
+    and safe because the subtraction is of one PSD summand out of N, not of a
+    triangular factor out of its own product.
+
+    **What it can see, measured.** On a campaign whose nights genuinely differ,
+    a single rogue epoch scores ``+72.96`` while the largest of the other 59
+    scores ``4.24``; and a common-mode error over 300 varying nights lifts the
+    campaign mean to ``+22.05`` sigma against ``+0.87`` for the clean run.
+
+    **What it cannot see, measured.** If every night carries the same design --
+    the realistic case, and the one section 1 describes -- a coherent error's
+    in-span half shifts ``z_e`` and ``mu_{-e}`` by amounts that cancel in ``m``.
+    The clean and the biased campaign then return the **same scores**: the
+    largest disagreement over 640 epochs is ``4.9e-05``, and it shrinks as the
+    prior's share of the posterior does -- ``1.9e-04`` at N = 160 against
+    ``4.9e-05`` at N = 640 -- while the answer is wrong by ``52.6`` sigma. The
+    spec promotes this diagnostic to primary; it is primary for a single rogue
+    night and for a campaign whose nights genuinely differ, and it is blind to
+    the fault section 12.11 is about. Read it beside :func:`coherent_mode`,
+    never instead of it.
+
+    Args:
+        terms: the archive, in any order -- this statistic is exchangeable even
+            when the campaign is not, because each epoch is scored against all
+            the others.
+        prior_fisher: ``F_prior`` over the same latents in the same column order.
+            Required, not optional: ``Sigma_{-e}`` is singular at small N without
+            it, and section 2.2 says a single epoch legitimately constrains only
+            a subspace.
+        prior_mean: the prior's mean, zero if absent.
+
+    Returns:
+        One :class:`HeldOut` per epoch, in the order the terms were given.
+
+    Raises:
+        ValueError: if the campaign is empty, if its epochs are over different
+            latents, if ``prior_fisher`` or ``prior_mean`` is over a different
+            number of columns, if the leave-one-out information is singular, or
+            if any score comes out non-finite.
+    """
+    terms = tuple(terms)
+    factors, targets, width = _campaign_arrays(terms)
+
+    fisher = np.asarray(prior_fisher, dtype=float)
+    if fisher.shape != (width, width):
+        raise ValueError(
+            f"prior_fisher has shape {fisher.shape}, but this campaign's epochs "
+            f"are over {width} raveled values ({list(terms[0].info.names)}). The "
+            "prior is added column for column, so a prior over a different "
+            "parameter set is not a prior over these."
+        )
+    mean = np.zeros(width) if prior_mean is None else np.asarray(prior_mean, dtype=float)
+    if mean.shape != (width,):
+        raise ValueError(
+            f"prior_mean has shape {mean.shape}, but this campaign's epochs are "
+            f"over {width} raveled values ({list(terms[0].info.names)})."
+        )
+
+    total_fisher = fisher + sum(row.T @ row for row in factors)
+    total_b = fisher @ mean + sum(
+        row.T @ target for row, target in zip(factors, targets, strict=True)
+    )
+
+    rows: list[HeldOut] = []
+    for term, row, target in zip(terms, factors, targets, strict=True):
+        left_fisher = total_fisher - row.T @ row
+        left_b = total_b - row.T @ target
+        try:
+            covariance = np.linalg.inv(np.linalg.cholesky(left_fisher)).T
+        except np.linalg.LinAlgError as error:
+            raise ValueError(
+                f"The campaign with epoch {term.epoch_id!r} left out carries "
+                "singular information, so there is no leave-one-out posterior to "
+                f"score that epoch against. Remedy: {_PRIOR_REMEDY}"
+            ) from error
+        covariance = covariance @ covariance.T
+        residual = row @ (covariance @ left_b) - target
+        spread = np.eye(row.shape[0]) + row @ covariance @ row.T
+        chi2 = float(residual @ np.linalg.solve(spread, residual))
+        dof = int(row.shape[0])
+        # `not (x >= 0.0)` rather than `x < 0.0`: NaN is False for both, and it
+        # is NaN that has to be caught here. A NaN z sails through every
+        # `z > threshold` an audit could write and reads as the quietest night.
+        if not (chi2 >= 0.0) or not np.isfinite(chi2):
+            raise ValueError(
+                f"Epoch {term.epoch_id!r} scored {chi2}, which is not finite and "
+                "non-negative. A stored factor or target carries NaN or inf, and "
+                "NaN loses every comparison a campaign audit could make about it "
+                "-- `z > threshold` is False for NaN, so the epoch would read as "
+                "the quietest night of the run. Recompress that epoch."
+            )
+        rows.append(
+            HeldOut(
+                epoch_id=term.epoch_id,
+                chi2=chi2,
+                dof=dof,
+                z=(chi2 - dof) / float(np.sqrt(2.0 * dof)),
+            )
+        )
+    return tuple(rows)
