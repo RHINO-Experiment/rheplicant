@@ -225,7 +225,15 @@ class ReducedBasis(eqx.Module):
         reference_values: the latent values ``reference`` was taken at. Recorded
             so the bias gradient (section 7) and the storage origin are the same
             point by construction, rather than two callers agreeing to use the
-            same one.
+            same one. A **dynamic** field, unlike ``seeded`` and ``support``
+            beside it: these are arrays, and equinox puts a static field into
+            the *treedef*, where array ``__eq__`` decides treedef equality. With
+            a scalar latent that silently works; with a latent of shape ``(4,)``
+            -- which ``score_directions`` explicitly supports -- comparing two
+            treedefs raises "the truth value of an array with more than one
+            element is ambiguous", measured. Equinox says so itself, with "A JAX
+            array is being set as static", and ``tests/core/test_basis.py`` pins
+            the same rule for ``Bind.fn``.
     """
 
     rows: jax.Array
@@ -237,7 +245,7 @@ class ReducedBasis(eqx.Module):
     seeded: tuple[str, ...] = eqx.field(static=True)
     orthonormal: bool = eqx.field(static=True)
     support: dict[str, tuple[float, float]] | None = eqx.field(static=True)
-    reference_values: dict[str, jax.Array] = eqx.field(static=True)
+    reference_values: dict[str, jax.Array]
 
     def __init__(
         self,
@@ -274,7 +282,9 @@ class ReducedBasis(eqx.Module):
         self.seeded = tuple(seeded)
         self.orthonormal = bool(orthonormal)
         self.support = None if support is None else dict(support)
-        self.reference_values = dict(reference_values or {})
+        self.reference_values = {
+            name: jnp.asarray(value) for name, value in (reference_values or {}).items()
+        }
         self.factor = jnp.linalg.qr(self.whitened.T, mode="r")
         self.c_ref = self._project_whitened(self.weight * jnp.ravel(reference))
 
@@ -355,6 +365,213 @@ class ReducedBasis(eqx.Module):
             for leaf in (self.whitened, self.weight, self.c_ref)
         )
         return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def numerical_rank(whitened_bank: jax.Array) -> int:
+    """Largest ``k`` with ``s_k / s_0 > sqrt(eps)`` -- section 5 requirement 5.
+
+    Not a tuning knob. Beyond this cut the Gram matrix of the retained set is
+    numerically singular in float64, and ``c^T G c`` returns a finite,
+    occasionally negative number rather than raising: the spec records measured
+    ``kappa(G) = 1.4e8`` at ``n_S = 4`` and ``2e16`` at ``n_S = 16`` for raw
+    snapshots. ``sqrt(eps)`` rather than ``eps`` because the quadratic form
+    squares the conditioning -- that is the same reason section 3 stores ``R``
+    instead of ``F``.
+    """
+    singular = np.asarray(jnp.linalg.svd(whitened_bank, compute_uv=False))
+    if singular.size == 0 or singular[0] == 0.0:
+        return 0
+    cut = float(np.sqrt(np.finfo(singular.dtype).eps))
+    return int(np.sum(singular / singular[0] > cut))
+
+
+def select_svd(whitened_bank: jax.Array, count: int) -> jax.Array:
+    """The ``count`` leading right singular directions of the bank.
+
+    **Candidates, not a basis.** They happen to be orthonormal here, which is a
+    property of the SVD rather than of the pipeline; :func:`orthonormalise` is
+    still what makes that a claim the code depends on.
+    """
+    if count <= 0:
+        return jnp.zeros((0, whitened_bank.shape[1]))
+    return jnp.linalg.svd(whitened_bank, full_matrices=False)[2][:count]
+
+
+def select_greedy(whitened_bank: jax.Array, count: int) -> jax.Array:
+    """Greedy EIM-style selection: the worst-represented draw, repeatedly.
+
+    Returns rows *of the bank*, in the order chosen -- the selection step of
+    Field/Galley/Puerrer, and nothing more. Orthonormalising them is a separate
+    call because storing the raw picks is what makes ``G`` unusable.
+    """
+    bank = np.asarray(whitened_bank)
+    if count <= 0:
+        return jnp.zeros((0, bank.shape[1]))
+    chosen: list[int] = []
+    residual = bank.copy()
+    for _ in range(min(count, bank.shape[0])):
+        index = int(np.argmax(np.linalg.norm(residual, axis=1)))
+        chosen.append(index)
+        direction = residual[index]
+        norm = float(np.linalg.norm(direction))
+        if norm == 0.0:
+            break
+        direction = direction / norm
+        residual = residual - np.outer(residual @ direction, direction)
+    return jnp.asarray(bank[chosen])
+
+
+def build_reduced_basis(
+    space: Any,
+    pipeline: Any,
+    state_template: Any,
+    *,
+    noise: Any,
+    bank: jax.Array,
+    n_basis: int,
+    at: dict[str, jax.Array] | None = None,
+    names: Sequence[str] | None = None,
+    method: str = "svd",
+    seed_scores: bool = True,
+    support: dict[str, tuple[float, float]] | None = None,
+) -> ReducedBasis:
+    """Score directions first, bank directions after, orthonormalised once.
+
+    The order is the substance. Seeding puts every named latent's signature in
+    the span at any ``n_basis``; the bank then completes it with whatever else
+    the prior actually produces, chosen on the *residual* after the scores so
+    the leading singular direction does not simply restate the mean.
+
+    Measured on a RHINO-like bank (60-85 MHz, 128 channels, 400 draws), the
+    residual fraction of the ``t21_depth`` score direction against a plain SVD
+    basis is ``0.3147`` at ``n_S = 3``, ``0.0289`` at 5, ``0.0040`` at 8 and
+    ``0.0000`` at 13. Seeding takes ``n_S = 4`` -- the smallest this space
+    allows -- to below ``1e-10``. The repair is complete, not incremental, and
+    it does not depend on choosing ``n_S`` large enough.
+
+    Args:
+        space, pipeline, state_template: the model.
+        noise: the epoch's :class:`~rheplicant.inference.noise.NoiseModel`,
+            evaluated at the reference prediction to give the metric. Under
+            ``RadiometerNoise`` this is the frozen-N step of section 8, and the
+            caller owes it a ``noise_frozen_at`` provenance downstream.
+        bank: ``(n_draws, ...)`` predictions at draws from the prior. The
+            *training bank*, whose extent is the ``support`` a T1 term claims.
+        n_basis: ``n_S``. Refused above the bank's numerical rank.
+        at: where the reference prediction and the scores are taken.
+        names: which latents to seed. ``None`` means all of them.
+        method: ``"svd"`` or ``"greedy"`` for the non-seeded remainder.
+        seed_scores: off only to *build the failure* the tests pin.
+        support: ``{latent: (low, high)}`` covered by ``bank``. Carried onto
+            every term compressed against this basis, so that "the region the
+            bank populated" is recorded where it was known rather than
+            re-promised by each caller.
+
+    Raises:
+        StateValidationError: if ``n_basis`` is below the number of score rows,
+            above the bank's numerical rank, or if the score rows are themselves
+            linearly dependent.
+    """
+    forward, values = space.forward_fn(pipeline, state_template)
+    values = {**values, **(at or {})}
+    reference = jnp.ravel(forward(values))
+    sigma = jnp.ravel(jnp.broadcast_to(noise.std(reference), reference.shape))
+    seen = jnp.isfinite(sigma) & (sigma > 0.0)
+    weight = jnp.where(seen, 1.0 / jnp.where(seen, sigma, 1.0), 0.0)
+
+    flat_bank = jnp.reshape(jnp.asarray(bank), (jnp.asarray(bank).shape[0], -1))
+    whitened_bank = _whiten(flat_bank, weight)
+    rank = numerical_rank(whitened_bank)
+    if n_basis > rank:
+        raise StateValidationError(
+            f"n_basis={n_basis} exceeds the whitened bank's numerical rank {rank} "
+            "(the largest k with s_k/s_0 > sqrt(eps)). Above it the retained Gram "
+            "matrix is singular in float64 and c^T G c returns a finite, sometimes "
+            "negative number instead of raising. Draw a bank that actually varies "
+            "in more directions, or accept the rank as the answer to how many "
+            "directions this prior has."
+        )
+
+    seeds = jnp.zeros((0, whitened_bank.shape[1]))
+    seeded_names: tuple[str, ...] = ()
+    if seed_scores:
+        scores = score_directions(space, pipeline, state_template, names=names, at=values)
+        seeded_names = tuple(scores)
+        seeds = _whiten(
+            jnp.concatenate([scores[name] for name in seeded_names], axis=0), weight
+        )
+        if seeds.shape[0] > n_basis:
+            raise StateValidationError(
+                f"n_basis={n_basis} is smaller than the {seeds.shape[0]} score "
+                f"directions of {list(seeded_names)}. Seeding is not a suggestion "
+                "that improves a truncation -- it is what puts each parameter's "
+                "signature in the span at all, and a basis with room for only some "
+                "of them silently deletes the rest. Raise n_basis to at least "
+                f"{seeds.shape[0]}, or name fewer latents."
+            )
+        seed_transform, seed_kept = orthonormal_transform(seeds)
+        if len(seed_kept) < seeds.shape[0]:
+            raise StateValidationError(
+                f"The score directions of {list(seeded_names)} are linearly "
+                "dependent, so the basis cannot hold them all and the data cannot "
+                "tell those latents apart in the first place. Run "
+                "identifiability(space, pipeline, state) and read "
+                "report.participation(0) -- it names which combination is blind."
+            )
+        orthonormal_seeds = seed_transform @ seeds
+        whitened_bank = (
+            whitened_bank - (whitened_bank @ orthonormal_seeds.T) @ orthonormal_seeds
+        )
+
+    remainder = n_basis - seeds.shape[0]
+    if method == "svd":
+        extra = select_svd(whitened_bank, remainder)
+    elif method == "greedy":
+        extra = select_greedy(whitened_bank, remainder)
+    else:
+        raise StateValidationError(
+            f"method must be 'svd' or 'greedy', got {method!r}."
+        )
+
+    # The SAME combination is applied to the whitened candidates and to their
+    # raw counterparts, rather than dividing the orthonormal rows by the weight.
+    # The two agree wherever the reference observed and differ by `inf` where it
+    # did not, and an epoch whose flags differ from the reference's is the
+    # normal case rather than the exception.
+    safe = jnp.where(weight > 0.0, weight, 1.0)
+    candidates = jnp.concatenate([seeds, extra], axis=0)
+    raw_candidates = candidates / safe
+    transform, kept = orthonormal_transform(candidates)
+    if len(kept) < candidates.shape[0]:
+        raise StateValidationError(
+            f"Only {len(kept)} of {candidates.shape[0]} candidate directions are "
+            "independent to sqrt(eps). Storing the rest gives a Gram matrix that is "
+            "singular in float64, after which c^T G c returns a finite and "
+            f"sometimes negative number rather than raising. Lower n_basis to "
+            f"{len(kept)}, or draw a bank that varies in more directions."
+        )
+    return ReducedBasis(
+        rows=transform @ raw_candidates,
+        weight=weight,
+        predict=forward,
+        reference=reference,
+        seeded=seeded_names,
+        support=support,
+        reference_values=values,
+    )
+
+
+def _whiten(rows: jax.Array, weight: jax.Array) -> jax.Array:
+    """``rows * weight``, selecting on the weight first and multiplying second.
+
+    Never a bare product. A score direction or a bank draw may be non-finite at
+    a sample the reference could not see -- that is what a flag is -- and
+    ``0.0 * inf`` and ``0.0 * nan`` are both ``nan``, which then survives
+    ``orthonormal_transform`` silently: ``nan <= cut`` is ``False``, so the row
+    is *kept* with NaN entries rather than dropped, and every projection built
+    from it is NaN while the Gram matrix stays perfectly well conditioned.
+    """
+    return jnp.where(weight > 0.0, rows, 0.0) * weight
 
 
 def _refuse_shapes_no_projector_can_use(rows: jax.Array, weight: jax.Array) -> None:
