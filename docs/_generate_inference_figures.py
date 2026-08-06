@@ -13,8 +13,8 @@ Two figures:
   mean and a 68% band from exact GCR draws on one axis, plus the per-channel
   shrinkage that shows what the data actually constrained.
 
-Run:  uv run python docs/_generate_inference_figures.py
-      uv run python docs/_generate_inference_figures.py --replot   (cached)
+Run:  uv run --frozen python docs/_generate_inference_figures.py
+      uv run --frozen python docs/_generate_inference_figures.py --replot   (cached)
 """
 
 import argparse

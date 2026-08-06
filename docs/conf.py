@@ -229,7 +229,7 @@ try:
         "The single-antenna path every assembly lights up — generated "
         "from `rheplicant.radio.RADIO_GRAPH` at documentation build time. `(+)` "
         "nodes are sum junctions, `(sw)` the antenna/cal-load selector; see "
-        "the [tour](tour.md#4-graph-assembly) for the assembly rules and "
+        "the [tour](tour.md#graph-assembly) for the assembly rules and "
         "[the operator catalog](operators.md) for what lives at each node.\n\n"
         "```{mermaid}\n" + _mermaid + "\n```\n\n"
         "## Lit and dim: what an assembly simulates\n\n"

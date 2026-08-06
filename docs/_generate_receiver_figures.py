@@ -21,8 +21,8 @@ Three figures:
 Falls back to an analytic horn when the (unpublished) RHINO CST export is
 absent, so the figures regenerate anywhere; the caption says which was used.
 
-Run:  uv run python docs/_generate_receiver_figures.py
-      uv run python docs/_generate_receiver_figures.py --replot   (cached)
+Run:  uv run --frozen python docs/_generate_receiver_figures.py
+      uv run --frozen python docs/_generate_receiver_figures.py --replot   (cached)
 """
 
 import argparse

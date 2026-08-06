@@ -9,7 +9,7 @@ which runs everything shown below. Every number and every figure here comes
 from that path being executed, not from illustrating it.
 
 ```bash
-uv run python examples/sky_to_noise_wave.py
+uv run --frozen python examples/sky_to_noise_wave.py
 ```
 
 ## The one identification
@@ -104,7 +104,7 @@ the junction.
 
 The mixture could have been split into a scaling and a separate ground leaf.
 That is exactly what it must not be: two objects holding two numbers that have
-to satisfy $f + (1-f) = 1$, with nothing enforcing it. See D17.
+to satisfy $f + (1-f) = 1$, with nothing enforcing it. See [D17](design.md).
 :::
 
 Not one line of the `assemble()` call says any of this — the
@@ -500,7 +500,7 @@ All of it is **limTOD's** — `horizon_partition_weights`,
 are in its `tests/limtod_jax/test_horizon_partition.py`. How a beam weights the
 sky is limTOD's subject, the same way the noise-wave data model is
 `rhino_cal_jax`'s; this package supplies the *placement*, and
-`BeamSpillOperator` consumes $f_\mathrm{sky}$ without computing it. See D20.
+`BeamSpillOperator` consumes $f_\mathrm{sky}$ without computing it. See [D20](design.md).
 :::
 
 ---

@@ -10,7 +10,7 @@ Its companion, [Tutorial: NUTS](tutorial-nuts.md), takes the same instrument and
 asks the opposite question.
 
 ```bash
-uv run python examples/tutorial_gcr.py
+uv run --frozen python examples/tutorial_gcr.py
 ```
 
 Everything below is that script's actual output.

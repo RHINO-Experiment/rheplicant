@@ -75,21 +75,73 @@ instrument is another template registered the same way.
    application, not the design center (a test enforces the layering).
 
 The [README](https://github.com/RHINO-Experiment/rheplicant#readme) expands
-each principle; start reading the docs with the [guided tour](tour.md).
+each principle.
+
+## Where to start
+
+:::{list-table}
+:header-rows: 1
+:widths: 40 60
+
+* - You want to…
+  - Start here
+* - understand the whole thing in one sitting
+  - [The guided tour](tour.md) — one worked example, simulated then inferred
+* - simulate an instrument
+  - [The canonical signal path](signal-path.md), then
+    [the operator catalog](operators.md)
+* - **turn a RHINO recording into a `State`**
+  - [Ingestion](ingestion.md) — every other page starts from a `State` that
+    already exists; this is where one comes from
+* - see one instrument end to end
+  - [From the sky to the receiver](sky-to-receiver.md)
+* - fit or sample parameters
+  - [Tutorial: an exact posterior](tutorial-gcr.md) or
+    [Tutorial: a gradient posterior](tutorial-nuts.md) first, then
+    [Inferring anything](inference.md) for the rules they cite
+* - look something up
+  - [The API reference](api.md), [contracts between stages](contracts.md),
+    [design decisions](design.md)
+:::
 
 ```{toctree}
 :maxdepth: 2
+:caption: Start here
 
 tour
-operators
-signal-path
-contracts
-sky-engines
-sky-to-receiver
 ingestion
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Concepts
+
+signal-path
+operators
+contracts
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: The instrument
+
+sky-to-receiver
+sky-engines
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Inference
+
 inference
 tutorial-gcr
 tutorial-nuts
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Reference
+
 api
 design
 changelog

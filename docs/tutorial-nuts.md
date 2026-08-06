@@ -12,7 +12,7 @@ the diagnostics were read before the answer. Diagnosing it is most of the
 tutorial.
 
 ```bash
-uv run python examples/tutorial_nuts.py
+uv run --frozen python examples/tutorial_nuts.py
 ```
 
 Everything below is that script's actual output.

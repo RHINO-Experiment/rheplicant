@@ -62,7 +62,7 @@ source is connected sample-by-sample from
 `coords.extra["receiver_input"]`; with more than one source that array is
 required, since defaulting to the first would return a finite,
 correctly-shaped, wrong answer. See `examples/noise_wave_gcr.py` for the model
-exercised as a checked linear block (Wiener mean and exact GCR draws) and D15
+exercised as a checked linear block (Wiener mean and exact GCR draws) and [D15](design.md)
 in `DESIGN.md` for why the per-source placement is what makes per-channel
 noise-wave temperatures identifiable at all.
 
@@ -229,13 +229,13 @@ unattenuated. `beam_spill` instead sits on the ASTRO branch
 (`beam | observed_astro_sky → astro_ant_sum → beam_spill → t_ant_sum`), because
 the split applies to the thing that genuinely is a beam integral over the
 celestial sphere and not to the effective temperatures that join at `t_ant_sum`.
-See D16 and D17 in `DESIGN.md`.
+See [D16](design.md) and [D17](design.md).
 
 ## Beam data
 
 **Every one of these is a pass-through.** What a beam IS, how a measured one is
 read, how it weights the sky and where the horizon falls in it all belong to
-limTOD (D20, D25). What stays here is *placement* — `BeamSpillOperator`
+limTOD ([D20](design.md), [D25](design.md)). What stays here is *placement* — `BeamSpillOperator`
 consumes `f_sky` but does not compute it — and the seam's own arguments.
 
 | Function | Delegates to | What this side adds |

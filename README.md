@@ -102,11 +102,15 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
 ## Install
 
 ```bash
+# limTOD carries the sky engines and is a dependency, not an extra -- but PyPI
+# has only <=1.8.0 against a >=1.10 floor, so install it from source first.
+pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
 pip install rheplicant
-pip install "rheplicant[limtod]"  # + the differentiable sky engines
+pip install "rheplicant[cal]"     # + the noise-wave model (rhino-cal-jax)
+
 # or, for development:
 git clone https://github.com/RHINO-Experiment/rheplicant
-cd rheplicant && uv sync          # extras: uv sync --extra numpyro --extra limtod
+cd rheplicant && uv sync --frozen   # NOT plain `uv sync` -- see below
 ```
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
@@ -206,14 +210,14 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 | [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
 | [Tutorial: GCR](docs/tutorial-gcr.md) | 256 sky pixels by exact conjugate solve, with iterative GLS for the covariance |
 | [Tutorial: NUTS](docs/tutorial-nuts.md) | Gradient MCMC, MCMC diagnostics, and what a broken posterior looks like |
-| [Architecture](DESIGN.md) | Design decisions D1–D28, element taxonomy, physics roadmap |
+| [Architecture](DESIGN.md) | Design decisions D1–D31, element taxonomy, physics roadmap |
 | [Changelog](CHANGELOG.md) | What arrived when |
 | `examples/` | Thirteen end-to-end runnable demos |
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2380 tests, 87.7 % coverage, jit+grad+vmap through the full twin; assembly
+(2402 tests, 87.7 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -241,7 +245,7 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet — run the suite and the linter in the project venv before pushing:
 
 ```bash
-.venv/bin/python -m pytest          # 2380 tests, ~12 min with coverage
+.venv/bin/python -m pytest          # 2402 tests, ~12 min with coverage
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```
@@ -263,11 +267,14 @@ default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
 **633 of the default report's 647 uncovered statements are those seven files**.
 Measured, on the run the number above comes from.
 
-**Not** plain `uv run`: the `limtod` and `rfi` extras name requirements that are
-not on PyPI *by design* (see the comment beside them in `pyproject.toml`), so
-`uv` cannot resolve the project and refuses before running anything —
-`limtod[jax]>=1.10` against a `<=1.8.0` index. `uv run --frozen` works against
-an existing lock.
+**Not** plain `uv run`, and **not** plain `uv sync`: `limTOD[jax]>=1.10` is a
+dependency, `rfi` and `cal` name requirements that are not on PyPI *by design*
+(see the comments in `pyproject.toml`), so `uv` cannot resolve the project and
+refuses before running anything — `limtod[jax]>=1.10` against a `<=1.8.0` index.
+Both were measured, not assumed: each reports *"your project's requirements are
+unsatisfiable"*. Add `--frozen` to either and both work against the existing
+lock. Note that `uv sync --frozen` will also *remove* anything installed outside
+the lock, editable local checkouts of limTOD or rhino-cal included.
 
 ## Developers and maintainers
 

@@ -3,6 +3,11 @@
 Generated from the source docstrings. Layering rule: `rheplicant.core` is
 domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
 
+For the prose behind these signatures: [the guided tour](tour.md) for the shape
+of a twin, [the operator catalog](operators.md) for what lives at each graph
+node, [inferring anything](inference.md) for the parameter-space machinery, and
+[contracts between stages](contracts.md) for the refusals.
+
 ## rheplicant.core
 
 ```{eval-rst}
