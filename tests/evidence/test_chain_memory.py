@@ -70,8 +70,9 @@ def _values(probe):
 def test_streaming_equals_the_batch_marginal(probe):
     """Validation item 12.7, at a fixed transition.
 
-    Measured on the run that shipped this: 1.1e-13 to 9.1e-13 nats from the
-    dense oracle over the four probes, against a band of 1e-9.
+    Measured on the run that shipped this: 5.7e-14, 1.1e-13, 9.1e-13 and
+    9.1e-13 nats from the dense oracle at the four probes, against a band of
+    1e-9.
     """
     assert float(_memory().log_likelihood(_values(probe))) == pytest.approx(
         bank.oracle(probe), abs=1e-9
@@ -148,7 +149,9 @@ def test_a_chain_is_not_exchangeable_and_the_gap_is_large():
     A bag's `remember` is order-invariant to roundoff -- Plan A pins that. Here
     the same two terms in the other order give a different likelihood, because
     epoch 3's drift is correlated with epoch 2's and not with epoch 5's.
-    Measured on this fixture: 0.3675 nats, against a band of 1e-3.
+    Measured on this fixture: 0.0752 nats, against a band of 1e-3 -- and
+    against the recursion's own 9.1e-13 disagreement with the dense oracle,
+    which is what makes 0.075 a signal rather than a small number.
     """
     terms = list(_terms())
     forward = _memory(terms=terms)
