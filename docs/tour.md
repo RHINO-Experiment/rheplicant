@@ -14,9 +14,7 @@ The tour is in two parts, and one worked example runs through both:
 :class-header: sd-font-weight-bold
 
 Assemble the RHINO signal path and record a raw waterfall, exactly as the
-instrument would.
-^^^
-`State` · `Operator` · the graph
+instrument would. `State` · `Operator` · the graph.
 +++
 The twin as a simulator.
 :::
@@ -25,9 +23,7 @@ The twin as a simulator.
 :class-header: sd-font-weight-bold
 
 Hold the sky fixed and get the receiver's four noise-wave temperatures back out
-of that waterfall.
-^^^
-`Latent` · `Bind` · the exact route
+of that waterfall. `Latent` · `Bind` · the exact route.
 +++
 The same twin as a model.
 :::
@@ -218,7 +214,6 @@ rules for implementors — never mutate the input state; draw randomness only vi
 :class-header: sd-font-weight-bold
 
 One after another — each stage transforms what the last produced.
-^^^
 ```python
 # sketch
 Pipeline(sky, beam, gain)
@@ -232,7 +227,6 @@ A chain of `transform` nodes.
 
 Independent contributions that **add**. Each branch gets the input context with
 `data` stripped, and its own PRNG subkey.
-^^^
 ```python
 # sketch
 SumOperator(signal, foregrounds)
@@ -246,7 +240,6 @@ A `junction` node.
 
 Alternatives, one **selected** per time sample by an integer cycle in
 `coords.extra`. They replace, they do not add.
-^^^
 ```python
 # sketch
 SelectOperator(antenna, cal_load)
@@ -360,7 +353,12 @@ Branch order comes from the graph, never from your argument order — so the sam
 set of operators always folds to the same tree, with the same names, the same
 PRNG stream and the same jit cache entry.
 
-Now the worked example. This is the RHINO forward segment, ending at the ADC:
+:::{important}
+**⬇ The worked example starts here.** Everything above was one operator at a
+time; this is the whole RHINO forward segment, ending at the ADC — a raw
+waterfall, as the instrument records it. Part 2 takes this same twin and infers
+the four noise-wave temperatures back out of it.
+:::
 
 ```python
 # needs-extra: rhino_cal_jax
@@ -416,6 +414,57 @@ twin = assemble(
 )
 observed = twin(state).data                          # the raw waterfall
 ```
+
+:::{figure} _static/tour-waterfall-light.svg
+:figclass: only-light
+:alt: The raw waterfall, the switch cycle aligned under it, and one mean spectrum per source
+:width: 100%
+
+**This is what the twin produces.** The stripes are the switch cycle — the
+coloured strip beneath the image is the same 64 samples, and every fourth one is
+the antenna. On the right, the four sources separated: the antenna's steep
+foreground spectrum, and three loads at levels the noise-wave couplings put them
+at, not at their physical temperatures. The 1200 K source reads lower than you
+would guess and the 400 K load lower than the 300 K one, because `c_s =
+(1−|Γ|²)|F|²` weights each source by its own match.
+:::
+
+:::{figure} _static/tour-waterfall-dark.svg
+:figclass: only-dark
+:alt: The raw waterfall, the switch cycle aligned under it, and one mean spectrum per source
+:width: 100%
+
+**This is what the twin produces.** The stripes are the switch cycle — the
+coloured strip beneath the image is the same 64 samples, and every fourth one is
+the antenna. On the right, the four sources separated: the antenna's steep
+foreground spectrum, and three loads at levels the noise-wave couplings put them
+at, not at their physical temperatures. The 1200 K source reads lower than you
+would guess and the 400 K load lower than the 300 K one, because `c_s =
+(1−|Γ|²)|F|²` weights each source by its own match.
+:::
+
+:::{dropdown} Every number that went in
+:color: secondary
+:icon: sliders
+
+| Setting | Value | Where it enters |
+|---|---|---|
+| grid | 64 samples × 8 channels, 60–85 MHz | `Coordinates` |
+| switch cycle | antenna, 300 K, 400 K, 1200 K — 16 visits each | `coords.extra["receiver_input"]` |
+| foreground | 2500 K at 70 MHz, spectral index 2.55 | `ForegroundOperator` |
+| global signal | 0.5 K absorption at 75 MHz, 5 MHz wide | `GlobalSignalOperator` |
+| horizon split | `f_sky` 0.97, ground 290 K | `BeamSpillOperator` |
+| horn loss | η 0.97 at 293 K | `AntennaLossOperator` |
+| noise waves | `T_unc` 230–270 K, `T_cos` ±30 K, `T_sin` −40…−32 K, `T_rx` 285–295 K — **per channel** | `NoiseWaveOperator` |
+| reflections | receiver 45 Ω; sources open/10 Ω/short/150 Ω through cables | `gamma_rec`, `gamma_src` |
+| bandpass | 10 % cosine ripple, mean 1 | `ReceiverOperator` |
+| gain | 1.0 ± 2 %, 60 s period | `GainOperator` |
+| noise | σ = 2 counts, post-gain | `NoiseOperator` |
+| ADC | 0.25 counts/K, 12-bit clip (**no quantisation** — it is a placeholder) | `ADCOperator` |
+
+The bandpass carries *shape* at mean 1 and the gain carries the *level*: free
+jointly, those two share one exactly null direction.
+:::
 
 Nothing in that call says what connects to what. The graph does: the two sky
 terms **sum**, the antenna stages **chain**, and `receiver_input` is a
@@ -490,10 +539,17 @@ at each node.
 
 # Part 2 — Bayesian inference
 
-The twin is now a *model*: `forward(params) -> prediction`, with everything else
-closed over. The question this part answers is the one the worked example set up
-— **the sky and the beam are given; what were the receiver's four noise-wave
-temperatures?**
+:::{important}
+**⬆ Same twin, read backwards.** Part 1 built it and ran it forward to the
+waterfall above. Nothing is rebuilt here: the twin becomes a *model*,
+`forward(params) -> prediction`, with everything except the four noise-wave
+temperatures closed over.
+:::
+
+**The sky and the beam are given; what were the receiver's four noise-wave
+temperatures?** That is the whole question, and the answer arrives as
+[a figure with error bars](#reading-the-answer-honestly) five short sections
+from here.
 
 Inference is declared in three layers, and it is worth keeping them apart:
 
@@ -623,7 +679,7 @@ solved, residual = wiener_solve(block, observed, noise_std=NOISE_STD,
                                 prior_std=PRIOR_STD, prior_mean=PRIOR_MEAN,
                                 tol=1e-12, maxiter=4000)
 
-keys = jax.random.split(jax.random.key(7), 200)
+keys = jax.random.split(jax.random.key(7), 500)
 draws = jax.vmap(lambda k: gcr_sample(
     block, observed, noise_std=NOISE_STD, prior_std=PRIOR_STD,
     prior_mean=PRIOR_MEAN, key=k, tol=1e-12, maxiter=4000)[0])(keys)
@@ -632,6 +688,25 @@ draws = jax.vmap(lambda k: gcr_sample(
 `linear_operator` exports `A`, `Aᵀ` and the offset **without ever forming a
 matrix**; `wiener_solve` gives the posterior mean by conjugate gradients and
 `gcr_sample` gives exact draws, one solve each.
+
+:::{tip}
+**No burn-in, no `r_hat`, no thinning — and that is not an oversight.**
+`gcr_sample` is not a Markov chain. Each call solves the same system
+`wiener_solve` does with two white-noise terms added to the right-hand side, so
+the solution has the posterior mean *and* the posterior covariance exactly, and
+every call is independent of every other. Draws are i.i.d. by construction, so
+500 of them are 500 effective samples and the only knob is how many you want.
+
+Measured against the dense posterior of this very block: 20 000 whitened draws
+give per-coordinate std 0.991–1.008, worst off-diagonal correlation 0.028
+against a Monte-Carlo bound of 0.028, mean χ²₃₂ = 32.005 ± 0.057 and a KS
+p-value of 0.57.
+
+The moment a latent is *not* linear the exact route is gone and you are back to
+NUTS, where burn-in and `r_hat` are the whole game — see
+[the gradient-posterior tutorial](tutorial-nuts.md), which opens with a run
+reporting `r_hat = 840`.
+:::
 
 ## Reading the answer honestly
 
@@ -645,18 +720,60 @@ for name in NAMES:
 ```
 
 ```text
-t_unc RMS err  2.345 K | posterior sigma  1.18..10.25 K | worst pull 3.03
-t_cos RMS err  0.734 K | posterior sigma  0.48.. 3.31 K | worst pull 2.00
-t_sin RMS err  1.395 K | posterior sigma  0.57.. 7.24 K | worst pull 2.45
-t_rx  RMS err  1.136 K | posterior sigma  0.72.. 2.39 K | worst pull 3.05
+t_unc RMS err  2.345 K | posterior sigma  1.21..10.18 K | worst pull 2.88
+t_cos RMS err  0.734 K | posterior sigma  0.55.. 3.29 K | worst pull 2.05
+t_sin RMS err  1.395 K | posterior sigma  0.58.. 7.20 K | worst pull 2.33
+t_rx  RMS err  1.136 K | posterior sigma  0.73.. 2.37 K | worst pull 3.00
 ```
 
+:::{figure} _static/tour-recovery-light.svg
+:figclass: only-light
+:alt: Truth against posterior mean with a 1-sigma band for four temperature families, and the pull histogram
+:width: 100%
+
+**The answer.** Truth dashed, posterior mean solid, band ±1σ from 500 GCR draws.
+Right: 32 × 500 pulls — 32 recovered numbers over 500 noise realisations — against
+a unit normal, χ²/dof = 0.98.
+:::
+
+:::{figure} _static/tour-recovery-dark.svg
+:figclass: only-dark
+:alt: Truth against posterior mean with a 1-sigma band for four temperature families, and the pull histogram
+:width: 100%
+
+**The answer.** Truth dashed, posterior mean solid, band ±1σ from 500 GCR draws.
+Right: 32 × 500 pulls — 32 recovered numbers over 500 noise realisations — against
+a unit normal, χ²/dof = 0.98.
+:::
+
+:::{figure} _static/tour-covariance-light.svg
+:figclass: only-light
+:alt: The 32x32 posterior correlation matrix and the 4x4 block it is eight copies of
+:width: 100%
+
+**The covariance those draws carry.** Sixteen *diagonal stripes*, not sixteen
+dense blocks: within one family the eight channels are uncorrelated — each
+channel is its own 4 × 4 problem. What couples is the four families at one
+channel, and `T_unc` against `T_rx` at −0.93 is what the switching cycle fights.
+:::
+
+:::{figure} _static/tour-covariance-dark.svg
+:figclass: only-dark
+:alt: The 32x32 posterior correlation matrix and the 4x4 block it is eight copies of
+:width: 100%
+
+**The covariance those draws carry.** Sixteen *diagonal stripes*, not sixteen
+dense blocks: within one family the eight channels are uncorrelated — each
+channel is its own 4 × 4 problem. What couples is the four families at one
+channel, and `T_unc` against `T_rx` at −0.93 is what the switching cycle fights.
+:::
+
 **The claim to take away is not "1 K accuracy" — it is that the errors sit inside
-the error bars the same machinery reports.** Over twelve noise realisations the
-pulls give χ²/dof = **1.00** (range 0.49–1.77), and the largest of 32 pulls has
-median 2.3 and range 1.7–3.3 — which is what thirty-two draws from a normal look
-like. One realisation's worst pull is not the diagnostic; the χ² across
-realisations is.
+the error bars the same machinery reports.** One run gives 32 pulls, which is far
+too few to judge that, so the histogram runs 500 of them. `T_unc` is loosest
+because it is multiplied by `|Γ_src|²|F|²`, small for the well-matched sources,
+so those rows carry little leverage on it.
+
 
 Posterior σ runs from 0.5 to 10 K against a per-sample scatter of 2 K, because
 the per-channel 4×4 system over the four coupling coefficients is square but not
@@ -682,6 +799,178 @@ from rheplicant.inference import identifiability
 report = identifiability(space, fit_twin, state)
 print(f"rank {report.rank} of {report.n_par} parameters, nullity {report.nullity}")
 ```
+
+## When it is not linear: the same twin, by NUTS
+
+Everything above rested on one measured fact — the temperatures are affine, so
+the posterior is a Gaussian you can write down. Let the **foreground spectral
+index** go free and that fact is gone: it enters as `(ν/ν₀)^(−β)`, an exponent,
+so no reparameterisation makes it linear. Ask the same question of it and the
+same check that passed at 9.4e-11 refuses:
+
+```python
+# needs-extra: numpyro
+import numpyro
+import numpyro.distributions as dist
+from numpyro.diagnostics import summary
+from rheplicant.inference import init_to_declared, to_numpyro_model
+
+probe = ParameterSpace(
+    latents=[Latent("fg_beta", init=jnp.array(2.55), linear=True)],
+    bindings=[Bind("fg_beta", into=lambda p: p["foregrounds"].spectral_index)],
+)
+try:
+    check_linearity(probe, fit_twin, state, name="fg_beta")
+except ValueError as exc:
+    print(f"{type(exc).__name__}: {str(exc)[:88]}...")
+```
+
+```text
+ParameterSpaceError: Latent 'fg_beta' is declared linear=True, but the predi...
+```
+
+The refusal quotes three probe scales — `0.001x -> 4.65e-04, 1x -> 3.07e-01,
+1000x -> 1.86e+01`. Even a probe a thousandth of the parameter's own size
+departs seven orders of magnitude further than the temperatures did. That is
+curvature, not roundoff.
+
+So: NUTS. Two latents, because the amplitude–index pair is the fit anyone
+actually does — and note that `amplitude` alone *is* affine; it is
+`fn=jnp.exp` that makes `fg_log_amp` nonlinear too.
+
+```python
+# needs-extra: numpyro
+nuts_space = ParameterSpace(
+    latents=[
+        Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)),
+               prior=dist.Normal(jnp.log(2000.0), 0.5)),
+        Latent("fg_beta", init=jnp.array(2.30), prior=dist.Normal(2.3, 0.3)),
+    ],
+    bindings=[
+        Bind("fg_log_amp", into=lambda p: p["foregrounds"].amplitude, fn=jnp.exp),
+        Bind("fg_beta", into=lambda p: p["foregrounds"].spectral_index),
+    ],
+)
+FG_NAMES = ("fg_log_amp", "fg_beta")
+model = to_numpyro_model(fit_twin, state, nuts_space, noise_std=NOISE_STD)
+
+
+def run(label, **kernel_kwargs):
+    mcmc = numpyro.infer.MCMC(
+        numpyro.infer.NUTS(model, dense_mass=True, **kernel_kwargs),
+        num_warmup=1000, num_samples=1000, num_chains=4,
+        chain_method="vectorized", progress_bar=False)
+    mcmc.run(jax.random.key(3), observed=observed, extra_fields=("diverging",))
+    chained = mcmc.get_samples(group_by_chain=True)
+    s = summary({n: chained[n] for n in FG_NAMES}, prob=0.9)
+    div = int(mcmc.get_extra_fields()["diverging"].sum())
+    print(f"{label:22s} r_hat {max(float(s[n]['r_hat']) for n in FG_NAMES):7.3f}"
+          f"   n_eff {min(float(s[n]['n_eff']) for n in FG_NAMES):5.0f}"
+          f"   divergences {div}")
+    return mcmc
+
+
+run("as written")
+mcmc = run("prior-aware init", init_strategy=init_to_declared(nuts_space))
+```
+
+```text
+as written             r_hat  36.296   n_eff     2   divergences 65
+prior-aware init       r_hat   1.002   n_eff   688   divergences 0
+```
+
+:::{figure} _static/tour-nuts-light.svg
+:figclass: only-light
+:alt: Four NUTS chains failing, the same chains converging, and the two-dimensional posterior
+:width: 100%
+
+**The first run is the one worth staring at.** Four chains, left, crawling —
+they never reach the truth (dashed) and never meet each other. It returned a mean
+and a σ regardless; `r̂ = 36`, `n_eff = 2` of 4000 is what says not to believe
+them. Middle: the same sampler, prior-aware start. Note the y-axis — the failing
+run's whole range is 0 to 2.5, the healthy one's is 0.014 wide.
+:::
+
+:::{figure} _static/tour-nuts-dark.svg
+:figclass: only-dark
+:alt: Four NUTS chains failing, the same chains converging, and the two-dimensional posterior
+:width: 100%
+
+**The first run is the one worth staring at.** Four chains, left, crawling —
+they never reach the truth (dashed) and never meet each other. It returned a mean
+and a σ regardless; `r̂ = 36`, `n_eff = 2` of 4000 is what says not to believe
+them. Middle: the same sampler, prior-aware start. Note the y-axis — the failing
+run's whole range is 0 to 2.5, the healthy one's is 0.014 wide.
+:::
+
+:::{danger}
+**A gradient sampler's output is not an answer until its diagnostics say so** —
+which is the whole difference from the conjugate route above, where there was
+nothing to diagnose. The failing run's "±1σ" for `log A` is 1.41; the converged
+one's is 0.00031.
+
+The fix is the *starting point*, not the model: any prior-aware initialisation
+converges, and `init_to_declared` is the one that reads the declaration you
+already wrote. [The gradient-posterior tutorial](tutorial-nuts.md) works a
+harder case, where the diagnosis is most of the page.
+:::
+
+Recovery is at 0.9σ and 1.2σ, and it is the data's, not the prior's: shifting
+the prior mean fivefold in amplitude and from 1.8 to 3.2 in index moves the
+posterior by under 0.1σ.
+
+## Both at once: one plan, two engines
+
+A real fit has both kinds of parameter. `SamplingPlan` takes the partition and
+**derives** each block's engine from what the latents already declared:
+
+```python
+# needs-extra: numpyro
+from rheplicant.inference import Block, SamplingPlan, identifiability
+
+joint = ParameterSpace(
+    latents=[
+        *[Latent(n, init=jnp.zeros((N_FREQ,)), linear=True,
+                 prior=dist.Normal(jnp.zeros(N_FREQ), 400.0)) for n in NAMES],
+        Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)),
+               prior=dist.Normal(jnp.log(2000.0), 0.5)),
+        Latent("fg_beta", init=jnp.array(2.30), prior=dist.Normal(2.3, 0.3)),
+    ],
+    bindings=[
+        *[Bind(n, into=(lambda k: lambda p: getattr(p["noise_wave"], k))(n))
+          for n in NAMES],
+        Bind("fg_log_amp", into=lambda p: p["foregrounds"].amplitude, fn=jnp.exp),
+        Bind("fg_beta", into=lambda p: p["foregrounds"].spectral_index),
+    ],
+)
+plan = SamplingPlan(joint, Block(*NAMES), Block("fg_log_amp", "fg_beta", steps=200))
+print(plan)
+rep = identifiability(joint, fit_twin, state)
+print(f"nullity {rep.nullity} of {rep.n_par}")
+```
+
+```text
+SamplingPlan(('t_unc', 't_cos', 't_sin', 't_rx'):conjugate, ('fg_log_amp', 'fg_beta'):gradient)
+nullity 2 of 34
+```
+
+Nobody wrote "conjugate" or "gradient" — `linear=True` already said it.
+
+:::{danger}
+**And the plan refuses to run.** Over *this* twin the six latents are exactly
+degenerate: per channel the four temperature families map one-to-one onto the
+four switch positions' levels, so between them they can produce **any**
+antenna-position spectrum — which is exactly what the foreground's two
+parameters produce. Singular values 1.6e-16 and 1.0e-16 against 1.82.
+
+`plan.estimate` names the directions and stops. The repair is **design, not
+tolerance**: three more calibration loads, seven switch positions, nullity 0.
+The switching cycle is the calibration design, and two more unknowns need more
+of it.
+:::
+
+[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py) runs the whole thing — the
+refusal, the seven-position repair, and both exits — in about 40 s.
 
 ## Where to go next
 

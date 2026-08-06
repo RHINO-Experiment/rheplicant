@@ -1,6 +1,6 @@
 # Examples
 
-Thirteen runnable scripts in
+Fourteen runnable scripts in
 [`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
 Each prints its own results; none needs a real recording. Every wall clock below
 was measured by running the script, on CPU.
@@ -96,6 +96,12 @@ other script finishes in under ten seconds.
     [the gradient-posterior tutorial](tutorial-nuts.md) — `r_hat = 840` first
   - **185 s**
   - numpyro
+* - `gibbs_plan.py`
+  - One `SamplingPlan` over six latents, conjugate blocks and a gradient block.
+    Opens by being **refused**: over the guided tour's own twin the six are
+    exactly degenerate, and the repair is three more calibration loads
+  - **37 s**
+  - `cal`, numpyro
 :::
 
 ## Analysis and rendering
