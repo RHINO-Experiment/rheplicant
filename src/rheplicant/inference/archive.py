@@ -128,6 +128,23 @@ def save_memory(memory, path: str | Path) -> None:
     the reverse window was not.
     """
     path = Path(path)
+    foreign = [
+        term.epoch_id
+        for term in memory.archive
+        if not isinstance(term, QuadraticLikelihood)
+    ]
+    if foreign:
+        raise StateValidationError(
+            f"Term(s) {foreign} are not QuadraticLikelihood, and this format can "
+            "only describe that one. The manifest is a reconstruction spec: it "
+            "records every static field so that eqx.tree_serialise_leaves cannot "
+            "take one from a template instead. A tier whose static half is a "
+            "Python callable -- RawLikelihood's `predict`, "
+            "ReducedBasisLikelihood's coefficient map -- has no textual form to "
+            "record, so a reloaded term would evaluate a different model against "
+            "the same numbers, with no error and no warning. Compress to a "
+            "quadratic tier, or keep the memory in the process that built it."
+        )
     manifest = {
         "format_version": _FORMAT_VERSION,
         "jax_enable_x64": bool(jax.config.jax_enable_x64),

@@ -18,8 +18,9 @@ Adding them produces a finite, correctly-shaped, meaningless number, so
 :attr:`QuadraticLikelihood.estimator` exists and the memory refuses to mix.
 """
 
+from collections.abc import Callable
 from fractions import Fraction
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import equinox as eqx
 import jax
@@ -177,3 +178,110 @@ class QuadraticLikelihood(eqx.Module):
 
     def __call__(self, values: dict[str, jax.Array]) -> jax.Array:
         return self.info.log_prob(values)
+
+
+class RawLikelihood(eqx.Module):
+    """T0 -- the epoch's likelihood with the raw data still inside it.
+
+    **This tier deliberately does not compress.** It holds ``observed`` and a
+    live ``predict``, so it defeats every one of the four bottlenecks §0 lists
+    and has no place in a campaign. It exists because D24's posture requires it:
+    an approximate posterior is only trustworthy where an exact one exists, and
+    from T1 upward "exact" is defined as "agrees with this, absolutely, at every
+    probe". §12.12's boundary validation is not writable without it.
+
+    Two refusals keep it out of the places it must not reach.
+    :attr:`info` raises rather than returning a quadratic form, so
+    :meth:`~rheplicant.inference.memory.BayesMemory.remember` -- which folds a
+    term into the running QR -- stops at the door instead of at a diagnostic.
+    :func:`~rheplicant.inference.archive.save_memory` refuses it for the same
+    reason: ``predict`` is a Python callable, and
+    ``eqx.tree_serialise_leaves`` would take it from whatever template it was
+    handed, so a reloaded T0 would evaluate a *different model* against the same
+    data with no error and no warning.
+
+    The masked normalisation is D21's, not a variant of it: a flagged sample is
+    ``sigma = inf``, whose inverse variance is a clean zero but whose
+    ``log(2 pi sigma^2)`` is ``+inf``. Only finite-sigma samples are summed. The
+    residual is SELECTED on that same mask before it is divided, never weighted
+    by a zero afterwards -- a flagged sample is usually flagged *because* it
+    holds a NaN, and ``0.0 * nan`` is ``nan``.
+
+    Attributes:
+        predict: ``values -> prediction``, shaped like ``observed``. Static: it
+            is code, not data, and it is what makes this tier unarchivable.
+        observed: the epoch's data.
+        sigma: the noise standard deviation, already resolved to an array.
+            ``inf`` marks an unobserved sample.
+        names: the latents ``predict`` consumes.
+        epoch_id: the recording's data hash.
+        include_logdet: whether the Gaussian normalisation is kept. ``False``
+            is generalized least squares (D21), a different estimator rather
+            than a cheaper version of this one.
+        noise_frozen_at: ``"none"`` for a genuinely fixed covariance, or the
+            procedure that produced the frozen one.
+    """
+
+    predict: Callable[[dict[str, jax.Array]], jax.Array] = eqx.field(static=True)
+    observed: jax.Array
+    sigma: jax.Array
+    names: tuple[str, ...] = eqx.field(static=True)
+    epoch_id: str = eqx.field(static=True)
+    n_observed: int = eqx.field(static=True)
+    exact: bool = eqx.field(static=True)
+    include_logdet: bool = eqx.field(static=True)
+    noise_frozen_at: str = eqx.field(static=True)
+    prior_share: tuple[int, int] = eqx.field(static=True)
+
+    def __init__(
+        self,
+        predict: Callable[[dict[str, jax.Array]], jax.Array],
+        observed: jax.Array,
+        sigma: Any,
+        names: tuple[str, ...],
+        epoch_id: str,
+        include_logdet: bool = True,
+        noise_frozen_at: str = "none",
+    ):
+        self.predict = predict
+        self.observed = jnp.asarray(observed)
+        self.sigma = jnp.broadcast_to(jnp.asarray(sigma), self.observed.shape)
+        self.names = tuple(names)
+        self.epoch_id = epoch_id
+        self.n_observed = int(jnp.sum(jnp.isfinite(self.sigma)))
+        self.exact = True
+        self.include_logdet = bool(include_logdet)
+        self.noise_frozen_at = noise_frozen_at
+        self.prior_share = (0, 1)
+
+    @property
+    def latents(self) -> tuple[str, ...]:
+        return self.names
+
+    @property
+    def estimator(self) -> tuple[str, ...]:
+        return ("full" if self.include_logdet else "gls", self.noise_frozen_at)
+
+    @property
+    def info(self) -> SqrtInfo:
+        raise StateValidationError(
+            f"Term {self.epoch_id!r} is a RawLikelihood -- T0, the oracle. It keeps "
+            "the raw data and a live forward model, so it is not a quadratic form "
+            "and it is not storable: accumulating it would mean the campaign never "
+            "released a byte, and archiving it would serialise the arrays while "
+            "silently taking `predict` from the load-time template. Compress the "
+            "epoch (compress_linear for a linear model, compress_reduced_basis "
+            "otherwise) and remember that. Use this one to check the result."
+        )
+
+    def __call__(self, values: dict[str, jax.Array]) -> jax.Array:
+        seen = jnp.isfinite(self.sigma)
+        safe = jnp.where(seen, self.sigma, 1.0)
+        prediction = jnp.reshape(self.predict(values), self.observed.shape)
+        residual = jnp.where(seen, self.observed - prediction, 0.0) / safe
+        quadratic = -0.5 * jnp.sum(residual**2)
+        if not self.include_logdet:
+            return quadratic
+        return quadratic - 0.5 * jnp.sum(
+            jnp.where(seen, jnp.log(2.0 * jnp.pi * safe**2), 0.0)
+        )
