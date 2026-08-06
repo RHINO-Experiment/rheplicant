@@ -50,7 +50,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import solve_triangular
 
-from rheplicant.core.errors import StateValidationError
+from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 
 
 def orthonormal_transform(
@@ -110,6 +110,75 @@ def orthonormalise(candidates: jax.Array, rtol: float | None = None) -> jax.Arra
     return transform @ candidates
 
 
+def score_directions(
+    space: Any,
+    pipeline: Any,
+    state_template: Any,
+    names: Sequence[str] | None = None,
+    at: dict[str, jax.Array] | None = None,
+) -> dict[str, jax.Array]:
+    """``d mu / d theta_j``, one row per scalar degree of freedom, per named latent.
+
+    Section 5 requirement 3, and the repair for the SVD's blindness: singular
+    values of a prior bank order modes by prior-induced amplitude, so a
+    direction whose amplitude is a thousandth of the foreground's is the last
+    retained and the first dropped. Seeding these makes each parameter's
+    signature present by construction, at any ``n_S``.
+
+    Built on :meth:`~rheplicant.inference.parameters.ParameterSpace.forward_fn`
+    rather than :func:`~rheplicant.inference.forward.build_forward_fn`, which
+    returns a ghost pipeline whose leaves carry no latent names -- and "for
+    every *named* global latent" is the whole requirement.
+
+    Args:
+        space: the :class:`~rheplicant.inference.parameters.ParameterSpace`.
+            Validated against the pipeline by ``forward_fn``.
+        pipeline: the forward model.
+        state_template: the state it is evaluated on.
+        names: which latents. ``None`` means all of them.
+        at: where to differentiate. Latents are a local property of a nonlinear
+            model, so this is the question "what does the prediction look like
+            *here*"; defaults to the declared initial values.
+
+    Returns:
+        ``{name: (size, n_data)}``, ravelled over the data axis, in the order
+        ``names`` asked for -- or the space's *declared* order. A latent of
+        shape ``(4,)`` contributes four rows.
+
+    Raises:
+        ParameterSpaceError: if ``names`` or ``at`` mentions a latent the space
+            does not declare.
+    """
+    forward, values = space.forward_fn(pipeline, state_template)
+    values = dict(values)
+    for supplied, label in ((at or {}, "at"), ({n: None for n in names or ()}, "names")):
+        unknown = [name for name in supplied if name not in values]
+        if unknown:
+            raise ParameterSpaceError(
+                f"score_directions was given {label}={sorted(unknown)}, which this "
+                f"space has not declared. Declared: {sorted(values)}."
+            )
+    values.update({name: jnp.asarray(value) for name, value in (at or {}).items()})
+
+    selected = tuple(values) if names is None else tuple(names)
+    fixed = {name: value for name, value in values.items() if name not in selected}
+
+    def only(chosen: dict[str, jax.Array]) -> jax.Array:
+        return jnp.ravel(forward({**fixed, **chosen}))
+
+    jacobian = jax.jacfwd(only)({name: values[name] for name in selected})
+    # Iterate `selected`, never `jacobian.items()`. jax rebuilds a dict from its
+    # flattened form, which is SORTED, so returning the jacobian's own order
+    # would silently hand back alphabetical names -- and every consumer that
+    # zips this against a declared-order list would then be wrong by a
+    # permutation that is the identity exactly when the latents happen to be
+    # named alphabetically. That is Plan A's BayesMemory.fisher() bug verbatim.
+    return {
+        name: jnp.reshape(jacobian[name], (jacobian[name].shape[0], -1)).T
+        for name in selected
+    }
+
+
 class ReducedBasis(eqx.Module):
     """A dictionary of directions in the data space, shared by every epoch.
 
@@ -125,7 +194,9 @@ class ReducedBasis(eqx.Module):
             campaign and evaluation costs ``O(n_S^2)`` per epoch instead of
             ``O(n_S * n_data)``. The mismatch that buys is measured, per epoch,
             by the bias budget (section 7).
-        whitened: ``rows * weight``. Orthonormal when :attr:`orthonormal`,
+        whitened: ``rows * weight`` where the weight is non-zero and exactly
+            ``0.0`` where it is not -- a select, not a product, because
+            ``0.0 * inf`` is ``nan``. Orthonormal when :attr:`orthonormal`,
             which is the supported case. Derived at construction and kept as a
             leaf because every projection reads it.
         factor: ``(n_S, n_S)`` upper-triangular ``R`` with ``R^T R = G``. The
