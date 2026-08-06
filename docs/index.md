@@ -103,6 +103,8 @@ each principle.
     [Inference](inference.md) for the rules they cite
 * - keep a campaign after the recordings are archived
   - [Evidence](evidence.md) — accumulate likelihood factors, discard the data
+* - run something and read its output
+  - [Examples](examples.md) — thirteen scripts, with measured wall clocks
 * - look something up
   - [The API reference](api.md), [contracts between stages](contracts.md),
     [design decisions](design.md)
@@ -147,6 +149,7 @@ tutorial-nuts
 :maxdepth: 2
 :caption: Reference
 
+examples
 api
 design
 changelog

@@ -184,3 +184,45 @@ def test_every_documentation_page_is_tracked_by_git() -> None:
         "that is generated and ignored cannot be diffed, grepped, read on GitHub, "
         "or edited where it is read -- generate the figures, author the prose."
     )
+
+
+def test_every_example_script_is_mentioned_in_the_docs() -> None:
+    """A demo nothing links to is a demo nobody runs.
+
+    Six of the thirteen were unreachable when this was written, and two of those
+    six had been reachable until a rewrite of ``tour.md`` replaced the paragraph
+    that named them -- which is the failure mode: not that anyone decides to hide
+    a script, but that the one sentence pointing at it is collateral in an edit
+    about something else. ``docs/examples.md`` is the index; this is what keeps
+    it complete.
+    """
+    scripts = sorted(p.name for p in (ROOT / "examples").glob("*.py"))
+    assert scripts, "No example scripts found -- has examples/ moved?"
+
+    prose = "\n".join(
+        p.read_text() for p in list(DOCS.glob("*.md")) + [ROOT / "README.md"]
+    )
+    missing = [s for s in scripts if s not in prose]
+    assert not missing, (
+        f"{missing} exist in examples/ but are named nowhere in docs/*.md or "
+        "README.md. Add them to docs/examples.md, or delete them."
+    )
+
+
+def test_the_examples_page_states_the_real_count() -> None:
+    """``examples.md`` and ``README.md`` both count the scripts in words."""
+    n = len(list((ROOT / "examples").glob("*.py")))
+    words = {
+        10: "Ten", 11: "Eleven", 12: "Twelve", 13: "Thirteen",
+        14: "Fourteen", 15: "Fifteen", 16: "Sixteen",
+    }
+    assert n in words, f"{n} example scripts -- extend the number words above"
+    word = words[n]
+    for path in (DOCS / "examples.md", ROOT / "README.md"):
+        text = path.read_text()
+        stated = re.search(r"\b(Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen)\b"
+                           r"[^.\n|]*(runnable|scripts|demos)", text)
+        assert stated, f"{path.name} no longer states how many examples there are"
+        assert stated.group(1) == word, (
+            f"{path.name} says '{stated.group(1)}' examples; there are {n} ({word})."
+        )

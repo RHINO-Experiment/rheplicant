@@ -15,6 +15,17 @@ named there rather than from the script.
 uv run --frozen python examples/sky_to_noise_wave.py
 ```
 
+- [The one identification](#the-one-identification) — what makes the two halves one model
+- [The path, as the graph builds it](#the-path-as-the-graph-builds-it)
+- [Step 1 — the horn](#step-1--the-horn)
+- [Step 2 — the antenna chain, assembled from the graph](#step-2--the-antenna-chain-assembled-from-the-graph)
+- [Step 3 — three effects, none standing in for another](#step-3--three-effects-none-standing-in-for-another)
+- [Step 4 — a real switching cycle](#step-4--a-real-switching-cycle)
+- [Step 5 — closing the loop](#step-5--closing-the-loop)
+- [Step 6 — one differentiable object](#step-6--one-differentiable-object)
+- [The horizon split, measured](#the-horizon-split-measured) — where f_sky comes from, and the two wrong answers before it
+- [What is tested](#what-is-tested)
+
 ## The one identification
 
 The Noise-Wave GCR draft's Eq. 1 says what the receiver measures:

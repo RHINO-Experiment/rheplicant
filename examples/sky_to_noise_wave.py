@@ -21,10 +21,12 @@ Six steps:
 5. close the loop — solve for the noise waves with the sky known;
 6. differentiate the whole thing, sky map included.
 
-Needs both wings:  pip install "rheplicant[limtod]" \
-                       "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git"
-Run:  uv run python examples/sky_to_noise_wave.py
-      uv run python examples/sky_to_noise_wave.py --beam-dir /path/to/CST_beams/HornDryGround
+Needs both wings. limTOD is a dependency (>= 1.10) and rhino-cal-jax is the
+`cal` extra; neither is on PyPI at the required version, so both come from git:
+      pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD" \
+                  "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git"
+Run:  uv run --frozen python examples/sky_to_noise_wave.py    (~60 s)
+      uv run --frozen python examples/sky_to_noise_wave.py --beam-dir /path/to/CST_beams
 """
 
 import argparse

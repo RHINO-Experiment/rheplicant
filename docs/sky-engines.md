@@ -15,6 +15,16 @@ the beam **once for the entire observation**.
 The result is not a cheaper approximation. It is the same number, to float64
 roundoff, for a small fraction of the work.
 
+- [The product](#the-product) — one sidereal day, as the engines render it
+- [What a drift scan actually measures](#what-a-drift-scan-actually-measures) — m-modes
+- [Two engines, one contract](#two-engines-one-contract)
+- [Not an approximation](#not-an-approximation) — the two agree to float64 roundoff
+- [What it costs](#what-it-costs) — measured scaling against band-limit
+- [Choosing an engine](#choosing-an-engine)
+- [Is the output a temperature?](#is-the-output-a-temperature) — the `normalize_beam` trap
+- [Where does the beam stop?](#where-does-the-beam-stop)
+- [Run it](#run-it)
+
 ---
 
 ## The product

@@ -6,6 +6,15 @@ contract is real and tested; the docstring of each class records the physics
 that will replace the body. Graph topology and assembly rules: see
 [the tour](tour.md#graph-assembly) and `rheplicant/radio/graph.py`.
 
+- [Sky (astrophysical sources → `astro_sum`)](#sky-astrophysical-sources--astro_sum)
+- [Modular sky engine (→ `observed_astro_sky`, post-beam)](#modular-sky-engine--observed_astro_sky-post-beam)
+- [Environment](#environment)
+- [Instrument (trunk order = graph order)](#instrument-trunk-order--graph-order)
+- [Beam data](#beam-data)
+- [Processing segment](#processing-segment)
+- [Core combinators & utilities](#core-combinators--utilities)
+- [Inference layer](#inference-layer)
+
 ## Sky (astrophysical sources → `astro_sum`)
 
 | Operator | Node | Role | Differentiable parameters |

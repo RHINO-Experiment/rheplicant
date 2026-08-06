@@ -38,6 +38,10 @@ and `tests/test_tour_runs.py` runs it. This is an orientation, not a census —
 [the operator catalog](operators.md), [inferring anything](inference.md) and
 [the API reference](api.md) are the complete surfaces.
 
+**Part 1 — Forward modelling** · [The state](#the-state) · [Operators](#operators) · [Graph assembly](#graph-assembly)
+
+**Part 2 — Bayesian inference** · [The model](#the-model-what-is-free-and-how-it-enters) · [The likelihood](#the-likelihood-a-noise-model-is-a-likelihood) · [The engine](#the-engine-exact-where-the-model-is-linear) · [Reading the answer](#reading-the-answer-honestly)
+
 ---
 
 # Part 1 — Forward modelling

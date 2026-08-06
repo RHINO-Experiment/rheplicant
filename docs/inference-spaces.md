@@ -4,6 +4,12 @@ Declaring an inference problem is two separate statements, and keeping them
 separate is what lets one latent drive several stages, or a leaf be a transform
 of several latents, without a new operator for each combination.
 
+- [Two words](#two-words)
+- [The three shapes](#the-three-shapes)
+- [A beam from two numbers](#a-beam-from-two-numbers)
+- [What gets checked](#what-gets-checked)
+- [When the blocks are not enough](#when-the-blocks-are-not-enough)
+
 ---
 
 ## Two words

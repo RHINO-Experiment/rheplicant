@@ -19,6 +19,24 @@ the page runs end to end with no real recording in hand — it is the schema of
 `tests/radio/test_rhino.py`'s `make_file` helper, cut down to what these
 examples use.
 
+:::{admonition} What is not on this page
+:class: note
+**Beam ingestion is documented where the beam is used.** `read_cst_farfield`,
+`cst_frequency_table`, `cst_beam_maps` and `horizon_truncated_beam` are
+pass-throughs to limTOD, so their arguments are in
+[the beam-data table](operators.md#beam-data) and reading a real CST export onto
+HEALPix is in [sky-to-receiver](sky-to-receiver.md) and
+[sky engines](sky-engines.md). The two readers on *this* page are pass-throughs
+to nothing.
+:::
+
+- [Two layers, and where the second one stops](#two-layers-and-where-the-second-one-stops)
+- [A file to read](#a-file-to-read) — the HDF5 schema, and `freq_unit`
+- [Onto the graph](#onto-the-graph) — `to_state`, and why `coords.time` is relative
+- [`thermistor_columns` is opt-in](#thermistor_columns-is-opt-in)
+- [`cal_load_operators`: the route from file to model](#cal_load_operators-the-route-from-file-to-model)
+- [Touchstone sweeps](#touchstone-sweeps) — column order, `flipped=`, and interpolation
+
 ## Two layers, and where the second one stops
 
 ```{mermaid}
@@ -695,13 +713,3 @@ ULPs at the axis's own magnitude — deliberately tiny, sized to swallow a unit
 conversion's rounding and nothing more. The same helper serves the thermistor
 log, which is why a temperature series stopping a millisecond short of the SDR
 axis refuses [above](#why-opt-in-and-not-simply-always-on).
-
-## What is not on this page
-
-Beam ingestion — `read_cst_farfield`, `cst_frequency_table`, `cst_beam_maps`,
-`horizon_truncated_beam` — is documented where the beam is used, not here:
-[the beam-data table in the operator guide](operators.md#beam-data) for the
-seam's arguments, [sky-to-receiver](sky-to-receiver.md) and
-[sky engines](sky-engines.md) for reading a real CST export onto HEALPix and
-cutting it at the horizon. Those four are pass-throughs to limTOD; the two
-readers on this page are not pass-throughs to anything.

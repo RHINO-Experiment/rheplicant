@@ -4,6 +4,12 @@ One space can be stepped by several engines at once. A `SamplingPlan` declares
 the partition and *derives* each block's engine from what the latents already
 say about themselves, rather than restating it.
 
+- [A plan: one partition, two exits](#a-plan-one-partition-two-exits)
+- [One space, every engine](#one-space-every-engine)
+- [Inference without a likelihood](#inference-without-a-likelihood)
+- [Tutorials](#tutorials)
+- [Run it](#run-it)
+
 ---
 
 ## A plan: one partition, two exits
