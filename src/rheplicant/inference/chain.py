@@ -789,7 +789,9 @@ class ChainMemory(eqx.Module):
         """What a stored block is a quadratic form in, ``zeta`` last."""
         return self.factorization.global_names + (self.linked_name,)
 
-    def remember(self, term: Any, duplicate: bool = False) -> "ChainMemory":
+    def remember(
+        self, term: Any, duplicate: bool = False, shared_inputs: bool = False
+    ) -> "ChainMemory":
         """A new memory holding this epoch **last**. The original is unchanged.
 
         Order is the content here, not a convenience: epoch *e*'s drift is
@@ -806,6 +808,11 @@ class ChainMemory(eqx.Module):
                 **and** its linked latent.
             duplicate: allow an ``epoch_id`` already present. Off by default,
                 because the common cause is a retried run.
+            shared_inputs: allow an input product this memory already holds under
+                the same hash. Section 9.5, and it is the *bag*'s rule reused
+                rather than restated: a chain already says the epochs are
+                dependent through ``zeta``, and a shared calibration solution is
+                a second dependence the chain does not model.
         """
         from rheplicant.inference.memory import reject_bad_term
 
@@ -815,6 +822,8 @@ class ChainMemory(eqx.Module):
             self._epochs.ids,
             duplicate,
             self._latents_ok,
+            self.factorization.represents,
+            shared_inputs,
         )
         square = _square_block(term.info, self.column_order)
         factors, targets, offsets = self.stacked

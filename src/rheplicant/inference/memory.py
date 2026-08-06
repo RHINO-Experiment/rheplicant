@@ -140,23 +140,37 @@ def reject_bad_term(
     ids: frozenset[str],
     duplicate: bool,
     latents_ok: Callable[[CompressedLikelihood], None],
+    represents: Any,
+    shared_inputs: bool,
 ) -> None:
     """The admission rules every accumulator shares.
 
     ``latents_ok`` is the one question a bag and a chain answer differently: a
     bag refuses a term carrying a linked latent's columns, a chain requires one.
     Everything else -- the protocol members, the prior share, the estimator, the
-    repeated epoch -- is identical, and identical is what it has to be, because
-    a rule enforced in one accumulator and not the other is a rule with a way
-    round it.
+    repeated epoch, the shared input product -- is identical, and identical is
+    what it has to be, because a rule enforced in one accumulator and not the
+    other is a rule with a way round it.
+
+    ``represents`` and ``shared_inputs`` have **no defaults**, and that is the
+    point of adding them here rather than in each caller: a default would let a
+    third accumulator be written that never passes them and never runs section
+    9.5's refusal, which is the way round this function exists to close.
 
     Args:
         term: the candidate.
-        held: the terms already accumulated, oldest first. Only the first is
-            read, for the estimator.
+        held: the terms already accumulated, oldest first. The first is read for
+            the estimator; all of them for the input-product clash.
         ids: their epoch ids, as a set.
         duplicate: allow an ``epoch_id`` already present.
         latents_ok: raises if this term's columns do not belong here.
+        represents: the factorization's ``{input product: global latents}``. Only
+            its keys are read -- a product modelled as a latent is integrated
+            with the rest of theta, so sharing its hash is no longer a claim of
+            independence about something unmodelled.
+        shared_inputs: admit a term whose input product is already held. D17's
+            posture, the same one ``duplicate`` takes: legitimate double-counting
+            is a choice made deliberately and by name.
     """
     absent = [name for name in REQUIRED_TERM_MEMBERS if not hasattr(term, name)]
     if absent:
@@ -194,6 +208,65 @@ def reject_bad_term(
             "nothing to show for it. Pass duplicate=True if that is genuinely "
             "what you mean."
         )
+    _reject_shared_inputs(term, held, represents, shared_inputs)
+
+
+def _reject_shared_inputs(
+    term: CompressedLikelihood,
+    held: tuple[CompressedLikelihood, ...],
+    represents: Any,
+    shared_inputs: bool,
+) -> None:
+    """Section 9.5: two epochs built from the same input product are not independent.
+
+    Last of the admission rules, after the duplicate check, because a retried
+    epoch trips both and its own message is the actionable one.
+
+    The comparison is on the ``(product, hash)`` **pair**, not on the product
+    name. A beam map re-measured between nights is a different beam map: the two
+    epochs carry different hashes, their errors are independent draws, and
+    summing them is exactly right. Refusing on the name alone would refuse that
+    campaign, which is the normal one.
+
+    ``getattr(other, "inputs", ())`` rather than ``other.inputs``: every term
+    that arrived through ``remember`` passed the member check above, but a
+    :class:`BayesMemory` can be constructed directly around an archive tuple --
+    :func:`~rheplicant.inference.archive.load_memory` does, and so does any test
+    that rebuilds a memory around a modified accumulator -- and those terms never
+    passed it.
+
+    Cost is O(held) per admission, in Python, and it is not a new order: the id
+    set's ``frozenset | {x}`` is already an O(N) copy per ``remember``. The loop
+    short-circuits on ``term.inputs`` being empty, which is every epoch compressed
+    without provenance.
+    """
+    if shared_inputs or not term.inputs:
+        return
+    modelled = set(represents)
+    for product, digest in term.inputs:
+        if product in modelled:
+            continue
+        clash = [
+            other.epoch_id
+            for other in held
+            if (product, digest) in getattr(other, "inputs", ())
+        ]
+        if clash:
+            raise StateValidationError(
+                f"Epoch {term.epoch_id!r} shares input product {product!r} "
+                f"(hash {digest!r}) with {clash}, and this memory sums factors "
+                "as though the epochs were conditionally independent. They are "
+                "not: one calibration solution, one beam map or one flag table "
+                "applied to several nights is a shared error with no variance "
+                "at all, so per-epoch chi-square is right, split-half agrees, "
+                "leave-one-out agrees, and the answer is wrong -- measured at "
+                "52.6 sigma by N = 640 with every diagnostic clean. Section 1's "
+                "rule is that shared structure belongs in theta: model the "
+                "product as a global latent and declare it with "
+                f"Factorization(represents={{{product!r}: (...)}}). If the "
+                "epochs really are independent despite the hash, pass "
+                "shared_inputs=True and say so in the run's notes."
+            )
 
 
 class _Archive:
@@ -354,7 +427,10 @@ class BayesMemory(eqx.Module):
     # ------------------------------------------------------------ accumulate --
 
     def remember(
-        self, term: CompressedLikelihood, duplicate: bool = False
+        self,
+        term: CompressedLikelihood,
+        duplicate: bool = False,
+        shared_inputs: bool = False,
     ) -> "BayesMemory":
         """A new memory holding this term as well. The original is unchanged.
 
@@ -363,8 +439,12 @@ class BayesMemory(eqx.Module):
             duplicate: allow an ``epoch_id`` already present. Off by default,
                 because the common cause is a retried run, and the effect is a
                 posterior that narrows for no reason.
+            shared_inputs: allow an input product this memory already holds under
+                the same hash. Off by default: two nights built from one
+                calibration solution are not conditionally independent, and
+                summing them is a shared error with no variance to give it away.
         """
-        self._reject_bad_term(term, duplicate)
+        self._reject_bad_term(term, duplicate, shared_inputs)
         if _is_reduced(term):
             return self._remember_reduced(term)
         return BayesMemory(
@@ -420,13 +500,17 @@ class BayesMemory(eqx.Module):
             basis=term.basis,
         )
 
-    def _reject_bad_term(self, term: CompressedLikelihood, duplicate: bool) -> None:
+    def _reject_bad_term(
+        self, term: CompressedLikelihood, duplicate: bool, shared_inputs: bool
+    ) -> None:
         reject_bad_term(
             term,
             self._archive.terms,
             self._archive.ids,
             duplicate,
             self._latents_ok,
+            self.factorization.represents,
+            shared_inputs,
         )
 
     def _latents_ok(self, term: CompressedLikelihood) -> None:
