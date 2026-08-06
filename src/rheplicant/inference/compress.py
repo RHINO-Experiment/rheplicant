@@ -289,12 +289,26 @@ def _support_corners(
     prediction, so it is the latent that scales the prediction that moves it,
     not a joint excursion of all of them. Named here rather than inlined so the
     boundary-validation task can use the same points.
+
+    **The edge is broadcast to the latent's own shape, not substituted for it.**
+    A declared box is one interval per *latent*, so pushing a latent of shape
+    ``(3,)`` to an edge means all three components at that edge. Writing the
+    bare scalar in its place changes the probe's shape, and the failure is not
+    a wrong number -- it is ``matmul input operand 1 must have ndim at least
+    1`` out of the forward model, raised from inside section 8's frozen-noise
+    measurement, several frames from anything the caller wrote. Every latent in
+    ``tests/evidence/rhino_bank.py`` is a scalar, where ``broadcast_to(edge,
+    ())`` and ``asarray(edge)`` are the same array, which is why this survived
+    until a boundary fixture declared a vector latent.
     """
     probes = [dict(values)]
     for name, (low, high) in support.items():
         if name not in values:
             continue
-        probes.extend({**values, name: jnp.asarray(edge)} for edge in (low, high))
+        probes.extend(
+            {**values, name: jnp.broadcast_to(jnp.asarray(edge), jnp.shape(values[name]))}
+            for edge in (low, high)
+        )
     return probes
 
 
