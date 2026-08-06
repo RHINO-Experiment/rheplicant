@@ -50,7 +50,7 @@ every array in every stored term before executing a line of its own body --
 measured at 1,000 / 2,000 / 4,000 epochs, **1.43 / 3.18 / 7.24 ms** -- and a
 NUTS chain pays that once per leapfrog step.
 
-Holding the terms behind :class:`_Archive`, which is not a registered pytree
+Holding the terms behind ``_Archive``, which is not a registered pytree
 node and is therefore a single opaque leaf, makes the memory's leaf count
 independent of the campaign's length: 12,007 leaves at 4,000 epochs before, 8 at
 any length after. The same three sizes then measure **0.13 / 0.16 / 0.15 ms**,
@@ -198,15 +198,6 @@ class BayesMemory(eqx.Module):
             the campaign's only prior.
         accumulated: the running
             :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`. Fixed treedef.
-        archive: the terms as remembered, kept for diagnostics, re-anchoring
-            and the smoother. The one part of the memory that legitimately grows
-            with the campaign -- and therefore the one held behind
-            :class:`_Archive`, so that growing costs one leaf rather than N.
-            A read-only property, because the stored object is not the tuple:
-            every reader here iterates in Python (``len``, ``archive[0]``, a
-            comprehension over the terms), so the property hands back the plain
-            tuple those readers already expect and the wrapper stays an
-            implementation detail of the flattening.
         coefficients: the second running
             :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`, over the reduced
             basis coefficients. ``None`` until the first T1 term arrives.
@@ -234,7 +225,11 @@ class BayesMemory(eqx.Module):
         self,
         factorization: Factorization,
         accumulated: SqrtInfo | None = None,
-        archive: tuple[CompressedLikelihood, ...] | _Archive = (),
+        # Annotated `Any` rather than `tuple[...] | _Archive`: autodoc renders
+        # the annotation and cannot resolve a private name, which is a nitpicky
+        # warning on a page nobody can act on. What it accepts is a plain tuple
+        # of terms or an existing ``_Archive``, and the body below says so.
+        archive: Any = (),
         coefficients: SqrtInfo | None = None,
         basis: Any = None,
     ):
@@ -253,7 +248,22 @@ class BayesMemory(eqx.Module):
 
     @property
     def archive(self) -> tuple[CompressedLikelihood, ...]:
-        """The stored terms, oldest first."""
+        """The terms as remembered, oldest first.
+
+        Kept for diagnostics, re-anchoring and the smoother. The one part of
+        the memory that legitimately grows with the campaign -- and therefore
+        the one held behind ``_Archive``, so that growing costs one pytree leaf
+        rather than N.
+
+        A read-only property rather than a field, because the stored object is
+        not the tuple: every reader iterates in Python (``len``,
+        ``archive[0]``, a comprehension over the terms), so this hands back the
+        plain tuple they already expect and the wrapper stays an implementation
+        detail of the flattening. Documented here and not in the class's
+        ``Attributes`` block because it is no longer a field at all, and
+        describing it in both places is what autodoc reports as a duplicate
+        object description.
+        """
         return self._archive.terms
 
     # ------------------------------------------------------------ accumulate --
