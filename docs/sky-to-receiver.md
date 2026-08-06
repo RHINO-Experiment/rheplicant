@@ -362,7 +362,7 @@ simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (Eq. 8)
 The sky is **data** here, not a parameter: limTOD supplies it and its only job
 is to be right. That is exactly why the block stays linear in the noise-wave
 temperatures and needs no gradient sampler — the same
-[linear-block machinery](inference.md#linear-blocks) as
+[linear-block machinery](inference-linear.md#linear-blocks) as
 `examples/noise_wave_gcr.py`, now with a real sky in the $T_\mathrm{src}$ column.
 
 ```python
@@ -416,7 +416,7 @@ counts as a source like any other because its $T_\mathrm{src}$ is known. Fit
 $T_{rx}$ as well and the per-channel system is $4\times 4$ and wants a fourth
 load. Drop to one source and $\kappa$
 jumps to $\sim 4\times 10^{6}$, at which point `wiener_solve`'s guard
-[refuses to answer](inference.md#conditioning-why-a-residual-is-not-an-accuracy)
+[refuses to answer](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy)
 rather than returning a prior-driven posterior that looks converged.
 
 ---

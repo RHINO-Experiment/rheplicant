@@ -100,7 +100,9 @@ each principle.
 * - fit or sample parameters
   - [Tutorial: an exact posterior](tutorial-gcr.md) or
     [Tutorial: a gradient posterior](tutorial-nuts.md) first, then
-    [Inferring anything](inference.md) for the rules they cite
+    [Inference](inference.md) for the rules they cite
+* - keep a campaign after the recordings are archived
+  - [Evidence](evidence.md) — accumulate likelihood factors, discard the data
 * - look something up
   - [The API reference](api.md), [contracts between stages](contracts.md),
     [design decisions](design.md)

@@ -89,7 +89,7 @@ STEP 3  conditioning, which decides what tolerance means
 
 CG reports a **residual**; what you need bounded is the **error**. They differ by
 κ. Choosing `tol` without knowing κ is choosing an accuracy you have not
-computed — see [Conditioning](inference.md#conditioning-why-a-residual-is-not-an-accuracy).
+computed — see [Conditioning](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy).
 
 ## Step 4 — the covariance is not given
 
@@ -175,11 +175,11 @@ same and told you none of this.
 
 | Step | Rule | Reference |
 |---|---|---|
-| 2 | a linearity claim gets checked before it is exploited | [Linear blocks](inference.md#linear-blocks) |
-| 3 | `tol` is a residual; κ·`tol` is the error | [Conditioning](inference.md#conditioning-why-a-residual-is-not-an-accuracy) |
-| 4 | radiometer noise ⇒ the covariance must be found | [When the covariance is not given](inference.md#when-the-covariance-is-not-given) |
-| 5 | one CG solve per independent draw | [Sampling it, exactly](inference.md#sampling-it-exactly) |
-| 7 | the prior holds up what the data cannot see | [The noise model](inference.md#the-noise-model) |
+| 2 | a linearity claim gets checked before it is exploited | [Linear blocks](inference-linear.md#linear-blocks) |
+| 3 | `tol` is a residual; κ·`tol` is the error | [Conditioning](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy) |
+| 4 | radiometer noise ⇒ the covariance must be found | [When the covariance is not given](inference-linear.md#when-the-covariance-is-not-given) |
+| 5 | one CG solve per independent draw | [Sampling it, exactly](inference-linear.md#sampling-it-exactly) |
+| 7 | the prior holds up what the data cannot see | [The noise model](inference-linear.md#the-noise-model) |
 
 ## Next
 

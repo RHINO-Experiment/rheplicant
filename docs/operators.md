@@ -304,7 +304,7 @@ noise = FlaggedNoise(RadiometerNoise(channel_width, integration_time), flags)
 
 That one object carries them into the likelihood, the Fisher matrix, the
 weights of a Wiener solve or GCR draw, and a NumPyro observation scale — see
-[the noise model](inference.md#the-noise-model). The route is tested by the
+[the noise model](inference-linear.md#the-noise-model). The route is tested by the
 bias it removes rather than by the mask it produces: a persistent narrow-band
 emitter on 2 of 32 channels pulls a maximum-likelihood amplitude **+5.8 %**
 high, and wrapping MomentRFI's own flags around the noise model recovers the

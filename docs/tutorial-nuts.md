@@ -225,7 +225,7 @@ The choice is not taste, it is the shape of the problem.
 | linear in the parameter, Gaussian noise | `gcr_sample` | exact, independent draws, one CG solve each; scales to 10⁶ dof |
 | nonlinear, few parameters | NUTS | no conjugate structure to exploit, and none needed |
 | both at once | Gibbs | draw the linear block exactly with `at=` pinning the nonlinear ones, move those with NUTS, repeat |
-| no tractable likelihood at all | [NPE](inference.md#inference-without-a-likelihood) | amortized, and validated against the two above |
+| no tractable likelihood at all | [NPE](inference-plans.md#inference-without-a-likelihood) | amortized, and validated against the two above |
 
 This run: 3 parameters, 1.2 s, 1327 effective draws. The same sampler on the
 256-pixel sky of [Tutorial: GCR](tutorial-gcr.md) would explore a space 85×
