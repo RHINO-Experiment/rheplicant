@@ -31,7 +31,21 @@ from rheplicant.inference.sqrtinfo import SqrtInfo
 
 @runtime_checkable
 class CompressedLikelihood(Protocol):
-    """Contract: ``logL = term(values)``, over the global latents alone."""
+    """Contract: ``logL = term(values)``, over the global latents alone.
+
+    Every member below is one :class:`~rheplicant.inference.memory.BayesMemory`
+    actually reads, and the list is that long for a reason. An earlier version
+    declared only ``latents``, ``epoch_id``, ``estimator`` and ``__call__``,
+    which made the protocol a **narrower** claim than the code relied on: a term
+    satisfying it passed ``isinstance``, passed ``remember``, contributed to the
+    accumulated density, and then raised ``AttributeError: 'X' object has no
+    attribute 'n_observed'`` from ``audit()`` -- a diagnostic, reached long
+    after the term had already been folded irreversibly into the QR.
+
+    ``exact`` and ``n_observed`` are read by ``audit()``; ``prior_share`` by
+    ``remember``'s tempering refusal. A published contract that omits them is
+    an invitation to write a class that cannot work.
+    """
 
     @property
     def latents(self) -> tuple[str, ...]: ...
@@ -42,7 +56,29 @@ class CompressedLikelihood(Protocol):
     @property
     def estimator(self) -> tuple[str, ...]: ...
 
+    @property
+    def n_observed(self) -> int: ...
+
+    @property
+    def exact(self) -> bool: ...
+
+    @property
+    def prior_share(self) -> tuple[int, int]: ...
+
     def __call__(self, values: dict[str, jax.Array]) -> jax.Array: ...
+
+
+#: What :class:`~rheplicant.inference.memory.BayesMemory` reads off a term.
+#: Checked by name at ``remember`` so an incomplete term is refused at the door
+#: rather than at a diagnostic, and listed here so the two cannot drift.
+REQUIRED_TERM_MEMBERS = (
+    "latents",
+    "epoch_id",
+    "estimator",
+    "n_observed",
+    "exact",
+    "prior_share",
+)
 
 
 class QuadraticLikelihood(eqx.Module):

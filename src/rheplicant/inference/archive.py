@@ -111,7 +111,22 @@ def _reject_bad_archive(terms: list[dict[str, Any]]) -> None:
 
 
 def save_memory(memory, path: str | Path) -> None:
-    """Write ``memory`` to ``path`` plus a manifest at ``path.json``."""
+    """Write ``memory`` to ``path`` plus a manifest at ``path.json``.
+
+    **The binary goes first, the manifest last, and that order is the commit.**
+    The manifest is this format's reconstruction spec, so its presence is what
+    says a readable archive exists. Written first -- as this did -- a failing
+    ``tree_serialise_leaves`` left a manifest describing a file that was never
+    created, and ``load_memory`` then died on a raw ``FileNotFoundError`` from
+    equinox rather than on anything this module says. Written last, a crash
+    mid-save leaves an orphan *binary*, which nothing reads, and the archive is
+    simply absent rather than corrupt.
+
+    Both writes are still separate operations, so this is crash-consistent, not
+    atomic: a reader can catch the instant between them. That window is
+    diagnosable -- the manifest is missing, which ``load_memory`` names -- where
+    the reverse window was not.
+    """
     path = Path(path)
     manifest = {
         "format_version": _FORMAT_VERSION,
@@ -121,8 +136,11 @@ def save_memory(memory, path: str | Path) -> None:
         "accumulated_rows": int(memory.accumulated.factor.shape[0]),
         "terms": [_describe(term) for term in memory.archive],
     }
-    _manifest_path(path).write_text(json.dumps(manifest, indent=2))
+    # Built before the write so a term this module cannot describe fails before
+    # anything reaches disk.
+    payload = json.dumps(manifest, indent=2)
     eqx.tree_serialise_leaves(path, memory)
+    _manifest_path(path).write_text(payload)
 
 
 def load_memory(path: str | Path, factorization: Factorization):
@@ -130,7 +148,18 @@ def load_memory(path: str | Path, factorization: Factorization):
     from rheplicant.inference.memory import BayesMemory
 
     path = Path(path)
-    manifest = json.loads(_manifest_path(path).read_text())
+    manifest_path = _manifest_path(path)
+    if not manifest_path.exists():
+        raise StateValidationError(
+            f"No manifest at {manifest_path}. In this format the manifest is the "
+            "reconstruction spec, not a sidecar: every static field, every dtype "
+            "and the writer's x64 state live there, and equinox would otherwise "
+            "silently take them from whatever template it was handed. A binary "
+            "without its manifest is therefore unreadable rather than "
+            "partially readable. save_memory writes the binary first and the "
+            "manifest last, so this most likely means a save was interrupted."
+        )
+    manifest = json.loads(manifest_path.read_text())
 
     if manifest["format_version"] != _FORMAT_VERSION:
         raise StateValidationError(

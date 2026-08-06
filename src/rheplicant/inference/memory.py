@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.inference.compressed import CompressedLikelihood
+from rheplicant.inference.compressed import REQUIRED_TERM_MEMBERS, CompressedLikelihood
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
 from rheplicant.inference.uncertainty import FlatMatrix, _named_spans
@@ -91,6 +91,17 @@ class BayesMemory(eqx.Module):
         )
 
     def _reject_bad_term(self, term: CompressedLikelihood, duplicate: bool) -> None:
+        absent = [name for name in REQUIRED_TERM_MEMBERS if not hasattr(term, name)]
+        if absent:
+            raise StateValidationError(
+                f"This term is missing {absent}, which BayesMemory reads. "
+                f"CompressedLikelihood requires {list(REQUIRED_TERM_MEMBERS)} plus "
+                "__call__. Checked here rather than where each is first read, "
+                "because accumulation is a QR: a term admitted now is folded "
+                "irreversibly into the running factor, and the omission would "
+                "surface later as an AttributeError out of audit() or "
+                "save_memory(), by which time the campaign already depends on it."
+            )
         if tuple(term.latents) != self.factorization.global_names:
             raise StateValidationError(
                 f"This term is over different latents from the memory: term has "

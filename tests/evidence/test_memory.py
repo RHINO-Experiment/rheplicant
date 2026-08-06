@@ -288,3 +288,56 @@ def test_the_permuted_fisher_composes_with_propagate_covariance():
     # exactly sigma(width) = 1/3 and picking up `depth` instead would give 1/7.
     sigma = propagate_covariance(lambda p: jnp.stack([p["width"]]), params, covariance)
     np.testing.assert_allclose(np.asarray(sigma), [1.0 / 3.0], rtol=1e-12)
+
+
+class TestATermMissingWhatTheMemoryReadsIsRefusedAtTheDoor:
+    """The protocol used to promise less than BayesMemory relies on.
+
+    Declaring only ``latents``/``epoch_id``/``estimator``/``__call__`` made
+    ``CompressedLikelihood`` a narrower claim than the code: a term satisfying
+    it passed ``isinstance``, passed ``remember``, contributed to the
+    accumulated density, and then raised ``AttributeError: 'X' object has no
+    attribute 'n_observed'`` out of ``audit()``. Accumulation is a QR, so by
+    then the campaign already depended on the term irreversibly.
+    """
+
+    class _Minimal:
+        """Satisfies the OLD contract exactly, and nothing more."""
+
+        latents = ("depth", "width")
+        epoch_id = "minimal"
+        estimator = ("full", "none")
+
+        def __init__(self, info):
+            self.info = info
+
+        def __call__(self, values):
+            return self.info.log_prob(values)
+
+    def test_the_protocol_now_names_every_member_the_memory_reads(self):
+        from rheplicant.inference.compressed import (
+            REQUIRED_TERM_MEMBERS,
+            CompressedLikelihood,
+        )
+
+        assert isinstance(_term("a"), CompressedLikelihood)
+        # The old-contract term must NOT satisfy the published protocol.
+        info = _term("a").info
+        assert not isinstance(self._Minimal(info), CompressedLikelihood)
+        for member in REQUIRED_TERM_MEMBERS:
+            assert hasattr(_term("a"), member), member
+
+    def test_remember_refuses_it_before_it_reaches_the_accumulator(self):
+        memory = BayesMemory(_factorization())
+        term = self._Minimal(_term("a").info)
+        with pytest.raises(StateValidationError, match="n_observed"):
+            memory.remember(term)
+
+    def test_and_the_memory_is_unchanged_by_the_refusal(self):
+        """A QR is irreversible, so the refusal has to happen before it."""
+        memory = BayesMemory(_factorization())
+        before = np.asarray(memory.accumulated.factor).copy()
+        with pytest.raises(StateValidationError):
+            memory.remember(self._Minimal(_term("a").info))
+        np.testing.assert_array_equal(np.asarray(memory.accumulated.factor), before)
+        assert memory.archive == ()

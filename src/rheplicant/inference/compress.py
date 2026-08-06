@@ -107,6 +107,22 @@ def compress_linear(
         jnp.zeros_like(observed) if offset_prediction is None else offset_prediction
     )
     sigma = jnp.broadcast_to(noise.std(prediction), observed.shape)
+    if isinstance(sigma, jax.core.Tracer):
+        raise StateValidationError(
+            "compress_linear cannot run under jit: the flag pattern is traced, and "
+            "n_observed is STATIC provenance -- a Python int recorded on the term "
+            "and written to the archive manifest, not an array. Under a trace the "
+            "number of unflagged samples is not known, so the term could only be "
+            "built by inventing one. Left unguarded this surfaced as a raw "
+            "TracerBoolConversionError from an unrelated line.\n\n"
+            "What does work, measured: jax.grad and jax.vmap over `observed`, "
+            "because a concrete noise_std keeps sigma concrete and only the data "
+            "is traced. What does not: jit of any kind, and a FlaggedNoise whose "
+            "flags are themselves traced. Compression is a once-per-epoch step "
+            "around a jitted forward model, not a step to put inside one -- jit "
+            "the model that produces `design` and `observed`, then call this on "
+            "the results."
+        )
     if bool(jnp.any(jnp.isnan(sigma))):
         raise StateValidationError(
             "noise_std produced NaN for at least one sample. `inf` is this "

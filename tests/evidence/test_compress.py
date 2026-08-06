@@ -255,3 +255,59 @@ class TestANaNAtAFlaggedSampleMustNotReachTheTerm:
                 design={"x": a_theta}, observed=jnp.asarray(data),
                 noise_std=jnp.asarray(sigma), shapes={"x": (2,)}, epoch_id="e",
             )
+
+
+class TestWhatCompressionCanAndCannotBeTracedThrough:
+    """`n_observed` is static provenance, so the flag pattern must be concrete.
+
+    It is a Python ``int`` recorded on the term and written into the archive
+    manifest -- not an array -- so under a trace it could only be invented. What
+    decides the question is whether ``sigma`` is traced, not whether the data
+    is: measured, ``observed`` is a tracer under jit, grad AND vmap, while
+    ``sigma`` is a tracer only under jit. That is exactly the split between the
+    transforms that cannot work and the two that can, so the guard tests sigma.
+    """
+
+    def _call(self, observed, noise_std=0.1):
+        a_theta, _ = _design(jax.random.key(30), n_data=8, n_theta=2, n_phi=1)
+        return compress_linear(
+            design={"x": a_theta}, observed=observed, noise_std=noise_std,
+            shapes={"x": (2,)}, epoch_id="e",
+        )
+
+    def test_jit_is_refused_by_name_rather_than_leaking_a_tracer_error(self):
+        """Unguarded this was a raw TracerBoolConversionError from an unrelated line."""
+        from rheplicant.core.errors import StateValidationError
+
+        data = jax.random.normal(jax.random.key(31), (8,))
+        with pytest.raises(StateValidationError, match="cannot run under jit"):
+            jax.jit(lambda d: self._call(d).info.offset)(data)
+
+    def test_traced_flags_are_refused_too(self):
+        """A FlaggedNoise whose mask is traced is the same problem by another door."""
+        from rheplicant.core.errors import StateValidationError
+        from rheplicant.inference import FlaggedNoise, HomoscedasticNoise
+
+        data = jax.random.normal(jax.random.key(32), (8,))
+
+        def go(flags):
+            noise = FlaggedNoise(HomoscedasticNoise(jnp.array(0.1)), flags)
+            return self._call(data, noise_std=noise).info.offset
+
+        with pytest.raises(StateValidationError, match="cannot run under jit"):
+            jax.jit(go)(jnp.zeros(8, bool))
+
+    def test_grad_through_the_data_still_works(self):
+        """The transform the guard must NOT refuse, since it works today."""
+        data = jax.random.normal(jax.random.key(33), (8,))
+        probe = {"x": jnp.array([0.2, -0.4])}
+        gradient = jax.grad(lambda d: self._call(d)(probe))(data)
+        assert gradient.shape == (8,)
+        assert np.all(np.isfinite(np.asarray(gradient)))
+
+    def test_vmap_over_a_stack_of_epochs_still_works(self):
+        data = jax.random.normal(jax.random.key(34), (3, 8))
+        probe = {"x": jnp.array([0.2, -0.4])}
+        values = jax.vmap(lambda d: self._call(d)(probe))(data)
+        assert values.shape == (3,)
+        assert np.all(np.isfinite(np.asarray(values)))

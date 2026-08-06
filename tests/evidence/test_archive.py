@@ -192,3 +192,47 @@ class TestLoadReRunsTheRefusalsRememberEnforces:
         path.unlink()
         with pytest.raises(StateValidationError, match="more than once"):
             load_memory(path, _factorization())
+
+
+class TestTheManifestIsWrittenLastBecauseItIsTheCommit:
+    """Its presence is what says a readable archive exists.
+
+    Written first, a failing ``tree_serialise_leaves`` left a manifest
+    describing a file that was never created, and ``load_memory`` died on a raw
+    ``FileNotFoundError`` from equinox rather than on anything this module says.
+    """
+
+    def test_a_failed_serialisation_leaves_no_manifest_behind(self, tmp_path, monkeypatch):
+        from rheplicant.inference import archive as archive_module
+
+        def explode(path, tree):
+            raise OSError("simulated: disk full")
+
+        # Patched through `archive_module.eqx` rather than by importing equinox
+        # here, so the substitution is the name this module actually calls --
+        # patching a separately-imported alias would leave save_memory bound to
+        # the real function and the test would pass while proving nothing.
+        monkeypatch.setattr(archive_module.eqx, "tree_serialise_leaves", explode)
+        path = tmp_path / "campaign.rhep"
+        with pytest.raises(OSError, match="disk full"):
+            save_memory(_memory_with_non_default_provenance(), path)
+        assert not path.with_suffix(".json").exists(), (
+            "a manifest survived a failed save, so it describes an archive that "
+            "does not exist"
+        )
+
+    def test_a_binary_without_its_manifest_is_refused_by_name(self, tmp_path):
+        path = tmp_path / "campaign.rhep"
+        save_memory(_memory_with_non_default_provenance(), path)
+        path.with_suffix(".json").unlink()
+        with pytest.raises(StateValidationError, match="No manifest"):
+            load_memory(path, _factorization())
+
+    def test_a_complete_save_still_round_trips(self, tmp_path):
+        """Guard the guard: reordering the writes must not break the happy path."""
+        original = _memory_with_non_default_provenance()
+        path = tmp_path / "campaign.rhep"
+        save_memory(original, path)
+        assert path.exists() and path.with_suffix(".json").exists()
+        restored = load_memory(path, original.factorization)
+        assert restored.archive[0].noise_frozen_at == "gls"
