@@ -38,6 +38,38 @@ not -- ``archive`` gains one term per epoch by design, so it is the *density
 path* (the two accumulators plus the shared dictionary) that keeps its shape,
 and :meth:`BayesMemory.to_numpyro_model` closes over exactly that rather than
 over ``self``.
+
+**The archive is one pytree leaf, not one per term, and the reason is not the
+sum.** An earlier version of this sentence said the archive "is never re-summed
+on the sampling path", which was true and beside the point: nothing summed it,
+and it still cost O(N) per call. Equinox wraps every non-magic bound method as a
+``BoundMethod``, which is a ``Module`` *with* a dataclass ``__init__``, and that
+constructor flattens ``(args, kwargs)`` -- ``self`` among them -- to check each
+leaf for a jax-transformed function. So ``memory.log_likelihood(v)`` paid for
+every array in every stored term before executing a line of its own body --
+measured at 1,000 / 2,000 / 4,000 epochs, **1.43 / 3.18 / 7.24 ms** -- and a
+NUTS chain pays that once per leapfrog step.
+
+Holding the terms behind :class:`_Archive`, which is not a registered pytree
+node and is therefore a single opaque leaf, makes the memory's leaf count
+independent of the campaign's length: 12,007 leaves at 4,000 epochs before, 8 at
+any length after. The same three sizes then measure **0.13 / 0.16 / 0.15 ms**,
+which is flat and is also nearly free -- ``accumulated.log_prob`` on the same
+values costs 0.109 ms at N = 4,000, so what the memory's own wrapper still adds
+is 0.025 ms and a constant. ``remember`` fell from 2.42 / 4.51 / 10.22 ms per
+epoch to 0.32 / 0.36 / 0.37, and a 4,000-epoch campaign from 27.0 s to 1.7 s.
+
+``eqx.field(static=True)`` would also have taken the terms out of the leaf list,
+and would have been wrong: a static field goes into the *treedef*, where array
+``__eq__`` decides treedef equality. Equinox warns "A JAX array is being set as
+static" for exactly that, and both ``ReducedBasis.reference_values`` and
+:attr:`BayesMemory.basis` carry the same note. An opaque leaf keeps the arrays on
+the dynamic side, where their identity rather than their contents is compared.
+
+The one thing that becomes explicit rather than automatic is serialisation:
+``eqx.tree_serialise_leaves`` walks leaves it recognises and skips one it does
+not, silently, so :mod:`rheplicant.inference.archive` now writes
+``(memory, tuple(memory.archive))`` and says so in its format version.
 """
 
 from typing import Any
@@ -79,6 +111,85 @@ def _is_reduced(term: Any) -> bool:
     return isinstance(info, SqrtInfo) and tuple(info.names) == (COEFFICIENTS,)
 
 
+class _Archive:
+    """The remembered terms, held as ONE pytree leaf rather than N.
+
+    Deliberately **not** registered with :mod:`jax.tree_util`, which is the whole
+    mechanism: an unregistered object is a leaf, so flattening a
+    :class:`BayesMemory` costs the same whether it holds one epoch or ten
+    thousand. Registering it -- or storing the tuple directly, as this did --
+    puts three arrays per term into the leaf list, and every bound-method call
+    on the memory walks all of them (see this module's docstring).
+
+    ``__slots__`` is not a micro-optimisation either: it is what stops a caller
+    quietly attaching state to an object that the surrounding
+    :class:`~equinox.Module` believes is immutable.
+
+    Membership is answered from ``ids`` rather than by rebuilding
+    ``{held.epoch_id for held in terms}`` on every ``remember``. That rebuild is
+    a second, independent O(N) per call which survives the leaf-count fix
+    untouched -- it is plain Python and has nothing to do with pytrees -- and
+    **it is still O(N) here.** ``frozenset | {x}`` copies; nothing in the
+    standard library gives a persistent set with O(1) insertion, and the
+    alternative that would (a dict shared down the chain, extended in place)
+    cannot be reconciled with the immutability ``remember`` promises: ``m1``
+    must be unchanged by ``m2 = m1.remember(t)``, and two remembers off the same
+    ``m1`` would then see each other's terms.
+
+    What the union buys is a smaller constant, measured on the same 10,000
+    ids: 0.0490 vs 0.0211 ms at N = 4,000 and 0.1694 vs 0.0891 ms at N = 10,000,
+    so a little over half. It is kept because it is free to write, and it is
+    **not** claimed to fix anything: against a ``remember`` that costs 0.37
+    ms/epoch flat after the leaf fix, the residual is 6 % at N = 4,000 and 24 %
+    at N = 10,000, or about 0.45 s spread over a ten-thousand-epoch campaign.
+    That is the measurement on which this was judged acceptable and left alone.
+    """
+
+    __slots__ = ("terms", "ids")
+
+    def __init__(
+        self,
+        terms: tuple[CompressedLikelihood, ...] = (),
+        ids: frozenset[str] | None = None,
+    ):
+        self.terms = tuple(terms)
+        self.ids = (
+            frozenset(term.epoch_id for term in self.terms) if ids is None else ids
+        )
+
+    def appended(self, term: CompressedLikelihood) -> "_Archive":
+        """A new archive holding ``term`` last. The original is unchanged."""
+        return _Archive(self.terms + (term,), self.ids | {term.epoch_id})
+
+    # `is`, never `==`, and that is the whole care in these two methods.
+    # `eqx.filter_jit` partitions leaves into arrays and everything else, so an
+    # opaque leaf lands on the STATIC side, where this `__eq__` decides whether
+    # a cached trace is reused. Comparing the terms by value would call `==` on
+    # arrays -- the elementwise-array-instead-of-bool trap that `static=True` was
+    # rejected for -- while the default identity `__eq__` on the archive itself
+    # is too coarse the other way: two separately built empty archives would
+    # compare unequal and retrace a density path whose shape never changed
+    # (`tests/evidence/test_compress_dispatch.py` measures exactly that, five
+    # traces for five epochs). Term identity is the honest middle: terms are
+    # immutable and never rebuilt in place, so same objects means same numbers.
+    def __eq__(self, other: Any) -> bool:
+        return (
+            type(other) is _Archive
+            and len(self.terms) == len(other.terms)
+            # `strict=` is safe rather than redundant: the length check above is
+            # what makes it unreachable, and it stays honest if that ever moves.
+            and all(
+                mine is theirs
+                for mine, theirs in zip(self.terms, other.terms, strict=True)
+            )
+        )
+
+    def __hash__(self) -> int:
+        # Consistent with the above by being coarser than it: equal archives hold
+        # the same terms, hence the same count and the same ids.
+        return hash((len(self.terms), self.ids))
+
+
 class BayesMemory(eqx.Module):
     """Accumulated evidence from a campaign, sampled without the raw data.
 
@@ -88,8 +199,14 @@ class BayesMemory(eqx.Module):
         accumulated: the running
             :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`. Fixed treedef.
         archive: the terms as remembered, kept for diagnostics, re-anchoring
-            and the smoother. Never re-summed on the sampling path, and the one
-            field that legitimately grows with the campaign.
+            and the smoother. The one part of the memory that legitimately grows
+            with the campaign -- and therefore the one held behind
+            :class:`_Archive`, so that growing costs one leaf rather than N.
+            A read-only property, because the stored object is not the tuple:
+            every reader here iterates in Python (``len``, ``archive[0]``, a
+            comprehension over the terms), so the property hands back the plain
+            tuple those readers already expect and the wrapper stays an
+            implementation detail of the flattening.
         coefficients: the second running
             :class:`~rheplicant.inference.sqrtinfo.SqrtInfo`, over the reduced
             basis coefficients. ``None`` until the first T1 term arrives.
@@ -103,12 +220,13 @@ class BayesMemory(eqx.Module):
             reason.
 
     New fields go last, with defaults: Plan A's tests construct this
-    positionally as ``BayesMemory(factorization, accumulated, archive)``.
+    positionally as ``BayesMemory(factorization, accumulated, archive)``, and
+    that third argument is still a plain tuple of terms.
     """
 
     factorization: Factorization
     accumulated: SqrtInfo
-    archive: tuple[CompressedLikelihood, ...] = eqx.field(default=())
+    _archive: Any = eqx.field(default=None)
     coefficients: SqrtInfo | None = eqx.field(default=None)
     basis: Any = eqx.field(default=None)
 
@@ -116,7 +234,7 @@ class BayesMemory(eqx.Module):
         self,
         factorization: Factorization,
         accumulated: SqrtInfo | None = None,
-        archive: tuple[CompressedLikelihood, ...] = (),
+        archive: tuple[CompressedLikelihood, ...] | _Archive = (),
         coefficients: SqrtInfo | None = None,
         basis: Any = None,
     ):
@@ -126,9 +244,17 @@ class BayesMemory(eqx.Module):
             if accumulated is None
             else accumulated
         )
-        self.archive = tuple(archive)
+        # An `_Archive` passes straight through: rebuilding one from its own
+        # terms would re-derive the id set, which is the O(N) this exists to
+        # avoid, and `remember` hands over an archive it has already extended.
+        self._archive = archive if isinstance(archive, _Archive) else _Archive(archive)
         self.coefficients = coefficients
         self.basis = basis
+
+    @property
+    def archive(self) -> tuple[CompressedLikelihood, ...]:
+        """The stored terms, oldest first."""
+        return self._archive.terms
 
     # ------------------------------------------------------------ accumulate --
 
@@ -149,7 +275,7 @@ class BayesMemory(eqx.Module):
         return BayesMemory(
             factorization=self.factorization,
             accumulated=SqrtInfo.combine(self.accumulated, term.info),
-            archive=self.archive + (term,),
+            archive=self._archive.appended(term),
             coefficients=self.coefficients,
             basis=self.basis,
         )
@@ -194,7 +320,7 @@ class BayesMemory(eqx.Module):
         return BayesMemory(
             factorization=self.factorization,
             accumulated=self.accumulated,
-            archive=self.archive + (term,),
+            archive=self._archive.appended(term),
             coefficients=SqrtInfo.combine(running, term.info),
             basis=term.basis,
         )
@@ -242,8 +368,9 @@ class BayesMemory(eqx.Module):
                 "Divide the temper back out at compression, or use the batch "
                 "consensus path."
             )
-        if self.archive:
-            held = self.archive[0].estimator
+        held_terms = self._archive.terms
+        if held_terms:
+            held = held_terms[0].estimator
             if term.estimator != held:
                 raise StateValidationError(
                     f"Term {term.epoch_id!r} was built with estimator {term.estimator} "
@@ -251,15 +378,13 @@ class BayesMemory(eqx.Module):
                     "full Gaussian likelihood are different estimators (D21/D23); "
                     "their sum is neither."
                 )
-        if not duplicate:
-            seen = {held.epoch_id for held in self.archive}
-            if term.epoch_id in seen:
-                raise StateValidationError(
-                    f"Epoch {term.epoch_id!r} is already in this memory. Adding it "
-                    "again would count its data twice, narrowing the posterior with "
-                    "nothing to show for it. Pass duplicate=True if that is genuinely "
-                    "what you mean."
-                )
+        if not duplicate and term.epoch_id in self._archive.ids:
+            raise StateValidationError(
+                f"Epoch {term.epoch_id!r} is already in this memory. Adding it "
+                "again would count its data twice, narrowing the posterior with "
+                "nothing to show for it. Pass duplicate=True if that is genuinely "
+                "what you mean."
+            )
 
     # --------------------------------------------------------------- densities --
 

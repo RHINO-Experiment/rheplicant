@@ -85,8 +85,8 @@ def test_a_manifest_from_another_format_version_is_refused(tmp_path):
     save_memory(memory, path)
     manifest_path = path.with_suffix(".json")
     manifest = json.loads(manifest_path.read_text())
-    assert manifest["format_version"] == 1, "the version this code writes"
-    manifest["format_version"] = 2
+    assert manifest["format_version"] == 2, "the version this code writes"
+    manifest["format_version"] = 3
     del manifest["terms"][0]["noise_frozen_at"]  # what a later layout may drop
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(StateValidationError, match="format version"):

@@ -129,13 +129,13 @@ def _raw(design, data, row):
     )
 
 
-def _quadratic(design, data, row):
+def _quadratic(design, data, row, epoch_id="e0"):
     return compress_linear(
         design={"x": design},
         observed=data,
         noise_std=row,
         shapes={"x": (N_THETA,)},
-        epoch_id="e0",
+        epoch_id=epoch_id,
     )
 
 
@@ -232,51 +232,63 @@ def test_a_flagged_epoch_agrees_across_tiers(where):
 
 
 def _accumulate(design, sigma, n_epochs):
-    """``(running SqrtInfo, sum of T0 densities)`` over ``n_epochs`` epochs.
+    """``(BayesMemory, sum of T0 densities)`` over ``n_epochs`` epochs.
 
-    ``SqrtInfo.combine`` rather than ``BayesMemory.remember``, and the two are
-    pinned equal by the test below rather than assumed so. The reason is cost,
-    measured: ``remember`` rebuilds the memory on every call, and equinox
-    re-flattens the whole module -- including an ``archive`` tuple that grows by
-    one term per epoch -- so the accumulation is O(N^2). 2,000 epochs took 20.7 s
-    with 4.0e6 calls to the generated ``QuadraticLikelihood`` flattener, which
-    puts 10,000 near nine minutes. The arithmetic under test is one
-    ``SqrtInfo.combine`` per epoch either way; the archive is bookkeeping this
-    claim does not touch.
+    **Through ``remember``, one epoch at a time, which is the thing the section
+    claims to do.** This used to call ``SqrtInfo.combine`` directly and lean on
+    the pin below to argue the substitution was harmless, because ``remember``
+    was O(N^2): equinox re-flattened the whole module on every bound-method
+    call, and an ``archive`` holding three arrays per term made that linear in
+    the campaign length. 2,000 epochs took 20.7 s with 4.0e6 calls to the
+    generated ``QuadraticLikelihood`` flattener, which put 10,000 near nine
+    minutes. The archive is now one opaque pytree leaf
+    (:class:`~rheplicant.inference.memory._Archive`), ``remember`` is flat at
+    0.37 ms/epoch, and the substitution is no longer worth its argument.
+
+    So what runs here is now the streaming path itself: 10,000 successive
+    ``remember`` calls, each refusing a duplicate epoch and folding one term
+    into the running factor, against 10,000 oracle densities. It costs almost
+    nothing to have made it real: 11.57 s for the 10,000-epoch case through
+    ``combine``, 12.62 s through ``remember``, on the same machine in the same
+    session. The residual 1 s is the memory's own bookkeeping, and roughly half
+    of it is the epoch-id set, which is still O(N) by a deliberate choice
+    ``_Archive`` records.
     """
     probe = _probes()["interior"]
-    running = SqrtInfo.null(("x",), ((N_THETA,),))
+    memory = BayesMemory(Factorization(_space()))
     total = 0.0
     for index in range(n_epochs):
         data, row = _epoch(design, sigma, seed=index)
-        running = SqrtInfo.combine(running, _quadratic(design, data, row).info)
+        memory = memory.remember(_quadratic(design, data, row, epoch_id=f"e{index}"))
         total += float(_raw(design, data, row)(probe))
-    return running, total
+    return memory, total
 
 
 @pytest.mark.parametrize("n_epochs", [1, 10_000])
 def test_one_epoch_and_ten_thousand_agree_across_tiers(n_epochs):
     """The campaign length is the axis the claim is about, so it spans four decades.
 
-    The accumulated factor is handed to a real ``BayesMemory`` and read through
+    A real ``BayesMemory``, streamed one ``remember`` at a time and read through
     ``log_likelihood``, so what is compared is the memory's own density against
     the sum of ten thousand oracle densities -- not two spellings of the same
     QR.
     """
-    running, total = _accumulate(_design(), 0.5, n_epochs)
-    memory = BayesMemory(Factorization(_space()), accumulated=running)
+    memory, total = _accumulate(_design(), 0.5, n_epochs)
     assert float(memory.log_likelihood(_probes()["interior"])) == pytest.approx(
         total, rel=1e-9
     )
 
 
 def test_remember_and_combine_are_the_same_accumulation():
-    """What the ten-thousand-epoch case substitutes, verified rather than assumed.
+    """The two accumulation routes agree, now stated rather than relied upon.
 
-    Sixty-four epochs is short enough for the O(N^2) path above to be free and
-    long enough that a per-term constant dropped by one route and kept by the
-    other would show: the two offsets a term carries sum to order 1e2 nats each,
-    so a single missing one is 64 times that.
+    This existed to license the substitution ``_accumulate`` used to make. That
+    substitution is gone -- the ten-thousand-epoch case streams through
+    ``remember`` itself -- so what is left is the claim on its own: the memory's
+    bookkeeping adds nothing to, and drops nothing from, the QR underneath it.
+    Sixty-four epochs is long enough that a per-term constant kept by one route
+    and lost by the other would show, since the two offsets a term carries sum
+    to order 1e2 nats each and a single missing one is 64 times that.
     """
     design = _design()
     memory = BayesMemory(Factorization(_space()))

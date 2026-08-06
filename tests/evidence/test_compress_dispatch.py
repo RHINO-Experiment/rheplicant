@@ -309,11 +309,18 @@ def test_the_density_path_treedef_is_fixed_and_the_archive_is_what_grows(basis):
     density over a growing pytree, against 1 trace for a fixed-treedef one.
 
     What is fixed is the DENSITY PATH -- the two accumulators plus the shared
-    dictionary -- and not the memory as a whole: `archive` is a dynamic field
-    that gains one term per epoch, so `eqx.filter_jit` over a whole
-    `BayesMemory` still retraces once per epoch. That is why
-    `to_numpyro_model` closes over the density path alone rather than over
-    `self`, and it is the shape measured here.
+    dictionary -- and not the memory as a whole: the archive gains one term per
+    epoch, so `eqx.filter_jit` over a whole `BayesMemory` still retraces once
+    per epoch. That is why `to_numpyro_model` closes over the density path
+    alone rather than over `self`, and it is the shape measured here.
+
+    The retrace has a different cause than it used to and the same consequence.
+    The archive was a tuple, so it grew the treedef; it is now one opaque leaf,
+    which `filter_jit` sorts to the static side because it is not an array, and
+    a static value that changes is a cache miss just as a new treedef is. Both
+    assertions below hold either way, which is the point of measuring traces
+    rather than structures: `_Archive.__eq__` is what makes the first one hold,
+    and it compares terms by identity for reasons its own comment gives.
     """
     traces, whole = [], []
 
@@ -340,9 +347,9 @@ def test_the_density_path_treedef_is_fixed_and_the_archive_is_what_grows(basis):
         "to prevent."
     )
     assert len(whole) == 5, (
-        "The archive is a dynamic field holding one term per epoch, so jitting "
-        "the whole memory must retrace per epoch. If this ever reports 1, the "
-        "archive stopped being carried and the diagnostics went with it."
+        "The archive holds one term per epoch, so jitting the whole memory must "
+        "retrace per epoch. If this ever reports 1, the archive stopped being "
+        "carried and the diagnostics went with it."
     )
     assert float(density(_density_state(memory), values)) == pytest.approx(
         float(memory.log_likelihood(values)), rel=1e-12

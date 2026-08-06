@@ -64,6 +64,28 @@ latent in the existing fixtures is a scalar, so it surfaced only once a boundary
 fixture declared one of shape `(3,)` — as `matmul input operand 1 must have ndim
 at least 1`, raised from inside the measurement rather than at the call.
 
+**A long campaign no longer pays for its own length on every method call.**
+`BayesMemory.archive` was a tuple of terms, so the memory's pytree leaf count
+grew with N — 12,007 leaves at 4,000 epochs — and equinox wraps every non-magic
+bound method as a `BoundMethod` whose dataclass `__init__` flattens `self` to
+check each leaf for a jax-transformed function. Nothing summed the archive; the
+cost was the flattening, and it fell on the sampling path as much as on
+`remember`. Measured at 1,000 / 2,000 / 4,000 epochs: `log_likelihood` 1.43 /
+3.18 / 7.24 ms, `remember` 2.42 / 4.51 / 10.22 ms per epoch. The terms now sit
+behind an unregistered wrapper — one opaque leaf, 8 in total at any campaign
+length — and the same measurements read 0.13 / 0.16 / 0.15 ms and 0.32 / 0.36 /
+0.37; a 4,000-epoch campaign takes 1.7 s instead of 27.0. `archive` is still a
+plain tuple to every reader. Not `eqx.field(static=True)`, which would have put
+arrays in the treedef where `__eq__` decides equality.
+
+The archive is consequently written to disk beside the memory rather than
+inside it, and `_FORMAT_VERSION` is 2: `eqx.tree_serialise_leaves` skips a leaf
+it does not recognise **silently**, so the previous call would have round-tripped
+every stored factor as the template's zeros with no error and no warning.
+`tests/evidence/test_tier_boundaries.py`'s 10,000-epoch case now streams through
+`remember` itself rather than substituting `SqrtInfo.combine` for it, at a cost
+of one second.
+
 `rheplicant.inference` now also exports `COEFFICIENTS`, `FidelityReport`,
 `RawLikelihood`, `ReducedBasis`, `ReducedBasisLikelihood`,
 `REQUIRED_TERM_MEMBERS`, `basis_fidelity`, `build_reduced_basis`, `compress`,

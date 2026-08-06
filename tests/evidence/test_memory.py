@@ -1,3 +1,5 @@
+import time
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -140,6 +142,73 @@ def test_the_treedef_does_not_change_as_epochs_are_remembered():
     for index in range(20):
         memory = memory.remember(_term(f"n{index}", jax.random.key(index)))
     assert jax.tree.structure(memory.accumulated) == first
+
+
+def test_the_archive_costs_one_pytree_leaf_however_long_the_campaign():
+    """The O(N) guard on every method call, pinned structurally rather than by clock.
+
+    Equinox wraps every non-magic bound method as a ``BoundMethod``, which is
+    itself a ``Module`` *with* a dataclass ``__init__``, and that constructor
+    flattens ``(args, kwargs)`` -- ``self`` included -- purely to check each leaf
+    for a jax-transformed function. So the cost of ``memory.anything(...)`` is
+    linear in the memory's leaf count, whether or not the method reads the
+    archive. Measured before the fix, with three leaves per stored term:
+    ``log_likelihood`` took 1.43 / 3.18 / 7.24 ms at 1,000 / 2,000 / 4,000
+    epochs, against 0.08 ms for ``accumulated.log_prob`` on the same values.
+    That is the sampling path -- a NUTS chain pays it once per leapfrog step.
+
+    Leaf count is the mechanism, so leaf count is what is asserted. A wall-clock
+    assertion measures the same defect but fails on a loaded machine for reasons
+    that have nothing to do with this package; the scaling test below is
+    deliberately given an order of magnitude of slack for that reason, and this
+    one is exact.
+    """
+    memory = BayesMemory(_factorization())
+    empty = len(jax.tree_util.tree_leaves(memory))
+    for index in range(8):
+        memory = memory.remember(_term(f"n{index}", jax.random.key(index)))
+    eight = len(jax.tree_util.tree_leaves(memory))
+    for index in range(8, 128):
+        memory = memory.remember(_term(f"n{index}", jax.random.key(index)))
+    # Not "bounded" but literally unchanged: the empty memory already carries the
+    # one archive leaf, and 120 more epochs add nothing to it.
+    assert len(jax.tree_util.tree_leaves(memory)) == eight == empty
+    # The archive is one leaf, and it is still a plain tuple to every reader.
+    assert isinstance(memory.archive, tuple)
+    assert len(memory.archive) == 128
+    assert memory.archive[3].epoch_id == "n3"
+
+
+def test_remembering_a_late_epoch_costs_what_an_early_one_did():
+    """The same claim in seconds, because leaf count is a proxy and cost is the point.
+
+    Deliberately generous: the arithmetic under a ``remember`` is one
+    ``SqrtInfo.combine``, flat at 0.405 ms/epoch on this repo, and the defect
+    this pins added 0.03 ms per already-stored epoch on top -- 10x the
+    arithmetic by epoch 2,000, and nine minutes of pure bookkeeping by 10,000.
+    A factor of four therefore separates the two regimes by a wide margin while
+    leaving room for a busy machine.
+    """
+    memory = BayesMemory(_factorization())
+    term = _term("warmup", jax.random.key(0))
+
+    def _span(start, stop):
+        nonlocal memory
+        while len(memory.archive) < start:
+            memory = memory.remember(
+                _term(f"n{len(memory.archive)}", jax.random.key(0))
+            )
+        begin = time.perf_counter()
+        while len(memory.archive) < stop:
+            memory = memory.remember(
+                _term(f"n{len(memory.archive)}", jax.random.key(0))
+            )
+        return (time.perf_counter() - begin) / (stop - start)
+
+    memory.remember(term)  # pay the first-call tracing cost outside the timing
+    early = _span(50, 150)
+    late = _span(1900, 2000)
+    assert late < 4.0 * early, f"{late * 1e3:.3f} ms/epoch late vs {early * 1e3:.3f} early"
 
 
 def test_fisher_is_named_and_refuses_to_pretend_to_be_a_covariance():

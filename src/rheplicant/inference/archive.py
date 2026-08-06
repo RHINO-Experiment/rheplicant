@@ -16,6 +16,20 @@ arrays come from the binary, and every static field, every dtype, and the
 writer's x64 state come from the JSON beside it. ``load_memory`` builds the
 template *from the manifest* and refuses -- not warns -- on any mismatch with
 the running environment.
+
+**The archive is written as its own pytree, beside the memory, and that is not
+redundancy.** ``BayesMemory`` holds its terms behind an opaque leaf so that a
+ten-thousand-epoch campaign costs the same to flatten as a one-epoch one (see
+:mod:`rheplicant.inference.memory`). ``eqx.tree_serialise_leaves`` does not
+object to a leaf it cannot serialise -- measured on equinox 0.13.8, it skips it,
+writes a shorter file, and ``tree_deserialise_leaves`` returns the template's
+arrays in its place. Every stored factor would come back as the zeros
+``load_memory`` builds its template from: not an error, not a warning, just a
+campaign that has forgotten its evidence and still reports the right epoch
+count. So the pair ``(memory, tuple(memory.archive))`` is serialised
+explicitly, and ``_FORMAT_VERSION`` moved to 2 because the byte layout changed
+-- a version-1 file read by this code would deserialise the memory and then run
+off the end of the file.
 """
 
 import json
@@ -31,7 +45,9 @@ from rheplicant.inference.compressed import QuadraticLikelihood
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
 
-_FORMAT_VERSION = 1
+#: 2 since the archive became an opaque pytree leaf and had to be written
+#: alongside the memory rather than inside it -- see the module docstring.
+_FORMAT_VERSION = 2
 
 
 def _manifest_path(path: Path) -> Path:
@@ -156,7 +172,9 @@ def save_memory(memory, path: str | Path) -> None:
     # Built before the write so a term this module cannot describe fails before
     # anything reaches disk.
     payload = json.dumps(manifest, indent=2)
-    eqx.tree_serialise_leaves(path, memory)
+    # The terms travel beside the memory, not inside it: they hang off an opaque
+    # leaf that equinox would skip in silence. See the module docstring.
+    eqx.tree_serialise_leaves(path, (memory, tuple(memory.archive)))
     _manifest_path(path).write_text(payload)
 
 
@@ -242,4 +260,17 @@ def load_memory(path: str | Path, factorization: Factorization):
             for entry in manifest["terms"]
         ),
     )
-    return eqx.tree_deserialise_leaves(path, template)
+    restored, terms = eqx.tree_deserialise_leaves(
+        path, (template, tuple(template.archive))
+    )
+    # `restored` carries the template's own terms -- its archive is the leaf
+    # equinox stepped over -- so the deserialised ones are put back by hand.
+    # Rebuilding through the constructor rather than eqx.tree_at because the
+    # archive is not a pytree node here, which is the entire point of it.
+    return BayesMemory(
+        factorization=restored.factorization,
+        accumulated=restored.accumulated,
+        archive=terms,
+        coefficients=restored.coefficients,
+        basis=restored.basis,
+    )
