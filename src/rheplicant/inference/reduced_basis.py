@@ -435,6 +435,7 @@ def build_reduced_basis(
     method: str = "svd",
     seed_scores: bool = True,
     support: dict[str, tuple[float, float]] | None = None,
+    extra_directions: jax.Array | None = None,
 ) -> ReducedBasis:
     """Score directions first, bank directions after, orthonormalised once.
 
@@ -473,11 +474,22 @@ def build_reduced_basis(
             every term compressed against this basis, so that "the region the
             bank populated" is recorded where it was known rather than
             re-promised by each caller.
+        extra_directions: ``(k, n_data)`` rows in the model's own units, placed
+            in the candidate set immediately after the scores and before the
+            bank residual is taken. This is where an epoch's affine nuisance
+            design goes. It is a *declared* part of the span rather than
+            something the bank is expected to discover: section 4.2(b)
+            integrates ``phi_e`` out by expanding it in the same dictionary, and
+            a nuisance column the dictionary cannot represent is one the
+            marginalisation cannot remove -- it reappears as signal, with every
+            other diagnostic clean. ``compress_reduced_basis`` refuses such a
+            column rather than projecting it quietly, and this argument is the
+            remedy its message names.
 
     Raises:
-        StateValidationError: if ``n_basis`` is below the number of score rows,
-            above the bank's numerical rank, or if the score rows are themselves
-            linearly dependent.
+        StateValidationError: if ``n_basis`` is below the number of declared
+            rows, above the bank's numerical rank, or if the declared rows are
+            themselves linearly dependent.
     """
     forward, values = space.forward_fn(pipeline, state_template)
     values = {**values, **(at or {})}
@@ -501,29 +513,63 @@ def build_reduced_basis(
 
     seeds = jnp.zeros((0, whitened_bank.shape[1]))
     seeded_names: tuple[str, ...] = ()
+    n_scores = 0
     if seed_scores:
         scores = score_directions(space, pipeline, state_template, names=names, at=values)
         seeded_names = tuple(scores)
         seeds = _whiten(
             jnp.concatenate([scores[name] for name in seeded_names], axis=0), weight
         )
-        if seeds.shape[0] > n_basis:
+        n_scores = int(seeds.shape[0])
+        if n_scores > n_basis:
             raise StateValidationError(
-                f"n_basis={n_basis} is smaller than the {seeds.shape[0]} score "
+                f"n_basis={n_basis} is smaller than the {n_scores} score "
                 f"directions of {list(seeded_names)}. Seeding is not a suggestion "
                 "that improves a truncation -- it is what puts each parameter's "
                 "signature in the span at all, and a basis with room for only some "
                 "of them silently deletes the rest. Raise n_basis to at least "
-                f"{seeds.shape[0]}, or name fewer latents."
+                f"{n_scores}, or name fewer latents."
             )
+
+    if extra_directions is not None:
+        extra_rows = _whiten(
+            jnp.reshape(jnp.asarray(extra_directions), (-1, flat_bank.shape[1])), weight
+        )
+        seeds = jnp.concatenate([seeds, extra_rows], axis=0)
+        if seeds.shape[0] > n_basis:
+            raise StateValidationError(
+                f"n_basis={n_basis} is smaller than the {n_scores} score directions "
+                f"plus the {extra_rows.shape[0]} declared extra_directions. Both are "
+                "part of the span by construction rather than by truncation luck -- "
+                "the scores carry each latent's signature and the extras carry the "
+                "nuisance columns section 4.2(b) integrates out -- so there is no "
+                f"subset to drop. Raise n_basis to at least {seeds.shape[0]}."
+            )
+
+    if seeds.shape[0]:
         seed_transform, seed_kept = orthonormal_transform(seeds)
         if len(seed_kept) < seeds.shape[0]:
+            # Two causes, two remedies, and reporting the second as the first
+            # would send the caller to run an identifiability report on a model
+            # that is perfectly identifiable.
+            dropped = [
+                index for index in range(seeds.shape[0]) if index not in seed_kept
+            ]
+            if dropped[0] < n_scores:
+                raise StateValidationError(
+                    f"The score directions of {list(seeded_names)} are linearly "
+                    "dependent, so the basis cannot hold them all and the data "
+                    "cannot tell those latents apart in the first place. Run "
+                    "identifiability(space, pipeline, state) and read "
+                    "report.participation(0) -- it names which combination is "
+                    "blind."
+                )
             raise StateValidationError(
-                f"The score directions of {list(seeded_names)} are linearly "
-                "dependent, so the basis cannot hold them all and the data cannot "
-                "tell those latents apart in the first place. Run "
-                "identifiability(space, pipeline, state) and read "
-                "report.participation(0) -- it names which combination is blind."
+                f"extra_directions row {dropped[0] - n_scores} already lies in the "
+                "span of the score directions and the rows declared before it, so "
+                "it needs no row of its own and asking for one gives a Gram matrix "
+                "that is singular by counting. Drop it: it is already representable, "
+                "which is exactly what declaring it was for."
             )
         orthonormal_seeds = seed_transform @ seeds
         whitened_bank = (

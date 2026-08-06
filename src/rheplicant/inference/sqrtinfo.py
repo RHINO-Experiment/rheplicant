@@ -22,9 +22,12 @@ it keeps the numerics separable from the model machinery, as
 :mod:`rheplicant.inference.conditioning` does for spectral diagnostics.
 """
 
+from collections.abc import Sequence
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.core.errors import StateValidationError
 
@@ -168,6 +171,133 @@ class SqrtInfo(eqx.Module):
         definite.
         """
         return self.factor.T @ self.factor
+
+
+def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
+    """Integrate named latents out of a square-root information form, exactly.
+
+    Permute the block's columns first, re-triangularise, and drop the leading
+    rows and columns. That drop **is** the Schur complement, and the Gaussian
+    integral over the block contributes exactly
+
+    ``+ (n_block/2) log(2 pi)  -  sum log|R_bb,ii|  -  0.5 rho^2``
+
+    and nothing else. In particular it does **not** contribute the block's own
+    prior normalisation: whoever appended the prior rows owns
+    ``-sum(log(std)) - (n/2) log(2 pi)``, and the two ``2 pi`` halves cancel
+    while ``sum(log(std))`` has nothing to cancel against. Plan A shipped that
+    second term missing -- 1.07 nats for three nuisances at ``std=0.7``, 27.47
+    for twenty-five at ``std=3``, and **exactly zero at** ``std=1``, which is how
+    a probe built on unit priors passed. A constant is invisible in a
+    posterior's shape, so the tests for this function compare absolute
+    log-densities against a dense oracle and use a non-unit prior.
+
+    Written once here rather than at each caller because section 6's chain
+    filter marginalises ``zeta_e`` by the same three lines, and two copies of a
+    constant is how one of them gets fixed.
+
+    Marginalising **every** name is legal and returns a zero-width term --
+    ``factor`` shape ``(0, 0)``, ``names=()`` -- whose ``log_prob({})`` is the
+    marginal likelihood. That is what T1 does at each ``theta`` when it
+    integrates out ``phi_e``, so refusing it would mean writing the nuisance and
+    no-nuisance paths twice. Marginalising **nothing** is likewise legal and is
+    the identity on the log-density: the re-triangularisation folds any excess
+    rows into ``rho`` and the offset absorbs it, which is
+    :meth:`SqrtInfo.combine`'s arithmetic with one term.
+
+    Args:
+        info: the joint form, prior rows already appended by the caller.
+        block: which names to integrate out.
+
+    Returns:
+        A term over ``info``'s remaining names, in their original relative
+        order, whose log-density is the integral of ``info``'s over ``block``.
+
+    Raises:
+        StateValidationError: if a name is repeated or not in ``info``, or if
+            the block is not constrained -- an unconstrained direction makes the
+            integral divergent, and finite arithmetic returns a large plausible
+            number for it rather than an infinity anyone would notice.
+    """
+    block = tuple(block)
+    if len(set(block)) != len(block):
+        raise StateValidationError(
+            f"marginalise was given {list(block)}, which names a latent twice. "
+            "Integrating the same block out twice is not defined. Pass each name "
+            "once."
+        )
+    unknown = [name for name in block if name not in info.names]
+    if unknown:
+        raise StateValidationError(
+            f"This term is not over {unknown}; it is over {list(info.names)}. "
+            "Marginalise a name the term actually carries, or combine the terms "
+            "that do carry it first."
+        )
+
+    spans: dict[str, range] = {}
+    position = 0
+    for name, shape in zip(info.names, info.shapes, strict=True):
+        size = _size(shape)
+        spans[name] = range(position, position + size)
+        position += size
+    kept = tuple(name for name in info.names if name not in block)
+    columns = [column for name in block for column in spans[name]]
+    columns += [column for name in kept for column in spans[name]]
+    n_block = sum(len(spans[name]) for name in block)
+    width = info.factor.shape[1]
+
+    upper = jnp.linalg.qr(
+        jnp.concatenate(
+            [info.factor[:, jnp.asarray(columns, dtype=int)], info.target[:, None]],
+            axis=1,
+        ),
+        mode="r",
+    )
+    if n_block:
+        if upper.shape[0] < n_block:
+            raise StateValidationError(
+                f"This term has {upper.shape[0]} independent rows but {n_block} "
+                f"columns in the block {list(block)}, so the block does not "
+                "constrain itself and the integral over it diverges. A per-epoch "
+                "latent is integrated exactly once, which is why condition C3 "
+                "requires its prior to be part of the model rather than an "
+                "optional regulariser: append the prior rows before marginalising."
+            )
+        pivots = jnp.abs(jnp.diag(upper)[:n_block])
+        # Compared against the LARGEST pivot, not against an absolute floor: the
+        # rows are whitened data, so their scale is the epoch's 1/sigma and an
+        # absolute threshold would refuse a well-constrained low-noise block and
+        # wave through a badly-constrained high-noise one.
+        scale = float(jnp.max(jnp.abs(jnp.diag(upper))))
+        floor = float(np.sqrt(np.finfo(np.asarray(upper).dtype).eps)) * scale
+        if bool(jnp.any(pivots <= floor)):
+            raise StateValidationError(
+                f"The block {list(block)} does not constrain one of its own "
+                "directions, so the Gaussian integral over it diverges and the "
+                "marginal would come back as +inf -- finite arithmetic gives a "
+                "large plausible number instead, which is worse, because nothing "
+                "downstream tests for it. Give the block a proper prior "
+                "(condition C3) and append its rows before marginalising."
+            )
+        log_pivots = jnp.sum(jnp.log(pivots))
+    else:
+        log_pivots = jnp.zeros(())
+
+    keep = min(upper.shape[0], width)
+    # The part of the residual no quadratic form in the retained columns can
+    # express. A constant, so it belongs in the offset; dropped, every term is
+    # wrong by an amount that grows with the campaign and changes no gradient.
+    corner = upper[keep:, width]
+    constant = (
+        0.5 * n_block * jnp.log(2.0 * jnp.pi) - log_pivots - 0.5 * jnp.sum(corner**2)
+    )
+    return SqrtInfo(
+        factor=upper[n_block:keep, n_block:width],
+        target=upper[n_block:keep, width],
+        offset=info.offset + constant,
+        names=kept,
+        shapes=tuple(info.shapes[info.names.index(name)] for name in kept),
+    )
 
 
 def _size(shape: tuple[int, ...]) -> int:

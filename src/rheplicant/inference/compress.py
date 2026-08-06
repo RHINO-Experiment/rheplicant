@@ -41,7 +41,7 @@ from rheplicant.inference.compressed import (
     QuadraticLikelihood,
     ReducedBasisLikelihood,
 )
-from rheplicant.inference.sqrtinfo import SqrtInfo
+from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise
 from rheplicant.inference.uncertainty import as_noise_model
 
 
@@ -259,6 +259,11 @@ def compress_reduced_basis(
     *,
     support: dict[str, tuple[float, float]] | None = None,
     noise_frozen_at: str = "none",
+    nuisance_design: Mapping[str, jax.Array] | None = None,
+    nuisance_prior_std: Mapping[str, Any] | None = None,
+    nuisance_prior_mean: Mapping[str, jax.Array] | None = None,
+    nuisance_shapes: Mapping[str, tuple[int, ...]] | None = None,
+    nuisance_tolerance: float = 1e-6,
 ) -> ReducedBasisLikelihood:
     """Compress one epoch against a shared reduced basis -- section 4.1's T1.
 
@@ -303,6 +308,19 @@ def compress_reduced_basis(
             :func:`~rheplicant.inference.gls.iterative_gls`. Two terms with
             different values are different estimators and ``BayesMemory``
             refuses to sum them.
+        nuisance_design: ``{nuisance latent: (n_data, n_j) block}`` for the
+            per-epoch latents integrated out here. Every column must lie inside
+            the basis -- pass the same block to ``build_reduced_basis`` as
+            ``extra_directions=``.
+        nuisance_prior_std: each nuisance latent's prior standard deviation.
+            Required for every entry of ``nuisance_design``: the block is
+            integrated exactly once and an improper integral is not a
+            likelihood, which is condition C3.
+        nuisance_prior_mean: each nuisance latent's prior mean; zero if absent.
+        nuisance_shapes: each nuisance latent's shape. Defaults to the design
+            block's column count as a flat vector.
+        nuisance_tolerance: how far outside the basis a nuisance column may lie
+            before it is refused, as a fraction of its own ``N^-1`` norm.
 
     Returns:
         A prior-free, approximate
@@ -330,34 +348,124 @@ def compress_reduced_basis(
     residual = jnp.where(seen, observed - reference, 0.0) * weight
     design = jnp.where(seen[None, :], basis.rows, 0.0).T * weight[:, None]
     width = design.shape[1]
-
-    upper = jnp.linalg.qr(
-        jnp.concatenate([design, residual[:, None]], axis=1), mode="r"
-    )
-    keep = min(upper.shape[0], width)
-    # The corner is the part of the residual no coefficient can reach. It is a
-    # constant in theta, so leaving it out changes no gradient and no curvature
-    # and every density by the same amount -- measured at -51.321 nats on the
-    # RHINO fixture, which is why Plan A's dropped corner survived a probe built
-    # on shapes. The masked normalisation below is the other such constant,
-    # +200.738 nats on the same epoch.
-    corner = upper[keep:, width]
+    # The masked normalisation, +200.738 nats on the RHINO fixture. A pure
+    # offset, which is why it is compared absolutely and never inferred from a
+    # posterior's shape.
     normalisation = -0.5 * jnp.sum(
         jnp.where(seen, jnp.log(2.0 * jnp.pi * jnp.where(seen, sigma, 1.0) ** 2), 0.0)
     )
-    info = SqrtInfo(
-        factor=upper[:keep, :width],
-        target=upper[:keep, width],
-        offset=normalisation - 0.5 * jnp.sum(corner**2),
-        names=(COEFFICIENTS,),
-        shapes=((width,),),
-    )
+
+    nuisance_design = dict(nuisance_design or {})
+    nuisance_names = tuple(nuisance_design)
+    nuisance_shapes = dict(nuisance_shapes or {})
+    nuisance_prior_std = dict(nuisance_prior_std or {})
+    nuisance_prior_mean = dict(nuisance_prior_mean or {})
+    missing = [name for name in nuisance_names if name not in nuisance_prior_std]
+    if missing:
+        raise StateValidationError(
+            f"Nuisance latent(s) {missing} are integrated out here, so their prior "
+            "is part of the model rather than an optional regulariser (condition "
+            "C3): without it the integral over the block diverges, and finite "
+            "arithmetic returns a large plausible number rather than an infinity "
+            "anything downstream would notice. Give each one a nuisance_prior_std."
+        )
+
+    columns, priors, targets, log_std, shapes = [], [], [], [], []
+    for name in nuisance_names:
+        block = jnp.reshape(jnp.asarray(nuisance_design[name]), (observed.shape[0], -1))
+        # Section 4.2(b): the basis must SPAN the phi directions, or the epoch's
+        # nuisance is being integrated against a model that cannot express it and
+        # the residual silently reappears as signal -- with the chi-square, the
+        # conditioning and the bank reproduction all clean.
+        for index in range(block.shape[1]):
+            fraction = float(basis.residual_fraction(block[:, index]))
+            if not fraction < nuisance_tolerance:
+                raise StateValidationError(
+                    f"Nuisance column {name}[{index}] lies {fraction:.3e} outside "
+                    f"this basis, against a tolerance of {nuisance_tolerance}. "
+                    "Section 4.2(b) integrates phi_e by expanding it in the SAME "
+                    "dictionary, so a direction the basis cannot represent is one "
+                    "the marginalisation cannot remove -- it would reappear as "
+                    "signal. Pass the nuisance design to build_reduced_basis as "
+                    "extra_directions=."
+                )
+        size = int(block.shape[1])
+        shapes.append(nuisance_shapes.get(name, (size,)))
+        std = jnp.broadcast_to(jnp.asarray(nuisance_prior_std[name]), (size,))
+        mean = jnp.broadcast_to(jnp.asarray(nuisance_prior_mean.get(name, 0.0)), (size,))
+        # Select, then multiply. Same rule as the residual above.
+        columns.append(jnp.where(seen[:, None], block, 0.0) * weight[:, None])
+        priors.append(jnp.diag(1.0 / std))
+        targets.append(mean / std)
+        log_std.append(jnp.sum(jnp.log(std)))
+
+    if nuisance_names:
+        nuisance_block = jnp.concatenate(columns, axis=1)
+        n_nuisance = nuisance_block.shape[1]
+        # Triangularise the data rows first so the stored joint is O((n_phi +
+        # n_S)^2) rather than O(n_data * n_S) -- storing the raw rows would
+        # reintroduce exactly the n_data dependence this tier removes. The prior
+        # rows are appended afterwards and carry their own normalisation, which
+        # is the caller's half of the constant `marginalise` deliberately does
+        # not supply.
+        upper = jnp.linalg.qr(
+            jnp.concatenate([nuisance_block, design, residual[:, None]], axis=1),
+            mode="r",
+        )
+        joint = SqrtInfo(
+            factor=jnp.concatenate(
+                [
+                    upper[:, : n_nuisance + width],
+                    jnp.concatenate(
+                        [
+                            jax.scipy.linalg.block_diag(*priors),
+                            jnp.zeros((n_nuisance, width)),
+                        ],
+                        axis=1,
+                    ),
+                ],
+                axis=0,
+            ),
+            target=jnp.concatenate(
+                [upper[:, n_nuisance + width], jnp.concatenate(targets)]
+            ),
+            offset=(
+                normalisation
+                - sum(log_std)
+                - 0.5 * n_nuisance * jnp.log(2.0 * jnp.pi)
+            ),
+            names=(*nuisance_names, COEFFICIENTS),
+            shapes=(*shapes, (width,)),
+        )
+        info = marginalise(joint, nuisance_names)
+    else:
+        upper = jnp.linalg.qr(
+            jnp.concatenate([design, residual[:, None]], axis=1), mode="r"
+        )
+        keep = min(upper.shape[0], width)
+        # The corner is the part of the residual no coefficient can reach. It is
+        # a constant in theta, so leaving it out changes no gradient and no
+        # curvature and every density by the same amount -- measured at -51.321
+        # nats on the RHINO fixture, which is why Plan A's dropped corner
+        # survived a probe built on shapes.
+        corner = upper[keep:, width]
+        joint = None
+        info = SqrtInfo(
+            factor=upper[:keep, :width],
+            target=upper[:keep, width],
+            offset=normalisation - 0.5 * jnp.sum(corner**2),
+            names=(COEFFICIENTS,),
+            shapes=((width,),),
+        )
+
     return ReducedBasisLikelihood(
         basis=basis,
         info=info,
-        joint=None,
+        joint=joint,
         epoch_id=epoch_id,
         n_observed=n_observed,
         support=dict(support),
+        nuisance_names=nuisance_names,
+        nuisance_shapes=tuple(shapes),
         noise_frozen_at=noise_frozen_at,
     )
