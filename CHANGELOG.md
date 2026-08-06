@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+### An epoch whose model is not linear can be compressed too
+
+- **Reduced-basis compression.** `build_reduced_basis` expands the prediction in
+  a dictionary seeded with `dmu/dtheta_j` for every named global latent and
+  completed by SVD or greedy selection over a bank of prior draws, orthonormal
+  in the `N^-1` metric the likelihood uses. `compress_reduced_basis` turns one
+  epoch into a `ReducedBasisLikelihood` storing `O(n_S^2)` numbers independent
+  of `n_data`; `basis_fidelity` reports the per-direction residual `r_j` under
+  each latent's own name and refuses above a declared tolerance; `marginalise`
+  integrates a named block out of a square-root information form, written once
+  because the chain filter will reuse it. `RawLikelihood` is the oracle every
+  other tier is validated against, and it refuses to be remembered or archived.
+  `audit()` reports the compression bias per named direction as a fraction of
+  `sigma_N`. `compress` routes an epoch to the tier that can represent it. See
+  D31.
+
+**Why the score directions are seeded rather than hoped for.** A plain SVD of a
+bank of prior draws orders modes by prior-induced amplitude, and at 60–85 MHz
+the foreground sits three orders above the 21 cm trough. Measured on the
+four-latent RHINO fixture, the residual fraction of the `t21_depth` score
+direction against an unseeded basis is 0.562 at `n_S = 3` and 1.7e-4 at 4; a
+richer pre-planning bank measured 0.3147 at 3 and 0.0000 only at 13. Seeded, it
+is 1.5e-16 at `n_S = 3`. The compressed term is otherwise clean throughout —
+residual chi-square, conditioning and bank reproduction all normal — while its
+Fisher has a collapsed eigenvalue along the one direction the campaign exists to
+measure.
+
+**Selecting in the wrong metric costs sensitivity; projecting in it costs bias.**
+The design ran the two together. `Pi = S_w^T (S_w S_w^T)^-1 S_w` is the
+`N^-1`-orthogonal projector whatever metric chose the rows, so the truncation
+cannot bias the score — it only shrinks the Fisher. An unweighted projector is
+not self-adjoint in the likelihood's inner product and does bias it, but only
+where there is a truncation residual to act on: measured, a seeded `n_S = 6`
+basis needs 5.1e21 epochs to reach one sigma either way, while an unseeded
+`n_S = 3` basis reaches it in **909**. The fixture's sigma spread across the
+band is `(85/60)^2.5 = 2.38896`, not the ~6x the design quoted.
+
+**The compression error is budgeted as a gradient, and it grows as `sqrt(N)`.**
+A constant offset has exactly zero effect on a posterior; a small
+theta-dependent tilt has unbounded effect, and one basis serving every epoch
+makes the tilt coherent, so the bias is N-independent while `sigma_N` falls as
+`N^-1/2`. Measured 1.571e-11 over four epochs against 6.286e-11 over
+sixty-four — a factor 4.001 against the 4.000 the law predicts. Freezing the
+covariance is measured separately and stored separately, because its remedy is a
+narrower support and not a larger `n_S`: 4.2188e7 nats over the fixture's full
+declared box, 0.7568 on the `t21_depth` axis alone.
+
+`tests/evidence/test_tier_boundaries.py` checks that T0, T1 and T2 return the
+same log-density at every threshold — SNR from 1e2 to 1e-2, `n_S` at both ends
+of the admissible range, a rank-deficient epoch, a flagged epoch, theta at the
+corner of the declared box and outside it, campaigns of 1 and 10,000 epochs. It
+calls each tier **directly**, never through `compress`: a dispatcher routes one
+input to one method, so sweeping a threshold through it shows only that the
+routed function is continuous.
+
+Fixed along the way: `compress_reduced_basis`'s frozen-noise probe substituted a
+bare scalar for a latent's value when pushing it to the edge of its declared
+box, which is correct for a scalar latent and a shape error for any other. Every
+latent in the existing fixtures is a scalar, so it surfaced only once a boundary
+fixture declared one of shape `(3,)` — as `matmul input operand 1 must have ndim
+at least 1`, raised from inside the measurement rather than at the call.
+
+`rheplicant.inference` now also exports `COEFFICIENTS`, `FidelityReport`,
+`RawLikelihood`, `ReducedBasis`, `ReducedBasisLikelihood`,
+`REQUIRED_TERM_MEMBERS`, `basis_fidelity`, `build_reduced_basis`, `compress`,
+`compress_reduced_basis`, `marginalise`, `numerical_rank`,
+`orthonormal_transform`, `orthonormalise`, `score_directions`, `select_greedy`
+and `select_svd`.
+
 ### A campaign can be accumulated, archived and sampled after the recordings are gone
 
 - **Streaming evidence accumulation.** `compress_linear` turns one epoch of a

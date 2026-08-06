@@ -213,7 +213,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2378 tests, 87.5 % coverage, jit+grad+vmap through the full twin; assembly
+(2378 tests, 87.7 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -255,12 +255,12 @@ while the rest of the suite must stay at float32 — eighteen tests assert
 refusals that only float32 forces — and `jax_enable_x64` is process-global, so
 the two cannot share an interpreter.
 
-That split is also why the stated coverage fell from 99.7 % to 87.5 % when the
+That split is also why the stated coverage fell from 99.7 % to 87.7 % when the
 evidence layer landed, without any code going untested. The second session runs
 `--no-cov` in its own process, so its 242 passing tests contribute nothing to the
 default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
 `memory.py`, `archive.py` and `reduced_basis.py` show 12–63 % there, and
-**633 of the default report's 656 uncovered statements are those seven files**.
+**633 of the default report's 647 uncovered statements are those seven files**.
 Measured, on the run the number above comes from.
 
 **Not** plain `uv run`: the `limtod` and `rfi` extras name requirements that are

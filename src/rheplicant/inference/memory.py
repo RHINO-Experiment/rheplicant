@@ -395,7 +395,7 @@ class BayesMemory(eqx.Module):
             at: where to pull a reduced-basis term's coefficient-space
                 information back into theta. Required once the memory holds
                 one, and refused rather than defaulted -- see
-                :meth:`_theta_fisher`. Ignored for a memory of T2 terms alone,
+                ``_theta_fisher``. Ignored for a memory of T2 terms alone,
                 whose information is already a quadratic in theta.
         """
         template, flat_names, flat_spans, flat_shapes, _ = self._flatten_layout()

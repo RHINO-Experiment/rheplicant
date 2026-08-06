@@ -3,8 +3,19 @@
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference.archive import load_memory, save_memory
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
-from rheplicant.inference.compress import compress_linear
-from rheplicant.inference.compressed import CompressedLikelihood, QuadraticLikelihood
+from rheplicant.inference.compress import (
+    compress,
+    compress_linear,
+    compress_reduced_basis,
+)
+from rheplicant.inference.compressed import (
+    COEFFICIENTS,
+    REQUIRED_TERM_MEMBERS,
+    CompressedLikelihood,
+    QuadraticLikelihood,
+    RawLikelihood,
+    ReducedBasisLikelihood,
+)
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.forward import build_forward_fn
 from rheplicant.inference.gls import GLSResult, iterative_gls
@@ -66,7 +77,19 @@ from rheplicant.inference.plan import (
     SamplingPlan,
     split_rhat,
 )
-from rheplicant.inference.sqrtinfo import SqrtInfo
+from rheplicant.inference.reduced_basis import (
+    FidelityReport,
+    ReducedBasis,
+    basis_fidelity,
+    build_reduced_basis,
+    numerical_rank,
+    orthonormal_transform,
+    orthonormalise,
+    score_directions,
+    select_greedy,
+    select_svd,
+)
+from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise
 from rheplicant.inference.uncertainty import (
     as_noise_model,
     fisher_information,
@@ -77,9 +100,11 @@ from rheplicant.inference.uncertainty import (
 
 __all__ = [
     "BROADCAST",
+    "COEFFICIENTS",
     "DEFAULT_RANK_RTOL",
     "MIN_DRAWS",
     "DISTRIBUTE",
+    "REQUIRED_TERM_MEMBERS",
     "ParameterSpaceError",
     "AdamCalibrator",
     "AmbiguousFanWarning",
@@ -90,6 +115,7 @@ __all__ = [
     "Draws",
     "Estimate",
     "Factorization",
+    "FidelityReport",
     "FlaggedNoise",
     "GLSResult",
     "GaussianLikelihood",
@@ -108,13 +134,20 @@ __all__ = [
     "PlanResult",
     "QuadraticLikelihood",
     "RadiometerNoise",
+    "RawLikelihood",
+    "ReducedBasis",
+    "ReducedBasisLikelihood",
     "SamplingPlan",
     "SqrtInfo",
     "as_noise_model",
+    "basis_fidelity",
     "build_forward_fn",
+    "build_reduced_basis",
     "check_linearity",
     "check_observed_shape",
+    "compress",
     "compress_linear",
+    "compress_reduced_basis",
     "condition_estimate",
     "fisher_information",
     "gcr_sample",
@@ -124,12 +157,19 @@ __all__ = [
     "iterative_gls",
     "linear_operator",
     "load_memory",
+    "marginalise",
     "mean_squared_error",
+    "numerical_rank",
+    "orthonormal_transform",
+    "orthonormalise",
     "parameter_covariance",
     "predict_from_samples",
     "propagate_covariance",
     "refuse_stochastic_stages",
     "save_memory",
+    "score_directions",
+    "select_greedy",
+    "select_svd",
     "simulate_pairs",
     "split_rhat",
     "push_forward",

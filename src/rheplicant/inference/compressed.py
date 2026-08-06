@@ -191,7 +191,7 @@ class RawLikelihood(eqx.Module):
     probe". §12.12's boundary validation is not writable without it.
 
     Two refusals keep it out of the places it must not reach.
-    :attr:`info` raises rather than returning a quadratic form, so
+    ``info`` raises rather than returning a quadratic form, so
     :meth:`~rheplicant.inference.memory.BayesMemory.remember` -- which folds a
     term into the running QR -- stops at the door instead of at a diagnostic.
     :func:`~rheplicant.inference.archive.save_memory` refuses it for the same
@@ -342,7 +342,7 @@ class ReducedBasisLikelihood(eqx.Module):
             mis-declaration that cannot be falsified is permanent (§4.2).
         nuisance_names, nuisance_shapes: what ``joint`` was marginalised over.
         frozen_noise_residual: the largest ``|log L_frozen - log L_live|``, in
-            nats, over ``2 n_theta + 1`` probes spanning :attr:`support` --
+            nats, over ``2 n_theta + 1`` probes spanning ``support`` --
             section 8's mandatory measurement of what freezing ``N`` cost this
             epoch. ``0.0`` exactly for a noise model that does not depend on the
             prediction, arithmetically rather than by a skipped branch, because

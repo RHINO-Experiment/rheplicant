@@ -1373,6 +1373,105 @@ round it. That axis has already been corrupted exactly this way once — see
 elsewhere. The compile cost is the cheaper of the two problems and is fixable at
 the consumer; the precision loss is fixable nowhere.
 
+### D31 — The basis is seeded with the score directions, and the metric is the likelihood's
+
+Compressing an epoch whose model is *not* linear in its latents means expanding
+the prediction in a dictionary and storing the coefficients. The obvious
+dictionary is the leading SVD modes of a bank of prior draws, and it is the
+wrong one for the one measurement RHINO exists to make. Singular values order
+modes by prior-induced amplitude; at 60–85 MHz the foreground spread (~200 K)
+sits three orders above the 21 cm trough (~0.2 K), so the science direction is
+the last retained and the first dropped. Measured on the four-latent fixture in
+`tests/evidence/rhino_bank.py` (128 channels, 400 draws), the residual fraction
+of the `t21_depth` score direction against a plain SVD basis is **0.562 at
+n_S = 3 and 1.7e-4 at n_S = 4**. A richer pre-planning bank measured 0.3147 at
+3, 0.0289 at 5, 0.0040 at 8 and 0.0000 only at 13. Both numbers are real: four
+near-linear latents span their own tangent space once four vectors are allowed,
+so where the deletion stops is a fact about the bank and not about the method.
+Seeding is what makes the answer independent of which bank a campaign happens to
+have — with `dmu/dtheta_t21` placed first, `r_t21 = 1.5e-16` at n_S = 3. A
+complete repair rather than an improvement, and it does not depend on choosing
+n_S large enough. So `build_reduced_basis` seeds `dmu/dtheta_j` for every
+**named** global latent before it looks at the bank, and `basis_fidelity`
+reports `r_j` per latent in D14's named-row `FlatMatrix`, so a collapsed Fisher
+eigenvalue arrives with a name attached — a scalar fidelity number names no
+culprit.
+
+The size of the test that can see this is itself constrained: the whitened
+bank's **numerical rank is 6**, not the 13–38 the design quotes for raw
+snapshots, and `build_reduced_basis` refuses any n_S above it. A test written at
+n_S = 8 does not assert a weak claim, it raises.
+
+**The metric is a second, separate decision, and the design ran two claims
+together.** Write `Pi = S_w^T (S_w S_w^T)^-1 S_w`. It is the `N^-1`-orthogonal
+projector onto the retained span *whatever metric chose the rows*, so T1's score
+at the truth is `((I - Pi) mu)^T N^-1 (Pi dmu/dtheta) = 0` exactly. Selecting or
+truncating in the wrong metric therefore costs **sensitivity** — a smaller
+Fisher — and not bias. Projecting in the wrong metric costs **bias**, because an
+unweighted least-squares projector is not self-adjoint in the likelihood's own
+inner product. Measured as the campaign length at which the induced bias reaches
+one sigma: at the operating point (seeded, n_S = 6) an unweighted projector
+needs 5.1e21 epochs and the `N^-1` projector 5.9e22 — both roundoff, and for the
+reason that matters. **The wrong projector needs a truncation residual to act
+on**, and a seeded basis leaves it none. Build one that genuinely deletes the
+target — n_S = 3, plain SVD, unseeded, `r_t21 = 0.562` — and the split appears
+cleanly: **909 epochs** for the unweighted projector against 2.9e22 for `N^-1`.
+The bias is a property of the projector, conditional on the truncation. The band
+this is measured in has a sigma spread of `(85/60)^2.5 = 2.38896`, not the ~6x
+the design quoted, which would need a spectral index near −5.1 over the same
+band; under a flat sigma the unweighted projector *is* the `N^-1` projector and
+the whole measurement goes quiet, which one test asserts so that a reader can
+see the file is capable of failing.
+
+**The dictionary is the campaign's and the metric is the epoch's.** Rows are
+shared and orthonormalised once, in a declared reference metric; each epoch
+stores its own `G_e` and `p_e` against them. Evaluation is then `O(n_S^2)` per
+epoch rather than `O(n_S n_data)`, which is the whole point of the tier. What
+that buys is not assumed away: §7's bias budget stores `grad_theta delta_e` at
+compression — one JVP, `n_theta` floats — and `audit()` reports
+`|bias_hat| / sigma_N` per named direction, refusing above a declared ratio. A
+gradient and not a magnitude, because a constant offset has exactly zero effect
+on a posterior while an arbitrarily small theta-dependent tilt has unbounded
+effect. Because one basis and one instrument model serve every epoch the tilt is
+**coherent**, so the bias is N-independent while `sigma_N` falls as `N^-1/2` and
+the ratio grows as `sqrt(N)`: measured 1.571e-11 over four epochs and 6.286e-11
+over sixty-four, a factor 4.001 against the 4.000 the law predicts. A ratio that
+is comfortable at N = 10 need not be at N = 1000, and that is the point of
+storing it rather than checking it once.
+
+**Freezing `N` is measured per epoch, not argued.** Under `RadiometerNoise`
+sigma tracks the prediction (D21), so the stored statistics are not constants
+until the covariance is frozen — and D23 records that the converged answer is
+then generalized least squares. The cost is recorded on the term over
+`2 n_theta + 1` probes spanning the declared support: on this fixture
+**4.2188e7 nats** over the full box, dominated by `amplitude` at ±3 prior sigma,
+against **0.7568** on the `t21_depth` axis alone. The remedy the refusal names
+is narrowing the support or re-anchoring the basis, never a larger `n_S` — that
+is §7's remedy for a different error, which is why the two numbers are stored
+separately rather than summed into one.
+
+**The stored term is a `SqrtInfo` over the coefficient vector**, so every
+property Plan A proved of that form transfers unchanged: PSD by construction,
+rank deficiency representable as a short `R`, accumulation by QR, the corner
+term kept. A memory accumulates T1 in a second fixed-treedef accumulator rather
+than in a pytree whose child count grows with N. The two constants it carries
+are why this tier is tested against absolute log-densities and never against a
+posterior's shape: on the RHINO epoch the masked normalisation is **+200.738**
+nats and the QR corner **−51.321**, summing to an offset of **+149.418**, and
+Plan A shipped both of those errors once — each is a pure offset, so gradients
+and curvature stay perfect while the evidence is wrong.
+
+**T0 exists so the rest can be validated.** `RawLikelihood` keeps the raw data
+and a live forward model, which defeats every bottleneck this layer was built
+for; it refuses to be remembered or archived, by name. Without it §12.12's
+boundary validation cannot be written at all, because "the tiers agree" needs
+something for them to agree *with*. That validation calls T0, T1 and T2
+**directly** and never through `compress`: a dispatcher routes one input to one
+method, so sweeping a threshold through it shows only the routed function's own
+continuity, which is smooth for anything analytic. The claim being checked is
+that two methods return the same number at the same point, and a dispatcher
+cannot be asked that question.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`
