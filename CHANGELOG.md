@@ -42,6 +42,18 @@ of `log_posterior`.
 `Factorization`, `QuadraticLikelihood`, `SqrtInfo`, `compress_linear`,
 `load_memory` and `save_memory`.
 
+**Why the entry point takes arrays rather than a `State`.** `State.meta` is
+static, so it is part of the jit cache key, and `to_state` writes
+`meta["time_epoch_unix_s"]` — a different float per recording. A jitted
+per-epoch function taking a `State` therefore compiles once per night and keeps
+every program for the life of the process: measured, three states differing
+only in that float produced three compilations where the same three with the
+epoch traced in `aux` produced one. `compress_linear` takes a design mapping and
+`remember` takes a `CompressedLikelihood`, so no `State` crosses the boundary
+and the loop compiles once. Recorded as D30 because nothing enforces it and a
+`compress_state()` convenience overload would undo it while staying numerically
+correct.
+
 ### Three contracts get a page, and the tour's inference section starts running again
 
 Twelve public names sat in `rheplicant.core.__all__` (nine) and

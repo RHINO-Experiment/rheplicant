@@ -76,11 +76,10 @@ through `jnp.asarray`, which is float32 — the argument is in
 That is a deliberate trade, and it is safe only as long as no hot loop passes
 such a `State` into a jitted function as an argument. Today none does: `src/`
 contains no `jax.jit` at all, and the tests jit a fixed template state. The
-obligation therefore falls on whoever writes the first per-observation loop —
-see the constraint recorded in the streaming-evidence plan, which is where
-that loop will first exist. The remedy is cheap and local: normalise `meta`
-down to the invariant keys at the jit boundary, and let per-run numbers travel
-traced in `aux`.
+obligation therefore falls on whoever writes the first per-observation loop,
+which is the streaming-evidence campaign of D29. **D30 states what that loop
+must satisfy**, why the remedy belongs at its boundary rather than in
+`to_state`, and what it is measured to cost.
 
 ### D2 — Functional updates via `dataclasses.replace`
 
@@ -1329,6 +1328,50 @@ forces. `jax_enable_x64` is process-global with no scoped form in jax 0.11, so
 runs it as a subprocess from the default suite — asserting a positive passed
 count and no skips, because a child that collected nothing exits 0 exactly like
 a healthy one.
+
+### D30 — The evidence boundary takes arrays, not a `State`, and that is what keeps the campaign loop compiling once
+
+D29's memory implies a loop: one term per night, absorbed, recording archived.
+It is the first place in this package where a function runs once per
+observation, and therefore the first place D1's static/traced split can cost
+something. `State.meta` is part of the jit cache key and `to_state` writes
+`meta["time_epoch_unix_s"]`, a different float for every recording, so a jitted
+per-epoch function taking a `State` recompiles every iteration and keeps every
+compiled program for the life of the process. Measured on a toy function: three
+states differing only in that one meta float produced three compilations; the
+same three with the epoch traced in `aux` produced one. It is not a memory
+nuisance — it is jit doing nothing.
+
+The layer as built does not have that problem, and the reason is a design
+property rather than luck: **no `State` crosses into it.** `compress_linear`
+takes a design mapping, an observed array, a noise scale and shapes;
+`BayesMemory.remember` takes a `CompressedLikelihood`. A memory that never sees
+a `State` cannot inherit its cache key. That is recorded here because it is
+load-bearing and nothing enforces it: a `compress_state(state, ...)` convenience
+overload is exactly the sugar this API invites, and adding one would reintroduce
+per-epoch recompilation silently, since the result would be numerically correct
+every time.
+
+The same failure is already defended from the other side. `SqrtInfo.null`
+returns a square factor rather than a zero-row one specifically to keep "a fixed
+treedef across a whole campaign, which is what stops `jit` retracing once per
+epoch". That covers the accumulator's *shape*; `meta` is the other half, and the
+two only pay for themselves together.
+
+**What still falls to the caller.** `design=` is computed caller-side, per
+night, and the natural way to compute it is a jitted pipeline over that night's
+`State` — which puts the loop back, one level out, where this package cannot see
+it. The remedy is at that boundary: normalise `meta` down to the keys that
+genuinely select a program (`telescope`, `band`) before the jitted call, and let
+per-run numbers travel traced in `aux`.
+
+**Not by moving the epoch out of `meta` in `to_state`.** It is there so the
+epoch survives in float64; `Coordinates` stores through `jnp.asarray` and would
+round it. That axis has already been corrupted exactly this way once — see
+`MAX_TIME_RESOLUTION_IN_SAMPLES` and `docs/ingestion.md` — and the contract that
+`meta[key] + coords.time` recovers `obs.time_s` exactly is load-bearing
+elsewhere. The compile cost is the cheaper of the two problems and is fixable at
+the consumer; the precision loss is fixable nowhere.
 
 ## Known deferred issues
 
