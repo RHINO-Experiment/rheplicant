@@ -24,7 +24,7 @@ That is why sections 9.4 and 9.5 are refusals based on what the analyst
 improve.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -122,11 +122,18 @@ def coherent_mode(terms: Sequence[Any]) -> dict[str, Any]:
     """Is there a fault common to every night? -- section 9.3's whole question.
 
     A deterministic error shared across epochs -- one calibration solution, one
-    beam model, one flag table -- contributes **no variance**. Per-epoch
-    chi-square is right, split-half agrees, leave-one-out agrees, and the answer
-    is wrong. What it does move is a **mean**, and a mean over N epochs is
-    resolved at sqrt(N), which is why this reports z-scores rather than
-    magnitudes.
+    beam model, one flag table -- contributes **no variance**. Split-half agrees
+    to roundoff, leave-one-out returns the same scores, the posterior width is
+    the same array element for element, and the answer is wrong. What it does
+    move is a **mean**, and a mean over N epochs is resolved at sqrt(N), which is
+    why this reports z-scores rather than magnitudes.
+
+    Section 9's list of what a common mode passes includes "per-epoch
+    chi-square", and measurement says otherwise: its mean is exactly what
+    ``chi2_z`` below reports as a detection, and its scatter is inflated by
+    noncentrality -- 5.5467 against ``sqrt(2 * 6) = 3.4641`` on this fixture,
+    with no new randomness injected. The statistic whose scatter a shift really
+    does leave alone is the named template projection, below.
 
     Two statistics, and neither is a substitute for the other. ``chi2_z`` needs
     no guess about what the fault looks like and therefore cannot say what it
@@ -375,3 +382,140 @@ def held_out_z(
             )
         )
     return tuple(rows)
+
+
+def _shrinkage_table(sigmas: Mapping[int, Any]) -> tuple[np.ndarray, np.ndarray]:
+    """``(log N, log sigma)`` as two flat arrays, with every trap refused first.
+
+    Three of them, and each is here because the failure it prevents is a finite,
+    plausible number rather than a crash:
+
+    * fewer than two campaign sizes -- one point admits every slope, so a fitted
+      power would be an invention;
+    * a non-finite or non-positive sigma -- ``np.log`` maps those to ``nan`` and
+      ``-inf``, and a ``nan`` power loses every comparison a caller could make
+      about it, exactly as a ``nan`` z-score does;
+    * a ragged table -- a pooled fit over two parameters at one size and three at
+      another is not one fit, and its slope silently weights the sizes unequally.
+    """
+    sizes = sorted(sigmas)
+    if len(sizes) < 2:
+        raise ValueError(
+            f"shrinkage_power needs at least two campaign sizes; got {sizes}. A "
+            "single point admits every slope, so any number returned here would "
+            "be the caller's assumption rather than a measurement."
+        )
+    bad_sizes = [n for n in sizes if not (int(n) > 0)]
+    if bad_sizes:
+        raise ValueError(
+            f"These campaign sizes are not positive: {bad_sizes}. The fit is in "
+            "log N, and log of a non-positive size is -inf or nan, which would "
+            "make the returned power finite-looking or nan rather than refused."
+        )
+    columns = [np.atleast_1d(np.asarray(sigmas[n], dtype=float)) for n in sizes]
+    widths = {column.shape for column in columns}
+    if len(widths) > 1:
+        raise ValueError(
+            f"These campaign sizes report different numbers of widths: "
+            f"{ {n: column.shape for n, column in zip(sizes, columns, strict=True)} }. "
+            "A pooled power is one fit over the same latents at every size; a "
+            "ragged table weights the sizes unequally without saying so. Fit the "
+            "shared latents, or fit each size's set separately."
+        )
+    stacked = np.concatenate(columns)
+    # `not (x > 0)` rather than `x <= 0`: NaN is False for both comparisons, and
+    # NaN is the case that has to be caught. `np.isfinite` alone would let a
+    # negative sigma through to `np.log`, which returns nan with a warning.
+    if not np.all(np.isfinite(stacked)) or not np.all(stacked > 0.0):
+        offenders = [
+            (n, column.tolist())
+            for n, column in zip(sizes, columns, strict=True)
+            if not (np.all(np.isfinite(column)) and np.all(column > 0.0))
+        ]
+        raise ValueError(
+            f"Every sigma must be finite and strictly positive; these are not: "
+            f"{offenders}. A posterior width of zero, inf or nan is a broken "
+            "covariance, not a very tight measurement -- check the campaign that "
+            "produced it rather than fitting its logarithm."
+        )
+    log_size = np.repeat(np.log(np.asarray(sizes, dtype=float)), stacked.size // len(sizes))
+    return log_size, np.log(stacked)
+
+
+def shrinkage_power(sigmas: Mapping[int, Any]) -> float:
+    """The fitted exponent of ``sigma_N ~ N^p``. **A sanity check, not a test.**
+
+    Kept because section 9 says to keep it, and returned as a bare float only
+    from here; :func:`shrinkage_report` is what a caller should print, because it
+    carries the caveat in the same object as the number.
+
+    For a Gaussian model ``sigma_N = (sum_e F_e + F_prior)^-1/2`` does not read
+    the data. So this quantity is **data-independent**, ``p = -0.5`` holds by
+    construction, and a uniform rescaling ``F_e -> (1+c) F_e`` moves it by
+    exactly nothing -- verified in the spec for ``c`` in {0, +0.5, -0.3} and
+    again in ``tests/evidence/test_coherent_bias.py``. Measured on the
+    repeated-design fixture, the clean and the deliberately-biased campaign
+    return ``-0.49991034`` and ``-0.49991034``, from per-N sigma arrays that are
+    equal element for element.
+
+    (The plan quoted ``-0.49989592``. That is the *first coordinate's own* slope;
+    the second is ``-0.49992476``. A single float over a two-parameter campaign
+    is the pooled fit, which is what this returns, and for the balanced grid a
+    campaign audit actually has it equals the mean of the per-coordinate slopes.)
+
+    v1's plan to prove a diagnostic works by injecting a shared systematic and
+    watching this number was self-refuting, and that is the whole reason section
+    9 exists in its present form.
+
+    Args:
+        sigmas: ``{campaign size: posterior widths}``. A scalar width is accepted
+            and treated as a one-element array. Every size must report the same
+            number of widths, in the same order.
+
+    Returns:
+        The ordinary-least-squares slope of ``log sigma`` on ``log N``, pooled
+        over the widths. The intercept is free, so a uniform rescaling of every
+        sigma cannot move the result.
+
+    Raises:
+        ValueError: for fewer than two campaign sizes, a non-positive size, a
+            ragged table, or a sigma that is not finite and strictly positive.
+    """
+    log_size, log_sigma = _shrinkage_table(sigmas)
+    centred = log_size - log_size.mean()
+    return float(centred @ (log_sigma - log_sigma.mean()) / (centred @ centred))
+
+
+def shrinkage_report(sigmas: Mapping[int, Any]) -> dict[str, Any]:
+    """:func:`shrinkage_power` with its limits attached to it.
+
+    ``detects_coherent_bias`` is ``False``, always, and it is a field rather than
+    a sentence in a docstring because a number and its caveat travel together or
+    they do not travel. A deterministic common-mode error -- one calibration
+    solution, one beam model, one flag table applied to every night -- contributes
+    **no variance** to the campaign's information: the posterior width is the
+    same array element for element, split-half agrees to roundoff, leave-one-out
+    returns the same scores, and the answer is wrong by 52.6 sigma at N = 640.
+    Read :func:`coherent_mode` for a diagnostic that can fire.
+
+    One measured refinement on section 9's own wording: the *per-epoch
+    chi-square* scatter is **not** among the things a common mode leaves alone.
+    It is inflated by noncentrality -- 5.5467 against ``sqrt(2 * 6) = 3.4641`` on
+    the fixture -- without any new randomness being injected. What keeps its
+    scatter exactly is the named template projection, 1.00200 clean and 1.00200
+    biased, because there the fault is a pure additive shift.
+    """
+    power = shrinkage_power(sigmas)
+    return {
+        "power": power,
+        "n_values": tuple(sorted(sigmas)),
+        "detects_coherent_bias": False,
+        "caveat": (
+            "sigma_N is data-independent for a Gaussian model, so this power is "
+            "-0.5 by construction. A deterministic error shared across epochs "
+            "contributes no variance, so it cannot move this number at all -- "
+            "measured, the same value to twelve digits on a clean campaign and "
+            "on one biased by 52.6 sigma. Use coherent_mode() and the systematic "
+            "floor."
+        ),
+    }
