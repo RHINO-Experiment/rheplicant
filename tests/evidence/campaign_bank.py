@@ -25,6 +25,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from rheplicant.inference.compress import compress_linear
+from rheplicant.inference.factorize import Factorization
+from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 
 N_THETA, N_SAMPLES, SIGMA = 2, 8, 0.5
 TRUTH = np.array([1.0, -0.5])
@@ -45,6 +47,47 @@ TEMPLATE = COMMON / np.linalg.norm(COMMON)
 
 def prior_fisher():
     return np.eye(N_THETA) / PRIOR_STD**2
+
+
+class _Normal:
+    """Minimal duck-typed prior: only ``log_prob`` is read downstream.
+
+    Its curvature is what :func:`rheplicant.inference.diagnostics.systematic_floor`
+    differentiates for the prior's share of the posterior width, so this must be
+    the same Gaussian ``prior_fisher()`` writes down by hand -- ``1 / scale^2``
+    per component. The two are pinned against each other in
+    ``test_systematic_floor.py``, because a fixture whose two priors disagreed
+    would make every crossing epoch in this file wrong by a constant and
+    nothing would say so.
+    """
+
+    def __init__(self, loc, scale):
+        self.loc, self.scale = loc, scale
+
+    def log_prob(self, x):
+        return -0.5 * (
+            ((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2)
+        )
+
+
+def space():
+    """One global latent ``x`` of shape ``(2,)``, with the prior above."""
+    latent = Latent("x", init=jnp.zeros(N_THETA), prior=_Normal(0.0, PRIOR_STD))
+    return ParameterSpace(
+        latents=(latent,),
+        bindings=(Bind("x", into=lambda p: p.x),),
+    )
+
+
+def factorization(represents=None):
+    """The campaign's declaration, optionally modelling a shared input product.
+
+    ``represents={"beam_map": ("x",)}`` is section 9.5's escape hatch in
+    executable form: it says the beam map is *not* an unmodelled shared error
+    because the campaign carries a global latent for it. Two epochs may then
+    share its hash, and the systematic floor no longer binds on ``x``.
+    """
+    return Factorization(space(), represents=dict(represents or {}))
 
 
 def terms(n_epochs, biased, seed=11, templates=None):

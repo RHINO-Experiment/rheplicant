@@ -86,6 +86,7 @@ from rheplicant.inference.compressed import (
     REQUIRED_TERM_MEMBERS,
     CompressedLikelihood,
 )
+from rheplicant.inference.diagnostics import systematic_floor as _systematic_floor
 from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
 from rheplicant.inference.uncertainty import FlatMatrix, _named_spans
@@ -756,10 +757,35 @@ class BayesMemory(eqx.Module):
             )
         return ratios, tuple(unconstrained)
 
+    def _represented(self, modelled: tuple[str, ...]) -> frozenset[str]:
+        """Which latents stand for a shared input product the analyst models.
+
+        The unknown-name refusal is not pedantry. ``modelled=("beam_maps",)``
+        against ``represents={"beam_map": ...}`` matches nothing, so the floor
+        binds and the analyst is shown a refusal about their campaign when what
+        is wrong is one letter in an argument -- a correct outcome reached for a
+        reason nobody could act on.
+        """
+        declared = self.factorization.represents
+        stray = sorted(product for product in modelled if product not in declared)
+        if stray:
+            raise StateValidationError(
+                f"modelled={list(modelled)} names {stray}, which this factorization "
+                f"does not declare in represents=; it declares {sorted(declared)}. "
+                "Claiming a product is modelled is claiming that some global latent "
+                "stands for it, so the declaration is where that claim lives -- "
+                "Factorization(represents={product: (latent, ...)})."
+            )
+        return frozenset(
+            name for product in modelled for name in declared[product]
+        )
+
     def audit(
         self,
         at: dict[str, jax.Array] | None = None,
         bias_tolerance: float | None = None,
+        systematic_floor: dict[str, float] | None = None,
+        modelled: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         """What the memory can say about its own trustworthiness.
 
@@ -790,6 +816,17 @@ class BayesMemory(eqx.Module):
                 not yet constrain are listed under ``"unconstrained"`` instead
                 of refused: their ratio is ``0/0``, and treating that as a
                 failure would refuse every young campaign.
+            systematic_floor: ``{global latent: declared prior width of the
+                shared calibration products, in that latent's units}``. Section
+                9.4. Refuse to report a posterior tighter than that floor while
+                those products are unmodelled. See
+                :func:`~rheplicant.inference.diagnostics.systematic_floor` for
+                what the number means and how the crossing epoch is computed.
+            modelled: the shared input products this campaign **does** model, by
+                name. Each must appear in ``factorization.represents``, whose
+                latents are then exempt from the floor -- a product carried as a
+                global latent is integrated with the rest of theta, so its
+                uncertainty is inside ``sigma_N`` rather than under it.
         """
         if at is None and self.basis is not None and self.basis.reference_values:
             at = dict(self.basis.reference_values)
@@ -811,6 +848,44 @@ class BayesMemory(eqx.Module):
                     "N^-1/2 and the ratio above grows as sqrt(N). Raise n_basis, "
                     "re-anchor the basis nearer the accumulated posterior, or "
                     "declare a larger budget knowing what it costs."
+                )
+
+        floor_report = None
+        if systematic_floor:
+            floor_report = _systematic_floor(self, systematic_floor, at)
+            represented = self._represented(tuple(modelled))
+            # `row["below_floor"]` rather than a second `not (sigma > floor)`
+            # written here. The NaN-safe comparison exists once, where the width
+            # is computed, because two copies of it is how one of them becomes
+            # `sigma <= floor` and lets a poisoned campaign through while the
+            # same dict reports the nan.
+            breached = {
+                name: row
+                for name, row in floor_report.items()
+                if name not in represented and row["below_floor"]
+            }
+            if breached:
+                listed = ", ".join(
+                    f"{n}: sigma={r['sigma']:.3e} vs floor {r['floor']:.3e}"
+                    for n, r in sorted(breached.items())
+                )
+                raise StateValidationError(
+                    f"This campaign is tighter than its own systematic floor -- "
+                    f"{listed}. (A sigma of nan there means the accumulated factor "
+                    "is poisoned rather than tight: NaN loses every comparison, so "
+                    "it is reported as a breach rather than waved through.) The "
+                    "floor is the declared prior width of a shared calibration "
+                    "product, projected into theta units: one solution, one beam "
+                    "model and one flag table serve every night, so their "
+                    "uncertainty does not average down while the statistical error "
+                    "does. Below the floor the quoted error bar describes the noise "
+                    "and not the answer. Nothing in the data can detect this -- the "
+                    "in-span half of a shared error biases theta identically in "
+                    "every epoch and leaves no residual, measured at 52.6 sigma "
+                    "with every diagnostic clean -- so the remedy is to model the "
+                    "product as a global latent (Factorization(represents=...), "
+                    "then pass modelled=), or to quote the floor rather than "
+                    "sigma_N."
                 )
 
         fisher = jnp.asarray(self.accumulated.fisher())
@@ -844,4 +919,5 @@ class BayesMemory(eqx.Module):
             "coefficient_condition": coefficient_condition,
             "bias_over_sigma": ratios,
             "unconstrained": unconstrained,
+            "systematic_floor": floor_report,
         }

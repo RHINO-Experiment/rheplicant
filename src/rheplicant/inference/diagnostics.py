@@ -24,11 +24,16 @@ That is why sections 9.4 and 9.5 are refusals based on what the analyst
 improve.
 """
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
+
+from rheplicant.core.errors import StateValidationError
 
 _PRIOR_REMEDY = (
     "pass prior_fisher over the same latents in the same column order -- "
@@ -519,3 +524,228 @@ def shrinkage_report(sigmas: Mapping[int, Any]) -> dict[str, Any]:
             "floor."
         ),
     }
+
+
+def _prior_curvature(
+    factorization: Any,
+    at: Mapping[str, Any] | None,
+    names: tuple[str, ...],
+    spans: tuple[tuple[int, int], ...],
+    width: int,
+) -> np.ndarray:
+    """``-d^2/dtheta^2 log pi(theta)``, block by block, in flatten order.
+
+    Differentiated rather than read off a ``.scale`` attribute. A prior in this
+    package is a duck type whose only guaranteed member is ``log_prob`` --
+    :meth:`~rheplicant.inference.memory.BayesMemory.log_posterior` reads nothing
+    else -- so a helper that reached for ``.scale`` would return **zero**
+    information for anything that does not carry one. That failure is silent and
+    it points the wrong way: less prior information means a wider sigma, and a
+    wider sigma means the floor refusal fires later than it should.
+
+    Evaluated at the latent's declared ``init`` unless ``at`` names a point,
+    because ``init`` is the one value a
+    :class:`~rheplicant.inference.parameters.ParameterSpace` guarantees is a
+    legal value of the latent -- zeros would be outside the support of a
+    log-normal or a gamma, and the resulting ``nan`` would read as a poisoned
+    campaign. For the Gaussian priors this layer is exact for, the curvature
+    does not depend on the point at all.
+
+    Block diagonal by latent, and that is a property of the declaration rather
+    than an approximation: ``global_priors`` is one prior per latent, so there
+    is no cross term to lose. Within a latent the block is whatever the Hessian
+    says, dense or not.
+    """
+    inits = {
+        latent.name: latent.init
+        for latent in factorization.space.latents
+        if latent.scope == "global"
+    }
+    priors = factorization.global_priors
+    curvature = np.zeros((width, width))
+    for name, (start, stop) in zip(names, spans, strict=True):
+        point = jnp.asarray(
+            inits[name] if at is None or name not in at else at[name], dtype=float
+        )
+        shape = point.shape
+
+        def density(flat: jax.Array, prior: Any = priors[name], shape: Any = shape):
+            return jnp.sum(prior.log_prob(jnp.reshape(flat, shape)))
+
+        block = -np.asarray(jax.hessian(density)(jnp.reshape(point, (-1,))))
+        if not np.all(np.isfinite(block)):
+            raise StateValidationError(
+                f"The prior on {name!r} has non-finite curvature at the point it "
+                "was differentiated at, so there is no posterior width to compare "
+                "against a floor. That point is the latent's declared init unless "
+                "at= names another; pass at= at a value inside the prior's "
+                "support."
+            )
+        curvature[start:stop, start:stop] = block
+    return curvature
+
+
+def _refuse_bad_floors(floors: Mapping[str, Any], names: tuple[str, ...]) -> None:
+    """A declared floor must name a latent this memory has, and be a real width.
+
+    Both halves fail quietly otherwise, and in the same direction. A floor of
+    ``nan`` makes ``sigma > floor`` False for every latent, so every campaign
+    reads as breached -- the comparison guard below is written ``not (sigma >
+    floor)`` precisely because NaN loses every comparison, and a NaN on the
+    *floor* side turns that protection into a false alarm. A floor of ``inf``
+    does the same thing without any NaN in sight. And a floor naming a latent
+    the memory never accumulated would simply be dropped, which reads as "the
+    campaign is above that floor".
+    """
+    unknown = sorted(name for name in floors if name not in names)
+    if unknown:
+        raise StateValidationError(
+            f"The declared systematic floor names {unknown}, which this memory "
+            f"does not accumulate; it accumulates {list(names)}. A floor is a "
+            "prior width projected into the units of a latent the campaign "
+            "actually carries, so a name it does not carry is a different model "
+            "or a typo -- and dropped silently it would read as a campaign safely "
+            "above that floor."
+        )
+    # `not (0 < value < inf)` rather than `value <= 0 or isinf(value)`: NaN is
+    # False for every comparison in the chain, so this catches it with the same
+    # expression that catches zero, negative and infinite.
+    bad = sorted(name for name, value in floors.items() if not (0.0 < float(value) < math.inf))
+    if bad:
+        listed = ", ".join(f"{name}={float(floors[name])!r}" for name in bad)
+        raise StateValidationError(
+            f"These declared floor widths are not finite and strictly positive: "
+            f"{listed}. A floor is a standard deviation in theta units. Zero or "
+            "negative is not a width; inf puts every campaign below the floor, "
+            "which reads as a detection; and nan loses every comparison, so it "
+            "would breach every latent at once while the report showed nan."
+        )
+
+
+def _posterior_widths(memory: Any, at: Mapping[str, Any] | None) -> tuple[
+    np.ndarray, tuple[str, ...], tuple[tuple[int, int], ...]
+]:
+    """``(widths, names, spans)`` -- ``sqrt(diag((F_like + F_prior)^-1))``.
+
+    The prior is added back deliberately.
+    :meth:`~rheplicant.inference.memory.BayesMemory.fisher` excludes it, and
+    says so, because it reports the *likelihood's* information; a floor is
+    compared against the width a result is **quoted** with, which is the
+    posterior's. Leaving the prior out makes every sigma larger than the quoted
+    one, so the refusal would fire later than it should -- the silent direction.
+    """
+    fisher = memory.fisher(at)
+    names, spans = tuple(fisher.names), tuple(fisher.spans)
+    total = np.asarray(fisher.matrix, dtype=float)
+    width = total.shape[0]
+    total = total + _prior_curvature(memory.factorization, at, names, spans, width)
+    # Checked before the factorisation, not after. `np.linalg.cholesky` on a
+    # matrix carrying NaN raises `LinAlgError`, which this function would then
+    # report as "not positive definite" -- a confident, wrong diagnosis of a
+    # poisoned stored factor. Propagating NaN instead is what the floor
+    # comparison below is written to catch.
+    if not np.all(np.isfinite(total)):
+        return np.full(width, np.nan), names, spans
+    try:
+        lower = np.linalg.cholesky(total)
+    except np.linalg.LinAlgError as error:
+        raise StateValidationError(
+            "The accumulated information plus the prior is not positive definite, "
+            "so this campaign has no posterior width to compare against a floor. "
+            "Every global latent needs a proper prior for that sum to be "
+            "invertible at any N; check the declared priors before the epochs."
+        ) from error
+    inverse = np.linalg.inv(lower)
+    return np.sqrt(np.diag(inverse.T @ inverse)), names, spans
+
+
+def systematic_floor(
+    memory: Any, floors: Mapping[str, Any], at: Mapping[str, Any] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Section 9.4: has this campaign out-run its own calibration?
+
+    The floor is the declared prior width of a shared calibration product --
+    one solution, one beam model, one flag table serving every night --
+    **projected into theta units by the analyst**. It is a declaration and not a
+    measurement, and that is forced rather than lazy: the in-span half of a
+    coherent error biases theta identically in every epoch and leaves no
+    residual anywhere, so it passes per-epoch chi-square, split-half and
+    leave-one-out, and no statistic computed from the stored terms can recover
+    it. Measured on ``tests/evidence/campaign_bank.py``, the answer is wrong by
+    52.6 sigma at N = 640 with every data-driven diagnostic clean.
+
+    What the campaign *does* know is its own width, and that width falls as
+    ``N^-1/2`` while the shared product's does not fall at all. So the whole
+    content of this function is: when does one pass under the other.
+
+    ``sigma`` is the **tightest** component of a latent's marginal posterior
+    width, not the loosest and not the mean. A vector latent has several widths
+    and a floor is one number; the tightest is the first to go under, so it is
+    the one a refusal must watch. Measured on the campaign fixture with a floor
+    of 0.05, the tightest component crosses at N = 8 and the loosest at N = 13 --
+    a report keyed on the loosest stays quiet for five nights while a quoted
+    error bar is already below the declared systematic.
+
+    ``crossing_epoch`` is **computed from the observed width**, not quoted: the
+    campaign's own ``sigma_N`` is extrapolated as ``sigma_N sqrt(N / N')`` and
+    solved for ``sigma_{N'} = floor``, giving ``N' = ceil(N (sigma_N /
+    floor)^2)``. That extrapolation ignores the prior's share, which shrinks as
+    N grows, so it predicts the crossing marginally early; measured on the
+    campaign fixture it is exact -- 8 predicted from N = 4 and from N = 16, 8
+    observed -- because the prior is 0.25 against a per-epoch 42.5.
+
+    Args:
+        memory: a :class:`~rheplicant.inference.memory.BayesMemory`. Read for
+            its Fisher, its factorization's priors and the campaign's length.
+        floors: ``{global latent: declared width in that latent's units}``.
+            Every entry must name a latent the memory accumulates and be finite
+            and strictly positive.
+        at: where to pull a reduced-basis term's coefficient-space information
+            back into theta, and where to differentiate the priors. Defaults to
+            each latent's declared ``init``.
+
+    Returns:
+        ``{name: {"sigma", "floor", "below_floor", "crossing_epoch"}}``.
+        ``below_floor`` is the refusal's own comparison, computed here and
+        nowhere else so that the NaN-safe form exists in one place;
+        ``crossing_epoch`` is ``None`` when the width is not a finite positive
+        number, because there is then no crossing to extrapolate.
+
+    Raises:
+        StateValidationError: for an empty campaign, a floor naming a latent
+            the memory does not accumulate, a floor that is not a finite
+            positive width, a prior with non-finite curvature, or an
+            information matrix that is not positive definite.
+    """
+    n_epochs = len(memory.archive)
+    if n_epochs == 0:
+        raise StateValidationError(
+            "systematic_floor needs at least one epoch. The crossing epoch is "
+            "N (sigma_N / floor)^2, which is zero for N = 0 -- an empty campaign "
+            "would report that it passed under its systematic floor before it "
+            "started."
+        )
+    widths, names, spans = _posterior_widths(memory, at)
+    _refuse_bad_floors(floors, names)
+    report: dict[str, dict[str, Any]] = {}
+    for name, declared in floors.items():
+        start, stop = spans[names.index(name)]
+        sigma = float(np.min(widths[start:stop]))
+        floor = float(declared)
+        # `not (sigma > floor)`, never `sigma <= floor`: NaN is False for both
+        # comparisons, so the second form waves a poisoned campaign through
+        # while the same dict reports the nan. Third time this exact shape has
+        # been needed in this subsystem. `inf` is handled by the same
+        # expression and correctly: a campaign that constrains nothing is not
+        # tighter than anything.
+        report[name] = {
+            "sigma": sigma,
+            "floor": floor,
+            "below_floor": not (sigma > floor),
+            "crossing_epoch": (
+                math.ceil(n_epochs * (sigma / floor) ** 2)
+                if math.isfinite(sigma) and sigma > 0.0
+                else None
+            ),
+        }
+    return report
