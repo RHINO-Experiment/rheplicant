@@ -51,6 +51,7 @@ import numpy as np
 from jax.scipy.linalg import solve_triangular
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
+from rheplicant.inference.uncertainty import FlatMatrix, _named_spans
 
 
 def orthonormal_transform(
@@ -442,12 +443,18 @@ def build_reduced_basis(
     the prior actually produces, chosen on the *residual* after the scores so
     the leading singular direction does not simply restate the mean.
 
-    Measured on a RHINO-like bank (60-85 MHz, 128 channels, 400 draws), the
-    residual fraction of the ``t21_depth`` score direction against a plain SVD
-    basis is ``0.3147`` at ``n_S = 3``, ``0.0289`` at 5, ``0.0040`` at 8 and
-    ``0.0000`` at 13. Seeding takes ``n_S = 4`` -- the smallest this space
-    allows -- to below ``1e-10``. The repair is complete, not incremental, and
-    it does not depend on choosing ``n_S`` large enough.
+    Measured on the four-latent RHINO fixture (60-85 MHz, 128 channels, 400
+    draws), the residual fraction of the ``t21_depth`` score direction against a
+    plain SVD basis is ``0.562`` at ``n_S = 3``; seeding that one direction at
+    the same ``n_S = 3`` takes it to ``1.5e-16``. The repair is complete, not
+    incremental, and it does not depend on choosing ``n_S`` large enough.
+
+    **Where the deletion stops depends on the bank, and both numbers are real.**
+    That fixture recovers the direction unseeded by ``n_S = 4``, because four
+    near-linear latents span their own tangent space once four vectors are
+    allowed. A richer pre-planning bank measured ``0.3147`` at ``n_S = 3``,
+    ``0.0289`` at 5, ``0.0040`` at 8 and ``0.0000`` only at 13. Seeding is what
+    makes the answer independent of which of those a campaign happens to have.
 
     Args:
         space, pipeline, state_template: the model.
@@ -558,6 +565,149 @@ def build_reduced_basis(
         seeded=seeded_names,
         support=support,
         reference_values=values,
+    )
+
+
+class FidelityReport(eqx.Module):
+    """What a basis retains of each named latent's signature.
+
+    Attributes:
+        residuals: ``{name: r_j}`` with
+            ``r_j = ||(I - Pi) dmu/dtheta_j||_{N^-1} / ||dmu/dtheta_j||_{N^-1}``.
+            ``nan`` where the prediction does not respond to the latent at all.
+        full: the Fisher of the score directions against the data, named rows.
+        projected: the same Fisher after projection onto the basis. The
+            difference between the two is what the truncation cost, and D14's
+            named-row rendering is what attaches a *latent's name* to a
+            collapsed eigenvalue -- a scalar fidelity number names no culprit,
+            which is the whole reason section 5 requirement 4 exists.
+    """
+
+    residuals: dict[str, float] = eqx.field(static=True)
+    full: FlatMatrix
+    projected: FlatMatrix
+
+    def worst(self) -> tuple[str, float]:
+        """``(name, r_j)`` of the least faithful direction. ``nan`` sorts first."""
+        items = sorted(
+            self.residuals.items(),
+            key=lambda item: (not np.isnan(item[1]), -item[1]),
+        )
+        return items[0]
+
+    def refuse_above(self, tolerance: float) -> None:
+        """Raise if any direction is worse than a declared tolerance.
+
+        Two failures, deliberately separate messages. A direction the basis
+        cannot represent is a truncation to fix; a direction that does not exist
+        is a model to fix, and reporting the second as the first would send the
+        caller to raise ``n_S`` against a derivative that is identically zero.
+        """
+        absent = sorted(
+            name for name, value in self.residuals.items() if np.isnan(value)
+        )
+        if absent:
+            raise StateValidationError(
+                f"The prediction does not respond to {absent} at this point: "
+                "dmu/dtheta is identically zero, so there is no direction for a "
+                "basis to be faithful to and r_j is 0/0 rather than large. This is "
+                "a statement about the model, not the basis. Run "
+                "identifiability(space, pipeline, state), or move the expansion "
+                "point with at= if the derivative merely happens to vanish here."
+            )
+        bad = {
+            name: value for name, value in self.residuals.items() if value > tolerance
+        }
+        if bad:
+            listed = ", ".join(
+                f"{name}={value:.4f}" for name, value in sorted(bad.items())
+            )
+            raise StateValidationError(
+                f"This basis loses {listed} against a tolerance of {tolerance}. "
+                "Compression is refused: the stored term would have a collapsed "
+                "Fisher eigenvalue along that direction and its marginal would "
+                "revert toward the prior, while every other diagnostic -- residual "
+                "chi-square, conditioning, bank reproduction -- stayed clean. "
+                "Seed the score direction (build_reduced_basis does this by "
+                "default), or raise n_basis; a plain SVD orders modes by "
+                "prior-induced amplitude, so a signal three orders below the "
+                "foreground is the last retained and the first dropped."
+            )
+
+
+def basis_fidelity(basis: ReducedBasis, scores: dict[str, jax.Array]) -> FidelityReport:
+    """Per-direction fidelity, plus the two named Fishers -- section 5 requirement 4.
+
+    Args:
+        basis: the dictionary under test.
+        scores: ``{name: (size, n_data)}`` from :func:`score_directions`.
+
+    Returns:
+        A :class:`FidelityReport`. Its matrices are rendered in **flatten**
+        order, derived from the actual flattening of a template rather than from
+        the order ``scores`` happens to iterate in -- ``jax`` sorts a dict's
+        keys, and a matrix built in one order and labelled in the other is wrong
+        by a permutation that is the identity exactly when the latents are named
+        alphabetically.
+    """
+    template = {
+        name: jnp.zeros((rows.shape[0],) if rows.shape[0] > 1 else ())
+        for name, rows in scores.items()
+    }
+    names, spans, shapes = _named_spans(template)
+    stacked = _whiten(
+        jnp.concatenate([scores[name] for name in names], axis=0), basis.weight
+    )
+    # `_whiten` selects first, so a non-finite entry at a sample the reference
+    # could not see is already an exact 0.0 here and this fires only for the case
+    # the message names. Ordered before anything comparison-based, because NaN
+    # defeats every comparison: `norm(nan)/norm(nan)` is nan, `nan > tolerance`
+    # is False, and `refuse_above` would wave a broken forward model through
+    # while reporting a perfectly conditioned Fisher.
+    if not bool(jnp.all(jnp.isfinite(stacked))):
+        raise StateValidationError(
+            "A score direction is non-finite where the reference observed. That is "
+            "a broken forward model, not a truncation to report: dmu/dtheta cannot "
+            "be NaN at a sample the data constrains. Sanitising it here would turn "
+            "the fault into a plausible fidelity number, so it is refused instead."
+        )
+
+    coefficients = jax.vmap(basis._project_whitened)(stacked)
+    residuals = stacked - coefficients @ basis.whitened
+    norms = jnp.linalg.norm(stacked, axis=1)
+    # `where` twice, never a multiply: the inner one keeps the division finite,
+    # since a masked-out `0/0` is nan and `0.0 * nan` is nan too.
+    safe = jnp.where(norms > 0.0, norms, 1.0)
+    per_row = np.asarray(
+        jnp.where(norms > 0.0, jnp.linalg.norm(residuals, axis=1) / safe, jnp.nan)
+    )
+    # `np.max` and NOT `np.nanmax`: a multi-component latent with one dead
+    # component IS a dead direction, and hiding it behind its live components is
+    # the failure this whole function exists to make visible.
+    fractions = {
+        name: float(np.max(per_row[start:stop]))
+        for name, (start, stop) in zip(names, spans, strict=True)
+    }
+
+    structure = jax.tree.structure(template)
+    return FidelityReport(
+        residuals=fractions,
+        full=FlatMatrix(
+            matrix=stacked @ stacked.T,
+            structure=structure,
+            kind="fisher",
+            names=names,
+            spans=spans,
+            shapes=shapes,
+        ),
+        projected=FlatMatrix(
+            matrix=coefficients @ basis.gram() @ coefficients.T,
+            structure=structure,
+            kind="fisher",
+            names=names,
+            spans=spans,
+            shapes=shapes,
+        ),
     )
 
 
