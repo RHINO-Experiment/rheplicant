@@ -14,7 +14,11 @@ uv.lock
 
 # Docs build
 docs/_build/
-docs/signal-path.md
+# Build artefacts embedded by the tracked docs/signal-path.md: the mermaid
+# diagram of the live RADIO_GRAPH and the two example assembly renders. The
+# PAGE is a source file -- it used to be generated and ignored, which put its
+# argument out of reach of git diff, grep, and GitHub.
+docs/_generated/
 docs/signal-path-*.svg
 
 # Tooling caches

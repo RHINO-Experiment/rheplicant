@@ -103,16 +103,45 @@ html_theme_options = {
     ],
 }
 
-exclude_patterns = ["_build", "superpowers"]
+exclude_patterns = ["_build", "superpowers", "_generated"]
 
-# The signal-path page is generated from the live template at build time,
-# so the rendered graph can never drift from the code. Two example
-# assemblies are rendered to SVG alongside it, showing the lit/dim view.
+# The signal path's PROSE is a tracked source file, `docs/signal-path.md`. Only
+# the artefacts it embeds are generated here: the mermaid diagram of the live
+# template, and two example assembly renders.
+#
+# It used to be the other way round -- conf.py wrote the whole page as one string
+# literal and `.gitignore` hid the result -- and that cost more than it looked
+# like it did. The page carried the composition model, the node kinds, the
+# "template, not the framework" argument and the custom-graph sketch; all of it
+# was invisible to `git diff`, invisible to grep, unreachable on GitHub (the
+# README's link to it 404'd), and impossible to edit where it is read. Worse, the
+# ImportError fallback below replaced the entire page with a two-line stub, so a
+# build where the package failed to import shipped documentation with no
+# explanation of Cascade/Sum/Switch at all.
+#
+# Now a failed import costs a diagram, not an argument. Every artefact is written
+# on both paths, so the page never references a file that is not there.
 _DOCS_DIR = pathlib.Path(__file__).parent
-_SIGNAL_PATH_PAGE = _DOCS_DIR / "signal-path.md"
+_GENERATED = _DOCS_DIR / "_generated"
+
+#: Shown in place of a render when `rheplicant` will not import. A visible
+#: statement of what is missing beats a broken-image icon, and beats the silence
+#: of a directive whose file is absent.
+_PLACEHOLDER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="60">'
+    '<text x="8" y="34" font-family="sans-serif" font-size="14">'
+    "rheplicant is not importable in this build environment; render skipped."
+    "</text></svg>"
+)
+_PLACEHOLDER_MERMAID = (
+    "flowchart LR\n"
+    '    skipped["rheplicant is not importable in this build '
+    'environment;\\ngraph rendering skipped"]\n'
+)
 
 
-def _example_svgs() -> None:
+def _example_svgs() -> tuple[str, str]:
+    """The two lit/dim example renders, as SVG source."""
     import jax.numpy as jnp
 
     from rheplicant.radio import (
@@ -140,10 +169,6 @@ def _example_svgs() -> None:
         BeamOperator(solid_angle=jnp.array(0.8)),
         GainOperator(gain=jnp.array(1.1)),
     )
-    (_DOCS_DIR / "signal-path-partial.svg").write_text(
-        partial.to_svg(title="Partial twin: beam-convolved sky through the gain")
-    )
-
     fuller = assemble(
         GlobalSignalOperator(
             depth=jnp.array(0.2), centre=jnp.array(72e6), width=jnp.array(5e6)
@@ -159,8 +184,9 @@ def _example_svgs() -> None:
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(0.5)),
     )
-    (_DOCS_DIR / "signal-path-fuller.svg").write_text(
-        fuller.to_svg(title="Fuller twin: sky, RFI, ground, atmosphere, cal loads")
+    return (
+        partial.to_svg(title="Partial twin: beam-convolved sky through the gain"),
+        fuller.to_svg(title="Fuller twin: sky, RFI, ground, atmosphere, cal loads"),
     )
 
 
@@ -168,102 +194,12 @@ try:
     from rheplicant.radio import RADIO_GRAPH
 
     _mermaid = RADIO_GRAPH.to_mermaid()
-    _example_svgs()
-    _SIGNAL_PATH_PAGE.write_text(
-        "# The canonical signal path\n\n"
-        "## Operators, and three ways to compose them\n\n"
-        "A signal path is not a special kind of object. It is **operators** — "
-        "each one `State in, State out` — plus exactly **three structures** "
-        "for putting them together. There is nothing else in the graph:\n\n"
-        ":::{list-table}\n:header-rows: 1\n:widths: 14 22 30 34\n\n"
-        "* - Structure\n  - Combinator\n  - Meaning\n  - Node kind it comes from\n"
-        "* - **Cascade**\n  - `Pipeline`\n  - one after another; each "
-        "transforms what the last produced\n  - a chain of `transform` nodes\n"
-        "* - **Sum**\n  - `SumOperator`\n  - independent contributions that "
-        "**add**\n  - a `junction` node `(+)`\n"
-        "* - **Switch**\n  - `SelectOperator`\n  - alternatives, one "
-        "**selected** per time sample\n  - a `selector` node `(sw)`\n"
-        ":::\n\n"
-        "Nodes come in the matching four kinds: a **source** creates data "
-        "(in-degree 0), a **transform** changes it (in-degree 1), a "
-        "**junction** sums its inputs and a **selector** switches between "
-        "them (both in-degree ≥ 2). That is the entire vocabulary. "
-        "`assemble(*operators)` lights the sub-path your operators induce and "
-        "folds it into exactly those three combinators, so the composition is "
-        "a consequence of the physics you declared rather than something you "
-        "wrote out.\n\n"
-        "Two rules follow from the table rather than being extra:\n\n"
-        "- **A junction or selector with one live input is traversed as "
-        "identity.** No `SumOperator` around a single branch, no switch array "
-        "for a twin with no calibration load. Partial models come free because "
-        "a structure with nothing to combine is not a structure.\n"
-        "- **Several instances at one `many` node compose the way their "
-        "consumer composes** — summed into a junction, switched at a selector. "
-        "Two `CalLoadOperator`s are two switch positions, not one load worth "
-        "their sum.\n\n"
-        ":::{admonition} The graph is a template, not the framework\n"
-        ":class: note\n"
-        "`rheplicant.radio.RADIO_GRAPH` is **RHINO's** structure: a "
-        "single-antenna, switched-load, drift-scanning horn. It is the "
-        "*default*, not the definition. The machinery underneath — "
-        "`SignalGraph`, the four node kinds, the three combinators, "
-        "`assemble` — knows nothing about radio astronomy, and a different "
-        "instrument is a different template registered the same way:\n\n"
-        "```python\n"
-        "from rheplicant.core.graph import NodeSpec, SignalGraph, register_graph\n\n"
-        "MY_GRAPH = register_graph(SignalGraph(\n"
-        '    "my-instrument",\n'
-        '    {"emitter":  NodeSpec("source", "what I emit"),\n'
-        '     "response": NodeSpec("transform", "what my box does")},\n'
-        '    [("emitter", "response")],\n'
-        "))\n"
-        "```\n\n"
-        "*Planned:* a documented path for supplying a custom graph end to end "
-        "— operators declaring `graph_node` against it, rendering, and the "
-        "assembly rules — so that *which instrument* becomes a configuration "
-        "choice rather than a fork. The pieces are already public and are what "
-        "`RADIO_GRAPH` itself is built from; what is missing is the guide.\n"
-        ":::\n\n"
-        "---\n\n"
-        "## RHINO's template\n\n"
-        "The single-antenna path every assembly lights up — generated "
-        "from `rheplicant.radio.RADIO_GRAPH` at documentation build time. `(+)` "
-        "nodes are sum junctions, `(sw)` the antenna/cal-load selector; see "
-        "the [tour](tour.md#graph-assembly) for the assembly rules and "
-        "[the operator catalog](operators.md) for what lives at each node.\n\n"
-        "```{mermaid}\n" + _mermaid + "\n```\n\n"
-        "## Lit and dim: what an assembly simulates\n\n"
-        "`assemble(*operators)` never shows you only the piece you built — "
-        "rendering always draws the *full* template, with the provided "
-        "operators lit (colored, amber signal path), traversed-as-identity "
-        "nodes half-lit, and everything else dimmed. Reserved placeholder "
-        "leaves are dashed. Both examples below are real renders, generated "
-        "at build time with `assembly.to_svg()` (`to_html()` produces the "
-        "same figure as a standalone page).\n\n"
-        "A partial twin — five operators, `assemble(global_signal, "
-        "foregrounds, ionosphere, beam, gain)`; every junction on the way "
-        "passes through and the rest of the receiver chain is identity:\n\n"
-        "```{figure} signal-path-partial.svg\n"
-        ":alt: Partial twin with five lit operators\n\n"
-        "Partial twin: the beam-convolved sky through the gain.\n"
-        "```\n\n"
-        "A fuller twin — nine operators including RFI, ground pickup, "
-        "atmospheric emission, and switched calibration loads (the `sw` "
-        "selector node); note the two dashed entrances (`atmosphere_field` and "
-        "`ground_field`) staying dim. Dashed means *reserved* — the node is "
-        "part of the physics and no shipped operator declares it yet — which "
-        "is a stronger claim than merely unlit, and one that goes stale the "
-        "moment an operator lands. `t_sys_extra` was dashed until "
-        "`BasisTemperatureOperator` arrived on it; the flag is now derived "
-        "against the operator registry by a test, so the drawing cannot claim "
-        "absent physics that is in fact present.\n\n"
-        "```{figure} signal-path-fuller.svg\n"
-        ":alt: Fuller twin with nine lit operators\n\n"
-        "Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.\n"
-        "```\n"
-    )
-except ImportError:  # pragma: no cover
-    _SIGNAL_PATH_PAGE.write_text(
-        "# The canonical signal path\n\n(rheplicant is not importable in this "
-        "build environment; graph rendering skipped.)\n"
-    )
+    _partial_svg, _fuller_svg = _example_svgs()
+except ImportError:  # pragma: no cover - only when the package will not import
+    _mermaid = _PLACEHOLDER_MERMAID
+    _partial_svg = _fuller_svg = _PLACEHOLDER_SVG
+
+_GENERATED.mkdir(exist_ok=True)
+(_GENERATED / "radio-graph.mmd").write_text(_mermaid)
+(_DOCS_DIR / "signal-path-partial.svg").write_text(_partial_svg)
+(_DOCS_DIR / "signal-path-fuller.svg").write_text(_fuller_svg)

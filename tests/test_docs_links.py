@@ -11,10 +11,9 @@ project builds with ``sphinx -n``, not ``-W``, and ``.readthedocs.yaml`` sets no
 the check without a build, in milliseconds, by slugifying every heading the way
 ``myst_heading_anchors`` does and looking each ``](page.md#anchor)`` up.
 
-It covers ``conf.py`` too, because ``docs/signal-path.md`` is not a source file:
-it is written at build time from a string literal in ``conf.py`` and is
-gitignored, so a dead link inside it is invisible to a reader of ``docs/*.md``
-and to ``git diff`` alike. That is exactly where the dead anchor was.
+It covers ``conf.py`` too, because links can be written there: ``conf.py``
+generates the artefacts ``docs/signal-path.md`` embeds, and for a long time it
+generated the whole page, which is exactly where the dead anchor was hiding.
 
 **The D range.** ``README.md`` advertised "Design decisions D1–D28" while
 ``DESIGN.md`` had reached D31 — the same failure ``test_readme_counts.py`` was
@@ -35,10 +34,12 @@ _MAX_ANCHOR_LEVEL = 3
 #: A markdown link to another page with a fragment: ``](page.md#anchor)``.
 _PAGE_ANCHOR = re.compile(r"\]\((?!https?:)([\w./-]+\.md)#([\w-]+)\)")
 
-#: Pages that are generated rather than committed, and so are not on disk to
-#: read headings from. Links INTO them cannot be checked; links FROM them can,
-#: because their source text lives in conf.py.
-_GENERATED = {"signal-path.md"}
+#: Pages generated rather than committed. Empty, and that is the point:
+#: ``signal-path.md`` used to be here, written wholesale by ``conf.py`` into a
+#: gitignored file, so links into it were exempt from this check. Its prose is a
+#: source file now and only the diagram is generated, so the exemption is gone
+#: and ``signal-path.md#rhinos-template`` is checked like any other link.
+_GENERATED: frozenset[str] = frozenset()
 
 
 def _slugs(text: str) -> set[str]:
@@ -145,4 +146,36 @@ def test_readme_d_range_matches_design() -> None:
         f"README.md says the decisions run to D{quoted.group(1)}, but DESIGN.md's last "
         f"is D{last}. Update the README rather than loosening this: the count drifted "
         "by three before anything checked it."
+    )
+
+
+def test_every_documentation_page_is_tracked_by_git() -> None:
+    """No documentation page may be a build artefact.
+
+    ``docs/signal-path.md`` was one: ``conf.py`` wrote the whole page from a
+    string literal and ``.gitignore`` hid the result. It carried the composition
+    model, the four node kinds, the "template, not the framework" argument and
+    the custom-graph sketch -- and none of that was in ``git diff``, in a grep,
+    or on GitHub, where ``README.md``'s link to the page 404'd. The
+    ``except ImportError`` fallback replaced the entire page with a two-line
+    stub, so a build machine without the package shipped documentation with no
+    explanation of Cascade/Sum/Switch at all.
+
+    Generated *artefacts* are fine and stay ignored -- the mermaid diagram of the
+    live graph, the two assembly renders. A generated *page* is not.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "docs/*.md"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    tracked_names = {Path(p).name for p in tracked}
+    on_disk = {p.name for p in DOCS.glob("*.md")}
+
+    untracked = on_disk - tracked_names
+    assert not untracked, (
+        f"{sorted(untracked)} exist in docs/ but are not tracked by git. A page "
+        "that is generated and ignored cannot be diffed, grepped, read on GitHub, "
+        "or edited where it is read -- generate the figures, author the prose."
     )
