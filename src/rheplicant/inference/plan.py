@@ -765,6 +765,7 @@ class SamplingPlan:
         solve_guard: float | None,
         tuning: dict[tuple[str, ...], Any],
         residuals: dict[tuple[str, ...], float],
+        programs: dict[Any, Any],
     ) -> dict[str, jax.Array]:
         """One sweep: every block updated in declaration order, in place of nothing.
 
@@ -773,6 +774,12 @@ class SamplingPlan:
         conditioning, partitioning, sigma, the joint chi-squared, the
         identifiability check — is shared, which is the claim the module
         docstring makes.
+
+        ``programs`` is the run's compiled-transition cache, created once per
+        run and threaded through every sweep. It is an argument rather than
+        state on the plan because a plan is an immutable declaration that may be
+        run twice against different data; a cache living on it would outlive the
+        conditioning it was compiled for.
         """
         for index, (block, engine) in enumerate(self._assign):
             block_key = None if key is None else jax.random.fold_in(key, index)
@@ -791,6 +798,7 @@ class SamplingPlan:
                     values, tuning[block.names] = gradient_draw(
                         cond, block.names, values, key=block_key, steps=steps,
                         tuning=tuning.get(block.names), adapt=adapt,
+                        programs=programs,
                     )
                     potential = conditional_potential(cond, block.names, values)
                     residuals[block.names] = float(
@@ -884,6 +892,7 @@ class SamplingPlan:
         )
         report = None
         residuals: dict[tuple[str, ...], float] = {}
+        programs: dict[Any, Any] = {}
         chi2 = [float(cond.chi2(values))]
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
@@ -898,7 +907,7 @@ class SamplingPlan:
             values = self._update(
                 cond, values, draw=False, key=None, adapt=False,
                 solve_tol=solve_tol, solve_guard=solve_guard,
-                tuning={}, residuals=residuals,
+                tuning={}, residuals=residuals, programs=programs,
             )
             chi2.append(float(cond.chi2(values)))
             progress = chi2[-2] - chi2[-1]
@@ -1034,6 +1043,7 @@ class SamplingPlan:
         report = None
         residuals: dict[tuple[str, ...], float] = {}
         tuning: dict[tuple[str, ...], Any] = {}
+        programs: dict[Any, Any] = {}
         chi2: list[float] = []
         kept: dict[str, list[jax.Array]] = {name: [] for name in self.space.names}
         due, repeat = check_identifiability is not False, (
@@ -1047,7 +1057,7 @@ class SamplingPlan:
             values = self._update(
                 cond, values, draw=True, key=jax.random.fold_in(key, sweep),
                 adapt=sweep < warmup, solve_tol=solve_tol, solve_guard=solve_guard,
-                tuning=tuning, residuals=residuals,
+                tuning=tuning, residuals=residuals, programs=programs,
             )
             chi2.append(float(cond.chi2(values)))
             if sweep >= warmup:

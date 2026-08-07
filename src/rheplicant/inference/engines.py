@@ -41,6 +41,7 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import lax
@@ -176,6 +177,88 @@ def conditional_potential(
         return 0.5 * cond.chi2({**others, **x}) - _log_prior(cond.space, names, x)
 
     return potential
+
+
+def _potential_of(
+    cond: Conditioning, names: Sequence[str]
+) -> Callable[[dict[str, jax.Array], dict[str, jax.Array]], jax.Array]:
+    """The same objective, with the neighbours as an ARGUMENT rather than a closure.
+
+    This is the whole of the compilation fix. :func:`conditional_potential`
+    rebuilds its closure every sweep because ``others`` changes, so every
+    ``jax.jit`` below it is keyed on a function object that never repeats: 41
+    XLA compilations over 20 sweeps, 121 over 60, against 0.3 ms of leapfrog per
+    call. Lifting ``others`` to a traced argument leaves ONE program per block
+    per branch for the life of a run.
+
+    Kept separate from :func:`conditional_potential`, which stays the
+    single-argument objective the estimator and the residual reporting take.
+    """
+
+    def potential(
+        others: dict[str, jax.Array], x: dict[str, jax.Array]
+    ) -> jax.Array:
+        return 0.5 * cond.chi2({**others, **x}) - _log_prior(cond.space, names, x)
+
+    return potential
+
+
+def _gradient_transition(
+    cond: Conditioning, names: Sequence[str], *, steps: int, adapt: bool
+) -> Callable[..., tuple[dict[str, jax.Array], tuple[jax.Array, jax.Array]]]:
+    """One jittable NUTS transition: ``(others, x0, key, tuning) -> (x, tuning)``.
+
+    Reproduces ``MCMC(kernel, num_warmup=w, num_samples=steps).run(...)`` exactly
+    -- measured to 8.9e-16, one ulp -- by scanning ``kernel.sample`` the number
+    of times ``MCMC`` would have applied it: ``2 * steps`` while adapting
+    (``num_warmup=steps`` AND ``num_samples=steps``) and ``steps`` when frozen.
+    Getting that count wrong is the failure mode with the most room to hide, and
+    it does not hide: ``steps`` instead of ``2 * steps`` disagrees at 1e-1.
+
+    ``kernel.init`` is called rather than the ``hmc()`` primitives beneath it
+    because ``init`` performs its own ``random.split``, exactly as ``MCMC.run``
+    does. Skipping that split yields a valid but DIFFERENT chain -- measured, a
+    sweep-0 draw off by 3.8e-4, which is the size of the posterior sigma.
+
+    ``eqx.filter_jit`` and not ``jax.jit``: measured at 0.143 ms against
+    0.115 ms, so the choice is free, and it is what preserves an
+    ``EquinoxRuntimeError`` from a guard inside the traced region rather than
+    degrading it to a bare ``JaxRuntimeError`` with the message buried.
+    """
+    from numpyro.infer import NUTS
+
+    length = 2 * steps if adapt else steps
+    potential_of = _potential_of(cond, names)
+
+    @eqx.filter_jit
+    def transition(others, x0, key, tuning):
+        def potential(x):
+            return potential_of(others, x)
+
+        if adapt:
+            kernel = NUTS(potential_fn=potential)
+            warmup = steps
+        else:
+            step_size, inverse_mass_matrix = tuning
+            kernel = NUTS(
+                potential_fn=potential,
+                step_size=step_size,
+                inverse_mass_matrix=inverse_mass_matrix,
+                adapt_step_size=False,
+                adapt_mass_matrix=False,
+            )
+            warmup = 0
+        start = kernel.init(key, warmup, init_params=x0)
+        final, _ = jax.lax.scan(
+            lambda carry, _: (kernel.sample(carry, (), {}), None),
+            start,
+            None,
+            length=length,
+        )
+        adapted = final.adapt_state
+        return final.z, (adapted.step_size, adapted.inverse_mass_matrix)
+
+    return transition
 
 
 # ------------------------------------------------------- the conjugate engine --
@@ -341,6 +424,7 @@ def gradient_draw(
     steps: int,
     tuning: Any = None,
     adapt: bool = True,
+    programs: dict[Any, Any] | None = None,
     **_ignored,
 ) -> tuple[dict[str, jax.Array], Any]:
     """``steps`` NUTS steps on the block's conditional potential, last state kept.
@@ -365,39 +449,40 @@ def gradient_draw(
             is visiting destroys the reversibility the transition's validity
             rests on, so the tuning is frozen for every sweep whose draws are
             kept.
+        programs: a caller-owned cache of compiled transitions, keyed on
+            ``(names, steps, adapting)``. A plan threads one dict through its
+            whole run so the block compiles once instead of once per sweep;
+            ``None`` compiles fresh, which is correct but pays 300 ms.
+
+            The key deliberately does **not** include the conditioning. Keying
+            on ``id(cond)`` would be the obvious shortcut and is a trap: CPython
+            reuses ids after collection, so a stale program could be served
+            against a different ``observed`` — a confident wrong answer with
+            every guard still green. Callers own the cache and therefore own its
+            lifetime; a new conditioning gets a new dict.
 
     Returns:
         ``(values, tuning)`` — the block updated to the chain's last state, and
         the tuning to hand to the next sweep.
     """
     _require_numpyro()
-    from numpyro.infer import MCMC, NUTS
 
-    potential = conditional_potential(cond, names, values)
-    x0 = {name: values[name] for name in names}
-
-    if adapt or tuning is None:
-        kernel = NUTS(potential_fn=potential)
-        warmup = steps
+    adapting = adapt or tuning is None
+    key_for = (tuple(names), steps, adapting)
+    if programs is None:
+        transition = _gradient_transition(cond, names, steps=steps, adapt=adapting)
     else:
-        step_size, inverse_mass_matrix = tuning
-        kernel = NUTS(
-            potential_fn=potential,
-            step_size=step_size,
-            inverse_mass_matrix=inverse_mass_matrix,
-            adapt_step_size=False,
-            adapt_mass_matrix=False,
-        )
-        warmup = 0
+        transition = programs.get(key_for)
+        if transition is None:
+            transition = _gradient_transition(
+                cond, names, steps=steps, adapt=adapting
+            )
+            programs[key_for] = transition
 
-    mcmc = MCMC(kernel, num_warmup=warmup, num_samples=steps, progress_bar=False)
-    mcmc.run(key, init_params=x0)
-    drawn = mcmc.get_samples()
-    adapted = mcmc.last_state.adapt_state
-    return (
-        {**values, **{name: drawn[name][-1] for name in names}},
-        (adapted.step_size, adapted.inverse_mass_matrix),
-    )
+    others = {key: value for key, value in values.items() if key not in names}
+    x0 = {name: values[name] for name in names}
+    drawn, adapted = transition(others, x0, key, tuning)
+    return {**values, **drawn}, adapted
 
 
 __all__ = [
