@@ -100,7 +100,7 @@ other script finishes in under ten seconds.
   - One `SamplingPlan` over six latents, conjugate blocks and a gradient block.
     Opens by being **refused**: over the guided tour's own twin the six are
     exactly degenerate, and the repair is three more calibration loads
-  - **37 s**
+  - **20 s**
   - `cal`, numpyro
 :::
 
