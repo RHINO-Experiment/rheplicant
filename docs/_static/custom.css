@@ -67,3 +67,25 @@ table > caption,
   height: auto !important;
   max-width: 100%;
 }
+
+/* The repository link under the brand (docs/_templates/sidebar/github.html).
+   Quiet enough not to compete with the navigation, legible enough to be found
+   without hunting -- which the footer mark and the unlabelled top-right glyphs
+   were not. */
+.sidebar-repo {
+  padding: 0 var(--sidebar-item-spacing-horizontal, 1rem) 0.75rem;
+  text-align: center;
+}
+.sidebar-repo a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.8125rem;
+  color: var(--color-foreground-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.sidebar-repo a:hover {
+  color: var(--color-brand-primary);
+  border-bottom-color: currentColor;
+}

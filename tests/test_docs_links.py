@@ -252,3 +252,30 @@ def test_every_committed_svg_is_well_formed_xml() -> None:
         "These committed SVGs are not well-formed XML, so a browser will not "
         "render them at all:\n  " + "\n  ".join(broken)
     )
+
+
+def test_the_sidebar_keeps_furo_s_own_components_and_adds_ours() -> None:
+    """Naming ``html_sidebars`` REPLACES furo's default list, silently.
+
+    Inserting one row means writing out the whole list, and anything left off
+    disappears with no warning -- the first draft of this dropped
+    ``ethical-ads.html``, Read the Docs' ad slot, purely as a side effect. This
+    pins both directions: our row is present, and none of furo's are missing.
+    """
+    conf = (DOCS / "conf.py").read_text()
+    listed = set(re.findall(r'"(sidebar/[a-z-]+\.html)"', conf))
+    furo_default = {
+        "sidebar/scroll-start.html",
+        "sidebar/brand.html",
+        "sidebar/search.html",
+        "sidebar/navigation.html",
+        "sidebar/ethical-ads.html",
+        "sidebar/scroll-end.html",
+    }
+    assert furo_default <= listed, (
+        f"conf.py's html_sidebars drops {sorted(furo_default - listed)} from "
+        "furo's default list. Naming the list replaces it, so a component left "
+        "off is simply gone."
+    )
+    assert "sidebar/github.html" in listed
+    assert (DOCS / "_templates" / "sidebar" / "github.html").is_file()

@@ -72,6 +72,23 @@ nitpick_ignore = [
 html_theme = "furo"
 html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
 html_static_path = ["_static"]
+#: One added template, `sidebar/github.html`: see the file for why furo's own
+#: two repository links were not enough. The rest of this list is furo's
+#: default, reproduced because naming the list at all replaces it -- including
+#: `ethical-ads.html`, which is Read the Docs' ad slot and is kept deliberately
+#: rather than dropped as a side effect of inserting one row.
+templates_path = ["_templates"]
+html_sidebars = {
+    "**": [
+        "sidebar/scroll-start.html",
+        "sidebar/brand.html",
+        "sidebar/github.html",
+        "sidebar/search.html",
+        "sidebar/navigation.html",
+        "sidebar/ethical-ads.html",
+        "sidebar/scroll-end.html",
+    ]
+}
 #: Caption typography: see the file. Nothing here overrides furo's own
 #: variables, so it follows the reader's light/dark choice by construction.
 html_css_files = ["custom.css"]

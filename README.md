@@ -32,12 +32,12 @@ the core is domain-agnostic by construction.
 
 ## Four things it is built to do
 
-| | | |
-|---|---|---|
-| **1 · Forward modelling** | Simulate what any stage of the experiment would produce — a sky, a receiver output, a processed product. Where you stop is a property of the graph. | [tour](docs/tour.md) |
-| **2 · Bayesian inference** | Read the same twin backwards. Free any subset of what it contains; the noise model *is* the likelihood; the engine follows from the model's structure. | [inference](docs/inference.md) |
-| **3 · Neural surrogates** | Replace an expensive stage with a trained network and leave the graph's shape untouched — or amortize the posterior itself. | [operators](docs/operators.md) |
-| **4 · Streaming evidence** | Keep a campaign after its recordings are archived: compress each night to a fixed-size likelihood factor, then discard the data. | [evidence](docs/evidence.md) |
+| | |
+|---|---|
+| **1 · Forward modelling** | Simulate what any stage of the experiment would produce — a sky, a receiver output, a processed product. Where you stop is a property of the graph. |
+| **2 · Bayesian inference** | Read the same twin backwards. Free any subset of what it contains; the noise model *is* the likelihood; the engine follows from the model's structure. |
+| **3 · Neural surrogates** | Replace an expensive stage with a trained network and leave the graph's shape untouched — or amortize the posterior itself. |
+| **4 · Streaming evidence** | Keep a campaign after its recordings are archived: compress each night to a fixed-size likelihood factor, then discard the data. |
 
 None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
@@ -54,10 +54,12 @@ immutable, which is what makes sharing safe.
 effects, calibration, filtering and neural networks are all the same kind of
 thing, each carrying its physical parameters as differentiable leaves.
 
-**`state.data` always holds what the instrument has produced so far.** A sky
-source writes the `(n_time, n_freq)` antenna temperature into it; the antenna's
-ohmic loss replaces that with the same array after loss; the receiver replaces
-*that* with a system temperature. One field, read at whatever stage you are.
+**`state.data` always references what the instrument has produced so far.**
+For example: the sky engine produces the `(n_time, n_freq)` antenna
+temperature, the antenna's ohmic loss produces that array after loss, the
+receiver produces a system temperature. Nothing is written in place — each
+stage hands back a *new* `State` whose `data` points at its own result, while
+the fields it did not touch go on pointing where they already did.
 
 The sky map itself is not in `state.data` — it is a **parameter of the sky
 model**, differentiable like every other, which is why a map can be inferred
@@ -163,81 +165,28 @@ name are the same: `rheplicant`. Full instructions, the four extras and the
 two-session test split are on the
 [install page](https://rheplicant.readthedocs.io/en/latest/install.html).
 
-## Sixty seconds of RHEPLICANT
+## Seeing it work
 
-```python
-import jax, jax.numpy as jnp, equinox as eqx
-from rheplicant import State, Coordinates
-from rheplicant.radio import assemble, SkyOperator, GainOperator, NoiseOperator
-from rheplicant.inference import build_forward_fn, GradientCalibrator
-
-state = State(
-    coords=Coordinates(time=jnp.linspace(0, 60, 128),
-                       freq=jnp.linspace(60e6, 85e6, 32)),
-    key=jax.random.key(0),
-    meta={"telescope": "my-antenna"},
-)
-
-# 1. Simulate: provide operators; the signal-path graph composes them.
-twin = assemble(
-    SkyOperator(amplitude=jnp.array(1e3)),
-    GainOperator(gain=jnp.array(1.1)),          # the truth to recover
-    NoiseOperator(sigma=jnp.array(0.5)),
-)
-observed = eqx.filter_jit(twin)(state)
-
-# 2. Calibrate: freeze everything except the gain, descend the gradient.
-model = twin.replace_node("gain", GainOperator(gain=jnp.array(1.0)))
-spec = jax.tree.map(lambda _: False, model)
-spec = eqx.tree_at(lambda p: p["gain"].gain, spec, replace=True)
-forward, params0 = build_forward_fn(model, state, filter_spec=spec)
-params_fit, losses = GradientCalibrator(learning_rate=2e-7, n_steps=200).fit(
-    forward, params0, observed.data
-)
-print(jax.tree.leaves(params_fit)[0])           # ~1.1
-```
-
-The same `forward` plugs into NUTS posteriors (`to_numpyro_model`), Fisher
-forecasts (`fisher_information`), and neural-surrogate training — see the
-[guided tour](docs/tour.md).
+The snippet above is the whole shape of it: provide operators, let the graph
+compose them, call the result. What that `twin` then plugs into — gradients,
+NUTS posteriors, Fisher forecasts, exact conjugate draws, neural surrogates —
+is one worked example carried end to end in
+**[the guided tour](https://rheplicant.readthedocs.io/en/latest/tour.html)**,
+and fourteen runnable scripts with measured wall clocks in
+[`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
 
 ## What is in the box
 
-- **Core** — `State` (immutable pytree context), `Pipeline` / `SumOperator` /
-  `SelectOperator` composition, `SignalGraph` + `assemble` (graph-guided
-  auto-composition with lit/dim mermaid & HTML rendering), and
-  `Assembly.replace_node` / `Assembly.without` to swap or drop a stage by node
-  id — `without` re-runs `assemble` over the operators that remain rather than
-  doing tree surgery, so the result is exactly the assembly you would have got
-  by never providing that one.
-- **Radio** — a 32-node canonical signal-path graph covering every element of
-  a single-antenna experiment: sky components, ionosphere, RFI, shared
-  chromatic beam, horizon spill, antenna ohmic loss, noise-wave terms, CW tone
-  and switched calibration loads (`cal_load_operators` builds one operator per
-  load straight from a RHINO observation, carrying its measured physical
-  temperature), gain, thermal noise, EMI, ADC, flagging, averaging —
-  plus a modular sky engine — a general differentiable limTOD port and a
-  drift-scan m-mode fast path that returns the same numbers orders of
-  magnitude cheaper, alongside projection matrices and a numpy-limTOD
-  validation bridge — and linear analysis filters (sidereal, sky-space
-  map-making, fringe-rate/delay).
-- **Inference** — a noise model (`RadiometerNoise` by default: multiplicative,
-  σ tracking the prediction) that the likelihood, the weights, the Fisher
-  matrix and the NumPyro scale all read from one place; gradient & Adam
-  calibrators, NumPyro bridge with pytree priors and posterior predictive,
-  Fisher / Cramér-Rao / delta-method uncertainty propagation, Monte Carlo
-  pushforward, `NeuralOperator` surrogate stages, MomentRFI flagging bridge,
-  masked likelihoods, iterative GLS for prediction-dependent covariances, and
-  amortized simulation-based inference (`NeuralPosterior`) validated against
-  the exact conjugate sampler. `SamplingPlan` declares a whole model's Gibbs
-  loop as one partition into `Block`s — each block's engine *derived* from
-  `Latent(..., linear=True)` rather than restated — with two exits (a point
-  estimate and draws), convergence monitored on the joint χ² rather than any
-  per-block residual, and a cross-block identifiability check that refuses a
-  degenerate partition before a sweep runs. Every inference exit also refuses a
-  forward model that draws its own randomness: the frozen realisation biases the
-  fit while leaving `check_linearity`, `identifiability` and the reported error
-  bar untouched, so nothing downstream could report it.
+| Layer | What lives there |
+|---|---|
+| **Core** | `State`, the three combinators, `SignalGraph` + `assemble`, and `Assembly.replace_node` / `.without` to swap or drop a stage by node id. Domain-agnostic — a test enforces the layering. |
+| **Radio** | A 32-node canonical signal path for a single-antenna experiment, a modular sky engine (a differentiable limTOD port plus a drift-scan m-mode fast path agreeing with it to roundoff), and linear analysis filters. |
+| **Inference** | One noise model read by the likelihood, the weights, the Fisher matrix and the NumPyro scale alike; gradient and conjugate engines; `SamplingPlan` to partition a model into blocks whose engine is *derived* rather than restated; streaming evidence for campaigns whose data is gone. |
+
+Per-operator detail is the
+[operator catalog](https://rheplicant.readthedocs.io/en/latest/operators.html);
+every signature is the
+[API reference](https://rheplicant.readthedocs.io/en/latest/api.html).
 
 ## Documentation
 
@@ -262,7 +211,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2766 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2767 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -276,7 +225,7 @@ terms of the noise-wave data model, the CW calibration tone, and the
 separable-basis antenna temperature; the Touchstone and RHINO-HDF5 readers are
 an ingestion layer, not a stand-in for one.
 
-Three of the seventeen are load-bearing even so. `ReceiverOperator`,
+Three of the fifteen are load-bearing even so. `ReceiverOperator`,
 `GainOperator` and `CalLoadOperator` have placeholder *bodies* — no flicker,
 no measured band shape, no load reflection or telemetry — but real shape and
 contract: the receiver module's `unit_mean_bandpass` / `unit_mean_free` are the
@@ -287,40 +236,18 @@ nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
-No CI yet — run the suite and the linter in the project venv before pushing:
+No CI yet, and the suite is two pytest sessions rather than one — the evidence
+layer needs float64 while eighteen tests elsewhere assert refusals that only
+float32 forces, and `jax_enable_x64` is process-global. Plain `pytest` runs both
+for you. That split is also why the reported coverage is 82 % rather than the
+99.7 % it was before the evidence layer landed: the second session runs
+`--no-cov`, so its 467 passing tests contribute nothing to the default report,
+and 1091 of its 1111 uncovered statements are the nine files that session
+covers.
 
-```bash
-.venv/bin/python -m pytest          # 2766 tests, ~12 min with coverage
-JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
-.venv/bin/python -m ruff check src tests
-```
-
-The second line is not optional work you might skip — plain `pytest` already
-runs it for you, in a subprocess, via `tests/test_evidence_session.py`. It is
-listed because that is how you run those tests directly when one of them fails.
-The evidence layer needs float64 (a stored factor's offset scalar is the
-time-bandwidth product, ~7.2e11 for one night, against a difference of ~1e5),
-while the rest of the suite must stay at float32 — eighteen tests assert
-refusals that only float32 forces — and `jax_enable_x64` is process-global, so
-the two cannot share an interpreter.
-
-That split is also why the stated coverage fell from 99.7 % to 82.1 % as the
-evidence layer landed, without any code going untested. The second session runs
-`--no-cov` in its own process, so its 467 passing tests contribute nothing to the
-default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
-`memory.py`, `archive.py`, `reduced_basis.py`, `chain.py` and `diagnostics.py`
-show 11–64 % there, and **1091 of the default report's 1111 uncovered statements
-are those nine files**. Measured, on the run the number above comes from.
-
-**Not** plain `uv run`, and **not** plain `uv sync`: `rfi` and `cal` name
-requirements that are not on PyPI *by design* (see the comments in
-`pyproject.toml`), so `uv` cannot resolve the project and refuses before running
-anything. Measured, not assumed: each reports *"your project's requirements are
-unsatisfiable"*, over `rheplicant[cal]` → `rhino-cal-jax`. limTOD used to be the
-blocker too and no longer is. Add `--frozen` to either and both work against the
-existing lock. Note that `uv sync --frozen` will also *remove* anything
-installed outside the lock, editable local checkouts of limTOD or rhino-cal
-included.
+`uv sync` and `uv run` need `--frozen`. Commands, reasons and the rest of the
+setup are in
+**[Install](https://rheplicant.readthedocs.io/en/latest/install.html)**.
 
 ## Developers and maintainers
 

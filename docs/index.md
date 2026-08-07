@@ -24,29 +24,21 @@ itself.
 :::{grid-item-card} 1 · Forward modelling
 Simulate what any stage of the experiment would produce — a sky, a receiver
 output, a processed product. Where you stop is a property of the graph.
-+++
-[The guided tour](tour.md)
 :::
 
 :::{grid-item-card} 2 · Bayesian inference
 Read the same twin backwards. Free any subset of what it contains; the noise
 model *is* the likelihood; the engine follows from the model's structure.
-+++
-[Inferring anything](inference.md)
 :::
 
 :::{grid-item-card} 3 · Neural surrogates
 Replace an expensive stage with a trained network and leave the graph's shape
 untouched — or amortize the posterior itself.
-+++
-[Operator catalog](operators.md)
 :::
 
 :::{grid-item-card} 4 · Streaming evidence
 Keep a campaign after its recordings are archived: compress each night to a
 fixed-size likelihood factor, then discard the data.
-+++
-[Evidence](evidence.md)
 :::
 ::::
 
@@ -83,10 +75,12 @@ An operator takes the whole scientific context and returns it one step later.
   calibration, filtering and neural networks are all the same kind of thing,
   and each carries its own physical parameters as differentiable leaves.
 
-**`state.data` always holds what the instrument has produced so far.** A sky
-source writes the `(n_time, n_freq)` antenna temperature into it; the antenna's
-ohmic loss replaces that with the same array after loss; the receiver replaces
-*that* with a system temperature. One field, read at whatever stage you are.
+**`state.data` always references what the instrument has produced so far.**
+For example: the sky engine produces the `(n_time, n_freq)` antenna
+temperature, the antenna's ohmic loss produces that array after loss, the
+receiver produces a system temperature. Nothing is written in place — each
+stage hands back a *new* `State` whose `data` points at its own result, while
+the fields it did not touch go on pointing where they already did.
 
 The sky map itself is not in `state.data` — it is a **parameter of the sky
 model**, differentiable like every other, which is why a map can be inferred
