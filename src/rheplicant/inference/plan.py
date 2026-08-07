@@ -555,7 +555,63 @@ class SamplingPlan:
                 "chi-squared settles, and nothing anywhere reports that a parameter you "
                 "declared was never inferred. Add it to a block, or drop it from the space."
             )
+        self._refuse_split_joint_prior(owner)
         return tuple((block, self._engine_of(block)) for block in self.blocks)
+
+    def _refuse_split_joint_prior(self, owner: dict[str, "Block"]) -> None:
+        """Refuse any plan over a space carrying a joint prior.
+
+        A plan does not read one. ``engines._log_prior`` builds each block's
+        conditional from ``Latent.prior`` alone, and a latent covered by a joint
+        prior declares ``prior=None`` — so the density contributes exactly
+        nothing. Measured, on a two-latent block the partition would otherwise
+        accept: the conditional potential is IDENTICAL with the prior declared
+        and without it, at every point, while ``0.5 logdet I`` ranges over 1.20
+        nats across the same points. The sweep then runs and reports a converged
+        chi-squared.
+
+        This refusal used to fire only on a partition that SPLIT the block, and
+        its own advice — "put the whole block in ONE Block" — led straight into
+        the silent case. The refusal is therefore unconditional, and it names
+        the exit that does evaluate the prior.
+
+        A :class:`~rheplicant.inference.priors.JeffreysPrior` is ONE density
+        over its whole ``over=`` block — ``sqrt(det I)`` of the joint
+        information matrix, which is not the product of the sub-blocks'
+        determinants and does not factorise into a term per latent. So a sweep
+        whose blocks split it has no conditional to give either block: whatever
+        each one steps against, the two are not conditionals of a common joint
+        density, and the sweep has no invariant distribution to converge to. It
+        would nevertheless run, settle, and report a converged chi-squared,
+        because every per-block number is computed from the block.
+
+        Called after the cover check, so every name in ``over`` is known to
+        have exactly one owning block.
+        """
+        joint = self.space.joint_prior
+        if joint is None:
+            return
+        placed = ", ".join(
+            f"{name!r} in Block{owner[name].names}" for name in joint.over
+        )
+        split = len({owner[name].names for name in joint.over}) > 1
+        why = (
+            "and this partition splits it across blocks, so neither block would "
+            "even be stepping a conditional of a common density"
+            if split
+            else "and no block would step it at all"
+        )
+        raise ParameterSpaceError(
+            f"This space declares {type(joint).__name__}(over={list(joint.over)}) "
+            f"({placed}), {why}. SamplingPlan does not evaluate a joint prior: each "
+            "block's conditional is built from Latent.prior, and a covered latent "
+            "declares none, so the density would contribute exactly zero — measured, "
+            "the conditional potential is identical with the declaration and without "
+            "it, while 0.5 logdet I ranges over 1.20 nats across the same points. The "
+            "sweep would run, settle, and report a converged chi-squared computed "
+            "entirely from blocks that never saw the prior. to_numpyro_model is the "
+            "exit that evaluates it; use that, or drop the joint prior from the space."
+        )
 
     def _engine_of(self, block: Block) -> str:
         """Derive the block's engine from the declaration, or honour the override."""

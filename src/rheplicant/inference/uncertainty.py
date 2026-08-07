@@ -310,6 +310,21 @@ def _prior_precision(
     # free to depend on each other in the other direction later.
     from rheplicant.inference.linear import _gaussian_parameters
 
+    if space.joint_prior is not None:
+        raise ParameterSpaceError(
+            f"fisher_information was given space= a ParameterSpace declaring "
+            f"{type(space.joint_prior).__name__}(over={list(space.joint_prior.over)}), and "
+            "`space=` means 'add the declared priors' curvature to this matrix'. That "
+            "prior is DEFINED as sqrt(det of this matrix), so adding it would put it "
+            "inside its own definition: the result is not the posterior precision it "
+            "would be labelled as, and it is finite, symmetric and positive definite, so "
+            "nothing downstream would say otherwise. Call this with space=None — which "
+            "is the likelihood Fisher the prior is built from, and is what "
+            "JeffreysPrior.log_density itself passes — or read the posterior by sampling "
+            "the space with to_numpyro_model + NUTS, which is the exit that evaluates a "
+            "joint prior."
+        )
+
     if names is None or spans is None or shapes is None:
         raise StateValidationError(
             "fisher_information was given a ParameterSpace, but these params are not "
@@ -405,7 +420,10 @@ def fisher_information(
             every latent must declare a Gaussian prior: a prior-free one, or one
             with no quadratic form (a Uniform, a Half-Normal, a LogNormal),
             raises :class:`~rheplicant.core.errors.ParameterSpaceError` by name
-            rather than being approximated away.
+            rather than being approximated away. A space declaring a
+            ``joint_prior`` is refused outright: a
+            :class:`~rheplicant.inference.priors.JeffreysPrior` is defined as
+            ``sqrt(det I)``, so it cannot be a term inside ``I``.
 
     Returns:
         A :class:`FlatMatrix` — the ``(n_params, n_params)`` matrix

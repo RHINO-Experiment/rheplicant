@@ -261,6 +261,14 @@ coefficients the noise-wave model consumes.
 .. automodule:: rheplicant.inference.uncertainty
    :members:
    :show-inheritance:
+
+.. automodule:: rheplicant.inference.sensitivity
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.inference.priors
+   :members:
+   :show-inheritance:
 ```
 
 ```{eval-rst}

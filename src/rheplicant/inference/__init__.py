@@ -96,6 +96,7 @@ from rheplicant.inference.plan import (
     SamplingPlan,
     split_rhat,
 )
+from rheplicant.inference.priors import JeffreysPrior
 from rheplicant.inference.reduced_basis import (
     FidelityReport,
     ReducedBasis,
@@ -107,6 +108,11 @@ from rheplicant.inference.reduced_basis import (
     score_directions,
     select_greedy,
     select_svd,
+)
+from rheplicant.inference.sensitivity import (
+    CRITERION_SHIFT,
+    PriorSensitivityReport,
+    prior_sensitivity,
 )
 from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise, marginalise_arrays
 from rheplicant.inference.uncertainty import (
@@ -120,6 +126,7 @@ from rheplicant.inference.uncertainty import (
 __all__ = [
     "BROADCAST",
     "COEFFICIENTS",
+    "CRITERION_SHIFT",
     "DEFAULT_RANK_RTOL",
     "MIN_DRAWS",
     "DISTRIBUTE",
@@ -145,6 +152,7 @@ __all__ = [
     "HomoscedasticNoise",
     "HyperTransition",
     "IdentifiabilityReport",
+    "JeffreysPrior",
     "Latent",
     "LinearBlock",
     "LinearGaussianTransition",
@@ -156,6 +164,7 @@ __all__ = [
     "ParameterSpace",
     "PlanDiagnostics",
     "PlanResult",
+    "PriorSensitivityReport",
     "QuadraticLikelihood",
     "RadiometerNoise",
     "RawLikelihood",
@@ -195,6 +204,7 @@ __all__ = [
     "orthonormalise",
     "parameter_covariance",
     "predict_from_samples",
+    "prior_sensitivity",
     "propagate_covariance",
     "refuse_stochastic_stages",
     "save_memory",

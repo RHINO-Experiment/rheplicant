@@ -59,14 +59,74 @@ def _require_numpyro():
 
 
 def _require_priors(space: ParameterSpace) -> None:
-    """Every latent must have a prior — a free parameter has no posterior."""
-    missing = [latent.name for latent in space.latents if latent.prior is None]
+    """Every latent must have a prior — a free parameter has no posterior.
+
+    A latent the space's ``joint_prior`` covers HAS one; it is simply declared
+    over the block rather than on the latent, and ``ParameterSpace`` already
+    refuses a latent that carries both.
+    """
+    joint = space.joint_prior
+    missing = [
+        latent.name
+        for latent in space.latents
+        if latent.prior is None and not (joint is not None and joint.covers(latent.name))
+    ]
     if missing:
         raise ParameterSpaceError(
             f"Latent(s) {missing} have no prior, so they cannot be sampled. A prior-free "
             "latent is a free parameter: fine for the calibrators, meaningless in a "
             "posterior. Give it a prior, or drop it from the space."
         )
+
+
+def _refuse_sampled_noise_std_under_a_joint_prior(
+    space: ParameterSpace, noise_std: Any, allowed: bool
+) -> None:
+    """Refuse an inferred sigma alongside a joint prior, unless asked for.
+
+    A ``noise_std`` that is a distribution becomes the sample site
+    ``"noise_std"`` below. That site is in NO
+    :class:`~rheplicant.inference.parameters.ParameterSpace`, so no ``over=``
+    can name it and no declaration can say what its prior is. Meanwhile a
+    :class:`~rheplicant.inference.priors.JeffreysPrior` over ``p`` latents is
+    ``sqrt(det I)``, and ``I`` carries ``1/sigma^2`` in every entry — so the
+    factor site multiplies the sigma posterior by ``sigma^-p`` whether or not
+    anybody meant sigma to have a prior at all.
+
+    Measured, in ``tests/inference/test_jeffreys_prior.py``: the factor site's
+    derivative with respect to ``log sigma`` is **exactly -p**, pinned to 1e-9
+    at ``p = 2`` and ``p = 3``. That is the ``sigma^-p``, and what it costs
+    follows in closed form — the sigma posterior's mode moves from ``chi2/n`` to
+    ``chi2/(n + p)``, which against a width of ``1/sqrt(2n)`` in ``log sigma``
+    is ``p / sqrt(2n)`` of a standard deviation. Over 512 samples that is
+    **0.062 sigma** at ``p = 2`` and **1.0 sigma** at ``p = 32``. A chain
+    reports none of it: the sigma posterior stays proper, unimodal and merely
+    narrower, and every convergence diagnostic is clean.
+    """
+    if allowed or space.joint_prior is None:
+        return
+    import numpyro.distributions as dist
+
+    if not isinstance(noise_std, dist.Distribution):
+        return
+    count = len(space.joint_prior.over)
+    raise ParameterSpaceError(
+        f"to_numpyro_model was given a {type(noise_std).__name__} noise_std — which "
+        "becomes the sample site 'noise_std', an INFERRED sigma — while this space "
+        f"declares {type(space.joint_prior).__name__}(over="
+        f"{list(space.joint_prior.over)}). That site belongs to no ParameterSpace, so "
+        "no over= can name it and nothing declares its prior; but the joint prior is "
+        "sqrt(det I) and every entry of I carries 1/sigma^2, so the factor site "
+        f"multiplies the sigma posterior by sigma^-{count} — a prior on sigma that "
+        "nobody wrote down. Measured: d(joint prior)/d log sigma is exactly -p. That "
+        "moves the sigma posterior's mode from chi2/n to chi2/(n + p), which is "
+        f"p/sqrt(2n) of a posterior width — for p = {count} over 512 samples, "
+        f"{count / (2 * 512) ** 0.5:.3f} sigma; at p = 32, 1.0 sigma. The chain reports "
+        "none of it: the sigma posterior stays proper, unimodal and merely narrower, "
+        "and every diagnostic is clean. Pass a fixed noise_std (a scalar, an array, or a "
+        "NoiseModel), or say allow_sampled_noise_std=True to take the sigma^-p tilt "
+        "deliberately."
+    )
 
 
 def to_numpyro_model(
@@ -76,13 +136,22 @@ def to_numpyro_model(
     noise_std: Any,
     flags: jax.Array | None = None,
     obs_name: str = "obs",
+    *,
+    allow_sampled_noise_std: bool = False,
 ):
     """Build a NumPyro model: priors -> bound pipeline -> Gaussian likelihood.
 
     Args:
         pipeline: the (deterministic) forward model.
         state_template: input state the model is evaluated on (closed over).
-        space: what to infer and how it binds. Every latent needs a prior.
+        space: what to infer and how it binds. Every latent needs a prior —
+            either its own ``Latent(prior=...)`` or the space's ``joint_prior``.
+            A declared
+            :class:`~rheplicant.inference.priors.JeffreysPrior` is evaluated
+            here and nowhere else: its latents get improper flat sample sites,
+            its block is checked for rank once before any sample is drawn, and
+            ``0.5 log det I`` is added at the ``"joint_prior"`` factor site with
+            the same noise object the likelihood uses.
         noise_std: how noisy the data is. Three forms:
 
             * a scalar or array standard deviation;
@@ -96,6 +165,13 @@ def to_numpyro_model(
             Equivalent to wrapping ``noise_std`` in
             :class:`~rheplicant.inference.noise.FlaggedNoise`.
         obs_name: name of the observed sample site.
+        allow_sampled_noise_std: take a sampled ``noise_std`` together with a
+            declared ``joint_prior`` deliberately. Off by default, and the
+            refusal explains what it costs: the ``"noise_std"`` site is in no
+            ParameterSpace, so a Jeffreys prior over ``p`` latents tilts its
+            posterior by ``sigma^-p`` with nothing reporting it — measured at
+            about 1.0 sigma for ``p = 32``. Inert when no ``joint_prior`` is
+            declared.
 
     Returns:
         A NumPyro model ``model(observed=None)`` — condition by passing
@@ -129,13 +205,41 @@ def to_numpyro_model(
     import numpyro.distributions as dist
 
     _require_priors(space)
+    _refuse_sampled_noise_std_under_a_joint_prior(
+        space, noise_std, allow_sampled_noise_std
+    )
     space.validate(pipeline)
 
+    joint = space.joint_prior
+    if joint is not None:
+        # Once, here, and not inside the model body: a rank is a decision, and a
+        # traced decision is one no branch can be taken on. This is the refusal;
+        # the eigenvalue floor inside `log_density` is only the arithmetic that
+        # keeps a degenerate block finite if one ever gets past it.
+        joint.check_identified(
+            space, pipeline, state_template, caller="to_numpyro_model"
+        )
+
+    def _site(latent):
+        """The sample site for one latent — its own prior, or a flat one.
+
+        A latent the joint prior covers still needs a site for NUTS to have a
+        coordinate; what it does not need is a density, because the whole
+        density over that block arrives once at the factor site below. An
+        improper flat site contributes exactly zero, so the block's log prior is
+        the joint prior and nothing else.
+        """
+        if latent.prior is not None:
+            return numpyro.sample(latent.name, latent.prior)
+        return numpyro.sample(
+            latent.name,
+            dist.ImproperUniform(
+                dist.constraints.real, (), event_shape=latent.init.shape
+            ),
+        )
+
     def model(observed: jax.Array | None = None):
-        values = {
-            latent.name: numpyro.sample(latent.name, latent.prior)
-            for latent in space.latents
-        }
+        values = {latent.name: _site(latent) for latent in space.latents}
         prediction = space.bind(pipeline, values)(state_template).data
         # Trace time, not run time: both shapes are static, so this compiles
         # away entirely and NUTS refuses before it draws a single sample.
@@ -152,6 +256,19 @@ def to_numpyro_model(
             else noise_std,
             flags,
         )
+        if joint is not None:
+            # The SAME noise object the likelihood is about to use, which is why
+            # the prior carries none of its own: a likelihood/prior noise
+            # mismatch is not something this API can express.
+            numpyro.factor(
+                "joint_prior",
+                joint.log_density(
+                    lambda v: space.bind(pipeline, v)(state_template).data,
+                    values,
+                    noise,
+                ),
+            )
+
         sigma = noise.std(prediction)
 
         # A sample with infinite sigma was not observed. Handing that scale to

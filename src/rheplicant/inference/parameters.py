@@ -72,6 +72,13 @@ from rheplicant.core.graph import _aliased_leaf_paths
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 
+# `priors` deliberately imports nothing from this package at module scope, so
+# that this direction of the dependency is the only one and the cycle through
+# `identifiability` / `uncertainty` — both of which import THIS module — never
+# has to resolve. Everything JeffreysPrior needs from them is a local import
+# inside the method that needs it.
+from rheplicant.inference.priors import JeffreysPrior
+
 #: ``Bind(fan="distribute")`` — ``fn`` returns one value PER ``into`` selector.
 DISTRIBUTE: str = "distribute"
 
@@ -440,11 +447,21 @@ class ParameterSpace(eqx.Module):
         raw_bind: escape hatch — ``(pipeline, values) -> pipeline``, used
             instead of compiling ``bindings``. Build one with
             :meth:`raw`.
+        joint_prior: a prior over a BLOCK of latents rather than over one —
+            today :class:`~rheplicant.inference.priors.JeffreysPrior`, and
+            ``None`` by default, which is the whole feature switched off.
+            Declared here rather than passed at an exit for the same reason
+            ``Latent(prior=...)`` is: the declaration is what every exit reads,
+            so a prior cannot be in force at one exit and absent at another. A
+            latent it covers must NOT also carry ``Latent(prior=...)`` — that
+            is two priors on one quantity, multiplied, with no diagnostic that
+            can report it — and both refusals are below.
     """
 
     latents: tuple[Latent, ...] = eqx.field(converter=tuple)
     bindings: tuple[Bind, ...] = eqx.field(static=True, converter=tuple, default=())
     raw_bind: Callable | None = eqx.field(static=True, default=None)
+    joint_prior: JeffreysPrior | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
         if not self.latents:
@@ -474,6 +491,18 @@ class ParameterSpace(eqx.Module):
                 raise ParameterSpaceError(
                     f"Bind references undeclared latent(s) {unknown}; declared: {sorted(declared)}."
                 )
+        if self.joint_prior is not None:
+            if not isinstance(self.joint_prior, JeffreysPrior):
+                raise ParameterSpaceError(
+                    f"joint_prior is a {type(self.joint_prior).__name__}, which this "
+                    "package does not know how to evaluate. The declared joint priors "
+                    "are JeffreysPrior(over=(...)); a per-latent NumPyro distribution "
+                    "belongs on the Latent it describes, as Latent(prior=...)."
+                )
+            self.joint_prior.validate_against(
+                names, [latent.name for latent in self.latents if latent.prior is not None]
+            )
+
         bound = {name for binding in self.bindings for name in binding.latents}
         if self.raw_bind is None:
             dead = declared - bound
