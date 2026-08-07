@@ -213,15 +213,25 @@ def marginalise_arrays(
     healthy (scale 1)         +0.203 nats      accepted
     rounding-scale (1e-10)    **+23.23 nats**  refused
     identically zero          ``+inf``         refused
+    scaled by ``nan``         ``nan``          refused
+    scaled by ``inf``         ``nan``          refused
     ========================  ===============  ==================
 
     The zero column is the easy half: ``-log|pivot|`` is a true ``+inf`` and any
-    finiteness check downstream catches it. The dangerous half is the middle
-    row, which is what a genuinely near-degenerate night looks like -- finite,
-    the right sign, the right order of magnitude for a good night's evidence,
-    growing as ``-log(pivot)`` (27.8 at 1e-12) and unbounded in principle.
-    Nothing downstream tests for that. Pinned by
-    ``test_the_kernel_cannot_see_what_the_checked_path_refuses``.
+    finiteness check downstream catches it. The dangerous half is the
+    rounding-scale row, which is what a genuinely near-degenerate night looks
+    like -- finite, the right sign, the right order of magnitude for a good
+    night's evidence, growing as ``-log(pivot)`` (27.8 at 1e-12) and unbounded
+    in principle. Nothing downstream tests for that.
+
+    **The last two rows are new, and the third column used to read "accepted".**
+    The table stopped at the zero column and so did the checked path's own test;
+    the threshold there is relative to ``max(pivots)``, so one ``nan`` anywhere
+    in the term made the threshold ``nan`` and every comparison against it
+    False. Both are pinned by
+    ``test_the_kernel_cannot_see_what_the_checked_path_refuses``, which reads
+    ``pivots`` at all five scales, and by
+    ``test_a_poisoned_block_is_refused_rather_than_marginalised_to_nan``.
 
     What it hands back instead is the evidence: ``pivots``, as data. An eager
     caller judges them (:func:`marginalise` does). A chain does not need to,
@@ -314,8 +324,13 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
         order, whose log-density is the integral of ``info``'s over ``block``.
 
     Raises:
-        StateValidationError: if a name is repeated or not in ``info``, or if
-            the block is not constrained -- an unconstrained direction makes the
+        StateValidationError: if a name is repeated or not in ``info``; if the
+            term's re-triangularisation is not finite -- the degeneracy test
+            below is relative to the largest pivot, so one ``nan`` or ``inf``
+            anywhere in the term used to make the threshold ``nan`` and the
+            answer "accepted", returning a ``SqrtInfo`` whose offset was ``nan``
+            past a ``__check_init__`` that validates shapes only; or if the
+            block is not constrained -- an unconstrained direction makes the
             integral divergent, and finite arithmetic returns a large plausible
             number for it rather than an infinity anyone would notice.
     """
@@ -371,16 +386,48 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
     )
 
     if n_block:
+        # Finiteness FIRST, and it is not defensive padding: the comparison
+        # below is relative to `max(pivots)`, so a single `nan` or `inf` anywhere
+        # in this term makes the threshold itself `nan` and every comparison
+        # against it False. Measured on `_block_scaled`, which is the term this
+        # module's own tests use: `scale=0` refused, `scale=nan` ACCEPTED with
+        # offset `nan`, `scale=inf` ACCEPTED with offset `nan` -- and
+        # `SqrtInfo.__check_init__` checks shapes only, so nothing between here
+        # and a campaign total would have said a word.
+        #
+        # BOTH ends, because a guard written NaN-safely can still be defeated
+        # from the other one: `inf > 0` is True, so a threshold of `inf` admits
+        # every pivot there is.
+        # `bool(jnp.all(...))` rather than `np.all(np.asarray(...))`: both
+        # concretise, and only the first raises `ConcretizationTypeError` under
+        # a trace. `test_the_checked_path_refuses_under_a_trace_rather_than_
+        # skipping_its_guard` pins that error by name, and a guard added in
+        # front of the others must not change which one a traced caller sees.
+        if not bool(jnp.all(jnp.isfinite(pivots))):
+            raise StateValidationError(
+                f"This term's re-triangularisation is not finite: its pivots are "
+                f"{np.asarray(pivots)}, so the marginal over {list(block)} would "
+                "come back as a SqrtInfo carrying nan -- which __check_init__ "
+                "does not test for, and which loses every comparison a campaign "
+                "audit could make about it. The stored factor or target already "
+                "carried nan or inf before this call. Recompress that epoch."
+            )
         # Compared against the LARGEST pivot, not against an absolute floor: the
         # rows are whitened data, so their scale is the epoch's 1/sigma and an
         # absolute threshold would refuse a well-constrained low-noise block and
         # wave through a badly-constrained high-noise one.
         #
-        # These two lines are why this function cannot be traced, and why the
+        # These lines are why this function cannot be traced, and why the
         # arithmetic above it can.
         scale = float(jnp.max(pivots))
         floor = float(np.sqrt(np.finfo(permuted.dtype).eps)) * scale
-        if bool(jnp.any(pivots[:n_block] <= floor)):
+        # `not all(> floor)` rather than `any(<= floor)`: the two are the same
+        # for finite numbers and not for `nan`, which loses both comparisons.
+        # The finiteness check above makes that unreachable today; it is written
+        # this way anyway, because it is the shape three other refusals in this
+        # subsystem needed and the fourth is how one of them gets written the
+        # weak way again.
+        if not bool(jnp.all(pivots[:n_block] > floor)):
             raise StateValidationError(
                 f"The block {list(block)} does not constrain one of its own "
                 "directions, so the Gaussian integral over it diverges and the "

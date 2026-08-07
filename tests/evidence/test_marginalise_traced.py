@@ -187,6 +187,30 @@ def test_an_unconstrained_block_is_still_refused_by_name():
     assert healthy == pytest.approx(0.2028, abs=1e-3)
 
 
+@pytest.mark.parametrize("scale", [float("nan"), float("inf")])
+def test_a_poisoned_block_is_refused_rather_than_marginalised_to_nan(scale):
+    """The degeneracy guard was defeated from both ends, and only one was seen.
+
+    ``scale = 0`` was where the table above stopped. Two scales past it the
+    guard read ``pivots[:n_block] <= floor`` with ``floor`` computed from
+    ``float(jnp.max(pivots))``:
+
+    * ``nan`` makes every pivot ``nan``, so ``max`` is ``nan``, ``floor`` is
+      ``nan``, and ``pivot <= nan`` is **False** -- accepted, returning a
+      ``SqrtInfo`` whose offset is ``nan``.
+    * ``inf`` puts ``inf`` in the block's pivot and ``nan`` in the maximum, with
+      the same result.
+
+    Measured, before the fix: ``scale=0`` refused; ``scale=nan`` ACCEPTED with
+    ``offset=nan``; ``scale=inf`` ACCEPTED with ``offset=nan``.
+    ``SqrtInfo.__check_init__`` validates shapes and nothing else, so nothing
+    between here and a campaign total says a word about it, and ``marginalise``
+    is the function whose ``Raises:`` block promises to catch exactly this.
+    """
+    with pytest.raises(StateValidationError, match="is not finite"):
+        marginalise(_block_scaled(scale), ("block",))
+
+
 def test_the_kernel_cannot_see_what_the_checked_path_refuses():
     """What the traced path does about rank deficiency, in executable form.
 
@@ -230,6 +254,18 @@ def test_the_kernel_cannot_see_what_the_checked_path_refuses():
     assert 20.0 < float(offset) < 27.0  # measured 23.23
     assert float(pivots[0]) == pytest.approx(2.0e-10, rel=0.5)
     assert float(jnp.max(pivots)) == pytest.approx(1.59, abs=0.1)
+
+    # Two scales past zero, which is where this test used to stop. The kernel
+    # does nothing about these either -- it cannot -- and the pivots it hands
+    # back are `nan` and `inf` respectively, which is the evidence the checked
+    # path now reads. Measured: both offsets come back `nan`.
+    for scale in (float("nan"), float("inf")):
+        poisoned = _block_scaled(scale)
+        _, _, offset, pivots = marginalise_arrays(
+            poisoned.factor, poisoned.target, poisoned.offset, 1
+        )
+        assert not np.isfinite(float(offset))
+        assert not np.isfinite(float(jnp.max(pivots)))
 
 
 def test_marginalising_nothing_is_the_identity_on_the_density():
