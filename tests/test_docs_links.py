@@ -221,10 +221,13 @@ def test_the_examples_page_states_the_real_count() -> None:
     word = words[n]
     for path in (DOCS / "examples.md", ROOT / "README.md"):
         text = path.read_text()
+        # Case-insensitive: the count reads "Fourteen scripts" at the start of
+        # a sentence and "fourteen runnable scripts" inside one, and both are
+        # the same claim. A case-sensitive match called the second one absent.
         stated = re.search(r"\b(Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen)\b"
-                           r"[^.\n|]*(runnable|scripts|demos)", text)
+                           r"[^.\n|]*(runnable|scripts|demos)", text, re.IGNORECASE)
         assert stated, f"{path.name} no longer states how many examples there are"
-        assert stated.group(1) == word, (
+        assert stated.group(1).capitalize() == word, (
             f"{path.name} says '{stated.group(1)}' examples; there are {n} ({word})."
         )
 

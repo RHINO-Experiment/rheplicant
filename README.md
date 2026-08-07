@@ -167,23 +167,15 @@ every signature is the
 
 ## Documentation
 
-Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)**
-(Sphinx + furo; build locally with
-`cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`).
+**[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)** — the guided
+tour, the operator catalog, the inference rules, the tutorials, the API, the
+architecture decisions and the changelog, with a sidebar that lists them.
+Build it locally with
+`cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
-| Document | What it covers |
-|---|---|
-| [Guided tour](docs/tour.md) | The complete API, top to bottom, with runnable snippets |
-| [Inferring anything](docs/inference.md) | Parameter spaces, linear blocks, `SamplingPlan`, identifiability — the rules the tutorials cite |
-| [The canonical signal path](docs/signal-path.md) | The 32-node graph: node kinds, the rules that follow, custom templates |
-| [Operator catalog](docs/operators.md) | Every operator: graph node, role, parameters |
-| [Sky engines](docs/sky-engines.md) | The limTOD ports: m-mode drift scan, beam normalization, the horizon |
-| [Sky to receiver](docs/sky-to-receiver.md) | RHINO's horn end to end: beam → T_src → noise waves, walked through |
-| [Tutorial: GCR](docs/tutorial-gcr.md) | 256 sky pixels by exact conjugate solve, with iterative GLS for the covariance |
-| [Tutorial: NUTS](docs/tutorial-nuts.md) | Gradient MCMC, MCMC diagnostics, and what a broken posterior looks like |
-| [Architecture](DESIGN.md) | Design decisions D1–D32, element taxonomy, physics roadmap |
-| [Changelog](CHANGELOG.md) | What arrived when |
-| `examples/` | Fourteen end-to-end runnable demos |
+Design decisions D1–D32 and the physics roadmap are in
+[`DESIGN.md`](DESIGN.md); what arrived when is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Status
 
