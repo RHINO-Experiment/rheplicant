@@ -143,8 +143,14 @@ _PLACEHOLDER_MERMAID = (
 )
 
 
-def _example_svgs() -> tuple[str, str]:
-    """The two lit/dim example renders, as SVG source."""
+def _example_svgs() -> dict[tuple[str, str], str]:
+    """The two lit/dim example renders, each in both themes.
+
+    Keyed ``(which, theme)``. Both themes are emitted because an SVG embedded
+    through ``<img>`` cannot read the host page's theme class, so a page that
+    switches has to ship a pair and show one of them -- the same arrangement the
+    committed figures use.
+    """
     import jax.numpy as jnp
 
     from rheplicant.radio import (
@@ -187,22 +193,32 @@ def _example_svgs() -> tuple[str, str]:
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(0.5)),
     )
-    return (
-        partial.to_svg(title="Partial twin: beam-convolved sky through the gain"),
-        fuller.to_svg(title="Fuller twin: sky, RFI, ground, atmosphere, cal loads"),
-    )
+    titles = {
+        "partial": "Partial twin: beam-convolved sky through the gain",
+        "fuller": "Fuller twin: sky, RFI, ground, atmosphere, cal loads",
+    }
+    twins = {"partial": partial, "fuller": fuller}
+    return {
+        (which, theme): twins[which].to_svg(title=titles[which], theme=theme)
+        for which in twins
+        for theme in ("light", "dark")
+    }
 
 
 try:
     from rheplicant.radio import RADIO_GRAPH
 
     _mermaid = RADIO_GRAPH.to_mermaid()
-    _partial_svg, _fuller_svg = _example_svgs()
+    _examples = _example_svgs()
 except ImportError:  # pragma: no cover - only when the package will not import
     _mermaid = _PLACEHOLDER_MERMAID
-    _partial_svg = _fuller_svg = _PLACEHOLDER_SVG
+    _examples = {
+        (which, theme): _PLACEHOLDER_SVG
+        for which in ("partial", "fuller")
+        for theme in ("light", "dark")
+    }
 
 _GENERATED.mkdir(exist_ok=True)
 (_GENERATED / "radio-graph.mmd").write_text(_mermaid)
-(_DOCS_DIR / "signal-path-partial.svg").write_text(_partial_svg)
-(_DOCS_DIR / "signal-path-fuller.svg").write_text(_fuller_svg)
+for (_which, _theme), _svg in _examples.items():
+    (_DOCS_DIR / f"signal-path-{_which}-{_theme}.svg").write_text(_svg)

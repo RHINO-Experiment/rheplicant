@@ -74,16 +74,32 @@ The single-antenna path every assembly lights up. The diagram itself is generate
 
 A partial twin — five operators, `assemble(global_signal, foregrounds, ionosphere, beam, gain)`; every junction on the way passes through and the rest of the receiver chain is identity:
 
-```{figure} signal-path-partial.svg
+:::{figure} signal-path-partial-light.svg
+:figclass: only-light
 :alt: Partial twin with five lit operators
 
 Partial twin: the beam-convolved sky through the gain.
-```
+:::
+
+:::{figure} signal-path-partial-dark.svg
+:figclass: only-dark
+:alt: Partial twin with five lit operators
+
+Partial twin: the beam-convolved sky through the gain.
+:::
 
 A fuller twin — nine operators including RFI, ground pickup, atmospheric emission, and switched calibration loads (the ◇ selector node); note the two dashed entrances (`atmosphere_field` and `ground_field`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
 
-```{figure} signal-path-fuller.svg
+:::{figure} signal-path-fuller-light.svg
+:figclass: only-light
 :alt: Fuller twin with nine lit operators
 
 Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.
-```
+:::
+
+:::{figure} signal-path-fuller-dark.svg
+:figclass: only-dark
+:alt: Fuller twin with nine lit operators
+
+Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.
+:::
