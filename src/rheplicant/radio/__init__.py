@@ -78,7 +78,7 @@ ids, or use ``assemble``, which has no such gap because placement is on the
 node itself. See D27.
 
 Physics is deliberately placeholder where the operator's own docstring says so
-— 17 of the 29 concrete operator classes here, a count pinned by
+— 16 of the 28 concrete operator classes here, a count pinned by
 ``tests/radio/test_placeholder_census.py`` so that it moves when the physics
 does. Real physics replaces function bodies, never interfaces: the sky
 engines, the horizon split, the antenna's ohmic loss, the noise-wave
@@ -113,7 +113,6 @@ from rheplicant.radio.instrument import (
     ADCOperator,
     AntennaLossOperator,
     ApplyCalibrationOperator,
-    BeamOperator,
     BeamSpillOperator,
     CalLoadOperator,
     CWCalibrationOperator,
@@ -166,7 +165,6 @@ __all__ = [
     "AtmosphericEmissionOperator",
     "BackendOperator",
     "BasisTemperatureOperator",
-    "BeamOperator",
     "BeamSpillOperator",
     "CWCalibrationOperator",
     "CalLoadOperator",

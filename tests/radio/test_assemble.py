@@ -8,14 +8,19 @@ import jax.numpy as jnp
 import pytest
 
 import rheplicant.radio as radio
-from rheplicant import AbstractOperator, Pipeline, SelectOperator, SumOperator
+from rheplicant import (
+    AbstractOperator,
+    LambdaOperator,
+    Pipeline,
+    SelectOperator,
+    SumOperator,
+)
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.graph import AmbiguousNodeError, AssemblyError, At
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 from rheplicant.radio import (
     RADIO_GRAPH,
     ADCOperator,
-    BeamOperator,
     CalLoadOperator,
     ForegroundOperator,
     GainOperator,
@@ -47,12 +52,23 @@ def ops():
         "ps": PointSourceOperator(level=jnp.array(2.0)),
         "io": IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6),
         "rf": RFIOperator(amplitude=jnp.array(100.0), occupancy=0.05),
-        "bm": BeamOperator(solid_angle=jnp.array(0.8)),
         "gd": GroundPickupOperator(coupling=jnp.array(0.01), t_ground=jnp.array(300.0)),
         "gn": GainOperator(gain=jnp.array(1.1)),
         "ns": NoiseOperator(sigma=jnp.array(0.5)),
         "ad": ADCOperator(scale=jnp.array(1.0), n_bits=14),
     }
+
+
+def beam_stub(factor=0.8):
+    """A scalar on the `beam` node, which ships no operator of its own.
+
+    The beam is applied by the sky projector while it produces
+    `observed_astro_sky`; `BeamOperator` was a scalar stand-in and was
+    removed because using it downstream of a projector double-counts the
+    beam. The node stays, so these routing tests place their own operator on
+    it -- which is also the check that placing one still works.
+    """
+    return At("beam", LambdaOperator.on_data(lambda d: d * factor))
 
 
 class TestUserExamples:
@@ -69,8 +85,9 @@ class TestUserExamples:
         """User example 2: {sky, ionosphere, beam} -> just that part of Tsys."""
         o = ops()
         sky = SkyOperator(amplitude=jnp.array(1e3))
-        asm = assemble(sky, o["io"], o["bm"])
-        hand = Pipeline(sky, o["io"], o["bm"], names=("uniform_sky", "ionosphere", "beam"))
+        asm = assemble(sky, o["io"], beam_stub())
+        hand = Pipeline(sky, o["io"], beam_stub().op,
+                        names=("uniform_sky", "ionosphere", "beam"))
         assert jnp.array_equal(asm(template_state).data, hand(template_state).data)
         assert asm.lit == ("uniform_sky", "ionosphere", "beam")
 
@@ -79,7 +96,7 @@ class TestCanonicalTopology:
     def test_rfi_field_passes_through_beam(self, template_state):
         """rfi_field is a pre-beam field: the beam factor applies to it."""
         o = ops()
-        asm = assemble(o["rf"], o["bm"])
+        asm = assemble(o["rf"], beam_stub())
         direct = o["rf"](template_state).data
         assert jnp.allclose(asm(template_state).data, 0.8 * direct)
 
@@ -140,8 +157,9 @@ class TestCanonicalTopology:
             names=("astro_sum", "ionosphere"),
         )
         field = SumOperator(astro, o["rf"], names=("astro_sum", "rfi_field"))
-        upto_beam = Pipeline(field, o["bm"], names=("field_sum", "beam"))
-        t_ant = SumOperator(upto_beam, o["gd"], names=("field_sum", "ground_pickup"))
+        # `beam` ships no operator, so the full set leaves it identity and
+        # `field` reaches the antenna-temperature sum directly.
+        t_ant = SumOperator(field, o["gd"], names=("field_sum", "ground_pickup"))
         hand = Pipeline(
             t_ant, o["gn"], o["ns"], o["ad"],
             names=("t_ant_sum", "gain", "noise", "adc"),
@@ -344,7 +362,6 @@ class TestRegistryCompleteness:
     def test_t_sys_extra_accepts_at_injection(self, template_state):
         asm = assemble(
             SkyOperator(amplitude=jnp.array(1e3)),
-            BeamOperator(solid_angle=jnp.array(0.8)),
             At("t_sys_extra", GroundPickupOperator(
                 coupling=jnp.array(0.02), t_ground=jnp.array(300.0)
             )),

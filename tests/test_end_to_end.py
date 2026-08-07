@@ -16,7 +16,6 @@ from rheplicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,
-    BeamOperator,
     GainOperator,
     NoiseOperator,
     ReceiverOperator,
@@ -41,11 +40,7 @@ def demo_pipeline():
     # Atmospheric emission is a source branch of the antenna-temperature sum,
     # mirroring the canonical graph (parallel to ground_pickup/t_sys_extra).
     t_ant = SumOperator(
-        Pipeline(
-            SkyOperator(amplitude=jnp.array(1.0e3)),
-            BeamOperator(solid_angle=jnp.array(0.8)),
-            names=("sky", "beam"),
-        ),
+        SkyOperator(amplitude=jnp.array(1.0e3)),
         AtmosphericEmissionOperator(t_atm=jnp.array(150.0)),
         names=("observed_sky", "atmosphere"),
     )
@@ -79,7 +74,7 @@ class TestEndToEnd:
         grads = eqx.filter_grad(loss)(demo_pipeline)
         leaves = jax.tree.leaves(eqx.filter(grads, eqx.is_inexact_array))
         # amplitude, solid_angle, t_sys, bandpass, gain, sigma, adc-scale
-        assert len(leaves) == 7
+        assert len(leaves) == 6
         assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
         assert any(jnp.any(leaf != 0) for leaf in leaves)
 
@@ -120,6 +115,6 @@ class TestEndToEnd:
         forward, params0 = build_forward_fn(model, template_state)
         assert jnp.array_equal(forward(params0), model(template_state).data)
         # one leaf fewer than the twin: sigma is gone, everything else stayed
-        assert len(jax.tree.leaves(eqx.filter(params0, eqx.is_inexact_array))) == 6
+        assert len(jax.tree.leaves(eqx.filter(params0, eqx.is_inexact_array))) == 5
         grads = jax.grad(lambda p: jnp.sum(forward(p)))(params0)
         assert all(jnp.all(jnp.isfinite(g)) for g in jax.tree.leaves(grads))

@@ -43,7 +43,6 @@ PLACEHOLDER = frozenset({
     "ADCOperator",
     "ApplyCalibrationOperator",
     "BackendOperator",
-    "BeamOperator",
     "CalLoadOperator",
     "EMIOperator",
     "FlaggingOperator",

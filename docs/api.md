@@ -121,10 +121,6 @@ node, [inferring anything](inference.md) for the parameter-space machinery, and
    :members:
    :show-inheritance:
 
-.. automodule:: rheplicant.radio.instrument.beam
-   :members:
-   :show-inheritance:
-
 .. automodule:: rheplicant.radio.instrument.antenna_loss
    :members:
    :show-inheritance:

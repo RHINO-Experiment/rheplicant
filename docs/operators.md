@@ -50,7 +50,6 @@ that will replace the body. Graph topology and assembly rules: see
 
 | Operator | Node | Role | Differentiable parameters |
 |---|---|---|---|
-| `BeamOperator` *(P)* | `beam` | shared chromatic beam — the single marginalisation target | `solid_angle` |
 | `BeamSpillOperator` | `beam_spill` | horizon split of the astro branch: `f_sky T + (1−f_sky) T_ground` | `sky_fraction`, `t_ground` |
 | `AntennaLossOperator` | `antenna_loss` | antenna ohmic loss: `η T + (1−η) T_phys`, on the whole `t_ant_sum`, before the switch | `efficiency`, `t_physical` |
 | `CalLoadOperator` *(P)* | `cal_loads` | switched calibration load (via `receiver_input` selector) | `t_load` |

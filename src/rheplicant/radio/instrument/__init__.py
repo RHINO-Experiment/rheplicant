@@ -13,7 +13,6 @@ between the sky-side temperatures and the receiver terms)::
 
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
-from rheplicant.radio.instrument.beam import BeamOperator
 from rheplicant.radio.instrument.beam_spill import BeamSpillOperator
 from rheplicant.radio.instrument.calibration import (
     ApplyCalibrationOperator,
@@ -34,7 +33,6 @@ __all__ = [
     "ADCOperator",
     "AntennaLossOperator",
     "ApplyCalibrationOperator",
-    "BeamOperator",
     "BeamSpillOperator",
     "CalLoadOperator",
     "CWCalibrationOperator",

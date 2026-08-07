@@ -1,9 +1,17 @@
-"""SkyOperator — PLACEHOLDER sky model.
+"""SkyOperator — PLACEHOLDER sky: one uniform brightness, no map and no beam.
 
-Real physics to come (port of limTOD's sky-TOD step): sky maps with spectral
-models, observed along ``coords.pointing``. This placeholder only establishes
-the contract: *the sky operator creates ``data`` on the (time, frequency)
-grid defined by the coordinates.*
+**The sky-TOD port is not coming here.** This module used to promise it --
+"sky maps with spectral models, observed along ``coords.pointing``" -- and that
+port has since arrived as
+:class:`~rheplicant.radio.sky.source.SkySourceOperator` composed with a
+projector, which is real rather than a stand-in. Leaving the promise here would
+have pointed at work that is finished somewhere else.
+
+What stays placeholder is the *sky*: one brightness temperature over the whole
+(time, frequency) grid stands in for a real sky model. That is deliberately the
+cheap path, and it is what a test, a smoke run or an inference fixture usually
+wants when the sky is not the subject. Reach for the projector when the beam
+matters, and for this when it does not.
 """
 
 from typing import ClassVar

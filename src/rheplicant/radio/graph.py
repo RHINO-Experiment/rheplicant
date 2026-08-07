@@ -7,7 +7,7 @@ and compiles it to the equivalent ``Pipeline``/``SumOperator`` nesting::
     from rheplicant.radio.graph import assemble
 
     twin = assemble(GlobalSignalOperator(...), ForegroundOperator(...),
-                    BeamOperator(...), GainOperator(...))
+                    GainOperator(...))
     print(twin)                # lit nodes + skipped-as-identity nodes
     print(twin.to_mermaid())   # lit/dim signal-path rendering
 
@@ -110,7 +110,12 @@ RADIO_GRAPH = register_graph(
             "ground_field": NodeSpec(_S, "ground as pre-beam field", reserved=True),
             "rfi_field": NodeSpec(_S, "RFI entering through sidelobes"),
             "field_sum": NodeSpec(_J, "pre-beam field sum"),
-            "beam": NodeSpec(_T, "shared chromatic beam (the pain point)"),
+            # No shipped operator: the beam belongs to the sky projector, which
+            # applies it while producing `observed_astro_sky`. The node stays as a
+            # slot for a beam coupling on a path that skipped the projector.
+            "beam": NodeSpec(
+                _T, "shared chromatic beam (the pain point)", reserved=True
+            ),
             "observed_astro_sky": NodeSpec(_S, "pre-convolved astro sky (SkySource)"),
             "ground_pickup": NodeSpec(_S, "effective ground-spill temperature"),
             # Not `reserved`: BasisTemperatureOperator declares this node, so

@@ -12,7 +12,6 @@ import pathlib
 import jax.numpy as jnp
 
 from rheplicant.radio import (
-    BeamOperator,
     ForegroundOperator,
     GainOperator,
     GlobalSignalOperator,
@@ -26,7 +25,6 @@ partial_twin = assemble(
     ForegroundOperator(amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5),
                        ref_freq=70e6),
     IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6),
-    BeamOperator(solid_angle=jnp.array(0.8)),
     GainOperator(gain=jnp.array(1.1)),
 )
 print(partial_twin)

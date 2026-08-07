@@ -21,7 +21,6 @@ from rheplicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,
-    BeamOperator,
     CWCalibrationOperator,
     EMIOperator,
     FlaggingOperator,
@@ -64,7 +63,6 @@ twin = assemble(
     PointSourceOperator(level=jnp.array(2.0)),
     IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6),
     RFIOperator(amplitude=jnp.array(2.0e3), occupancy=0.01),   # pre-beam field
-    BeamOperator(solid_angle=jnp.array(0.8)),
     GroundPickupOperator(coupling=jnp.array(0.01),             # post-beam effective
                          t_ground=jnp.array(300.0)),
     AtmosphericEmissionOperator(t_atm=jnp.array(150.0)),       # t_ant_sum branch

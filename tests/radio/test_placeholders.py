@@ -15,7 +15,6 @@ from rheplicant.radio import (
     ADCOperator,
     AtmosphericEmissionOperator,
     BackendOperator,
-    BeamOperator,
     GainOperator,
     NoiseOperator,
     ReceiverOperator,
@@ -35,7 +34,6 @@ def data_state(template_state):
 
 ALL_OPERATOR_CLASSES = [
     SkyOperator,
-    BeamOperator,
     AtmosphericEmissionOperator,
     ReceiverOperator,
     GainOperator,
@@ -64,10 +62,6 @@ class TestSkyOperator:
 
 
 class TestSimpleArithmetic:
-    def test_beam_scales(self, data_state):
-        out = BeamOperator(solid_angle=jnp.array(0.5))(data_state)
-        assert jnp.all(out.data == 5.0)
-
     def test_atmosphere_emits_scalar(self, template_state):
         # Source-type: a t_ant_sum branch producing its own contribution.
         out = AtmosphericEmissionOperator(t_atm=jnp.array(150.0))(template_state)

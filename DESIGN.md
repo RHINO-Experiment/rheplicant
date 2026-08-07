@@ -628,7 +628,7 @@ upstream.
 | IonosphereOperator | chromatic absorption/refraction, time-variable | — |
 | GroundPickupOperator | topographic template, alt/az modulation, beam-coupled | EM sims |
 | RFIOperator | stochastic process model (night-to-night variance) | MomentRFI |
-| BeamOperator | primary-beam convolution (harmonic alm rotation, ZYZ) | limTOD (TIBEC for full-Stokes); |
+| *(the `beam` node)* | primary-beam convolution (harmonic alm rotation, ZYZ) — **delivered**, but by the sky projector at `observed_astro_sky`, not by an operator on this node. `BeamOperator` was a scalar stand-in and was removed: applying it downstream of a projector double-counts the beam | limTOD (TIBEC for full-Stokes); |
 | AtmosphericEmissionOperator | opacity x ambient temperature, beam-weighted airmass (receiver temp lives in noise-wave T_0 / post-gain noise); strict RT reserved at `atmosphere_field` (D13) | instrument configs |
 | ReceiverOperator | bandpass; reflection/impedance effects | instrument configs |
 | NoiseWaveOperator | the full system temperature with the F factor; T/Γ per frequency — **delivered** via `rhino_cal_jax` (D15) | `rhino_cal_jax` |

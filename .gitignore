@@ -20,6 +20,8 @@ docs/_build/
 # argument out of reach of git diff, grep, and GitHub.
 docs/_generated/
 docs/signal-path-*.svg
+# examples/render_signal_path.py writes this to the working directory.
+signal_path.html
 
 # Tooling caches
 .pytest_cache/

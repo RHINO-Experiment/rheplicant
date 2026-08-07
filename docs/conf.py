@@ -155,7 +155,6 @@ def _example_svgs() -> dict[tuple[str, str], str]:
 
     from rheplicant.radio import (
         AtmosphericEmissionOperator,
-        BeamOperator,
         CalLoadOperator,
         ForegroundOperator,
         GainOperator,
@@ -175,7 +174,6 @@ def _example_svgs() -> dict[tuple[str, str], str]:
             amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6
         ),
         IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6),
-        BeamOperator(solid_angle=jnp.array(0.8)),
         GainOperator(gain=jnp.array(1.1)),
     )
     fuller = assemble(
@@ -186,7 +184,6 @@ def _example_svgs() -> dict[tuple[str, str], str]:
             amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6
         ),
         RFIOperator(amplitude=jnp.array(2e3), occupancy=0.01),
-        BeamOperator(solid_angle=jnp.array(0.8)),
         GroundPickupOperator(coupling=jnp.array(0.01), t_ground=jnp.array(300.0)),
         AtmosphericEmissionOperator(t_atm=jnp.array(150.0)),
         CalLoadOperator(t_load=jnp.array(400.0)),
