@@ -112,6 +112,89 @@ def _epoch_weights(
     return sigma, seen, weight, int(jnp.sum(seen))
 
 
+def _reject_bad_templates(
+    templates: Mapping[str, jax.Array], seen: jax.Array
+) -> None:
+    """A template is model input, and this is the one place it is checked.
+
+    Shape and finiteness together, because they are the same guard: both say
+    "this array cannot be projected onto, and here is which one and why".
+    Splitting them would leave two messages to keep in step and two places for a
+    third caller to miss one.
+
+    **Finiteness, and why refusing beats sanitising.** The projection selected
+    on ``norm > 0.0``, and that comparison is **False for NaN**. So a NaN
+    anywhere in an unflagged sample took the same branch as a template lying
+    entirely inside the design's column space, and both were reported as
+    exactly ``0.0`` -- the value :func:`_residual_summary` documents as the
+    genuine null. Measured on this fixture's whitened expression: healthy
+    ``norm=1.3136``, projection ``-0.4957``; all-zero ``norm=0.0000``,
+    projection ``+0.0000``; one NaN ``norm=nan``, projection ``+0.0000``. End
+    to end over 200 epochs carrying a real common mode, one NaN took
+    ``gain_ripple`` from ``z = 30.49`` to ``z = 0.0`` while ``chi2_z`` stayed at
+    18.542. Nothing downstream could see it: ``0.0`` passes every finiteness
+    guard there is, and ``QuadraticLikelihood.__check_init__`` checks
+    ``info.factor``, ``info.target`` and ``info.offset`` for dtype without ever
+    reading ``template_projections``.
+
+    ``inf`` is refused by the same line and for the same reason, not as a
+    tidiness measure: it looks like the loud case and is not. ``projector @
+    column`` is infinite too, ``inf - inf`` is NaN, so an infinite template
+    reaches ``norm=nan`` and reports ``+0.0000`` by exactly the route a NaN
+    does.
+
+    **Only unflagged samples.** A template built from the product that caused
+    the flag is non-finite precisely where the data is, which is the normal
+    case and is what ``test_a_flagged_epoch_summarises_what_it_saw_rather_than_a_nan``
+    pins. ``jnp.where(seen, ...)`` removes those before any arithmetic, so
+    refusing them would be a second bug in the other direction.
+
+    **Shape.** Never checked at all before this. A scalar broadcast to a
+    constant vector and was reported as a legitimate projection of the named
+    systematic -- on one epoch of this fixture the real ``gain_ripple`` gives
+    ``-0.4957`` and a scalar ``1.0`` gives ``-1.1330``, a louder detection of
+    something nobody supplied, and ``3.0`` gives the same number because a
+    constant vector has one direction whatever its length. A wrong length
+    raised ``Incompatible shapes for broadcasting: shapes=[(8,), (5,), ()]``,
+    out of jax, naming no template and no remedy.
+
+    A template is caller-supplied *model* input, not data, so the remedy is the
+    caller's: fix the array, or flag the sample. Neither is something this
+    function may choose on the caller's behalf.
+    """
+    for name, template in templates.items():
+        # `bool` on a concrete array: `_refuse_traced_sigma` has already refused
+        # jit, and grad/vmap trace `observed`, never a template. A caller who
+        # maps over templates gets a tracer error here rather than a wrong
+        # answer, which is the safe side of that trap.
+        column = jnp.ravel(jnp.asarray(template))
+        if column.shape != seen.shape:
+            raise StateValidationError(
+                f"Template {name!r} has {column.size} entries, but this epoch has "
+                f"{seen.size} samples, so it is not a usable systematic template. "
+                "A scalar is the trap this catches: it broadcasts to a constant "
+                "vector and is reported as a projection of the named systematic, "
+                "which on a real epoch reads louder than the true template does. "
+                "Pass the template sampled on the epoch's own time-frequency "
+                "grid, in the model's units."
+            )
+        if bool(jnp.any(seen & ~jnp.isfinite(column))):
+            bad = [int(i) for i in jnp.flatnonzero(seen & ~jnp.isfinite(column))]
+            raise StateValidationError(
+                f"Template {name!r} is not a usable systematic template: it holds "
+                f"a non-finite value at unflagged sample(s) {bad[:8]}. This is "
+                "refused rather than repaired because the only repair available "
+                "here reports the projection as exactly 0.0, and 0.0 is this "
+                "summary's documented value for a template lying entirely inside "
+                "the design's column space -- a genuine null. Measured, one NaN "
+                "turned a 30.5-sigma detection into z = 0.0 with the chi-square "
+                "half of the same summary still firing. A template is model "
+                "input, not data: fix the bad channel, or mask that sample with "
+                "FlaggedNoise, after which the template may be non-finite there "
+                "and this epoch summarises what it saw."
+            )
+
+
 def _residual_summary(
     whitened_design: jax.Array,
     whitened_residual: jax.Array,
@@ -135,7 +218,10 @@ def _residual_summary(
     Templates are projected onto the part of themselves that is also out of
     span. A template lying entirely inside the design's column space projects to
     exactly zero and says so, rather than reporting a small number that reads
-    like a null result.
+    like a null result. That reading of ``0.0`` is exclusive, which is what
+    :func:`_reject_bad_templates` buys: a non-finite or wrongly shaped template
+    is refused by name here rather than arriving downstream wearing the null's
+    own value.
 
     **``whitened_design`` must carry every column the epoch fits, nuisances
     included.** The plan wrote this call with the *global* block alone, which is
@@ -161,6 +247,8 @@ def _residual_summary(
     names = tuple(templates or ())
     if not names:
         return chi2, dof, (), None
+    # Before any arithmetic, so that `norm > 0.0` below decides ONE question.
+    _reject_bad_templates(templates, seen)
     rows = []
     for name in names:
         # SELECT on `seen` before weighting: a template is supplied in the
@@ -169,9 +257,10 @@ def _residual_summary(
         column = jnp.where(seen, jnp.ravel(jnp.asarray(templates[name])), 0.0) * weight
         column = column - projector @ column
         norm = jnp.linalg.norm(column)
-        # `norm > 0` selects, and the division uses `safe`, so a template lying
-        # entirely in span never divides by zero -- and never produces the NaN
-        # that would defeat every downstream comparison guard.
+        # `norm > 0` is now the in-span test and nothing else -- the guard above
+        # has already refused every template that could reach here non-finite.
+        # It used to be both, and `norm > 0.0` is False for NaN, so a broken
+        # template and a null result were reported as the same 0.0.
         safe = jnp.where(norm > 0.0, norm, 1.0)
         rows.append(jnp.where(norm > 0.0, column @ perpendicular / safe, 0.0))
     return chi2, dof, names, jnp.stack(rows)

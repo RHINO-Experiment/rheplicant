@@ -122,6 +122,118 @@ def test_a_flagged_epoch_summarises_what_it_saw_rather_than_a_nan():
     assert np.isfinite(float(term.template_projections[0]))
 
 
+def _with_template(template, sigma=camp.SIGMA):
+    """One clean epoch of the fixture, compressed against ``template``."""
+    import jax.numpy as jnp
+
+    from rheplicant.inference.compress import compress_linear
+
+    rng = np.random.default_rng(17)
+    data = camp.DESIGN @ camp.TRUTH + camp.SIGMA * rng.normal(size=camp.N_SAMPLES)
+    return compress_linear(
+        design={"x": jnp.asarray(camp.DESIGN)},
+        observed=jnp.asarray(data),
+        noise_std=sigma,
+        shapes={"x": (camp.N_THETA,)},
+        epoch_id="e",
+        templates={"gain_ripple": template},
+    )
+
+
+class TestATemplateIsModelInputAndIsCheckedLikeOne:
+    """A template the epoch cannot project onto is refused, by name, at entry.
+
+    ``_residual_summary`` selected on ``norm > 0.0``, and that test is **False
+    for NaN**. So a NaN anywhere in an unflagged sample of a template took the
+    same branch as a template lying entirely inside the design's column space,
+    and both were reported as a projection of exactly ``0.0`` -- which is the
+    value this summary's own docstring reserves for the genuine null. Measured
+    on the expression, whitened by the fixture's sigma: healthy ``norm=1.3136``,
+    ``norm>0=True``, projection ``-0.4957``; all-zero ``norm=0.0000``,
+    ``norm>0=False``, projection ``+0.0000``; one NaN ``norm=nan``,
+    ``norm>0=False``, projection ``+0.0000``. End to end over 200 epochs each
+    carrying the fixture's genuine common mode, a single NaN on an unflagged
+    sample of the template took ``gain_ripple`` from
+    ``{'mean': 2.156, 'scatter': 1.062, 'z': 30.49}`` to
+    ``{'mean': 0.0, 'scatter': 0.0, 'z': 0.0}`` while ``chi2_z`` stayed at
+    18.542 -- a 30-sigma detection reported as silence, with the chi-square
+    half of the same summary still shouting.
+
+    Nothing downstream could have caught it: ``QuadraticLikelihood`` checks
+    ``info.factor``, ``info.target`` and ``info.offset`` for dtype and never
+    looks at ``template_projections``, and ``0.0`` passes every finiteness guard
+    there is.
+
+    ``inf`` was measured too, and on this fixture it is **not** the loud case it
+    looks like: ``projector @ column`` is infinite as well, ``inf - inf`` is
+    NaN, so ``norm=nan`` and an infinite template reports ``0.0`` by the same
+    route. Both are refused by the same check.
+    """
+
+    def test_a_nan_on_an_unflagged_sample_is_refused_by_name(self):
+        import jax.numpy as jnp
+
+        from rheplicant.core.errors import StateValidationError
+
+        template = jnp.asarray(camp.TEMPLATE).at[3].set(jnp.nan)
+        with pytest.raises(StateValidationError, match="usable systematic template"):
+            _with_template(template)
+        with pytest.raises(StateValidationError, match="gain_ripple"):
+            _with_template(template)
+
+    def test_an_infinity_is_refused_by_the_same_check(self):
+        import jax.numpy as jnp
+
+        from rheplicant.core.errors import StateValidationError
+
+        template = jnp.asarray(camp.TEMPLATE).at[3].set(jnp.inf)
+        with pytest.raises(StateValidationError, match="usable systematic template"):
+            _with_template(template)
+
+    def test_a_non_finite_sample_that_is_flagged_is_still_admitted(self):
+        """The guard must not over-refuse the case the file already pins.
+
+        A template built from the same product that caused the flag is NaN
+        exactly where the data is, and ``jnp.where(seen, ...)`` removes it
+        before any arithmetic sees it. That epoch has a perfectly good summary
+        of its unflagged samples, and refusing it would be a second bug.
+        """
+        import jax.numpy as jnp
+
+        sigma = jnp.array([camp.SIGMA] * 6 + [jnp.inf, jnp.inf])
+        template = jnp.asarray(camp.TEMPLATE).at[6].set(jnp.nan)
+        term = _with_template(template, sigma=sigma)
+        assert np.isfinite(float(term.template_projections[0]))
+
+    def test_a_scalar_is_refused_rather_than_broadcast_into_a_projection(self):
+        """Finding 7: ``templates=`` was never shape-checked at all.
+
+        A scalar broadcast to a constant vector and came back as a projection
+        that reads exactly like a measurement of the named systematic. On this
+        epoch the real ``gain_ripple`` projects to ``-0.4957`` and the scalar
+        ``1.0`` to ``-1.1330`` -- a *louder* detection of a template nobody
+        supplied. ``3.0`` gives the same ``-1.1330``, because the projection is
+        onto the direction and a constant vector has one direction whatever its
+        length, so not even the magnitude betrays it.
+        """
+        from rheplicant.core.errors import StateValidationError
+
+        with pytest.raises(StateValidationError, match="usable systematic template"):
+            _with_template(1.0)
+
+    def test_the_wrong_length_names_the_template_instead_of_the_broadcast(self):
+        """It raised ``Incompatible shapes for broadcasting: shapes=[(8,), (5,), ()]``.
+
+        Which names no template, no epoch, and no remedy.
+        """
+        import jax.numpy as jnp
+
+        from rheplicant.core.errors import StateValidationError
+
+        with pytest.raises(StateValidationError, match="gain_ripple.*8 samples"):
+            _with_template(jnp.arange(5.0))
+
+
 def test_the_summary_is_about_a_hundred_bytes_an_epoch():
     """Section 9.3's size claim, which is what makes it storable for 1000 nights."""
     term = camp.terms(1, biased=False)[0]

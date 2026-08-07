@@ -217,7 +217,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2715 tests, 82.4 % coverage, jit+grad+vmap through the full twin; assembly
+(2725 tests, 82.4 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -245,7 +245,7 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet — run the suite and the linter in the project venv before pushing:
 
 ```bash
-.venv/bin/python -m pytest          # 2715 tests, ~12 min with coverage
+.venv/bin/python -m pytest          # 2725 tests, ~12 min with coverage
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```
@@ -261,7 +261,7 @@ the two cannot share an interpreter.
 
 That split is also why the stated coverage fell from 99.7 % to 82.4 % as the
 evidence layer landed, without any code going untested. The second session runs
-`--no-cov` in its own process, so its 431 passing tests contribute nothing to the
+`--no-cov` in its own process, so its 436 passing tests contribute nothing to the
 default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
 `memory.py`, `archive.py`, `reduced_basis.py`, `chain.py` and `diagnostics.py`
 show 11–64 % there, and **1005 of the default report's 1019 uncovered statements
