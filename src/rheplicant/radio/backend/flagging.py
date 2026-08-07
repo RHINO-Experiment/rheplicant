@@ -4,12 +4,17 @@ Element: "We then apply various flagging, averaging, and calibration steps
 that can correct for some of these contributions, but can also introduce
 their own additional issues, e.g. if the models are slightly wrong/biased."
 
-Real physics to come: MomentRFI-based flagging (as in the noise-wave GCR
-draft, where flags inform the noise covariance). Flagging is a *data
-processing* operator living in the same pipeline formalism — which is exactly
-how "processing steps introduce their own issues" becomes modellable. The
-placeholder thresholds the data and stores a boolean mask in ``state.aux``
-(the traced side-channel), leaving the data itself untouched.
+**MomentRFI-based flagging has arrived**, in this module:
+:class:`MomentRFIFlaggingOperator` bridges to the numpy package and is the
+permanent integration, not a stand-in. What is still a placeholder is
+:class:`FlaggingOperator` beside it, which thresholds the data and stores a
+boolean mask in ``state.aux`` (the traced side-channel), leaving the data
+itself untouched — useful precisely because it needs no optional dependency.
+
+Flagging is a *data processing* operator living in the same pipeline formalism
+— which is exactly how "processing steps introduce their own issues" becomes
+modellable. Flags reaching the noise covariance is the seam
+:class:`~rheplicant.inference.noise.FlaggedNoise` implements.
 
 Both flaggers honour :mod:`rheplicant.radio.protection` — without it they flag
 a CW calibration tone at fraction 1.0, correctly by their own lights and
@@ -73,10 +78,11 @@ class FlaggingOperator(AbstractOperator):
 class MomentRFIFlaggingOperator(AbstractOperator):
     """RFI flagging via MomentRFI's ``IterativeSurfaceFitter`` (host callback).
 
-    The real flagger behind the placeholder above. Flagging is inherently
-    non-differentiable (a boolean decision), so ``jax.pure_callback`` into the
-    numpy MomentRFI package is the *permanent* right integration — not a
-    stopgap. Jit-compatible; not vmappable/differentiable (by nature).
+    The real flagger, beside :class:`FlaggingOperator`'s thresholding one.
+    Flagging is inherently non-differentiable (a boolean decision), so
+    ``jax.pure_callback`` into the numpy MomentRFI package is the *permanent*
+    right integration — not a stopgap. Jit-compatible; not
+    vmappable/differentiable (by nature).
 
     Behaviour:
         * ``state.data`` must be a positive, linear-scale ``(n_time, n_freq)``

@@ -1,8 +1,11 @@
 """BackendOperator — PLACEHOLDER backend processing.
 
-Real physics to come: correlator/spectrometer integration, RFI flagging
-(MomentRFI integration point), frequency rebinning, waterfall product
-generation. This placeholder averages time chunks — and, importantly,
+Real physics to come: correlator/spectrometer integration, frequency
+rebinning, waterfall product generation. (RFI flagging was once listed here
+too; it landed on the ``flagging`` node instead, as
+:class:`~rheplicant.radio.backend.flagging.MomentRFIFlaggingOperator`, which is
+the right place for it — a separate step with its own node.) This placeholder
+averages time chunks — and, importantly,
 demonstrates the contract that *shape-changing operators must update the
 coordinates along with the data*, and refuse what they cannot update.
 """

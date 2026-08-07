@@ -264,7 +264,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 The architecture and inference layer are complete and tested end-to-end
 (2766 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
-*physics* is deliberately placeholder where the docstring says so — 16 of the
+*physics* is deliberately placeholder where the docstring says so — 15 of the
 28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
 and friends. The other twelve no longer carry that wording: the sky engines
 are real (a general differentiable limTOD port and a drift-scan m-mode fast

@@ -1,10 +1,16 @@
 """NoiseOperator — PLACEHOLDER radiometric noise.
 
-Real physics to come (radiometer equation, limTOD / hydra-tod noise models):
-the noise level tracks the total power itself,
-``sigma = T_total / sqrt(dt * dnu)``, plus correlated 1/f fluctuations.
-This placeholder adds white Gaussian noise with a fixed sigma, demonstrating
-the PRNG-consumption contract.
+Real physics to come (limTOD / hydra-tod noise models): correlated 1/f
+fluctuations, and a level that tracks the total power as it is *drawn*.
+
+The radiometer equation itself is not future work on the inference side --
+:class:`~rheplicant.inference.noise.RadiometerNoise` is
+``sigma = |prediction| / sqrt(delta_nu * tau)`` and is this package's default
+noise model. The asymmetry is real and worth knowing: a likelihood can scale
+its sigma with the prediction it already has, while *drawing* a realisation
+whose sigma depends on the total power needs that power first. So this
+operator adds white Gaussian noise at a fixed sigma, and an example wanting a
+radiometric draw scales it by hand.
 """
 
 from typing import ClassVar

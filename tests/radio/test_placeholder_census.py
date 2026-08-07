@@ -50,7 +50,6 @@ PLACEHOLDER = frozenset({
     "GainOperator",
     "GlobalSignalOperator",
     "IonosphereOperator",
-    "MomentRFIFlaggingOperator",
     "NoiseOperator",
     "PointSourceOperator",
     "RFIOperator",
@@ -61,6 +60,11 @@ PLACEHOLDER = frozenset({
 #: Operators that carry no such wording. Adding a name here is a claim that
 #: the physics is real, and the burden is a docstring that says what it does.
 REAL = frozenset({
+    # Was on the PLACEHOLDER side until its docstring was read rather than
+    # matched: it said "the real flagger behind the placeholder above", and the
+    # wording check below fired on that reference to its NEIGHBOUR. The body
+    # bridges to the numpy MomentRFI package and is the permanent integration.
+    "MomentRFIFlaggingOperator",
     "AntennaLossOperator",
     "AtmosphericEmissionOperator",
     "BasisTemperatureOperator",
@@ -107,6 +111,11 @@ class TestCensus:
     @pytest.mark.parametrize("name", sorted(PLACEHOLDER))
     def test_placeholder_operators_say_so(self, name):
         doc = inspect.getdoc(_concrete_operators()[name]) or ""
+        # Necessary, not sufficient. A docstring can contain the word while
+        # DENYING that it applies -- "the real flagger behind the placeholder
+        # above" matched here for a year while describing a permanent
+        # integration. This direction cannot catch that; only reading can, and
+        # `test_real_operators_do_not_hedge` is the half that has teeth.
         assert _PLACEHOLDER_WORDING.search(doc), (
             f"{name} is listed as a placeholder but its docstring no longer "
             f"says so. If the physics is real now, move it to REAL and update "

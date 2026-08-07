@@ -1,7 +1,11 @@
 """Receiver bandpass — PLACEHOLDER.
 
-Real physics to come: frequency-dependent bandpass, and eventually
-reflection/impedance-mismatch effects along the signal chain. Sky-side
+Real physics to come: a frequency-dependent bandpass from measurement or an
+instrument model. **Not** the reflection/impedance-mismatch effects this
+docstring once promised — those arrived at the ``noise_wave`` node, where
+:class:`~rheplicant.radio.instrument.noise_wave.NoiseWaveOperator` carries the
+source and receiver ``Gamma`` and is real physics rather than a stand-in.
+Sky-side
 additive temperatures (atmosphere, ground spill) are *not* receiver
 business — they are branches of the antenna-temperature sum
 (:class:`~rheplicant.radio.environment.atmosphere.AtmosphericEmissionOperator`,
