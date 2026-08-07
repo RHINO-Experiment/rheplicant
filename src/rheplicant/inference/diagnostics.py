@@ -763,11 +763,19 @@ def systematic_floor(
             each latent's declared ``init``.
 
     Returns:
-        ``{name: {"sigma", "floor", "below_floor", "crossing_epoch",
-        "direction"}}``. ``below_floor`` is the refusal's own comparison,
-        computed here and nowhere else so that the NaN-safe form exists in one
-        place; ``crossing_epoch`` is ``None`` when the width is not a finite
-        positive number, because there is then no crossing to extrapolate;
+        One entry per latent name, each a dict of ``"sigma"``, ``"floor"``,
+        ``"below_floor"``, ``"crossing_epoch"`` and ``"direction"``. Spelled
+        out rather than written as ``{name: {...}}``, because napoleon splits a
+        Google-style ``Returns:`` block at its first colon to find a return
+        TYPE -- and it does not exempt colons inside an inline literal, so that
+        form had its opening backticks eaten into the rtype and left the
+        closing pair orphaned. One Sphinx warning, and the paragraph rendered
+        wrong. Keep this description colon-free.
+
+        ``below_floor`` is the refusal's own comparison, computed here and
+        nowhere else so that the NaN-safe form exists in one place;
+        ``crossing_epoch`` is ``None`` when the width is not a finite positive
+        number, because there is then no crossing to extrapolate;
         ``direction`` is the unit combination of that latent's raveled
         components whose width ``sigma`` is, and ``None`` for a poisoned block.
 
