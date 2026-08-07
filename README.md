@@ -216,7 +216,7 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2765 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2769 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -244,7 +244,7 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet — run the suite and the linter in the project venv before pushing:
 
 ```bash
-.venv/bin/python -m pytest          # 2765 tests, ~12 min with coverage
+.venv/bin/python -m pytest          # 2769 tests, ~12 min with coverage
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```

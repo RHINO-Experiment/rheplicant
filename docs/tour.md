@@ -39,7 +39,7 @@ and `tests/test_tour_runs.py` runs it. This is an orientation, not a census —
 
 **Part 1 — Forward modelling** · [The state](#the-state) · [Operators](#operators) · [Graph assembly](#graph-assembly)
 
-**Part 2 — Bayesian inference** · [The model](#the-model-what-is-free-and-how-it-enters) · [The likelihood](#the-likelihood-a-noise-model-is-a-likelihood) · [The engine](#the-engine-exact-where-the-model-is-linear) · [Reading the answer](#reading-the-answer-honestly)
+**Part 2 — Bayesian inference** · [The model](#the-model-what-is-free-and-how-it-enters) · [The likelihood](#the-likelihood-a-noise-model-is-a-likelihood) · [The engine](#the-engine-exact-where-the-model-is-linear) · [Reading the answer](#reading-the-answer)
 
 ---
 
@@ -496,16 +496,26 @@ terms **sum**, the antenna stages **chain**, and `receiver_input` is a
 **selector**, so each `CalLoadOperator` *replaces* the antenna on its own switch
 position instead of adding to it.
 
+**One convention, three structures.** A **cascade** is an arrow. A **sum** and a
+**switch** are not operators but operations *on* operators, so neither is drawn
+as one: the wire runs *through* a symbol of its own — ⊕ adds the branches that
+reach it, the lever in the ◇ connects one of them per sample. Boxes are the
+operators; only a box is a slot you can place one in.
+
 ```{mermaid}
+%%{init: {"themeVariables": {"fontSize": "22px"}}}%%
 flowchart LR
-    GS["global_signal"] --> AS(("astro_sum"))
+    GS["global signal"] --> AS(("+"))
     FG["foregrounds"] --> AS
-    AS --> BSP["beam_spill"] --> AL["antenna_loss"] --> SW{{"receiver_input"}}
+    AS --> ANT["beam spill · antenna loss"] --> SW{"/"}
     L1["cal load 300 K"] --> SW
     L2["cal load 400 K"] --> SW
     L3["cal load 1200 K"] --> SW
-    SW --> NW["noise_wave"] --> BP["bandpass"] --> G["gain"] --> N["noise"] --> ADC["adc"]
-    ADC --> W["waterfall (64, 8)"]
+    SW --> NW["noise wave"] --> RX["bandpass · gain · noise · adc"]
+    %% sum and switch: the wire runs THROUGH them, so no fill -- the stroke
+    %% colour is left to the theme so both light and dark stay legible.
+    classDef sym fill:none,stroke-width:1.5px;
+    class AS,SW sym;
 ```
 
 The result is an `Assembly` — an ordinary operator, with node-id ergonomics:
@@ -525,6 +535,28 @@ skipped-as-identity=['ionosphere', 'atmosphere_field', 'field_sum', 'beam',
 'astro_ant_sum', 't_ant_sum', 'cw_tone', 'emi'])
 switch order: ('astro_sum', 'cal_loads_1', 'cal_loads_2', 'cal_loads_3')
 ```
+
+:::{dropdown} What `to_svg()` actually draws — the whole template, unedited
+:color: secondary
+:icon: image
+
+The figure above is the assembled path alone. `to_svg()` keeps every node of the
+template, so the skipped ones are visible *as* skipped: half-lit where the
+traversal went through them as identity, dimmed where nothing reached them.
+
+:::{figure} _static/tour-graph-light.svg
+:figclass: only-light
+:alt: The single-antenna template, the tour's operators lit, summing at the circled plus and switching at the diamond
+:width: 640px
+:::
+
+:::{figure} _static/tour-graph-dark.svg
+:figclass: only-dark
+:alt: The single-antenna template, the tour's operators lit, summing at the circled plus and switching at the diamond
+:width: 640px
+:::
+:::
+
 
 Two things to read off that output. The **skipped** nodes are the template
 traversed as identity — nothing was provided for them, and no `SumOperator`
@@ -595,7 +627,7 @@ Inference is declared in three layers, and it is worth keeping them apart:
 
 **▸ In this tour** — the sky and the beam are given; what were the receiver's
 four noise-wave temperatures? The answer arrives as
-[a figure with error bars](#reading-the-answer-honestly) five short sections
+[a figure with error bars](#reading-the-answer) five short sections
 from here.
 
 ## The model: what is free, and how it enters
@@ -739,7 +771,7 @@ NUTS, where burn-in and `r_hat` are the whole game — see
 reporting `r_hat = 840`.
 :::
 
-## Reading the answer honestly
+## Reading the answer
 
 ```python
 for name in NAMES:

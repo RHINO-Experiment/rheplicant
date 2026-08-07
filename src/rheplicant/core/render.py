@@ -19,25 +19,43 @@ _NODE_W, _NODE_H = 150, 40
 _X_GAP, _Y_GAP = 24, 42
 _MARGIN = 40
 
-_KIND_FILL = {
-    "source": ("#EEEDFE", "#534AB7", "#3C3489"),
-    "transform": ("#E6F1FB", "#185FA5", "#0C447C"),
-    "junction": ("#F1EFE8", "#5F5E5A", "#444441"),
-    "selector": ("#FAEEDA", "#854F0B", "#633806"),
+#: The two composition symbols, sized against the operator box they must not be
+#: mistaken for. An operator is a BOX the signal enters and leaves; a sum or a
+#: switch is a SYMBOL the wire passes through, so both are drawn small, unfilled,
+#: in the wire's own colour, and the edges stop at their outline rather than at a
+#: box that is not there. ``+`` and ``sw`` used to be two labels in one circle,
+#: which made the three compositions look like one kind of thing and both
+#: operations look like peers of the operators around them.
+_SUM_R = 10  # circled plus: radius
+_SW_R = 15  # switch diamond: half-diagonal
+
+#: One palette per theme. Operators take a KIND colour; the two composition
+#: symbols take ``wire``, so "operator" and "operation on operators" stay apart
+#: even where colour is all a reader has.
+_THEMES = {
+    "light": {
+        "source": ("#EEEDFE", "#534AB7", "#3C3489"),
+        "transform": ("#E6F1FB", "#185FA5", "#0C447C"),
+        "processing": ("#F1EFE8", "#5F5E5A", "#444441"),
+        "wire": "#8C8A82",
+        "lit": "#BA7517",
+    },
+    "dark": {
+        "source": ("#241E3D", "#A371F7", "#D2A8FF"),
+        "transform": ("#0D2137", "#58A6FF", "#A5D6FF"),
+        "processing": ("#1C1F24", "#8B949E", "#C9D1D9"),
+        "wire": "#6E7681",
+        "lit": "#E3B341",
+    },
 }
-_PROCESSING_FILL = ("#F1EFE8", "#5F5E5A", "#444441")
-_LIT_STROKE = "#BA7517"
 
 _STYLE = """
 body { font-family: system-ui, sans-serif; background: #faf9f5; color: #2c2c2a;
        margin: 24px; }
 h1 { font-size: 18px; font-weight: 600; }
 p.legend { font-size: 13px; color: #5f5e5a; }
-@media (prefers-color-scheme: dark) {
-  body { background: #1f1e1b; color: #d3d1c7; }
-  p.legend { color: #b4b2a9; }
-}
 """
+_DARK_PAGE = "body{background:#1f1e1b;color:#d3d1c7}p.legend{color:#b4b2a9}"
 
 # Inside the SVG so the rendering survives standalone embedding (<img>, docs).
 _SVG_STYLE = ".lit{opacity:1}.wire{opacity:.55}.dim{opacity:.22}"
@@ -58,12 +76,78 @@ def _layers(graph) -> dict[str, int]:
     return layer
 
 
+def _palette(theme: str) -> dict:
+    """The colours for ``theme``, refusing a name that has none."""
+    if theme not in _THEMES:
+        raise ValueError(f"Unknown theme {theme!r}; known themes: {list(_THEMES)}.")
+    return _THEMES[theme]
+
+
+def _page_style(theme: str) -> str:
+    """Chrome for the standalone page, matched to the figure it wraps.
+
+    ``theme="dark"`` PINS a dark page, because a dark-palette figure on light
+    chrome is unreadable. The default keeps following the reader's system, as it
+    did before there was a choice: the light palette is pale boxes with dark
+    text of their own and stays legible on either background.
+    """
+    if theme == "dark":
+        return _STYLE + _DARK_PAGE
+    return _STYLE + f"@media (prefers-color-scheme: dark) {{{_DARK_PAGE}}}"
+
+
+def _half_height(kind: str) -> float:
+    """How far a node reaches above and below its centre, for edge attachment.
+
+    The wire has to STOP at an operator's box and RUN THROUGH a sum or a switch,
+    so it is drawn to the symbol's own outline. Attaching every edge at the box
+    half-height instead left a gap around symbols that are smaller than a box,
+    and the gap is what made them read as undersized nodes.
+    """
+    if kind == "junction":
+        return _SUM_R
+    if kind == "selector":
+        return _SW_R
+    return _NODE_H / 2
+
+
+def _sum_symbol(x: float, y: float, stroke: str, width: float) -> str:
+    """A circled plus on the wire: the branches reaching this node ADD."""
+    return (
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{_SUM_R}" fill="none" '
+        f'stroke="{stroke}" stroke-width="{width}"/>'
+        f'<path d="M{x - 5:.1f} {y:.1f}h10M{x:.1f} {y - 5:.1f}v10" fill="none" '
+        f'stroke="{stroke}" stroke-width="{width}" stroke-linecap="round"/>'
+    )
+
+
+def _switch_symbol(x: float, y: float, stroke: str, width: float) -> str:
+    """A single-pole lever in a diamond: ONE branch is connected per sample.
+
+    Drawn the way the flow runs — the throws are at the top where the branches
+    arrive, the pole at the bottom where the one selected signal leaves, and the
+    lever reaches only one of them. It is the electrical symbol rather than a
+    letter because what has to be legible here is *what happens*, not the node's
+    name, which the ``<title>`` carries for anyone who hovers.
+    """
+    return (
+        f'<path d="M{x:.1f} {y - _SW_R:.1f}L{x + _SW_R:.1f} {y:.1f}'
+        f'L{x:.1f} {y + _SW_R:.1f}L{x - _SW_R:.1f} {y:.1f}Z" fill="none" '
+        f'stroke="{stroke}" stroke-width="{width}" stroke-linejoin="round"/>'
+        f'<circle cx="{x:.1f}" cy="{y + 7:.1f}" r="2" fill="{stroke}"/>'
+        f'<circle cx="{x + 6.5:.1f}" cy="{y - 5.5:.1f}" r="1.8" fill="{stroke}"/>'
+        f'<path d="M{x:.1f} {y + 7:.1f}L{x - 7:.1f} {y - 6:.1f}" fill="none" '
+        f'stroke="{stroke}" stroke-width="1.8" stroke-linecap="round"/>'
+    )
+
+
 def signal_path_svg(
     graph,
     lit: Iterable[str] = (),
     skipped: Iterable[str] = (),
     title: str | None = None,
     counts: Mapping[str, int] | None = None,
+    theme: str = "light",
 ) -> str:
     """Render ``graph`` as a self-contained ``<svg>`` element (lit/dim styling).
 
@@ -73,12 +157,17 @@ def signal_path_svg(
     ``counts`` maps a node id to how many operator instances an assembly put
     on it; ``many`` nodes carrying more than one say so in their label,
     because the template draws them as a single box either way.
+
+    ``theme`` selects the palette (``"light"`` or ``"dark"``). One SVG cannot
+    serve both: embedded as an ``<img>`` it cannot see the page's theme class,
+    which is why the documentation commits a pair and shows one of them.
     """
     # Deferred import: graph.py calls into this module from a method body, so a
     # top-level import here would merely be redundant, not cyclic — kept local
     # to keep render.py importable standalone.
     from rheplicant.core.graph import _live_span
 
+    pal = _palette(theme)
     lit_set = set(lit)
     counts = dict(counts or {})
     # skipped nodes are traversed-as-identity; the live span normally covers
@@ -136,44 +225,53 @@ def signal_path_svg(
     for a, b in graph.edges:
         (xa, ya), (xb, yb) = centers[a], centers[b]
         edge_lit = a in active and b in active
-        stroke = _LIT_STROKE if edge_lit else "#b4b2a9"
+        stroke = pal["lit"] if edge_lit else pal["wire"]
         cls = "lit" if edge_lit else "dim"
         stroke_w = 2 if edge_lit else 1
+        y1 = ya + _half_height(graph.nodes[a].kind)
+        y2 = yb - _half_height(graph.nodes[b].kind) - 4
         parts.append(
-            f'<line class="{cls}" x1="{xa:.0f}" y1="{ya + _NODE_H / 2:.0f}" '
-            f'x2="{xb:.0f}" y2="{yb - _NODE_H / 2 - 4:.0f}" stroke="{stroke}" '
+            f'<line class="{cls}" x1="{xa:.0f}" y1="{y1:.0f}" '
+            f'x2="{xb:.0f}" y2="{y2:.0f}" stroke="{stroke}" '
             f'stroke-width="{stroke_w}" marker-end="url(#arr)"/>'
         )
     for nid, spec in graph.nodes.items():
         x, y = centers[nid]
-        fill, stroke, text = (
-            _PROCESSING_FILL if spec.segment == "processing" else _KIND_FILL[spec.kind]
-        )
+        if spec.kind in ("junction", "selector"):
+            # Wire furniture: the composition symbols carry the WIRE's colour,
+            # never a node colour, and light up with the wire that runs through
+            # them. They are never operator slots, so `lit` never names one.
+            on = nid in active
+            # Class "lit"/"dim", never "wire": the half-lit tier says "an
+            # operator could sit here and none does", and none ever can here.
+            # At .55 the symbol would also read as fainter than the full-opacity
+            # wire drawn through it, which is the one thing it must not do.
+            draw = _sum_symbol if spec.kind == "junction" else _switch_symbol
+            parts.append(
+                f'<g class="{"lit" if on else "dim"}">'
+                f"<title>{_html.escape(nid)}</title>"
+                f'{draw(x, y, pal["lit"] if on else pal["wire"], 1.6 if on else 1.1)}</g>'
+            )
+            continue
         state = "lit" if nid in lit_set else ("wire" if nid in active else "dim")
-        border = _LIT_STROKE if nid in lit_set else stroke
+        fill, border, text = pal[
+            "processing" if spec.segment == "processing" else spec.kind
+        ]
+        if nid in lit_set:
+            border = pal["lit"]
         border_w = 2 if nid in lit_set else 0.75
         text_label = nid.replace("_", " ")
         if counts.get(nid, 1) > 1:
             text_label = f"{text_label} (x{counts[nid]})"
         label = _html.escape(text_label)
-        if spec.kind in ("junction", "selector"):
-            symbol = "+" if spec.kind == "junction" else "sw"
-            parts.append(
-                f'<g class="{state}"><title>{_html.escape(nid)}</title>'
-                f'<circle cx="{x:.0f}" cy="{y:.0f}" r="14" '
-                f'fill="{fill}" stroke="{border}" stroke-width="{border_w}"/>'
-                f'<text x="{x:.0f}" y="{y:.0f}" text-anchor="middle" '
-                f'dominant-baseline="central" font-size="12" fill="{text}">{symbol}</text></g>'
-            )
-        else:
-            dash = ' stroke-dasharray="5 4"' if spec.reserved else ""
-            parts.append(
-                f'<g class="{state}"><rect x="{x - _NODE_W / 2:.0f}" '
-                f'y="{y - _NODE_H / 2:.0f}" width="{_NODE_W}" height="{_NODE_H}" '
-                f'rx="8" fill="{fill}" stroke="{border}" stroke-width="{border_w}"{dash}/>'
-                f'<text x="{x:.0f}" y="{y:.0f}" text-anchor="middle" '
-                f'dominant-baseline="central" font-size="12.5" fill="{text}">{label}</text></g>'
-            )
+        dash = ' stroke-dasharray="5 4"' if spec.reserved else ""
+        parts.append(
+            f'<g class="{state}"><rect x="{x - _NODE_W / 2:.0f}" '
+            f'y="{y - _NODE_H / 2:.0f}" width="{_NODE_W}" height="{_NODE_H}" '
+            f'rx="8" fill="{fill}" stroke="{border}" stroke-width="{border_w}"{dash}/>'
+            f'<text x="{x:.0f}" y="{y:.0f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-size="12.5" fill="{text}">{label}</text></g>'
+        )
 
     label = _html.escape(title or f"Signal path: {graph.name}")
     return (
@@ -189,6 +287,7 @@ def signal_path_html(
     skipped: Iterable[str] = (),
     title: str | None = None,
     counts: Mapping[str, int] | None = None,
+    theme: str = "light",
 ) -> str:
     """Render ``graph`` as a standalone HTML page with lit/dim signal-path styling."""
     page_title = _html.escape(title or f"Signal path: {graph.name}")
@@ -200,12 +299,16 @@ def signal_path_html(
         )
         or "none"
     )
-    svg = signal_path_svg(graph, lit=lit, skipped=skipped, title=title, counts=counts)
+    svg = signal_path_svg(
+        graph, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
+    )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{page_title}</title><style>{_STYLE}</style></head><body>"
+        f"<title>{page_title}</title><style>{_page_style(theme)}</style></head><body>"
         f"<h1>{page_title}</h1>"
-        f"<p class='legend'>lit = provided operators ({lit_line}); half-lit = "
-        "traversed as identity; dashed = reserved placeholder leaves.</p>"
+        f"<p class='legend'>Boxes are operators: lit = provided ({lit_line}); "
+        "half-lit = traversed as identity; dashed = reserved placeholder leaves. "
+        "The two symbols on the wire are not operators — &#8853; sums the branches "
+        "reaching it, the lever in the diamond selects one of them per sample.</p>"
         f"{svg}</body></html>"
     )

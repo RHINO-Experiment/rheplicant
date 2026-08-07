@@ -72,6 +72,9 @@ nitpick_ignore = [
 html_theme = "furo"
 html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
 html_static_path = ["_static"]
+#: Caption typography: see the file. Nothing here overrides furo's own
+#: variables, so it follows the reader's light/dark choice by construction.
+html_css_files = ["custom.css"]
 html_logo = "_static/rheplicant-logo.png"
 # The logo already carries the "rheplicant" wordmark, so don't repeat the name.
 # source_repository adds per-page "view/edit source" links; footer_icons puts a

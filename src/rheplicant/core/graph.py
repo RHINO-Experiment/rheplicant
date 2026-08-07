@@ -249,6 +249,13 @@ class SignalGraph:
         on it. A ``many`` node is one box however many instances it carries,
         so the count is shown in the label: an unannotated box would render
         two components as one.
+
+        Operators are **boxes**; the two composition operations are **symbols
+        the wire runs through** and are given shapes of their own — a circled
+        plus for a sum, a rhombus for a switch. Mermaid has no line art, so the
+        shape carries the distinction here; ``to_svg`` draws the switch's lever.
+        Both used to be circles differing only in their label, which made two
+        operations *on* operators look like two more operators.
         """
         lit, skipped = set(lit), set(skipped)
         counts = dict(counts or {})
@@ -258,9 +265,9 @@ class SignalGraph:
             if counts.get(n, 1) > 1:
                 label = f"{label} (x{counts[n]})"
             if spec.kind == "junction":
-                shape = '(("+"))'
+                shape = '(("+"))'  # circle + plus = the summing-junction symbol
             elif spec.kind == "selector":
-                shape = '(("sw"))'
+                shape = '{"/"}'  # rhombus + lever = the switch symbol
             else:
                 shape = f'["{label}"]'
             lines.append(f"  {n}{shape}")
@@ -280,12 +287,13 @@ class SignalGraph:
         skipped: Iterable[str] = (),
         title: str | None = None,
         counts: Mapping[str, int] | None = None,
+        theme: str = "light",
     ) -> str:
         """Standalone HTML page of the template with lit/dim signal-path styling."""
         from rheplicant.core.render import signal_path_html
 
         return signal_path_html(
-            self, lit=lit, skipped=skipped, title=title, counts=counts
+            self, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
         )
 
     def to_svg(
@@ -294,12 +302,17 @@ class SignalGraph:
         skipped: Iterable[str] = (),
         title: str | None = None,
         counts: Mapping[str, int] | None = None,
+        theme: str = "light",
     ) -> str:
-        """Self-contained ``<svg>`` of the template, for embedding (docs, notebooks)."""
+        """Self-contained ``<svg>`` of the template, for embedding (docs, notebooks).
+
+        ``theme`` is ``"light"`` or ``"dark"``. An ``<img>``-embedded SVG cannot
+        read the host page's theme, so a page that switches renders a pair.
+        """
         from rheplicant.core.render import signal_path_svg
 
         return signal_path_svg(
-            self, lit=lit, skipped=skipped, title=title, counts=counts
+            self, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
         )
 
     def __repr__(self) -> str:
@@ -549,16 +562,21 @@ class Assembly(AbstractOperator):
             lit=self.lit, skipped=self.skipped, counts=self._counts
         )
 
-    def to_html(self, title: str | None = None) -> str:
+    def to_html(self, title: str | None = None, theme: str = "light") -> str:
         """Standalone HTML page: the full graph with this assembly's nodes lit."""
         return get_graph(self.graph_name).to_html(
-            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
+            lit=self.lit, skipped=self.skipped, title=title,
+            counts=self._counts, theme=theme,
         )
 
-    def to_svg(self, title: str | None = None) -> str:
-        """Self-contained ``<svg>`` with this assembly's nodes lit, for embedding."""
+    def to_svg(self, title: str | None = None, theme: str = "light") -> str:
+        """Self-contained ``<svg>`` with this assembly's nodes lit, for embedding.
+
+        ``theme`` is ``"light"`` or ``"dark"``; see :meth:`SignalGraph.to_svg`.
+        """
         return get_graph(self.graph_name).to_svg(
-            lit=self.lit, skipped=self.skipped, title=title, counts=self._counts
+            lit=self.lit, skipped=self.skipped, title=title,
+            counts=self._counts, theme=theme,
         )
 
     def __repr__(self) -> str:

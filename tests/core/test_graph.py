@@ -313,6 +313,71 @@ class TestAssemblyErgonomics:
             )
 
 
+class TestCompositionSymbols:
+    """A sum and a switch are operations ON operators, and must not look like one.
+
+    The three composition structures are drawn to one convention: a cascade is
+    an arrow, a sum is a symbol the wire runs through, a switch is a *different*
+    symbol the wire runs through. Nothing enforced it, and the package drifted
+    into drawing both operations as identical circles labelled ``+`` and ``sw``
+    — two operations rendered as peers of the operator boxes around them, and
+    told apart only by reading two characters.
+    """
+
+    @pytest.fixture
+    def both(self):
+        """src -> (junction) <- src ; junction -> (selector) <- src ; -> sink."""
+        return SignalGraph(
+            "sum-and-switch",
+            {
+                "p": NodeSpec(S), "q": NodeSpec(S), "sum": NodeSpec(J),
+                "load": NodeSpec(S), "switch": NodeSpec("selector"),
+                "out": NodeSpec(T),
+            },
+            [("p", "sum"), ("q", "sum"), ("sum", "switch"), ("load", "switch"),
+             ("switch", "out")],
+        )
+
+    def test_mermaid_gives_them_different_shapes(self, both):
+        """Different SHAPES, not one shape with two labels."""
+        lines = {
+            line.split("(")[0].split("{")[0].split("[")[0].strip(): line.strip()
+            for line in both.to_mermaid().splitlines()
+            if line.startswith("  ") and "-->" not in line and "class" not in line
+        }
+        sum_shape = lines["sum"].removeprefix("sum")
+        switch_shape = lines["switch"].removeprefix("switch")
+        box_shape = lines["out"].removeprefix("out")
+        assert sum_shape != switch_shape
+        # A label alone would satisfy "different"; strip the labels and the
+        # shapes must still differ, which is the property a reader relies on.
+        assert {sum_shape[0], switch_shape[0]} == {"(", "{"}
+        assert box_shape.startswith("[") and box_shape != sum_shape
+
+    def test_svg_draws_only_operators_as_boxes(self, both):
+        """One <rect> per operator slot, and none for the two operations."""
+        svg = both.to_svg()
+        slots = [n for n, s in both.nodes.items() if s.kind in ("source", "transform")]
+        assert svg.count("<rect") == len(slots)
+        # The sum is a circle, the switch is not — otherwise they would again be
+        # one shape distinguished by its contents.
+        assert svg.count("<circle") == 1 + 2  # the sum, plus the switch's terminals
+
+    def test_svg_symbols_are_smaller_than_a_box_and_the_wire_reaches_them(self, both):
+        """The wire must arrive AT the symbol, not stop where a box would end."""
+        from rheplicant.core.render import _NODE_H, _SUM_R, _SW_R, _half_height
+
+        assert _SUM_R < _NODE_H / 2 and _SW_R < _NODE_H / 2
+        assert _half_height("junction") == _SUM_R
+        assert _half_height("selector") == _SW_R
+        assert _half_height("transform") == _half_height("source") == _NODE_H / 2
+
+    def test_theme_selects_a_palette_and_an_unknown_one_is_refused(self, both):
+        assert both.to_svg(theme="dark") != both.to_svg(theme="light")
+        with pytest.raises(ValueError, match="Unknown theme"):
+            both.to_svg(theme="solarized")
+
+
 class TestRegionCoverage:
     """One operator covering a contiguous region of the template."""
 

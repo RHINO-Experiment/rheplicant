@@ -64,8 +64,9 @@ answer when you get it wrong. They are called out as you reach them.
 
 Six operators, and one call. All three composition structures appear here at
 once, and the picture shows each of them differently because they *are*
-different kinds of thing — a **cascade** is a run of arrows, a **sum** and a
-**switch** are properties of the node that collects them:
+different kinds of thing — a **cascade** is a run of arrows; a **sum** and a
+**switch** are not operators but operations *on* them, so the wire runs through
+a symbol of its own for each, ⊕ and ◇. Boxes are the operators:
 
 ```{mermaid}
 flowchart LR
@@ -74,7 +75,7 @@ flowchart LR
   atm["AtmosphericEmissionOperator<br/>its own emission<br/>atmosphere"]
   tsum(("+"))
   loss["AntennaLossOperator<br/>attenuates, and emits<br/>antenna_loss"]
-  sw(("sw"))
+  sw{"/"}
   amb["CalLoadOperator<br/>ambient load, 300 K<br/>cal_loads_1"]
   hot["CalLoadOperator<br/>hot load, 400 K<br/>cal_loads_2"]
   nw["NoiseWaveOperator<br/>noise waves<br/>noise_wave"]
@@ -98,9 +99,9 @@ Read it structure by structure:
 
 - **cascade** — `sky → beam_spill`, and again `t_ant_sum → antenna_loss →
   receiver_input`. Each stage transforms what the last produced.
-- **sum** at the `(+)`: the sky branch and the atmosphere are *independent
+- **sum** at the ⊕: the sky branch and the atmosphere are *independent
   contributions*, and they add.
-- **switch** at the `(sw)`: the antenna and the two loads are *alternatives*.
+- **switch** at the ◇: the antenna and the two loads are *alternatives*.
   One is connected per sample; the loads **replace** the antenna rather than
   adding to it.
 

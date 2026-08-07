@@ -1,0 +1,69 @@
+/* Figure captions read as apparatus, not as prose.
+ *
+ * Two defaults were working against that. Docutils gives a caption the body's
+ * size and colour, so a two-line caption under a figure looked like the next
+ * paragraph; and `:align: center` centres the caption along with the image,
+ * which is unreadable past one line because every line starts somewhere new.
+ *
+ * So: always ragged-right regardless of the figure's own alignment, set in a
+ * smaller and quieter face, and offset by a rule rather than by indentation
+ * alone -- indentation on its own is easy to misread as a block quote.
+ */
+figure > figcaption,
+figure.align-center > figcaption,
+figure.align-default > figcaption,
+figure.align-left > figcaption,
+figure.align-right > figcaption {
+  text-align: left;
+  margin: 0.75rem 0 0 1.75rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--color-background-border);
+  font-size: 0.855em;
+  line-height: 1.55;
+  color: var(--color-foreground-secondary);
+}
+
+/* Docutils wraps caption text in its own <p>, whose margins would otherwise
+   push the rule away from the text it belongs to. */
+figure > figcaption > p {
+  margin: 0;
+}
+
+figure > figcaption > p + p {
+  margin-top: 0.5rem;
+}
+
+/* A literal inside a caption inherits the caption's size, so it does not sit a
+   step larger than the words around it. */
+figure > figcaption code.literal {
+  font-size: 0.94em;
+}
+
+/* "Fig. 3" and friends, when numfig is on. */
+figure > figcaption .caption-number {
+  font-weight: 600;
+  color: var(--color-foreground-muted);
+}
+
+/* Table and code-block captions get the same treatment, so a page that mixes
+   them does not show three different ideas of what a caption is. */
+table > caption,
+.literal-block-wrapper > .code-block-caption {
+  text-align: left;
+  font-size: 0.855em;
+  line-height: 1.55;
+  color: var(--color-foreground-secondary);
+}
+
+/* Mermaid figures.
+ *
+ * sphinxcontrib-mermaid renders at `width:100%` but leaves the SVG's own
+ * height in place, so a wide diagram scaled down to the text column keeps the
+ * height it wanted and leaves a band of dead space above it -- measured, a
+ * 1767x434 graph occupied 736x507 to draw 736x181 of content. Letting height
+ * follow the aspect ratio removes the band.
+ */
+.mermaid > svg {
+  height: auto !important;
+  max-width: 100%;
+}

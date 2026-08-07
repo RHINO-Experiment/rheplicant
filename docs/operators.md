@@ -290,6 +290,11 @@ pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 
 ## Core combinators & utilities
 
+The first three are the only ways to compose, and none of them is an operator —
+they act *on* operators, which is why every rendering draws a cascade as an
+**arrow**, a sum as an **⊕** on the wire and a switch as a **◇**, never as
+another box. See [the canonical signal path](signal-path.md).
+
 | Component | Role |
 |---|---|
 | `Pipeline` | sequential composition; `replace_stage`, `run_with_intermediates`, name access |

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### One convention for the three ways to compose
+
+- **A sum and a switch are operations *on* operators, so they have stopped
+  looking like operators.** The package drew composition in three places and
+  they disagreed: `to_mermaid` and `to_svg` both gave the junction and the
+  selector one circle with a different label inside, and `docs/tour.md` had a
+  third, hand-written spelling. One convention now — a cascade is an **arrow**,
+  a sum is a **⊕** the wire runs through, a switch is a **lever in a ◇**. In the
+  SVG both are drawn small, unfilled and in the *wire's* colour, and every edge
+  now stops at the symbol's own outline instead of where a box would have ended.
+  An operator is a box the signal enters and leaves; these two are furniture on
+  the wire, and neither is a slot anything can be placed in.
+- `SignalGraph.to_svg` / `to_html` and `Assembly.to_svg` / `to_html` take
+  `theme="light"` or `"dark"`. An `<img>`-embedded SVG cannot read the host
+  page's theme, so a page that switches has to ship a pair.
+- `docs/tour.md`'s graph is now `twin.to_svg()` of the tour's own twin — a
+  committed light/dark pair written by `docs/_generate_tour_graph_figure.py`,
+  which refuses to write a figure whose assembly the tour no longer prints.
+
 ### `pip install rheplicant` just works now
 
 - **limTOD 1.10.0 reached PyPI**, so the dependency resolves and the install

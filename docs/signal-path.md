@@ -19,11 +19,19 @@ A signal path is not a special kind of object. It is **operators** — each one 
 * - **Sum**
   - `SumOperator`
   - independent contributions that **add**
-  - a `junction` node `(+)`
+  - a `junction` node, drawn ⊕
 * - **Switch**
   - `SelectOperator`
   - alternatives, one **selected** per time sample
-  - a `selector` node `(sw)`
+  - a `selector` node, drawn ◇
+:::
+
+:::{admonition} How to read the pictures
+:class: tip
+A cascade is an **arrow**. A sum and a switch are not operators — they are
+operations *on* operators — so neither is drawn as one: the wire runs *through*
+a symbol of its own, ⊕ for the sum and a lever in a ◇ for the switch. Every
+**box** is an operator, and a box is the only thing you can place one in.
 :::
 
 Nodes come in the matching four kinds: a **source** creates data (in-degree 0), a **transform** changes it (in-degree 1), a **junction** sums its inputs and a **selector** switches between them (both in-degree ≥ 2). That is the entire vocabulary. `assemble(*operators)` lights the sub-path your operators induce and folds it into exactly those three combinators, so the composition is a consequence of the physics you declared rather than something you wrote out.
@@ -55,7 +63,7 @@ MY_GRAPH = register_graph(SignalGraph(
 
 ## RHINO's template
 
-The single-antenna path every assembly lights up. The diagram itself is generated from the live `rheplicant.radio.RADIO_GRAPH` at documentation build time, so it cannot drift from the code; the prose around it is written by hand. `(+)` nodes are sum junctions, `(sw)` the antenna/cal-load selector; see the [tour](tour.md#graph-assembly) for the assembly rules and [the operator catalog](operators.md) for what lives at each node.
+The single-antenna path every assembly lights up. The diagram itself is generated from the live `rheplicant.radio.RADIO_GRAPH` at documentation build time, so it cannot drift from the code; the prose around it is written by hand. Circles are sum junctions and the rhombus is the antenna/cal-load switch; see the [tour](tour.md#graph-assembly) for the assembly rules and [the operator catalog](operators.md) for what lives at each node.
 
 ```{mermaid} _generated/radio-graph.mmd
 ```
@@ -72,7 +80,7 @@ A partial twin — five operators, `assemble(global_signal, foregrounds, ionosph
 Partial twin: the beam-convolved sky through the gain.
 ```
 
-A fuller twin — nine operators including RFI, ground pickup, atmospheric emission, and switched calibration loads (the `sw` selector node); note the two dashed entrances (`atmosphere_field` and `ground_field`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
+A fuller twin — nine operators including RFI, ground pickup, atmospheric emission, and switched calibration loads (the ◇ selector node); note the two dashed entrances (`atmosphere_field` and `ground_field`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
 
 ```{figure} signal-path-fuller.svg
 :alt: Fuller twin with nine lit operators
