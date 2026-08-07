@@ -91,6 +91,15 @@ from rheplicant.inference.factorize import Factorization
 from rheplicant.inference.sqrtinfo import SqrtInfo
 from rheplicant.inference.uncertainty import FlatMatrix, _named_spans
 
+#: What a bag can do about an ``epoch_id`` it already holds. Passed to
+#: :func:`reject_bad_term` rather than written inside it, because the chain's
+#: answer to the same question is a different one -- see that function's
+#: ``repeat_remedy``.
+_BAG_REPEAT_REMEDY = (
+    "narrowing the posterior with nothing to show for it. Pass duplicate=True "
+    "if that is genuinely what you mean."
+)
+
 
 def _is_reduced(term: Any) -> bool:
     """Whether this term's numbers are a quadratic in the BASIS COEFFICIENTS.
@@ -142,6 +151,7 @@ def reject_bad_term(
     latents_ok: Callable[[CompressedLikelihood], None],
     represents: Any,
     shared_inputs: bool,
+    repeat_remedy: str,
 ) -> None:
     """The admission rules every accumulator shares.
 
@@ -171,6 +181,14 @@ def reject_bad_term(
         shared_inputs: admit a term whose input product is already held. D17's
             posture, the same one ``duplicate`` takes: legitimate double-counting
             is a choice made deliberately and by name.
+        repeat_remedy: what the caller should do about an ``epoch_id`` that is
+            already held. The **rule** is shared and the **remedy** is not, and
+            that split is measured rather than stylistic: the bag's remedy is
+            ``duplicate=True``, which a chain refuses outright, because a chain
+            appends the repeat last and so reorders the campaign as well as
+            double-counting it. A single sentence here would have told half the
+            callers to pass a flag that raises. No default, for the reason
+            ``represents`` has none.
     """
     absent = [name for name in REQUIRED_TERM_MEMBERS if not hasattr(term, name)]
     if absent:
@@ -204,9 +222,7 @@ def reject_bad_term(
     if not duplicate and term.epoch_id in ids:
         raise StateValidationError(
             f"Epoch {term.epoch_id!r} is already in this memory. Adding it "
-            "again would count its data twice, narrowing the posterior with "
-            "nothing to show for it. Pass duplicate=True if that is genuinely "
-            "what you mean."
+            f"again would count its data twice, {repeat_remedy}"
         )
     _reject_shared_inputs(term, held, represents, shared_inputs)
 
@@ -511,6 +527,7 @@ class BayesMemory(eqx.Module):
             self._latents_ok,
             self.factorization.represents,
             shared_inputs,
+            _BAG_REPEAT_REMEDY,
         )
 
     def _latents_ok(self, term: CompressedLikelihood) -> None:

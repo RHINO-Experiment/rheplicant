@@ -90,9 +90,20 @@ def test_remembering_accumulates_the_log_likelihood():
 
 
 def test_the_same_night_cannot_be_remembered_twice_by_accident():
+    """...and the remedy offered is the **bag's**, which a chain refuses.
+
+    The rule is shared with `ChainMemory.remember` and the last sentence is not:
+    a bag can be told to count a night twice, a chain cannot, because its repeat
+    would land last and reorder the campaign as well. `reject_bad_term` takes
+    that sentence as an argument for exactly this reason, so it is pinned on
+    both sides -- swapping the two remedies over must fail a test here as well
+    as one in `test_chain_memory.py`, and until this assertion existed it
+    failed only there.
+    """
     memory = BayesMemory(_factorization()).remember(_term("night-001", jax.random.key(0)))
-    with pytest.raises(StateValidationError, match="already"):
+    with pytest.raises(StateValidationError, match="already") as caught:
         memory.remember(_term("night-001", jax.random.key(1)))
+    assert "Pass duplicate=True" in str(caught.value)
 
 
 def test_a_deliberate_duplicate_is_allowed_and_doubles_the_information():

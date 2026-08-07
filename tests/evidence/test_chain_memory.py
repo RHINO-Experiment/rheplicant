@@ -330,13 +330,105 @@ class TestTheChainChecksEveryDeclaredColumnAndNotJustTheLinkedOne:
         assert len(memory.epoch_ids) == bank.N_EPOCHS
 
 
-def test_a_chain_refuses_a_repeated_epoch_and_takes_duplicate_true():
+class TestTheStackAndTheArchiveHaveToDescribeTheSameCampaign:
+    """The type promised order; only `remember` delivered it.
+
+    `ChainMemory.__init__` took `(factorization, stacked, epochs)` and asked
+    nothing about how the three related, so every one of the pairs below was
+    accepted. Two of them are silent -- the campaign answers, with a number that
+    is either about a different model or labelled with the wrong nights -- and
+    two put the duplicate guard to work on an `ids` set that no longer describes
+    the stack, which re-admits an epoch already folded in.
+
+    Measured on `chain_bank`'s six nights at `PROBES[0]`: the ordered campaign
+    is -171.621919, the stack reversed under the same ids is -171.614950, and
+    the archive reversed over the same stack is -171.621919 exactly -- the same
+    number, now labelled `('e5', ..., 'e0')`.
+    """
+
+    def _pair(self):
+        memory = _memory()
+        return memory, _terms()
+
+    def test_an_archive_in_the_reverse_order_of_the_stack_is_refused(self):
+        memory, terms = self._pair()
+        with pytest.raises(StateValidationError, match="does not come from epoch"):
+            ChainMemory(memory.factorization, memory.stacked, tuple(reversed(terms)))
+
+    def test_a_stack_in_the_reverse_order_of_the_archive_is_refused(self):
+        memory, terms = self._pair()
+        factors, targets, offsets = memory.stacked
+        with pytest.raises(StateValidationError, match="does not come from epoch"):
+            ChainMemory(
+                memory.factorization,
+                (factors[::-1], targets[::-1], offsets[::-1]),
+                terms,
+            )
+
+    def test_more_blocks_than_epochs_is_refused_before_the_ids_can_lie(self):
+        """The sharp one: a short archive makes the duplicate guard re-admit.
+
+        With six blocks and two terms, `_epochs.ids` is `{'e0', 'e1'}` and the
+        stack holds all six, so `remember(e3)` saw no clash and folded `e3` in a
+        second time -- seven blocks, `('e0', 'e1', 'e3')`.
+        """
+        memory, terms = self._pair()
+        with pytest.raises(StateValidationError, match="6 blocks .* 2 epochs"):
+            ChainMemory(memory.factorization, memory.stacked, terms[:2])
+
+    def test_an_emptied_archive_over_a_full_stack_is_refused(self):
+        memory, _ = self._pair()
+        with pytest.raises(StateValidationError, match="6 blocks .* 0 epochs"):
+            ChainMemory(memory.factorization, memory.stacked, ())
+
+    def test_a_block_of_the_wrong_width_is_refused_by_shape(self):
+        memory, terms = self._pair()
+        factors, targets, offsets = memory.stacked
+        with pytest.raises(StateValidationError, match="shaped"):
+            ChainMemory(
+                memory.factorization, (factors[:, :, :2], targets, offsets), terms
+            )
+
+    def test_the_pair_remember_builds_is_still_taken(self):
+        """Guard the guard, and the tolerance with it.
+
+        The comparison is on the quadratic form each block and its term stand
+        for, not on the arrays, so QR roundoff must not read as a foreign
+        block. Measured over the six fixture epochs the worst disagreement is
+        1.4e-16 of the block's own scale, against a `sqrt(eps)` band of 1.5e-8;
+        pairing epoch `e0`'s block with `e1`'s term disagrees by 3.1e-01.
+        """
+        memory, terms = self._pair()
+        rebuilt = ChainMemory(memory.factorization, memory.stacked, terms)
+        assert rebuilt.epoch_ids == tuple(f"e{e}" for e in range(bank.N_EPOCHS))
+
+
+def test_a_chain_refuses_a_repeated_epoch_and_says_what_a_chain_can_do_about_it():
     memory = _memory()
-    with pytest.raises(StateValidationError, match="already in this memory"):
+    with pytest.raises(StateValidationError, match="already in this memory") as caught:
         memory.remember(_terms()[0])
-    assert len(memory.remember(_terms()[0], duplicate=True).epoch_ids) == (
-        bank.N_EPOCHS + 1
-    )
+    # Not the bag's remedy. The shared message used to end "Pass duplicate=True
+    # if that is genuinely what you mean", which for a chain names a flag that
+    # now raises.
+    assert "Pass duplicate=True" not in str(caught.value)
+    assert "a chain refuses it" in str(caught.value)
+    assert "own epoch_id" in str(caught.value)
+
+
+def test_a_chain_refuses_duplicate_true_rather_than_appending_the_repeat_last():
+    """A bag's "count it twice" has no chain reading, and the flag took it anyway.
+
+    `duplicate=True` appended the repeat at the *end*, so `('e0', 'e1', 'e2')`
+    became `('e0', 'e1', 'e2', 'e1')` -- the same night claimed to have happened
+    after `e2`. Measured at `PROBES[0]`: -58.9892 for the three nights,
+    -68.6127 with `e1` repeated last, and -68.4998 with the same double count
+    placed in order. The 0.1129 nats between the last two is the part that is
+    the chain's alone, and it is larger than the 0.0752 nats `remember`'s
+    docstring records for swapping two adjacent epochs.
+    """
+    memory = _memory()
+    with pytest.raises(StateValidationError, match="does not take duplicate=True"):
+        memory.remember(_terms()[0], duplicate=True)
 
 
 def test_a_chain_refuses_two_estimators():

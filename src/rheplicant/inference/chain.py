@@ -66,6 +66,7 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise_arrays
@@ -635,6 +636,39 @@ def smooth(
     return mean.reshape(n_epochs, n_zeta), variance.reshape(n_epochs, n_zeta)
 
 
+#: What a chain can do about an ``epoch_id`` it already holds, which is not what
+#: a bag can do -- see :meth:`ChainMemory.remember` for the 0.1129 nats that
+#: separate the two answers, and :func:`~rheplicant.inference.memory.reject_bad_term`
+#: for why the rule is shared and this sentence is not.
+_CHAIN_REPEAT_REMEDY = (
+    "and it would land last, so the campaign would also say that night happened "
+    "again after the ones that followed it. duplicate=True is the bag's answer "
+    "and a chain refuses it: drop the repeat, or give the retried recording its "
+    "own epoch_id."
+)
+
+
+def _column_spans(
+    names: tuple[str, ...], shapes: tuple[tuple[int, ...], ...]
+) -> dict[str, range]:
+    """``{name: which columns of a factor over these names it owns}``.
+
+    One copy, read by :func:`_square_block` when it permutes an epoch into the
+    memory's order and by :func:`_reject_a_foreign_stack` when it asks whether a
+    stored block came from a given epoch. A second implementation of this
+    arithmetic would let the check agree with a permutation the accumulator did
+    not perform, which is the one way the check could pass on a block that is
+    genuinely somebody else's.
+    """
+    spans: dict[str, range] = {}
+    position = 0
+    for name, shape in zip(names, shapes, strict=True):
+        size = int(np.prod(shape, dtype=int))
+        spans[name] = range(position, position + size)
+        position += size
+    return spans
+
+
 def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
     """One epoch's joint form, permuted into ``order`` and padded to square.
 
@@ -648,12 +682,7 @@ def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
     """
     if tuple(info.names) != order:
         shapes = dict(zip(info.names, info.shapes, strict=True))
-        columns: dict[str, range] = {}
-        position = 0
-        for name, shape in zip(info.names, info.shapes, strict=True):
-            size = int(jnp.zeros(shape).size)
-            columns[name] = range(position, position + size)
-            position += size
+        columns = _column_spans(tuple(info.names), tuple(info.shapes))
         permutation = jnp.asarray(
             [column for name in order for column in columns[name]], dtype=int
         )
@@ -665,6 +694,167 @@ def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
             shapes=tuple(shapes[name] for name in order),
         )
     return SqrtInfo.combine(SqrtInfo.null(info.names, info.shapes), info)
+
+
+def _quadratic_form(
+    factor: Any, target: Any, offset: Any, columns: Sequence[int] | None = None
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """``(A, b, c)`` such that the term is ``x^T A x - 2 b^T x + c``.
+
+    The three coefficients are what a stored block and the epoch it came from
+    have in common, and all that they have in common. ``combine(null, info)``
+    re-triangularises, so the stored factor is **not** the epoch's factor even
+    up to roundoff -- it has a different number of rows and a different sign
+    convention -- while the form it stands for is preserved exactly. Comparing
+    coefficients is therefore the check; comparing arrays would refuse every
+    block the accumulator actually builds.
+    """
+    factor = np.asarray(factor, dtype=float)
+    if columns is not None:
+        factor = factor[:, list(columns)]
+    target = np.asarray(target, dtype=float)
+    return factor.T @ factor, factor.T @ target, float(target @ target + float(offset))
+
+
+def _reject_a_foreign_stack(
+    stacked: tuple[Any, Any, Any],
+    terms: tuple[Any, ...],
+    order: tuple[str, ...],
+    width: int,
+) -> None:
+    """The stack and the archive are one campaign, so they are checked as one.
+
+    ``__init__`` took ``(factorization, stacked, epochs)`` and asked nothing
+    about how they related, which made the class's own promise -- ordered,
+    refuses to be shuffled -- a property of :meth:`ChainMemory.remember` rather
+    than of the type. Four pairs were accepted, and none of them raised
+    anywhere downstream:
+
+    * the archive reversed over an unchanged stack. The campaign returns the
+      right number, -171.621919 nats at ``PROBES[0]`` on ``chain_bank``, under
+      the labels ``('e5', ..., 'e0')``. Every per-epoch report is then attached
+      to the wrong night.
+    * the stack reversed under an unchanged archive: -171.614950 nats, a
+      different model, the same ids.
+    * six blocks and two terms. This is the sharp one, because the damage
+      compounds: ``remember``'s duplicate guard reads ``_epochs.ids``, which now
+      describes two nights out of six, so ``remember(e3)`` saw no clash and
+      folded ``e3`` in a **second** time -- seven blocks under
+      ``('e0', 'e1', 'e3')``.
+    * six blocks and no terms at all, which reports the six-night likelihood
+      from an archive that says the campaign is empty.
+
+    **What is compared.** Not the arrays: ``_square_block`` re-triangularises,
+    so a stored block never equals its epoch's factor. The quadratic form does
+    survive, so ``(A, b, c)`` from :func:`_quadratic_form` is compared on each
+    side, against ``sqrt(eps)`` times the epoch's own largest coefficient --
+    relative, for the reason
+    :func:`~rheplicant.inference.sqrtinfo.marginalise` gives about pivots, and
+    the same ``sqrt(eps)`` band. Measured over ``chain_bank``'s six epochs the
+    worst honest disagreement is 1.4e-16 of the block's scale against a band of
+    1.5e-8, and pairing ``e0``'s block with ``e1``'s term disagrees by 3.1e-01.
+    Eight orders of headroom either way.
+
+    **What it costs.** O(N) small numpy products per construction, so O(N^2)
+    over a campaign built one night at a time -- the same order section 6
+    already spends per likelihood call. Measured on a warm 64-epoch chain, best
+    of three: 0.065 s to build with no check, 0.120 s with this one, 0.335 s if
+    the blocks are indexed on device instead of converted in bulk, and 0.800 s
+    if the check rebuilds each block through :func:`_square_block` rather than
+    comparing coefficients. The last is the version that reads as the obvious
+    one and is seven times the cost of the whole build.
+    """
+    factors, targets, offsets = stacked
+    n_blocks = int(np.shape(factors)[0])
+    shapes = (np.shape(factors), np.shape(targets), np.shape(offsets))
+    if shapes != ((n_blocks, width, width), (n_blocks, width), (n_blocks,)):
+        raise StateValidationError(
+            f"The stack is shaped {shapes}, but {list(order)} is a width-{width} "
+            f"vector, so {n_blocks} epochs of it is "
+            f"{((n_blocks, width, width), (n_blocks, width), (n_blocks,))}. A "
+            "stored block is a quadratic form in one specific ordered vector; a "
+            "block of another width is not that form reshaped, it is a different "
+            "model, and the filter would slice theta's columns off the chain's."
+        )
+    if len(terms) != n_blocks:
+        raise StateValidationError(
+            f"This chain carries {n_blocks} blocks and {len(terms)} epochs. They "
+            "are one campaign recorded twice -- the stack is what the recursion "
+            "reads and the archive is what names it -- so a mismatch means "
+            "either an unnamed night in the arithmetic or a named one missing "
+            "from it. With a short archive the duplicate guard reads epoch ids "
+            "that no longer describe the stack, and remember() folds in an epoch "
+            "that is already there. Build the chain with remember(), which grows "
+            "both together."
+        )
+    if not terms:
+        return
+    # Converted once, in bulk. Indexing the device arrays instead costs a gather
+    # and a transfer per block, which is most of what this check would spend:
+    # 0.335 s against 0.120 s on the 64-epoch chain above.
+    found = (
+        np.asarray(factors, dtype=float),
+        np.asarray(targets, dtype=float),
+        np.asarray(offsets, dtype=float),
+    )
+    root_eps = float(np.sqrt(np.finfo(np.asarray(factors).dtype).eps))
+    for index, term in enumerate(terms):
+        _reject_a_foreign_block(
+            tuple(part[index] for part in found), term, order, index, root_eps
+        )
+
+
+def _reject_a_foreign_block(
+    block: tuple[Any, Any, Any],
+    term: Any,
+    order: tuple[str, ...],
+    index: int,
+    root_eps: float,
+) -> None:
+    """One block against one epoch. See :func:`_reject_a_foreign_stack`."""
+    from rheplicant.inference.memory import _stored_names
+
+    stored = _stored_names(term)
+    if set(stored) != set(order):
+        raise StateValidationError(
+            f"Block {index} does not come from epoch {term.epoch_id!r}: that "
+            f"epoch is over {list(stored)} and this chain's blocks are over "
+            f"{list(order)}. Build the chain with remember(), which refuses the "
+            "term before it reaches the stack."
+        )
+    columns = _column_spans(tuple(term.info.names), tuple(term.info.shapes))
+    found = _quadratic_form(*block)
+    expected = _quadratic_form(
+        term.info.factor,
+        term.info.target,
+        term.info.offset,
+        [column for name in order for column in columns[name]],
+    )
+    scale = max(float(np.max(np.abs(part))) for part in expected[:2])
+    scale = max(scale, abs(expected[2]))
+    # `not (difference <= tolerance)`, and `isfinite(tolerance)` beside it: NaN
+    # loses both comparisons, so the plain `>` form would wave a poisoned block
+    # through, and an epoch whose own coefficients are inf makes the tolerance
+    # inf, which admits every block there is. Both ends, because a guard written
+    # NaN-safely can still be defeated from the other one.
+    difference = max(
+        float(np.max(np.abs(found[0] - expected[0]))),
+        float(np.max(np.abs(found[1] - expected[1]))),
+        abs(found[2] - expected[2]),
+    )
+    tolerance = root_eps * scale
+    if not (np.isfinite(tolerance) and difference <= tolerance):
+        raise StateValidationError(
+            f"Block {index} does not come from epoch {term.epoch_id!r}: their "
+            f"quadratic forms differ by {difference:.3e}, against a band of "
+            f"{tolerance:.3e} at this epoch's scale. The stack is what the "
+            "recursion reads and the archive is what names it, so a block "
+            "paired with the wrong epoch is either a different model reported "
+            "under these ids or this model reported under the wrong ones, and "
+            "the chain is ordered, so a reordering is one of those. Build the "
+            "chain with remember(), which appends the block and the epoch "
+            "together."
+        )
 
 
 class _Epochs:
@@ -721,12 +911,21 @@ class ChainMemory(eqx.Module):
     time. Measured: one trace per ``remember`` and none thereafter. During a NUTS
     run N is fixed, so the cost is one compilation, not one per step.
 
+    **Ordered is a property of the type, not of ``remember``.** The stack is
+    what the recursion reads and the archive is what names it, and until
+    :func:`_reject_a_foreign_stack` existed the constructor related the two in
+    no way at all -- a reversed archive over an unchanged stack, a reversed
+    stack under an unchanged archive, six blocks with two epochs and six blocks
+    with none were all accepted, and the first two answer with a plausible
+    number. See that function for what each one costs.
+
     Attributes:
         factorization: the single declaration. Its ``linked`` entry supplies the
             transition, and ``__check_init__`` has already refused a transition
             built from anything that is not global.
         stacked: ``(factor (N, w, w), target (N, w), offset (N,))``, epochs in
-            the order they were remembered, ``zeta``'s columns last.
+            the order they were remembered, ``zeta``'s columns last. Checked at
+            construction against the archive, block by block.
     """
 
     factorization: Any
@@ -755,6 +954,9 @@ class ChainMemory(eqx.Module):
             else stacked
         )
         self._epochs = epochs if isinstance(epochs, _Epochs) else _Epochs(epochs)
+        _reject_a_foreign_stack(
+            self.stacked, self._epochs.terms, self.column_order, width
+        )
 
     @staticmethod
     def _width(factorization: Any) -> int:
@@ -803,11 +1005,28 @@ class ChainMemory(eqx.Module):
         and 1e12 times the recursion's own 9.1e-13 disagreement with the dense
         oracle, which is the comparison that makes it evidence.
 
+        **``duplicate=True`` is refused here, where the bag takes it**, and the
+        asymmetry is the same one the two types exist to carry. For a bag it
+        means "count this recording twice": the terms are exchangeable, the
+        result is a well-defined posterior that is too narrow by a known amount,
+        and a caller who wrote it meant it. A chain has no such reading. The
+        repeat lands **last**, so it does not say "``e1`` twice", it says "``e1``
+        happened, then ``e2``, then ``e1`` again" -- one night's drift correlated
+        with itself across two transitions. Measured at ``PROBES[0]``:
+        ``('e0', 'e1', 'e2')`` is -58.9892 nats, appending ``e1`` gives
+        -68.6127, and the same double count placed in order gives -68.4998. The
+        0.1129 nats between the last two is the part no bag can produce, and it
+        is larger than the 0.0752 above. There is no flag value that means
+        "twice, in the right place", because a chain has no right place for a
+        night that happened once: use :class:`BayesMemory` if the epochs really
+        are exchangeable, or give the second recording its own ``epoch_id``.
+
         Args:
             term: one epoch's compressed likelihood, over this memory's globals
                 **and** its linked latent.
-            duplicate: allow an ``epoch_id`` already present. Off by default,
-                because the common cause is a retried run.
+            duplicate: refused. Present so that a caller who reaches for the
+                bag's flag gets a refusal that says why rather than a
+                ``TypeError`` about a keyword.
             shared_inputs: allow an input product this memory already holds under
                 the same hash. Section 9.5, and it is the *bag*'s rule reused
                 rather than restated: a chain already says the epochs are
@@ -816,6 +1035,17 @@ class ChainMemory(eqx.Module):
         """
         from rheplicant.inference.memory import reject_bad_term
 
+        if duplicate:
+            raise StateValidationError(
+                "ChainMemory.remember does not take duplicate=True. A bag counts "
+                "a recording twice and stays a posterior over the same model; a "
+                "chain appends the repeat at the end, which says the same night "
+                "happened again after the ones that followed it and its drift is "
+                "correlated with itself through the transition. Measured on "
+                "tests/evidence/chain_bank.py, that costs 0.1129 nats beyond the "
+                "double count itself. Use BayesMemory if the epochs are "
+                "exchangeable, or give the second recording its own epoch_id."
+            )
         reject_bad_term(
             term,
             self._epochs.terms,
@@ -824,6 +1054,7 @@ class ChainMemory(eqx.Module):
             self._latents_ok,
             self.factorization.represents,
             shared_inputs,
+            _CHAIN_REPEAT_REMEDY,
         )
         square = _square_block(term.info, self.column_order)
         factors, targets, offsets = self.stacked
