@@ -22,13 +22,14 @@ dependencies = [
     # adapters are wired to limTOD, and they are the package's real forward model
     # rather than an accessory, so this is a dependency and not an extra.
     #
-    # THE COST, STATED: limTOD is not on PyPI at this floor -- the index carries
-    # <=1.8.0 -- so a plain `pip install rheplicant` cannot resolve, and neither
-    # can `uv sync` / `uv run` (both measured: "your project's requirements are
-    # unsatisfiable"). Install limTOD first, or work against the lock with
-    # `uv sync --frozen` / `uv run --frozen`. Publishing to PyPI needs limTOD
-    # published first; until then this floor is a deliberate refusal to pretend
-    # the sky engines are optional.
+    # limTOD 1.10.0 is on PyPI, so this resolves normally and `pip install
+    # rheplicant` needs no preparatory step. It did not always: the index
+    # carried <=1.8.0 against this >=1.10 floor, and the floor was kept anyway,
+    # as a refusal to pretend the sky engines are optional. That bet is now paid
+    # off rather than merely defensible.
+    #
+    # `uv sync` still refuses, but no longer over this: the remaining
+    # unsatisfiable requirement is `rheplicant[cal]` -> rhino-cal-jax. Measured.
     #
     # Floored at 1.10, which is where the CST reader lives (limTOD.cstbeam); 1.9
     # brought the horizon partition. Beam physics and beam ingestion are both
@@ -55,25 +56,27 @@ classifiers = [
 [project.optional-dependencies]
 numpyro = ["numpyro"]
 # NoiseWaveOperator is an adapter over rhino_cal_jax, the JAX implementation of
-# the Noise-Wave GCR note's Eq. 1 (D15). The physics has a life outside this
+# the noise-wave receiver model (D15). The physics has a life outside this
 # framework, so the dependency runs one way and stays optional: everything
 # except the noise-wave stage works without it, and the operator raises an
 # actionable ImportError naming this extra when it is missing.
 #
-# Like limTOD and MomentRFI, rhino-cal-jax is not on PyPI, so the extra NAMES
-# the requirement rather than resolving it:
+# rhino-cal-jax is not on PyPI, so the extra NAMES the requirement rather than
+# resolving it -- and it is the one requirement that still makes a bare
+# `uv sync` unsatisfiable:
 #   uv pip install -e <path-to-rhino-cal>
 #   uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal"
 cal = ["rhino-cal-jax"]
 # MomentRFIFlaggingOperator bridges to the numpy MomentRFI package through
-# jax.pure_callback. Like limTOD above, MomentRFI is not on PyPI, so this extra
-# names the requirement rather than resolving it:
+# jax.pure_callback. MomentRFI is not on PyPI, so this extra names the
+# requirement rather than resolving it:
 #   uv pip install -e <path-to-MomentRFI>
 #   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 # The threshold-based FlaggingOperator needs none of it.
 rfi = ["MomentRFI"]
 # read_rhino_observation() reads the RHINO observation HDF5 through h5py. Unlike
-# limTOD and MomentRFI this one IS on PyPI, so the extra resolves normally:
+# rhino-cal-jax and MomentRFI this one IS on PyPI, so the extra resolves
+# normally:
 #   uv pip install -e ".[rhino]"
 # The Touchstone reader needs none of it -- it is numpy only.
 rhino = ["h5py"]

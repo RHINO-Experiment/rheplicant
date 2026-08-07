@@ -450,7 +450,7 @@ class PriorSensitivityReport:
 
     @property
     def worst(self) -> tuple[str, int, float]:
-        """``(latent, index within it, signed shift)`` of the largest |shift|.
+        """``(latent, index within it, signed shift)``, by largest magnitude.
 
         What to print first. An anonymous argmax over the flat vector would
         name a position in a layout the caller did not choose.

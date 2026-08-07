@@ -1,6 +1,6 @@
 """RHINO's horn on the sky, feeding the noise-wave receiver — end to end.
 
-limTOD says what the antenna sees. The Noise-Wave GCR draft's Eq. 1 says what
+limTOD says what the antenna sees. The noise-wave data model says what
 the receiver does with it::
 
     T_sys = T_src c_s + T_unc k_unc + T_cos k_cos + T_sin k_sin + T_rx
@@ -15,16 +15,16 @@ with it.
 Six steps:
 
 1. the RHINO horn: CST -> HEALPix -> drift-scan sky, checked to BE a temperature;
-2. the antenna chain, assembled from the graph, cross-checked against Eq. 1;
+2. the antenna chain, assembled from the graph, cross-checked by hand;
 3. what the receiver did to the sky (mismatch loss vs ohmic loss);
-4. a real switching cycle: antenna + two loads + Eq. 8 radiometer noise;
+4. a real switching cycle: antenna + two loads + radiometer noise;
 5. close the loop — solve for the noise waves with the sky known;
 6. differentiate the whole thing, sky map included.
 
-Needs both wings. limTOD is a dependency (>= 1.10) and rhino-cal-jax is the
-`cal` extra; neither is on PyPI at the required version, so both come from git:
-      pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD" \
-                  "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git"
+Needs both wings. limTOD is a dependency (>= 1.10) and comes from PyPI with the
+install; rhino-cal-jax is the `cal` extra and is not on PyPI, so it comes from
+git:
+      pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git"
 Run:  uv run --frozen python examples/sky_to_noise_wave.py    (~60 s)
       uv run --frozen python examples/sky_to_noise_wave.py --beam-dir /path/to/CST_beams
 """
@@ -226,7 +226,8 @@ print(two_branch)
 print("switch order:", two_branch["receiver_input"].names,
       "<- gamma_src rows must be stacked in THIS order\n")
 
-# Cross-check: Eq. 1 spelled out by hand, with the antenna chain in T_src's place.
+# Cross-check: the system temperature spelled out by hand, with the antenna
+# chain in T_src's place.
 ab_switch = jnp.arange(N_TIME) % 2
 ab_coords = coords.replace(extra={"lst_deg": lst_deg, "receiver_input": ab_switch})
 assembled = eqx.filter_jit(two_branch)(State(coords=ab_coords)).data
@@ -243,7 +244,7 @@ by_hand = rcj.system_temperature(
     t_unc=TRUE_T[0], t_cos=TRUE_T[1], t_sin=TRUE_T[2], t_rx=jnp.array(T_RX),
 )
 worst = float(jnp.max(jnp.abs(assembled - by_hand)) / jnp.max(jnp.abs(by_hand)))
-print(f"assembled twin vs Eq. 1 by hand: {worst:.1e} relative — roundoff\n")
+print(f"assembled twin vs the same sum by hand: {worst:.1e} relative — roundoff\n")
 
 # =============================== 3. two different losses, not one ----------
 # c_s = (1 - |G_src|^2)|F|^2 is the impedance MISMATCH at the receiver input: it
@@ -277,7 +278,7 @@ truth = eqx.filter_jit(twin(TRUE_T))(state).data
 observed = rcj.add_radiometer_noise(truth, jax.random.key(1),
                                     t_int=T_INT, delta_nu=DELTA_NU)
 
-# Eq. 8's noise is FRACTIONAL: sigma = T_sys / sqrt(delta_nu * t_int), so it is
+# The radiometer noise is FRACTIONAL: sigma = T_sys / sqrt(delta_nu * t_int), so it is
 # ~2x larger on antenna samples than on the loads here. A scalar sigma would
 # weight them equally and throw that away; the observed power is the standard
 # estimator of the per-sample sigma (slightly biased by the noise it estimates,
@@ -285,7 +286,7 @@ observed = rcj.add_radiometer_noise(truth, jax.random.key(1),
 noise_std = observed / (DELTA_NU * T_INT) ** 0.5
 print(f"simulated waterfall: {observed.shape}, {float(observed.mean()):.1f} K "
       f"mean, sigma {float(noise_std.min()):.3f}..{float(noise_std.max()):.3f} K "
-      "(Eq. 8, fractional)")
+      "(radiometer, fractional)")
 for index, name in enumerate(("antenna", "ambient", "hot")):
     rows = observed[switch == index]
     print(f"   {name:8s} {rows.shape[0]:3d} samples   "
@@ -323,7 +324,7 @@ print(f"condition_estimate: kappa = {float(kappa):.2e}")
 
 solved, residual = wiener_solve(block, observed, noise_std=noise_std,
                                 prior_std=100.0, tol=1e-10, maxiter=4000)
-print(f"\nWiener mean (Eq. 30), CG residual {float(residual):.1e}:")
+print(f"\nWiener mean, CG residual {float(residual):.1e}:")
 for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
     err = float(jnp.sqrt(jnp.mean((solved[i] - TRUE_T[i]) ** 2)))
     span = float(TRUE_T[i].max() - TRUE_T[i].min())
@@ -332,7 +333,7 @@ for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
 
 # ======================================= 6. one differentiable object ------
 # From the HEALPix sky map through the beam convolution, the ohmic loss, the
-# switch and Eq. 1 — one gradient, no finite differences anywhere.
+# switch and the noise-wave couplings — one gradient, no finite differences.
 def total_power(maps, efficiency):
     # Reach any parameter by its GRAPH NODE, wherever assemble() folded it.
     pipeline = eqx.tree_at(
@@ -352,5 +353,5 @@ print(f"d(sum P^2)/d(eta):        {float(d_eta):.3e}")
 print("\nThree losses, in order and none standing in for another: the horizon "
       "split\n(mixing, no loss), the horn's ohmic loss (loss + its own "
       "emission), and the\nreceiver mismatch (loss, nothing added).")
-print("One object: RHINO's horn, limTOD's sky, rhino-cal-jax's Eq. 1, "
+print("One object: RHINO's horn, limTOD's sky, rhino-cal-jax's couplings, "
       "rheplicant's graph.")

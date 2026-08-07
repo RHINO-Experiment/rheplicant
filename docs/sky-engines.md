@@ -310,12 +310,8 @@ the expected way to switch engines.
 
 Both engines are backed by the `limtod_jax` package that ships with
 [limTOD](https://github.com/zzhang0123/limTOD). It is a **dependency**, not an
-extra — the engines are the forward model rather than an accessory — but PyPI
-carries only ≤ 1.8.0 against a ≥ 1.10 floor, so it installs from source:
-
-```bash
-pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
-```
+extra — the engines are the forward model rather than an accessory — and it is
+on PyPI, so `pip install rheplicant` brings it.
 
 The floor is **limTOD ≥ 1.10**, so a fresh install gets every fast path. The
 individual floors, if you are pinning by hand: `GeneralPointingProjector`

@@ -1,9 +1,9 @@
 """Noise waves as a linear block: Wiener mean and exact posterior draws.
 
-The data model (Noise-Wave GCR note, Eq. 1) is exactly linear in the noise-wave
-temperatures, so they never need a gradient sampler. This script declares that
-linearity, has it CHECKED, then solves in closed form and draws exact posterior
-samples -- the note's Eqs. 30 and 31 respectively.
+The noise-wave data model is exactly linear in the noise-wave temperatures, so
+they never need a gradient sampler. This script declares that
+linearity, has it CHECKED, then solves in closed form (the Wiener mean) and
+draws exact posterior samples.
 
 The switching is what makes it work, and the demonstration is deliberately
 per-channel. Each switch position contributes one equation per frequency
@@ -156,13 +156,13 @@ print(f"condition_estimate: kappa = {float(kappa):.2e} "
 solved, residual = wiener_solve(
     block, observed, noise_std=NOISE, prior_std=PRIOR, tol=CG_TOL, maxiter=CG_MAXITER
 )
-print(f"\nWiener mean (Eq. 30), CG residual {float(residual):.1e}")
+print(f"\nWiener mean, CG residual {float(residual):.1e}")
 for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
     err = jnp.sqrt(jnp.mean((solved[i] - TRUE_T[i]) ** 2))
     print(f"   {name:6s} RMS error {float(err):8.3f} K   "
           f"(truth spans {float(TRUE_T[i].min()):7.1f} .. {float(TRUE_T[i].max()):7.1f})")
 
-# gcr_sample adds the two fluctuation terms of Eq. 31 to the same right-hand
+# gcr_sample adds the two fluctuation terms to the same right-hand
 # side, so every solve is an independent, exact posterior draw.
 keys = jax.random.split(jax.random.key(9), 300)
 draws = jax.vmap(
@@ -171,7 +171,7 @@ draws = jax.vmap(
         tol=CG_TOL, maxiter=CG_MAXITER,
     )[0]
 )(keys)
-print("\n300 exact posterior draws (Eq. 31): per-channel sigma, and how much of")
+print("\n300 exact posterior draws: per-channel sigma, and how much of")
 print(f"the {PRIOR:.0f} K prior width the data bought back:")
 for i, name in enumerate(("T_unc", "T_cos", "T_sin")):
     sig = draws[:, i].std(axis=0)

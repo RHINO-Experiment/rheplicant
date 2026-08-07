@@ -35,15 +35,15 @@ other script finishes in under ten seconds.
 * - `sky_to_noise_wave.py`
   - RHINO's horn end to end: CST beam → HEALPix → drift-scan `T_src` → horizon
     spill, ohmic loss, mismatch → a three-position switch cycle → noise waves
-    solved back out. Cross-checked against Eq. 1 written by hand
+    solved back out. Cross-checked against the same sum written by hand
   - **59 s**
-  - limTOD, `cal`
+  - `cal`
 * - `driftscan_mmode.py`
   - Shows the m-mode engine reproduces the general one to 5e-15 — an
     optimisation, not an approximation — then times it at ~230× and
     differentiates through the beam
   - **61 s**
-  - limTOD
+  - —
 :::
 
 ## Inference
@@ -130,10 +130,10 @@ other script finishes in under ten seconds.
 
 ## What "Needs" means
 
-`—` is a default install. **limTOD** is a dependency rather than an extra, but it
-is not on PyPI at the required floor, so it installs from source; **`cal`** is
-`rhino-cal-jax`, also from git; **numpyro** is `pip install "rheplicant[numpyro]"`.
-See [Install](install.md) for the commands.
+`—` is a default install, limTOD included: it is a dependency rather than an
+extra, and it is on PyPI. **`cal`** is `rhino-cal-jax`, which is not, so it
+installs from git; **numpyro** is `pip install "rheplicant[numpyro]"`. See
+[Install](install.md) for the commands.
 
 Note that limTOD and `rhino_cal_jax` are imported **lazily** — importing
 `rheplicant.radio` does not pull either. A script needs them only when it

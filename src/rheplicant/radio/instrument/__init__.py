@@ -1,7 +1,7 @@
 """Instrumental response chain (elements taxonomy: "Instrumental").
 
-Typical ordering in a forward model (RHINO paper Eq. 6:
-``P_rec = g (T_ant + T_nw + T_cw) + T_n`` — the CW tone joins *before*
+Typical ordering in a forward model, which assembles
+``P_rec = g (T_ant + T_nw + T_cw) + T_n`` (the CW tone joins *before*
 bandpass and gain so it tracks gain drift; the antenna/cal-load switch sits
 between the sky-side temperatures and the receiver terms)::
 

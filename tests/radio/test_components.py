@@ -157,7 +157,7 @@ class TestInstrumentComponents:
     def test_noise_wave_reflection_loss(self, data_state):
         """|Gamma_src|^2 = 0.25 with a matched receiver (Gamma_rec = 0).
 
-        Gamma_rec = 0 gives the reflection factor F = 1 exactly (draft Eq. 3),
+        Gamma_rec = 0 gives the reflection factor F = 1 exactly,
         which is the placeholder's old F -> 1 limit — so the expected 7.5
         survives as a special case of the real model rather than an assumption
         it makes.

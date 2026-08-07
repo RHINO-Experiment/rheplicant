@@ -16,8 +16,8 @@ Six things happen below:
 5. hoist the sky analysis out of the loop, for when the twin is being fitted;
 6. take a gradient through the whole twin — the reason any of this is in JAX.
 
-The sky engine is a dependency, not an extra -- limTOD >= 1.10, from source:
-      pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
+The sky engine is a dependency, not an extra -- limTOD >= 1.10, which a plain
+`pip install rheplicant` brings in from PyPI.
 Run:  uv run --frozen python examples/driftscan_mmode.py   (~60 s: mostly JIT)
 """
 

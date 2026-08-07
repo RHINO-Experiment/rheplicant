@@ -5,21 +5,19 @@
 Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import name are
 the same: `rheplicant`.
 
-## The one awkward step, first
-
-`limTOD` is a **dependency**, not an extra — the sky engines it carries are the
-forward model rather than an accessory — but PyPI has only ≤ 1.8.0 against a
-≥ 1.10 floor, so `pip install rheplicant` cannot resolve it on its own. Install
-limTOD from source first and the rest follows:
+## Install
 
 ```bash
-pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
 pip install rheplicant
 ```
 
+`limTOD` comes with it. It is a **dependency**, not an extra — the sky engines
+it carries are the forward model rather than an accessory — and since limTOD
+1.10.0 reached PyPI the `>= 1.10` floor resolves with no preparatory step.
+
 ## Extras
 
-Three of the four name a requirement that is not on PyPI, deliberately: the
+Two of the four name a requirement that is not on PyPI, deliberately: the
 package is developed alongside them and pinning a git URL in `pyproject.toml`
 would make this project unpublishable. So the extra records *what is needed*,
 and you install it yourself.
@@ -35,7 +33,8 @@ and you install it yourself.
   - NUTS, and every gradient posterior
   - `pip install "rheplicant[numpyro]"`
 * - `cal`
-  - `NoiseWaveOperator` — the noise-wave model of the GCR note's Eq. 1
+  - `NoiseWaveOperator` — the noise-wave receiver model, reflection couplings
+    and all
   - `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal"`
 * - `rfi`
   - `MomentRFIFlaggingOperator`, the real flagger. The threshold-based
@@ -56,10 +55,11 @@ uv sync --frozen
 ```
 
 :::{warning}
-**Neither `uv sync` nor `uv run` works without `--frozen`.** Both were measured,
-not assumed: each refuses with *"your project's requirements are
-unsatisfiable"*, because `limTOD[jax]>=1.10` cannot be resolved against an index
-carrying ≤ 1.8.0. `--frozen` works against the existing lock.
+**Neither `uv sync` nor `uv run` works without `--frozen`.** Measured, not
+assumed: each refuses with *"your project's requirements are unsatisfiable"*.
+The cause is now `rheplicant[cal]` → `rhino-cal-jax`, which is not on PyPI;
+limTOD used to be the blocker and no longer appears in the error at all.
+`--frozen` works against the existing lock.
 
 And `uv sync --frozen` **removes** anything installed outside that lock —
 editable local checkouts of limTOD or rhino-cal included. If you are developing

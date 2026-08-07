@@ -28,7 +28,7 @@ uv run --frozen python examples/sky_to_noise_wave.py
 
 ## The one identification
 
-The Noise-Wave GCR draft's Eq. 1 says what the receiver measures:
+The noise-wave data model says what the receiver measures:
 
 $$
 T_\mathrm{sys}(\nu, t) \;=\; T_\mathrm{src}\,c_s
@@ -77,7 +77,7 @@ flowchart LR
   sw(("sw"))
   amb["CalLoadOperator<br/>ambient load, 300 K<br/>cal_loads_1"]
   hot["CalLoadOperator<br/>hot load, 400 K<br/>cal_loads_2"]
-  nw["NoiseWaveOperator<br/>Eq. 1<br/>noise_wave"]
+  nw["NoiseWaveOperator<br/>noise waves<br/>noise_wave"]
   out["T_sys"]
   sky --> spill
   spill --> tsum
@@ -241,7 +241,7 @@ getting it backwards: **46 K peak, 28 K mean** on a 545 K signal. Read the order
 off the assembly — `twin["receiver_input"].names` — rather than assuming it.
 :::
 
-The example then checks the assembled twin against Eq. 1 written out by hand,
+The example then checks the assembled twin against that sum written out by hand,
 with the antenna chain in $T_\mathrm{src}$'s place:
 
 ```python
@@ -251,7 +251,7 @@ t_ant       = ETA * t_collected + (1 - ETA) * T_PHYS
 ```
 
 ```text
-assembled twin vs Eq. 1 by hand: 2.7e-16 relative — roundoff
+assembled twin vs the same sum by hand: 2.7e-16 relative — roundoff
 ```
 
 ---
@@ -352,7 +352,7 @@ the gradient with respect to the sky map came back exactly zero. The graph
 knowing the composition rules is what removed the opportunity.
 :::
 
-Noise is the draft's Eq. 8 — fractional, $d \to d\,(1 + w)$ with
+Noise is the radiometer equation — fractional, $d \to d\,(1 + w)$ with
 $w \sim \mathcal{N}(0, \sigma_w)$ and $\sigma_w = 1/\sqrt{\Delta\nu\,\tau}$:
 
 ```python
@@ -364,7 +364,7 @@ Because the noise is multiplicative it is ~2× larger on antenna samples than on
 the loads. A scalar $\sigma$ would weight them equally and throw that away.
 
 ```text
-simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (Eq. 8)
+simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (radiometer, fractional)
    antenna   32 samples    1220.03 K mean   232.68 K rms
    ambient   32 samples     586.66 K mean    21.42 K rms
    hot       32 samples     522.62 K mean    14.20 K rms
@@ -419,7 +419,7 @@ underneath on a ±0.45 K scale. The spectra come back to ~0.1 K out of spreads o
 linearity check: worst relative departure 6.7e-13
 condition_estimate: kappa = 4.00e+01
 
-Wiener mean (Eq. 30), CG residual 2.9e-11:
+Wiener mean, CG residual 2.9e-11:
    T_unc  RMS error   0.134 K   ( 0.33% of its 40 K spread)
    T_cos  RMS error   0.113 K   ( 0.19% of its 60 K spread)
    T_sin  RMS error   0.110 K   ( 1.40% of its  8 K spread)
@@ -439,7 +439,8 @@ rather than returning a prior-driven posterior that looks converged.
 ## Step 6 — one differentiable object
 
 From the HEALPix sky map, through the beam convolution, the horizon split, the
-ohmic loss, the switch and Eq. 1 — one gradient, no finite differences anywhere.
+ohmic loss, the switch and the noise-wave couplings — one gradient, no finite
+differences anywhere.
 Parameters are reached by their **graph node**, wherever `assemble()` folded
 them:
 

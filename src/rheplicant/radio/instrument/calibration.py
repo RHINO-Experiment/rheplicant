@@ -71,10 +71,10 @@ line's second moment. A narrower tone is a sharper probe; that is the trade
 against the identifiability point below, which pushes the same way.
 
 ORDERING CONSTRAINT: the tone is combined with the antenna signal *before*
-the receiver chain — paper Eq. 6: ``P_rec = g(nu,t) (T_ant + T_nw + T_cw)
+the receiver chain — ``P_rec = g(nu,t) (T_ant + T_nw + T_cw)
 + T_n``. This operator must therefore sit BEFORE the bandpass and gain
 operators in a pipeline: the tone tracks g(t) drift only if it passes
-through the gain (Eqs. 13-16: delta P_cw ~ g(nu_cw, t)). That is no longer
+through the gain, so that delta P_cw ~ g(nu_cw, t). That is no longer
 prose — it is declared as ``must_precede`` and :func:`~rheplicant.core.graph.
 assemble` refuses a placement that breaks it.
 
@@ -98,7 +98,7 @@ makes the tone independently sufficient, and no docstring should imply it.
 
 Real physics still to come: the tone's own reflection and noise
 contributions, and the switched reference loads used for noise-wave
-calibration (GCR draft).
+calibration.
 """
 
 from typing import ClassVar
@@ -350,8 +350,8 @@ class CWCalibrationOperator(AbstractOperator):
     graph_node: ClassVar[str] = "cw_tone"
     must_precede: ClassVar[tuple[str, ...]] = ("bandpass", "gain")
     must_precede_because: ClassVar[str] = (
-        "The tone tracks g(nu, t) only by passing through it (paper Eqs. 13-16, "
-        "delta P_cw ~ g(nu_cw, t)); injected after the gain its response is "
+        "The tone tracks g(nu, t) only by passing through it "
+        "(delta P_cw ~ g(nu_cw, t)); injected after the gain its response is "
         "exactly 1.0 and it monitors nothing at all."
     )
 
@@ -656,7 +656,7 @@ class CalLoadOperator(AbstractOperator):
     ``coords.extra["receiver_input"]`` (0 = antenna, 1 = load, in the
     graph's edge order).
 
-    Real physics to come (GCR draft): warm/hot loads with their own
+    Real physics to come: warm/hot loads with their own
     reflection coefficients and physical-temperature telemetry.
 
     ``cal_loads`` is ``many=True`` and feeds only the ``receiver_input``

@@ -1,13 +1,14 @@
 """NoiseWaveOperator — the receiver stage of the noise-wave data model.
 
-Implements the bracket of the Noise-Wave GCR draft's Eq. 1::
+Implements the system temperature the receiver sees::
 
     T_sys = T_src c_s + T_unc k_unc + T_cos k_cos + T_sin k_sin + T_rx
 
 with the coupling spectra ``(c_s, k_unc, k_cos, k_sin)`` supplied by
-``rhino_cal_jax`` (draft Eqs. 2-6). The physics lives in that package, where it
-is cross-checked against the numpy reference it was ported from; this module is
-the adapter that gives it a State -> State face and a home on the signal graph.
+``rhino_cal_jax``, which builds them from the source and receiver reflection
+coefficients. The physics lives in that package, where it is cross-checked
+against the numpy reference it was ported from; this module is the adapter that
+gives it a State -> State face and a home on the signal graph.
 
 Placement. This operator sits at the ``noise_wave`` node, downstream of the
 ``receiver_input`` selector, so ``state.data`` already carries the *selected*
@@ -188,8 +189,8 @@ class NoiseWaveOperator(AbstractOperator):
         t_unc: uncorrelated noise-wave temperature [K].
         t_cos: in-phase noise-wave temperature [K].
         t_sin: quadrature noise-wave temperature [K].
-        t_rx: receiver offset temperature [K] (the draft's ``T_rx``; the numpy
-            reference calls the same quantity ``t_0``). Free like the other
+        t_rx: receiver offset temperature [K] (the module docstring's ``T_rx``;
+            the numpy reference calls the same quantity ``t_0``). Free like the other
             three — see the module docstring for what that costs in loads.
         gamma_src_re: ``(n_source, n_freq)`` real part of each source's ``Gamma``.
         gamma_src_im: ``(n_source, n_freq)`` imaginary part.

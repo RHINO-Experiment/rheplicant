@@ -102,9 +102,8 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
 ## Install
 
 ```bash
-# limTOD carries the sky engines and is a dependency, not an extra -- but PyPI
-# has only <=1.8.0 against a >=1.10 floor, so install it from source first.
-pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"
+# limTOD carries the sky engines and is a dependency, not an extra. It is on
+# PyPI as of 1.10.0, so it comes with the install.
 pip install rheplicant
 pip install "rheplicant[cal]"     # + the noise-wave model (rhino-cal-jax)
 
@@ -227,7 +226,7 @@ path that agrees with it to float64 roundoff while running ~1000x faster on
 RHINO's geometry — see
 [sky engines](https://rheplicant.readthedocs.io/en/latest/sky-engines.html)),
 and so are the horizon split, the horn's ohmic loss, the noise-wave reflection
-terms of the GCR draft's Eq. 1, the CW calibration tone, and the
+terms of the noise-wave data model, the CW calibration tone, and the
 separable-basis antenna temperature; the Touchstone and RHINO-HDF5 readers are
 an ingestion layer, not a stand-in for one.
 
@@ -267,14 +266,15 @@ default report: `sqrtinfo.py`, `factorize.py`, `compressed.py`, `compress.py`,
 show 11–64 % there, and **1005 of the default report's 1019 uncovered statements
 are those nine files**. Measured, on the run the number above comes from.
 
-**Not** plain `uv run`, and **not** plain `uv sync`: `limTOD[jax]>=1.10` is a
-dependency, `rfi` and `cal` name requirements that are not on PyPI *by design*
-(see the comments in `pyproject.toml`), so `uv` cannot resolve the project and
-refuses before running anything — `limtod[jax]>=1.10` against a `<=1.8.0` index.
-Both were measured, not assumed: each reports *"your project's requirements are
-unsatisfiable"*. Add `--frozen` to either and both work against the existing
-lock. Note that `uv sync --frozen` will also *remove* anything installed outside
-the lock, editable local checkouts of limTOD or rhino-cal included.
+**Not** plain `uv run`, and **not** plain `uv sync`: `rfi` and `cal` name
+requirements that are not on PyPI *by design* (see the comments in
+`pyproject.toml`), so `uv` cannot resolve the project and refuses before running
+anything. Measured, not assumed: each reports *"your project's requirements are
+unsatisfiable"*, over `rheplicant[cal]` → `rhino-cal-jax`. limTOD used to be the
+blocker too and no longer is. Add `--frozen` to either and both work against the
+existing lock. Note that `uv sync --frozen` will also *remove* anything
+installed outside the lock, editable local checkouts of limTOD or rhino-cal
+included.
 
 ## Developers and maintainers
 

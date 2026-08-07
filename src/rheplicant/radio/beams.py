@@ -51,7 +51,7 @@ def _require_limtod_jax(feature: str):
         raise ImportError(
             f"rheplicant.radio.beams.{feature} needs limTOD's JAX package. It is a\n"
             "dependency, so this means the install is broken or limTOD was removed: "
-            'pip install "limTOD[jax] @ git+https://github.com/zzhang0123/limTOD"'
+            'pip install "limTOD[jax]>=1.10"'
         ) from exc
     if not hasattr(limtod_jax, feature):
         raise ImportError(

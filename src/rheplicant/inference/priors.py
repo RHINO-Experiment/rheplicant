@@ -109,15 +109,15 @@ class JeffreysPrior(eqx.Module):
     amplitude is ``exp(a + b)``, so ``a`` and ``b`` are the same parameter
     twice — measured:
 
-    ========================  ==============================================
-    route                     what it returns
-    ========================  ==============================================
-    ``jnp.linalg.slogdet``    sign ``+1.0``, half-logdet ``+6.420496``
-    ``jnp.linalg.cholesky``   all-finite, half-logdet ``+6.566517``,
-                              smallest pivot ``9.755e-05`` (positive, so it
-                              did not fail)
-    ``eigvalsh`` + rank floor ``-338.05`` — effectively zero density
-    ========================  ==============================================
+    =========================  =============================================
+    route                      what it returns
+    =========================  =============================================
+    ``jnp.linalg.slogdet``     sign ``+1.0``, half-logdet ``+6.420496``
+    ``jnp.linalg.cholesky``    all-finite, half-logdet ``+6.566517``,
+                               smallest pivot ``9.755e-05`` (positive, so
+                               it did not fail)
+    ``eigvalsh`` + rank floor  ``-338.05`` — effectively zero density
+    =========================  =============================================
 
     Both of the first two came back with a plausible, finite, positive-definite
     answer for a matrix that is singular by construction, because the null

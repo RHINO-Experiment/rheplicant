@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### `pip install rheplicant` just works now
+
+- **limTOD 1.10.0 reached PyPI**, so the dependency resolves and the install
+  loses its preparatory step. It was a hard dependency at a floor the index
+  could not satisfy — the sky engines are the forward model, not an accessory,
+  and the floor was held rather than softened — so every install path had to
+  route around it. Those detours are gone from `pyproject.toml`, the README,
+  `docs/install.md`, `docs/sky-engines.md` and two example headers.
+- Read the Docs no longer pre-installs limTOD from `git @main` through
+  `docs/requirements.txt`; the file is deleted and `pip install .` resolves it
+  from PyPI. The docs used to build against a moving upstream tip and could
+  break with no commit in this repository.
+- `uv sync` and `uv run` still need `--frozen`, but for a different reason, and
+  the docs now say which: the unsatisfiable requirement is `rheplicant[cal]` →
+  `rhino-cal-jax`. limTOD no longer appears in the resolver's error at all.
+
+### Equation numbers from an unpublished draft leave the prose
+
+- Documentation, docstrings and example output referred to "the Noise-Wave GCR
+  draft's Eq. 1", "Eq. 8", "Eq. 30" and so on — 46 sites citing a paper no
+  reader can open. Each is replaced by what the equation *says*: the noise-wave
+  system temperature, the fractional radiometer noise, the Wiener mean. The one
+  surviving equation reference is Eq. (13) of the m-mode note, which is linked
+  and public.
+
 ### A sweep is not a compilation unit
 
 - **`SamplingPlan` compiles once per run, not once per sweep.** Both engines
@@ -2061,7 +2086,8 @@ text.** MyST's `dollarmath` extension was not enabled and MathJax was not
 loaded, so `sky-to-receiver.md` and `sky-engines.md` — both written in TeX —
 rendered their maths as dollar signs. A docs build cannot warn about that; only
 a reader can. `dollarmath`, `amsmath` and `sphinx.ext.mathjax` are on now, and
-Eq. 1, the four coupling spectra, the rank counting and the horizon split all
+The system temperature, the four coupling spectra, the rank counting and the
+horizon split all
 display as equations.
 
 **"Operators plus three structures" now appears where it belongs.** Cascade
@@ -2207,10 +2233,10 @@ selector as a result.
 ### Added: RHINO's horn on the sky, feeding the noise-wave receiver
 
 The two halves were already there — limTOD says what the antenna sees, the
-Noise-Wave GCR draft's Eq. 1 says what the receiver does with it — and they meet
+noise-wave data model says what the receiver does with it — and they meet
 at one quantity, `T_src`. `SkySourceOperator` upstream of the `receiver_input`
 selector now feeds `NoiseWaveOperator` directly, and the path is tested end to
-end against Eq. 1 written out by hand (4.0e-16 relative).
+end against the same sum written out by hand (4.0e-16 relative).
 
 **`AntennaLossOperator`** and the `antenna_loss` graph node (graph v1.3) close
 the physics gap that separated them. A real antenna dissipates part of what it
@@ -2244,10 +2270,10 @@ as assumptions to check, not results.
 **`examples/sky_to_noise_wave.py`** runs the whole path on the real horn:
 CST → HEALPix → drift-scan m-mode sky with `normalize_beam=True`, ground spill
 and atmospheric emission, ohmic loss, a three-source switching cycle
-(antenna + ambient + hot load), Eq. 8 fractional radiometer noise, a closed-form
+(antenna + ambient + hot load), fractional radiometer noise, a closed-form
 recovery of the per-channel noise-wave temperatures with the sky treated as
 known data (0.11–0.14 K RMS, kappa ~ 40), and one gradient from the HEALPix sky
-map through the beam convolution, the switch and Eq. 1.
+map through the beam convolution, the switch and the noise-wave couplings.
 `docs/sky-to-receiver.md` walks through it.
 
 **Fixed — an out-of-range switch value now refuses instead of clamping.**
@@ -2699,9 +2725,9 @@ at import time rather than silently working until it does not.
   the m-mode expansion, so the returned coefficients would silently not be
   the spectrum of `forward()` (~18x off).
 
-### Changed: `NoiseWaveOperator` implements the full Eq. 1 (breaking)
+### Changed: `NoiseWaveOperator` implements the full system temperature (breaking)
 
-`NoiseWaveOperator` now runs Eq. 1 of the noise-wave GCR note through
+`NoiseWaveOperator` now runs the full noise-wave system temperature through
 `rhino_cal_jax` (see D15 in `DESIGN.md`) instead of the `F -> 1` placeholder
 that summed one scalar `Gamma` straight into the sky-side temperature.
 `t_zero` is renamed `t_rx`; the scalar `gamma_re`/`gamma_im` pair is replaced
@@ -2717,8 +2743,7 @@ and that array is absent, rather than silently defaulting to the first.
 
 `examples/noise_wave_gcr.py`: the per-channel noise-wave temperatures
 (`t_unc`, `t_cos`, `t_sin`) declared as ONE `linear=True` latent, solved in
-closed form (`wiener_solve`, GCR note Eq. 30) and sampled exactly
-(`gcr_sample`, Eq. 31). A `--one-source` mode shows what switching buys: with
+closed form (`wiener_solve`) and sampled exactly (`gcr_sample`). A `--one-source` mode shows what switching buys: with
 one load the per-channel design matrix is deficient by a factor of three and
 two of every three directions fall back to the prior; with three genuinely
 different loads it is square and every direction is data-constrained.

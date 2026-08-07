@@ -1,6 +1,6 @@
 """The beam-convolved sky as the noise-wave model's ``T_src``.
 
-limTOD produces an antenna temperature; the Noise-Wave GCR draft's Eq. 1 wants
+limTOD produces an antenna temperature; the noise-wave data model wants
 a source temperature. This suite is the claim that they are the same quantity,
 and that the graph delivers one to the other without rescaling it, leaking it
 across the switch, or folding it into the wrong term.
@@ -9,7 +9,7 @@ Three hazards get their own tests because none of them is a shape error, so
 none can be caught by a structural guard:
 
 * ``normalize_beam=False`` (the default, matching numpy limTOD) returns
-  ``int(B T)``, not ``int(B T)/int(B)``. Fed to Eq. 1 it is a temperature
+  ``int(B T)``, not ``int(B T)/int(B)``. Fed to the receiver it is a temperature
   scaled by the beam solid angle -- a few percent off even for a beam the user
   normalized by hand, because the band-limit truncates the denominator too.
 * The selector's branch order and ``NoiseWaveOperator``'s ``gamma_src`` rows
@@ -148,7 +148,7 @@ class TestTheSkyIsTheSourceTemperature:
     def test_a_matched_antenna_passes_the_beam_convolved_sky_through(
         self, sky_maps, freq
     ):
-        """Gamma = 0 everywhere and no receiver terms: Eq. 1 collapses to
+        """Gamma = 0 everywhere and no receiver terms: the model collapses to
         ``T_sys = T_ant``, so the noise-wave stage must return the projector's
         own output unchanged. This is the whole claim in one assertion -- the
         sky enters as T_src and nothing rescales it on the way."""
@@ -179,7 +179,7 @@ class TestTheSkyIsTheSourceTemperature:
     def test_the_receiver_terms_do_not_scale_with_the_sky(self, sky_maps, freq):
         """T_unc/T_cos/T_sin/T_rx are receiver properties. Changing the sky may
         move the output only through ``c_src * dT_ant`` -- if any receiver term
-        picked up a sky factor (or the sky landed in the wrong column of Eq. 1),
+        picked up a sky factor (or the sky landed in the wrong coupling column),
         this difference would not close."""
         coords = make_coords(freq, ALTERNATING)
         out_a = make_twin(sky_maps, freq)(State(coords=coords)).data
@@ -194,7 +194,7 @@ class TestTheSkyIsTheSourceTemperature:
         assert jnp.allclose(out_b - out_a, expected, rtol=RTOL, atol=1e-4)
 
     def test_the_assembled_twin_matches_a_hand_built_reference(self, sky_maps, freq):
-        """End to end against Eq. 1 spelled out by hand: project, switch the
+        """End to end against the system temperature spelled out by hand: project, switch the
         source temperature, gather the couplings, evaluate. Nothing in the
         assembled path may deviate from that."""
         coords = make_coords(freq, ALTERNATING)
@@ -412,7 +412,7 @@ class TestTheAntennaChain:
     def test_the_ohmic_loss_reaches_the_receiver_as_a_changed_t_src(
         self, sky_maps, freq
     ):
-        """eta acts on the sky BEFORE Eq. 1, so the receiver sees
+        """eta acts on the sky BEFORE the receiver stage, so the receiver sees
         ``eta T_sky + (1 - eta) T_phys`` in T_src's place -- attenuated AND
         offset, which the mismatch loss c_s alone can never produce."""
         coords = make_coords(freq, jnp.zeros(N_TIME, dtype=int))

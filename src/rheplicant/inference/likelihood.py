@@ -143,7 +143,7 @@ class GaussianLikelihood(eqx.Module):
 class MaskedGaussianLikelihood(eqx.Module):
     """Gaussian likelihood that ignores flagged samples.
 
-    The seam where RFI flags inform the noise covariance (GCR draft): pass
+    The seam where RFI flags inform the noise covariance: pass
     ``flags`` from ``state.aux["flags"]`` (True = flagged/bad); flagged
     samples contribute zero to the log-probability, equivalent to infinite
     noise variance on those samples.

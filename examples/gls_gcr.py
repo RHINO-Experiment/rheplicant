@@ -114,7 +114,7 @@ def twin(t_nw):
 noise = RadiometerNoise(CHANNEL_WIDTH, INTEGRATION_TIME)
 truth = twin(TRUE_T)(state).data
 
-# MULTIPLICATIVE, not additive: the draft's Eq. 8 form.
+# MULTIPLICATIVE, not additive: the radiometer-equation form.
 w = noise.fractional * jax.random.normal(jax.random.key(0), truth.shape)
 observed = truth * (1.0 + w)
 

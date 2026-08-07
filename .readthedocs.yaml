@@ -10,11 +10,11 @@ sphinx:
 
 python:
   install:
-    # limTOD first, from source: it is a dependency of rheplicant but PyPI
-    # carries only <=1.8.0 against a >=1.10 floor, so `pip install .` alone
-    # fails to resolve and the build never reaches Sphinx. See the comment in
-    # docs/requirements.txt.
-    - requirements: docs/requirements.txt
+    # limTOD needs no pre-install step: it is a hard dependency of rheplicant
+    # and it is on PyPI, so `pip install .` resolves it. This used to be a
+    # `- requirements: docs/requirements.txt` line pinning limTOD at git @main,
+    # which meant the docs built against a moving tip and could break with no
+    # commit in this repo.
     - method: pip
       path: .
       extra_requirements:

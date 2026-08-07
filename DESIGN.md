@@ -427,7 +427,7 @@ numerical change to existing twins.
 ### D15 — The noise-wave data model is an imported package, not a rheplicant module
 
 `NoiseWaveOperator` is an adapter over `rhino_cal_jax`, the JAX/Equinox
-implementation of the Noise-Wave GCR note's Eq. 1 that lives in the
+implementation of the noise-wave system temperature that lives in the
 `RHINO-Experiment/rhino-cal` repository beside the numpy pipeline it was
 verified against — 256 parameter cells agreeing to `1e-13` relative. The
 dependency runs one way (`rhino_cal_jax` knows nothing about `State`,
@@ -458,8 +458,8 @@ square and leave a four-family one deficient by exactly `n_freq`.
 
 **The count is per-channel and does not survive a basis.** Frequency structure
 in `Γ` **does** identify *scalar*, frequency-independent noise-wave temperatures
-from a single load, and the note's basis matrices `U_unc`, `U_cos`, `U_sin`
-(Eqs. 13–15) are the general case of that: they tie channels together, and the
+from a single load, and basis matrices `U_unc`, `U_cos`, `U_sin` over
+frequency are the general case of that: they tie channels together, and the
 per-channel counting then stops applying in *both* directions with no counting
 rule to replace it. Two loads and a three-coefficient basis identify all
 `k · n_basis = 12` coefficients at `k = 4` where the per-channel count would say
@@ -521,7 +521,7 @@ Instrumental
   extra T_sys on a separable basis (D28)   radio/t_sys.py
   DI gains (1/f + slower drifts)           radio/instrument/gain.py
   reflections + bandpass                   radio/instrument/receiver.py
-  noise-wave T/Γ terms (GCR draft Eq. 1)   radio/instrument/noise_wave.py
+  noise-wave T/Γ terms                     radio/instrument/noise_wave.py
   calibration signals (CW tone, loads)     radio/instrument/calibration.py
   self-generated EMI (comb-like)           radio/instrument/emi.py
   thermal noise (radiometer, T_sys)        radio/instrument/noise.py
@@ -590,7 +590,7 @@ Composition follows the physics, per the canonical signal-path graph
 field* (it enters through the sidelobes and is convolved by the shared beam
 node), ground pickup joins as a *post-beam effective temperature*, and the
 instrument chain is sequential (`Pipeline`). The chain order mirrors RHINO
-paper Eq. 6, `P_rec = g (T_ant + T_nw + T_cw) + T_n`: sky-side temperatures
+`P_rec = g (T_ant + T_nw + T_cw) + T_n`: sky-side temperatures
 enter before the reflection/noise-wave terms, the CW tone joins *before*
 bandpass and gain (it tracks gain drift only if it passes through the gain),
 and thermal noise is added after the gain:
@@ -631,7 +631,7 @@ upstream.
 | BeamOperator | primary-beam convolution (harmonic alm rotation, ZYZ) | limTOD (TIBEC for full-Stokes); |
 | AtmosphericEmissionOperator | opacity x ambient temperature, beam-weighted airmass (receiver temp lives in noise-wave T_0 / post-gain noise); strict RT reserved at `atmosphere_field` (D13) | instrument configs |
 | ReceiverOperator | bandpass; reflection/impedance effects | instrument configs |
-| NoiseWaveOperator | full Eq. 1 with F factor; T/Γ per frequency — **delivered** via `rhino_cal_jax` (D15) | noise-wave GCR draft |
+| NoiseWaveOperator | the full system temperature with the F factor; T/Γ per frequency — **delivered** via `rhino_cal_jax` (D15) | `rhino_cal_jax` |
 | CWCalibrationOperator | tone shape/stability, switched reference loads | RHINO paper Sect. 4 |
 | GainOperator | g(t) with 1/f flicker fluctuations | limTOD, hydra-tod |
 | NoiseOperator | radiometer equation, 1/f covariance | limTOD, hydra-tod |

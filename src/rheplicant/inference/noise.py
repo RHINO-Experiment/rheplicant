@@ -122,7 +122,7 @@ class RadiometerNoise(eqx.Module):
     ``sigma = |prediction| * f`` with the fractional level
     ``f = 1 / sqrt(delta_nu * tau)`` — the multiplicative form, ``d -> d(1+w)``,
     which is what the radiometer equation actually says and what the noise-wave
-    draft's Eq. 8 writes. This is rheplicant's default noise model.
+    radiometer equation writes. This is rheplicant's default noise model.
 
     Because sigma tracks the prediction, a solve for the prediction and a
     weighting by its noise are the same problem: see

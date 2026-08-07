@@ -1,4 +1,4 @@
-"""NoiseWaveOperator: draft Eq. 1 as a rheplicant operator."""
+"""NoiseWaveOperator: the noise-wave system temperature as a rheplicant operator."""
 
 import contextlib
 
