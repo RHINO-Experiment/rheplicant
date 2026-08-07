@@ -6,9 +6,9 @@
 :width: 560px
 ```
 
-A **REPLIC**a of an **ANT**enna — a JAX + Equinox framework for building
-differentiable replicas of single-antenna radio telescopes: horns, dipoles,
-and dishes alike.
+A **REPLIC**a of an **ANT**enna — a **JAX model of a radio telescope, run as a
+digital twin**. Built for **RHINO**, a horn antenna measuring the 21 cm global
+signal, and domain-agnostic underneath: horns, dipoles and dishes alike.
 
 A RHEPLICANT twin is one pure function from sky and instrument parameters to raw
 data. Because every stage is differentiable, the same twin that *simulates*
@@ -16,10 +16,84 @@ an observation also *calibrates* it: gradients, Bayesian posteriors, Fisher
 forecasts, and neural surrogates all run through the instrument model
 itself.
 
-## A twin is operators plus three structures
+## Four things it is built to do
 
-There are only two ingredients. **Operators** — each one `State in, State out`
-— and **three ways to compose them**:
+::::{grid} 1 1 2 2
+:gutter: 2
+
+:::{grid-item-card} 1 · Forward modelling
+Simulate what any stage of the experiment would produce — a sky, a receiver
+output, a processed product. Where you stop is a property of the graph.
++++
+[The guided tour](tour.md)
+:::
+
+:::{grid-item-card} 2 · Bayesian inference
+Read the same twin backwards. Free any subset of what it contains; the noise
+model *is* the likelihood; the engine follows from the model's structure.
++++
+[Inferring anything](inference.md)
+:::
+
+:::{grid-item-card} 3 · Neural surrogates
+Replace an expensive stage with a trained network and leave the graph's shape
+untouched — or amortize the posterior itself.
++++
+[Operator catalog](operators.md)
+:::
+
+:::{grid-item-card} 4 · Streaming evidence
+Keep a campaign after its recordings are archived: compress each night to a
+fixed-size likelihood factor, then discard the data.
++++
+[Evidence](evidence.md)
+:::
+::::
+
+None of the four is a separate mode. They all read the **same twin object**,
+which is what makes the calibration you fit the simulator you trust.
+
+## Two nouns
+
+:::{figure} _static/tour-operator-light.svg
+:figclass: only-light
+:align: center
+:width: 460px
+
+An operator takes the whole scientific context and returns it one step later.
+:::
+
+:::{figure} _static/tour-operator-dark.svg
+:figclass: only-dark
+:align: center
+:width: 460px
+
+An operator takes the whole scientific context and returns it one step later.
+:::
+
+`State`
+: **The complete scientific context** — data, coordinates, environment,
+  randomness, metadata. It is an organisation of *references* to buffers, not
+  the buffers themselves, so a derived state allocates the shell and nothing
+  else: 48 bytes, with a 16 MB array shared rather than copied. JAX arrays are
+  immutable, which is what makes sharing safe.
+
+`Operator`
+: **One step**, `State` in and `State` out. Sky models, instrument effects,
+  calibration, filtering and neural networks are all the same kind of thing,
+  and each carries its own physical parameters as differentiable leaves.
+
+**`state.data` always holds what the instrument has produced so far.** A sky
+source writes the `(n_time, n_freq)` antenna temperature into it; the antenna's
+ohmic loss replaces that with the same array after loss; the receiver replaces
+*that* with a system temperature. One field, read at whatever stage you are.
+
+The sky map itself is not in `state.data` — it is a **parameter of the sky
+model**, differentiable like every other, which is why a map can be inferred
+rather than merely assumed.
+
+## Three ways to join them — and you rarely write any
+
 
 :::{list-table}
 :header-rows: 1
@@ -39,12 +113,17 @@ There are only two ingredients. **Operators** — each one `State in, State out`
   - alternative paths, one selected per time sample
 :::
 
-A *canonical signal path* is then just a template saying which operators exist
-and which structure joins them: node kinds `source`, `transform`, `junction`
+**You normally write none of them.** Declare the operators you want and
+[`assemble`](tour.md#graph-assembly) reads the canonical signal path to decide
+what joins to what — so the composition is a consequence of the physics you
+declared, not something you wrote out. Reach for the three combinators directly
+only when you are building a structure the template does not describe.
+
+A *canonical signal path* is a template saying which operators exist and which
+structure joins them: node kinds `source`, `transform`, `junction`
 and `selector` map one-to-one onto "creates data", cascade, sum and switch. You
 provide a set of operators, and [`assemble`](tour.md#graph-assembly) folds
-them into exactly those three combinators — so composition is a consequence of
-the physics you declared rather than something you wrote out.
+them into exactly those three combinators.
 
 The template shipped as the default,
 [`RADIO_GRAPH`](signal-path.md), is **RHINO's** structure: a single-antenna,
@@ -52,7 +131,9 @@ switched-load, drift-scanning horn. It is a default, not the framework — the
 machinery underneath knows nothing about radio astronomy, and another
 instrument is another template registered the same way.
 
-## The eight principles
+:::{dropdown} The eight principles the design follows
+:color: secondary
+:icon: law
 
 1. **Everything is an operator acting on a state** — one contract covers
    sky models, instrument effects, processing, filters, neural networks; and
@@ -76,6 +157,7 @@ instrument is another template registered the same way.
 
 The [README](https://github.com/RHINO-Experiment/rheplicant#readme) expands
 each principle.
+:::
 
 ## Where to start
 

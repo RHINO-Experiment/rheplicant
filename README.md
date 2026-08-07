@@ -7,9 +7,10 @@
 
 [![Documentation Status](https://readthedocs.org/projects/rheplicant/badge/?version=latest)](https://rheplicant.readthedocs.io/en/latest/)
 
-A **REPLIC**a of an **ANT**enna — a JAX + [Equinox](https://github.com/patrick-kidger/equinox)
-framework for building *differentiable replicas* of single-antenna radio
-telescopes: horns, dipoles, and dishes alike.
+A **REPLIC**a of an **ANT**enna — a **JAX model of a radio telescope, run as a
+digital twin**. Built for **RHINO**, a horn antenna measuring the 21 cm global
+signal, and domain-agnostic underneath: horns, dipoles and dishes alike.
+(JAX + [Equinox](https://github.com/patrick-kidger/equinox).)
 **Documentation: [rheplicant.readthedocs.io](https://rheplicant.readthedocs.io/en/latest/)**
 
 A RHEPLICANT twin is one pure function from sky and instrument parameters to raw
@@ -28,6 +29,51 @@ observation = twin(state)          # simulate — and differentiate, fit, sample
 
 First deployed for RHINO (a horn antenna targeting the 21 cm global signal);
 the core is domain-agnostic by construction.
+
+## Four things it is built to do
+
+| | | |
+|---|---|---|
+| **1 · Forward modelling** | Simulate what any stage of the experiment would produce — a sky, a receiver output, a processed product. Where you stop is a property of the graph. | [tour](docs/tour.md) |
+| **2 · Bayesian inference** | Read the same twin backwards. Free any subset of what it contains; the noise model *is* the likelihood; the engine follows from the model's structure. | [inference](docs/inference.md) |
+| **3 · Neural surrogates** | Replace an expensive stage with a trained network and leave the graph's shape untouched — or amortize the posterior itself. | [operators](docs/operators.md) |
+| **4 · Streaming evidence** | Keep a campaign after its recordings are archived: compress each night to a fixed-size likelihood factor, then discard the data. | [evidence](docs/evidence.md) |
+
+None of the four is a separate mode. They all read the **same twin object**,
+which is what makes the calibration you fit the simulator you trust.
+
+## Two nouns
+
+**`State`** — the complete scientific context: data, coordinates, environment,
+randomness, metadata. It organises *references* to buffers rather than the
+buffers themselves, so a derived state allocates the shell and nothing else
+(48 bytes, with a 16 MB array shared rather than copied). JAX arrays are
+immutable, which is what makes sharing safe.
+
+**`Operator`** — one step, `State` in and `State` out. Sky models, instrument
+effects, calibration, filtering and neural networks are all the same kind of
+thing, each carrying its physical parameters as differentiable leaves.
+
+**`state.data` always holds what the instrument has produced so far.** A sky
+source writes the `(n_time, n_freq)` antenna temperature into it; the antenna's
+ohmic loss replaces that with the same array after loss; the receiver replaces
+*that* with a system temperature. One field, read at whatever stage you are.
+
+The sky map itself is not in `state.data` — it is a **parameter of the sky
+model**, differentiable like every other, which is why a map can be inferred
+rather than merely assumed.
+
+## Three ways to join them — and you rarely write any
+
+**Cascade** (`Pipeline`) for sequential effects, **sum** (`SumOperator`) for
+independent contributions that add, **switch** (`SelectOperator`) for
+alternatives with one selected per time sample. There is no fourth.
+
+You normally write none of them. Declare the operators you want and `assemble`
+reads the canonical signal path — the template that says which operators exist
+and what joins them — to decide the composition. Reach for the three
+combinators directly only when building a structure the template does not
+describe.
 
 ## The name
 
@@ -216,10 +262,10 @@ Rendered docs: **[rheplicant.readthedocs.io](https://rheplicant.readthedocs.io)*
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2769 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2766 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
-*physics* is deliberately placeholder where the docstring says so — 17 of the
-29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
+*physics* is deliberately placeholder where the docstring says so — 16 of the
+28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
 and friends. The other twelve no longer carry that wording: the sky engines
 are real (a general differentiable limTOD port and a drift-scan m-mode fast
 path that agrees with it to float64 roundoff while running ~1000x faster on
@@ -244,7 +290,7 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet — run the suite and the linter in the project venv before pushing:
 
 ```bash
-.venv/bin/python -m pytest          # 2769 tests, ~12 min with coverage
+.venv/bin/python -m pytest          # 2766 tests, ~12 min with coverage
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```

@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### `BeamOperator` is gone: the beam belongs to the projector
+
+- **Removed `BeamOperator`.** Its body was `state.data * solid_angle` -- a
+  scalar, not a beam -- and its own docstring promised "a port of limTOD's beam
+  handling", which has since arrived as `DriftScanProjector` /
+  `GeneralPointingProjector` and is applied while producing
+  `observed_astro_sky`. Keeping it was worse than redundant: placed downstream
+  of a projector it **double-counts the beam**.
+- The `beam` node stays in the 32-node template, now `reserved` -- drawn dashed,
+  meaning "part of the physics, no shipped operator declares it". Nothing
+  declared that; `test_reserved_leaves_are_exactly_those_with_no_shipped_
+  operator` derives the flag from the operator registry and required it the
+  moment the class went. A path that skips the projector can still place its own
+  coupling there with `At("beam", ...)`.
+- The census moves with it: **16 of the 28** concrete `rheplicant.radio`
+  operator classes are placeholders, down from 17 of 29.
+- **Kept, against the same test.** Only one operator met the bar "the physics it
+  promises already exists elsewhere in the package". `PointSourceOperator`,
+  `AtmosphericEmissionOperator`, `GroundPickupOperator`, `EMIOperator`,
+  `RFIOperator` and `IonosphereOperator` all promise physics that is nowhere
+  else, so they are unfinished rather than redundant, and `reserved` plus the
+  census already say so.
+- `SkyOperator` keeps its placeholder status -- a uniform brightness does stand
+  in for a real sky model -- but loses the stale promise that the sky-TOD port
+  was coming to it. That port arrived elsewhere; the docstring now points there.
+
+### The front door says what the framework does before it says how
+
+- README and the documentation landing page both open on the same four-level
+  spine: what it is (a JAX model of a radio telescope run as a digital twin,
+  built for RHINO), the four things it is built to do (forward modelling,
+  Bayesian inference, neural surrogates, streaming evidence), the two nouns
+  (`State`, `Operator`), and the three ways to join them -- with the point that
+  you normally write none of the three, because `assemble` reads the canonical
+  path.
+- `state.data` is described by what it holds rather than by an example that
+  would have taught the wrong model: the sky map is **not** in `state.data`, it
+  is a parameter of the sky model, which is why a map can be inferred.
+- The eight principles move into a dropdown on the landing page. They are an
+  asset, not an on-ramp.
+
 ### One convention for the three ways to compose
 
 - **A sum and a switch are operations *on* operators, so they have stopped
