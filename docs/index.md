@@ -149,8 +149,6 @@ instrument is another template registered the same way.
 8. **The core is domain-agnostic** — radio astronomy is the first
    application, not the design center (a test enforces the layering).
 
-The [README](https://github.com/RHINO-Experiment/rheplicant#readme) expands
-each principle.
 :::
 
 ## Where to start

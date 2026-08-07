@@ -99,53 +99,30 @@ One-line gloss: *a differentiable replica of a radio antenna — first, of RHINO
 
 ## Philosophy
 
-1. **Everything is an operator acting on a state.** One contract —
-   `State in, State out` — covers sky models, instrument effects, data
-   processing, filters, even neural networks. If it transforms the
-   scientific context, it is an operator; there is nothing else to learn.
-
+1. **Everything is an operator acting on a state.** One contract, `State in,
+   State out`, covers sky models, instrument effects, processing, filters and
+   neural networks alike.
 2. **The twin is a differentiable function.** Every physical parameter is a
-   pytree leaf, so `jit`, `grad`, and `vmap` apply to the *entire
-   instrument*. Systematics stop being nuisances you correct for and become
-   parameters you infer, forecast, and marginalise.
-
-3. **Composition is physics — and it is implicit in the signal path.**
-   Sequential effects chain (`Pipeline`), independent contributions add
-   (`SumOperator`), switched paths select (`SelectOperator`). The canonical
-   signal-path graph knows how elements connect, so `assemble(*operators)`
-   builds the right composition from a *set*: provide only a sky and a beam,
-   get exactly the beam-convolved sky — partial models come free.
-
-4. **Purity everywhere.** States are immutable (functional updates only),
-   randomness is data flowing through the state (one seed reproduces an
-   entire run), and operators have no hidden side effects. This is what
-   makes the whole twin safe to transform.
-
-5. **Forward models never contain inference.** A single seam turns any twin
-   into `f(params) -> prediction`. Gradient and Adam calibrators, NumPyro
-   posteriors, Fisher forecasts, conjugate-Gaussian solves and surrogate
-   training all connect there; calibration never contaminates the instrument
-   description. A `ParameterSpace` says *what* is inferred and *how* it
-   reaches the model, so re-parameterizing — two scalars driving a whole
-   beam, one gain tied across three stages — never means editing an
-   operator.
-
-6. **Interfaces first, physics second.** An operator may ship as a
-   trivial-but-runnable placeholder whose *contract* (shapes, PRNG
-   consumption, linearity in calibration parameters) is real and tested.
-   Real physics replaces function bodies, never interfaces — the native
-   differentiable limTOD sky engine, the horizon split and the noise-wave
-   reflection terms all arrived exactly that way. [Status](#status) says
-   which operators are still placeholders and which are not.
-
-7. **Loud failure over silent wrongness.** Structural validation at every
-   boundary, trace-time (jit-safe) shape checks, provenance-tagged
-   covariance matrices, assembly-time graph errors. In a framework built to
-   chase 0.1 % systematics, a wrong number is worse than an exception.
-
+   pytree leaf, so `jit`/`grad`/`vmap` apply to the whole instrument, and a
+   systematic becomes something you infer rather than correct for.
+3. **Composition is physics, implicit in the signal path.** Chains, sums and
+   switches are read off the canonical graph, so `assemble` builds the right
+   structure from a *set* of operators and partial models come free.
+4. **Purity everywhere.** Immutable states, randomness as data, no hidden side
+   effects — which is what makes the twin safe to transform at all.
+5. **Forward models never contain inference.** One seam turns any twin into
+   `f(params) -> prediction`, and a `ParameterSpace` re-parameterizes without
+   ever editing an operator.
+6. **Interfaces first, physics second.** A placeholder body may ship; its
+   contract may not be one. Real physics replaces bodies, never interfaces.
+7. **Loud failure over silent wrongness.** Chasing 0.1 % systematics, a wrong
+   number is worse than an exception.
 8. **The core is domain-agnostic.** `rheplicant.core` never imports the radio
-   layer (a test enforces it). Radio astronomy is the first application,
-   not the design center.
+   layer, and a test enforces it.
+
+Each is argued at length in
+**[the documentation](https://rheplicant.readthedocs.io/en/latest/)**;
+[Status](#status) says which operators are still placeholders.
 
 ## Install
 
