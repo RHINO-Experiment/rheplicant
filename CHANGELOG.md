@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### A sweep is not a compilation unit
+
+- **`SamplingPlan` compiles once per run, not once per sweep.** Both engines
+  rebuilt their transition every sweep, because `conditional_potential` closed
+  over the other latents' values and `linear_operator` returns a matvec closing
+  over `at=`: a fresh Python function each time, so XLA never hit its cache.
+  Measured on a mixed plan, 2.00 compilations per extra sweep — about 300 ms of
+  compiler wrapped around 0.3 ms of leapfrog. Both now lift the changing value
+  to a traced argument and cache the compiled transition in a dict the run owns,
+  keyed on the block rather than on the conditioning's `id`. The count is flat
+  in `n_sweeps` (7 at 20 sweeps, 7 at 60, 7 at 80) and so is the wall clock
+  (1.58 s, 1.68 s, 1.67 s); `tests/inference/test_plan.py` goes from 3 m 29 s to
+  16 s. The draws are unchanged, which
+  `tests/inference/test_gradient_transition.py` checks call-for-call against a
+  locally built `MCMC.run`.
+- **Breaking, narrowly.** The conjugate update is now traced, so a noise or
+  forward model that branches in Python on a *parameter value* — `if
+  float(theta) > 0:` — raises where it used to run. Branch on `jnp.where` or on
+  something static instead. The gradient path was already traced by NumPyro, so
+  nothing changes there.
+
 ### A nuisance that drifts across epochs
 
 - **The linked scope.** `ChainMemory` accumulates a campaign whose nuisance is a

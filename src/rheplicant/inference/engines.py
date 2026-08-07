@@ -264,6 +264,54 @@ def _gradient_transition(
 # ------------------------------------------------------- the conjugate engine --
 
 
+def _conjugate_transition(
+    cond: Conditioning,
+    names: tuple[str, ...],
+    *,
+    draw: bool,
+    tol: float,
+    maxiter: int | None,
+    require_convergence: float | None,
+) -> Callable[..., tuple[dict[str, jax.Array], jax.Array]]:
+    """One jittable conjugate update: ``(values, key) -> (solved, residual)``.
+
+    The same closure-identity fix :func:`_gradient_transition` applies to the
+    gradient block. ``linear_operator`` returns an operator whose matvec closes
+    over ``at=values``, so an unjitted sweep hands the CG solver a Python
+    function it has never seen, and XLA rebuilds the program: measured, one
+    compilation per sweep, 21 at 20 sweeps against 61 at 60.
+
+    ``eqx.filter_jit`` and **not** ``jax.jit``, and here that is a correctness
+    requirement rather than a preference. ``gcr_sample``'s convergence guard is
+    an :func:`equinox.error_if`; under ``filter_jit`` it surfaces as an
+    ``EquinoxRuntimeError`` carrying the message that names the remedy, and
+    under ``jax.jit`` it degrades to a bare ``JaxRuntimeError``. A guard whose
+    diagnosis is buried is most of a guard thrown away, which is why
+    ``test_the_conjugate_convergence_guard_still_raises_equinox`` asserts on the
+    exception TYPE and not only on the text.
+
+    One consequence worth stating: ``cond.sigma(values)`` is now traced, so a
+    noise or forward model with Python control flow on a parameter's *value*
+    raises where it used to run. That was already true of the gradient path,
+    which NumPyro has always traced.
+    """
+
+    @eqx.filter_jit
+    def transition(values, key):
+        sigma = cond.sigma(values)
+        block = linear_operator(
+            cond.space, cond.pipeline, cond.state_template,
+            names=names, at=values, check=False,
+        )
+        extra = {"key": key} if draw else {}
+        return (gcr_sample if draw else wiener_solve)(
+            block, cond.observed, noise_std=sigma, tol=tol, maxiter=maxiter,
+            require_convergence=require_convergence, **extra,
+        )
+
+    return transition
+
+
 def _conjugate_update(
     cond: Conditioning,
     names: tuple[str, ...],
@@ -273,6 +321,7 @@ def _conjugate_update(
     tol: float,
     maxiter: int | None,
     require_convergence: float | None,
+    programs: dict[Any, Any] | None = None,
 ) -> tuple[dict[str, jax.Array], jax.Array]:
     """One conjugate-Gaussian block update. ``key=None`` is the mean, ``k`` a draw.
 
@@ -284,18 +333,25 @@ def _conjugate_update(
     the loop — the bargain
     :func:`~rheplicant.inference.linear.gcr_sample`'s own docstring recommends
     for a Gibbs sweep.
+
+    ``programs`` is the caller's compiled-transition cache; see
+    :func:`gradient_draw` for why it is the caller's and why the key excludes
+    the conditioning. Everything in the key here is part of the compiled
+    program: ``tol`` and ``maxiter`` reach ``jax.scipy.sparse.linalg.cg`` as
+    static arguments, and ``require_convergence`` decides whether the guard is
+    traced into the graph at all.
     """
-    sigma = cond.sigma(values)
-    block = linear_operator(
-        cond.space, cond.pipeline, cond.state_template,
-        names=names, at=values, check=False,
-    )
-    solve = wiener_solve if key is None else gcr_sample
-    extra = {} if key is None else {"key": key}
-    solved, residual = solve(
-        block, cond.observed, noise_std=sigma, tol=tol, maxiter=maxiter,
-        require_convergence=require_convergence, **extra,
-    )
+    draw = key is not None
+    key_for = (names, draw, tol, maxiter, require_convergence)
+    transition = None if programs is None else programs.get(key_for)
+    if transition is None:
+        transition = _conjugate_transition(
+            cond, names, draw=draw, tol=tol, maxiter=maxiter,
+            require_convergence=require_convergence,
+        )
+        if programs is not None:
+            programs[key_for] = transition
+    solved, residual = transition(values, key)
     return {**values, **solved}, residual
 
 

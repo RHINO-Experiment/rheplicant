@@ -789,7 +789,7 @@ class SamplingPlan:
                 values, recorded = run(
                     cond, block.names, values,
                     tol=solve_tol, maxiter=None, require_convergence=solve_guard,
-                    **extra,
+                    programs=programs, **extra,
                 )
                 residuals[block.names] = float(recorded)
             else:

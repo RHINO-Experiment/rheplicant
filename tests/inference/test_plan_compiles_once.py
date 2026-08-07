@@ -1,17 +1,21 @@
 """A sweep is not a compilation unit: ``SamplingPlan`` must compile once per run.
 
-``SamplingPlan.sample`` recompiles its transitions on EVERY sweep. Measured on
-the fixture below: **45 XLA compilations over 20 sweeps, 121 over 60** -- 2.02
-per sweep in steady state, not a warm-up artefact. The arithmetic the sampler
-exists to do is 0.3 ms of a 315 ms sweep; the rest is the compiler.
+``SamplingPlan.sample`` used to recompile its transitions on EVERY sweep.
+Measured on the fixture below before the repair: **45 XLA compilations over 20
+sweeps, 121 over 60** -- 2.02 per sweep in steady state, not a warm-up artefact.
+The arithmetic the sampler exists to do was 0.3 ms of a 315 ms sweep; the rest
+was the compiler. After stages 1 and 2 the count is **7 at 20 sweeps, 7 at 60
+and 7 at 80**, and the wall clock is flat with it: 1.58 s, 1.68 s, 1.67 s.
 
-The cause is closure identity. ``conditional_potential``
-(``engines.py:163-178``) closes over ``others`` -- every latent outside the
-block -- as concrete arrays, so each sweep mints a fresh Python function and
-every ``jax.jit`` below it sees a cache it has never seen before. Reusing one
-``MCMC`` object does not help: measured, the same object with identical inputs
-still pays 240 ms of compile, because NumPyro's ``fori_collect`` defines
-``_fori_collect_loop`` locally and jits *that*.
+The cause was closure identity, at two sites. ``conditional_potential`` closed
+over ``others`` -- every latent outside the block -- as concrete arrays, and
+``linear_operator`` returns an operator whose matvec closes over ``at=values``;
+either way each sweep minted a fresh Python function and every ``jax.jit`` below
+it saw a cache key it had never seen. Reusing one ``MCMC`` object does not help:
+measured, the same object with identical inputs still paid 240 ms of compile,
+because NumPyro's ``fori_collect`` defines ``_fori_collect_loop`` locally and
+jits *that*. The fix on both sides is to lift the changing value to a traced
+argument and cache the compiled transition in a dict the run owns.
 
 **Why a compile COUNT and not a wall clock.** A timing test on a shared machine
 is a flaky test, and a slow sweep has many innocent explanations. A compilation
@@ -19,11 +23,12 @@ count has one: something the run should have reused was rebuilt. It is also the
 measurement that survives a faster machine, which a threshold on seconds does
 not.
 
-The counting test is xfail(strict=True): it is the defect, written so it
-can be fixed, and strict so that landing the repair turns it into a failing
-xpass rather than a quietly mislabelled pass. See
-``docs/superpowers/plans/2026-08-07-samplingplan-compiles-once.md`` has the
-staged repair and its measured effect (386.7 -> 1.7 ms per sweep).
+This began as an xfail(strict=True) statement of the defect. Landing the repair
+turned it into a failing xpass, which is what forced the marker off rather than
+leaving a passing test quietly mislabelled -- so the marker's removal is part of
+the record, not a tidy-up. See
+``docs/superpowers/plans/2026-08-07-samplingplan-compiles-once.md`` for the
+staged repair and its measured effect.
 """
 
 import logging
@@ -135,21 +140,22 @@ def test_the_handler_sees_compilations_at_all(mixed) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="stage 0 of docs/superpowers/plans/2026-08-07-samplingplan-compiles-once.md: "
-    "the defect is stated here first and repaired in stages 1-2. strict=True so "
-    "that landing the repair turns this into a FAILING xpass, which is what forces "
-    "the marker off rather than leaving a passing test quietly mislabelled.",
-)
 def test_the_transition_is_compiled_once_per_run(mixed) -> None:
     """Tripling the sweeps must not triple the compilations.
 
-    Measured today: 45 at 20 sweeps and 121 at 60, so this fails by a factor of
-    about 2.7. After the repair the count is flat -- the programs are built once
-    and reused, which is what makes the run's wall clock flat in ``n_sweeps``
-    (1.518 s at n=8 against 1.722 s at n=80, versus 3.5 s and 35.6 s today).
+    The warm-up call is load-bearing. A cold process pays for every program in
+    the run -- measured, 72 compilations on the first call regardless of sweep
+    count -- so measuring cold-then-warm compares 72 against 7 and passes no
+    matter what the loop does. Warming first makes both measurements steady
+    state, where the numbers are 7 and 7.
+
+    The ``+ 4`` is not slack for the sweep loop. ``sample`` stacks its kept
+    draws and computes a split-r_hat at the end, and those shapes depend on
+    ``n_sweeps``, so a handful of end-of-run programs legitimately differ
+    between the two calls. What must not scale is the per-sweep count: before
+    the repair this was 2.02 per extra sweep, or 80 over the 40-sweep gap.
     """
+    _count_compiles(_sample(mixed, 8))
     few = _count_compiles(_sample(mixed, 20))
     many = _count_compiles(_sample(mixed, 60))
     assert many <= few + 4, (
