@@ -5,7 +5,7 @@ is a *graph of operators* acting on a *state*, and because the whole thing is a
 JAX pytree, the same object that simulates a night of data can be differentiated,
 jitted, and handed to a sampler.
 
-The tour is in two parts, and one worked example runs through both:
+The tour is in two parts:
 
 ::::{grid} 1 1 2 2
 :gutter: 2
@@ -13,8 +13,8 @@ The tour is in two parts, and one worked example runs through both:
 :::{grid-item-card} Part 1 — Forward modelling
 :class-header: sd-font-weight-bold
 
-Assemble the RHINO signal path and record a raw waterfall, exactly as the
-instrument would. `State` · `Operator` · the graph.
+Simulate what any stage of an experiment would produce — a sky, a receiver
+output, a processed product. `State` · `Operator` · the graph.
 +++
 The twin as a simulator.
 :::
@@ -22,12 +22,15 @@ The twin as a simulator.
 :::{grid-item-card} Part 2 — Bayesian inference
 :class-header: sd-font-weight-bold
 
-Hold the sky fixed and get the receiver's four noise-wave temperatures back out
-of that waterfall. `Latent` · `Bind` · the exact route.
+Infer any subset of what the twin contains, with the noise model standing as
+the likelihood. `Latent` · `Bind` · the engines.
 +++
 The same twin as a model.
 :::
 ::::
+
+**▸ The example running through both** — RHINO's signal path down to the
+receiver output, then the four noise-wave temperatures recovered from it.
 
 Snippets build on each other; pasted top to bottom they form a working script,
 and `tests/test_tour_runs.py` runs it. This is an orientation, not a census —
@@ -42,16 +45,30 @@ and `tests/test_tour_runs.py` runs it. This is an orientation, not a census —
 
 # Part 1 — Forward modelling
 
-A twin is a **graph of operators**. Each node of the graph is one step of signal
-transmission or of signal processing; each operator is a pure `State -> State`
-function; and the graph says how they connect. The default graph is RHINO's, but
-it is a *default*, not the framework — supplying your own is supported.
+A twin is a **graph of operators**. Each node is one step of signal transmission
+*or of signal processing*; each operator is a pure `State -> State` function; and
+the graph says how they connect. The default graph is RHINO's, but it is a
+*default*, not the framework — supplying your own is supported.
 
-```{mermaid}
-flowchart LR
-    S["State in"] --> OP["Operator"] --> S2["State out"]
-    OP -.-> G["one node of the graph"]
-```
+:::{figure} _static/tour-operator-light.svg
+:figclass: only-light
+:align: center
+:width: 460px
+
+Every operator has the same shape. A new `State` comes back — usually with
+`data` replaced; whatever it did not touch is the same buffer, shared, not
+copied.
+:::
+
+:::{figure} _static/tour-operator-dark.svg
+:figclass: only-dark
+:align: center
+:width: 460px
+
+Every operator has the same shape. A new `State` comes back — usually with
+`data` replaced; whatever it did not touch is the same buffer, shared, not
+copied.
+:::
 
 Two nouns carry everything:
 
@@ -62,6 +79,14 @@ Two nouns carry everything:
 `Operator`
 : **One step**, `State` in and `State` out. Sky models, instrument effects,
   calibration, filtering and neural networks are all the same kind of thing.
+
+**Where you stop is a choice.** The graph decides what the twin produces: cut it
+at the antenna for a sky temperature, at the receiver for a raw waterfall, later
+still for a calibrated, flagged, averaged product. Analysis steps are operators
+too, so end-to-end and any sub-path are the same kind of object.
+
+**▸ In this tour** — the path down to the receiver output and stopping there:
+no post-analysis operators on the graph.
 
 ## The state
 
@@ -540,16 +565,17 @@ at each node.
 # Part 2 — Bayesian inference
 
 :::{important}
-**⬆ Same twin, read backwards.** Part 1 built it and ran it forward to the
-waterfall above. Nothing is rebuilt here: the twin becomes a *model*,
-`forward(params) -> prediction`, with everything except the four noise-wave
-temperatures closed over.
+**⬆ Same twin, read backwards.** Part 1 built it and ran it forward. Nothing is
+rebuilt here: the twin becomes a *model*, `forward(params) -> prediction`, with
+everything you do not free closed over.
 :::
 
-**The sky and the beam are given; what were the receiver's four noise-wave
-temperatures?** That is the whole question, and the answer arrives as
-[a figure with error bars](#reading-the-answer-honestly) five short sections
-from here.
+Any leaf of the graph can be made free — a sky amplitude, a beam coefficient, a
+gain, a receiver temperature — and whatever you leave alone is closed over.
+Declaring the noise declares the likelihood. The engine then follows from the
+model's *structure* rather than from taste: exact and sampler-free where the free
+parameters enter linearly, gradient-based where they do not, and one plan
+splitting a model that is both.
 
 Inference is declared in three layers, and it is worth keeping them apart:
 
@@ -566,6 +592,11 @@ Inference is declared in three layers, and it is worth keeping them apart:
 * - **The engine**
   - how to get the posterior, given the shape the first two produced
 :::
+
+**▸ In this tour** — the sky and the beam are given; what were the receiver's
+four noise-wave temperatures? The answer arrives as
+[a figure with error bars](#reading-the-answer-honestly) five short sections
+from here.
 
 ## The model: what is free, and how it enters
 
