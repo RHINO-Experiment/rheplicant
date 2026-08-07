@@ -205,6 +205,131 @@ def test_a_chain_refuses_a_term_that_carries_no_linked_latent():
         memory.remember(term)
 
 
+class TestTheChainChecksEveryDeclaredColumnAndNotJustTheLinkedOne:
+    """`_latents_ok` asked two of the three questions a stored block must answer.
+
+    It required the linked latent and refused a stray name, and never asked
+    whether every *declared* global was there. A term over a subset then reached
+    ``_square_block``, whose ``columns[name]`` lookup is keyed on the term's own
+    names, and the campaign died on a bare ``KeyError('gain_slope')`` -- an
+    epoch compressed with ``design={"t_rx": ..., "t_rx_drift": ...}`` against a
+    factorization declaring ``gain_slope`` as well. That is a plausible night,
+    not a typo: one global not exercised. ``BayesMemory._latents_ok`` has the
+    mirror check (``tuple(term.latents) != declared``); the chain's half did
+    not.
+
+    Width was the same gap one step along. A linked latent declared at width 1
+    and carried at width 2 reached ``jnp.concatenate`` and raised
+    ``TypeError: Cannot concatenate arrays with shapes that differ in
+    dimensions other than the one being concatenated: concatenating along
+    dimension 0 for shapes (0, 3, 3), (1, 4, 4)``. ``_check_block_width`` says
+    this properly, and existed only on the read path.
+
+    The chain's rule is an exact set where the bag's is not, and that is not an
+    inconsistency: a T1 term's stored columns are ``(COEFFICIENTS,)``, so the
+    linked-latent refusal above turns it away before any of this is reached,
+    and the subset branch a reduced basis legitimately needs stays where it
+    belongs -- ``test_a_t1_term_expanding_in_a_SUBSET_is_accepted`` in
+    ``test_compress_dispatch.py`` pins it there.
+    """
+
+    def _epoch(self, design, shapes, epoch_id="odd"):
+        A, C, d = bank.design()
+        blocks = {
+            "t_rx": A[0][:, :1],
+            "gain_slope": A[0][:, 1:],
+            bank.ZETA_NAME: C[0],
+            "wide_zeta": np.column_stack([C[0][:, 0], C[0][:, 0] * 0.5]),
+            "wide_t_rx": np.column_stack([A[0][:, 0], A[0][:, 0] * 0.25]),
+        }
+        return compress_linear(
+            design={name: blocks[source] for name, source in design.items()},
+            observed=jnp.asarray(d[0]),
+            noise_std=bank.SIGMA,
+            shapes=shapes,
+            epoch_id=epoch_id,
+        )
+
+    def test_a_term_missing_a_declared_global_is_refused_by_name(self):
+        term = self._epoch(
+            {"t_rx": "t_rx", bank.ZETA_NAME: bank.ZETA_NAME},
+            {"t_rx": (), bank.ZETA_NAME: ()},
+        )
+        assert term.info.names == ("t_rx", bank.ZETA_NAME)
+        memory = ChainMemory(bank.factorization(_transition()))
+        with pytest.raises(StateValidationError, match="gain_slope") as caught:
+            memory.remember(term)
+        # The bare KeyError named `gain_slope` too, and nothing else. What makes
+        # this a message rather than a crash is that it also says what the
+        # memory expected and where the missing block has to come from.
+        assert "column_order" in str(caught.value) or "accumulates" in str(
+            caught.value
+        )
+
+    def test_a_linked_latent_of_the_wrong_width_is_refused_by_name(self):
+        term = self._epoch(
+            {
+                "t_rx": "t_rx",
+                "gain_slope": "gain_slope",
+                bank.ZETA_NAME: "wide_zeta",
+            },
+            {"t_rx": (), "gain_slope": (), bank.ZETA_NAME: (2,)},
+        )
+        assert term.info.shapes == ((), (), (2,))
+        memory = ChainMemory(bank.factorization(_transition()))
+        with pytest.raises(StateValidationError, match=bank.ZETA_NAME) as caught:
+            memory.remember(term)
+        message = str(caught.value)
+        assert "2" in message and "1" in message
+
+    def test_a_global_of_the_wrong_width_is_refused_by_the_same_check(self):
+        """The transition is not the only column whose width can be wrong."""
+        term = self._epoch(
+            {
+                "t_rx": "wide_t_rx",
+                "gain_slope": "gain_slope",
+                bank.ZETA_NAME: bank.ZETA_NAME,
+            },
+            {"t_rx": (2,), "gain_slope": (), bank.ZETA_NAME: ()},
+        )
+        memory = ChainMemory(bank.factorization(_transition()))
+        with pytest.raises(StateValidationError, match="t_rx") as caught:
+            memory.remember(term)
+        # Only the column that is actually wrong is named, so the message says
+        # where to look rather than listing the whole declared order back.
+        assert "gain_slope" not in str(caught.value)
+
+    def test_the_declared_set_in_another_order_is_still_taken(self):
+        """The nearest legitimate case, and it must stay legitimate.
+
+        `compress_linear` names the columns in the caller's dict order, so a
+        night written drift-first is the same information in a different
+        ordered vector -- `_square_block` permutes it. A check written on the
+        ordered tuple rather than the set would refuse it, and
+        `test_a_term_whose_columns_arrive_in_another_order_is_permuted_not_relabelled`
+        would then be measuring a refusal instead of the oracle.
+        """
+        term = self._epoch(
+            {
+                bank.ZETA_NAME: bank.ZETA_NAME,
+                "gain_slope": "gain_slope",
+                "t_rx": "t_rx",
+            },
+            {bank.ZETA_NAME: (), "gain_slope": (), "t_rx": ()},
+            epoch_id="reordered",
+        )
+        assert term.info.names == (bank.ZETA_NAME, "gain_slope", "t_rx")
+        memory = ChainMemory(bank.factorization(_transition())).remember(term)
+        assert memory.epoch_ids == ("reordered",)
+
+    def test_a_full_and_ordinary_epoch_is_still_taken(self):
+        """Guard the guard: the fixture's own nights must keep going in."""
+        memory = ChainMemory(bank.factorization(_transition()))
+        for term in _terms():
+            memory = memory.remember(term)
+        assert len(memory.epoch_ids) == bank.N_EPOCHS
+
+
 def test_a_chain_refuses_a_repeated_epoch_and_takes_duplicate_true():
     memory = _memory()
     with pytest.raises(StateValidationError, match="already in this memory"):

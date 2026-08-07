@@ -837,8 +837,61 @@ class ChainMemory(eqx.Module):
             self._epochs.appended(term),
         )
 
+    def _declared_widths(self) -> dict[str, int]:
+        """``{column: how many entries it contributes}``, ``zeta`` last.
+
+        The globals' widths come from the factorization's shapes and the chain's
+        from the transition, which is the same arithmetic :meth:`_width` does --
+        written once here so the admission check and the stack cannot disagree
+        about how wide a block should be.
+        """
+        widths = {
+            name: int(jnp.zeros(shape).size)
+            for name, shape in zip(
+                self.factorization.global_names,
+                self.factorization.global_shapes,
+                strict=True,
+            )
+        }
+        widths[self.linked_name] = self.transition.width
+        return widths
+
     def _latents_ok(self, term: Any) -> None:
-        """A chain's half of the admission rules -- the mirror of the bag's."""
+        """A chain's half of the admission rules -- the mirror of the bag's.
+
+        Four questions, and it used to ask two. Present and no strays were
+        checked; **every declared global present**, and **at the declared
+        width**, were not, and each has a stored block that reaches the
+        accumulator and dies there without naming anything.
+
+        A term over a *subset* -- an epoch compressed with
+        ``design={"t_rx": ..., "t_rx_drift": ...}`` against a factorization that
+        also declares ``gain_slope`` -- reached ``_square_block``, whose
+        ``columns[name]`` lookup is keyed on the term's own names, and raised a
+        bare ``KeyError('gain_slope')``. That is a night where one global was
+        not exercised, not a typo. ``BayesMemory._latents_ok`` has the mirror
+        check (``tuple(term.latents) != declared``) and this half did not.
+
+        A linked latent declared at width 1 and carried at width 2 reached
+        ``jnp.concatenate`` and raised ``TypeError: ... shapes (0, 3, 3),
+        (1, 4, 4)``. :func:`_check_block_width` says that properly, and existed
+        only on the read path, where the blocks are already stacked and the
+        damage is already in them.
+
+        **A set, not a tuple.** ``compress_linear`` names the columns in the
+        caller's dict order, and a night written drift-first is the same
+        information in a differently ordered vector -- ``_square_block``
+        permutes it, and comparing ordered tuples here would refuse the
+        campaign ``test_a_term_whose_columns_arrive_in_another_order...``
+        measures against the dense oracle.
+
+        **Exact, where the bag's is not.** A reduced-basis term legitimately
+        expands in a subset of the latents, and ``BayesMemory._latents_ok`` has
+        a branch for exactly that. It cannot be reached from here: a T1 term's
+        stored columns are ``(COEFFICIENTS,)``, so the linked-latent refusal
+        below turns it away first. The two rules do not collide, and this one
+        must not be softened to imitate the other.
+        """
         from rheplicant.inference.memory import _stored_names
 
         stored = _stored_names(term)
@@ -858,6 +911,46 @@ class ChainMemory(eqx.Module):
             raise StateValidationError(
                 f"Term {term.epoch_id!r} is over {stray}, which this memory does "
                 f"not declare; it accumulates {list(self.column_order)}."
+            )
+        missing = [name for name in self.column_order if name not in stored]
+        if missing:
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} is over {list(stored)} and does not carry "
+                f"{missing}, which this memory declares; it accumulates "
+                f"{list(self.column_order)} and every block must be square in all "
+                "of them. A night that did not exercise one global is still a "
+                "quadratic form in it -- an all-zero design block, which says "
+                "the epoch constrains that latent not at all and is the normal "
+                "rank-deficient case the square-root form exists to carry. "
+                "Compress the epoch with a design block for each declared "
+                "latent, or accumulate it in a BayesMemory over the latents it "
+                "does have."
+            )
+        widths = self._declared_widths()
+        stored_widths = {
+            name: int(jnp.zeros(shape).size)
+            for name, shape in zip(term.info.names, term.info.shapes, strict=True)
+        }
+        wrong = [
+            (name, stored_widths[name], widths[name])
+            for name in self.column_order
+            if stored_widths[name] != widths[name]
+        ]
+        if wrong:
+            detail = ", ".join(
+                f"{name!r} carries {got} column(s) where this memory declares "
+                f"{want}"
+                for name, got, want in wrong
+            )
+            raise StateValidationError(
+                f"Term {term.epoch_id!r} does not have the declared widths: "
+                f"{detail}. The stored blocks are a quadratic form in one "
+                "specific ordered vector, and the filter slices at the "
+                "globals' width to separate theta's columns from the chain's -- "
+                "a block of another width makes that slice take one for the "
+                "other. Checked at admission because the accumulator stacks "
+                "these into a single array: unguarded, the symptom was a raw "
+                "TypeError out of jnp.concatenate naming only two shapes."
             )
 
     def log_likelihood(self, values: dict[str, jax.Array]) -> jax.Array:
