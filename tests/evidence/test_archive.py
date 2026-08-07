@@ -371,3 +371,76 @@ class TestTheManifestIsWrittenLastBecauseItIsTheCommit:
         assert path.exists() and path.with_suffix(".json").exists()
         restored = load_memory(path, original.factorization)
         assert restored.archive[0].noise_frozen_at == "gls"
+
+
+class TestTheFormatDescribesABagAndSaysSoWhenHandedSomethingElse:
+    """`save_memory` refused a foreign *term* by name and a foreign *memory* by crash.
+
+    Handed a `ChainMemory` it built the manifest as far as
+    `int(memory.accumulated.factor.shape[0])` and raised
+    `AttributeError: 'ChainMemory' object has no attribute 'accumulated'` --
+    which names an implementation detail of the thing it was not given, says
+    nothing about what this format is, and offers no remedy. Every other
+    unsupported input on this path gets a sentence.
+
+    A chain is not a bag with a longer archive: `accumulated_rows` is a bag's
+    running QR, which a chain deliberately does not have, and the transition a
+    chain reads is a live object that may hold a Python callable
+    (`HyperTransition`) with no textual form for a manifest to record. So this
+    is a refusal rather than a to-do: `load_memory` returns a `BayesMemory`,
+    and there is no reading of this format under which it could return the
+    other one.
+    """
+
+    def _chain(self):
+        import jax.numpy as jnp
+
+        from rheplicant.inference.chain import ChainMemory, LinearGaussianTransition
+        from rheplicant.inference.compress import compress_linear
+        from tests.evidence import chain_bank as bank
+
+        transition = LinearGaussianTransition(
+            phi=bank.PHI,
+            process_std=bank.PROCESS_STD,
+            initial_std=bank.INITIAL_STD,
+            initial_mean=bank.INITIAL_MEAN,
+        )
+        design, drift, data = bank.design(0)
+        memory = ChainMemory(bank.factorization(transition))
+        for epoch in range(2):
+            memory = memory.remember(
+                compress_linear(
+                    design={
+                        "t_rx": design[epoch][:, :1],
+                        "gain_slope": design[epoch][:, 1:],
+                        bank.ZETA_NAME: drift[epoch],
+                    },
+                    observed=jnp.asarray(data[epoch]),
+                    noise_std=bank.SIGMA,
+                    shapes={"t_rx": (), "gain_slope": (), bank.ZETA_NAME: ()},
+                    epoch_id=f"e{epoch}",
+                )
+            )
+        return memory
+
+    def test_a_chain_memory_is_refused_by_name(self, tmp_path):
+        with pytest.raises(StateValidationError, match="ChainMemory") as caught:
+            save_memory(self._chain(), tmp_path / "chain.rhep")
+        message = str(caught.value)
+        assert "BayesMemory" in message
+        # A remedy, as the foreign-term refusal has one.
+        assert "process that built it" in message
+
+    def test_nothing_is_written_when_the_memory_is_refused(self, tmp_path):
+        """The refusal is before the binary, as the foreign-term one is."""
+        path = tmp_path / "chain.rhep"
+        with pytest.raises(StateValidationError):
+            save_memory(self._chain(), path)
+        assert not path.exists()
+        assert not path.with_suffix(".json").exists()
+
+    def test_a_bag_still_saves(self, tmp_path):
+        """Guard the guard."""
+        path = tmp_path / "bag.rhep"
+        save_memory(_memory_with_non_default_provenance(), path)
+        assert path.exists() and path.with_suffix(".json").exists()

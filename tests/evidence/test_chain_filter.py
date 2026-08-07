@@ -128,7 +128,23 @@ def test_an_inferred_correlation_time_is_exact_at_several_values():
 
 
 def test_the_marginal_is_a_sqrtinfo_over_the_global_latents_only():
-    """theta is never marginalised; zeta always is."""
+    """theta is never marginalised; zeta always is.
+
+    **The third assertion used to be that the marginal's Fisher is positive
+    semi-definite.** ``fisher()`` is ``R.T @ R``, so ``eigvalsh(...) > -1e-12``
+    holds for every array of real numbers this function could possibly return,
+    including one from a filter that had dropped the chain entirely. It could
+    not fail, so it said nothing.
+
+    What it should have said is that the *value* is right, and the dense oracle
+    already knows it: for the whole campaign as one Gaussian,
+    ``F = A^T (sigma^2 I + C Sigma_zeta C^T)^-1 A``. Measured, that agrees with
+    the filter's marginal to ``2.6e-13`` absolute, ``1.4e-15`` relative -- and a
+    bag's ``A^T A / sigma^2``, which is what ignoring the chain gives, is 26 %
+    larger in trace with an off-diagonal of ``+0.0498`` against the correct
+    ``-10.383``. The sign is different, so this cannot pass on a filter that
+    forgets what it is filtering.
+    """
     marginal = chain_marginal(
         bank.stacked(),
         _transition(),
@@ -138,7 +154,23 @@ def test_the_marginal_is_a_sqrtinfo_over_the_global_latents_only():
     )
     assert marginal.names == bank.THETA_NAMES
     assert marginal.factor.shape[1] == bank.N_THETA
-    assert np.all(np.linalg.eigvalsh(np.asarray(marginal.fisher())) > -1e-12)
+
+    designs, drifts, _ = bank.design(0)
+    rows = bank.N_EPOCHS * bank.N_SAMPLES
+    theta_design = np.zeros((rows, bank.N_THETA))
+    zeta_design = np.zeros((rows, bank.N_EPOCHS))
+    for epoch in range(bank.N_EPOCHS):
+        span = slice(epoch * bank.N_SAMPLES, (epoch + 1) * bank.N_SAMPLES)
+        theta_design[span, :] = designs[epoch]
+        zeta_design[span, epoch] = drifts[epoch][:, 0]
+    covariance = bank.SIGMA**2 * np.eye(rows) + (
+        zeta_design @ bank.zeta_covariance() @ zeta_design.T
+    )
+    oracle = theta_design.T @ np.linalg.solve(covariance, theta_design)
+    np.testing.assert_allclose(np.asarray(marginal.fisher()), oracle, atol=1e-11)
+    # ...and the bag's answer, which the old assertion also accepted.
+    bag = theta_design.T @ theta_design / bank.SIGMA**2
+    assert np.sign(bag[0, 1]) != np.sign(oracle[0, 1])
 
 
 def _wide_campaign(seed=7):

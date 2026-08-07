@@ -227,7 +227,29 @@ def save_memory(memory, path: str | Path) -> None:
     atomic: a reader can catch the instant between them. That window is
     diagnosable -- the manifest is missing, which ``load_memory`` names -- where
     the reverse window was not.
+
+    **The memory is checked before its terms are.** A foreign *term* has been
+    refused by name since this module existed; a foreign *memory* was refused by
+    ``AttributeError: 'ChainMemory' object has no attribute 'accumulated'``,
+    from the manifest line that reads a bag's running QR. That names an
+    implementation detail of the class it was not given, says nothing about what
+    this format is, and offers no remedy.
     """
+    from rheplicant.inference.memory import BayesMemory
+
+    if not isinstance(memory, BayesMemory):
+        raise StateValidationError(
+            f"save_memory writes a BayesMemory and this is a "
+            f"{type(memory).__name__}. The manifest is a reconstruction spec for "
+            "a bag: it records `accumulated_rows`, the running QR a chain "
+            "deliberately does not have, and `load_memory` returns a BayesMemory "
+            "-- so there is no reading of this format under which it could "
+            "return the other one. A chain also carries a live transition, and "
+            "a HyperTransition's builder is a Python callable with no textual "
+            "form for a manifest to record, so a reloaded chain would run a "
+            "different model against the same numbers. Keep a chain in the "
+            "process that built it."
+        )
     path = Path(path)
     foreign = [
         term.epoch_id

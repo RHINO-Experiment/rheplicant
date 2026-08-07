@@ -210,3 +210,39 @@ def test_a_nan_score_is_refused_rather_than_returned():
     )
     with pytest.raises(ValueError, match="not finite"):
         held_out_z(tuple(collected), camp.prior_fisher())
+
+
+def test_an_epoch_with_no_rows_is_refused_by_name_rather_than_by_zero_division():
+    """`dof` is the epoch's row count, and `z` divides by `sqrt(2 * dof)`.
+
+    A fully flagged night compresses to a factor with zero rows -- so does
+    `SqrtInfo.null`, which the accumulator uses as padding -- and it reached
+    `(chi2 - dof) / sqrt(2 * dof)` with `dof = 0` and died on a bare
+    `ZeroDivisionError: float division by zero`, one line below the NaN guard
+    that was written for exactly this shape of problem and cannot help because
+    the division happens first. Measured: it raised for a lone empty epoch and
+    for an empty epoch sitting between two real ones, so a long campaign with
+    one dead night lost every score it had already computed.
+    """
+    import jax.numpy as jnp
+
+    from rheplicant.inference.sqrtinfo import SqrtInfo
+
+    class _Empty:
+        epoch_id = "all-flagged"
+        info = SqrtInfo(
+            factor=jnp.zeros((0, camp.N_THETA)),
+            target=jnp.zeros((0,)),
+            offset=jnp.zeros(()),
+            names=("x",),
+            shapes=((camp.N_THETA,),),
+        )
+
+    for collected in ((_Empty(),), (*camp.terms(2, biased=False)[:1], _Empty())):
+        with pytest.raises(ValueError, match="no rows"):
+            held_out_z(collected, camp.prior_fisher())
+
+
+def test_a_campaign_of_ordinary_nights_is_still_scored():
+    """Guard the guard: the row-count refusal must not catch a real campaign."""
+    assert len(held_out_z(camp.terms(3, biased=False), camp.prior_fisher())) == 3

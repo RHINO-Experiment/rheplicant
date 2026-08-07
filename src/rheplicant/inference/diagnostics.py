@@ -264,6 +264,25 @@ def _campaign_arrays(
         )
     factors = tuple(np.asarray(term.info.factor, dtype=float) for term in terms)
     targets = tuple(np.asarray(term.info.target, dtype=float) for term in terms)
+    # An epoch's `dof` is its factor's row count, and `z` divides by
+    # `sqrt(2 * dof)`. A night whose samples are all flagged compresses to zero
+    # rows -- so does `SqrtInfo.null`, which the accumulator uses as padding --
+    # and reached that division as a bare `ZeroDivisionError: float division by
+    # zero`, one line below the NaN guard written for the same shape of problem
+    # and unable to help because the division happens first. Refused here, with
+    # the whole campaign in hand, so a long run with one dead night says which
+    # night before it spends the other N-1 leave-one-out solves.
+    empty = [term.epoch_id for term, row in zip(terms, factors, strict=True) if not row.shape[0]]
+    if empty:
+        raise ValueError(
+            f"Epoch(s) {empty} have no rows in their stored factor, so they "
+            "constrain nothing and have no residual to score: the held-out "
+            "chi-square is on zero degrees of freedom and its standardisation "
+            "divides by sqrt(2 * 0). That is a night whose samples were all "
+            "flagged, or a null padding term that was never replaced. Drop "
+            "those epochs from the campaign -- a score of 'unsurprising' for a "
+            "night with no data is not a diagnostic result."
+        )
     return factors, targets, factors[0].shape[1]
 
 
