@@ -380,8 +380,22 @@ def _require_inexact(space: ParameterSpace, names: Sequence[str]) -> None:
 
 
 def _magnitude(latent: Any) -> float:
-    """The latent's own scale, with the documented fallback for an all-zero init."""
-    magnitude = float(jnp.max(jnp.abs(latent.init)))
+    """The latent's own scale, with the documented fallback for an all-zero init.
+
+    ``np`` and not ``jnp``, and the difference is not stylistic. Inside a trace
+    a ``jnp`` call is staged into the jaxpr *even when its input is concrete* --
+    JAX does not constant-fold at trace time -- so ``jnp.max`` hands back a
+    tracer and the ``float`` below raises ``ConcretizationTypeError``. ``np``
+    runs eagerly on the array and returns a Python float. Which is the honest
+    spelling anyway: ``latent.init`` is a declaration, fixed when the program is
+    built, and this is a step size chosen at build time rather than a quantity
+    that varies with the data.
+
+    (Closed-over arrays are *not* traced by ``eqx.filter_jit`` -- verified --
+    so it really is the ``jnp`` call that introduces the tracer, not the
+    closure.)
+    """
+    magnitude = float(np.max(np.abs(latent.init)))
     return magnitude if magnitude != 0.0 else 1.0
 
 
