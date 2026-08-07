@@ -101,6 +101,20 @@ _BAG_REPEAT_REMEDY = (
 )
 
 
+def _direction_phrase(name: str, direction: Any) -> str:
+    """`` in direction (0.707, 0.707) of x`` -- or nothing, for a scalar latent.
+
+    Empty for a width-1 latent, where the only direction is the latent itself
+    and naming it would be noise; empty too when the block was not finite, since
+    :func:`~rheplicant.inference.diagnostics._tightest_direction` returns
+    ``None`` there and the ``nan`` sigma is already the message.
+    """
+    if direction is None or len(direction) < 2:
+        return ""
+    listed = ", ".join(f"{value:.3f}" for value in np.asarray(direction))
+    return f" in direction ({listed}) of {name}"
+
+
 def _is_reduced(term: Any) -> bool:
     """Whether this term's numbers are a quadratic in the BASIS COEFFICIENTS.
 
@@ -966,8 +980,15 @@ class BayesMemory(eqx.Module):
                 if name not in represented and row["below_floor"]
             }
             if breached:
+                # The direction is quoted, not just the width. `sigma` is the
+                # narrowest direction of the latent's posterior block, which for
+                # a correlated posterior is a *combination* and not a component
+                # -- so "your error bar is too tight" without it leaves the
+                # analyst looking down the coordinate axes, where every width
+                # can legitimately be above the floor while this one is not.
                 listed = ", ".join(
                     f"{n}: sigma={r['sigma']:.3e} vs floor {r['floor']:.3e}"
+                    + _direction_phrase(n, r["direction"])
                     for n, r in sorted(breached.items())
                 )
                 raise StateValidationError(

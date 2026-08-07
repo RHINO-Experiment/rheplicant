@@ -622,10 +622,10 @@ def _refuse_bad_floors(floors: Mapping[str, Any], names: tuple[str, ...]) -> Non
         )
 
 
-def _posterior_widths(memory: Any, at: Mapping[str, Any] | None) -> tuple[
+def _posterior_covariance(memory: Any, at: Mapping[str, Any] | None) -> tuple[
     np.ndarray, tuple[str, ...], tuple[tuple[int, int], ...]
 ]:
-    """``(widths, names, spans)`` -- ``sqrt(diag((F_like + F_prior)^-1))``.
+    """``(covariance, names, spans)`` -- ``(F_like + F_prior)^-1``, whole.
 
     The prior is added back deliberately.
     :meth:`~rheplicant.inference.memory.BayesMemory.fisher` excludes it, and
@@ -633,6 +633,12 @@ def _posterior_widths(memory: Any, at: Mapping[str, Any] | None) -> tuple[
     compared against the width a result is **quoted** with, which is the
     posterior's. Leaving the prior out makes every sigma larger than the quoted
     one, so the refusal would fire later than it should -- the silent direction.
+
+    The **matrix** is returned rather than its diagonal, and that is the whole
+    of this function's part in what
+    :func:`_tightest_direction` fixes: a diagonal knows the width of each
+    coordinate and nothing about the width of a combination, and the smallest
+    width a correlated posterior has is never a coordinate's.
     """
     fisher = memory.fisher(at)
     names, spans = tuple(fisher.names), tuple(fisher.spans)
@@ -645,7 +651,7 @@ def _posterior_widths(memory: Any, at: Mapping[str, Any] | None) -> tuple[
     # poisoned stored factor. Propagating NaN instead is what the floor
     # comparison below is written to catch.
     if not np.all(np.isfinite(total)):
-        return np.full(width, np.nan), names, spans
+        return np.full((width, width), np.nan), names, spans
     try:
         lower = np.linalg.cholesky(total)
     except np.linalg.LinAlgError as error:
@@ -656,7 +662,55 @@ def _posterior_widths(memory: Any, at: Mapping[str, Any] | None) -> tuple[
             "invertible at any N; check the declared priors before the epochs."
         ) from error
     inverse = np.linalg.inv(lower)
-    return np.sqrt(np.diag(inverse.T @ inverse)), names, spans
+    return inverse.T @ inverse, names, spans
+
+
+def _tightest_direction(block: np.ndarray) -> tuple[float, np.ndarray | None]:
+    """``(width, unit direction)`` of the narrowest direction of one latent's block.
+
+    **This is the correction to section 9.4's arithmetic, not to its argument.**
+    The rationale was already right -- "the tightest is the first to go under,
+    so it is the one a refusal must watch" -- and the code took ``np.min`` of
+    the covariance's *diagonal*, which is the tightest **coordinate**. For any
+    correlated posterior the smallest eigen-direction is below every diagonal
+    entry, so the sentence was true of a quantity the function was not
+    computing, and the gap is a basis rotation wide.
+
+    Measured. On ``tests/evidence/campaign_bank.py``, whose posterior
+    correlation is 0.5131, the tightest direction is 0.10419 against a tightest
+    coordinate of 0.13425 at N = 1, and at a floor of 0.05 it crosses at N = 5
+    where the tightest coordinate crosses at N = 8 and the loosest at N = 13:
+    three nights of silence, and eight for a report keyed on the loosest. On a
+    deliberately near-collinear design over 200 epochs the gap is the whole
+    refusal: coordinate widths ``(1.402505, 1.403178)`` against a floor of 0.05,
+    and a tightest direction of ``0.006335`` -- 7.9 times **below** it -- along
+    ``(0.7073, 0.7069)``. That campaign quoted an error bar under its own
+    declared systematic while ``below_floor`` said ``False``.
+
+    The direction is returned because a bare number is half the value: "your
+    error bar is too tight" is not actionable, "your error bar on
+    ``0.707 x[0] + 0.707 x[1]`` is too tight" is. Its sign is fixed by making
+    the largest-magnitude component positive, so the same posterior reports the
+    same vector rather than one that flips with LAPACK's mood.
+
+    ``None`` and a ``nan`` width for a block that is not finite: NaN cannot be
+    eigendecomposed -- ``eigh`` raises ``LinAlgError`` -- and a poisoned
+    campaign must report ``nan`` and be refused by the NaN-safe comparison in
+    :func:`systematic_floor`, not raise a linear-algebra error here.
+    """
+    if not np.all(np.isfinite(block)):
+        return float("nan"), None
+    values, vectors = np.linalg.eigh(block)
+    smallest = float(values[0])
+    direction = np.asarray(vectors[:, 0], dtype=float)
+    direction = direction * np.sign(direction[int(np.argmax(np.abs(direction)))])
+    # A covariance is positive definite by construction here -- it is the
+    # inverse of a Cholesky factor times its transpose -- so a non-positive
+    # eigenvalue is roundoff on a block that constrains that direction not at
+    # all. Zero is the honest width for it and it is below every legal floor,
+    # which is the safe direction. `nan` is handled above, never here, because
+    # `smallest > 0.0` is False for NaN and would silently become zero.
+    return (math.sqrt(smallest) if smallest > 0.0 else 0.0), direction
 
 
 def systematic_floor(
@@ -678,13 +732,17 @@ def systematic_floor(
     ``N^-1/2`` while the shared product's does not fall at all. So the whole
     content of this function is: when does one pass under the other.
 
-    ``sigma`` is the **tightest** component of a latent's marginal posterior
-    width, not the loosest and not the mean. A vector latent has several widths
-    and a floor is one number; the tightest is the first to go under, so it is
-    the one a refusal must watch. Measured on the campaign fixture with a floor
-    of 0.05, the tightest component crosses at N = 8 and the loosest at N = 13 --
-    a report keyed on the loosest stays quiet for five nights while a quoted
-    error bar is already below the declared systematic.
+    ``sigma`` is the width of the **tightest direction** of a latent's marginal
+    posterior -- the square root of the smallest eigenvalue of its covariance
+    block -- not the tightest coordinate, not the loosest and not the mean. A
+    vector latent has a width in every direction and a floor is one number; the
+    tightest is the first to go under, so it is the one a refusal must watch,
+    and for a correlated posterior it is never a coordinate. Measured on the
+    campaign fixture with a floor of 0.05 and a posterior correlation of 0.5131,
+    the tightest direction crosses at N = 5, the tightest coordinate at N = 8
+    and the loosest at N = 13. See :func:`_tightest_direction`, which also
+    records the near-collinear campaign whose error bar sits 7.9 times under the
+    floor with every coordinate width an order of magnitude above it.
 
     ``crossing_epoch`` is **computed from the observed width**, not quoted: the
     campaign's own ``sigma_N`` is extrapolated as ``sigma_N sqrt(N / N')`` and
@@ -705,11 +763,13 @@ def systematic_floor(
             each latent's declared ``init``.
 
     Returns:
-        ``{name: {"sigma", "floor", "below_floor", "crossing_epoch"}}``.
-        ``below_floor`` is the refusal's own comparison, computed here and
-        nowhere else so that the NaN-safe form exists in one place;
-        ``crossing_epoch`` is ``None`` when the width is not a finite positive
-        number, because there is then no crossing to extrapolate.
+        ``{name: {"sigma", "floor", "below_floor", "crossing_epoch",
+        "direction"}}``. ``below_floor`` is the refusal's own comparison,
+        computed here and nowhere else so that the NaN-safe form exists in one
+        place; ``crossing_epoch`` is ``None`` when the width is not a finite
+        positive number, because there is then no crossing to extrapolate;
+        ``direction`` is the unit combination of that latent's raveled
+        components whose width ``sigma`` is, and ``None`` for a poisoned block.
 
     Raises:
         StateValidationError: for an empty campaign, a floor naming a latent
@@ -725,12 +785,12 @@ def systematic_floor(
             "would report that it passed under its systematic floor before it "
             "started."
         )
-    widths, names, spans = _posterior_widths(memory, at)
+    covariance, names, spans = _posterior_covariance(memory, at)
     _refuse_bad_floors(floors, names)
     report: dict[str, dict[str, Any]] = {}
     for name, declared in floors.items():
         start, stop = spans[names.index(name)]
-        sigma = float(np.min(widths[start:stop]))
+        sigma, direction = _tightest_direction(covariance[start:stop, start:stop])
         floor = float(declared)
         # `not (sigma > floor)`, never `sigma <= floor`: NaN is False for both
         # comparisons, so the second form waves a poisoned campaign through
@@ -747,5 +807,6 @@ def systematic_floor(
                 if math.isfinite(sigma) and sigma > 0.0
                 else None
             ),
+            "direction": direction,
         }
     return report
