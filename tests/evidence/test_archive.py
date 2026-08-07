@@ -156,12 +156,17 @@ def test_the_restored_memory_gives_the_same_log_posterior(tmp_path):
 class TestLoadReRunsTheRefusalsRememberEnforces:
     """The manifest is an editable text file, so it is a second way in.
 
-    ``BayesMemory.remember`` refuses a repeated epoch, a mixed estimator and a
-    tempered term. ``load_memory`` calls ``BayesMemory(archive=...)`` directly,
-    which validates nothing -- so before this guard, a hand-edited manifest
-    loaded silently, ``audit()["estimator"]`` reported one estimator for an
-    archive holding two (it reads ``archive[0]``), and ``remember`` then
-    admitted further terms of whichever estimator sat at index 0.
+    ``BayesMemory.remember`` refuses a repeated epoch, a mixed estimator, a
+    tempered term and a shared input product. ``load_memory`` calls
+    ``BayesMemory(archive=...)`` directly, which validates nothing -- so before
+    this guard, a hand-edited manifest loaded silently,
+    ``audit()["estimator"]`` reported one estimator for an archive holding two
+    (it reads ``archive[0]``), and ``remember`` then admitted further terms of
+    whichever estimator sat at index 0.
+
+    The fourth is section 9.5's, and it lives in
+    :class:`TestTheProvenanceRuleIsReRunOnLoadToo` below because it needs a
+    two-term archive whose binary is as real as its manifest.
     """
 
     def _saved(self, tmp_path, mutate):
@@ -215,6 +220,113 @@ class TestLoadReRunsTheRefusalsRememberEnforces:
         path.unlink()
         with pytest.raises(StateValidationError, match="more than once"):
             load_memory(path, _factorization())
+
+
+class TestTheProvenanceRuleIsReRunOnLoadToo:
+    """Section 9.5, through the door this module's own docstring documents.
+
+    ``remember`` refuses two epochs that share an input-product hash unless the
+    product is represented among the global latents, because a shared
+    calibration solution is a shared error with no variance at all: per-epoch
+    chi-square is right, split-half agrees, leave-one-out agrees, and the answer
+    is wrong. ``load_memory`` re-ran three of ``remember``'s refusals and not
+    that one.
+
+    Reproduced with a **one-character** manifest edit and no ``shared_inputs=``
+    anywhere: written, the two terms read
+    ``[[['beam_map', 'sha:abc']], [['beam_map', 'sha:def']]]``; edited to
+    ``[[['beam_map', 'sha:abc']], [['beam_map', 'sha:abc']]]``, ``load_memory``
+    ACCEPTED both, while ``remember`` on the same pair said "Epoch 'n1' shares
+    input product 'beam_map' (hash 'sha:abc') with ['n0']" and the *duplicate*
+    rule fired on the very same edited file. Concatenating two runs' manifests
+    reaches the same state with no editing at all, which is why this is not a
+    tampering guard.
+
+    Every archive here is genuinely two terms in the binary as well as in the
+    manifest, so an accepted case really loads rather than dying on a short
+    file, and a refused case is refused on the archive's meaning rather than on
+    its damage.
+    """
+
+    def _pair(self, tmp_path, second_hash, share=False):
+        """A real two-night archive; ``share`` retypes the second hash on disk."""
+        from rheplicant.inference.memory import BayesMemory
+
+        memory = BayesMemory(_factorization())
+        for epoch_id, digest in (("n0", "sha:abc"), ("n1", second_hash)):
+            memory = memory.remember(
+                QuadraticLikelihood(
+                    info=SqrtInfo(
+                        factor=jnp.array([[1.5, 0.25], [0.0, 0.75]]),
+                        target=jnp.array([0.5, -0.25]),
+                        offset=jnp.array(-3.25),
+                        names=("depth", "width"), shapes=((), ()),
+                    ),
+                    epoch_id=epoch_id, n_observed=64,
+                    inputs=(("beam_map", digest),),
+                )
+            )
+        path = tmp_path / "campaign.rhep"
+        save_memory(memory, path)
+        if share:
+            manifest_path = path.with_suffix(".json")
+            manifest = json.loads(manifest_path.read_text())
+            manifest["terms"][1]["inputs"] = manifest["terms"][0]["inputs"]
+            manifest_path.write_text(json.dumps(manifest))
+        return path
+
+    def _represents(self, product):
+        from rheplicant.inference.factorize import Factorization
+
+        return Factorization(_factorization().space, represents={product: ("depth",)})
+
+    def test_a_shared_unmodelled_product_is_refused(self, tmp_path):
+        path = self._pair(tmp_path, "sha:def", share=True)
+        with pytest.raises(StateValidationError, match="share input product"):
+            load_memory(path, _factorization())
+
+    def test_the_message_names_the_product_the_hash_and_both_epochs(self, tmp_path):
+        path = self._pair(tmp_path, "sha:def", share=True)
+        with pytest.raises(StateValidationError) as caught:
+            load_memory(path, _factorization())
+        message = str(caught.value)
+        assert "beam_map" in message
+        assert "sha:abc" in message
+        assert "n0" in message and "n1" in message
+
+    def test_a_re_measured_product_still_loads(self, tmp_path):
+        """The nearest legitimate case, and it must stay legitimate.
+
+        Same product, different hash: the beam was re-measured between nights,
+        the two errors are independent draws, and summing them is exactly
+        right. Matching on the product NAME alone would refuse the normal
+        campaign, so the comparison is on the ``(product, hash)`` pair.
+        """
+        path = self._pair(tmp_path, "sha:def")
+        restored = load_memory(path, _factorization())
+        assert [term.inputs for term in restored.archive] == [
+            (("beam_map", "sha:abc"),),
+            (("beam_map", "sha:def"),),
+        ]
+
+    def test_a_shared_product_that_is_modelled_still_loads(self, tmp_path):
+        """The remedy the message names, exercised so it is not a dead end.
+
+        A product carried as a global latent is integrated with the rest of
+        theta, so sharing its hash is no longer a claim of independence about
+        something unmodelled. The refusal has to read the *supplied*
+        factorization to know that, which is why it takes ``represents`` rather
+        than deciding on the manifest alone.
+        """
+        path = self._pair(tmp_path, "sha:def", share=True)
+        restored = load_memory(path, self._represents("beam_map"))
+        assert len(restored.archive) == 2
+
+    def test_representing_a_different_product_does_not_excuse_this_one(self, tmp_path):
+        """`represents` is read by key, so a near-miss must not open the gate."""
+        path = self._pair(tmp_path, "sha:def", share=True)
+        with pytest.raises(StateValidationError, match="share input product"):
+            load_memory(path, self._represents("cal_solution"))
 
 
 class TestTheManifestIsWrittenLastBecauseItIsTheCommit:

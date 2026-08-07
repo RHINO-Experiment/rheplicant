@@ -100,22 +100,45 @@ def _describe(term: QuadraticLikelihood) -> dict[str, Any]:
     }
 
 
-def _reject_bad_archive(terms: list[dict[str, Any]]) -> None:
-    """Re-run, on the manifest, the three refusals ``remember`` enforces.
+def _reject_bad_archive(terms: list[dict[str, Any]], represents: Any) -> None:
+    """Re-run, on the manifest, the four refusals ``remember`` enforces.
 
     ``BayesMemory.remember`` refuses a repeated ``epoch_id``, a mixed
-    estimator and a tempered term, and its docstring calls those three "worth
-    the words they cost". None of them was checked here, and ``load_memory`` is
-    a *second* way to build an archive -- it calls ``BayesMemory(archive=...)``
-    directly, which validates nothing. Since this module's own premise is that
-    the manifest is the reconstruction spec and therefore an editable text file,
-    the bypass is reachable by the very mechanism the format documents.
+    estimator, a tempered term and a shared input product. None of them was
+    checked here, and ``load_memory`` is a *second* way to build an archive --
+    it calls ``BayesMemory(archive=...)`` directly, which validates nothing.
+    Since this module's own premise is that the manifest is the reconstruction
+    spec and therefore an editable text file, the bypass is reachable by the
+    very mechanism the format documents.
 
-    Measured before this check existed: a manifest with the same ``epoch_id``
-    twice, one term ``include_logdet=True`` and one ``False``, loaded without
-    complaint; ``audit()["estimator"]`` then reported ``("full", "none")`` for
-    an archive holding both, because it reads ``archive[0]``; and ``remember``
-    admitted further terms of whichever estimator happened to sit at index 0.
+    Measured before the first three existed: a manifest with the same
+    ``epoch_id`` twice, one term ``include_logdet=True`` and one ``False``,
+    loaded without complaint; ``audit()["estimator"]`` then reported
+    ``("full", "none")`` for an archive holding both, because it reads
+    ``archive[0]``; and ``remember`` admitted further terms of whichever
+    estimator happened to sit at index 0.
+
+    **The fourth arrived after the other three and was missed.** Section 9.5's
+    rule -- two epochs sharing an input-product hash are not conditionally
+    independent unless the product is represented among the globals -- is the
+    one this module's own docstring gives as the reason ``inputs`` is in the
+    manifest at all: a reloaded campaign that has forgotten which nights shared
+    a calibration solution "will cheerfully sum them". Measured with a
+    one-character edit and no ``shared_inputs=`` anywhere: written,
+    ``[[['beam_map', 'sha:abc']], [['beam_map', 'sha:def']]]``; edited,
+    ``[[['beam_map', 'sha:abc']], [['beam_map', 'sha:abc']]]``; ``load_memory``
+    ACCEPTED, while ``remember`` refused the identical pair and the *duplicate*
+    rule fired on the very same edited file. Concatenating two runs' manifests
+    reaches that state with no editing at all, which is why this is a
+    correctness check and not a tampering one.
+
+    ``represents`` comes from the caller's :class:`Factorization` rather than
+    from the manifest, and it has to: whether a shared product is modelled is a
+    property of the model being loaded *against*, not of the archive. The
+    comparison is on the ``(product, hash)`` pair for the reason
+    :func:`~rheplicant.inference.memory._reject_shared_inputs` gives -- a beam
+    map re-measured between nights is a different beam map, and refusing on the
+    name alone would refuse the normal campaign.
 
     Checked on the manifest rather than on the rebuilt terms so that a bad
     archive is refused before any array is read.
@@ -154,6 +177,38 @@ def _reject_bad_archive(terms: list[dict[str, Any]]) -> None:
             "stores prior-free factors: log_posterior applies the prior exactly once, "
             "so a tempered term would apply it twice."
         )
+
+    # Last, for `reject_bad_term`'s reason: an epoch present twice trips this
+    # rule as well as the duplicate one, and the duplicate message is the
+    # actionable half of that pair.
+    modelled = set(represents)
+    first_use: dict[tuple[str, str], str] = {}
+    for entry in terms:
+        for pair in entry["inputs"]:
+            product, digest = tuple(pair)
+            if product in modelled:
+                continue
+            earlier = first_use.get((product, digest))
+            if earlier is not None:
+                raise StateValidationError(
+                    f"This archive holds epochs {earlier!r} and "
+                    f"{entry['epoch_id']!r} that share input product {product!r} "
+                    f"(hash {digest!r}), and a memory sums its factors as though "
+                    "the epochs were conditionally independent. They are not: one "
+                    "calibration solution, one beam map or one flag table applied "
+                    "to several nights is a shared error with no variance at all, "
+                    "so per-epoch chi-square is right, split-half agrees, "
+                    "leave-one-out agrees, and the answer is wrong -- measured at "
+                    "52.6 sigma by N = 640 with every diagnostic clean. Model the "
+                    "product as a global latent and load against "
+                    f"Factorization(represents={{{product!r}: (...)}}). A memory "
+                    "built by `remember` cannot contain this unless "
+                    "shared_inputs=True was passed deliberately, so the manifest "
+                    "has most likely been edited or concatenated -- and a "
+                    "deliberately shared campaign has to declare itself again "
+                    "here, because the archive is all that is left of it."
+                )
+            first_use[(product, digest)] = entry["epoch_id"]
 
 
 def save_memory(memory, path: str | Path) -> None:
@@ -256,7 +311,7 @@ def load_memory(path: str | Path, factorization: Factorization):
             f"This archive's latent shapes {manifest['global_shapes']} do not match "
             f"the factorization's {[list(s) for s in factorization.global_shapes]}."
         )
-    _reject_bad_archive(manifest["terms"])
+    _reject_bad_archive(manifest["terms"], factorization.represents)
 
     names = factorization.global_names
     shapes = factorization.global_shapes
