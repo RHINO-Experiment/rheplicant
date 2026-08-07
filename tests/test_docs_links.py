@@ -21,6 +21,7 @@ written to close for the test count, in a second place with no guard.
 """
 
 import re
+import xml.dom.minidom
 from pathlib import Path
 
 import pytest
@@ -226,3 +227,28 @@ def test_the_examples_page_states_the_real_count() -> None:
         assert stated.group(1) == word, (
             f"{path.name} says '{stated.group(1)}' examples; there are {n} ({word})."
         )
+
+
+def test_every_committed_svg_is_well_formed_xml() -> None:
+    """A browser serves ``.svg`` as XML, and declines to render a malformed one.
+
+    This exists because the failure is invisible to every cheaper check. XML
+    forbids ``--`` inside a comment; a generator that wrote
+    ``<!-- edit this -- not that -->`` produced a file that opens fine in an
+    editor, diffs clean, passes a checksum comparison against its own
+    regeneration, and renders as a broken-image icon on the page. It shipped in
+    a commit whose figure had been looked at -- before the comment was written.
+
+    Parsing is the whole test. Anything a browser will not parse fails here
+    first, with the line and column.
+    """
+    broken = []
+    for path in sorted((DOCS / "_static").glob("*.svg")):
+        try:
+            xml.dom.minidom.parse(str(path))
+        except Exception as exc:  # noqa: BLE001 - any parse failure is the bug
+            broken.append(f"{path.name}: {exc}")
+    assert not broken, (
+        "These committed SVGs are not well-formed XML, so a browser will not "
+        "render them at all:\n  " + "\n  ".join(broken)
+    )
