@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Two README links were dead on PyPI, and no guard could see them
+
+- `](DESIGN.md)` and `](CHANGELOG.md)` are correct on GitHub and 404 on PyPI,
+  which renders `README.md` as the long description with no repository to
+  resolve against. Both now point at Read the Docs, where `docs/design.md` and
+  `docs/changelog.md` are `{include}` of these exact files -- the same content
+  with a heading sidebar and search over it, which a 3000-line changelog needs
+  and a blob view does not give. The README is down to one link convention
+  from two: its other eight documentation links were already RTD.
+- `[project.urls].Changelog` follows, so the PyPI sidebar and the README prose
+  no longer point at two different renderings of one file.
+- **0.2.0's page keeps both 404s.** PyPI freezes the description and the URLs
+  into the uploaded metadata and will not accept a re-upload, so this reaches
+  readers only with the next release. Nothing about the installed package
+  changes, which is why it is not worth a release of its own.
+- `test_readme_links_survive_being_rendered_off_repo` refuses any relative link
+  target in the README, across the markdown links and the HTML attributes.
+  `#anchor` links are exempt: readme_renderer rewrites them to
+  `#user-content-` and inserts the targets -- verified on the live page rather
+  than assumed, because a guard that also banned those would have condemned
+  fourteen anchors that work. The existing link guard only ever read
+  `](page.md#anchor)` inside `docs/`, so a README rendered outside the
+  repository was a shape it could not see: another matcher narrower than the
+  thing it guards.
+- Checking this needs a real browser. `curl` gets `200` and a
+  `<title>Client Challenge</title>` bot-interstitial from PyPI for a URL that
+  a browser resolves to a 404 page, so a status-code probe reports the broken
+  links as healthy.
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than
