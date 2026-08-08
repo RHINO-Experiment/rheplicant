@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-08-08)
+
+288 commits since 0.1.4. The minor bump is earned by five removals rather than
+by that count. `pip install rheplicant` also resolves without a preparatory
+step for the first time: limTOD 1.10.0 reached PyPI, so the sky engines are an
+ordinary dependency again rather than a floor the index could not satisfy.
+
+Breaking, each argued in its own section below:
+
+- **`BeamOperator` is gone.** The beam is applied while the projector produces
+  `observed_astro_sky`; the operator placed downstream of one double-counted
+  it.
+- **The CST beam reader moved to limTOD** (`limTOD.cstbeam`), which already
+  read measured horns for pyuvdata.
+- **`prior_template` / `set_prior` are gone.** `to_numpyro_model` and
+  `predict_from_samples` take a `ParameterSpace` where they took a positional
+  prior pytree.
+- **`MModeProjector` and `LimTODProjector` are gone.** Three sky engines
+  remain, no placeholders.
+- **`NativeLimTODProjector` -> `GeneralPointingProjector`**, module
+  `radio.sky.native` -> `radio.sky.general_pointing`, with no compatibility
+  alias -- a stale import fails at import time.
 
 ### `BeamOperator` is gone: the beam belongs to the projector
 

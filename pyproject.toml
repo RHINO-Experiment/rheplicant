@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rheplicant"
-version = "0.1.4"
+version = "0.2.0"
 description = "RHEPLICANT — a differentiable replica of a radio antenna (RHino + REPLICa + ANTenna): a JAX + Equinox scientific pipeline framework for single-antenna radio telescopes"
 readme = "README.md"
 license = { file = "LICENSE" }
