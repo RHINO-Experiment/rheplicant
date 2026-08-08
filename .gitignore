@@ -53,3 +53,6 @@ repro-todsim/
 docs/_engine-figure-data.npz
 docs/_inference-figure-data.npz
 docs/_receiver-figure-data.npz
+
+# Visual brainstorming companion (local mockups)
+.superpowers/
