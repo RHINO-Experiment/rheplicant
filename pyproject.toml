@@ -93,7 +93,7 @@ docs = [
 Homepage = "https://github.com/RHINO-Experiment/rheplicant"
 Documentation = "https://rheplicant.readthedocs.io"
 Repository = "https://github.com/RHINO-Experiment/rheplicant"
-Changelog = "https://github.com/RHINO-Experiment/rheplicant/blob/main/CHANGELOG.md"
+Changelog = "https://rheplicant.readthedocs.io/en/latest/changelog.html"
 
 [dependency-groups]
 dev = [

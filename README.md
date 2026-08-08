@@ -174,13 +174,14 @@ Build it locally with
 `cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
 Design decisions D1–D32 and the physics roadmap are in
-[`DESIGN.md`](DESIGN.md); what arrived when is in
-[`CHANGELOG.md`](CHANGELOG.md).
+[`DESIGN.md`](https://rheplicant.readthedocs.io/en/latest/design.html); what
+arrived when is in
+[`CHANGELOG.md`](https://rheplicant.readthedocs.io/en/latest/changelog.html).
 
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2767 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2768 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 28 concrete `rheplicant.radio` operator classes — pending ports from limTOD

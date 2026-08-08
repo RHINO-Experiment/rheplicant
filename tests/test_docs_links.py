@@ -18,6 +18,15 @@ generated the whole page, which is exactly where the dead anchor was hiding.
 **The D range.** ``README.md`` advertised "Design decisions D1–D28" while
 ``DESIGN.md`` had reached D31 — the same failure ``test_readme_counts.py`` was
 written to close for the test count, in a second place with no guard.
+
+**Off-repo rendering.** ``README.md`` is also the PyPI long description, and
+there it is rendered alone, with no repository around it. ``](DESIGN.md)`` and
+``](CHANGELOG.md)`` therefore resolved against the project page and 404'd on
+the 0.2.0 release — correct on GitHub, dead everywhere else, which is why
+reading the file could not reveal it. PyPI freezes the
+description at upload, so the fix could only ship in the next release. In-page
+``#anchor`` links are fine and are not flagged: readme_renderer rewrites them
+to ``#user-content-`` and inserts the targets (verified on the live page).
 """
 
 import re
@@ -152,6 +161,38 @@ def test_readme_d_range_matches_design() -> None:
         f"README.md says the decisions run to D{quoted.group(1)}, but DESIGN.md's last "
         f"is D{last}. Update the README rather than loosening this: the count drifted "
         "by three before anything checked it."
+    )
+
+
+#: Any markdown link target: ``](target)``. Filtered down to relative ones below.
+_ANY_LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+#: An HTML ``src=``/``href=`` attribute, for the banner ``<img>`` at the top.
+_HTML_ATTR = re.compile(r"(?:src|href)=[\"']([^\"']+)[\"']")
+
+
+def test_readme_links_survive_being_rendered_off_repo() -> None:
+    """``README.md`` may not link to a repository path relatively.
+
+    It is the PyPI long description as well as the repository front page, and
+    PyPI renders it with no repository around it: ``](DESIGN.md)`` became
+    ``pypi.org/project/rheplicant/DESIGN.md``, a 404 that shipped on the 0.2.0
+    page. Absolute URLs are the only form that works in both places.
+
+    ``#anchor`` links are exempt -- readme_renderer rewrites them and inserts
+    the targets, so they resolve on PyPI too.
+    """
+    readme = (ROOT / "README.md").read_text()
+    targets = _ANY_LINK.findall(readme) + _HTML_ATTR.findall(readme)
+
+    relative = sorted(
+        {t for t in targets if not t.startswith(("http://", "https://", "#", "mailto:"))}
+    )
+    assert not relative, (
+        f"README.md links to {relative} relatively. The README is also the PyPI "
+        "long description, where there is no repository to resolve against and "
+        "these 404. Use the Read the Docs URL (every other link in the README "
+        "already does) or an absolute GitHub URL."
     )
 
 
