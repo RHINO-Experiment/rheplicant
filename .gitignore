@@ -32,6 +32,9 @@ signal_path.html
 .pytest_cache/
 .ruff_cache/
 .coverage
+# pytest-xdist writes one data file per worker beside .coverage; the
+# parallel run documented in docs/install.md leaves eight of them.
+.coverage.*
 htmlcov/
 .mypy_cache/
 
