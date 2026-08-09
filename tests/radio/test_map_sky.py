@@ -88,3 +88,13 @@ def test_survives_jit(grid, maps):
     sky = MapSky(maps=maps, freq=grid)
     out = eqx.filter_jit(lambda s, f: s(f))(sky, grid)
     assert jnp.array_equal(out, maps)
+
+
+def test_both_real_sky_engines_are_importable_from_rheplicant_radio():
+    """docs/sky-engines.md presents two real engines; both must be reachable
+    from the package's advertised entry point, not one from a submodule."""
+    import rheplicant.radio as radio
+
+    for name in ("DriftScanProjector", "GeneralPointingProjector", "MatrixProjector"):
+        assert name in radio.__all__, f"{name} missing from rheplicant.radio.__all__"
+        assert hasattr(radio, name)
