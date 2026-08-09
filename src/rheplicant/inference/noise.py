@@ -94,8 +94,8 @@ class NoiseModel(Protocol):
     def realise(self, prediction: jax.Array, *, key: jax.Array) -> jax.Array:
         """Draw one noisy observation of ``prediction`` under this model.
 
-        The generator to :meth:`std`'s assumption. A caller that draws with
-        this and weights with :meth:`std` cannot have the two disagree, which
+        The generator to ``std``'s assumption. A caller that draws with this
+        and weights with ``std`` cannot have the two disagree, which
         is the failure mode of every hand-written ``data + sigma * normal``
         line beside a likelihood carrying its own sigma.
         """
