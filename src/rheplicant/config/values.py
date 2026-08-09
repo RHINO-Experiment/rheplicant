@@ -216,3 +216,4 @@ def register_form(name: str) -> Callable[[Any], Any]:
 # place a circular import is deliberate and safe, because `arrays` imports only
 # names already defined above it.
 from rheplicant.config import arrays as _arrays  # noqa: E402,F401  (registers form 2)
+from rheplicant.config import draws as _draws  # noqa: E402,F401  (registers form 3)
