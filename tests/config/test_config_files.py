@@ -320,6 +320,81 @@ class TestTheHash:
             resolve_value({"file": {"path": "gain.npy", "format": "npy", "sha256": near}}, context)
 
 
+class TestWhenAReaderFails:
+    def test_a_serialised_object_array_is_refused(self, workspace, context):
+        """The guard between an untrusted .npy and arbitrary code execution at
+        config-load time. An object-dtype .npy is a serialised Python object
+        graph, and reconstructing one runs whatever code it names; numpy
+        declines to do that by default, and files.py passes no argument to
+        change it. This test is what makes that a decision rather than an
+        accident -- the obvious "fix" for a contributor who legitimately wants
+        such a file loaded is to pass the argument that turns it on, and
+        nothing else in the package would push back. Asserting on the refusal's
+        own wording rather than merely on ConfigError is the point: were the
+        default ever to flip, np.load would succeed and the failure would move
+        to jnp.asarray, which raises too -- so a bare `raises(ConfigError)`
+        would stay green while the guarantee was gone."""
+        np.save(workspace / "objects.npy", np.array([{"a": 1}], dtype=object))
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "objects.npy", "format": "npy"}}, context)
+        assert "Object arrays cannot be loaded" in str(excinfo.value)
+
+    def test_a_malformed_file_is_refused_with_the_documents_own_context(self, workspace, context):
+        """Catches the reader's exception escaping unwrapped. np.loadtxt raises
+        a bare ValueError naming a line number and nothing else -- not the
+        resolved path this layer chose out of several candidates, not the
+        format that was declared, not what to check."""
+        (workspace / "ragged.txt").write_text("1.0 2.0\n3.0\n")
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "ragged.txt", "format": "txt"}}, context)
+        message = str(excinfo.value)
+        assert str(workspace / "ragged.txt") in message
+        assert "txt" in message
+        assert "ValueError" in message  # the library's own type, named not hidden
+        assert "skiprows" in message  # and what to check
+
+    def test_a_malformed_csv_is_refused_the_same_way(self, workspace, context):
+        """genfromtxt is a different numpy entry point from loadtxt and fails
+        differently; the wrapper is shared, so this catches it being applied to
+        only one of the two readers."""
+        (workspace / "ragged.csv").write_text("az_deg,el_deg\n0.0,90.0,7.0\nx,y\n")
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {"file": {"path": "ragged.csv", "format": "csv", "columns": ["el_deg"]}}, context
+            )
+        assert "delimiter" in str(excinfo.value)
+
+    def test_a_column_index_past_the_end_is_refused(self, context):
+        """IndexError, not ValueError -- the enumerate-the-types version of this
+        guard catches loadtxt's failure and lets the indexing failure past."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "grid.txt", "format": "txt", "column": 9}}, context)
+        assert "IndexError" in str(excinfo.value)
+
+    def test_the_librarys_exception_is_chained(self, workspace, context):
+        """Catches `raise ConfigError(...)` written without `from exc`. Without
+        the chain the traceback stops at this layer and the library's own frame
+        -- the only thing that says where in the file parsing failed -- is
+        gone. __context__ is set implicitly inside an except block, so only
+        __cause__ tells a chained raise from an unchained one."""
+        (workspace / "ragged.txt").write_text("1.0 2.0\n3.0\n")
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "ragged.txt", "format": "txt"}}, context)
+        assert excinfo.value.__cause__ is not None
+        assert not isinstance(excinfo.value.__cause__, ConfigError)
+
+    def test_a_readers_own_refusal_is_not_rewrapped(self, context):
+        """Catches the `except ConfigError: raise` clause dropped. ConfigError
+        subclasses ValueError, so a broad catch swallows this layer's own
+        refusals and buries a message that named the archive's keys under
+        advice about delimiters and header rows. The message check cannot see
+        it -- the original text is quoted inside the wrapper -- but a
+        re-wrapped refusal carries a __cause__ and a deliberate one does not."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "bundle.npz", "format": "npz"}}, context)
+        assert excinfo.value.__cause__ is None
+
+
 class TestTheRegistry:
     def test_an_unknown_format_is_refused_and_the_registered_ones_are_listed(self, context):
         with pytest.raises(ConfigError) as excinfo:

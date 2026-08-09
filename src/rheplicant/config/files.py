@@ -11,6 +11,32 @@ Every file reference is hashed. The cost is one read of a file that is about
 to be read anyway, and it is what lets ``config.resolved.yaml`` state which
 bytes a run saw -- so a rerun that disagrees is detectable rather than merely
 suspected.
+
+**What a document is trusted to do.** This is the one place the value grammar
+reaches outside itself, so the assumption is worth writing down rather than
+leaving to be inferred from what the code does not check. Path resolution
+applies no containment: ``~`` and ``${ENV}`` expand, an absolute path is taken
+as written, and a relative one may climb out of the document's directory with
+``..``. That is deliberate, and every alternative breaks a spelling the
+package is actually used with -- ``~/data/beams/...`` on a workstation,
+``${SCRATCH}/...`` on a cluster, ``../data/...`` in a repository whose configs
+and data are siblings. The assumption underneath is that whoever wrote the
+document is whoever is running the pipeline, in which case the document can
+already do nothing its author could not do at a shell.
+
+That assumption stops holding the moment a document arrives from somewhere
+else: a shared root, a CI artefact, a collaborator's YAML. Then a ``file:``
+entry naming ``~/.ssh/id_ed25519`` is read by this process, and what lands in
+``config.resolved.yaml`` is its ``_path`` and its ``_sha256``. The digest is
+the part that turns a read into a disclosure -- it confirms a guess about a
+file's contents to anyone holding the artefact, and the artefact exists to be
+shared. At that point an opt-in "every resolved path must be under
+``base_dir`` or a declared root" belongs in :func:`resolve_file_path`,
+recorded alongside the roots it was checked against. It is not written yet
+because on by default it would refuse all three spellings above, and the
+threat it answers is not the one this layer was designed under. The decision
+is recorded here, next to the function it would change, rather than in an
+issue nobody reading this file would find.
 """
 
 import hashlib
@@ -80,6 +106,17 @@ def resolve_file_path(
     )
 
 
+# Neither np.load below passes ``allow_pickle``, deliberately. numpy's default
+# has been False since 1.16.3 for exactly this reason: an object-dtype .npy is
+# a serialised Python object graph, and reconstructing one runs whatever code
+# it names -- so with that default flipped, reading a config document that
+# references an untrusted .npy is executing that file, at config-load time,
+# before a single operator is built. Spelling the argument out even as False
+# would not strengthen the guarantee; it would advertise the one-character
+# edit, which is what the next person to hit "Object arrays cannot be loaded
+# when allow_pickle=False" will reach for. The refusal is pinned by a test
+# instead -- TestWhenAReaderFails.test_a_serialised_object_array_is_refused --
+# so it cannot be relaxed without deleting an assertion that says why not.
 @register_reader("npy")
 def _read_npy(path: pathlib.Path, spec: dict):
     return np.load(path)
@@ -129,6 +166,48 @@ def _read_csv(path: pathlib.Path, spec: dict):
     if len(columns) == 1:
         return data[columns[0]]
     return np.stack([data[name] for name in columns], axis=-1)
+
+
+def _read(reader, path: pathlib.Path, spec: dict, fmt: str):
+    """Call one reader, and let nothing out of it without the document's context.
+
+    One wrapper here rather than a ``try`` inside each reader, for the reason
+    :func:`rheplicant.config.values.resolve_value` gives for its single
+    modifier exit: a reader added in a later task cannot opt out of this by
+    forgetting to write it, and Plan 1B adds four. ``jnp.asarray`` is inside
+    the guard too -- an object array that numpy declined to reject would fail
+    there instead, and a bare ``TypeError`` from jax is no more use to a reader
+    of the document than a bare ``ValueError`` from numpy.
+
+    The catch is ``Exception`` and not a list of the types numpy documents,
+    because that list is not part of numpy's contract and does not survive
+    contact with a malformed file: one bad ``.npz`` gives ``BadZipFile``, a
+    truncated one ``EOFError``, a ragged ``.txt`` ``ValueError``, an
+    out-of-range ``column:`` ``IndexError``. Enumerating them is how a guard
+    ends up matching one shape of a failure and reading every other shape as
+    success. The exception's own type is named in the message, so a defect in
+    a reader is still reported as one rather than disguised as a bad file.
+    """
+    try:
+        return jnp.asarray(reader(path, spec))
+    except ConfigError:
+        # A reader's own refusal already names the document, the key and the
+        # remedy. Re-wrapping it would bury that under advice about delimiters.
+        raise
+    except Exception as exc:
+        raise ConfigError(
+            f"{path} could not be read as format {fmt!r}. The reader raised "
+            f"{type(exc).__name__}: {exc}. That message is the library's: it knows the "
+            "file, and nothing about the document, the value node, or the keys that "
+            "decided how the file would be parsed -- and one document may reference "
+            "dozens of files. Three things usually differ from what was declared: the "
+            "delimiter (csv assumes ',' unless the entry says otherwise), skiprows (a "
+            "header row nothing was told to skip is parsed as data and fails on its "
+            "first non-numeric field), and the format itself (a csv read as txt, or an "
+            "npy from a producer that writes something else). Check those against the "
+            "file's first few lines rather than against its extension, which this "
+            "layer does not consult."
+        ) from exc
 
 
 def _refuse_healpix(spec: dict) -> None:
@@ -191,7 +270,7 @@ def _file(node, context, modifiers):
             "recorded is not the run the artefact describes."
         )
 
-    array = jnp.asarray(reader(path, spec))
+    array = _read(reader, path, spec, fmt)
     unit_token = modifiers.get("unit")
     carried = {**modifiers, "_sha256": digest, "_path": str(path)}
     if unit_token is None:
