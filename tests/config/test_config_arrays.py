@@ -243,6 +243,19 @@ class TestEachFormsKeysAreExactlyItsOwn:
             resolve_value({"zeros": 8, "unit": "K"}, context)
         assert "shape" in str(excinfo.value)
 
+    def test_the_scalar_advice_is_this_modules_and_not_the_shared_helpers(self, context):
+        """The shape check and the check A41 report now live in
+        symbols.resolve_shape, shared with the draw forms. Everything about
+        that pass is common to both callers except this clause: a scalar zeros
+        is {value: 0.0} and a scalar normal is an empty shape. Pinned so a
+        later collapse into one shared string fails here instead of telling a
+        zeros writer to write a draw."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"zeros": 8, "unit": "K"}, context)
+        message = str(excinfo.value)
+        assert "{value: 0.0}" in message
+        assert "shape: []" not in message
+
     def test_modulo_refuses_a_period_of_zero(self, context):
         """Measured: jnp.arange(8) % 0 does not raise, it returns
         [0 0 0 0 0 0 0 0]. So without this guard a period that came out of a

@@ -13,24 +13,26 @@ import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.symbols import literal_shadowing_a_symbol, resolve_extent
+from rheplicant.config.symbols import resolve_extent, resolve_shape
 from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
 
 
 def _shape(spec: Any, context: ResolutionContext, form: str) -> tuple[tuple[int, ...], dict]:
-    if not isinstance(spec, (list, tuple)):
-        raise ConfigError(
-            f"{form}: expects a shape -- a list of integers or shape symbols -- and "
-            f"got {spec!r}. A scalar zero is written {{value: 0.0}}."
-        )
-    scope = context.shape_scope
-    shadowed = {
-        index: symbol
-        for index, entry in enumerate(spec)
-        if (symbol := literal_shadowing_a_symbol(entry, scope)) is not None
-    }
-    return tuple(resolve_extent(entry, scope) for entry in spec), shadowed
+    """This form's shape, resolved and reported by the shared helper.
+
+    The pairing of "resolve the extents" with "report the literals that shadow
+    a symbol" is :func:`rheplicant.config.symbols.resolve_shape`, not this
+    function, so the draw forms get check A41 from the same code rather than
+    from a copy of it. What is left here is the one clause that is this
+    module's to say: what to write when a scalar was meant.
+    """
+    return resolve_shape(
+        spec,
+        context.shape_scope,
+        form=form,
+        instead="A scalar zero is written {value: 0.0}.",
+    )
 
 
 def _finish(array, modifiers: dict, form: str, shadowed: dict) -> ResolvedValue:

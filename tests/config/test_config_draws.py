@@ -103,6 +103,66 @@ class TestTheDraw:
         assert got.value.shape == (8,)
 
 
+class TestAHardCodedExtentIsReported:
+    """Check A41 does not depend on which constructor was reached for.
+
+    ``{zeros: [8]}`` reports the shadow and ``{normal: {shape: [8]}}`` did not,
+    because ``arrays`` paired the extent resolution with the report and
+    ``draws`` built its shape with a bare generator. A draw's ``shape:`` is a
+    shape position like any other -- the hand-copied grid length A41 exists to
+    name is the same mistake in both.
+    """
+
+    def test_a_literal_matching_n_freq_is_reported_not_refused(self, context):
+        got = resolve_value(
+            {"normal": {"shape": [8], "seed": {"from": "runtime.seeds.sky_structure"}}}, context
+        )
+        assert got.value.shape == (8,)
+        assert got.modifiers.get("_shadowed") == {0: "n_freq"}
+
+    def test_the_report_names_the_position_the_literal_sits_in(self, context):
+        """Catches a report whose indices do not match the shape as written --
+        enumerating a reversed or sorted copy, say. Every other shadow test in
+        this package uses a one-position shape, where no ordering bug is
+        visible. A41's whole content is 'the literal at position i is your
+        grid length'; with the indices transposed it names the wrong axis, and
+        the reader edits the position that was correct."""
+        got = resolve_value(
+            {"normal": {"shape": [64, 8], "seed": {"from": "runtime.seeds.sky_structure"}}},
+            context,
+        )
+        assert got.value.shape == (64, 8)
+        assert got.modifiers["_shadowed"] == {0: "n_time", 1: "n_freq"}
+
+    def test_a_symbol_is_not_reported_as_shadowing_itself(self, context):
+        """Catches a report that fires on every shape position rather than on
+        literal integers only -- under which A41 names every well-written
+        document and is read as noise by the second week."""
+        got = resolve_value(
+            {"normal": {"shape": ["n_freq"], "seed": {"from": "runtime.seeds.sky_structure"}}},
+            context,
+        )
+        assert got.modifiers.get("_shadowed") == {}
+
+    def test_a_scalar_where_a_shape_belongs_is_refused(self, context):
+        """{normal: {shape: 8}} rather than {shape: [8]}, the same slip
+        arrays already refuses. Without the check ``for entry in 8`` raises
+        TypeError -- a traceback naming neither the document nor the key."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {"normal": {"shape": 8, "seed": {"from": "runtime.seeds.sky_structure"}}}, context
+            )
+        message = str(excinfo.value)
+        assert "shape" in message
+        # The advice is this form's to give, and it is the one seam the shared
+        # helper opens: a scalar draw is an empty shape, and {value: 0.0} --
+        # which is the right answer for {zeros: 8} -- is a constant here, not
+        # a draw. Pinned on both sides so a later collapse into one shared
+        # string is a failing test rather than wrong advice in a live refusal.
+        assert "shape: []" in message
+        assert "{value: 0.0}" not in message
+
+
 class TestTheSeedIsNamedNotWritten:
     def test_a_literal_seed_is_refused(self, context):
         """schema 2.1.4: seed: must NAME an entry of runtime.seeds, so every

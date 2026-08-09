@@ -25,7 +25,7 @@ import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.symbols import resolve_extent
+from rheplicant.config.symbols import resolve_shape
 from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
 
@@ -139,7 +139,12 @@ def _draw(form: str, node: dict, context: ResolutionContext, modifiers: dict) ->
     if "shape" not in spec:
         raise ConfigError(f"{form}: 'shape' is required.")
     key = _key(_seed_name(spec, form), context)
-    shape = tuple(resolve_extent(entry, context.shape_scope) for entry in spec["shape"])
+    shape, shadowed = resolve_shape(
+        spec["shape"],
+        context.shape_scope,
+        form=form,
+        instead="A scalar draw is written with an empty shape, shape: [].",
+    )
     if form == "normal":
         loc = _resolve_operand(spec.get("loc"), context, 0.0)
         scale = _resolve_operand(spec.get("scale"), context, 1.0)
@@ -148,11 +153,16 @@ def _draw(form: str, node: dict, context: ResolutionContext, modifiers: dict) ->
         low = _resolve_operand(spec.get("low"), context, 0.0)
         high = _resolve_operand(spec.get("high"), context, 1.0)
         array = jax.random.uniform(key, shape, dtype=context.dtype, minval=low, maxval=high)
+    # Rebuilt rather than mutated, and on both branches: check A41's report
+    # rides in the modifier dict (apply_modifiers passes over keys it does not
+    # know precisely so a form can record its own findings there), and a draw's
+    # shape: is a shape position like any other.
+    recorded = {**modifiers, "_shadowed": shadowed}
     unit_token = modifiers.get("unit")
     if unit_token is None:
-        return ResolvedValue(array, None, form, modifiers)
+        return ResolvedValue(array, None, form, recorded)
     converted, unit = convert_to_canonical(jnp.asarray(array), unit_token)
-    return ResolvedValue(converted, unit, form, modifiers)
+    return ResolvedValue(converted, unit, form, recorded)
 
 
 @register_form("normal")

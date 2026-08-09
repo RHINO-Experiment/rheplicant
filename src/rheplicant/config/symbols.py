@@ -175,3 +175,55 @@ def literal_shadowing_a_symbol(value, scope: ShapeScope) -> str | None:
         if value == _extent(symbol, scope) and value > 1:
             return symbol
     return None
+
+
+def resolve_shape(
+    spec, scope: ShapeScope, *, form: str, instead: str
+) -> tuple[tuple[int, ...], dict[int, str]]:
+    """Resolve a whole shape, and report the literals that shadow a symbol.
+
+    The resolution and the check A41 report are one function because they are
+    one pass over one list, and because splitting them let them diverge: the
+    array constructors paired them and the draw forms did not, so
+    ``{zeros: [8]}`` reported a hand-copied grid length and
+    ``{normal: {shape: [8]}}`` said nothing about the same 8. A report that
+    depends on which constructor the writer reached for is worse than no
+    report -- it is read as authoritative.
+
+    It lives here rather than in either caller because both halves consult
+    :data:`SHAPE_SYMBOLS` and the scope, which is this module's subject, and
+    because the alternative on offer was ``draws`` importing a private name
+    out of ``arrays``.
+
+    Args:
+        spec: the shape as written -- a list of integers and shape symbols.
+        scope: the extents in force at this position.
+        form: the form key, quoted in the refusal.
+        instead: what to write if this is a scalar rather than a shape. It is
+            the one clause that is genuinely the caller's to say and not this
+            module's -- a scalar zero is ``{value: 0.0}`` and a scalar draw is
+            an empty shape, and neither is deducible from the other. Required
+            and undefaulted, so a form added later states it rather than
+            inheriting whichever caller happened to be written first.
+
+    Returns:
+        ``(extents, shadowed)``. ``shadowed`` maps position -> the symbol a
+        literal integer there happens to equal, and is empty for a shape
+        written entirely in symbols.
+
+    Raises:
+        ConfigError: when ``spec`` is not a list, and from
+            :func:`resolve_extent` for anything in it that is not a shape
+            position.
+    """
+    if not isinstance(spec, (list, tuple)):
+        raise ConfigError(
+            f"{form}: expects a shape -- a list of integers or shape symbols -- and "
+            f"got {spec!r}. {instead}"
+        )
+    shadowed = {
+        index: symbol
+        for index, entry in enumerate(spec)
+        if (symbol := literal_shadowing_a_symbol(entry, scope)) is not None
+    }
+    return tuple(resolve_extent(entry, scope) for entry in spec), shadowed
