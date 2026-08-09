@@ -137,6 +137,58 @@ class TestPart:
             assert part in message, part
 
 
+class TestPartImOnAValueThatIsNotComplex:
+    """`jnp.imag` of a real array is exactly 0 everywhere -- right, and never
+    what a document meant. It is the only one of the four whose answer cannot
+    depend on the value, so it is the only one refused here.
+    """
+
+    def test_it_is_refused_rather_than_returning_a_column_of_zeros(self, context):
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"list": [1.0, 2.0], "unit": "dimensionless", "part": "im"}, context)
+        assert "float32" in str(excinfo.value)  # the dtype it actually found
+
+    def test_the_message_says_why_nothing_downstream_could_have_caught_it(self, context):
+        """A zero `gamma_src_im` is a well-formed noise-wave model that has no
+        sine component, and no check below here separates "no sine component"
+        from "the sine component was deleted when the config was read"."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"value": 1.0, "part": "im"}, context)
+        message = str(excinfo.value)
+        assert "gamma_src_im" in message  # the field it would silently empty
+        assert "extends:" in message  # cause two: the wrong resource
+        assert "{value: 0.0}" in message  # how to SAY the imaginary part is zero
+
+    @pytest.mark.parametrize(
+        ("part", "expected"),
+        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [math.pi, 0.0])],
+    )
+    def test_the_other_three_parts_stay_legal_on_a_real_value(self, part, expected, context):
+        """The point of the refusal is that it is narrow. `re` is a no-op an
+        extends: merge can legitimately produce, `abs` is the absolute value
+        and `angle` is 0 or pi -- all three answer something the value decides.
+        Without this, widening the guard to "part: on a real value" later would
+        pass every test that only checks the refusal."""
+        got = resolve_value({"list": [-3.0, 4.0], "unit": "dimensionless", "part": part}, context)
+        assert [float(v) for v in got.value] == pytest.approx(expected)
+
+    def test_im_on_a_genuinely_complex_value_is_untouched(self, context):
+        """The complement of the refusal: the case it exists to protect."""
+        got = resolve_value({"value": 1.0 + 2.0j, "part": "im"}, context)
+        assert float(got.value) == pytest.approx(2.0)
+
+    def test_an_integer_value_is_refused_too_and_not_only_a_float_one(self, context):
+        """`modulo` is integer, and `jnp.issubdtype(int32, complexfloating)` is
+        False just as it is for float32 -- but a guard written as
+        `dtype == float32` or `not jnp.isrealobj(...)` would treat the two
+        differently for no reason the document could see."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {"modulo": {"num": "n_time", "period": 7}, "unit": "count", "part": "im"}, context
+            )
+        assert "int32" in str(excinfo.value)
+
+
 class TestColumn:
     def test_it_turns_n_into_n_by_one(self, context):
         """CalLoadOperator.t_load reads (n, 1) as per-sample and (n,) as

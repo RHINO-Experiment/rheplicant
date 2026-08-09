@@ -123,6 +123,26 @@ def _cast(value: Any, dtype: str, form: str):
 
 def _part(value: Any, part: str):
     array = jnp.asarray(value)
+    if part == "im" and not jnp.issubdtype(array.dtype, jnp.complexfloating):
+        raise ConfigError(
+            f"part: im on a value that is not complex ({array.dtype}). jnp.imag of a "
+            "real array is exactly 0 for every element -- mathematically right, and "
+            "never the thing a document was trying to say. part: is here for "
+            "reflection coefficients (gamma_src, gamma_rec, the s_params resources) "
+            "and NoiseWaveOperator takes gamma_src_re and gamma_src_im as separate "
+            "fields, so a zero column here is a perfectly well-formed noise-wave model "
+            "that simply has no sine component -- and nothing downstream separates 'no "
+            "sine component' from 'the sine component was deleted when the config was "
+            "read'. Two things usually cause it: the value really is real, and the "
+            "part: key is a leftover; or the wrong thing was referenced -- a file: that "
+            "turned out real, an extends: that inherited the wrong sibling, an s_params "
+            "entry read on the wrong component. If the quantity is genuinely real and "
+            "its imaginary part is genuinely zero -- a purely resistive termination is "
+            "the honest case -- write {value: 0.0} and say so, which a reader can check "
+            "against the hardware; a zero that falls out of part: im cannot be "
+            f"distinguished from this bug. The parts defined on a real value are "
+            f"{[name for name in PARTS if name != 'im']}."
+        )
     return {"re": jnp.real, "im": jnp.imag, "abs": jnp.abs, "angle": jnp.angle}[part](array)
 
 

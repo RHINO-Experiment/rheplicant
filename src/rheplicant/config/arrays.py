@@ -33,7 +33,7 @@ def _shape(spec: Any, context: ResolutionContext, form: str) -> tuple[tuple[int,
     return tuple(resolve_extent(entry, scope) for entry in spec), shadowed
 
 
-def _finish(array, node: dict, modifiers: dict, form: str, shadowed: dict) -> ResolvedValue:
+def _finish(array, modifiers: dict, form: str, shadowed: dict) -> ResolvedValue:
     unit_token = modifiers.get("unit")
     if unit_token is None:
         return ResolvedValue(array, None, form, {**modifiers, "_shadowed": shadowed})
@@ -44,13 +44,13 @@ def _finish(array, node: dict, modifiers: dict, form: str, shadowed: dict) -> Re
 @register_form("zeros")
 def _zeros(node, context, modifiers):
     shape, shadowed = _shape(node["zeros"], context, "zeros")
-    return _finish(jnp.zeros(shape, dtype=context.dtype), node, modifiers, "zeros", shadowed)
+    return _finish(jnp.zeros(shape, dtype=context.dtype), modifiers, "zeros", shadowed)
 
 
 @register_form("ones")
 def _ones(node, context, modifiers):
     shape, shadowed = _shape(node["ones"], context, "ones")
-    return _finish(jnp.ones(shape, dtype=context.dtype), node, modifiers, "ones", shadowed)
+    return _finish(jnp.ones(shape, dtype=context.dtype), modifiers, "ones", shadowed)
 
 
 @register_form("full")
@@ -59,13 +59,13 @@ def _full(node, context, modifiers):
     _require_keys(spec, {"shape", "value"}, "full")
     shape, shadowed = _shape(spec["shape"], context, "full")
     return _finish(
-        jnp.full(shape, spec["value"], dtype=context.dtype), node, modifiers, "full", shadowed
+        jnp.full(shape, spec["value"], dtype=context.dtype), modifiers, "full", shadowed
     )
 
 
 @register_form("list")
 def _list(node, context, modifiers):
-    return _finish(jnp.asarray(node["list"], dtype=context.dtype), node, modifiers, "list", {})
+    return _finish(jnp.asarray(node["list"], dtype=context.dtype), modifiers, "list", {})
 
 
 @register_form("linspace")
@@ -95,7 +95,7 @@ def _linspace(node, context, modifiers):
         endpoint=bool(spec["endpoint"]),
         dtype=context.dtype,
     )
-    return _finish(array, node, modifiers, "linspace", {})
+    return _finish(array, modifiers, "linspace", {})
 
 
 @register_form("arange")
@@ -105,7 +105,7 @@ def _arange(node, context, modifiers):
     num = resolve_extent(spec["num"], context.shape_scope)
     start, step = float(spec["start"]), float(spec["step"])
     array = start + step * jnp.arange(num, dtype=context.dtype)
-    return _finish(array, node, modifiers, "arange", {})
+    return _finish(array, modifiers, "arange", {})
 
 
 @register_form("modulo")
@@ -116,7 +116,7 @@ def _modulo(node, context, modifiers):
     period = resolve_extent(spec["period"], context.shape_scope)
     if period < 1:
         raise ConfigError(f"modulo: period must be >= 1, got {period}.")
-    return _finish(jnp.arange(num) % period, node, modifiers, "modulo", {})
+    return _finish(jnp.arange(num) % period, modifiers, "modulo", {})
 
 
 @register_form("from_grid")
@@ -136,7 +136,7 @@ def _from_grid(node, context, modifiers):
             "this is reachable only when a value node is resolved before the "
             "observation is."
         )
-    return _finish(grid, node, modifiers, "from_grid", {})
+    return _finish(grid, modifiers, "from_grid", {})
 
 
 def _require_keys(spec: Any, required: set[str], form: str) -> None:
