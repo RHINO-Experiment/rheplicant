@@ -1,0 +1,295 @@
+"""Delivery: the destination field decides how a resolved value arrives.
+
+A config value is a number in a document. Whether it reaches an operator as a
+Python ``int`` or as a traced ``jnp`` array is not the document's choice and
+not this layer's -- it is written on the target class, in the ``dataclasses``
+field metadata equinox populates. So delivery reads the class first.
+
+Three measurements are the whole argument for this module.
+
+1. ``ADCOperator(n_bits=jnp.asarray(12))`` warns ``A JAX array is being set as
+   static!`` and then raises. ``ForegroundOperator(ref_freq=jnp.asarray(1.4e8))``
+   only warns: it *constructs*, the forward numbers are bit-identical, and
+   ``eqx.filter_grad`` then returns ``1.4e+08`` where a gradient belongs.
+   ``FlaggingOperator.threshold`` has no ``__check_init__`` at all and takes a
+   whole array, detonating later at an unrelated pytree comparison.
+2. ``AntennaLossOperator(efficiency=1)`` stores ``int32``. An integer array is
+   not an *inexact* array, so ``eqx.partition(op, eqx.is_inexact_array)``
+   returns ``[]`` and the field is silently untrainable. A YAML ``1`` and a
+   YAML ``1.0`` must not differ in what can be inferred.
+3. A YAML sequence is a Python ``list``. On a static ``tuple`` field it
+   constructs fine and makes the module unhashable.
+
+The model is ``CWCalibrationOperator``'s converters
+(``radio/instrument/calibration.py:242-255``): coerce to a clean static scalar
+*before* equinox's static check runs, and refuse with a message rather than a
+warning. This module does the same thing one step earlier.
+"""
+
+import dataclasses
+import numbers
+import typing
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple
+
+import jax.numpy as jnp
+
+from rheplicant.config.errors import ConfigError
+from rheplicant.core.frozen import FrozenMapping
+
+#: The values ``as:`` may take, and what each claims about the destination.
+DELIVERY_MODES: tuple[str, ...] = (
+    "traced",
+    "static_int",
+    "static_float",
+    "static_str",
+    "static_bool",
+    "static_tuple",
+    "static_mapping",
+)
+
+#: Forms that produce an array. None of them can land on a static field.
+ARRAY_FORMS: frozenset[str] = frozenset(
+    {
+        "zeros",
+        "ones",
+        "full",
+        "list",
+        "linspace",
+        "arange",
+        "modulo",
+        "from_grid",
+        "basis_fit",
+        "normal",
+        "uniform",
+        "file",
+        "stack",
+    }
+)
+
+
+class FieldSpec(NamedTuple):
+    """What a destination field says about itself.
+
+    Attributes:
+        name: the Python field name -- also what a refusal quotes.
+        annotation: the resolved type object (``int``, ``float``, ``jax.Array``…).
+        static: ``True`` when equinox will put this field in the treedef.
+        converter: the field's own converter, or ``None``.
+        required: no default and no default_factory.
+    """
+
+    name: str
+    annotation: Any
+    static: bool
+    converter: Callable[[Any], Any] | None
+    required: bool
+
+
+def field_specs(cls: type) -> dict[str, FieldSpec]:
+    """Every ``init`` field of an ``eqx.Module`` subclass, by name.
+
+    ``typing.get_type_hints`` rather than ``f.type``: four modules in the
+    package use ``from __future__ import annotations``, and although none of
+    them currently defines an ``eqx.Module``, a string annotation would make
+    every branch below fall through to "traced" silently.
+    """
+    hints = typing.get_type_hints(cls)
+    return {
+        f.name: FieldSpec(
+            name=f.name,
+            annotation=hints.get(f.name, f.type),
+            static=f.metadata.get("static", False) is True,
+            converter=f.metadata.get("converter"),
+            required=(
+                f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
+            ),
+        )
+        for f in dataclasses.fields(cls)
+        if f.init
+    }
+
+
+def mode_of(spec: FieldSpec) -> str:
+    """The delivery mode a field's own declaration implies."""
+    if not spec.static:
+        return "traced"
+    annotation = spec.annotation
+    # Identity, not isinstance: bool subclasses int, so issubclass(bool, int)
+    # is True and an isinstance-style test would classify a bool field as an
+    # int one. Identity checks are mutually exclusive, so the order of the
+    # four below carries no meaning -- the ordering that does is in
+    # _as_static_int, where the guard is isinstance and bool must come first.
+    if annotation is bool:
+        return "static_bool"
+    if annotation is int:
+        return "static_int"
+    if annotation is float:
+        return "static_float"
+    if annotation is str:
+        return "static_str"
+    origin = typing.get_origin(annotation) or annotation
+    if origin is tuple:
+        return "static_tuple"
+    if isinstance(origin, type) and issubclass(origin, Mapping):
+        return "static_mapping"
+    return "static_other"
+
+
+def _refuse_array_form(spec: FieldSpec, source: str) -> None:
+    raise ConfigError(
+        f"Field {spec.name!r} is static -- equinox puts it in the treedef, where it "
+        f"is part of the jit cache key -- and a {source!r} form produces an array. "
+        "Measured, this fails in three different ways depending on the field: "
+        "ADCOperator(n_bits=Array(12)) warns 'A JAX array is being set as static!' "
+        "and then raises; ForegroundOperator(ref_freq=Array(...)) only warns, so it "
+        "constructs, the forward numbers are unchanged, and filter_grad hands back "
+        "the static value where a gradient belongs; FlaggingOperator.threshold has no "
+        "check at all and detonates later at an unrelated pytree comparison. Write a "
+        "single number here, or -- if the quantity really varies -- bind it to a "
+        "field that is traced."
+    )
+
+
+def deliver(
+    value: Any,
+    spec: FieldSpec,
+    *,
+    dtype: str,
+    source: str = "scalar",
+    declared_as: str | None = None,
+) -> Any:
+    """Coerce a resolved value into what ``spec``'s field will accept.
+
+    Args:
+        value: the resolved, canonical-unit value.
+        spec: the destination, from :func:`field_specs`.
+        dtype: the run's floating dtype, ``"float32"`` or ``"float64"``.
+        source: the value form's name, for check A40 and for the message.
+        declared_as: the document's own ``as:`` claim, cross-checked.
+
+    Raises:
+        ConfigError: on an array form landing on a static field (A40), on a
+            declared ``as:`` the field contradicts, and on any value the
+            destination's type cannot hold.
+    """
+    mode = mode_of(spec)
+    if declared_as is not None:
+        if declared_as not in DELIVERY_MODES:
+            raise ConfigError(
+                f"as={declared_as!r} is not a delivery mode; they are "
+                f"{list(DELIVERY_MODES)}. The mode is normally inferred from the "
+                "destination field's own metadata and only needs writing when you "
+                "want the expectation checked."
+            )
+        if declared_as != mode:
+            raise ConfigError(
+                f"This value declares as={declared_as!r}, but field {spec.name!r} is "
+                f"{mode!r} -- that is what its own eqx.field(...) metadata says, and "
+                "the metadata is what equinox acts on. One of the two is out of date. "
+                "Drop the as: key to take the field's word for it, or write the value "
+                "against the field you meant."
+            )
+    if mode != "traced" and source in ARRAY_FORMS:
+        _refuse_array_form(spec, source)
+
+    if mode == "traced":
+        return _as_traced(value, spec, dtype)
+    if mode == "static_bool":
+        return _as_static_bool(value, spec)
+    if mode == "static_int":
+        return _as_static_int(value, spec)
+    if mode == "static_float":
+        return _as_static_float(value, spec)
+    if mode == "static_str":
+        return _as_static_str(value, spec)
+    if mode == "static_tuple":
+        return _as_tuple(value)
+    if mode == "static_mapping":
+        return FrozenMapping(value)
+    # static_other: a Callable, a nested Module, a PyTreeDef. The value grammar
+    # cannot make one of those; only the python: hatch can, and it passes the
+    # object through untouched.
+    return value
+
+
+def _as_traced(value: Any, spec: FieldSpec, dtype: str):
+    array = jnp.asarray(value)
+    if jnp.issubdtype(array.dtype, jnp.complexfloating):
+        return array.astype("complex128" if dtype == "float64" else "complex64")
+    if jnp.issubdtype(array.dtype, jnp.bool_):
+        return array
+    # Everything else becomes floating. An integer array here is not an
+    # *inexact* array, so eqx.partition(op, eqx.is_inexact_array) drops it and
+    # the field is silently uninferrable -- measured on AntennaLossOperator.
+    return array.astype(dtype)
+
+
+def _reject_numpy(value: Any, spec: FieldSpec) -> None:
+    if type(value).__module__.startswith("numpy"):
+        raise ConfigError(
+            f"Field {spec.name!r} is static and the value is a numpy scalar "
+            f"({type(value).__name__}). numpy.generic is one of equinox's array "
+            "types, so it trips the 'A JAX array is being set as static!' warning, "
+            "and isinstance(np.int64(8), int) is False so the operator's own guard "
+            "refuses it too. Deliver a Python scalar."
+        )
+
+
+def _as_static_bool(value: Any, spec: FieldSpec) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static bool and the value is "
+            f"{type(value).__name__} ({value!r}). Write true or false."
+        )
+    return value
+
+
+def _as_static_int(value: Any, spec: FieldSpec) -> int:
+    if isinstance(value, bool):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static int and the value is the bool {value!r}. "
+            "Python's isinstance(True, int) is True, so this passes the operator's own "
+            f"guard and gives {spec.name} = {int(value)} -- a one-bit ADC, or a "
+            "single-sample period. Write the integer."
+        )
+    _reject_numpy(value, spec)
+    if not isinstance(value, int):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static int and the value is "
+            f"{type(value).__name__} ({value!r}). The operator's own guard refuses "
+            "this too, but only after it has been constructed -- which, on a beam "
+            "node, is after the CST directory has been read and analysed. Write an "
+            "integer."
+        )
+    return int(value)
+
+
+def _as_static_float(value: Any, spec: FieldSpec) -> float:
+    if isinstance(value, bool):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static float and the value is the bool "
+            f"{value!r}. Write {float(value)!r} if that is what was meant."
+        )
+    _reject_numpy(value, spec)
+    if not isinstance(value, numbers.Real):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static float and the value is "
+            f"{type(value).__name__} ({value!r})."
+        )
+    return float(value)
+
+
+def _as_static_str(value: Any, spec: FieldSpec) -> str:
+    if not isinstance(value, str):
+        raise ConfigError(
+            f"Field {spec.name!r} is a static str and the value is "
+            f"{type(value).__name__} ({value!r})."
+        )
+    return value
+
+
+def _as_tuple(value: Any):
+    if isinstance(value, (list, tuple)):
+        return tuple(_as_tuple(item) for item in value)
+    return value
