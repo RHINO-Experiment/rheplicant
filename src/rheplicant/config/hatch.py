@@ -17,6 +17,44 @@ jax-traceable. On a static field it is hashed by identity, so an equivalent
 re-created function misses the jit cache. With ``raw_bind``,
 ``ParameterSpace.validate``'s per-selector checks cannot run at all.
 
+**What a document is trusted to do.** :mod:`rheplicant.config.files` records
+the same assumption next to path resolution; this is the sharper half of it,
+so it belongs beside the function that acts on it rather than in one place for
+both. A document that reaches this form runs arbitrary named code in the
+process that loaded it, with that process's privileges -- there is no sandbox
+here and no allow-list of importable packages, and neither would be honest
+about what the form is for. **Importing alone is sufficient.** Measured:
+:func:`import_target` calls ``importlib.import_module``, which executes the
+named module's body whether or not anything is subsequently called, so
+``{python: "pkg.mod:anything"}`` runs ``pkg/mod.py`` even with no ``args:``
+key -- resolving a document is enough, and a loader that only *resolves* a
+document in order to report on it has already executed it. The assumption
+underneath is the one ``files`` states: whoever wrote the document is whoever
+is running the pipeline, in which case the document can do nothing its author
+could not do at a shell.
+
+That assumption stops holding the moment a document arrives from somewhere
+else -- a shared root, a CI artefact, a collaborator's YAML. Two consequences
+follow and are worth writing down. The top-level ``plugins:`` key this
+module's own refusals point at -- whose loader arrives with the document
+loader, in Plan 1B -- is not a declaration of intent but a list of module
+bodies to execute, because importing for the registration side effect is the
+whole mechanism by which a plugin registers; and those imports have to happen
+before any value node is resolved, since resolution is what needs the names.
+Reading the ``plugins:`` of an unfamiliar document is therefore reading code
+that will run first, unconditionally, whatever else the document says. And a
+published ``config.resolved.yaml`` records the target *string* --
+``_python: "pkg.mod:fn"`` -- which says which code ran and nothing whatever
+about what that code was, so the artefact is evidence of provenance and not of
+behaviour. Two runs whose resolved configs match byte for byte can have done
+different things if the named package changed between them; the file hash a
+``file:`` entry records has no counterpart here, because there is no single
+artefact to hash. The remedy, when a document is not your own, is to read its
+``plugins:`` and its ``python:`` targets before loading it, in a process that
+can afford what they do. This is recorded here rather than in an issue because
+it is a property of the form and not a defect in it: an escape hatch that
+could be made safe would not be an escape hatch.
+
 **Calling is spelled by the document, not inferred from the object.** Writing
 ``args:`` or ``literal:`` -- either of them, even empty -- calls the attribute;
 writing neither delivers the attribute itself. The alternative considered and

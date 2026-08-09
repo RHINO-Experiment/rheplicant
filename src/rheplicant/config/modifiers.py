@@ -19,17 +19,17 @@ import jax.numpy as jnp
 
 from rheplicant.config.errors import ConfigError
 
-#: `part:` -- which component of a complex value node.
+#: ``part:`` -- which component of a complex value node.
 PARTS: tuple[str, ...] = ("re", "im", "abs", "angle")
 
-#: `normalize:` -- a declaration of convention, never a computation the array
+#: ``normalize:`` -- a declaration of convention, never a computation the array
 #: could have implied.
 NORMALIZATIONS: tuple[str, ...] = ("none", "mean1", "pixel_sum", "max1")
 
-#: `dtype:` -- the four the run may ask for.
+#: ``dtype:`` -- the four the run may ask for.
 DTYPES: tuple[str, ...] = ("float32", "float64", "complex64", "complex128")
 
-#: `axis:` -- mandatory for a 1-D noise sigma; recorded here, checked by
+#: ``axis:`` -- mandatory for a 1-D noise sigma; recorded here, checked by
 #: inference/noise.py:264 check_noise_std_axis.
 NOISE_AXES: tuple[str, ...] = ("time", "freq", "none")
 

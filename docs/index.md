@@ -201,6 +201,7 @@ ingestion
 signal-path
 operators
 contracts
+config-values
 ```
 
 ```{toctree}

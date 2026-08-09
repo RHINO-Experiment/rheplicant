@@ -1,12 +1,15 @@
 # API reference
 
 Generated from the source docstrings. Layering rule: `rheplicant.core` is
-domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it.
+domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it; and
+`rheplicant.config` sits above all three, importing them and imported by none of
+them.
 
 For the prose behind these signatures: [the guided tour](tour.md) for the shape
 of a twin, [the operator catalog](operators.md) for what lives at each graph
-node, [inferring anything](inference.md) for the parameter-space machinery, and
-[contracts between stages](contracts.md) for the refusals.
+node, [inferring anything](inference.md) for the parameter-space machinery,
+[contracts between stages](contracts.md) for the refusals, and [values in a
+config document](config-values.md) for the grammar the config layer resolves.
 
 ## rheplicant.core
 
@@ -310,4 +313,63 @@ coefficients the noise-wave model consumes.
 
 .. automodule:: rheplicant.inference.archive
    :members:
+```
+
+## rheplicant.config
+
+The value grammar: what a fragment of a document may say, and how the resolved
+value reaches a field. [Values in a config document](config-values.md) is the
+prose; these are the signatures.
+
+```{eval-rst}
+.. automodule:: rheplicant.config.errors
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.registry
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.units
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.symbols
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.context
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.values
+   :members:
+   :show-inheritance:
+```
+
+```{eval-rst}
+.. automodule:: rheplicant.config.arrays
+   :members:
+
+.. automodule:: rheplicant.config.draws
+   :members:
+
+.. automodule:: rheplicant.config.files
+   :members:
+
+.. automodule:: rheplicant.config.derive
+   :members:
+
+.. automodule:: rheplicant.config.refs
+   :members:
+
+.. automodule:: rheplicant.config.hatch
+   :members:
+
+.. automodule:: rheplicant.config.modifiers
+   :members:
+
+.. automodule:: rheplicant.config.delivery
+   :members:
+   :show-inheritance:
 ```

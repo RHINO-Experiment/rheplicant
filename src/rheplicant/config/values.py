@@ -66,16 +66,19 @@ _SHORTHAND = re.compile(
 class ResolvedValue(NamedTuple):
     """What a value node resolved to, before any destination is considered.
 
-    Attributes:
-        value: the canonical-unit value -- a Python scalar, a ``jnp`` array, or
-            an arbitrary object for ``ref`` and ``python``.
-        unit: the parsed unit, or ``None`` for a bare number.
-        source: the form key that produced it. Check A40 reads this, and every
-            refusal quotes it.
-        modifiers: the modifier keys as written, for the caller that needs
-            ``axis:`` (which is recorded, never applied). No default: a
-            mutable default on a NamedTuple is shared between every instance,
-            and every construction site here has the dict to hand anyway.
+    A bullet list rather than an ``Attributes:`` section, for the reason given
+    on :class:`rheplicant.config.units.Unit`: napoleon's copy of a NamedTuple's
+    fields duplicates the one autodoc already emits.
+
+    * ``value`` -- the canonical-unit value: a Python scalar, a ``jnp`` array,
+      or an arbitrary object for ``ref`` and ``python``.
+    * ``unit`` -- the parsed unit, or ``None`` for a bare number.
+    * ``source`` -- the form key that produced it. Check A40 reads this, and
+      every refusal quotes it.
+    * ``modifiers`` -- the modifier keys as written, for the caller that needs
+      ``axis:`` (which is recorded, never applied). No default: a mutable
+      default on a NamedTuple is shared between every instance, and every
+      construction site here has the dict to hand anyway.
     """
 
     value: Any

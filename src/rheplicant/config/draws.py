@@ -47,8 +47,11 @@ def seed_for(name: str, context: ResolutionContext) -> int:
     """The reportable integer seed for ``name``, declared or derived.
 
     This is the number that lands in ``provenance.json``, and it is also the
-    number the draw is made from -- :func:`_key` is defined in terms of this
-    function rather than deriving a key of its own. See there.
+    number the draw is made from -- ``_key`` is defined in terms of this
+    function rather than deriving a key of its own. See there. A literal rather
+    than a cross-reference, because ``_key`` is private and autodoc does not
+    collect it, so the reference would never resolve -- the same warning
+    ``a3f96f0`` removed from ``inference/noise.py``.
 
     Raises:
         ConfigError: when the run declares no root seed at all -- ``seed:

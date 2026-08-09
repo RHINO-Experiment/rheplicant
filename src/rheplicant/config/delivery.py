@@ -77,12 +77,16 @@ ARRAY_FORMS: frozenset[str] = frozenset(
 class FieldSpec(NamedTuple):
     """What a destination field says about itself.
 
-    Attributes:
-        name: the Python field name -- also what a refusal quotes.
-        annotation: the resolved type object (``int``, ``float``, ``jax.Array``…).
-        static: ``True`` when equinox will put this field in the treedef.
-        converter: the field's own converter, or ``None``.
-        required: no default and no default_factory.
+    A bullet list rather than an ``Attributes:`` section, for the reason given
+    on :class:`rheplicant.config.units.Unit`: napoleon's copy of a NamedTuple's
+    fields duplicates the one autodoc already emits.
+
+    * ``name`` -- the Python field name, also what a refusal quotes.
+    * ``annotation`` -- the resolved type object (``int``, ``float``,
+      ``jax.Array``…).
+    * ``static`` -- ``True`` when equinox will put this field in the treedef.
+    * ``converter`` -- the field's own converter, or ``None``.
+    * ``required`` -- no default and no default_factory.
     """
 
     name: str

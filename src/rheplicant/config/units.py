@@ -68,14 +68,18 @@ _NAME_SUFFIX_DIMENSION: dict[str, str] = {"_deg": "angle", "_m": "length"}
 class Unit(NamedTuple):
     """A parsed unit: what to multiply by, and what the result is called.
 
-    Attributes:
-        canonical: the canonical spelling, e.g. ``"Hz"`` or ``"adc_count/K"``.
-        factor: multiply a declared value by this to reach canonical.
-        offset: add after scaling. Non-zero only for a bare affine atom
-            (``celsius``), which is why an affine atom may not compose.
-        numerator: canonical atom spellings above the line.
-        denominator: canonical atom spellings below it.
-        dimension: the single dimension when this unit is one atom, else None.
+    A bullet list rather than an ``Attributes:`` section, as ``GLSResult`` in
+    ``inference/gls.py`` already is: autodoc documents a NamedTuple's field
+    aliases itself, so napoleon's second copy is a duplicate object description
+    and sphinx warns on every field.
+
+    * ``canonical`` -- the canonical spelling, e.g. ``"Hz"`` or ``"adc_count/K"``.
+    * ``factor`` -- multiply a declared value by this to reach canonical.
+    * ``offset`` -- add after scaling. Non-zero only for a bare affine atom
+      (``celsius``), which is why an affine atom may not compose.
+    * ``numerator`` -- canonical atom spellings above the line.
+    * ``denominator`` -- canonical atom spellings below it.
+    * ``dimension`` -- the single dimension when this unit is one atom, else None.
     """
 
     canonical: str

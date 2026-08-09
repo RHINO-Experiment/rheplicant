@@ -30,7 +30,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
 
-#: `part:` inside a `from_switch_order`. Narrower than the modifier alphabet on
+#: ``part:`` inside a ``from_switch_order``. Narrower than the modifier alphabet on
 #: purpose: NoiseWaveOperator takes gamma_src_re and gamma_src_im as separate
 #: fields, so a switch-ordered stack is written once per half, and `abs` or
 #: `angle` there would be a quantity no field reads.

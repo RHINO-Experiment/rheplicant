@@ -347,6 +347,78 @@
   `rheplicant.radio.sky`, absent from `rheplicant.radio.__all__` beside
   `DriftScanProjector`, its sibling. Now exported from both.
 
+### `rheplicant.config`: a document can say what a value is, and the destination decides how it arrives
+
+- A new subpackage, 2780 lines across fourteen modules and 366 tests, holding
+  the **value grammar**: the eight forms a value node may take (a scalar, an
+  array constructor, a random draw, a file reference, a reference to a named
+  resource, a derivation, a stack, and the `python:` hatch), the nine modifier
+  keys that describe one, and the rule that decides how a resolved value
+  reaches a field. Eighteen names are exported from `rheplicant.config`.
+- **There is no document loader yet, and this is deliberate.** The grammar
+  resolves a *fragment* — `resolve_value(node, context)` — and the reader that
+  turns a whole YAML file into a twin arrives next, on top of this without
+  changing it. Shipping the two together would have meant testing the part
+  that can be wrong silently through the part that cannot.
+- Units are converted on read, and the table is closed. A token this layer
+  cannot convert is refused by name rather than passed through: a factor of
+  1e6 on a frequency grid produces a finite, correctly shaped, wrong answer,
+  and nothing downstream can tell.
+- Delivery reads the **destination class**, not the document. Three
+  measurements are the argument: `ADCOperator(n_bits=Array(12))` warns and
+  raises, `ForegroundOperator(ref_freq=Array(1.4e8))` only warns — so it
+  constructs, the forward numbers are bit-identical, and `filter_grad` hands
+  back the static value where a gradient belongs — and
+  `AntennaLossOperator(efficiency=1)` stores `int32`, which
+  `eqx.partition(op, eqx.is_inexact_array)` drops, leaving the field silently
+  untrainable. An array form on a static field, an `as:` the field
+  contradicts, and a `float64` request in a process where `jax_enable_x64` is
+  off are all refused with a message rather than a warning.
+- Forms, file readers and derivations are **registries** with live key views —
+  `VALUE_FORMS`, `FILE_FORMATS`, `DERIVATIONS` — so every "unknown X" refusal
+  lists what is actually registered at the moment it is raised rather than a
+  set frozen at import. `basis_fit` is declared in the grammar and
+  deliberately unregistered until the resource loader lands, and a test
+  asserts that it is the *only* such gap.
+- **The layer is removable, mechanically.** `rheplicant.config` imports
+  `core`, `radio` and `inference`; none of them imports it.
+  `tests/core/test_layering.py` names it in `FORBIDDEN` and
+  `tests/config/test_config_surface.py` checks the whole-package direction, so
+  the arrow is a test rather than a convention. None of the eighteen names
+  leaks into `rheplicant.__all__`.
+- **The `python:` hatch now states its trust cost, not just its
+  reproducibility cost.** Measured: `import_target` runs the named module's
+  body whether or not anything is called, so `{python: "pkg.mod:anything"}`
+  executes `pkg/mod.py` with no `args:` key — merely *resolving* a document to
+  report on it has already run its code. The assumption underneath the whole
+  layer is that the document's author is the person running the pipeline; the
+  module docstring now says what stops holding when the document arrives from
+  a shared root, a CI artefact or a collaborator, what a `plugins:` list
+  therefore is, and why a published `config.resolved.yaml` is evidence of
+  provenance and not of behaviour. `files.py` already carried the analogous
+  paragraph for path resolution; this is the sharper half of the same
+  assumption, written next to the function that acts on it.
+- New page,
+  [values in a config document](https://rheplicant.readthedocs.io/en/latest/config-values.html),
+  and a fifth
+  section in the API reference covering all fourteen modules. Getting the
+  layer's docstrings onto that page without new sphinx warnings took three
+  docstring fixes and no code change: three NamedTuples move from an
+  `Attributes:` section to the bullet list `GLSResult` already uses (napoleon's
+  copy duplicates the field aliases autodoc emits), five `#:` comments that
+  opened with a single-backticked key had that key silently eaten as a type
+  annotation and rendered a stray backtick, and one `:func:` pointed at a
+  private function autodoc does not collect. Nitpicky build back to its
+  baseline of 35 warnings; a plain build has none.
+- The README's test count moves 2809 → 3175, which is the 366 the config layer
+  brought; its coverage figure moves 81.9 % → 84.3 %, and the uncovered-statement
+  total behind that sentence 1129 → 1120. The count has been red since the first
+  commit of this work, by design:
+  `tests/test_readme_counts.py` fails on drift, and the number is taken from
+  the guard's own message rather than computed, because the guard subtracts
+  the modules gated on unpublishable data so that the figure means the same in
+  every environment.
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than
