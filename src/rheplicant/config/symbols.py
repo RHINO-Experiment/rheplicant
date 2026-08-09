@@ -113,8 +113,11 @@ def resolve_extent(value, scope: ShapeScope) -> int:
             ``"<symbol> +|- <int>"``. The multiple and the offset are each
             optional and may both appear, in which case the multiple binds to
             the symbol: ``"2 * n_freq - 1"`` is ``2 * n_freq`` minus one, not
-            twice ``n_freq - 1``. That is the only precedence in this module,
-            and it is stated here rather than left to be inferred.
+            twice ``n_freq - 1``. That is a fixed combination rule, not
+            precedence in the expression-language sense this module's refusals
+            disclaim -- there is still no operator to apply, nothing to nest
+            and no evaluation order to reason about. It is written down here
+            rather than left to be inferred from an example.
         scope: the extents in force at this position.
 
     Raises:
@@ -154,7 +157,18 @@ def literal_shadowing_a_symbol(value, scope: ShapeScope) -> str | None:
     Check A41 in the schema, and a report rather than a refusal: a literal 8
     may genuinely be 8. What it cannot be is *tied* to the grid, which is the
     whole failure -- five hand-copied grid lengths in one 90-line script.
+
+    Where two extents are equal the symbol reported is the first in
+    ``SHAPE_SYMBOLS`` order, which is what the loop below walks. On a tie both
+    answers are true, so this is a stated convention rather than a correctness
+    claim -- but it is stated, so a later reordering is a deliberate change
+    rather than an accident.
     """
+    # The bool check is redundant today: True and False are 1 and 0, and
+    # neither survives the `value > 1` guard below. It is kept because that
+    # guard exists for an unrelated reason -- silencing the n_source == 1
+    # default -- and would take this protection with it if it were ever
+    # relaxed to also report 0 or 1.
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     for symbol in ("n_time", "n_freq", "n_source"):
