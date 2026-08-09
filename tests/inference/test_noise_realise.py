@@ -58,11 +58,44 @@ def test_different_keys_give_different_draws(prediction):
     assert not jnp.array_equal(a, b)
 
 
-def test_flagged_delegates_to_the_wrapped_model(prediction):
+def test_the_radiometer_draw_is_not_the_additive_abs_sigma_form(prediction):
+    """The one test that can tell the two forms apart, and why it needs a
+    NEGATIVE prediction to do it.
+
+    ``std`` is ``|prediction| * f``. For a positive prediction, ``d + |d| f w``
+    and ``d (1 + f w)`` are the same number -- measured, they differ by 8e-6 at
+    d = +100, which is float rounding. Every other test in this file uses the
+    positive fixture, so none of them could see the difference: an
+    implementation that silently used ``prediction + self.std(prediction) *
+    draw`` would pass them all. At d = -100 the two differ by 0.66, because the
+    absolute value flips the sign of the scatter relative to the datum it
+    belongs to. That is the whole reason the generator may not reuse ``std``.
+    """
+    noise = RadiometerNoise(channel_width=1e6, integration_time=1.0)
+    negative = -prediction
+    key = jax.random.key(0)
+
+    drawn = noise.realise(negative, key=key)
+    draw = jax.random.normal(key, jnp.shape(negative))
+
+    assert jnp.allclose(drawn, negative * (1.0 + noise.fractional * draw))
+    assert not jnp.allclose(drawn, negative + noise.std(negative) * draw)
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [HomoscedasticNoise(sigma=jnp.array(2.0)),
+     RadiometerNoise(channel_width=1e6, integration_time=1.0)],
+    ids=["homoscedastic", "radiometer"],
+)
+def test_flagged_delegates_to_the_wrapped_model(prediction, inner):
     """Flags describe what was OBSERVED, not what the sky did. A flagged
-    sample still has a true value; it is the measurement that is missing."""
+    sample still has a true value; it is the measurement that is missing.
+
+    Both wrapped models, because delegation that happened to work for the
+    constant-sigma one would say nothing about the prediction-dependent one.
+    """
     flags = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[0].set(True)
-    inner = HomoscedasticNoise(sigma=jnp.array(2.0))
     wrapped = FlaggedNoise(inner, flags=flags)
     key = jax.random.key(3)
     assert jnp.array_equal(wrapped.realise(prediction, key=key),
