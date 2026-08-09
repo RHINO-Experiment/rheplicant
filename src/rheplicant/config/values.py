@@ -14,6 +14,7 @@ from typing import Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.modifiers import apply_modifiers
 from rheplicant.config.units import Unit, convert_to_canonical
 
 #: Every form key. A mapping value node holds exactly one of these.
@@ -150,14 +151,25 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
     form = forms[0]
     modifiers = {key: node[key] for key in node if key in VALUE_MODIFIERS}
     if form == "value":
-        return _resolve_scalar(node, modifiers)
-    resolver = _RESOLVERS.get(form)
-    if resolver is None:  # pragma: no cover - every form registers in Task 6..12
-        raise ConfigError(
-            f"Form {form!r} is declared in the grammar but no resolver is registered "
-            f"for it. Registered: {sorted(_RESOLVERS)}."
-        )
-    return resolver(node, context, modifiers)
+        resolved = _resolve_scalar(node, modifiers)
+    else:
+        resolver = _RESOLVERS.get(form)
+        if resolver is None:  # pragma: no cover - every form registers in Task 6..12
+            raise ConfigError(
+                f"Form {form!r} is declared in the grammar but no resolver is registered "
+                f"for it. Registered: {sorted(_RESOLVERS)}."
+            )
+        resolved = resolver(node, context, modifiers)
+    # One exit, deliberately, rather than a call on each branch. Every form's
+    # result passes through the same modifier order, and a form added in a
+    # later task cannot opt out of it by forgetting to call -- which is the
+    # failure the two-call-site version invites, and an invisible one: the
+    # value stays finite and correctly shaped, it is simply not what the
+    # document declared. The resolver's own `modifiers` dict is read back off
+    # `resolved` rather than reused, because a form may have added to it.
+    return resolved._replace(
+        value=apply_modifiers(resolved.value, resolved.modifiers, form=resolved.source)
+    )
 
 
 def _resolve_scalar(node: dict, modifiers: dict) -> ResolvedValue:

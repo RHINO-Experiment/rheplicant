@@ -62,12 +62,18 @@ class TestFormOneScalar:
         """`axis:` is recorded here and applied nowhere, so a resolver that
         drops it is invisible until an array form goes looking. Both returns
         of _resolve_scalar are checked -- they are two statements and only one
-        of them runs per call."""
-        assert resolve_value({"value": 1.0, "unit": "K", "axis": 1}, context).modifiers == {
+        of them runs per call.
+
+        The value was `1` until modifiers.py gave `axis:` its closed table
+        (`time`, `freq`, `none`) and resolve_value started validating against
+        it. Nothing about what this test asserts has changed -- `1` was only
+        ever a stand-in for "some key the scalar branch must not drop" -- but
+        it is now a value the grammar refuses, so it names a real axis."""
+        assert resolve_value({"value": 1.0, "unit": "K", "axis": "freq"}, context).modifiers == {
             "unit": "K",
-            "axis": 1,
+            "axis": "freq",
         }
-        assert resolve_value({"value": 1.0, "axis": 1}, context).modifiers == {"axis": 1}
+        assert resolve_value({"value": 1.0, "axis": "freq"}, context).modifiers == {"axis": "freq"}
 
     def test_a_string_that_is_not_a_number_and_a_unit_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
