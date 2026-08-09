@@ -280,6 +280,8 @@ class TestPlacement:
         sky = jnp.full((1, hp.nside2npix(nside)), T_SKY)
         twin = assemble(
             SkySourceOperator(
+                # This sky is single-channel, so it takes polar_coords' own
+                # 1-channel grid rather than the class's 4-channel `coords`.
                 sky_model=MapSky(maps=sky, freq=polar_coords(nside).freq),
                 projector=polar_projector(nside, beam, horizon_mask=True),
             ),

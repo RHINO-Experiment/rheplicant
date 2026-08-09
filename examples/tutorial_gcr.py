@@ -61,6 +61,9 @@ def beam_matrix(fwhm: float, offset: float) -> jax.Array:
     return response / jnp.sum(response, axis=1, keepdims=True)
 
 
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
+
+
 def twin(maps: jax.Array, fwhm: float = FWHM) -> Pipeline:
     """The forward model: sky -> beam-weighted TOD -> gain."""
     return Pipeline(
@@ -73,7 +76,6 @@ def twin(maps: jax.Array, fwhm: float = FWHM) -> Pipeline:
     )
 
 
-freq = jnp.linspace(60e6, 85e6, N_FREQ)
 state = State(
     coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=freq),
     meta={"telescope": "ring-toy"},
