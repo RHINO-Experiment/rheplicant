@@ -57,6 +57,6 @@ class TestEveryFormHasAResolver:
 
         declared = set(VALUE_FORMS) - {"value"}  # form 1 is handled inline
         implemented = set(_RESOLVERS)
-        deferred = {"basis_fit"}  # Plan 1B, with resources.bases
+        deferred = set()  # Plan 1B: resources.bases lands basis_fit, closing the gap
         assert declared - implemented == deferred, declared - implemented
         assert implemented - declared == set()

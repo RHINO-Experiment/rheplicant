@@ -149,7 +149,6 @@ class TestExtends:
         assert "apod_deg" not in merged
         assert merged["lmax"] == 8
 
-    @pytest.mark.xfail(strict=True, reason="the arrays and bases kinds land in Tasks 3-4")
     def test_extending_a_sibling_of_another_kind_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(

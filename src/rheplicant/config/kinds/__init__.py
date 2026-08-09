@@ -12,3 +12,4 @@ that lists a set which is silently short.
 # value grammar (the array constructors), an unrelated module one `grep
 # arrays` away from this one. The alias names which of the two this import is.
 from rheplicant.config.kinds import arrays as _arrays_kind  # noqa: F401  (registers 'arrays')
+from rheplicant.config.kinds import bases as _bases_kind  # noqa: F401  (registers 'bases')
