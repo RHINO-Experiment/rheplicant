@@ -120,16 +120,30 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
         )
 
     forms = [key for key in node if key in VALUE_FORMS]
-    unknown = [key for key in node if key not in VALUE_FORMS and key not in VALUE_MODIFIERS]
+    # Read before the sweep below, because a form may take its arguments as
+    # siblings rather than nested under its own key. Only answerable when
+    # exactly one form is present; with none or several the node is refused
+    # either way, and the empty default reproduces the sweep as it was.
+    arguments = _FORM_ARGUMENTS.get(forms[0], frozenset()) if len(forms) == 1 else frozenset()
+    unknown = (
+        []
+        if arguments is None
+        else [
+            key
+            for key in node
+            if key not in VALUE_FORMS and key not in VALUE_MODIFIERS and key not in arguments
+        ]
+    )
     if unknown:
         matches = {key: [m for m in VALUE_MODIFIERS if m.startswith(key[:3])] for key in unknown}
         near = [
             f"{key!r} (did you mean one of {close}?)" if close else repr(key)
             for key, close in matches.items()
         ]
+        also = f", and {forms[0]}: also takes {sorted(arguments)}" if arguments else ""
         raise ConfigError(
             f"Value node has unknown key(s) {', '.join(near)}. The forms are "
-            f"{list(VALUE_FORMS)} and the modifiers are {list(VALUE_MODIFIERS)}. An "
+            f"{list(VALUE_FORMS)} and the modifiers are {list(VALUE_MODIFIERS)}{also}. An "
             "unrecognised key is refused rather than ignored: a mistyped modifier is "
             "silently dropped by any loader that reads only the keys it knows, and "
             "the run then differs from the document by exactly the thing that key "
@@ -201,12 +215,33 @@ def _resolve_shorthand(text: str) -> ResolvedValue:
 #: comes off the thing registered, and the refusal lists what is known.
 _RESOLVERS: dict[str, Any] = {}
 
+#: Form key -> the sibling keys that form takes beside the modifiers. Forms
+#: 1-4 and 7 nest their arguments under their own key and so take none, which
+#: is the default. ``from`` is registered with None, because schema 2.1.7
+#: spells a derivation flat -- ``{from: <name>, ...arguments...}`` -- and WHICH
+#: arguments are legal depends on which derivation was named, so the
+#: dispatcher cannot know them. None means the form refuses its own strays,
+#: and :func:`rheplicant.config.derive._from` does, naming the derivation and
+#: the arguments it takes rather than the whole grammar. The guarantee is
+#: unchanged either way: no key a document wrote is ignored.
+_FORM_ARGUMENTS: dict[str, frozenset[str] | None] = {}
 
-def register_form(name: str) -> Callable[[Any], Any]:
-    """Register a resolver for one value form. Returns the function."""
+
+def register_form(
+    name: str, *, arguments: frozenset[str] | None = frozenset()
+) -> Callable[[Any], Any]:
+    """Register a resolver for one value form. Returns the function.
+
+    Args:
+        name: the form key.
+        arguments: the sibling keys this form takes beside the modifiers, or
+            None when the legal siblings depend on the node's own content, in
+            which case the form is responsible for refusing its own strays.
+    """
 
     def _register(fn):
         _RESOLVERS[name] = fn
+        _FORM_ARGUMENTS[name] = arguments
         return fn
 
     return _register
@@ -216,5 +251,6 @@ def register_form(name: str) -> Callable[[Any], Any]:
 # place a circular import is deliberate and safe, because `arrays` imports only
 # names already defined above it.
 from rheplicant.config import arrays as _arrays  # noqa: E402,F401  (registers form 2)
+from rheplicant.config import derive as _derive  # noqa: E402,F401  (registers form 6)
 from rheplicant.config import draws as _draws  # noqa: E402,F401  (registers form 3)
 from rheplicant.config import files as _files  # noqa: E402,F401  (registers form 4)
