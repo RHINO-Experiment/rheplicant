@@ -16,7 +16,6 @@ def context():
 
 
 class TestBuildOrder:
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_an_entry_may_reference_one_declared_earlier(self, context):
         built = build_resources(
             {"arrays": {"base": {"list": [1.0, 2.0]},
@@ -26,7 +25,6 @@ class TestBuildOrder:
         scaled = built.resources["resources.arrays.scaled"]
         assert [float(v) for v in scaled] == pytest.approx([10.0, 20.0])
 
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_order_in_the_document_does_not_matter(self, context):
         """A mapping has an order and a reader should not have to know it."""
         built = build_resources(
@@ -34,9 +32,13 @@ class TestBuildOrder:
                         "base": {"list": [1.0, 2.0]}}},
             context,
         )
-        assert "resources.arrays.scaled" in built.resources
+        scaled = built.resources["resources.arrays.scaled"]
+        assert [float(v) for v in scaled] == pytest.approx([10.0, 20.0])
+        # The document declares 'scaled' first, but 'base' must still be
+        # BUILT first -- the dependency graph decides order, not the
+        # document's own key order.
+        assert built.order == ("resources.arrays.base", "resources.arrays.scaled")
 
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_a_cycle_is_refused_and_the_loop_is_named(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
@@ -48,7 +50,6 @@ class TestBuildOrder:
         assert "resources.arrays.a" in message
         assert "resources.arrays.b" in message
 
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_a_reference_to_an_undeclared_entry_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources({"arrays": {"a": {"ref": "resources.arrays.absent"}}}, context)
@@ -56,7 +57,6 @@ class TestBuildOrder:
 
 
 class TestEachEntryIsBuiltOnce:
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_two_references_get_the_same_object(self, context):
         """radio/instrument/beam_spill.py:89 from_projector is 'the one call
         that cannot get the weight and the sky average out of step', and
@@ -71,7 +71,6 @@ class TestEachEntryIsBuiltOnce:
         )
         assert built.resources["resources.arrays.left"] is built.resources["resources.arrays.right"]
 
-    @pytest.mark.xfail(strict=True, reason="the arrays kind lands in Task 3")
     def test_the_shared_objects_map_records_it(self, context):
         """schema 2.1.6: config.resolved.yaml emits a shared_objects: map, so
         identity is visible in the artefact rather than only in the spec."""
@@ -176,12 +175,12 @@ class TestTheKindRegistry:
         assert "antennas" in message
         for kind in RESOURCE_KINDS:
             assert kind in message, kind
-        # RESOURCE_KINDS is empty right now (Tasks 3-8 fill it), so the loop
-        # above is vacuous and would not catch the registered-set going
-        # silently short. Pin the rendered-empty-list wording so this test
-        # actually fails once a kind is registered but this assertion is
-        # forgotten. Adjust this literal in Task 3, when it stops being [].
-        assert "[]" in message
+        # RESOURCE_KINDS now holds 'arrays' (Task 3), so the loop above is no
+        # longer vacuous -- it already checks that the rendered list names
+        # every registered kind. Pin it explicitly too, so a rendering bug
+        # that happened to keep 'arrays' out of `message` while the loop
+        # above (reading the same `message`) still passed would be caught.
+        assert "'arrays'" in message
 
     @pytest.mark.xfail(strict=True, reason="kinds land in Tasks 3-8")
     def test_all_six_kinds_are_registered(self):

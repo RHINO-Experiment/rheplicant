@@ -285,3 +285,10 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
         groups.setdefault(id(value), set()).add(dotted)
     shared = tuple(frozenset(names) for names in groups.values() if len(names) > 1)
     return BuiltResources(built, shared, tuple(order))
+
+
+# Imported for its side effect, at the very bottom and nowhere else: `kinds`
+# imports `register_kind` from this module, so importing it any earlier would
+# be circular. A caller who only imports `resources` still gets every
+# registered kind, because this import runs as part of importing this module.
+from rheplicant.config import kinds as _kinds  # noqa: E402,F401  (populates the registry)
