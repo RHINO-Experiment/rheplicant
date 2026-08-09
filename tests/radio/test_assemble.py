@@ -308,6 +308,14 @@ class TestSelectorFoldReplacement:
         assert twin["receiver_input"].switch_key == "receiver_input"
 
 
+#: Leaves whose operator IS shipped, but from ``rheplicant.core`` -- which may
+#: not name a radio node (``tests/core/test_layering.py``), so the class cannot
+#: declare ``graph_node`` and never appears in ``radio.__all__``. They are
+#: placed with ``At(<leaf>, Op())``. They are NOT reserved: reserved means the
+#: physics has no implementation, and these have one.
+CORE_PLACED = {"snapshot": "rheplicant.core.operator:SnapshotOperator"}
+
+
 class TestRegistryCompleteness:
     def test_every_concrete_operator_is_placeable(self):
         """Every exported radio operator class has a valid graph_node."""
@@ -346,7 +354,7 @@ class TestRegistryCompleteness:
 
         declared = {
             getattr(getattr(radio, name), "graph_node", None) for name in radio.__all__
-        }
+        } | set(CORE_PLACED)
         # Junctions and selectors never carry an operator -- `assemble` synthesises
         # their Sum/Select -- so `reserved`, which the docstring defines for leaves,
         # is only meaningful on the kinds a user can supply an operator for.
@@ -358,6 +366,27 @@ class TestRegistryCompleteness:
         # ...and the concrete pair, so a bug that empties `declared` still fails.
         assert RADIO_GRAPH.nodes["ground_field"].reserved
         assert not RADIO_GRAPH.nodes["t_sys_extra"].reserved
+
+    def test_every_core_placed_leaf_names_a_real_shipped_operator(self):
+        """`CORE_PLACED` is an exemption from the reserved invariant above, so
+        each entry must be checkable: the leaf must exist on the graph, the
+        operator must import, it must be an `AbstractOperator`, and it must
+        NOT declare a `graph_node` -- because if it ever declares one it
+        belongs in `declared` by the ordinary route and the exemption is
+        stale.
+        """
+        import importlib
+
+        from rheplicant.core.operator import AbstractOperator
+
+        for leaf, target in CORE_PLACED.items():
+            assert leaf in RADIO_GRAPH.nodes, leaf
+            module_name, _, attr = target.partition(":")
+            op = getattr(importlib.import_module(module_name), attr)
+            assert isinstance(op, type) and issubclass(op, AbstractOperator), target
+            assert getattr(op, "graph_node", None) is None, (
+                f"{target} now declares a graph_node; drop it from CORE_PLACED"
+            )
 
     def test_t_sys_extra_accepts_at_injection(self, template_state):
         asm = assemble(

@@ -586,7 +586,7 @@ Two more things `assemble` refuses, and three escape hatches:
   let the same physics enter in different forms (ground spill as a pre-beam
   field, or as a post-beam effective temperature).
 
-The default template `RADIO_GRAPH` has 32 nodes and is **RHINO's** structure, not
+The default template `RADIO_GRAPH` has 33 nodes and is **RHINO's** structure, not
 the framework's — `SignalGraph`, `register_graph` and `get_graph` are public and
 domain-agnostic. See [the canonical signal path](signal-path.md) for the rendered
 graph and the node table, and [the operator catalog](operators.md) for what lives

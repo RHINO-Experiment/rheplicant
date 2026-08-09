@@ -159,7 +159,7 @@ and fourteen runnable scripts with measured wall clocks in
 | Layer | What lives there |
 |---|---|
 | **Core** | `State`, the three combinators, `SignalGraph` + `assemble`, and `Assembly.replace_node` / `.without` to swap or drop a stage by node id. Domain-agnostic — a test enforces the layering. |
-| **Radio** | A 32-node canonical signal path for a single-antenna experiment, a modular sky engine (a differentiable limTOD port plus a drift-scan m-mode fast path agreeing with it to roundoff), and linear analysis filters. |
+| **Radio** | A 33-node canonical signal path for a single-antenna experiment, a modular sky engine (a differentiable limTOD port plus a drift-scan m-mode fast path agreeing with it to roundoff), and linear analysis filters. |
 | **Inference** | One noise model read by the likelihood, the weights, the Fisher matrix and the NumPyro scale alike; gradient and conjugate engines; `SamplingPlan` to partition a model into blocks whose engine is *derived* rather than restated; streaming evidence for campaigns whose data is gone. |
 
 Per-operator detail is the

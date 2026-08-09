@@ -21,7 +21,7 @@ Topology (v1.4; sum junctions marked ``(+)``)::
         -> antenna_loss -> (SW) receiver_input <- cal_loads
         -> noise_wave -> cw_tone -> bandpass -> gain
         -> noise -> emi -> adc
-        -> flagging -> averaging -> apply_cal -> filters      [processing segment]
+        -> snapshot -> flagging -> averaging -> apply_cal -> filters      [processing segment]
 
 Equivalent-entry leaves (the ``*`` nodes are reserved placeholders with no
 shipped operator yet): the same physical effect may enter at different
@@ -84,8 +84,16 @@ it. Absent an ``AntennaLossOperator`` the node is skipped as identity, which
 is the lossless-antenna assumption made explicit rather than hidden.
 
 The forward physical chain ends at ``adc`` (the raw waterfall); the
-processing segment (flagging/averaging/apply_cal/filters) is data-side and
-applies identically to simulated and observed raw data.
+processing segment (snapshot/flagging/averaging/apply_cal/filters) is
+data-side and applies identically to simulated and observed raw data.
+
+``snapshot`` has no shipped operator registered on it —
+:class:`~rheplicant.core.operator.SnapshotOperator` deliberately declares no
+``graph_node``, because ``rheplicant.core`` may not name a node of a domain
+graph (see :mod:`rheplicant.core.operator`). Place it with
+``At("snapshot", SnapshotOperator(name=...))`` to preserve the raw waterfall
+into ``aux`` before it is destructively processed; absent an operator the
+node is skipped as identity, same as any other transform.
 """
 
 from rheplicant.core.graph import At, NodeSpec, SignalGraph, register_graph
@@ -147,6 +155,11 @@ RADIO_GRAPH = register_graph(
             "noise": NodeSpec(_T, "post-gain thermal noise T_n"),
             "emi": NodeSpec(_T, "self-generated EMI comb"),
             "adc": NodeSpec(_T, "digitisation -> raw waterfall"),
+            "snapshot": NodeSpec(
+                _T,
+                "preserve the raw waterfall into aux before processing",
+                segment="processing",
+            ),
             "flagging": NodeSpec(_T, "RFI flags -> aux", segment="processing"),
             "averaging": NodeSpec(_T, "time integration", segment="processing"),
             "apply_cal": NodeSpec(_T, "apply gain solution", segment="processing"),
@@ -183,7 +196,8 @@ RADIO_GRAPH = register_graph(
             ("gain", "noise"),
             ("noise", "emi"),
             ("emi", "adc"),
-            ("adc", "flagging"),
+            ("adc", "snapshot"),
+            ("snapshot", "flagging"),
             ("flagging", "averaging"),
             ("averaging", "apply_cal"),
             ("apply_cal", "filters"),
