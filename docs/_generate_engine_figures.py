@@ -4,8 +4,8 @@ Run MANUALLY (not at documentation build time) — the drift-scan engine needs
 ``limTOD[jax]`` plus ``healpy``/``pygdsm``, none of which the Read the Docs
 environment installs. The outputs are committed under ``docs/_static``::
 
-    uv run --frozen python docs/_generate_engine_figures.py           # full, ~10 min
-    uv run --frozen python docs/_generate_engine_figures.py --smoke   # fast check
+    .venv/bin/python docs/_generate_engine_figures.py           # full, ~10 min
+    .venv/bin/python docs/_generate_engine_figures.py --smoke   # fast check
 
 Every figure is written twice, ``-light`` and ``-dark``, and embedded in
 ``docs/sky-engines.md`` through furo's ``only-light`` / ``only-dark`` classes,

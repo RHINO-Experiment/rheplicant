@@ -9,7 +9,12 @@ build/
 .venv/
 venv/
 
-# uv
+# uv. Not shipped, and this is now a decision rather than the scaffold default
+# it started as: `uv lock` cannot produce a lockfile for this project at all.
+# Locking resolves every declared extra, and `cal` -> rhino-cal-jax and
+# `rfi` -> MomentRFI deliberately name packages that are not on PyPI, so the
+# resolver refuses before it writes anything. A lock committed here could only
+# ever be a stale one. See docs/install.md for what to run instead.
 uv.lock
 
 # Docs build

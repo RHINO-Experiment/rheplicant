@@ -17,8 +17,8 @@ example would prove nothing -- and a BASIS parameterization is not covered by
 this counting at all; measure that one with rheplicant.inference.
 identifiability. See NoiseWaveOperator's module docstring for the full rule.
 
-Run:  uv run python examples/noise_wave_gcr.py
-      uv run python examples/noise_wave_gcr.py --one-source
+Run:  .venv/bin/python examples/noise_wave_gcr.py
+      .venv/bin/python examples/noise_wave_gcr.py --one-source
 """
 
 import argparse

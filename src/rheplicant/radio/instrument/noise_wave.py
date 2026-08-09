@@ -112,7 +112,7 @@ def _rhino_cal_jax():
         raise ImportError(
             "NoiseWaveOperator needs the rhino_cal_jax package (the 'cal' extra): "
             "pip install 'rhino-cal-jax @ "
-            "git+https://github.com/RHINO-Experiment/rhino-cal.git'"
+            "git+https://github.com/RHINO-Experiment/rhino-cal.git@feat/rhino-cal-jax'"
         ) from exc
     return rhino_cal_jax
 

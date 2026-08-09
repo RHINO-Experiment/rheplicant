@@ -6,7 +6,7 @@ Each prints its own results; none needs a real recording. Every wall clock below
 was measured by running the script, on CPU.
 
 ```bash
-uv run --frozen python examples/radio_digital_twin.py
+.venv/bin/python examples/radio_digital_twin.py
 ```
 
 :::{warning}

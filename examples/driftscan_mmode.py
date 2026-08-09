@@ -18,7 +18,7 @@ Six things happen below:
 
 The sky engine is a dependency, not an extra -- limTOD >= 1.10, which a plain
 `pip install rheplicant` brings in from PyPI.
-Run:  uv run --frozen python examples/driftscan_mmode.py   (~60 s: mostly JIT)
+Run:  .venv/bin/python examples/driftscan_mmode.py   (~60 s: mostly JIT)
 """
 
 import time

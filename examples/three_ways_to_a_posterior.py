@@ -17,7 +17,7 @@ being wrong -- a badly-trained estimator returns a smooth, confident,
 correctly-centred, incorrect distribution -- so validating on a problem with a
 closed-form answer is not a formality, it is the only thing that catches it.
 
-Run:  uv run python examples/three_ways_to_a_posterior.py
+Run:  .venv/bin/python examples/three_ways_to_a_posterior.py
 """
 
 import time

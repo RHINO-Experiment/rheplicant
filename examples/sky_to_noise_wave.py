@@ -24,12 +24,13 @@ Six steps:
 Needs both wings. limTOD is a dependency (>= 1.10) and comes from PyPI with the
 install; rhino-cal-jax is the `cal` extra and is not on PyPI, so it comes from
 git:
-      pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git"
-Run:  uv run --frozen python examples/sky_to_noise_wave.py    (~60 s)
-      uv run --frozen python examples/sky_to_noise_wave.py --beam-dir /path/to/CST_beams
+      pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal.git@feat/rhino-cal-jax"
+Run:  .venv/bin/python examples/sky_to_noise_wave.py    (~60 s)
+      .venv/bin/python examples/sky_to_noise_wave.py --beam-dir /path/to/CST_beams
 """
 
 import argparse
+import os
 from pathlib import Path
 
 import jax
@@ -65,7 +66,12 @@ from rheplicant.radio import (  # noqa: E402
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
 from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
-RHINO_BEAMS = Path("~/Dataspace/RHINO/CST_beams/HornDryGround").expanduser()
+# The CST far-field exports are not redistributable, so this script cannot ship
+# a path to them and must not guess one: a hard-coded home directory would be a
+# fact about one machine. Name yours in RHEPLICANT_RHINO_BEAMS or pass
+# --beam-dir; with neither, the run falls back to a Gaussian beam and says so.
+_NAMED_BEAMS = os.environ.get("RHEPLICANT_RHINO_BEAMS")
+RHINO_BEAMS = Path(_NAMED_BEAMS).expanduser() if _NAMED_BEAMS else None
 
 NSIDE, N_FREQ = 16, 8
 LMAX = 3 * NSIDE - 1
@@ -77,9 +83,16 @@ T_RX, T_AMBIENT, T_HOT = 290.0, 300.0, 400.0
 T_GROUND, T_ATM = 290.0, 3.0
 DELTA_NU, T_INT = 25e6 / N_FREQ, 2.0           # channel bandwidth [Hz], dump [s]
 
+def _beam_dir(value: str) -> Path:
+    """``--beam-dir '~/beams'`` is quoted, so the shell leaves the tilde to us."""
+    return Path(value).expanduser()
+
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--beam-dir", type=Path, default=RHINO_BEAMS,
-                    help="directory of per-frequency CST far-field exports")
+parser.add_argument("--beam-dir", type=_beam_dir, default=RHINO_BEAMS,
+                    help="directory of per-frequency CST far-field exports "
+                         "(default: $RHEPLICANT_RHINO_BEAMS; a Gaussian beam "
+                         "stands in when neither is given)")
 args = parser.parse_args()
 
 freq = jnp.linspace(60e6, 85e6, N_FREQ)
@@ -98,13 +111,14 @@ class MapSky(AbstractSkyModel):
 # CST exports directivity in dBi on a (theta, phi) grid, one file per frequency.
 # cst_beam_maps reads them onto HEALPix in limTOD's beam-local convention
 # (boresight at the pole) as linear power, and interpolates in frequency.
-if args.beam_dir.is_dir():
+if args.beam_dir is not None and args.beam_dir.is_dir():
     beam_maps = jnp.asarray(cst_beam_maps(args.beam_dir, freq, nside=NSIDE))
     beam_label = f"RHINO horn, {args.beam_dir.name}"
 else:  # keeps the script runnable without the (unpublished) CST dataset
     theta = jnp.arccos(1.0 - 2.0 * (jnp.arange(N_PIX) + 0.5) / N_PIX)
     beam_maps = jnp.stack([jnp.exp(-0.5 * (theta / 0.40) ** 2)] * N_FREQ)
-    beam_label = f"Gaussian stand-in ({args.beam_dir} not found)"
+    missing = args.beam_dir if args.beam_dir is not None else "$RHEPLICANT_RHINO_BEAMS unset"
+    beam_label = f"Gaussian stand-in ({missing})"
 
 structure = jax.random.normal(jax.random.key(0), (N_PIX,))
 sky_maps = jnp.stack([

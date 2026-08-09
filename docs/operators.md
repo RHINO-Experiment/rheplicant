@@ -281,7 +281,7 @@ truth — matching, to six digits, what flagging the contaminated channels by
 hand would have given.
 
 Install: MomentRFI is not on PyPI, so the `rheplicant[rfi]` extra names the
-requirement rather than resolving it (the same arrangement as `limtod`).
+requirement rather than resolving it (the same arrangement as `cal`).
 
 ```bash
 pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"

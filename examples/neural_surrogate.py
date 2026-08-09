@@ -7,7 +7,7 @@ weights through the standard calibration seam recovers the bandpass shape —
 no ML-specific machinery anywhere: network weights are ordinary
 differentiable leaves.
 
-Run:  uv run python examples/neural_surrogate.py
+Run:  .venv/bin/python examples/neural_surrogate.py
 """
 
 import equinox as eqx

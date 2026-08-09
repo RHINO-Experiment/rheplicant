@@ -35,7 +35,9 @@ and you install it yourself.
 * - `cal`
   - `NoiseWaveOperator` — the noise-wave receiver model, reflection couplings
     and all
-  - `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal"`
+  - `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"`
+    — the `@feat/rhino-cal-jax` is load-bearing: `rhino_cal_jax/` exists only on
+    that branch, and the default branch has no `pyproject.toml` to build
 * - `rfi`
   - `MomentRFIFlaggingOperator`, the real flagger. The threshold-based
     `FlaggingOperator` needs none of it
@@ -51,25 +53,72 @@ and you install it yourself.
 ```bash
 git clone https://github.com/RHINO-Experiment/rheplicant
 cd rheplicant
-uv sync --frozen
+uv venv
+uv pip install -e . --group dev
 ```
 
 :::{warning}
-**Neither `uv sync` nor `uv run` works without `--frozen`.** Measured, not
-assumed: each refuses with *"your project's requirements are unsatisfiable"*.
-The cause is now `rheplicant[cal]` → `rhino-cal-jax`, which is not on PyPI;
-limTOD used to be the blocker and no longer appears in the error at all.
-`--frozen` works against the existing lock.
+**Neither `uv sync` nor `uv run` works in this project — with `--frozen` or
+without it.** Measured on a fresh clone, not assumed.
 
-And `uv sync --frozen` **removes** anything installed outside that lock —
-editable local checkouts of limTOD or rhino-cal included. If you are developing
-against source checkouts of those, re-install them afterwards, or stay on
-`uv run --frozen`, which does not sync.
+*Without* `--frozen`, each refuses with *"your project's requirements are
+unsatisfiable"*. `uv` resolves **every declared extra** when it locks, and
+`rheplicant[cal]` → `rhino-cal-jax` is not on PyPI by design; `rheplicant[rfi]`
+→ `MomentRFI` is the same shape. The `pyproject.toml` comment beside each says
+why they name a requirement instead of resolving it.
+
+*With* `--frozen`, each refuses with *"Unable to find lockfile at `uv.lock`"*.
+This repository ships no lockfile and **cannot**: `uv lock` fails on the very
+same unsatisfiable extra, so there is nothing to commit. `--frozen` applies only
+where a `uv.lock` already exists in your working copy — which a fresh clone does
+not have and cannot generate. Treat any `uv.lock` you find in an older checkout
+as stale rather than as the missing piece.
+
+`uv pip install` resolves only what you ask it for, never the whole declared
+universe, which is why the two commands above work where the project-level ones
+cannot. Nothing is removed either, so editable local checkouts of limTOD or
+rhino-cal survive it — install those the usual way afterwards, in any order.
 :::
+
+## Optional local data
+
+Two things this project compares itself against cannot be published: the RHINO
+CST far-field exports, and the `rhino-cal` checkout whose numpy readers are the
+reference implementation. Neither has a path that can be guessed, so neither is
+guessed — you name yours, or the work that needs it stands down and says so.
+
+:::{list-table}
+:header-rows: 1
+:widths: 32 68
+
+* - Variable
+  - What it unlocks
+* - `RHEPLICANT_RHINO_BEAMS`
+  - The directory of per-frequency CST far-field exports. Unlocks the beam tests
+    in `tests/radio/test_beams.py`, the real horn in
+    `examples/sky_to_noise_wave.py` (which otherwise substitutes a Gaussian and
+    labels the plot as such), and the receiver figure. `--beam-dir` overrides it
+    for the example.
+* - `RHEPLICANT_RHINO_CAL`
+  - A `rhino-cal` checkout. Unlocks
+    `tests/radio/test_ingestion_vs_reference.py`, which cross-checks this
+    package's Touchstone and HDF5 readers against rhino-cal's.
+:::
+
+Neither is required, and nothing fails without them — the tests that need them
+skip with the variable named in the reason. Both used to be hard-coded paths
+under one person's home directory, which meant those tests never ran anywhere
+else and said nothing about it.
 
 ## Running the tests
 
 There is no CI; run the suite and the linter in the project venv before pushing.
+The `dev` group carries what the tests need on top of the package — `numpyro`,
+because five modules import it unguarded, and `mdit-py-plugins`, because the
+docs-link guard computes anchors with myst's own slugifier. Both are runtime
+*extras* rather than dependencies, so nothing but the test suite pulls them in;
+without them `pytest` stops at collection, or reports every documentation link
+as broken.
 
 ```bash
 .venv/bin/python -m pytest          # ~12 min with coverage
@@ -99,9 +148,14 @@ the seven evidence-layer files.
 ## Check it worked
 
 ```bash
-python -c "import rheplicant; print(rheplicant.__version__)"
-python -c "from rheplicant.radio import RADIO_GRAPH; print(len(RADIO_GRAPH.nodes), 'nodes')"
+.venv/bin/python -c "import rheplicant; print(rheplicant.__version__)"
+.venv/bin/python -c "from rheplicant.radio import RADIO_GRAPH; print(len(RADIO_GRAPH.nodes), 'nodes')"
 ```
+
+The interpreter is named explicitly because nothing above activates the
+environment — a bare `python` here reaches whichever one is on your `PATH` and
+reports `ModuleNotFoundError` for an install that is in fact fine. Drop the
+prefix if you have run `source .venv/bin/activate`.
 
 The second line is the more useful one: it proves the radio layer imported and
 the default signal-path template registered. If the extras are in place, these
@@ -109,7 +163,7 @@ import too — each is the module an operator reaches for, and an absent one
 raises an `ImportError` naming what to install rather than failing later:
 
 ```bash
-python -c "import limtod_jax, rhino_cal_jax; print('sky engines and noise waves ready')"
+.venv/bin/python -c "import limtod_jax, rhino_cal_jax; print('sky engines and noise waves ready')"
 ```
 
 Then read [the guided tour](tour.md), or [ingestion](ingestion.md) if you have a

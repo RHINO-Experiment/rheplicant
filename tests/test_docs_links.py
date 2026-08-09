@@ -69,7 +69,17 @@ def _slugs(text: str) -> set[str]:
     The upstream function is imported rather than reimplemented, because a
     hand-rolled slugifier is a third scheme that agrees with neither.
     """
-    from mdit_py_plugins.anchors.index import slugify
+    try:
+        from mdit_py_plugins.anchors.index import slugify
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment, not logic
+        raise ModuleNotFoundError(
+            "mdit-py-plugins is not installed, so no heading anchor can be "
+            "computed and every anchor check below fails as though the "
+            "documentation were broken. It is in the `dev` dependency group: "
+            "`uv pip install -e . --group dev`. Measured 2026-08-09 -- absent, "
+            "it produced 31 failures reading 'that page has no such anchor' "
+            "with all 31 links in fact correct."
+        ) from exc
 
     return {slugify(re.sub(r"[`*]", "", text).strip())}
 
@@ -121,6 +131,67 @@ def _link_targets() -> list[tuple[str, str, str]]:
         for page, anchor in _PAGE_ANCHOR.findall(text):
             out.append((label, page, anchor))
     return out
+
+
+def test_the_slugifier_is_present_and_still_spells_anchors_myst_s_way() -> None:
+    """The harness must fail as a harness, not as thirty-one dead links.
+
+    ``_slugs`` reaches myst's slugifier through ``mdit-py-plugins``, which rides
+    in with ``myst-parser`` in the ``docs`` extra and reached no one who followed
+    the documented dev install. Absent, it raises *inside* the assertion helper,
+    so pytest reported 31 failures whose message accuses the **documentation** --
+    "that page has no such anchor" -- of a fault belonging entirely to the
+    environment. It was read exactly that way: a hunt for renamed headings found
+    nothing to rename, because all 31 links were correct. It is now in the ``dev``
+    group, and this is the check that says so when it is not.
+
+    Behaviour is pinned, not mere importability -- a slugifier that still imports
+    and spells differently would move every anchor at once. The double hyphen in
+    the third case is the whole point: myst emits ``order--graph`` where docutils
+    emits one, and only myst's spelling resolves (see ``_slugs``).
+    """
+    assert _slugs("Sampling it exactly") == {"sampling-it-exactly"}
+    assert _slugs("The `noise` model") == {"the-noise-model"}
+    assert _slugs("Instrument (trunk order = graph order)") == {
+        "instrument-trunk-order--graph-order"
+    }
+
+
+#: ``uv sync`` / ``uv run``, which cannot work in this project at all -- locking
+#: resolves every declared extra and two of them name packages that are on no
+#: index, so no lockfile exists or can be generated. Written as a split string so
+#: this line does not match itself.
+_DEAD_UV_COMMAND = re.compile(r"uv\s+(?:sync|run)\b")
+
+#: Prose that discusses the problem rather than instructing the reader. These
+#: files argue *why* the commands do not work and must be allowed to name them.
+_MAY_DISCUSS_UV = frozenset({"install.md", "index.md"})
+
+
+def test_no_page_tells_the_reader_to_run_a_command_that_cannot_work() -> None:
+    """``uv run`` was purged from the docs twice and survived both times.
+
+    The first sweep fixed the README and ``docs/install.md``; six more sites were
+    found later in ``docs/examples.md`` and friends, and six more after that in
+    the tutorials and the figure generators -- one of them forty lines below an
+    edit made in the same change. Every one of them handed a reader a command
+    that exits non-zero on a fresh clone. A sweep that has to be repeated is a
+    check waiting to be written, so here it is: no page, script or docstring may
+    contain ``uv sync`` or ``uv run`` unless it is arguing about them.
+    """
+    offenders: list[str] = []
+    for path in sorted([*DOCS.glob("*.md"), *DOCS.glob("*.py"), *(ROOT / "examples").glob("*.py")]):
+        if path.name in _MAY_DISCUSS_UV:
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            if _DEAD_UV_COMMAND.search(line):
+                offenders.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
+
+    assert not offenders, (
+        "these hand the reader a uv command that cannot work in this project "
+        "(no lockfile exists or can be generated -- see docs/install.md); use "
+        "`.venv/bin/python`:\n  " + "\n  ".join(offenders)
+    )
 
 
 def test_there_are_links_to_check() -> None:

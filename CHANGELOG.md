@@ -2,6 +2,213 @@
 
 ## Unreleased
 
+### The documented developer install could not be run by anyone but its author
+
+- `uv sync --frozen` was the first command a contributor was given, in the
+  README, in `docs/install.md`, and by reference from the README's Status
+  section. On a fresh clone it fails immediately: *"Unable to find lockfile at
+  `uv.lock`, but `--frozen` was provided."* `uv.lock` is git-ignored, so a clone
+  never has one. Reproduced in a worktree, which like a fresh clone carries only
+  tracked files.
+- **And no lockfile can be made.** `uv lock` resolves every declared extra, and
+  `rheplicant[cal]` → `rhino-cal-jax` is not on PyPI by design, so locking
+  refuses with *"your project's requirements are unsatisfiable"* before writing
+  anything. `rheplicant[rfi]` → `MomentRFI` would refuse next. So the fix is not
+  to ship the lock: there is no correct lock to ship. The one on the author's
+  machine dates from July and still records `limtod` as an *extra* at 1.8.0,
+  which `pyproject.toml` stopped saying when limTOD became a core dependency at
+  `>=1.10` — committing it would have shipped a file contradicting the manifest.
+- Replaced with the commands that were verified to work here, from a clone with
+  nothing else in it: `uv venv`, then `uv pip install -e . --group dev`.
+  `uv pip install` resolves only what is asked of it rather than the whole
+  declared universe, which is the entire reason it survives where the
+  project-level commands cannot. Checked by installing into an empty worktree
+  and running `tests/core` — 471 passed, limTOD resolved to 1.10.0.
+- `docs/install.md` now states when `--frozen` *does* apply — only against a
+  `uv.lock` that already exists locally — instead of implying a fresh clone has
+  one. The `.gitignore` entry says why the lockfile is absent, so the next
+  reader does not re-derive it or "fix" it by committing a stale lock; it had
+  been an unexamined scaffold default since the first commit.
+- Six further invocations of `uv run --frozen python …` — in `docs/examples.md`,
+  `docs/sky-engines.md`, `docs/sky-to-receiver.md` and the two figure
+  generators — were unrunnable for the same reason and are now
+  `.venv/bin/python`, matching how `docs/install.md` has invoked the test suite
+  since the last time this bit.
+- "Check it worked" — the section whose whole job is to confirm the install —
+  invoked a bare `python`, which nothing in the setup puts the environment on.
+  It reports `ModuleNotFoundError` for an install that is fine. Now
+  `.venv/bin/python`, like the rest of the page, with the activation escape
+  hatch named.
+- **The dev group could not run the test suite it exists for.** Five test
+  modules import `numpyro` at module level — eighteen imports, none guarded by
+  `importorskip`, and rightly so, since numpyro is on PyPI and those posteriors
+  are meant to be exercised rather than skipped. But numpyro is a runtime
+  *extra*, so a `--group dev` install stopped at collection with five
+  `ImportError`s: the install page's own `.venv/bin/python -m pytest` line could
+  not run. `numpyro` and `mdit-py-plugins` are both in the group now. A dev
+  environment that cannot collect the suite is not a dev environment.
+  (`rhino_cal_jax` stays out and stays `importorskip`ed — it cannot come from an
+  index at all, which is the distinction the group draws.)
+- 0.2.0 fixed exactly this shape for `uv run pytest` and closed with "`uv run
+  --frozen` still works against an existing lock". True, and the buried premise
+  is the bug: the existing lock existed on one machine. A command verified only
+  where its precondition already holds is not verified.
+
+### The docs-link guard reported thirty-one broken links and there were none
+
+- `tests/test_docs_links.py` computes heading anchors with myst's own slugifier,
+  imported from `mdit_py_plugins` — deliberately, so the check cannot invent a
+  third spelling scheme. But `mdit-py-plugins` arrives only with `myst-parser`,
+  in the **`docs` extra**, which the `dev` group does not install. So the guard
+  has never run for anyone who followed the documented dev install.
+- It did not skip. The import sits *inside* `_slugs`, so it raised once per
+  parametrised case and pytest reported **31 failures** — every
+  `](page.md#anchor)` link in the documentation, a 100 % failure rate — each
+  carrying the message *"links to page.md#anchor, but that page has no such
+  anchor"*. That message accuses the documentation of a fault owned entirely by
+  the environment, and it was believed: it produced a work item to find the
+  renamed headings behind 31 rotted links. There were none. **Every one of the
+  31 links is correct**, confirmed by installing the one missing package and
+  re-running: 31 passed.
+- `mdit-py-plugins` is now in the `dev` group, so the guard runs where the
+  install docs say to work. The import failure, if it ever recurs, now names
+  itself instead of impersonating dead links.
+- `test_the_slugifier_is_present_and_still_spells_anchors_myst_s_way` pins the
+  slugifier's behaviour rather than its importability — a slugifier that still
+  imports and spells differently would move every anchor at once, and the 31
+  cases would again blame the pages. It pins the double hyphen of
+  `instrument-trunk-order--graph-order` in particular, which is exactly where
+  myst and docutils disagree and only myst's spelling resolves.
+- The README's test count follows the new checks: **2768 → 2771**, measured in an
+  environment that collects the whole suite.
+- The shape is the one directly above, twice in one changelog: a check whose
+  precondition held only on the machine that wrote it. There it passed; anywhere
+  else it failed, loudly, about the wrong thing.
+
+### Four paths under one person's home directory left the repository
+
+- `~/projects/rhino-cal` and `~/Dataspace/RHINO/CST_beams/HornDryGround` were
+  hard-coded in four places: the ingestion cross-checks, the beam tests, the
+  receiver figure generator, and `examples/sky_to_noise_wave.py` — a script
+  shipped for other people to run, defaulting to a directory only one machine
+  has. Each described a machine rather than a requirement, and each failed
+  *quietly* elsewhere: the tests skipped, the example silently substituted a
+  Gaussian beam. Skipping reads as passing.
+- Both are now named by the person who has them, `RHEPLICANT_RHINO_CAL` and
+  `RHEPLICANT_RHINO_BEAMS`, documented in `docs/install.md` under **Optional
+  local data**. Neither is required; what needs them stands down with the
+  variable named in the reason, so an absent dataset says so instead of
+  vanishing. `--beam-dir` still overrides for the example.
+- **The `sys.path` insert is gone from import time.** The Touchstone half needs
+  exactly one module, `utils/utils.py`, which imports only numpy and astropy —
+  it is now loaded from its file with `spec_from_file_location`, touching no
+  global state at all. The HDF5 half genuinely needs a path entry, because `gcr`
+  is a package whose modules import each other; that entry now lives and dies
+  with the `data_handler` fixture instead of being added on import and left
+  there for the rest of the session.
+- Verified in the order that used to break: with `RHEPLICANT_RHINO_CAL` set, the
+  cross-checks run *and* `test_tour_runs.py` still skips correctly — the scoped
+  entry no longer leaks a top-level `rhino_cal_jax` into every later test.
+- The docs example in `docs/sky-to-receiver.md` and the ten `uv run` lines in
+  `examples/*.py` went the same way: a path nobody else has, and a command that
+  cannot work here, both presented as things to type.
+- **`uv run` took three sweeps to actually purge**, which is a check that was
+  waiting to be written. After the README and `docs/install.md`, six more sites
+  turned up in `docs/examples.md` and friends, and six more after that in the
+  tutorials and the figure generators — one of them forty lines below an edit
+  made in the same pass. `test_no_page_tells_the_reader_to_run_a_command_that_cannot_work`
+  now greps every page, script and docstring, exempting only the two files whose
+  job is to explain why the command does not work.
+- `docs/index.md`'s install row still read "limTOD comes from source, and `uv`
+  needs `--frozen`" — both halves false, in the first install pointer a docs
+  reader meets. `src/rheplicant/radio/beams.py` told the user to install limTOD
+  from a personal GitHub fork for a package that is on PyPI, eight lines below a
+  sibling message that says the right thing.
+- One more import-time `sys.path` insert, in
+  `tests/inference/test_degenerate_partition.py`, prepended `tests/` globally to
+  reach a sibling module — the same shape of leak, on a machine-independent path.
+  It was simply unnecessary: pytest's default import mode already puts that
+  directory on the path, so the sibling imports directly.
+
+### The `cal` extra's install command was wrong in the source, too
+
+- `NoiseWaveOperator`'s `ImportError` handed the reader
+  `pip install 'rhino-cal-jax @ git+…/rhino-cal.git'` — the branch-less URL that
+  resolves to a default branch carrying no package. The one message a user sees
+  at exactly the moment they need it was a command that cannot succeed. Fixed
+  there and in `examples/sky_to_noise_wave.py`, which repeated it.
+
+### A skipped test module still ran its side effects, and the tour paid for it
+
+- `test_the_tour_is_a_script_that_runs` asked **this** process whether
+  `rhino_cal_jax` was importable, then ran the pasted tour in a **subprocess**.
+  Those two processes do not have to agree, and here they did not:
+  `tests/radio/test_ingestion_vs_reference.py` inserts `~/projects/rhino-cal`
+  into `sys.path` at import time, and that checkout carries a top-level
+  `rhino_cal_jax/`. So on any machine with the checkout, the skip did not fire
+  and the tour died on `import rhino_cal_jax` — an error naming neither the tour
+  nor the file that caused it.
+- **The polluting module is itself skipped.** Its `sys.path.insert` sits above
+  its own `importorskip`, so the path is mutated and then the module bows out,
+  leaving the side effect behind and no evidence of who did it.
+- Which made it order-dependent, and that is why it was first misread. Alone,
+  the tour test skips and looks healthy; in a full run it fails. Every isolated
+  re-run of the "failing" test passed. Minimal reproduction:
+  `pytest tests/radio/test_ingestion_vs_reference.py tests/test_tour_runs.py`
+  fails where `pytest tests/test_tour_runs.py` skips.
+- The check now asks a **fresh interpreter**, in the directory the script will
+  run from, and by importing rather than locating — a module that is findable
+  but broken is no use to the tour either. The question is now asked of the
+  process that has to answer it.
+  `test_a_module_only_this_process_can_see_does_not_count_as_installed` builds a
+  package visible only via a mutated `sys.path` and pins that it reads as absent.
+- Not diagnosed as a bad marker: `docs/tour.md` block 10 declares
+  `# needs-extra: rhino_cal_jax` correctly and `_NEEDS_EXTRA` matches it. The
+  marker was never the problem; the process the answer came from was.
+
+### The test-count guard told readers to write a wrong number into the README
+
+- `_collected()` shells out to `pytest --collect-only`, and nine test modules sit
+  behind a **module-level** `pytest.importorskip`. Without `h5py` and
+  `rhino-cal-jax` two of them do not collect at all, so the suite reports 2698
+  where a complete environment reports 2771 — not a smaller suite, a partial
+  view of the same one.
+- The guard compared that partial number to the README and said *"Update
+  README.md rather than loosening this assertion"*. Following it writes a number
+  that is wrong for everyone with the extras, on the authority of a test.
+- It now establishes whether the environment can see the whole suite before it
+  forms an opinion: every module defining a `def test_` must have contributed.
+  When some did not, it stands down naming them and saying plainly not to put
+  that number in the README; when all did, it asserts exactly as before. Strict
+  where the comparison means something, silent where it does not, wrong nowhere.
+- `test_the_collection_probe_can_still_see_the_suite` pins both halves of that
+  completeness check, because a scan that stopped matching would make the guard
+  stand down forever — trading a loud wrong answer for a silent absent one,
+  which is the failure this file was written to close.
+- **Standing down is not allowed to become the normal case, and briefly was.**
+  An independent review caught it: once the ingestion cross-checks moved behind
+  `RHEPLICANT_RHINO_CAL`, that module stopped collecting in every environment
+  that does not hold an unpublishable checkout — so the count guard stood down
+  *always*, on the very number this release put in the README. A guard that
+  never runs is the thing this file exists to prevent, reintroduced one level
+  down. Modules gated on unpublishable local data are now **subtracted** from
+  the comparison (`_OPT_IN_LOCAL`) rather than waited for, so the number means
+  the same in every environment and the assertion always happens; standing down
+  is reserved for a missing *installable* dependency, which is a state anyone
+  can leave. Verified in both: with the variable set and unset, the comparison
+  is the same 2767 and asserts either way.
+- The README's count follows: **2771 → 2767**, and it is now a number every
+  contributor can reproduce rather than one that needed a particular checkout.
+
+### The `cal` extra's install command named a branch that has no package on it
+
+- `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal"`
+  takes the repository's default branch, and `rhino_cal_jax/` is not on it —
+  that branch carries the numpy pipeline and no `pyproject.toml` at all, so the
+  command fails at the build backend rather than installing anything. The
+  package lives on `feat/rhino-cal-jax`, which the URL now names, in
+  `docs/install.md` and beside the extra in `pyproject.toml`.
+
 ### Two README links were dead on PyPI, and no guard could see them
 
 - `](DESIGN.md)` and `](CHANGELOG.md)` are correct on GitHub and 404 on PyPI,

@@ -7,7 +7,7 @@ solve. Here the sky is known and three instrument parameters are inferred by
 gradient MCMC -- because they enter the model nonlinearly, so no conjugate
 solve exists, and because there are three of them, so none is needed.
 
-Run:  uv run python examples/tutorial_nuts.py
+Run:  .venv/bin/python examples/tutorial_nuts.py
 """
 
 import time

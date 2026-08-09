@@ -7,7 +7,7 @@ Demonstrates the three integration seams:
 2. analysis on calibrated data: snapshot -> apply calibration -> filters;
 3. sky-space filtering reusing the SAME projector via its adjoint (CG).
 
-Run:  uv run python examples/sky_projection_and_filters.py
+Run:  .venv/bin/python examples/sky_projection_and_filters.py
 """
 
 import equinox as eqx

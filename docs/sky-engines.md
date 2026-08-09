@@ -459,7 +459,7 @@ against the general engine, time all three configurations, read off the
 m-modes, and differentiate the result with respect to the beam.
 
 ```bash
-uv run --frozen python examples/driftscan_mmode.py
+.venv/bin/python examples/driftscan_mmode.py
 ```
 
 [`examples/sky_to_noise_wave.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/sky_to_noise_wave.py)
@@ -468,5 +468,5 @@ takes it one stage further: the drift-scan TOD becomes the noise-wave model's
 are recovered in closed form with the sky treated as known data.
 
 ```bash
-uv run --frozen python examples/sky_to_noise_wave.py
+.venv/bin/python examples/sky_to_noise_wave.py
 ```

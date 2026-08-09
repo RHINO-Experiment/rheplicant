@@ -25,7 +25,7 @@ This script shows three things:
      the switched loads sit at genuinely different power levels and the whole
      content of the weighting is that they should not count equally.
 
-Run:  uv run python examples/gls_gcr.py
+Run:  .venv/bin/python examples/gls_gcr.py
 """
 
 import jax

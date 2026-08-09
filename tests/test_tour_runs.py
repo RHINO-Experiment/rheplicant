@@ -76,6 +76,49 @@ def _blocks() -> list[str]:
     return _FENCE.findall(TOUR.read_text())
 
 
+def _importable_in_a_fresh_interpreter(name: str, cwd: Path) -> bool:
+    """Can the process that will run the script import this? Not: can we?
+
+    ``find_spec`` in *this* process was the original check and it is the wrong
+    process. ``tests/radio/test_ingestion_vs_reference.py`` used to put a
+    rhino-cal checkout on ``sys.path`` at import time -- above its own
+    ``importorskip``, so the insert happened even when that module then bowed out
+    -- and such a checkout carries a top-level ``rhino_cal_jax``. Anyone with one
+    therefore had a pytest process that could find a module the pasted script's
+    interpreter could not: the skip below did not fire, the script ran, and it
+    died on ``import rhino_cal_jax`` with a ``ModuleNotFoundError`` that said
+    nothing about the tour and everything about another test file. It was
+    order-dependent rather than random, which is why it survived a while:
+    ``pytest tests/test_tour_runs.py`` skipped while
+    ``pytest tests/radio/test_ingestion_vs_reference.py tests/test_tour_runs.py``
+    failed, so every isolated re-run of the "failing" test passed.
+
+    That import-time insert is gone -- it is scoped to a fixture now -- but the
+    check stays asked of the right process, because the bug was never really the
+    other file. Any future path manipulation, in any test or plugin or sitecustomize,
+    reintroduces exactly this divergence, and only asking the interpreter that
+    has to run the script is immune to all of them.
+
+    So: a fresh interpreter, in the directory the script will run from, and by
+    importing rather than locating -- a module that is findable but broken is not
+    one the tour can use either.
+    """
+    try:
+        probe = subprocess.run(
+            [sys.executable, "-c", f"import importlib; importlib.import_module({name!r})"],
+            capture_output=True,
+            cwd=cwd,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        # An import that hangs -- a device scan, a network probe, a stale lock --
+        # is not one the tour can rely on either, and the run below carries its
+        # own timeout for the same reason. Answering "no" beats hanging the suite
+        # on a question nobody asked.
+        return False
+    return probe.returncode == 0
+
+
 def test_the_tour_is_a_script_that_runs(tmp_path: Path) -> None:
     """Paste every runnable python block into one file, in order, and run it."""
     blocks = _blocks()
@@ -86,7 +129,7 @@ def test_the_tour_is_a_script_that_runs(tmp_path: Path) -> None:
 
     for number, source in enumerate(blocks, start=1):
         for name in _NEEDS_EXTRA.findall(source):
-            if find_spec(name) is None:
+            if not _importable_in_a_fresh_interpreter(name, cwd=tmp_path):
                 pytest.skip(
                     f"{TOUR.name} block {number} needs {name}, which is not installed; "
                     "the tour is one continuous script, so the run cannot be verified "
@@ -128,6 +171,34 @@ def test_sketches_are_rare_and_still_parse() -> None:
                 f"{TOUR.name} block {number} is marked '# sketch' but is not valid "
                 f"Python: {exc}\n\n{source}"
             ) from exc
+
+
+def test_a_module_only_this_process_can_see_does_not_count_as_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The regression for the order-dependent failure described in the helper.
+
+    Another test file puts a checkout on ``sys.path``; this process can then
+    import things the tour's subprocess cannot. Asking ``find_spec`` here said
+    "installed", the skip did not fire, and the tour failed on an import. The
+    fake package below reproduces that shape exactly -- visible here, invisible
+    to a fresh interpreter -- and the check must call it absent.
+    """
+    polluted = tmp_path / "polluted"
+    (polluted / "ghost_extra").mkdir(parents=True)
+    (polluted / "ghost_extra" / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(polluted))
+
+    assert find_spec("ghost_extra") is not None, (
+        "the fake package is not visible in this process, so this test is not "
+        "reproducing the sys.path pollution it exists to pin"
+    )
+    assert not _importable_in_a_fresh_interpreter("ghost_extra", cwd=tmp_path), (
+        "a module importable only because THIS process' sys.path was mutated is "
+        "being counted as installed. The tour runs in a subprocess that cannot "
+        "see it, so the run would fail with ModuleNotFoundError instead of "
+        "skipping."
+    )
 
 
 def test_every_needs_extra_marker_names_a_real_module() -> None:

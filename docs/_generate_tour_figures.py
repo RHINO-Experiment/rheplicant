@@ -16,7 +16,7 @@ Two figures:
   give, and the pull histogram over many noise realisations, because "the errors
   sit inside the error bars" is the claim and a pull distribution shows it.
 
-Run:  uv run --frozen python docs/_generate_tour_figures.py
+Run:  .venv/bin/python docs/_generate_tour_figures.py
       (~60 s: the GCR sampler and the 500 re-solves dominate)
 """
 

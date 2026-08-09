@@ -65,7 +65,11 @@ numpyro = ["numpyro"]
 # resolving it -- and it is the one requirement that still makes a bare
 # `uv sync` unsatisfiable:
 #   uv pip install -e <path-to-rhino-cal>
-#   uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal"
+#   uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
+# The branch is not decoration. `rhino_cal_jax/` lives only on
+# `feat/rhino-cal-jax`; the repository's default branch carries the numpy
+# pipeline and no `pyproject.toml` at all, so the URL without a ref installs
+# nothing and fails at the build backend.
 cal = ["rhino-cal-jax"]
 # MomentRFIFlaggingOperator bridges to the numpy MomentRFI package through
 # jax.pure_callback. MomentRFI is not on PyPI, so this extra names the
@@ -100,6 +104,24 @@ dev = [
     "pytest>=8",
     "pytest-cov",
     "ruff",
+    # tests/test_docs_links.py checks every `](page.md#anchor)` against the
+    # anchors myst would generate, and imports myst's own slugifier to do it
+    # rather than inventing a third scheme that agrees with neither. That
+    # slugifier otherwise arrives only with myst-parser, in the `docs` extra,
+    # which the dev group does not install -- so without this line the guard
+    # cannot run at all, and every one of its cases fails claiming the
+    # destination page "has no such anchor". Measured 2026-08-09: 31 of 31
+    # failing, zero links actually broken.
+    "mdit-py-plugins",
+    # Eighteen module-level `import numpyro` across five test modules, none of
+    # them guarded by `importorskip` -- unlike `rhino_cal_jax`, which is guarded
+    # because it cannot come from an index at all. numpyro can, so the suite is
+    # meant to exercise the gradient posteriors rather than skip past them.
+    # A runtime *extra* for users and a hard requirement for the tests is exactly
+    # what a dev group is for: without it `pytest` stops at collection with five
+    # ImportErrors, and the install page's own "run the suite" command cannot
+    # run. Measured 2026-08-09.
+    "numpyro",
 ]
 
 [tool.hatch.build.targets.wheel]

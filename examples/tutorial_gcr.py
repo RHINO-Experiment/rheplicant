@@ -8,7 +8,7 @@ beam through a known gain, in 4 frequency channels. The sky is 256 unknowns --
 far past where a gradient sampler is sensible, and exactly where a
 conjugate-Gaussian solve belongs.
 
-Run:  uv run python examples/tutorial_gcr.py
+Run:  .venv/bin/python examples/tutorial_gcr.py
 """
 
 import jax

@@ -519,7 +519,7 @@ linear and solved by CG. The instrument description is written once at the top
 and never edited.
 
 ```bash
-uv run --frozen python examples/inferring_anything.py
+.venv/bin/python examples/inferring_anything.py
 ```
 
 The figures on this page come from

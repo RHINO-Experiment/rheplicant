@@ -1,6 +1,8 @@
 """Agreement with rhino-cal's numpy readers, where both can read the same file.
 
-Skipped unless the rhino-cal checkout is importable. Nothing here re-tests
+Opt-in: skipped unless ``RHEPLICANT_RHINO_CAL`` names a rhino-cal checkout. The
+reference is on no index, so no install can supply it and no default path can
+guess it. Nothing here re-tests
 rheplicant's own rejections -- those live in test_touchstone.py and
 test_rhino.py. What this file establishes is that where the reference produces
 an answer, so do we, and it is the same one.
@@ -17,17 +19,80 @@ exercised by the two test files named above, and it is *not* something this
 file can assert on, because agreement is only defined where both answer.
 """
 
+import contextlib
+import importlib.util
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-RHINO_CAL = Path("~/projects/rhino-cal").expanduser()
-if RHINO_CAL.is_dir() and str(RHINO_CAL) not in sys.path:
-    sys.path.insert(0, str(RHINO_CAL))
+#: Where the reference checkout is, named by whoever has one.
+#:
+#: This used to be ``Path("~/projects/rhino-cal").expanduser()``, hard-coded --
+#: a fact about one machine that every other machine silently failed. Worse, the
+#: directory went onto ``sys.path`` at import time, *above* the skip below, so
+#: the mutation happened even when this module then bowed out. That leak reached
+#: other tests: the checkout carries a top-level ``rhino_cal_jax``, which made
+#: ``find_spec`` succeed in the pytest process for a module no subprocess could
+#: import, and ``test_tour_runs.py`` failed on it in full runs while passing
+#: alone. Nothing here touches the global path any more; see ``_load_reference``
+#: and the ``data_handler`` fixture.
+_RHINO_CAL_ENV = "RHEPLICANT_RHINO_CAL"
 
-reference = pytest.importorskip("utils.utils", reason=f"rhino-cal not present at {RHINO_CAL}")
+
+def _rhino_cal_root() -> Path | None:
+    """The checkout root, or ``None`` if this machine has not named one."""
+    named = os.environ.get(_RHINO_CAL_ENV)
+    if not named:
+        return None
+    root = Path(named).expanduser()
+    return root if root.is_dir() else None
+
+
+def _load_reference():
+    """rhino-cal's ``utils.utils``, loaded from its file rather than imported.
+
+    By path, so ``sys.path`` is never touched: this half of the comparison needs
+    exactly one module, ``utils/utils.py``, which imports only numpy and astropy
+    and nothing from its own tree. Loading it directly buys the cross-check
+    without giving the whole checkout import precedence over the real
+    environment for the rest of the session.
+    """
+    root = _rhino_cal_root()
+    if root is None:
+        return None
+    module_path = root / "utils" / "utils.py"
+    if not module_path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_rhino_cal_reference", module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    # Registered for the duration of exec_module and no longer: a module that
+    # refers to itself while executing (dataclasses, get_type_hints, anything
+    # reading sys.modules[__name__]) needs to find itself there, and leaving it
+    # registered afterwards would be the global state this loader exists to
+    # avoid. We hold the only reference either way.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except ImportError:  # the reference's own dependencies, not ours to supply
+        return None
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+reference = _load_reference()
+if reference is None:
+    pytest.skip(
+        f"no rhino-cal checkout to compare against: set {_RHINO_CAL_ENV} to one "
+        "(see docs/install.md). These are cross-checks against a reference "
+        "implementation that is not on any index, so they are opt-in by nature.",
+        allow_module_level=True,
+    )
 h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 
 from rheplicant.radio.rhino import read_rhino_observation  # noqa: E402
@@ -77,8 +142,29 @@ def data_handler():
     """Behind a fixture, not at module scope, so that a failure to import the
     reference *HDF5* reader does not also skip the Touchstone comparisons --
     those need only ``utils.utils``, which has no dependencies beyond numpy
-    and astropy."""
-    return _import_data_handler()
+    and astropy.
+
+    This half cannot be loaded by path the way ``utils.utils`` is: ``gcr`` is a
+    package whose modules import each other, so it needs a real entry on
+    ``sys.path``. The entry therefore lives and dies with this fixture rather
+    than being added at import time and left there -- an import-time insert is
+    what leaked a top-level ``rhino_cal_jax`` into every later test in the
+    session and broke ``test_tour_runs.py`` in full runs.
+    """
+    root = _rhino_cal_root()
+    if root is None:  # pragma: no cover - the module-level skip already caught this
+        pytest.skip(f"no rhino-cal checkout; set {_RHINO_CAL_ENV}")
+
+    entry = str(root)
+    added = entry not in sys.path
+    if added:
+        sys.path.insert(0, entry)
+    try:
+        yield _import_data_handler()
+    finally:
+        if added:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(entry)
 
 
 # The HDF5 fixture is rebuilt here rather than imported from test_rhino.py:

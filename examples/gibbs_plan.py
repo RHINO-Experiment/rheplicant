@@ -18,7 +18,7 @@ The repair is design, not tolerance: three more calibration loads, seven switch
 positions, nullity 0. The tour's own tip -- the switching cycle IS the
 calibration design -- one step further. Two more unknowns need more design.
 
-Run:  uv run --frozen python examples/gibbs_plan.py    (~45 s)
+Run:  .venv/bin/python examples/gibbs_plan.py    (~45 s)
 Needs: rhino-cal-jax (the `cal` extra) and numpyro.
 """
 

@@ -27,11 +27,23 @@ numerical, so a suite that only held in one precision would be testing the
 arithmetic instead of the model.
 """
 
-import sys
-from pathlib import Path
-
 import jax.numpy as jnp
 import pytest
+
+# No sys.path insert to reach the sibling: pytest's default (prepend) import
+# mode already puts this directory on the path, because tests/inference/ has no
+# __init__.py and is therefore the basedir of every module in it. The insert
+# that used to be here prepended tests/ globally, at import time and for the
+# rest of the session, which is the shape of leak that made an unrelated module
+# visible to a later test and broke it -- see tests/test_tour_runs.py.
+from test_identifiability import (  # noqa: E402
+    GAIN0,
+    N_FREQ,
+    N_TIME,
+    T_ANT0,
+    TONE_KELVIN,
+    make_pipeline,
+)
 
 from rheplicant import Coordinates, State
 from rheplicant.core.errors import ParameterSpaceError
@@ -42,16 +54,6 @@ from rheplicant.inference.linear import (
     condition_estimate,
     linear_operator,
     wiener_solve,
-)
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from inference.test_identifiability import (  # noqa: E402
-    GAIN0,
-    N_FREQ,
-    N_TIME,
-    T_ANT0,
-    TONE_KELVIN,
-    make_pipeline,
 )
 
 #: Flat enough that the prior does not resolve the degeneracy. A tight prior

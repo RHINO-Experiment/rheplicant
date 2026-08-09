@@ -12,7 +12,7 @@ behind Step 1's $f_\mathrm{sky}$, and their numbers come from the test suites
 named there rather than from the script.
 
 ```bash
-uv run --frozen python examples/sky_to_noise_wave.py
+.venv/bin/python examples/sky_to_noise_wave.py
 ```
 
 - [The one identification](#the-one-identification) — what makes the two halves one model
@@ -170,7 +170,7 @@ from rheplicant.radio import cst_beam_maps, horizon_truncated_beam
 from rheplicant.radio.sky import DriftScanProjector
 
 freq = jnp.linspace(60e6, 85e6, 8)
-beam_maps = cst_beam_maps("~/Dataspace/RHINO/CST_beams/HornDryGround",
+beam_maps = cst_beam_maps("/path/to/CST_beams/HornDryGround",  # your export directory
                           freq, nside=16)
 beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
 

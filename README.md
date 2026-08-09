@@ -134,7 +134,9 @@ pip install "rheplicant[cal]"     # + the noise-wave model (rhino-cal-jax)
 
 # or, for development:
 git clone https://github.com/RHINO-Experiment/rheplicant
-cd rheplicant && uv sync --frozen   # NOT plain `uv sync` -- see below
+cd rheplicant
+uv venv                          # NOT `uv sync`, which cannot work here
+uv pip install -e . --group dev
 ```
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
@@ -181,7 +183,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2768 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2767 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -215,8 +217,14 @@ for you. That split is also why the reported coverage is 82 % rather than the
 and 1091 of its 1111 uncovered statements are the nine files that session
 covers.
 
-`uv sync` and `uv run` need `--frozen`. Commands, reasons and the rest of the
-setup are in
+Neither `uv sync` nor `uv run` works here, with or without `--frozen`: locking
+resolves every declared extra and two of them name packages that are not on
+PyPI by design, so no lockfile exists or can be made. Use `uv venv` plus
+`uv pip install`, and call the venv's interpreter directly. Two optional
+datasets that cannot be published — the CST beam exports and a `rhino-cal`
+checkout — are named by `RHEPLICANT_RHINO_BEAMS` and `RHEPLICANT_RHINO_CAL`
+rather than guessed at a path; without them the work that needs them stands
+down and says so. Commands, reasons and the rest of the setup are in
 **[Install](https://rheplicant.readthedocs.io/en/latest/install.html)**.
 
 ## Developers and maintainers

@@ -160,7 +160,8 @@ instrument is another template registered the same way.
 * - You want to…
   - Start here
 * - install it
-  - [Install](install.md) — limTOD comes from source, and `uv` needs `--frozen`
+  - [Install](install.md) — limTOD resolves from PyPI; `uv sync` and `uv run`
+    do not work here, so use `uv venv` + `uv pip install`
 * - understand the whole thing in one sitting
   - [The guided tour](tour.md) — one worked example, simulated then inferred
 * - simulate an instrument

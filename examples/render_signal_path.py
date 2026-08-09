@@ -4,7 +4,7 @@ Writes ``signal_path.html`` to the current directory — the full single-antenna
 flowchart with the provided operators highlighted, traversed-as-identity
 nodes half-lit, and everything else dimmed. Open it in a browser.
 
-Run:  uv run python examples/render_signal_path.py
+Run:  .venv/bin/python examples/render_signal_path.py
 """
 
 import pathlib

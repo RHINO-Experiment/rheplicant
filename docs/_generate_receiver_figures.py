@@ -21,11 +21,12 @@ Three figures:
 Falls back to an analytic horn when the (unpublished) RHINO CST export is
 absent, so the figures regenerate anywhere; the caption says which was used.
 
-Run:  uv run --frozen python docs/_generate_receiver_figures.py
-      uv run --frozen python docs/_generate_receiver_figures.py --replot   (cached)
+Run:  .venv/bin/python docs/_generate_receiver_figures.py
+      .venv/bin/python docs/_generate_receiver_figures.py --replot   (cached)
 """
 
 import argparse
+import os
 from pathlib import Path
 
 import jax
@@ -65,7 +66,11 @@ from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 STATIC = Path(__file__).parent / "_static"
 CACHE = Path(__file__).parent / "_receiver-figure-data.npz"  # git-ignored
-RHINO_BEAMS = Path("~/Dataspace/RHINO/CST_beams/HornDryGround").expanduser()
+# Named rather than guessed: the CST exports are not redistributable, so a
+# hard-coded home directory here described one machine and quietly produced the
+# Gaussian-beam figure everywhere else.
+_NAMED_BEAMS = os.environ.get("RHEPLICANT_RHINO_BEAMS")
+RHINO_BEAMS = Path(_NAMED_BEAMS).expanduser() if _NAMED_BEAMS else None
 
 THEMES = {
     "light": {"fg": "#24292f", "muted": "#57606a", "grid": "#d0d7de",
@@ -118,9 +123,9 @@ def compute():
     """Run the documented path and return everything the figures plot."""
     freq = jnp.linspace(60e6, 85e6, N_FREQ)
     theta = jnp.arccos(1.0 - 2.0 * (jnp.arange(N_PIX) + 0.5) / N_PIX)
-    if RHINO_BEAMS.is_dir():
+    if RHINO_BEAMS is not None and RHINO_BEAMS.is_dir():
         raw = jnp.asarray(cst_beam_maps(RHINO_BEAMS, freq, nside=NSIDE))
-        source = "RHINO horn (CST export, HornDryGround)"
+        source = f"RHINO horn (CST export, {RHINO_BEAMS.name})"
     else:
         raw = jnp.stack([jnp.exp(-0.5 * (theta / 0.40) ** 2)] * N_FREQ)
         source = "Gaussian stand-in (CST export unavailable)"

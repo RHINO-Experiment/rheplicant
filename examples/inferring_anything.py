@@ -19,7 +19,7 @@ None of this required a new operator class. That is the point: a
 re-parameterization is an inference decision, so it lives in the inference
 layer, not in the instrument description.
 
-Run:  uv run python examples/inferring_anything.py
+Run:  .venv/bin/python examples/inferring_anything.py
 """
 
 import jax

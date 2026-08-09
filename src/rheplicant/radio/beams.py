@@ -81,9 +81,7 @@ def _require_cstbeam():
         raise ImportError(
             "rheplicant.radio.beams needs limTOD.cstbeam, which is where the CST "
             "far-field reader lives (limTOD >= 1.10). The installed limTOD does "
-            'not have it: pip install "limTOD[jax] @ '
-            'git+https://github.com/zzhang0123/limTOD", or reinstall limTOD from '
-            "source if you are tracking it there."
+            'not have it: pip install --upgrade "limTOD[jax]>=1.10"'
         ) from exc
     return cstbeam
 

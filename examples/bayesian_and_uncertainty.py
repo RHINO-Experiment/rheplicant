@@ -7,7 +7,7 @@ One twin, three uncertainty routes through the same seam:
    since the model is nearly linear in the parameters;
 3. delta-method prediction band + Monte Carlo posterior predictive.
 
-Run:  uv run python examples/bayesian_and_uncertainty.py
+Run:  .venv/bin/python examples/bayesian_and_uncertainty.py
 (requires the numpyro extra: pip install 'rheplicant[numpyro]')
 """
 

@@ -8,7 +8,7 @@ compiles it to the equivalent Pipeline/SumOperator nesting (see
 Then the inference seam works unchanged: gradient calibration of the gain
 against "observed" data, without touching the forward model's internals.
 
-Run:  uv run python examples/radio_digital_twin.py
+Run:  .venv/bin/python examples/radio_digital_twin.py
 """
 
 import equinox as eqx

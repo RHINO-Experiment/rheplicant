@@ -18,6 +18,7 @@ What belongs here is the seam:
 plus RHINO's actual horn, which is this package's subject and not limTOD's.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -35,9 +36,17 @@ hp = pytest.importorskip("healpy", reason="healpy comes with limTOD")
 pytest.importorskip("scipy")
 pytest.importorskip("limTOD.cstbeam", reason="the CST reader lives in limTOD")
 
-RHINO_BEAMS = Path("~/Dataspace/RHINO/CST_beams/HornDryGround").expanduser()
+#: The CST far-field exports, named by whoever has them. Hard-coding
+#: ``~/Dataspace/RHINO/CST_beams/HornDryGround`` described one machine and
+#: skipped silently on every other, which reads as "these tests pass" rather
+#: than "these tests never ran". The measurements are not redistributable, so
+#: an environment variable is the honest interface.
+RHINO_BEAMS_ENV = "RHEPLICANT_RHINO_BEAMS"
+_named = os.environ.get(RHINO_BEAMS_ENV)
+RHINO_BEAMS = Path(_named).expanduser() if _named else None
 requires_rhino = pytest.mark.skipif(
-    not RHINO_BEAMS.is_dir(), reason=f"RHINO CST beams not present at {RHINO_BEAMS}"
+    RHINO_BEAMS is None or not RHINO_BEAMS.is_dir(),
+    reason=f"no RHINO CST beam directory; set {RHINO_BEAMS_ENV} to one",
 )
 
 THETA_STEP, PHI_STEP = 2.0, 5.0
