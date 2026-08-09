@@ -120,18 +120,27 @@ class TestAffineUnitsCannotCompose:
         assert "273.15" in message  # the offset that cannot be distributed
         assert "K/s" in message  # the remedy
 
-    def test_the_suggested_remedy_is_itself_a_legal_unit(self):
+    @pytest.mark.parametrize(
+        "token,remedy",
+        [("celsius/s", "K/s"), ("celsius*m", "K*m"), ("m*celsius", "m*K")],
+    )
+    def test_the_suggested_remedy_is_itself_a_legal_unit(self, token, remedy):
         """A refusal that recommends something this same function refuses is
         worse than one that recommends nothing. A pure product has no
         denominator, and a remedy built with a placeholder '1' below the line
-        would be exactly that -- 'K/1' has no atom '1' in this alphabet."""
-        for token in ("celsius/s", "celsius*m", "m*celsius"):
-            with pytest.raises(ConfigError) as excinfo:
-                canonical_unit(token)
-            message = str(excinfo.value)
-            after = message.split("Declare the compound in ")[1]
-            suggestion = after.split("(here: ")[1].split(")")[0]
-            canonical_unit(suggestion)  # must not raise
+        would be exactly that -- 'K/1' has no atom '1' in this alphabet.
+
+        The expected remedy is written out rather than parsed back out of the
+        message. An earlier version split the prose on "Declare the compound
+        in " and "(here: ", which made a pure copy-edit of that sentence fail
+        with a raw IndexError -- a message about nothing being wrong. This
+        file's own refusals get reworded as a matter of course here, so a test
+        that breaks on rewording is a test that will be edited into silence.
+        """
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit(token)
+        assert remedy in str(excinfo.value)
+        canonical_unit(remedy)  # the recommendation must itself be accepted
 
     def test_the_worked_example_quotes_the_compound_it_was_given(self):
         """The example was hard-coded to '/s', so 'celsius*m' was refused with
