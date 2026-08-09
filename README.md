@@ -175,7 +175,7 @@ architecture decisions and the changelog, with a sidebar that lists them.
 Build it locally with
 `cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
-Design decisions D1–D32 and the physics roadmap are in
+Design decisions D1–D36 and the physics roadmap are in
 [`DESIGN.md`](https://rheplicant.readthedocs.io/en/latest/design.html); what
 arrived when is in
 [`CHANGELOG.md`](https://rheplicant.readthedocs.io/en/latest/changelog.html).

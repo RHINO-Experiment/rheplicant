@@ -1563,6 +1563,126 @@ over the data: a campaign refuses to quote an error bar below its declared
 systematic floor, and a memory refuses to sum two epochs that share an
 input-product hash unless the product is represented among the global latents.
 
+### D33 — The post-`gain` trunk is in `adc_count`, and only `adc.scale` carries the conversion
+
+Five operator fields carry no unit anywhere in this package — `adc.scale`,
+`gain.gain`, `apply_cal.gain`, `flagging.threshold`, `filters[].regularization` —
+while `RhinoObservation.waterfall` is documented as "raw power, arbitrary scale"
+and every operator upstream of it produces kelvin. Somewhere between the two the
+signal stops being a temperature, and nothing says where.
+
+**It is declared to happen at `adc`.** The trunk downstream of `gain` is
+`adc_count`, and `adc.scale` carries the compound unit `adc_count/K`. That makes
+`adc_count/K × K = adc_count` a *dimensional identity a loader can check*, which
+is what promotes the unit rule from a spelling convention into a real one. It is
+also the only arrangement under which the tone-protection threshold and the
+flagging threshold are two numbers in the same unit, so they can be compared at
+all.
+
+**`gain` sits before `adc` on the trunk** (`bandpass → gain → noise → emi →
+adc`), so `gain.gain` is genuinely dimensionless and only `adc.scale` converts.
+An earlier draft of the config schema pointed the other way.
+
+**Rejected.** Calling the trunk dimensionless and letting the gain absorb the
+absolute level throws the check away entirely. A top-level `observation.data_unit`
+adds a second place to state one fact, and two places to state one fact is how
+they come to disagree.
+
+**Revisit if** either RHINO HDF5 producer starts recording a physical unit for
+the waterfall — the conversion then stops being a declaration and becomes a
+measurement, and should be read rather than declared — or the absolute level
+turns out to be degenerate with another fitted quantity, in which case
+"dimensionless" stops throwing away a check and starts describing the truth.
+
+### D34 — The LST bridge is a units-only adapter in this package, not a call from the layer above
+
+`coords.extra["lst_deg"]` is required by both real sky engines and is produced by
+nothing in `src/` except `DriftScanProjector.uniform_lst_grid`, which only makes a
+synthetic uniform turn. `limTOD.simulator.generate_LSTs_deg(lat, lon, height_m,
+time_list, start_time_utc)` exists upstream and this package never calls it. The
+consequence is that `site.lon_deg` and `site.alt_m` are recorded and never
+consumed — two keys a user fills in that change nothing, which is worse than not
+offering them.
+
+**A thin `rheplicant.radio.site` adapter closes it**, matching the seam
+`radio/beams.py` already established for CST ingestion: units in, units out, no
+physics of its own. That makes `observation.site` a section this package can
+validate rather than one it passes through.
+
+**Rejected.** Letting the config layer call limTOD directly leaves `rheplicant`
+unable to check the one quantity both engines depend on. Requiring an `lst` array
+always and deleting `lon`/`alt` is honest about today, but gives up precisely what
+a user with a real observing log needs.
+
+**Revisit if** limTOD changes `generate_LSTs_deg`'s signature or semantics — the
+adapter is a pass-through and inherits any drift — or if users turn out to arrive
+with LST arrays already computed by their own pipeline, in which case the declared
+array is the honest primary and the adapter becomes the convenience.
+
+### D35 — `phi0_deg` and `phi_sense` are facts about the horn, so they travel with the beam
+
+`radio/beams.py` calls them "a fact about the as-built horn, not the file". A fact
+about the horn cannot live in a run config without being restated for every run,
+and cannot live in a preset without the preset guessing on the user's behalf — in
+exactly the place this package otherwise refuses to guess.
+
+**They belong in a per-beam sidecar, hashed alongside the export** (the pyuvdata
+CST-settings precedent). Until that format ships they stay **required in the
+user's own file for `format: cst`, and no preset may supply them** — and they are
+refused for every other beam format, because they describe how a CST export's
+azimuth maps onto the beam-local chart and are meaningless for a raw HEALPix array
+or a synthesised map. For those, `frame:` is the genuinely unverifiable fact and is
+required instead.
+
+**Rejected, and the reason is measurement-shaped.** Letting a preset supply them
+marked `provisional: true` is the worst of the options available: **a mirrored beam
+passes every integral, every peak and every azimuthally-symmetric diagnostic
+unchanged.** There is no numerical symptom at all, so the only protection is that
+the value was stated by someone who knew it — and `provisional: true` is a warning
+a user clicks past.
+
+**Revisit if** CST (or whichever exporter is in use) gains a standard metadata
+block carrying orientation and sense, making the sidecar redundant; or if
+pyuvdata's CST-settings convention is adopted wholesale, in which case use theirs
+rather than inventing a second one.
+
+### D36 — `check_linearity` runs by default, and the only escape is a written reason
+
+`linear_operator(check=True)`'s own comment is the argument: "leave it on; turning
+it off buys a class of silent, confident errors". A declared-linear latent that is
+not linear gives a fit that converges, a residual that looks right, and an answer
+that is wrong — the same shape as every other failure this file records.
+
+**So it runs at config validation, always**, and `checks.linearity.mode: skip`
+plus a **required written reason** is the only way past it. The reason lands in the
+run log, so a skipped check is a sentence someone wrote rather than a flag someone
+set. The cost is three forward evaluations per declared-linear latent — negligible
+for a noise-wave block, non-negligible for a 10⁶-coefficient sky block.
+
+**Rejected.** Defaulting it on but auto-skipping blocks above a declared size
+reintroduces exactly the size heuristic this package refuses to make anywhere else
+— notably for `identifiability`, where the absence of a size threshold is
+deliberate and documented. A user with a 10⁶ block can write one sentence; a
+threshold cannot know which 10⁶ block was safe.
+
+**Revisit if** a real block is found where the three forward evaluations are
+prohibitive *and* the skip-with-a-reason escape proves too coarse to express the
+situation. That would be evidence for a cheaper check, not for a size threshold.
+
+### The pattern in D33–D36
+
+Three of these four chose the option that **keeps a check possible** over the one
+that is cheaper or has fewer keys. That is the tie-breaker for the config layer's
+remaining questions:
+
+> Where two options differ in whether a wrong configuration can be *detected*,
+> prefer the detectable one — because every failure mode named in this package's
+> own docstrings is one that returns a finite, correctly-shaped, plausible, wrong
+> number.
+
+D35 is the sharpest instance: it rejects the convenient option specifically
+because the failure it guards against has no numerical symptom at all.
+
 ## Known deferred issues
 
 - `data` is any pytree; the radio convention is a single `(n_time, n_freq)`
