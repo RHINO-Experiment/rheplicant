@@ -59,6 +59,16 @@ class TestTheQuotientGrammar:
         assert got == pytest.approx(1e6)
         assert unit.canonical == "Hz/s"
 
+    def test_a_quotient_divides_by_the_denominator_factor(self):
+        """MEASURED: with `factor /= atom.factor` mutated to `*=`, all 26 of
+        this file's other tests still pass -- every other quotient fixture has
+        a denominator atom of factor 1.0, where multiply and divide agree.
+        kHz has a factor of 1e3, so this is the fixture that can tell them
+        apart, and K/kHz is a unit a config can actually write."""
+        got, unit = convert_to_canonical(1.0, "K/kHz")
+        assert got == pytest.approx(1e-3)
+        assert unit.canonical == "K/Hz"
+
     def test_a_product_is_accepted(self):
         assert canonical_unit("K*s").canonical == "K*s"
 
@@ -77,6 +87,16 @@ class TestTheQuotientGrammar:
         assert "product" in message  # the grammar it is not
         assert "resources.arrays" in message  # the remedy
 
+    @pytest.mark.parametrize("token", ["K/", "*K", "K*", "K*/s", "K/*s", "K*s*"])
+    def test_an_empty_segment_is_refused(self, token):
+        """A stray or doubled separator is a template that expanded to nothing.
+        Filtering it out silently would let 'K/' read as 'K' and 'K*' read as
+        'K' -- the module's own position is that a unit it cannot convert is
+        refused by name rather than quietly repaired."""
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit(token)
+        assert token in str(excinfo.value)
+
 
 class TestAffineUnitsCannotCompose:
     def test_celsius_inside_a_quotient_is_refused(self):
@@ -89,6 +109,30 @@ class TestAffineUnitsCannotCompose:
         assert "celsius" in message
         assert "273.15" in message  # the offset that cannot be distributed
         assert "K/s" in message  # the remedy
+
+    def test_the_suggested_remedy_is_itself_a_legal_unit(self):
+        """A refusal that recommends something this same function refuses is
+        worse than one that recommends nothing. A pure product has no
+        denominator, and a remedy built with a placeholder '1' below the line
+        would be exactly that -- 'K/1' has no atom '1' in this alphabet."""
+        for token in ("celsius/s", "celsius*m", "m*celsius"):
+            with pytest.raises(ConfigError) as excinfo:
+                canonical_unit(token)
+            message = str(excinfo.value)
+            after = message.split("Declare the compound in ")[1]
+            suggestion = after.split("(here: ")[1].split(")")[0]
+            canonical_unit(suggestion)  # must not raise
+
+    def test_the_worked_example_quotes_the_compound_it_was_given(self):
+        """The example was hard-coded to '/s', so 'celsius*m' was refused with
+        a sentence about 'celsius/s' -- a message describing a unit the caller
+        did not write."""
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit("celsius*m")
+        message = str(excinfo.value)
+        assert "celsius*m" in message
+        assert "K*m" in message  # the remedy, derived
+        assert "celsius/s" not in message
 
 
 class TestAnUnknownTokenIsRefused:
@@ -131,3 +175,19 @@ class TestTheFieldNameCrossCheck:
         config declares one and it is recorded as a declaration; there is
         nothing to cross-check it against."""
         check_field_name_unit("scale", canonical_unit("adc_count/K"))
+
+
+def test_offset_is_applied_after_scaling_not_before(monkeypatch):
+    """celsius is the only affine atom and its factor is 1.0, so v*f+o and
+    (v+o)*f agree on every fixture the production alphabet can produce. A
+    synthetic Fahrenheit atom is the only way to separate them -- and the day
+    a real one is added, this is the test that will already be there."""
+    from rheplicant.config import units as units_mod
+
+    monkeypatch.setitem(
+        units_mod._ATOMS,
+        "fahrenheit",
+        units_mod._Atom("K", "temperature", 5 / 9, 255.372222),
+    )
+    got, _ = convert_to_canonical(41.0, "fahrenheit")
+    assert got == pytest.approx(278.15)

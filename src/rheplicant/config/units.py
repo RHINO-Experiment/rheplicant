@@ -138,57 +138,69 @@ def canonical_unit(token: str) -> Unit:
                 "a resources.arrays entry and reference it."
             )
 
-    head, _, tail = text.partition("/")
-    numerator = [part for part in head.split("*") if part.strip()]
-    denominator = [part for part in tail.split("*") if part.strip()]
-    if not numerator:
+    head, slash, tail = text.partition("/")
+    if slash and not head.strip():
         raise ConfigError(
             f"Unit {token!r} has nothing above the '/'. Write the numerator "
             "explicitly -- '1/s' has no atom '1' here, so use 'cycles/s' or "
             "'dimensionless/s', whichever states what the quantity is."
         )
+    numerator = head.split("*")
+    denominator = tail.split("*") if slash else []
+    for segment in (*numerator, *denominator):
+        if not segment.strip():
+            raise ConfigError(
+                f"Unit {token!r} has an empty segment -- split on '/' and '*' it "
+                f"gives {[*numerator, *denominator]}, and one of those is blank. "
+                "A stray or doubled separator is almost always a template that "
+                "expanded to nothing, and dropping it silently would turn that "
+                "into a unit which reads as valid: 'K/' would become 'K', and "
+                "every value under it would be wrong by whatever the denominator "
+                "should have been -- finite, correctly-shaped, and undetectable "
+                "downstream. Write the missing atom out, or delete the separator."
+            )
 
-    factor = 1.0
-    offset = 0.0
-    up: list[str] = []
-    down: list[str] = []
-    compound = len(numerator) + len(denominator) > 1
-    for token_up in numerator:
-        atom = _atom(token_up)
+    # Resolve every atom before applying any rule, so an unknown token is
+    # reported as one and the canonical form below -- which the affine refusal
+    # hands back as its suggested remedy -- is built only from known atoms.
+    numerator_atoms = [_atom(part) for part in numerator]
+    denominator_atoms = [_atom(part) for part in denominator]
+    compound = len(numerator_atoms) + len(denominator_atoms) > 1
+    up = tuple(atom.canonical for atom in numerator_atoms)
+    down = tuple(atom.canonical for atom in denominator_atoms)
+    # Every canonical spelling is itself a key of _ATOMS, so this string always
+    # parses back to an equal Unit. That is what lets a refusal quote it.
+    canonical = "*".join(up) + (("/" + "*".join(down)) if down else "")
+
+    for raw, atom in zip(numerator, numerator_atoms, strict=True):
         if atom.offset and compound:
             raise ConfigError(
-                f"Unit {token!r} uses {token_up.strip()!r} inside a compound. "
-                f"That atom is affine -- it converts with an offset of "
-                f"{atom.offset} -- and an affine unit has no meaning as a factor: "
-                f"2 {token_up.strip()}/s is not {2 + atom.offset} K/s. Declare the "
-                f"compound in {atom.canonical} (here: "
-                f"{atom.canonical}/{'*'.join(t.strip() for t in denominator) or '1'}"
-                "), and convert the offset where the quantity is still a scalar."
+                f"Unit {token!r} uses {raw.strip()!r} inside a compound. That atom "
+                f"is affine -- it converts with an offset of {atom.offset} -- and an "
+                f"affine unit has no meaning as a factor: 2 {text} is not "
+                f"{2 + atom.offset} {canonical}. Declare the compound in "
+                f"{atom.canonical} (here: {canonical}), and convert the offset "
+                "where the quantity is still a scalar."
             )
-        factor *= atom.factor
-        offset = atom.offset
-        up.append(atom.canonical)
-    for token_down in denominator:
-        atom = _atom(token_down)
+    for raw, atom in zip(denominator, denominator_atoms, strict=True):
         if atom.offset:
             raise ConfigError(
-                f"Unit {token!r} uses the affine atom {token_down.strip()!r} as a "
+                f"Unit {token!r} uses the affine atom {raw.strip()!r} as a "
                 f"denominator. Dividing by a unit with an offset of {atom.offset} "
                 f"is not defined; use {atom.canonical} below the line."
             )
-        factor /= atom.factor
-        down.append(atom.canonical)
 
-    canonical = "*".join(up) + (("/" + "*".join(down)) if down else "")
-    dimension = _atom(numerator[0]).dimension if not compound else None
-    return Unit(
-        canonical,
-        factor,
-        offset if not compound else 0.0,
-        tuple(up),
-        tuple(down),
-        dimension,
-    )
+    factor = 1.0
+    for atom in numerator_atoms:
+        factor *= atom.factor
+    for atom in denominator_atoms:
+        factor /= atom.factor
+
+    # A compound is never affine: the loop above refused every way of getting
+    # an offset into one, so the sole numerator atom is the only source left.
+    offset = numerator_atoms[0].offset if not compound else 0.0
+    dimension = numerator_atoms[0].dimension if not compound else None
+    return Unit(canonical, factor, offset, up, down, dimension)
 
 
 def convert_to_canonical(value, token: str):
@@ -200,6 +212,13 @@ def convert_to_canonical(value, token: str):
         destined for a static field is not turned into a float on the way.
     """
     unit = canonical_unit(token)
+    # Exact equality, deliberately, not a lazy `math.isclose`. Every factor
+    # here is a product and quotient of the table's own literals, and x/x is
+    # exactly 1.0 in IEEE-754 for any finite x -- so a unit that scales by
+    # nothing lands ON 1.0 rather than near it ('ms*kHz' is exactly 1.0, and
+    # no pair of atoms in the table lands near 1.0 without landing on it). A
+    # tolerance here would be its own fuzz: it would return a genuinely
+    # scaled value unscaled.
     if unit.factor == 1.0 and unit.offset == 0.0:
         return value, unit
     return value * unit.factor + unit.offset, unit
