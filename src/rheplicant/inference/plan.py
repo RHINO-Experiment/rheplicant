@@ -299,18 +299,32 @@ class Block:
             a conjugate solve has no inner steps for it to mean.
         engine: ``"conjugate"``, ``"gradient"``, or ``None`` to derive. An
             override, not the norm.
+        learning_rate: Adam step size for a **gradient** block at
+            :meth:`SamplingPlan.estimate`, as a fraction of ``max|init|``.
+            ``None`` takes
+            :data:`~rheplicant.inference.engines.DEFAULT_LEARNING_RATE`.
+            It has no meaning at :meth:`SamplingPlan.sample`, where NUTS adapts
+            its own step size, and none for a conjugate block, which has no
+            iterate to step. Giving it to a conjugate block is an error rather
+            than an ignored argument, for the same reason ``steps`` is.
     """
 
     names: tuple[str, ...]
     steps: int | None
     engine: str | None
+    learning_rate: float | None
 
     def __init__(
-        self, *names: str, steps: int | None = None, engine: str | None = None
+        self,
+        *names: str,
+        steps: int | None = None,
+        engine: str | None = None,
+        learning_rate: float | None = None,
     ) -> None:
         object.__setattr__(self, "names", tuple(names))
         object.__setattr__(self, "steps", steps)
         object.__setattr__(self, "engine", engine)
+        object.__setattr__(self, "learning_rate", learning_rate)
         self._check()
 
     def _check(self) -> None:
@@ -352,6 +366,19 @@ class Block:
                 "sweep, which is a latent excluded from the inference while the partition "
                 "check still reports it covered."
             )
+        if self.learning_rate is not None:
+            if not self.learning_rate > 0.0:  # `not >` so a NaN is refused too
+                raise ParameterSpaceError(
+                    f"learning_rate must be > 0, got {self.learning_rate}. It is a "
+                    "fraction of max|init|, not an absolute step."
+                )
+            if self.engine == "conjugate":
+                raise ParameterSpaceError(
+                    "Block(..., engine='conjugate', learning_rate=...) is a "
+                    "contradiction: a conjugate block is solved in closed form and "
+                    "has no iterate for a step size to scale. Drop learning_rate, or "
+                    "drop engine='conjugate' if the block is meant to be gradient."
+                )
 
     @property
     def label(self) -> str:
@@ -806,7 +833,9 @@ class SamplingPlan:
                     )
                 else:
                     values, potential = gradient_estimate(
-                        cond, block.names, values, steps=steps
+                        cond, block.names, values, steps=steps,
+                        **({} if block.learning_rate is None
+                           else {"learning_rate": block.learning_rate}),
                     )
                     residuals[block.names] = float(potential)
         return values
