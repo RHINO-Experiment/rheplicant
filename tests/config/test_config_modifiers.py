@@ -235,6 +235,122 @@ class TestNormalize:
         assert "32838" in message  # the measurement that makes this a declaration
 
 
+class TestNormalizeRefusesADivisorThatCannotDivide:
+    """Three of the four conventions divide, and each can be handed a divisor
+    of zero or of nan. Measured before this guard existed:
+    ``{list: [1.0, -1.0], normalize: pixel_sum}`` returned ``[inf, -inf]`` and
+    ``{zeros: [n_freq], normalize: mean1}`` returned ``[nan, nan, nan]`` --
+    two documents that read as perfectly ordinary, neither refused.
+    """
+
+    @pytest.mark.parametrize(
+        ("kind", "node"),
+        [
+            ("mean1", {"list": [1.0, -1.0]}),
+            ("pixel_sum", {"list": [1.0, -1.0]}),
+            ("max1", {"zeros": ["n_freq"]}),
+        ],
+    )
+    def test_a_zero_divisor_is_refused_by_every_convention_that_divides(self, kind, node, context):
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({**node, "unit": "dimensionless", "normalize": kind}, context)
+        assert kind in str(excinfo.value)
+
+    @pytest.mark.parametrize("kind", ["mean1", "pixel_sum", "max1"])
+    def test_a_non_finite_divisor_is_refused_too(self, kind, context):
+        """Not only zero -- an inf anywhere in the value makes all three
+        reductions inf, and dividing by inf gives a quiet array of zeros
+        rather than anything that looks wrong. A guard written as `== 0`
+        alone passes this straight through."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {"list": [float("inf"), 1.0], "unit": "dimensionless", "normalize": kind}, context
+            )
+        assert kind in str(excinfo.value)
+
+    @pytest.mark.parametrize("kind", ["mean1", "pixel_sum"])
+    def test_a_nan_divisor_is_refused_where_a_comparison_guard_would_not(self, kind, context):
+        """The case the explicit ``isfinite`` branch exists for: inf + -inf is
+        nan, and nan answers False to `> 0`, to `< 0` and to `== 0` alike, so
+        every ordering-based way of writing this guard admits precisely the
+        worst divisor of the three."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {
+                    "list": [float("inf"), float("-inf")],
+                    "unit": "dimensionless",
+                    "normalize": kind,
+                },
+                context,
+            )
+        assert "nan" in str(excinfo.value)
+
+    def test_the_refusal_quotes_the_divisor_and_names_the_way_out(self, context):
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"zeros": ["n_freq"], "unit": "K", "normalize": "mean1"}, context)
+        message = str(excinfo.value)
+        assert "mean1" in message
+        assert "0.0" in message  # the divisor it actually computed, quoted
+        assert "normalize: none" in message  # what to write if that is the intent
+        for kind in NORMALIZATIONS:
+            assert kind in message, kind
+
+    def test_the_same_value_under_normalize_none_is_still_legal(self, context):
+        """The guard belongs to the division, not to the key. A zero-sum value
+        that declares `normalize: none` divides by nothing and says so, which
+        is exactly the remedy the refusal offers -- a guard hung on the
+        presence of `normalize:` would refuse its own advice."""
+        got = resolve_value({"zeros": ["n_freq"], "unit": "K", "normalize": "none"}, context)
+        assert [float(v) for v in got.value] == pytest.approx([0.0] * 8)
+
+
+class TestARealDtypeOverAComplexValue:
+    """Widening is lossless and stays legal; narrowing deletes the phase.
+    Measured before this guard: ``{value: 1+2j, dtype: float32}`` returned
+    ``1.0`` -- no exception, no warning, no record that anything was lost.
+    """
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_it_is_refused_rather_than_dropping_the_imaginary_part(self, dtype, context):
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"value": 1.0 + 2.0j, "dtype": dtype}, context)
+        assert dtype in str(excinfo.value)
+
+    def test_the_refusal_names_part_as_the_deliberate_route(self, context):
+        """`part: re` states "the real part is what I want" where a reader can
+        see it. That is the distinction this schema draws everywhere else --
+        between a computation the numbers imply and a declaration only the
+        document can make -- and the refusal has to hand the reader the second
+        one rather than merely blocking the first."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"value": 1.0 + 2.0j, "dtype": "float32"}, context)
+        message = str(excinfo.value)
+        for part in ("re", "abs", "angle"):
+            assert f"part: {part}" in message, part
+
+    def test_writing_part_alongside_the_dtype_does_not_get_past_it(self, context):
+        """The order is dtype -> part, so `{dtype: float32, part: re}` really
+        does delete the phase before `part` ever sees the value. The remedy is
+        to REPLACE the dtype: key, not to add to it, and the refusal has to
+        hold here or it would be advice the grammar itself contradicts."""
+        with pytest.raises(ConfigError):
+            resolve_value({"value": 1.0 + 2.0j, "dtype": "float32", "part": "re"}, context)
+
+    def test_widening_a_real_value_to_complex_is_not_refused(self, context):
+        """The other direction loses nothing and has a real use: a field that
+        must be complex, given a real starting value. A guard written on "the
+        dtypes disagree" rather than on the direction would refuse it."""
+        got = resolve_value(
+            {"list": [1.0, 2.0], "unit": "dimensionless", "dtype": "complex64"}, context
+        )
+        assert jnp.issubdtype(got.value.dtype, jnp.complexfloating)
+        assert [complex(v) for v in got.value] == [1.0 + 0j, 2.0 + 0j]
+
+    def test_a_complex_dtype_over_a_complex_value_keeps_the_phase(self, context):
+        got = resolve_value({"value": 1.0 + 2.0j, "dtype": "complex64"}, context)
+        assert complex(got.value) == pytest.approx(1.0 + 2.0j)
+
+
 class TestDtype:
     def test_it_overrides_the_run_dtype(self, context):
         got = resolve_value({"zeros": ["n_freq"], "unit": "K", "dtype": "complex64"}, context)

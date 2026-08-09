@@ -33,6 +33,10 @@ DTYPES: tuple[str, ...] = ("float32", "float64", "complex64", "complex128")
 #: inference/noise.py:264 check_noise_std_axis.
 NOISE_AXES: tuple[str, ...] = ("time", "freq", "none")
 
+#: The members of :data:`DTYPES` that cannot hold a phase. Derived from the
+#: table rather than written out, so the two stay in step.
+REAL_DTYPES: tuple[str, ...] = tuple(name for name in DTYPES if not name.startswith("complex"))
+
 
 def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
     """Apply every modifier that transforms the value, in a fixed order.
@@ -73,7 +77,7 @@ def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
             raise ConfigError(_unknown_modifier_message(key, modifiers[key], permitted))
 
     if "dtype" in modifiers:
-        value = jnp.asarray(value).astype(modifiers["dtype"])
+        value = _cast(value, modifiers["dtype"], form)
     if "part" in modifiers:
         value = _part(value, modifiers["part"])
     if "scale" in modifiers or "offset" in modifiers:
@@ -83,6 +87,38 @@ def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
     if modifiers.get("column"):
         value = _column(value, form)
     return value
+
+
+def _cast(value: Any, dtype: str, form: str):
+    """Apply ``dtype:``, refusing the one direction of it that loses meaning.
+
+    Widening a real value to complex is lossless and stays legal. Narrowing a
+    complex one is not: it deletes the phase and leaves a real number of
+    entirely plausible magnitude. jax itself is on the way to refusing it --
+    ``astype`` already warns ``Casting from complex to real dtypes will soon
+    raise a ValueError`` -- but a DeprecationWarning is not a refusal, and it
+    names neither the document nor the key that asked for it.
+    """
+    array = jnp.asarray(value)
+    if dtype in REAL_DTYPES and jnp.issubdtype(array.dtype, jnp.complexfloating):
+        raise ConfigError(
+            f"dtype: {dtype!r} is a real dtype and this {form} value is complex "
+            f"({array.dtype}). jnp.asarray(...).astype({dtype!r}) does not raise -- "
+            "measured, 1+2j comes back as 1.0 -- so the imaginary part is dropped and "
+            "what is left is a real number of entirely plausible magnitude that is a "
+            "different quantity. Every complex value in this package is a reflection "
+            "coefficient (gamma_src, gamma_rec, the s_params resources) and the "
+            "noise-wave receiver model is built on their phase, so NoiseWaveOperator "
+            "consumes the stripped value without complaint and the answer comes back "
+            "finite, correctly shaped and wrong. Taking a component is a declaration "
+            f"rather than a cast, so replace dtype: {dtype} with part: re if the real "
+            "part is what was meant, or with part: abs or part: angle if the magnitude "
+            "or the phase was. Replace rather than add: the order here is dtype then "
+            f"part, so writing both would still narrow first. The real dtypes are "
+            f"{list(REAL_DTYPES)}; dtype: is for widening a real value, which loses "
+            "nothing."
+        )
+    return array.astype(dtype)
 
 
 def _part(value: Any, part: str):
@@ -95,10 +131,37 @@ def _normalize(value: Any, kind: str):
         return value
     array = jnp.asarray(value)
     if kind == "mean1":
-        return array / jnp.mean(array)
+        return array / _usable_divisor(jnp.mean(array), kind, "mean")
     if kind == "pixel_sum":
-        return array / jnp.sum(array)
-    return array / jnp.max(array)
+        return array / _usable_divisor(jnp.sum(array), kind, "sum")
+    return array / _usable_divisor(jnp.max(array), kind, "maximum")
+
+
+def _usable_divisor(divisor: Any, kind: str, name: str):
+    """Return ``divisor``, or refuse if dividing by it cannot mean anything.
+
+    ``isfinite`` first and ``== 0`` second, as two explicit branches rather
+    than one comparison. A nan divisor answers ``False`` to ``> 0``, to
+    ``< 0`` and to ``== 0`` alike, so every ordering-based spelling of this
+    guard admits exactly the worst of the three cases -- and it is the worst
+    because a nan then defeats every comparison-based check downstream too.
+    """
+    if bool(jnp.isfinite(divisor)) and not bool(divisor == 0):
+        return divisor
+    raise ConfigError(
+        f"normalize: {kind!r} divides by the value's {name}, and this value's {name} "
+        f"is {divisor}, so every element would come back inf or nan. This is the last "
+        "point at which that can be said: nan > x is False and nan != nan is True, so "
+        "a guard written downstream as 'refuse anything outside the range' passes a "
+        "nan straight through -- which has happened four separate times in this "
+        "package. The two routes here are not equally visible either. pixel_sum on a "
+        "beam whose pixels cancel hands the projector a nan beam and the TOD comes "
+        "back nan with every shape correct; an all-zero mean1 bandpass is simply the "
+        "shape a partially-written config has, {zeros: [n_freq]} with a normalize: "
+        "still attached from the template. Write normalize: none if the value is meant "
+        f"to be used as it stands, or fix the value so its {name} is a non-zero finite "
+        f"number. The conventions are {list(NORMALIZATIONS)}."
+    )
 
 
 def _column(value: Any, form: str):
