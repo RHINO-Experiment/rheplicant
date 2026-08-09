@@ -146,6 +146,25 @@ class At:
     op: AbstractOperator
 
 
+#: Mermaid's own three-class palette, one triplet per theme. Deliberately
+#: separate from :data:`rheplicant.core.render._THEMES`, which keys on the five
+#: SVG roles: mermaid has no wire colour and no per-kind fill, so the two
+#: cannot share a table without one of them drifting to fit the other.
+#: Each value is ``(fill, stroke, text)``.
+_MERMAID_THEMES: dict[str, dict[str, tuple[str, str, str]]] = {
+    "light": {
+        "lit": ("#FAC775", "#854F0B", "#412402"),
+        "wire": ("#F1EFE8", "#854F0B", "#444441"),
+        "dim": ("#F1EFE8", "#B4B2A9", "#B4B2A9"),
+    },
+    "dark": {
+        "lit": ("#4A3A12", "#E3B341", "#F0D896"),
+        "wire": ("#1C1F24", "#8B949E", "#C9D1D9"),
+        "dim": ("#1C1F24", "#3D4148", "#6E7681"),
+    },
+}
+
+
 class SignalGraph:
     """An immutable signal-path template (DAG with a single sink).
 
@@ -238,6 +257,7 @@ class SignalGraph:
         lit: Iterable[str] = (),
         skipped: Iterable[str] = (),
         counts: Mapping[str, int] | None = None,
+        theme: str = "light",
     ) -> str:
         """Render the template as a mermaid flowchart with lit/dim styling.
 
@@ -256,6 +276,11 @@ class SignalGraph:
         shape carries the distinction here; ``to_svg`` draws the switch's lever.
         Both used to be circles differing only in their label, which made two
         operations *on* operators look like two more operators.
+
+        ``theme`` is ``"light"`` or ``"dark"``, matching :meth:`to_svg` and
+        :meth:`to_html`. An unknown name raises rather than falling back to a
+        default, because a silently-light diagram in a dark page is exactly the
+        failure the argument exists to prevent.
         """
         lit, skipped = set(lit), set(skipped)
         counts = dict(counts or {})
@@ -273,9 +298,12 @@ class SignalGraph:
             lines.append(f"  {n}{shape}")
         for a, b in self.edges:
             lines.append(f"  {a} --> {b}")
-        lines.append("  classDef lit fill:#FAC775,stroke:#854F0B,color:#412402;")
-        lines.append("  classDef wire fill:#F1EFE8,stroke:#854F0B,color:#444441;")
-        lines.append("  classDef dim fill:#F1EFE8,stroke:#B4B2A9,color:#B4B2A9;")
+        palette = _MERMAID_THEMES[theme]  # KeyError names the unknown theme
+        for cls in ("lit", "wire", "dim"):
+            fill, stroke, text = palette[cls]
+            lines.append(
+                f"  classDef {cls} fill:{fill},stroke:{stroke},color:{text};"
+            )
         for n in self.nodes:
             cls = "lit" if n in lit else ("wire" if n in skipped else "dim")
             lines.append(f"  class {n} {cls};")
@@ -556,10 +584,13 @@ class Assembly(AbstractOperator):
         """Instances per node, for renderings — one lit box may be several."""
         return {nid: len(names) for nid, names in self.instances}
 
-    def to_mermaid(self) -> str:
-        """Lit/dim mermaid rendering via the registered template."""
+    def to_mermaid(self, theme: str = "light") -> str:
+        """Lit/dim mermaid rendering via the registered template.
+
+        ``theme`` is ``"light"`` or ``"dark"``; see :meth:`SignalGraph.to_mermaid`.
+        """
         return get_graph(self.graph_name).to_mermaid(
-            lit=self.lit, skipped=self.skipped, counts=self._counts
+            lit=self.lit, skipped=self.skipped, counts=self._counts, theme=theme
         )
 
     def to_html(self, title: str | None = None, theme: str = "light") -> str:
