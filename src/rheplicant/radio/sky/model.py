@@ -133,13 +133,12 @@ class MapSky(AbstractSkyModel):
             )
 
     def __call__(self, freq: jax.Array) -> jax.Array:
-        n_built, n_asked = jnp.shape(self.freq)[0], jnp.shape(freq)[0]
-        if n_built != n_asked:
+        if jnp.shape(freq) != jnp.shape(self.freq):
             raise StateValidationError(
-                f"MapSky was built on a grid of {n_built} channels and asked "
-                f"for {n_asked}. The maps are not interpolated -- they are "
-                "returned as stored -- so a grid of another length is a "
-                "modelling error, not a resampling request. Rebuild the maps "
-                "on the grid you mean to observe on."
+                f"MapSky was built on a grid of shape {jnp.shape(self.freq)} "
+                f"and asked for shape {jnp.shape(freq)}. The maps are not "
+                "interpolated -- they are returned as stored -- so a grid of "
+                "another shape is a modelling error, not a resampling "
+                "request. Rebuild the maps on the grid you mean to observe on."
             )
         return self.maps

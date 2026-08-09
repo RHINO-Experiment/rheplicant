@@ -40,8 +40,24 @@ def test_call_ignores_its_freq_argument_when_the_shape_agrees(grid, maps):
 
 def test_call_refuses_a_grid_of_a_different_length(grid, maps):
     sky = MapSky(maps=maps, freq=grid)
-    with pytest.raises(StateValidationError, match="built on a grid of 4"):
+    with pytest.raises(StateValidationError, match="built on a grid of shape"):
         sky(jnp.linspace(60e6, 85e6, N_FREQ + 1))
+
+
+def test_call_refuses_a_scalar_grid(grid, maps):
+    """A scalar freq has no axis to compare, and used to raise a bare IndexError
+    from inside the guard rather than the guard's own refusal."""
+    sky = MapSky(maps=maps, freq=grid)
+    with pytest.raises(StateValidationError, match="built on a grid of shape"):
+        sky(jnp.array(70e6))
+
+
+def test_call_refuses_a_grid_with_the_right_length_and_the_wrong_rank(grid, maps):
+    """(n_freq, 1) is not (n_freq,). __check_init__ already refuses that shape
+    for the stored grid; the call-time guard must agree with it."""
+    sky = MapSky(maps=maps, freq=grid)
+    with pytest.raises(StateValidationError, match="built on a grid of shape"):
+        sky(grid.reshape(-1, 1))
 
 
 def test_refuses_maps_that_are_not_two_dimensional(grid):
