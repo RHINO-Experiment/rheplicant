@@ -76,10 +76,20 @@ def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
         if key in modifiers and modifiers[key] not in permitted:
             raise ConfigError(_unknown_modifier_message(key, modifiers[key], permitted))
 
+    # Read before ``dtype:`` can touch it. A declared widening makes the type
+    # complex and leaves every imaginary part zero, so ``part: im`` has to be
+    # answered against what the value WAS -- zero by construction is not an
+    # answer the cast can turn into a measurement. Computed only when ``part:``
+    # asks, because a ``ref`` or ``python`` value need not be an array at all
+    # and jnp.asarray would refuse it on the way past.
+    was_complex = "part" in modifiers and bool(
+        jnp.issubdtype(jnp.asarray(value).dtype, jnp.complexfloating)
+    )
+
     if "dtype" in modifiers:
         value = _cast(value, modifiers["dtype"], form)
     if "part" in modifiers:
-        value = _part(value, modifiers["part"])
+        value = _part(value, modifiers["part"], was_complex=was_complex)
     if "scale" in modifiers or "offset" in modifiers:
         value = value * float(modifiers.get("scale", 1.0)) + float(modifiers.get("offset", 0.0))
     if "normalize" in modifiers:
@@ -121,29 +131,47 @@ def _cast(value: Any, dtype: str, form: str):
     return array.astype(dtype)
 
 
-def _part(value: Any, part: str):
+def _part(value: Any, part: str, *, was_complex: bool):
     array = jnp.asarray(value)
-    if part == "im" and not jnp.issubdtype(array.dtype, jnp.complexfloating):
-        raise ConfigError(
-            f"part: im on a value that is not complex ({array.dtype}). jnp.imag of a "
-            "real array is exactly 0 for every element -- mathematically right, and "
-            "never the thing a document was trying to say. part: is here for "
-            "reflection coefficients (gamma_src, gamma_rec, the s_params resources) "
-            "and NoiseWaveOperator takes gamma_src_re and gamma_src_im as separate "
-            "fields, so a zero column here is a perfectly well-formed noise-wave model "
-            "that simply has no sine component -- and nothing downstream separates 'no "
-            "sine component' from 'the sine component was deleted when the config was "
-            "read'. Two things usually cause it: the value really is real, and the "
-            "part: key is a leftover; or the wrong thing was referenced -- a file: that "
-            "turned out real, an extends: that inherited the wrong sibling, an s_params "
-            "entry read on the wrong component. If the quantity is genuinely real and "
-            "its imaginary part is genuinely zero -- a purely resistive termination is "
-            "the honest case -- write {value: 0.0} and say so, which a reader can check "
-            "against the hardware; a zero that falls out of part: im cannot be "
-            f"distinguished from this bug. The parts defined on a real value are "
-            f"{[name for name in PARTS if name != 'im']}."
-        )
+    if part == "im" and not was_complex:
+        raise ConfigError(_no_imaginary_part_message(array.dtype))
     return {"re": jnp.real, "im": jnp.imag, "abs": jnp.abs, "angle": jnp.angle}[part](array)
+
+
+def _no_imaginary_part_message(dtype: Any) -> str:
+    """Why ``part: im`` was refused, by the route that got here.
+
+    Two routes, and they need different first sentences: a value that is real
+    right now, and one a declared ``dtype:`` has just widened -- for which
+    "is not complex" would read as plainly false and lose the reader.
+    """
+    if jnp.issubdtype(dtype, jnp.complexfloating):
+        opening = (
+            f"part: im on a value that dtype: widened to {dtype} from a real one. The "
+            "type is complex and the quantity is not: every imaginary part here is zero "
+            "by construction rather than by measurement, so the cast cannot be the thing "
+            "that makes part: im meaningful -- it is what guaranteed the zero."
+        )
+    else:
+        opening = f"part: im on a value that is not complex ({dtype})."
+    return (
+        f"{opening} The result would be exactly 0 for every element -- mathematically "
+        "right, and never the thing a document was trying to say. part: is here for "
+        "reflection coefficients (gamma_src, gamma_rec, the s_params resources) "
+        "and NoiseWaveOperator takes gamma_src_re and gamma_src_im as separate "
+        "fields, so a zero column here is a perfectly well-formed noise-wave model "
+        "that simply has no sine component -- and nothing downstream separates 'no "
+        "sine component' from 'the sine component was deleted when the config was "
+        "read'. Two things usually cause it: the value really is real, and the "
+        "part: key is a leftover; or the wrong thing was referenced -- a file: that "
+        "turned out real, an extends: that inherited the wrong sibling, an s_params "
+        "entry read on the wrong component. If the quantity is genuinely real and "
+        "its imaginary part is genuinely zero -- a purely resistive termination is "
+        "the honest case -- write {value: 0.0} and say so, which a reader can check "
+        "against the hardware; a zero that falls out of part: im cannot be "
+        "distinguished from this bug. The parts defined on a real value are "
+        f"{[name for name in PARTS if name != 'im']}."
+    )
 
 
 def _normalize(value: Any, kind: str):

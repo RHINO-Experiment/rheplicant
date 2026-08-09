@@ -189,6 +189,63 @@ class TestPartImOnAValueThatIsNotComplex:
         assert "int32" in str(excinfo.value)
 
 
+class TestPartImAfterAWideningDtype:
+    """`dtype: complex64` over a real value makes the TYPE complex and leaves
+    every imaginary part zero. Judging `part: im` on the post-cast dtype would
+    let exactly that document through -- guaranteed zeros, no symptom -- so the
+    question is asked of what the value was on entry, before any declared cast.
+    """
+
+    def test_a_widening_dtype_does_not_make_part_im_meaningful(self, context):
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value(
+                {
+                    "list": [1.0, 2.0],
+                    "unit": "dimensionless",
+                    "dtype": "complex64",
+                    "part": "im",
+                },
+                context,
+            )
+        assert "complex64" in str(excinfo.value)  # the dtype the cast produced
+
+    def test_the_message_says_the_zero_is_by_construction(self, context):
+        """The clause this path needs and the plain one does not: the value is
+        complex, so 'not complex' would read as simply wrong. What makes it a
+        refusal is that the zero was put there by the cast rather than measured
+        -- and the resistive-termination remedy answers this path unchanged."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"value": 1.0, "dtype": "complex64", "part": "im"}, context)
+        message = str(excinfo.value)
+        assert "by construction" in message
+        assert "by measurement" in message
+        assert "{value: 0.0}" in message  # the remedy still reaches this path
+
+    @pytest.mark.parametrize(
+        ("part", "expected"),
+        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [math.pi, 0.0])],
+    )
+    def test_the_other_three_parts_stay_legal_through_a_widening_dtype(
+        self, part, expected, context
+    ):
+        """The narrowness complement for this path. Threading "was it complex
+        on entry" into `_part` puts a second condition within reach of a guard
+        that creeps, and `re`/`abs`/`angle` are as legal after a widening cast
+        as before one."""
+        got = resolve_value(
+            {"list": [-3.0, 4.0], "unit": "dimensionless", "dtype": "complex64", "part": part},
+            context,
+        )
+        assert [float(v) for v in got.value] == pytest.approx(expected)
+
+    def test_im_survives_a_cast_that_did_not_widen_anything(self, context):
+        """The case the guard must not catch: a genuinely complex value that
+        also declares a complex dtype. Reading the flag off the post-cast value
+        would pass this; reading it off the pre-cast value must too."""
+        got = resolve_value({"value": 1.0 + 2.0j, "dtype": "complex64", "part": "im"}, context)
+        assert float(got.value) == pytest.approx(2.0)
+
+
 class TestColumn:
     def test_it_turns_n_into_n_by_one(self, context):
         """CalLoadOperator.t_load reads (n, 1) as per-sample and (n,) as
