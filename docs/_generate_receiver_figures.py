@@ -55,6 +55,7 @@ from rheplicant.radio import (  # noqa: E402
     AtmosphericEmissionOperator,
     BeamSpillOperator,
     CalLoadOperator,
+    MapSky,
     NoiseWaveOperator,
     SkySourceOperator,
     assemble,
@@ -62,7 +63,6 @@ from rheplicant.radio import (  # noqa: E402
     horizon_truncated_beam,
 )
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 STATIC = Path(__file__).parent / "_static"
 CACHE = Path(__file__).parent / "_receiver-figure-data.npz"  # git-ignored
@@ -109,13 +109,6 @@ def save(fig, name: str, theme: str) -> None:
     fig.savefig(out, bbox_inches="tight", transparent=True)
     plt.close(fig)
     print(f"  wrote {out.relative_to(STATIC.parent.parent)}")
-
-
-class MapSky(AbstractSkyModel):
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
 
 
 # ------------------------------------------------------------- the world ----
@@ -165,7 +158,7 @@ def compute():
 
     def twin(t_nw):
         return assemble(
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector),
             BeamSpillOperator(sky_fraction=jnp.asarray(f_sky),
                               t_ground=jnp.array(T_GROUND)),
             AtmosphericEmissionOperator(t_atm=jnp.array(T_ATM)),

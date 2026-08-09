@@ -42,12 +42,12 @@ from rheplicant.radio import (  # noqa: E402
     AtmosphericEmissionOperator,
     CalLoadOperator,
     GroundPickupOperator,
+    MapSky,
     NoiseWaveOperator,
     SkySourceOperator,
     assemble,
 )
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 NSIDE, LMAX, N_FREQ, N_TIME = 4, 11, 2, 8
 N_PIX = 12 * NSIDE**2
@@ -55,15 +55,6 @@ LAT_DEG, AZ_DEG, EL_DEG = 53.2, 0.0, 90.0
 
 X64 = jax.config.read("jax_enable_x64")
 RTOL = 1e-12 if X64 else 3e-5  # the suite runs f32; x64 is process-global
-
-
-class MapSky(AbstractSkyModel):
-    """Fixed brightness maps, so the test controls T_src exactly."""
-
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
 
 
 def beam_maps(sigma: float = 0.35) -> jax.Array:
@@ -132,7 +123,7 @@ def make_noise_wave(freq, *, matched=False, zero_temps=False, gamma_src=None):
 def make_twin(sky_maps, freq, *, t_load=300.0, normalize_beam=True, **nw_kwargs):
     """The assembled two-branch twin: sky | load -> switch -> noise wave."""
     return assemble(
-        SkySourceOperator(sky_model=MapSky(sky_maps),
+        SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq),
                           projector=projector(normalize_beam)),
         CalLoadOperator(t_load=jnp.array(t_load)),
         make_noise_wave(freq, **nw_kwargs),
@@ -372,7 +363,7 @@ class TestAssembly:
         g_src, g_rec = make_gammas(freq)
         three = jnp.stack([g_src[0], g_src[1], g_src[1] * 0.5])
         twin = assemble(
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector()),
             CalLoadOperator(t_load=jnp.array(300.0)),
             CalLoadOperator(t_load=jnp.array(400.0)),
             make_noise_wave(freq, gamma_src=three),
@@ -393,7 +384,7 @@ class TestAssembly:
         three = jnp.stack([g_src[0], g_src[1], g_src[1]])
         switch = jnp.arange(N_TIME) % 3
         twin = assemble(
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector()),
             CalLoadOperator(t_load=jnp.array(300.0)),
             CalLoadOperator(t_load=jnp.array(400.0)),
             make_noise_wave(freq, gamma_src=three, zero_temps=True),
@@ -419,7 +410,7 @@ class TestTheAntennaChain:
         eta, t_phys = 0.9, 293.0
         lossless = make_twin(sky_maps, freq, zero_temps=True)
         lossy = assemble(
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector()),
             AntennaLossOperator(efficiency=jnp.array(eta),
                                 t_physical=jnp.array(t_phys)),
             CalLoadOperator(t_load=jnp.array(300.0)),
@@ -447,7 +438,7 @@ class TestTheAntennaChain:
         antenna_only = jnp.zeros(N_TIME, dtype=int)
         coords = make_coords(freq, antenna_only)
         sources = (
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector()),
             GroundPickupOperator(coupling=jnp.array(0.02),
                                  t_ground=jnp.array(290.0)),
             AtmosphericEmissionOperator(t_atm=jnp.array(3.0)),
@@ -476,7 +467,7 @@ class TestTheAntennaChain:
         # survives, so scaling the sky maps changes nothing at all.
         def wrongly_wired(maps):
             replaced = (
-                SkySourceOperator(sky_model=MapSky(maps), projector=projector()),
+                SkySourceOperator(sky_model=MapSky(maps=maps, freq=freq), projector=projector()),
             ) + sources[1:]
             return Pipeline(
                 SelectOperator(
@@ -510,7 +501,7 @@ class TestCalibrationClosure:
         g_src = jnp.stack([g_ant, g_ambient, g_short])
         g_rec = rcj.termination_gamma("resistive", N_FREQ, impedance=45.0)
         return assemble(
-            SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector()),
+            SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector()),
             CalLoadOperator(t_load=jnp.array(300.0)),
             CalLoadOperator(t_load=jnp.array(400.0)),
             NoiseWaveOperator(
@@ -616,7 +607,7 @@ class TestTransforms:
 
         def loss(maps, t_unc):
             twin = assemble(
-                SkySourceOperator(sky_model=MapSky(maps), projector=projector()),
+                SkySourceOperator(sky_model=MapSky(maps=maps, freq=freq), projector=projector()),
                 CalLoadOperator(t_load=jnp.array(300.0)),
                 eqx.tree_at(lambda o: o.t_unc, make_noise_wave(freq), t_unc),
             )

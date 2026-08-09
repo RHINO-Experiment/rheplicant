@@ -57,6 +57,7 @@ from rheplicant.radio import (  # noqa: E402
     AtmosphericEmissionOperator,
     BeamSpillOperator,
     CalLoadOperator,
+    MapSky,
     NoiseWaveOperator,
     SkySourceOperator,
     assemble,
@@ -64,7 +65,6 @@ from rheplicant.radio import (  # noqa: E402
     horizon_truncated_beam,
 )
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 # The CST far-field exports are not redistributable, so this script cannot ship
 # a path to them and must not guess one: a hard-coded home directory would be a
@@ -96,16 +96,6 @@ parser.add_argument("--beam-dir", type=_beam_dir, default=RHINO_BEAMS,
 args = parser.parse_args()
 
 freq = jnp.linspace(60e6, 85e6, N_FREQ)
-
-
-class MapSky(AbstractSkyModel):
-    """Fixed brightness maps — stand-in for a GSM/pyGDSM realisation."""
-
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
-
 
 # ============================================== 1. the horn, and the sky ----
 # CST exports directivity in dBi on a (theta, phi) grid, one file per frequency.
@@ -193,7 +183,7 @@ def antenna_chain():
     top of the one the split already accounts for.
     """
     return (
-        SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
+        SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector),
         BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(T_GROUND)),
         AtmosphericEmissionOperator(t_atm=jnp.array(T_ATM)),
         AntennaLossOperator(efficiency=jnp.array(ETA),

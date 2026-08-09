@@ -31,25 +31,14 @@ import equinox as eqx  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 
 from rheplicant import Coordinates, State  # noqa: E402
-from rheplicant.radio import SkySourceOperator, assemble  # noqa: E402
+from rheplicant.radio import MapSky, SkySourceOperator, assemble  # noqa: E402
 from rheplicant.radio.sky import DriftScanProjector, GeneralPointingProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 NSIDE, N_FREQ = 16, 4
 LMAX = 3 * NSIDE - 1
 N_TIME = 4 * (LMAX + 1)  # FFT synthesis needs 2*lmax < n_time (sampling theorem)
 N_PIX = 12 * NSIDE**2
 LAT_DEG, AZ_DEG, EL_DEG = 53.2, 0.0, 90.0  # a zenith drift scan
-
-
-class MapSky(AbstractSkyModel):
-    """Fixed brightness maps — stand-in for GSM/foreground models."""
-
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
-
 
 # ------------------------------------------------------------ 1. the twin ---
 # A Gaussian beam and a lumpy sky, both as ordinary HEALPix maps.
@@ -69,12 +58,14 @@ drift = DriftScanProjector.from_beam_maps(
 
 # The LST grid the FFT path wants: a FULL sidereal turn, endpoint excluded.
 lst_deg = DriftScanProjector.uniform_lst_grid(N_TIME)
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
 coords = Coordinates(time=jnp.arange(float(N_TIME)),
-                     freq=jnp.linspace(60e6, 85e6, N_FREQ),
+                     freq=freq,
                      extra={"lst_deg": lst_deg})
 state = State(coords=coords, key=jax.random.key(42), meta={"scan": "drift"})
 
-twin = assemble(SkySourceOperator(sky_model=MapSky(sky_maps), projector=drift))
+twin = assemble(SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq),
+                                  projector=drift))
 observation = eqx.filter_jit(twin)(state)
 print(f"drift-scan waterfall: {observation.data.shape}  "
       f"({observation.data.mean():.1f} K mean)")

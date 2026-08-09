@@ -23,23 +23,16 @@ from rheplicant.radio import (  # noqa: E402
     BeamSpillOperator,
     CalLoadOperator,
     GroundPickupOperator,
+    MapSky,
     SkyOperator,
     SkySourceOperator,
     assemble,
 )
 from rheplicant.radio.sky import DriftScanProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 N_TIME = 6
 T_SKY, T_GROUND = 3000.0, 290.0
 X64 = jax.config.read("jax_enable_x64")
-
-
-class MapSky(AbstractSkyModel):
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
 
 
 def gaussian_beam(nside: int, fwhm_sigma_deg: float = 35.0, floor: float = 0.02):
@@ -287,7 +280,7 @@ class TestPlacement:
         sky = jnp.full((1, hp.nside2npix(nside)), T_SKY)
         twin = assemble(
             SkySourceOperator(
-                sky_model=MapSky(sky),
+                sky_model=MapSky(maps=sky, freq=polar_coords(nside).freq),
                 projector=polar_projector(nside, beam, horizon_mask=True),
             ),
             BeamSpillOperator(sky_fraction=jnp.array(0.9),

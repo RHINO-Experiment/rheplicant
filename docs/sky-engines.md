@@ -162,7 +162,7 @@ Either one drops into the same graph slot, so the rest of the twin never
 learns which engine it got:
 
 ```python
-twin = assemble(SkySourceOperator(sky_model=MapSky(sky), projector=projector))
+twin = assemble(SkySourceOperator(sky_model=MapSky(maps=sky, freq=nu), projector=projector))
 waterfall = eqx.filter_jit(twin)(state).data
 ```
 

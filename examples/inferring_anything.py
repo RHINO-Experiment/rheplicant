@@ -42,23 +42,12 @@ from rheplicant.inference import (  # noqa: E402
     parameter_covariance,
     wiener_solve,
 )
-from rheplicant.radio import GainOperator, SkySourceOperator  # noqa: E402
+from rheplicant.radio import GainOperator, MapSky, SkySourceOperator  # noqa: E402
 from rheplicant.radio.sky import MatrixProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 N_TIME, N_FREQ, N_PIX = 64, 4, 96
 TRUE_FWHM, TRUE_OFFSET, TRUE_GAIN = 0.35, 0.12, 1.10
 MEAN_SKY, SKY_SCALE, NOISE = 10.0, 1.0, 0.02
-
-
-class MapSky(AbstractSkyModel):
-    """A fixed brightness map per channel — what fit 3 infers."""
-
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
-
 
 # --------------------------------------------------------------- the model ---
 # A ring of sky pixels drifting past a Gaussian beam. Deliberately small, and
@@ -85,10 +74,9 @@ modes = jnp.arange(1, 5)[:, None] * pixel_angle[None, :]
 weights = jax.random.normal(jax.random.fold_in(key, 1), (N_FREQ, 4))
 true_maps = MEAN_SKY + SKY_SCALE * (weights @ jnp.cos(modes)) / jnp.sqrt(2.0)
 
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
 state = State(
-    coords=Coordinates(
-        time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)
-    ),
+    coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=freq),
     meta={"telescope": "ring-toy"},
 )
 
@@ -96,7 +84,7 @@ state = State(
 def build_twin(maps, fwhm, offset, gain):
     return Pipeline(
         SkySourceOperator(
-            sky_model=MapSky(maps=maps),
+            sky_model=MapSky(maps=maps, freq=freq),
             projector=MatrixProjector(beam_matrix(fwhm, offset)),
         ),
         GainOperator(gain=jnp.asarray(gain)),

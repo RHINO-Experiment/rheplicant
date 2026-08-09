@@ -35,9 +35,8 @@ from rheplicant.inference import (  # noqa: E402
     predict_from_samples,
     to_numpyro_model,
 )
-from rheplicant.radio import GainOperator, SkySourceOperator  # noqa: E402
+from rheplicant.radio import GainOperator, MapSky, SkySourceOperator  # noqa: E402
 from rheplicant.radio.sky import MatrixProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 N_TIME, N_PIX, N_FREQ = 256, 64, 4
 TRUE_FWHM, TRUE_OFFSET, TRUE_GAIN = 0.15, 0.12, 1.10
@@ -49,13 +48,6 @@ NAMES = ("fwhm", "offset", "log_gain")
 
 pixel_angle = 2.0 * jnp.pi * jnp.arange(N_PIX) / N_PIX
 scan_angle = 2.0 * jnp.pi * jnp.arange(N_TIME) / N_TIME
-
-
-class MapSky(AbstractSkyModel):
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
 
 
 def beam_matrix(fwhm, offset):
@@ -70,10 +62,9 @@ modes = jnp.arange(1, 6)[:, None] * pixel_angle[None, :]
 weights = jax.random.normal(jax.random.key(1), (N_FREQ, 5))
 true_maps = MEAN_SKY + SKY_SCALE * (weights @ jnp.cos(modes)) / jnp.sqrt(2.5)
 
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
 state = State(
-    coords=Coordinates(
-        time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)
-    ),
+    coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=freq),
     meta={"telescope": "ring-toy"},
 )
 
@@ -81,7 +72,7 @@ state = State(
 def twin(fwhm, offset, gain):
     return Pipeline(
         SkySourceOperator(
-            sky_model=MapSky(maps=true_maps),
+            sky_model=MapSky(maps=true_maps, freq=freq),
             projector=MatrixProjector(beam_matrix(fwhm, offset)),
         ),
         GainOperator(gain=jnp.asarray(gain)),

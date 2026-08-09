@@ -211,7 +211,7 @@ really is that bright, which is why the calibration problem is hard.
 
 ```python
 twin = assemble(
-    SkySourceOperator(sky_model=MapSky(sky_maps), projector=projector),
+    SkySourceOperator(sky_model=MapSky(maps=sky_maps, freq=freq), projector=projector),
     BeamSpillOperator(sky_fraction=f_sky, t_ground=jnp.array(290.0)),
     AtmosphericEmissionOperator(t_atm=jnp.array(3.0)),
     AntennaLossOperator(efficiency=jnp.array(0.97), t_physical=jnp.array(293.0)),

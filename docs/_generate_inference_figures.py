@@ -43,9 +43,8 @@ from rheplicant.inference import (  # noqa: E402
     parameter_covariance,
     wiener_solve,
 )
-from rheplicant.radio import GainOperator, SkySourceOperator  # noqa: E402
+from rheplicant.radio import GainOperator, MapSky, SkySourceOperator  # noqa: E402
 from rheplicant.radio.sky import MatrixProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 STATIC = Path(__file__).parent / "_static"
 CACHE = Path(__file__).parent / "_inference-figure-data.npz"  # git-ignored
@@ -60,6 +59,7 @@ THEMES = {
 N_TIME, N_FREQ, N_PIX = 128, 4, 128
 TRUE_FWHM, TRUE_OFFSET, TRUE_GAIN = 0.35, 0.12, 1.10
 MEAN_SKY, SKY_SCALE, NOISE = 10.0, 1.0, 0.02
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
 
 
 def styled(theme: str):
@@ -90,13 +90,6 @@ pixel_angle = 2.0 * jnp.pi * jnp.arange(N_PIX) / N_PIX
 scan_angle = 2.0 * jnp.pi * jnp.arange(N_TIME) / N_TIME
 
 
-class MapSky(AbstractSkyModel):
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
-
-
 def beam_matrix(fwhm, offset):
     separation = pixel_angle[None, :] - scan_angle[:, None] - offset
     wrapped = jnp.arctan2(jnp.sin(separation), jnp.cos(separation))
@@ -107,7 +100,7 @@ def beam_matrix(fwhm, offset):
 def build_twin(maps, fwhm, offset, gain):
     return Pipeline(
         SkySourceOperator(
-            sky_model=MapSky(maps=maps),
+            sky_model=MapSky(maps=maps, freq=freq),
             projector=MatrixProjector(beam_matrix(fwhm, offset)),
         ),
         GainOperator(gain=jnp.asarray(gain)),
@@ -121,9 +114,7 @@ def make_world():
     weights = jax.random.normal(jax.random.fold_in(key, 1), (N_FREQ, 5))
     true_maps = MEAN_SKY + SKY_SCALE * (weights @ jnp.cos(modes)) / jnp.sqrt(2.5)
     state = State(
-        coords=Coordinates(
-            time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)
-        ),
+        coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=freq),
         meta={"telescope": "ring-toy"},
     )
     truth = build_twin(true_maps, TRUE_FWHM, TRUE_OFFSET, TRUE_GAIN)

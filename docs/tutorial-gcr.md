@@ -26,7 +26,7 @@ A ring of 64 sky pixels, scanned by a Gaussian beam through a known gain, in
 def twin(maps, fwhm=FWHM):
     return Pipeline(
         SkySourceOperator(
-            sky_model=MapSky(maps=maps),
+            sky_model=MapSky(maps=maps, freq=freq),
             projector=MatrixProjector(beam_matrix(fwhm, OFFSET)),
         ),
         GainOperator(gain=jnp.asarray(GAIN)),

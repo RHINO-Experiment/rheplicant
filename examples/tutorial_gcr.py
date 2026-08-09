@@ -29,9 +29,8 @@ from rheplicant.inference import (  # noqa: E402
     linear_operator,
     wiener_solve,
 )
-from rheplicant.radio import GainOperator, SkySourceOperator  # noqa: E402
+from rheplicant.radio import GainOperator, MapSky, SkySourceOperator  # noqa: E402
 from rheplicant.radio.sky import MatrixProjector  # noqa: E402
-from rheplicant.radio.sky.model import AbstractSkyModel  # noqa: E402
 
 N_TIME, N_PIX, N_FREQ = 256, 64, 4   # 1024 samples constraining 256 pixels
 # A beam 1.5 pixels wide: it smooths the ring without erasing it. Step 7 shows
@@ -54,15 +53,6 @@ pixel_angle = 2.0 * jnp.pi * jnp.arange(N_PIX) / N_PIX
 scan_angle = 2.0 * jnp.pi * jnp.arange(N_TIME) / N_TIME
 
 
-class MapSky(AbstractSkyModel):
-    """The sky IS the parameter here: one map per channel, achromatic lookup."""
-
-    maps: jax.Array
-
-    def __call__(self, freq: jax.Array) -> jax.Array:
-        return self.maps
-
-
 def beam_matrix(fwhm: float, offset: float) -> jax.Array:
     """Row t = the beam's weight on every pixel at scan step t, summing to 1."""
     separation = pixel_angle[None, :] - scan_angle[:, None] - offset
@@ -75,7 +65,7 @@ def twin(maps: jax.Array, fwhm: float = FWHM) -> Pipeline:
     """The forward model: sky -> beam-weighted TOD -> gain."""
     return Pipeline(
         SkySourceOperator(
-            sky_model=MapSky(maps=maps),
+            sky_model=MapSky(maps=maps, freq=freq),
             projector=MatrixProjector(beam_matrix(fwhm, OFFSET)),
         ),
         GainOperator(gain=jnp.asarray(GAIN)),
@@ -83,10 +73,9 @@ def twin(maps: jax.Array, fwhm: float = FWHM) -> Pipeline:
     )
 
 
+freq = jnp.linspace(60e6, 85e6, N_FREQ)
 state = State(
-    coords=Coordinates(
-        time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)
-    ),
+    coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=freq),
     meta={"telescope": "ring-toy"},
 )
 
