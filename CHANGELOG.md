@@ -85,6 +85,24 @@
   precondition held only on the machine that wrote it. There it passed; anywhere
   else it failed, loudly, about the wrong thing.
 
+### The suite is four minutes, and not one test was deleted to get there
+
+- It was never slow because it was large. Profiled rather than guessed: of a
+  692 s serial run, the **four heaviest items account for 249 s** — the float64
+  subsession (159 s), the beam-spill closure at two resolutions (70 s), the NPE
+  training (28 s), the tour run as a script (16 s) — while the other ~2700 tests
+  come to about 290 s between them, a tenth of a second each. Halving the test
+  count would have bought around two minutes and cost half the coverage.
+- `pytest-xdist` is in the `dev` group instead:
+  `.venv/bin/python -m pytest -n 8 -o addopts=""` runs in **241 s**, against
+  692 s, with the same 2286 passed and 486 skipped. Nothing here depends on
+  execution order, so the parallel run is not a weaker run.
+- The floor is 159 s, because the float64 subsession is a second pytest session
+  inside one test and a single worker has to carry it whole. Worth knowing
+  before anyone tries to explain the remaining minutes.
+- Recorded in `docs/install.md` next to the commands, including which four
+  tests to look at first if the number ever moves.
+
 ### Four paths under one person's home directory left the repository
 
 - `~/projects/rhino-cal` and `~/Dataspace/RHINO/CST_beams/HornDryGround` were

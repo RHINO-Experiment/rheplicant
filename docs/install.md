@@ -121,10 +121,30 @@ without them `pytest` stops at collection, or reports every documentation link
 as broken.
 
 ```bash
-.venv/bin/python -m pytest          # ~12 min with coverage
+.venv/bin/python -m pytest                    # ~12 min with coverage
+.venv/bin/python -m pytest -n 8 -o addopts="" # ~4 min, no coverage gate
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```
+
+The second line is the one to use while working. `pytest-xdist` is in the `dev`
+group and the run is identical — same 2286 passed, 486 skipped — because
+nothing here depends on execution order.
+
+:::{admonition} Why parallel rather than fewer tests
+:class: note
+The suite is not slow because it is large. Of a 692 s serial run, the four
+heaviest items account for 249 s; the other ~2700 tests come to roughly 290 s
+between them, a tenth of a second each. Deleting tests therefore buys almost
+nothing and costs coverage — and most of these tests are regression evidence for
+a specific failure, which is the last thing to trade for a minute.
+
+The four are worth knowing, because they are where a slowdown would show up:
+the float64 subsession (159 s — a whole second pytest run, and the floor on any
+parallel time, since one worker must carry it alone), the beam-spill closure at
+two resolutions (70 s), the NPE training (28 s), and the tour executed as a
+script (16 s). Each verifies something nothing else can.
+:::
 
 The second line is **not** optional work you might skip — plain `pytest` already
 runs it for you, in a subprocess, via `tests/test_evidence_session.py`. It is

@@ -122,6 +122,14 @@ dev = [
     # ImportErrors, and the install page's own "run the suite" command cannot
     # run. Measured 2026-08-09.
     "numpyro",
+    # The suite is not slow because it is large. Measured 2026-08-09: the four
+    # heaviest items account for 249 s of a 692 s serial run, while the other
+    # ~2700 tests together come to about 290 s -- a tenth of a second each. So
+    # deleting tests buys almost nothing and costs coverage, and parallelism
+    # buys everything: `-n 8` runs the same 2286 passed / 486 skipped in 241 s.
+    # The floor is the float64 subsession, 159 s that one worker must carry
+    # alone.
+    "pytest-xdist",
 ]
 
 [tool.hatch.build.targets.wheel]
