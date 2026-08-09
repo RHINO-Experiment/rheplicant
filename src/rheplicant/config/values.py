@@ -254,4 +254,5 @@ from rheplicant.config import arrays as _arrays  # noqa: E402,F401  (registers f
 from rheplicant.config import derive as _derive  # noqa: E402,F401  (registers form 6)
 from rheplicant.config import draws as _draws  # noqa: E402,F401  (registers form 3)
 from rheplicant.config import files as _files  # noqa: E402,F401  (registers form 4)
+from rheplicant.config import hatch as _hatch  # noqa: E402,F401  (registers form 8)
 from rheplicant.config import refs as _refs  # noqa: E402,F401  (registers forms 5 and 7)
