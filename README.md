@@ -183,7 +183,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(2767 tests, 82.0 % coverage, jit+grad+vmap through the full twin; assembly
+(2809 tests, 81.9 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -211,10 +211,10 @@ numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 No CI yet, and the suite is two pytest sessions rather than one — the evidence
 layer needs float64 while eighteen tests elsewhere assert refusals that only
 float32 forces, and `jax_enable_x64` is process-global. Plain `pytest` runs both
-for you. That split is also why the reported coverage is 82 % rather than the
+for you. That split is also why the reported coverage is 81.9 % rather than the
 99.7 % it was before the evidence layer landed: the second session runs
 `--no-cov`, so its 467 passing tests contribute nothing to the default report,
-and 1091 of its 1111 uncovered statements are the nine files that session
+and 1091 of its 1129 uncovered statements are the nine files that session
 covers.
 
 Neither `uv sync` nor `uv run` works here, with or without `--frozen`: locking

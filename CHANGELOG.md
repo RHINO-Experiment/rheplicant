@@ -256,6 +256,97 @@
   a browser resolves to a 404 page, so a status-code probe reports the broken
   links as healthy.
 
+### `MapSky`, the sky model nine files declared by hand and three doc pages called without declaring
+
+- **`MapSky`** ships from `rheplicant.radio.sky.model`, exported from
+  `rheplicant.radio`. It holds fixed brightness maps and the frequency grid
+  they were built on, and `__call__` does not consult its `freq` argument
+  beyond checking that it has that grid's exact shape — refusing both a
+  channel-count mismatch and a same-length, different-rank grid such as
+  `(n_freq, 1)`, matching `FlaggedNoise.std`'s shape-equality pattern rather
+  than comparing lengths. A map built for 60–85 MHz handed a grid of another
+  shape is refused rather than silently returning the wrong band; a map
+  handed a same-shape grid of a *different* band is not, and cannot be under
+  `jit` — the values are traced, only the shape is static — which is exactly
+  why the grid is stored and named rather than discarded after use.
+- Nine files — the doc figure generators and the worked examples — declared
+  their own copy of this class by hand rather than importing it; they now
+  import `MapSky` instead, and three `.md` pages that called it without ever
+  declaring it now match what they call.
+
+### `snapshot` node on the canonical signal path between `adc` and `flagging`
+
+- The 32-node template gains a 33rd: `snapshot`, sitting on the processing
+  segment between the physical chain's end and `flagging`. `At("snapshot",
+  SnapshotOperator())` now addresses it by its own name rather than by the
+  node it used to precede, and a taken snapshot shows in the rendered path
+  instead of being invisible on it.
+- `SnapshotOperator` itself still declares no `graph_node` — it lives in
+  `rheplicant.core`, which may not name a node of a domain graph — so the
+  registry's `reserved` invariant (every leaf with no declared operator is
+  `reserved`) would otherwise have called `snapshot` reserved when an
+  operator for it has shipped all along. `tests/radio/test_assemble.py`'s
+  `CORE_PLACED` widens the invariant by name for exactly this leaf, checked
+  rather than assumed: the leaf must exist on the graph, the operator must
+  import, and it must not declare a `graph_node` — the moment it did, the
+  exemption would be stale.
+
+### `Block(learning_rate=...)` reaches `gradient_estimate`
+
+- `engines.gradient_estimate` has always accepted a `learning_rate`;
+  `SamplingPlan` never passed one through, so a gradient block's Adam step
+  size was unreachable from the plan that builds it. `Block(...,
+  learning_rate=...)` now flows to `.estimate`'s call into
+  `gradient_estimate`. It has no meaning at `.sample`, where NUTS adapts its
+  own step size, so it is refused there the same way `steps` already is on a
+  conjugate block: `Block(..., engine="conjugate", learning_rate=...)` raises
+  rather than silently ignoring the argument, because a conjugate solve has
+  no iterate for a step size to scale.
+
+### `to_mermaid(theme=...)`, matching `to_svg` and `to_html`
+
+- `SignalGraph.to_mermaid` and `Assembly.to_mermaid` take `theme="light"` or
+  `"dark"`, filling the one rendering method that could not follow a dark
+  page — mermaid has no wire colour and no per-kind fill to share with
+  `to_svg`'s five-role table, so it carries its own three-class palette per
+  theme. An unknown theme name raises rather than silently falling back to
+  light, because a silently-light diagram in a dark page is exactly the
+  failure the argument exists to prevent. The light palette is byte-for-byte
+  what `to_mermaid` already drew.
+
+### `NoiseModel.realise(prediction, key=...)`, the generator beside the assumption
+
+- Added to the `NoiseModel` Protocol and implemented on all three models —
+  `HomoscedasticNoise`, `RadiometerNoise`, `FlaggedNoise` — so a caller that
+  draws a synthetic observation and weights it in the likelihood cannot have
+  the two disagree, which is the risk of every hand-written `data + sigma *
+  normal` line living beside a likelihood that carries its own `std`.
+- **`RadiometerNoise.realise` draws the multiplicative form**, `d * (1 + f *
+  w)`, not `d + std(d) * w` — because `std = |prediction| * f` takes an
+  absolute value that a generator must not: the two forms agree to 8e-6 at a
+  positive prediction (float rounding, invisible to a positive-only fixture)
+  and disagree by 0.66 at `d = -100`, because the absolute value flips the
+  scatter's sign relative to the datum it belongs to.
+  `floor` is deliberately not applied in `realise`: it is a remedy for a
+  reweighting iterate crossing zero, and a generator has no iterate.
+  `FlaggedNoise.realise` delegates to the wrapped model unchanged — a flagged
+  sample says it was not *observed*, not that it has no true value, so the
+  generator ignores the flag and only `std` puts `inf` at those samples.
+- **Compatibility note.** `NoiseModel` is `@runtime_checkable`, so adding
+  `realise` to the Protocol narrows what satisfies `isinstance(x,
+  NoiseModel)`. Every noise model shipped in this package implements it, and
+  no in-repo call site changes behaviour — checked across the `isinstance`
+  gates in `inference/noise.py`, `linear.py`, `uncertainty.py` and `gls.py`.
+  An **external**, hand-written noise model that implements only `std` and
+  `depends_on_prediction` will now fail those `isinstance` checks where it
+  used to pass.
+
+### `GeneralPointingProjector` is exported from `rheplicant.radio`
+
+- One of the two real sky engines was reachable only from
+  `rheplicant.radio.sky`, absent from `rheplicant.radio.__all__` beside
+  `DriftScanProjector`, its sibling. Now exported from both.
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than
