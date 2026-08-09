@@ -91,6 +91,16 @@ class NoiseModel(Protocol):
 
     def std(self, prediction: jax.Array) -> jax.Array: ...
 
+    def realise(self, prediction: jax.Array, *, key: jax.Array) -> jax.Array:
+        """Draw one noisy observation of ``prediction`` under this model.
+
+        The generator to :meth:`std`'s assumption. A caller that draws with
+        this and weights with :meth:`std` cannot have the two disagree, which
+        is the failure mode of every hand-written ``data + sigma * normal``
+        line beside a likelihood carrying its own sigma.
+        """
+        ...
+
 
 class HomoscedasticNoise(eqx.Module):
     """Constant noise: sigma independent of what the model predicts.
@@ -114,6 +124,11 @@ class HomoscedasticNoise(eqx.Module):
 
     def std(self, prediction: jax.Array) -> jax.Array:
         return jnp.broadcast_to(jnp.asarray(self.sigma), jnp.shape(prediction))
+
+    def realise(self, prediction: jax.Array, *, key: jax.Array) -> jax.Array:
+        """Additive: ``d + sigma * w``, ``w ~ N(0, 1)``."""
+        draw = jax.random.normal(key, jnp.shape(prediction))
+        return prediction + self.std(prediction) * draw
 
 
 class RadiometerNoise(eqx.Module):
@@ -169,6 +184,18 @@ class RadiometerNoise(eqx.Module):
             magnitude = jnp.maximum(magnitude, self.floor)
         return magnitude * self.fractional
 
+    def realise(self, prediction: jax.Array, *, key: jax.Array) -> jax.Array:
+        """Multiplicative: ``d (1 + f w)``, ``f = 1/sqrt(delta_nu tau)``.
+
+        The multiplicative form, not ``d + sigma(d) w`` -- because
+        ``sigma = |prediction| * f`` uses an absolute value that a *generator*
+        must not, and the two forms differ in sign wherever the prediction
+        does. ``floor`` is deliberately not applied here: it is a remedy for a
+        reweighting iterate crossing zero, and a generator has no iterate.
+        """
+        draw = jax.random.normal(key, jnp.shape(prediction))
+        return prediction * (1.0 + self.fractional * draw)
+
 
 class FlaggedNoise(eqx.Module):
     """Wrap a noise model so flagged samples carry infinite variance.
@@ -203,6 +230,18 @@ class FlaggedNoise(eqx.Module):
                 f"prediction shape {jnp.shape(sigma)}."
             )
         return jnp.where(self.flags, jnp.inf, sigma)
+
+    def realise(self, prediction: jax.Array, *, key: jax.Array) -> jax.Array:
+        """The wrapped model's draw, unchanged.
+
+        Flags say a sample was not OBSERVED, not that it had no true value, so
+        they belong to the likelihood's covariance and not to the generator.
+        ``std`` puts ``inf`` at the flagged samples; drawing at that sigma
+        would produce a data set no instrument could record, and every
+        consumer that turns ``inf`` into a clean zero weight expects the datum
+        underneath to be finite.
+        """
+        return self.base.realise(prediction, key=key)
 
 
 def _constant_sigma(noise_std: Any) -> Any | None:
