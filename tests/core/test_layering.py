@@ -16,6 +16,13 @@ FORBIDDEN = (
     "import rheplicant.radio",
     "from rheplicant.inference",
     "import rheplicant.inference",
+    # config assembles core objects from a document; core knows nothing about
+    # documents. Without this entry the direction is a convention, and the
+    # glob below never leaves core/, so a core -> config import would be
+    # silent -- and DESIGN.md's "core graduates by moving one directory"
+    # would quietly stop being true.
+    "from rheplicant.config",
+    "import rheplicant.config",
 )
 
 
