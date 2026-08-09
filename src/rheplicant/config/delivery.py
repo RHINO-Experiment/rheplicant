@@ -5,7 +5,7 @@ Python ``int`` or as a traced ``jnp`` array is not the document's choice and
 not this layer's -- it is written on the target class, in the ``dataclasses``
 field metadata equinox populates. So delivery reads the class first.
 
-Three measurements are the whole argument for this module.
+Four measurements are the whole argument for this module.
 
 1. ``ADCOperator(n_bits=jnp.asarray(12))`` warns ``A JAX array is being set as
    static!`` and then raises. ``ForegroundOperator(ref_freq=jnp.asarray(1.4e8))``
@@ -19,6 +19,11 @@ Three measurements are the whole argument for this module.
    YAML ``1.0`` must not differ in what can be inferred.
 3. A YAML sequence is a Python ``list``. On a static ``tuple`` field it
    constructs fine and makes the module unhashable.
+4. ``astype("float64")`` returns ``float32`` when ``jax_enable_x64`` is off,
+   with no warning, and every later dtype check then agrees with the downcast
+   value. The flag is process-global and must be set before any array exists,
+   so a document cannot make float64 true merely by asking for it -- and
+   ``general_pointing.py`` puts the cost of getting this wrong at O(10%).
 
 The model is ``CWCalibrationOperator``'s converters
 (``radio/instrument/calibration.py:242-255``): coerce to a clean static scalar
@@ -32,6 +37,7 @@ import typing
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
+import jax
 import jax.numpy as jnp
 
 from rheplicant.config.errors import ConfigError
@@ -213,7 +219,46 @@ def deliver(
     return value
 
 
+def _x64_enabled() -> bool:
+    """Whether this process can represent float64, read at CALL time.
+
+    Not at import: ``jax_enable_x64`` is normally switched on during a run's
+    setup, which happens after this module has been imported. A snapshot taken
+    at import would answer ``False`` for a run that had correctly enabled it.
+    """
+    try:
+        return bool(jax.config.jax_enable_x64)
+    except AttributeError:  # pragma: no cover - accessor differs by jax version
+        return bool(jax.config.read("jax_enable_x64"))
+
+
+def _require_x64(dtype: str) -> None:
+    """Refuse a float64 request a float32 process would silently downcast.
+
+    One guard covers ``complex128`` too, because that dtype is reachable only
+    through ``dtype == "float64"``.
+    """
+    if dtype != "float64" or _x64_enabled():
+        return
+    raise ConfigError(
+        "This value is to be delivered as float64, but jax_enable_x64 is False in "
+        "this process, so jnp.asarray(...).astype('float64') silently returns "
+        "float32 (and complex128 returns complex64). Nothing downstream can detect "
+        "that: the arrays are finite, correctly shaped and plausibly structured, "
+        "every later dtype check compares the downcast values against each other "
+        "and agrees, and config.resolved.yaml would record float64 as though it had "
+        "happened. The map<->alm steps shared by GeneralPointingProjector and "
+        "DriftScanProjector (s2fft healpix transforms, Price-McEwen recursion) carry "
+        "O(10%) errors in float32 even at small lmax, so the maps come out wrong by "
+        "about a tenth rather than obviously broken. jax_enable_x64 is process-global "
+        "and part of the hashed config, so it has to be set before any array exists: "
+        "write runtime.jax_enable_x64: true in the document, or export "
+        "JAX_ENABLE_X64=1 in the environment."
+    )
+
+
 def _as_traced(value: Any, spec: FieldSpec, dtype: str):
+    _require_x64(dtype)
     array = jnp.asarray(value)
     if jnp.issubdtype(array.dtype, jnp.complexfloating):
         return array.astype("complex128" if dtype == "float64" else "complex64")

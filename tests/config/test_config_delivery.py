@@ -1,6 +1,10 @@
 """Static vs traced: the destination field decides, and the decision is measured."""
 
 import dataclasses
+import os
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable
 
 import equinox as eqx
@@ -85,6 +89,11 @@ class TestTracedDeliveryForcesAFloatingDtype:
         assert jax.tree_util.tree_leaves(params), "delivered fields must be trainable"
 
     def test_the_run_dtype_is_honoured(self):
+        """DECORATIVE for the astype rule: with x64 off, jnp.asarray(1.0) is
+        already float32, so this passes just as well on an implementation that
+        returns the array untouched. It pins the float32 case and nothing
+        more. TestFloat64MustBeRealFloat64 is the test that can actually tell
+        a requested dtype from a delivered one."""
         spec = field_specs(AntennaLossOperator)["efficiency"]
         assert deliver(1.0, spec, dtype="float32").dtype == jnp.float32
 
@@ -102,6 +111,72 @@ class TestTracedDeliveryForcesAFloatingDtype:
         spec = field_specs(ForegroundOperator)["amplitude"]
         value = deliver([True, False], spec, dtype="float32")
         assert jnp.issubdtype(value.dtype, jnp.bool_)
+
+
+class TestFloat64MustBeRealFloat64:
+    """jax_enable_x64 is process-global, so a document cannot make float64
+    true by asking. Delivery is the last seam that can still tell."""
+
+    def test_float64_is_refused_when_the_process_cannot_represent_it(self):
+        """Catches the silent downcast: with x64 off, astype("float64")
+        returns float32 and every later dtype check agrees with itself, so
+        nothing downstream can notice. The refusal has to happen here."""
+        spec = field_specs(AntennaLossOperator)["efficiency"]
+        with pytest.raises(ConfigError) as excinfo:
+            deliver(1.0, spec, dtype="float64")
+        message = str(excinfo.value)
+        assert "float64" in message  # what was asked for
+        assert "float32" in message  # what the process can represent
+        assert "10%" in message  # the size of the error it hides
+        assert "GeneralPointingProjector" in message  # who is harmed
+        assert "DriftScanProjector" in message
+        assert "JAX_ENABLE_X64=1" in message  # remedy 1
+        assert "runtime.jax_enable_x64" in message  # remedy 2
+
+    def test_a_complex_value_at_float64_is_refused_by_the_same_guard(self):
+        """complex128 is reachable only via dtype="float64", so the one guard
+        covers it -- but a guard placed after the complex branch would let a
+        complex value through and silently deliver complex64."""
+        spec = field_specs(AntennaLossOperator)["efficiency"]
+        with pytest.raises(ConfigError, match="float64"):
+            deliver(1 + 2j, spec, dtype="float64")
+
+    def test_float32_is_unaffected_by_the_guard(self):
+        """Catches a guard that refuses on x64 being off regardless of the
+        dtype asked for, which would make the ordinary float32 run unwritable."""
+        spec = field_specs(AntennaLossOperator)["efficiency"]
+        assert deliver(1.0, spec, dtype="float32").dtype == jnp.float32
+
+    def test_a_process_that_enables_x64_gets_a_real_float64(self):
+        """The other half of the rule, and the only test here that proves the
+        remedy works rather than that the refusal fires.
+
+        Enabling x64 is process-global and would leak into every test sharing
+        this worker, so it runs in a subprocess. The child enables x64 AFTER
+        importing delivery, which is what a run doing setup does -- that
+        catches an implementation that snapshots jax_enable_x64 at import
+        time, as well as one that refuses float64 unconditionally."""
+        source = textwrap.dedent(
+            """
+            import jax
+            from rheplicant.config.delivery import deliver, field_specs
+            from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
+
+            jax.config.update("jax_enable_x64", True)   # after import, as a run does
+            spec = field_specs(AntennaLossOperator)["efficiency"]
+            print("DTYPE=", deliver(1.0, spec, dtype="float64").dtype, sep="")
+            print("CDTYPE=", deliver(1 + 2j, spec, dtype="float64").dtype, sep="")
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", source],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "JAX_ENABLE_X64": "1"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "DTYPE=float64" in proc.stdout, proc.stdout
+        assert "CDTYPE=complex128" in proc.stdout, proc.stdout
 
 
 class TestStaticDelivery:
@@ -242,7 +317,13 @@ class TestNumpyNeverReachesAField:
     def test_a_numpy_scalar_on_a_static_int_is_refused(self):
         """MEASURED: np.int64(8) is rejected by ADCOperator's isinstance guard
         AND trips the equinox array warning, because numpy.generic is in
-        equinox's _ARRAY_TYPES."""
+        equinox's _ARRAY_TYPES.
+
+        DECORATIVE for _reject_numpy itself: this passes with the numpy guard
+        deleted, because isinstance(np.int64(8), int) is False and the generic
+        int guard answers first. It covers the int half of the destination
+        only. test_a_numpy_scalar_on_a_static_float_is_refused covers the half
+        where the guard is load-bearing."""
         import numpy as np
 
         spec = field_specs(ADCOperator)["n_bits"]
