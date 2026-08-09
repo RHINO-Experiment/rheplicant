@@ -217,3 +217,4 @@ def register_form(name: str) -> Callable[[Any], Any]:
 # names already defined above it.
 from rheplicant.config import arrays as _arrays  # noqa: E402,F401  (registers form 2)
 from rheplicant.config import draws as _draws  # noqa: E402,F401  (registers form 3)
+from rheplicant.config import files as _files  # noqa: E402,F401  (registers form 4)
