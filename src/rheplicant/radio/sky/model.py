@@ -92,11 +92,12 @@ class MapSky(AbstractSkyModel):
 
     The stand-in for a GSM / pyGDSM realisation, and the shape every worked
     example in this package reaches for. ``__call__`` returns the stored maps
-    and **does not consult its ``freq`` argument** beyond checking that it is
-    the same length as the grid the maps were built on.
+    and **does not consult its ``freq`` argument** beyond checking that it has
+    the same shape as the grid the maps were built on.
 
     **What that check does and does not catch.** A map built for 60-85 MHz and
-    evaluated on a 60-85 MHz grid of a different length is refused. A map built
+    evaluated on a 60-85 MHz grid of a different length -- or of the same length
+    and a different rank, such as ``(n_freq, 1)`` -- is refused. A map built
     for 60-85 MHz and evaluated on a 100-125 MHz grid of the SAME length is
     not, and cannot be under ``jit`` -- the values are traced, only the shape is
     static. That failure returns a smooth, plausible, wrong temperature, so
