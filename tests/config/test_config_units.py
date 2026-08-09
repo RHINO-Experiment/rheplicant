@@ -97,6 +97,16 @@ class TestTheQuotientGrammar:
             canonical_unit(token)
         assert token in str(excinfo.value)
 
+    def test_an_empty_numerator_keeps_its_own_message(self):
+        """'/s' has a blank segment too, so the empty-segment rule above would
+        answer it perfectly well -- and would bury the more specific message.
+        What this really pins is the ORDER of the two checks: the head-empty
+        test has to run first, and nothing else in this file would notice if
+        it stopped doing so."""
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit("/s")
+        assert "nothing above the '/'" in str(excinfo.value)
+
 
 class TestAffineUnitsCannotCompose:
     def test_celsius_inside_a_quotient_is_refused(self):
@@ -133,6 +143,23 @@ class TestAffineUnitsCannotCompose:
         assert "celsius*m" in message
         assert "K*m" in message  # the remedy, derived
         assert "celsius/s" not in message
+
+    def test_an_affine_denominator_is_refused_in_its_own_words(self):
+        """'K/celsius' fails on the denominator branch, which has a message of
+        its own and no coverage. Asserting a substring the two branches share
+        would pass whichever one ran, so what this pins is that the sentences
+        DIFFER: a reader has to be able to tell which side of the '/' the
+        offending atom was on, and that is the one check a shared substring
+        cannot make."""
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit("K/celsius")
+        below_the_line = str(excinfo.value)
+        assert "celsius" in below_the_line
+        assert "denominator" in below_the_line
+
+        with pytest.raises(ConfigError) as excinfo:
+            canonical_unit("celsius/s")
+        assert below_the_line != str(excinfo.value)
 
 
 class TestAnUnknownTokenIsRefused:
