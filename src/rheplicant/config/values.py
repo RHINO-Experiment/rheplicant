@@ -198,3 +198,9 @@ def register_form(name: str) -> Callable[[Any], Any]:
         return fn
 
     return _register
+
+
+# Imported for its side effect, at the very bottom and nowhere else: the one
+# place a circular import is deliberate and safe, because `arrays` imports only
+# names already defined above it.
+from rheplicant.config import arrays as _arrays  # noqa: E402,F401  (registers form 2)
