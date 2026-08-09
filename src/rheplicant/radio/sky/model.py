@@ -85,3 +85,61 @@ class PowerLawSkyModel(AbstractSkyModel):
         spectrum = (freq / self.ref_freq) ** (-self.spectral_index)  # (n_freq,)
         amplitude = jnp.broadcast_to(self.amplitude, (self.n_pix,))
         return jnp.outer(spectrum, amplitude)
+
+
+class MapSky(AbstractSkyModel):
+    """Fixed brightness maps, and the frequency grid they were built on.
+
+    The stand-in for a GSM / pyGDSM realisation, and the shape every worked
+    example in this package reaches for. ``__call__`` returns the stored maps
+    and **does not consult its ``freq`` argument** beyond checking that it is
+    the same length as the grid the maps were built on.
+
+    **What that check does and does not catch.** A map built for 60-85 MHz and
+    evaluated on a 60-85 MHz grid of a different length is refused. A map built
+    for 60-85 MHz and evaluated on a 100-125 MHz grid of the SAME length is
+    not, and cannot be under ``jit`` -- the values are traced, only the shape is
+    static. That failure returns a smooth, plausible, wrong temperature, so
+    ``freq`` is stored to give it a name and a place for a config layer to
+    check it before tracing begins.
+
+    Attributes:
+        maps: ``(n_freq, n_pix)`` brightness temperatures [K] -- a
+            differentiable leaf, so a sky can be inferred rather than assumed.
+        freq: ``(n_freq,)`` the frequency grid the maps were built on [Hz].
+    """
+
+    maps: jax.Array
+    freq: jax.Array
+
+    def __check_init__(self):
+        if jnp.ndim(self.maps) != 2:
+            raise StateValidationError(
+                f"maps must be (n_freq, n_pix), got ndim {jnp.ndim(self.maps)} "
+                f"with shape {jnp.shape(self.maps)}. A single map is (1, n_pix), "
+                "not (n_pix,) -- the frequency axis is not optional, because "
+                "MapSky's whole contract is which grid the maps belong to."
+            )
+        if jnp.ndim(self.freq) != 1:
+            raise StateValidationError(
+                f"freq must be (n_freq,), got ndim {jnp.ndim(self.freq)} with "
+                f"shape {jnp.shape(self.freq)}."
+            )
+        if jnp.shape(self.maps)[0] != jnp.shape(self.freq)[0]:
+            raise StateValidationError(
+                f"maps and freq disagree on the number of channels: maps is "
+                f"{jnp.shape(self.maps)} and freq is {jnp.shape(self.freq)}. "
+                "The maps' first axis IS the frequency axis."
+            )
+
+    def __call__(self, freq: jax.Array) -> jax.Array:
+        n_built, n_asked = jnp.shape(self.freq)[0], jnp.shape(freq)[0]
+        if n_built != n_asked:
+            raise StateValidationError(
+                f"MapSky was built on a grid of {n_built} channels and asked "
+                f"for {n_asked}. The maps are not interpolated -- they are "
+                "returned as stored -- so a grid of another length is a "
+                "modelling error, not a resampling request. Rebuild the maps "
+                "on the grid you mean to observe on."
+            )
+        return self.maps

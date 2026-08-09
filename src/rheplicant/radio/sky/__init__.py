@@ -15,7 +15,7 @@ from rheplicant.radio.sky.driftscan import DriftScanProjector
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
 from rheplicant.radio.sky.general_pointing import GeneralPointingProjector
 from rheplicant.radio.sky.global_signal import GlobalSignalOperator
-from rheplicant.radio.sky.model import AbstractSkyModel, PowerLawSkyModel, UniformSkyModel
+from rheplicant.radio.sky.model import AbstractSkyModel, MapSky, PowerLawSkyModel, UniformSkyModel
 from rheplicant.radio.sky.point_sources import PointSourceOperator
 from rheplicant.radio.sky.projection import (
     AbstractSkyProjector,
@@ -30,6 +30,7 @@ __all__ = [
     "DriftScanProjector",
     "ForegroundOperator",
     "GlobalSignalOperator",
+    "MapSky",
     "MatrixProjector",
     "GeneralPointingProjector",
     "PointSourceOperator",
