@@ -157,7 +157,7 @@ RADIO_GRAPH = register_graph(
             "adc": NodeSpec(_T, "digitisation -> raw waterfall"),
             "snapshot": NodeSpec(
                 _T,
-                "preserve the raw waterfall into aux before processing",
+                "raw waterfall -> aux (pre-processing checkpoint)",
                 segment="processing",
             ),
             "flagging": NodeSpec(_T, "RFI flags -> aux", segment="processing"),

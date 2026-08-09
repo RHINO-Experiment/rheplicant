@@ -33,9 +33,9 @@ def test_snapshot_is_a_node_of_the_canonical_graph():
 
 
 def test_snapshot_sits_between_adc_and_flagging():
-    assert "snapshot" in RADIO_GRAPH._out["adc"]
-    assert "flagging" in RADIO_GRAPH._out["snapshot"]
-    assert "flagging" not in RADIO_GRAPH._out["adc"]
+    assert ("adc", "snapshot") in RADIO_GRAPH.edges
+    assert ("snapshot", "flagging") in RADIO_GRAPH.edges
+    assert ("adc", "flagging") not in RADIO_GRAPH.edges
 
 
 def test_snapshot_is_in_the_processing_segment():
