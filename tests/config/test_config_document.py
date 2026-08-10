@@ -70,7 +70,7 @@ class TestLoadDocument:
 
     @pytest.mark.parametrize(
         ("section", "route"),
-        [("inference", "Plan 2B"), ("runs", "Plan 2B"), ("outputs", "Plan 4"),
+        [("runs", "Plan 2B"), ("outputs", "Plan 4"),
          ("defaults", "Plan 4"), ("plugins", "Plan 4")],
     )
     def test_not_yet_owned_sections_name_their_plan(self, section, route):
@@ -87,12 +87,28 @@ class TestLoadDocument:
         assert float(base.twin["gain"].gain) == pytest.approx(1.1)
         assert float(unity.twin["gain"].gain) == pytest.approx(1.0)
 
+    def test_an_inference_section_builds_on_the_run(self):
+        doc = {**synthetic_document(),
+               "inference": {
+                   "twin": {"without": ["noise"]},
+                   "parameters": {"g": {"init": 1.0, "linear": True,
+                                        "into": "gain.gain"}},
+                   "noise": {"kind": "homoscedastic",
+                             "sigma": {"value": 0.5, "unit": "K"}},
+                   "observed": {"from": "simulation", "at": {"g": 1.5}},
+               }}
+        run = load_document(doc)
+        assert run.inference.space is not None
+        assert "noise" not in run.inference.fit_twin.lit
+        assert run.inference.observed.entries["primary"].shape == (16, 8)
+        assert float(run.inference.truth["g"]) == pytest.approx(1.5)
+
     def test_a_variant_cannot_smuggle_a_refused_section_past_the_sweep(self):
         """The sweep runs on the MERGED document: variants apply first, so a
         patch injecting a not-yet-owned section is still refused."""
         doc = synthetic_document()
-        doc["variants"]["sneaky"] = {"inference": {}}
-        with pytest.raises(ConfigError, match="Plan 2B"):
+        doc["variants"]["sneaky"] = {"outputs": {}}
+        with pytest.raises(ConfigError, match="Plan 4"):
             load_document(doc, variant="sneaky")
 
 

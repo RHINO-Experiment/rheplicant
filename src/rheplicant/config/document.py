@@ -20,6 +20,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.layering import apply_variant
 from rheplicant.config.resources import BuiltResources, build_resources
 from rheplicant.config.sections.compose import build_model
+from rheplicant.config.sections.inference import build_inference
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import RuntimeFacts, build_runtime, state_key
 from rheplicant.core.coordinates import Coordinates
@@ -31,7 +32,6 @@ _SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
              "resources", "model", "variants", "inference", "runs", "outputs",
              "campaign")
 _NOT_YET = {
-    "inference": "Plan 2B (ParameterSpace, NoiseModel, observed)",
     "runs": "Plan 2B (the exits; run_forward is this layer's forward exit)",
     "outputs": "Plan 4 (outputs, provenance, the CLI)",
     "defaults": "Plan 4 (presets are YAML files, and the CLI is where YAML "
@@ -48,6 +48,7 @@ class ConfiguredRun(NamedTuple):
     runtime: RuntimeFacts
     state: State
     twin: Any
+    inference: Any
     resources: BuiltResources
     context: ResolutionContext
 
@@ -133,8 +134,11 @@ def load_document(document: Mapping, *, variant: str | None = None,
             key=state_key(runtime),
             meta=observation.meta,
         )
+    inference = build_inference(doc.get("inference"), twin=twin, state=state,
+                                observation=observation, context=context)
     return ConfiguredRun(document=doc, runtime=runtime, state=state,
-                         twin=twin, resources=resources, context=context)
+                         twin=twin, inference=inference, resources=resources,
+                         context=context)
 
 
 def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,
