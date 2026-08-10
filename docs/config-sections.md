@@ -10,6 +10,10 @@ run = load_document(document)      # a plain dict, schema v1
 out = run_forward(run)             # = run.twin(run.state)
 ```
 
+What the document's `inference:` and `runs:` sections say — the fit twin,
+the latents, the likelihood and the exits — is
+[its own page](config-inference.md).
+
 ## The build order
 
 `load_document` builds in the order the sections feed each other: variants
@@ -49,5 +53,8 @@ point). Lighting `beam_spill` and `ground_pickup` together requires
 
 ## What is refused, and where it goes instead
 
-`inference:` and `runs:` arrive with Plan 2B; `outputs:`, `defaults:` and
-`plugins:` with Plan 4's CLI; `campaign:` stays reserved with capability 4.
+`inference:` and `runs:` are read now — [their own page](config-inference.md)
+covers them, and `runs:` is required. What still goes elsewhere: `outputs:`,
+`defaults:` and `plugins:` arrive with Plan 4's CLI; the 2C exits (`nuts`,
+the `conjugate.*` family, `predict`, `npe` and friends) with Plan 2C, refused
+by name until then; `campaign:` stays reserved with capability 4.

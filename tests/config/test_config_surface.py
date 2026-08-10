@@ -92,3 +92,12 @@ class TestThePlan2ASurface:
 
         assert "rhino_hdf5" in config.FILE_FORMATS
         assert "eqx_leaves" in config.FILE_FORMATS
+
+
+class TestThePlan2BSurface:
+    def test_the_inference_and_runs_layer_is_exported(self):
+        import rheplicant.config as config
+
+        for name in ("InferenceBuild", "RunResult", "run_document"):
+            assert name in config.__all__, name
+            assert getattr(config, name) is not None

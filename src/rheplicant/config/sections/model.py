@@ -220,7 +220,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
     raise ConfigError(
         f"model.{node_id}: from: {route!r} is not a route this node offers. "
         "The shipped routes: beam_spill from: projector, t_sys_extra "
-        "from: basis."
+        "from: basis, cal_loads from: thermistors."
     )
 
 

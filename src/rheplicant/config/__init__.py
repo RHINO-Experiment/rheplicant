@@ -9,8 +9,11 @@ their nine modifiers, the delivery rule that decides scalar-vs-traced off the
 destination field, the path grammar, and ``resources.<kind>.<name>`` with
 ``ref``-is-identity construction. Plan 2A adds the section loaders and the
 document layer: ``load_document`` turns a parsed document's
-``runtime:``/``observation:``/``model:`` into a ``ConfiguredRun`` and
-``run_forward`` evaluates it.
+``runtime:``/``observation:``/``model:``/``inference:`` into a
+``ConfiguredRun`` and ``run_forward`` evaluates it. Plan 2B adds the fitting
+exits: ``run_document`` executes the ``runs:`` a document declares, each
+against the ``InferenceBuild`` its ``inference:`` section produced, and hands
+back one ``RunResult`` per run.
 """
 
 from rheplicant.config.context import ResolutionContext
@@ -28,6 +31,8 @@ from rheplicant.config.paths import (
 )
 from rheplicant.config.resources import RESOURCE_KINDS, BuiltResources, build_resources
 from rheplicant.config.sections import ingest as _ingest  # noqa: F401  (registers rhino_hdf5)
+from rheplicant.config.sections.inference import InferenceBuild
+from rheplicant.config.sections.runs import RunResult, run_document
 from rheplicant.config.symbols import SHAPE_SYMBOLS, ShapeScope, resolve_extent
 from rheplicant.config.units import (
     ACCEPTED_UNITS,
@@ -54,9 +59,11 @@ __all__ = [
     "ConfigError",
     "ConfiguredRun",
     "FieldSpec",
+    "InferenceBuild",
     "ResolutionContext",
     "ResolvedPath",
     "ResolvedValue",
+    "RunResult",
     "ShapeScope",
     "Unit",
     "apply_variant",
@@ -72,5 +79,6 @@ __all__ = [
     "resolve_extent",
     "resolve_path_on",
     "resolve_value",
+    "run_document",
     "run_forward",
 ]

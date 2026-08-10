@@ -204,6 +204,7 @@ contracts
 config-values
 config-resources
 config-sections
+config-inference
 ```
 
 ```{toctree}

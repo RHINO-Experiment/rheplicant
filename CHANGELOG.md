@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### A YAML document now runs its own fit
+
+Plan 2B: the document that assembled the twin declares what to do with it.
+`inference:` builds the fit twin (`without:`/`replace:` — the supported
+repair, not a redeclaration), the latents with their priors and bindings, the
+likelihood's noise, the observed data (simulated with truth injected through
+`at:`, read from a file, or several by name), the recorded truth, and the
+checks ledger. `runs:` is required again — a 2A-era document without it is
+refused naming `runs` — and `run_document(document)` executes every entry in
+declaration order: `forward`, `fisher`, `optimize`, `plan.estimate` and
+`plan.sample` are the five exits this plan ships, with `expect: refuse`
+turning a demonstration refusal into a checkable assertion.
+
+Two constructs are the config layer's own rather than re-exports.
+`radiometer_frozen` exists nowhere in `src/` on purpose: it DECIDES the
+radiometer sigma into a constant array — the one form the conjugate seam
+accepts — from `|observed|` or the starting prediction. And
+`model.cal_loads: {from: thermistors, label: ...}` is the route that turns an
+ingested recording's thermistor log into the load operator, joining
+`beam_spill from: projector` and `t_sys_extra from: basis` in the route
+table's catch-all message.
+
+The 2B/2C split is enforced by name: `nuts`, the `conjugate.*` family,
+`gradient`, `identifiability`, `score_directions`, `condition`, `mmodes`,
+`predict` and `npe` are refused naming Plan 2C, as are `reuse:`,
+`inference.npe:` and the `beam_analysis` transform; `compare` and
+`benchmark` name Plan 4. What 2C still owes: the likelihood-carrying exits
+that consume `include_logdet` (parsed and recorded here, A49 both
+directions), the driftscan exits behind `beam_analysis`, and the cross-run
+products behind `reuse:`.
+
 ### The documented developer install could not be run by anyone but its author
 
 - `uv sync --frozen` was the first command a contributor was given, in the
