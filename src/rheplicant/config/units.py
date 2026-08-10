@@ -42,6 +42,7 @@ _ATOMS: dict[str, _Atom] = {
     "ghz": _Atom("Hz", "frequency", 1e9),
     "s": _Atom("s", "time", 1.0),
     "ms": _Atom("s", "time", 1e-3),
+    "unix_s": _Atom("unix_s", "time_epoch", 1.0),
     "k": _Atom("K", "temperature", 1.0),
     "celsius": _Atom("K", "temperature", 1.0, 273.15),
     "deg": _Atom("deg", "angle", 1.0),
