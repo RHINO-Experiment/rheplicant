@@ -199,6 +199,130 @@ def _run_optimize(run: RunSpec, built: Any) -> Any:
 _EXECUTORS["optimize"] = _run_optimize
 
 
+_BLOCK_KEYS = frozenset({"names", "steps", "engine", "learning_rate"})
+_ESTIMATE_KEYS = frozenset({"blocks", "max_iter", "tol", "min_sweeps",
+                            "check_identifiability", "solve_tol",
+                            "solve_guard"})
+_SAMPLE_KEYS = frozenset({"blocks", "seed", "n_sweeps", "warmup", "rhat_max",
+                          "warm_start", "check_identifiability", "solve_tol",
+                          "solve_guard"})
+_WARM_KEYS = frozenset({"kind", "blocks", "max_iter", "tol", "min_sweeps",
+                        "move", "check_identifiability", "solve_tol",
+                        "solve_guard"})
+_ESTIMATE_PASSTHROUGH = ("max_iter", "tol", "min_sweeps",
+                         "check_identifiability", "solve_tol", "solve_guard")
+_SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability",
+                       "solve_tol", "solve_guard")
+
+
+def _blocks(where: str, node: Any) -> tuple[Any, ...]:
+    from rheplicant.inference import Block
+
+    if not isinstance(node, list) or not node:
+        raise ConfigError(f"{where}: blocks: is a non-empty list of block "
+                          f"mappings; got {node!r}.")
+    built = []
+    for index, entry in enumerate(node):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{where}: blocks[{index}] is a mapping; got "
+                              f"{entry!r}.")
+        unknown = sorted(set(entry) - _BLOCK_KEYS)
+        if unknown:
+            raise ConfigError(
+                f"{where}: blocks[{index}] does not take {unknown}; a block "
+                f"takes {sorted(_BLOCK_KEYS)}."
+            )
+        names = entry.get("names")
+        if not isinstance(names, list) or not names or not all(
+                isinstance(name, str) for name in names):
+            raise ConfigError(f"{where}: blocks[{index}].names is a "
+                              f"non-empty list of latent names; got "
+                              f"{entry.get('names')!r}.")
+        knobs = {key: entry[key] for key in ("steps", "engine",
+                                             "learning_rate") if key in entry}
+        built.append(Block(*names, **knobs))
+    return tuple(built)
+
+
+def _passthrough(options: dict, keys: tuple[str, ...]) -> dict:
+    return {key: options[key] for key in keys if key in options}
+
+
+def _run_plan(run: RunSpec, built: Any) -> Any:
+    import equinox as eqx
+    import jax
+
+    from rheplicant.config.draws import _seed_name, seed_for
+    from rheplicant.inference import SamplingPlan
+
+    estimate = run.kind == "plan.estimate"
+    where = f"runs[{run.name!r}]"
+    if estimate and "seed" in run.options:
+        raise ConfigError(
+            f"{where}: plan.estimate refuses a seed -- the asymmetry is the "
+            "package's own (sample takes key=, estimate has no key "
+            "parameter; check A29). Drop it, or make this run plan.sample."
+        )
+    _sweep(run, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
+    inference = built.inference
+    space = _space(run, built)
+    noise = _noise(run, built)
+    observed = _observed(run, built)
+    blocks = _blocks(where, run.options.get("blocks"))
+    if estimate:
+        return SamplingPlan(space, *blocks).estimate(
+            inference.fit_twin, built.state, observed, noise=noise,
+            **_passthrough(run.options, _ESTIMATE_PASSTHROUGH))
+    if "n_sweeps" not in run.options:
+        raise ConfigError(f"{where}: n_sweeps: is required for plan.sample.")
+    key = jax.random.key(seed_for(_seed_name(dict(run.options), where),
+                                  built.context))
+    warm = run.options.get("warm_start")
+    if warm is not None:
+        if not isinstance(warm, dict):
+            raise ConfigError(f"{where}: warm_start: is a mapping; got "
+                              f"{warm!r}.")
+        unknown = sorted(set(warm) - _WARM_KEYS)
+        if unknown:
+            raise ConfigError(f"{where}: warm_start does not take "
+                              f"{unknown}; it takes {sorted(_WARM_KEYS)}.")
+        if warm.get("kind") != "plan.estimate":
+            raise ConfigError(
+                f"{where}: warm_start.kind: plan.estimate is the one warm "
+                f"start there is; got {warm.get('kind')!r}."
+            )
+        move = warm.get("move")
+        if not isinstance(move, list) or not move or not all(
+                isinstance(name, str) for name in move):
+            raise ConfigError(
+                f"{where}: warm_start.move: is required -- the latents "
+                "whose inits the warm start moves; the rest stay declared."
+            )
+        missing = sorted(set(move) - set(space.names))
+        if missing:
+            raise ConfigError(
+                f"{where}: warm_start.move names {missing}, which "
+                f"inference.parameters does not declare; it declares "
+                f"{list(space.names)}."
+            )
+        warm_blocks = _blocks(f"{where}: warm_start", warm.get("blocks"))
+        est = SamplingPlan(space, *warm_blocks).estimate(
+            inference.fit_twin, built.state, observed, noise=noise,
+            **_passthrough(warm, _ESTIMATE_PASSTHROUGH))
+        space = eqx.tree_at(
+            lambda s: [s.latent(name).init for name in move], space,
+            [est.values[name] for name in move])
+    kwargs = _passthrough(run.options, _SAMPLE_PASSTHROUGH)
+    return SamplingPlan(space, *blocks).sample(
+        inference.fit_twin, built.state, observed, noise=noise, key=key,
+        n_sweeps=_number(run, "n_sweeps", run.options["n_sweeps"], kind=int),
+        **kwargs)
+
+
+_EXECUTORS["plan.estimate"] = _run_plan
+_EXECUTORS["plan.sample"] = _run_plan
+
+
 def execute_run(run: RunSpec, built: Any) -> RunResult:
     """One run entry against its ConfiguredRun -> a RunResult."""
     executor = _EXECUTORS[run.kind]
