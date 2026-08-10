@@ -54,15 +54,29 @@ from rheplicant.config.registry import LiveNames
 from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
 
-#: format name -> (reader, the keys it accepts beyond path/format/unit/sha256)
-_READERS: dict[str, tuple[Callable[..., Any], frozenset[str]]] = {}
+#: format name -> (reader, the keys it accepts beyond path/format/unit/sha256,
+#: whether its return value is an array).
+_READERS: dict[str, tuple[Callable[..., Any], frozenset[str], bool]] = {}
 
 
-def register_reader(name: str, extra_keys: frozenset[str] = frozenset()):
-    """Register a file reader under ``name``. Returns the function."""
+def register_reader(name: str, extra_keys: frozenset[str] = frozenset(), *, array: bool = True):
+    """Register a file reader under ``name``. Returns the function.
+
+    Args:
+        name: the format token, as written in ``format:``.
+        extra_keys: the keys this format accepts beyond path/format/sha256.
+        array: ``True`` (the default) for a reader whose return value is an
+            array -- ``jnp.asarray``'d and eligible for ``unit:`` like every
+            other format. ``False`` for a reader that returns some other
+            object (:class:`rheplicant.radio.touchstone.Touchstone`, today):
+            the object is handed back unwrapped, and the node it came from
+            takes no modifiers, because a modifier describes what an array's
+            numbers ARE and an object-valued reader returns something else
+            entirely.
+    """
 
     def _register(fn):
-        _READERS[name] = (fn, extra_keys)
+        _READERS[name] = (fn, extra_keys, array)
         return fn
 
     return _register
@@ -168,7 +182,7 @@ def _read_csv(path: pathlib.Path, spec: dict):
     return np.stack([data[name] for name in columns], axis=-1)
 
 
-def _read(reader, path: pathlib.Path, spec: dict, fmt: str):
+def _read(reader, path: pathlib.Path, spec: dict, fmt: str, *, as_array: bool = True):
     """Call one reader, and let nothing out of it without the document's context.
 
     One wrapper here rather than a ``try`` inside each reader, for the reason
@@ -178,6 +192,12 @@ def _read(reader, path: pathlib.Path, spec: dict, fmt: str):
     the guard too -- an object array that numpy declined to reject would fail
     there instead, and a bare ``TypeError`` from jax is no more use to a reader
     of the document than a bare ``ValueError`` from numpy.
+
+    ``as_array=False`` skips the ``jnp.asarray`` and hands the reader's return
+    value back exactly as given -- for a reader registered with
+    ``register_reader(..., array=False)``, whose return value is not an array
+    at all (:class:`rheplicant.radio.touchstone.Touchstone`, today) and which
+    ``jnp.asarray`` would either mangle or refuse outright.
 
     The catch is ``Exception`` and not a list of the types numpy documents,
     because that list is not part of numpy's contract and does not survive
@@ -189,7 +209,8 @@ def _read(reader, path: pathlib.Path, spec: dict, fmt: str):
     a reader is still reported as one rather than disguised as a bad file.
     """
     try:
-        return jnp.asarray(reader(path, spec))
+        result = reader(path, spec)
+        return jnp.asarray(result) if as_array else result
     except ConfigError:
         # A reader's own refusal already names the document, the key and the
         # remedy. Re-wrapping it would bury that under advice about delimiters.
@@ -266,7 +287,7 @@ def _file(node, context, modifiers):
             "call takes, so a format this layer does not know is refused rather than "
             "guessed from the extension."
         )
-    reader, extra = entry
+    reader, extra, is_array = entry
     unknown = sorted(set(spec) - {"path", "format", "sha256"} - extra)
     if unknown:
         raise ConfigError(
@@ -285,10 +306,24 @@ def _file(node, context, modifiers):
             "recorded is not the run the artefact describes."
         )
 
-    array = _read(reader, path, spec, fmt)
-    unit_token = modifiers.get("unit")
+    result = _read(reader, path, spec, fmt, as_array=is_array)
     carried = {**modifiers, "_sha256": digest, "_path": str(path)}
+    if not is_array:
+        # Modifiers describe what an array's numbers ARE (unit, part, scale,
+        # normalize, ...); an object-valued reader returns something else
+        # entirely, and there is no modifier here that means anything applied
+        # to it. Refused by name -- `type(result).__name__` -- rather than
+        # dropped, on the same reasoning `resolve_value`'s own unknown-key
+        # sweep gives for silently-ignored keys.
+        if modifiers:
+            raise ConfigError(
+                "file: an object-valued file node takes no modifiers; modifiers "
+                f"describe arrays, and this reader returns a {type(result).__name__}."
+            )
+        return ResolvedValue(result, None, "file", carried)
+
+    unit_token = modifiers.get("unit")
     if unit_token is None:
-        return ResolvedValue(array, None, "file", carried)
-    converted, unit = convert_to_canonical(array, unit_token)
+        return ResolvedValue(result, None, "file", carried)
+    converted, unit = convert_to_canonical(result, unit_token)
     return ResolvedValue(converted, unit, "file", carried)

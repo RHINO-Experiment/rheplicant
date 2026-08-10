@@ -1,7 +1,6 @@
 """Importing this package is how every resource-kind builder gets registered.
 
-``arrays`` today; Tasks 4-8 add the remaining five, one import each, until the
-set of six is complete.
+All six, as of this commit -- one import each, until the set is complete.
 
 One import rather than six: a kind that is defined but never imported is a
 kind the registry does not have, and the failure is an "unknown kind" refusal
@@ -16,6 +15,9 @@ from rheplicant.config.kinds import bases as _bases_kind  # noqa: F401  (registe
 from rheplicant.config.kinds import beams as _beams_kind  # noqa: F401  (registers 'beams')
 from rheplicant.config.kinds import (
     projectors as _projectors_kind,  # noqa: F401  (registers 'projectors')
+)
+from rheplicant.config.kinds import (
+    s_params as _s_params_kind,  # noqa: F401  (registers 's_params')
 )
 from rheplicant.config.kinds import (
     sky_models as _sky_models_kind,  # noqa: F401  (registers 'sky_models')

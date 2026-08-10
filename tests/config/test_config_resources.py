@@ -181,7 +181,6 @@ class TestTheKindRegistry:
         # above (reading the same `message`) still passed would be caught.
         assert "'arrays'" in message
 
-    @pytest.mark.xfail(strict=True, reason="kinds land in Tasks 3-8")
     def test_all_six_kinds_are_registered(self):
         assert set(RESOURCE_KINDS) == {
             "arrays", "beams", "sky_models", "projectors", "s_params", "bases"
