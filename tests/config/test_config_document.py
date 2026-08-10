@@ -35,6 +35,7 @@ def synthetic_document():
             "unity_gain": {"model": {"gain": {"gain": {"value": 1.0,
                                                        "unit": "dimensionless"}}}},
         },
+        "runs": [{"kind": "forward"}],
     }
 
 
@@ -70,7 +71,7 @@ class TestLoadDocument:
 
     @pytest.mark.parametrize(
         ("section", "route"),
-        [("runs", "Plan 2B"), ("outputs", "Plan 4"),
+        [("outputs", "Plan 4"),
          ("defaults", "Plan 4"), ("plugins", "Plan 4")],
     )
     def test_not_yet_owned_sections_name_their_plan(self, section, route):
@@ -146,6 +147,7 @@ class TestIngestedDocuments:
             },
             "model": {"gain": {"gain": {"value": 2.0,
                                         "unit": "dimensionless"}}},
+            "runs": [{"kind": "forward"}],
         }
 
     def test_the_recording_becomes_the_state(self, tmp_path):

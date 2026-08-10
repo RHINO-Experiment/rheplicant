@@ -32,13 +32,12 @@ _SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
              "resources", "model", "variants", "inference", "runs", "outputs",
              "campaign")
 _NOT_YET = {
-    "runs": "Plan 2B (the exits; run_forward is this layer's forward exit)",
     "outputs": "Plan 4 (outputs, provenance, the CLI)",
     "defaults": "Plan 4 (presets are YAML files, and the CLI is where YAML "
                 "first comes off disk)",
     "plugins": "Plan 4 (plugin import belongs to the process entry point)",
 }
-_REQUIRED = ("runtime", "observation", "model")
+_REQUIRED = ("runtime", "observation", "model", "runs")
 
 
 class ConfiguredRun(NamedTuple):
@@ -82,7 +81,7 @@ def _sweep(document: Mapping) -> None:
     if missing:
         raise ConfigError(
             f"This document is missing {missing}; schema_version, runtime, "
-            "observation and model are required."
+            "observation, model and runs are required."
         )
 
 
@@ -147,7 +146,8 @@ def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,
 
     Plain evaluation, deliberately: jit is the caller's choice
     (``eqx.filter_jit(run.twin)(run.state)``), and the Assembly's own guards
-    speak for a data/source mismatch.
+    speak for a data/source mismatch.  The runs: section's forward exit calls
+    this; a bare mapping must now declare runs: like any document.
     """
     if not isinstance(run, ConfiguredRun):
         run = load_document(run, variant=variant, base_dir=base_dir)

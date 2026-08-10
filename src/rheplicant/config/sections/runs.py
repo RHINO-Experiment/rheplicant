@@ -1,0 +1,141 @@
+"""runs: the exit list (schema §4.7.9).
+
+A run entry names WHAT to do (``kind:``), against WHICH document layer
+(``variant:``), on WHICH observed data (``on:``), and whether a refusal is
+the point (``expect: refuse`` -- two of ``examples/gibbs_plan.py``'s exits
+exist only to be refused, and this key turns that demonstration into a
+checkable assertion).  Kind-specific keys travel untouched in ``options``;
+each executor in ``sections/exits.py`` sweeps its own.
+
+``runs:`` is read from the BASE document; a variant patching ``runs:``
+changes what ``load_document(variant=...)`` accepts, never which runs
+execute -- executor's decision, recorded in the 2B plan.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, NamedTuple
+
+from rheplicant.config.errors import ConfigError
+
+__all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
+
+_RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
+_KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample")
+_KINDS_2C = ("nuts", "conjugate.wiener", "conjugate.gcr", "conjugate.gls",
+             "gradient", "identifiability", "score_directions", "condition",
+             "mmodes", "predict", "npe")
+_KINDS_PLAN4 = ("compare", "benchmark")
+
+
+class RunSpec(NamedTuple):
+    """One parsed run entry."""
+
+    name: str
+    kind: str
+    variant: str | None
+    on: str
+    expect: str
+    options: dict[str, Any]
+
+
+class RunResult(NamedTuple):
+    """One executed run: its product, or the refusal it expected."""
+
+    name: str
+    kind: str
+    product: Any
+    error: Exception | None
+
+
+def _one(index: int, entry: Any, several: bool) -> RunSpec:
+    where = f"runs[{index}]"
+    if not isinstance(entry, Mapping):
+        raise ConfigError(f"{where}: is a mapping; got {entry!r}.")
+    kind = entry.get("kind")
+    if kind is None:
+        raise ConfigError(f"{where}: kind: is required.")
+    if kind in _KINDS_2C:
+        raise ConfigError(
+            f"{where}: kind: {kind} arrives with Plan 2C; this layer runs "
+            f"{list(_KINDS)}."
+        )
+    if kind in _KINDS_PLAN4:
+        raise ConfigError(
+            f"{where}: kind: {kind} arrives with Plan 4 (D-C16), with the "
+            "outputs that make it reportable."
+        )
+    if kind not in _KINDS:
+        raise ConfigError(
+            f"{where}: kind: {kind!r} is not an exit; this layer runs "
+            f"{list(_KINDS)}."
+        )
+    if "reuse" in entry:
+        raise ConfigError(
+            f"{where}: reuse: arrives with Plan 2C, alongside predict and "
+            "the cross-run products."
+        )
+    name = entry.get("name")
+    if several and not isinstance(name, str):
+        raise ConfigError(
+            f"{where}: name: is required when there is more than one run."
+        )
+    if name is not None and not isinstance(name, str):
+        raise ConfigError(f"{where}: name: is a string; got {name!r}.")
+    variant = entry.get("variant")
+    if variant is not None and not isinstance(variant, str):
+        raise ConfigError(f"{where}: variant: is a name; got {variant!r}.")
+    on = entry.get("on", "primary")
+    if not isinstance(on, str):
+        raise ConfigError(f"{where}: on: is an observed name; got {on!r}.")
+    expect = entry.get("expect", "ok")
+    if expect not in ("ok", "refuse"):
+        raise ConfigError(f"{where}: expect: is ok or refuse; got "
+                          f"{expect!r}.")
+    options = {key: value for key, value in entry.items()
+               if key not in _RUN_KEYS}
+    return RunSpec(name=name if name is not None else kind, kind=kind,
+                   variant=variant, on=on, expect=expect, options=options)
+
+
+def parse_runs(section: Any) -> tuple[RunSpec, ...]:
+    """``runs:`` -> parsed entries, names resolved and unique."""
+    if isinstance(section, Mapping):
+        section = [section]
+    if not isinstance(section, list) or not section:
+        raise ConfigError(
+            "runs: is a list of exits (or one exit mapping); got "
+            f"{section!r}."
+        )
+    parsed = tuple(_one(index, entry, len(section) > 1)
+                   for index, entry in enumerate(section))
+    names = [run.name for run in parsed]
+    for name in names:
+        if names.count(name) > 1:
+            raise ConfigError(f"runs: the name {name!r} appears twice.")
+    return parsed
+
+
+def run_document(document: Mapping, *,
+                 base_dir: str | None = None) -> dict[str, RunResult]:
+    """Execute every run a document declares, in order, by name."""
+    from rheplicant.config.document import load_document
+    from rheplicant.config.sections.exits import execute_run
+
+    if not isinstance(document, Mapping):
+        raise ConfigError(
+            f"A document is a mapping of sections; got "
+            f"{type(document).__name__} ({document!r})."
+        )
+    runs = parse_runs(document.get("runs"))
+    built: dict[str | None, Any] = {}
+
+    def configured(variant: str | None):
+        if variant not in built:
+            built[variant] = load_document(document, variant=variant,
+                                           base_dir=base_dir)
+        return built[variant]
+
+    return {run.name: execute_run(run, configured(run.variant))
+            for run in runs}
