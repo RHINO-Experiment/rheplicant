@@ -437,7 +437,7 @@ def _require_healpy(name: str):
         import healpy
     except ImportError as exc:  # pragma: no cover
         raise ConfigError(
-            f"{name}: format: gaussian needs healpy to place pixels on the sphere. It "
+            f"{name}: needs healpy to place pixels on the sphere. It "
             "arrives with limTOD's own dependencies; if it is missing, the install is "
             'incomplete: pip install "limTOD[jax]>=1.10".'
         ) from exc

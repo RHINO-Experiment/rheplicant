@@ -15,5 +15,8 @@ from rheplicant.config.kinds import arrays as _arrays_kind  # noqa: F401  (regis
 from rheplicant.config.kinds import bases as _bases_kind  # noqa: F401  (registers 'bases')
 from rheplicant.config.kinds import beams as _beams_kind  # noqa: F401  (registers 'beams')
 from rheplicant.config.kinds import (
+    projectors as _projectors_kind,  # noqa: F401  (registers 'projectors')
+)
+from rheplicant.config.kinds import (
     sky_models as _sky_models_kind,  # noqa: F401  (registers 'sky_models')
 )
