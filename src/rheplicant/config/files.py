@@ -14,10 +14,10 @@ beam's raw array at ``resources.beams`` instead, because the frequency grid,
 ``nside`` and (for ``cst_dir``) ``phi0_deg``/``phi_sense`` are all in scope
 there in a way a bare value node cannot express -- ``_ELSEWHERE`` below names
 the route for both, so the refusal points somewhere real instead of claiming
-the capability is absent. ``rhino_hdf5`` and ``eqx_leaves`` arrive with
-Plan 2: the first reads an ``observation:`` section this layer does not own
-yet, and the second reconstructs operator state from a saved equinox pytree,
-which is a ``model:`` concern.
+the capability is absent. ``eqx_leaves`` arrives at ``model.<node>.eqx_leaves``
+(Plan 2A Task 10): it reconstructs operator state onto a template built from
+the node's own declared fields. ``rhino_hdf5`` is registered by
+:mod:`rheplicant.config.sections.ingest` as an object reader.
 
 Every file reference is hashed. The cost is one read of a file that is about
 to be read anyway, and it is what lets ``config.resolved.yaml`` state which
@@ -250,7 +250,6 @@ _ELSEWHERE: dict[str, str] = {
     "healpix": "resources.beams, with format: healpix -- it needs order: (RING versus "
                "NESTED is declared, not guessed), the declared frequency grid, and "
                "frame:, none of which a value node can carry",
-    "rhino_hdf5": "observation.from_file (Plan 2)",
 }
 
 
@@ -283,7 +282,7 @@ def _file(node, context, modifiers):
     # neither remedy -- "unknown format" reads as a typo, which invites the
     # reader to try another spelling of a reader that does not exist in any
     # spelling. healpix keeps its own wording (the ordering-guess hazard is
-    # worth spelling out); cst_dir and rhino_hdf5 get the route named plainly.
+    # worth spelling out); cst_dir gets the route named plainly.
     if fmt == "healpix":
         _refuse_healpix(spec)
     elif fmt in _ELSEWHERE:

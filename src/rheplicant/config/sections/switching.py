@@ -18,7 +18,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
 
-__all__ = ["SwitchingBuild", "compile_switching"]
+__all__ = ["SwitchingBuild", "compile_switching", "declared_order"]
 
 _KEYS = {
     "none": frozenset({"mode"}),
@@ -33,7 +33,7 @@ class SwitchingBuild(NamedTuple):
     receiver_input: Any
 
 
-def _order(spec: Mapping) -> tuple[str, ...]:
+def declared_order(spec: Mapping) -> tuple[str, ...]:
     order = spec.get("order")
     if not isinstance(order, list) or len(order) < 2 \
             or not all(isinstance(label, str) for label in order):
@@ -74,7 +74,7 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
     if mode == "none":
         return SwitchingBuild(order=(), receiver_input=None)
 
-    order = _order(spec)
+    order = declared_order(spec)
     n_source = len(order)
     cycle = spec.get("cycle", "from_file" if "index" in spec else "round_robin")
     if cycle == "none":

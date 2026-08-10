@@ -168,3 +168,71 @@ class TestExtraAuxData:
         assert data.shape == (4, 8)
         with pytest.raises(ConfigError, match=r"\(n_time, n_freq\)"):
             _data({"zeros": [3, 8]}, context, n_time=4, n_freq=8)
+
+
+class TestBuildObservation:
+    """The public orchestrator: both forms, one owner of the exclusivity."""
+
+    def _runtime(self):
+        from rheplicant.config.sections.runtime import build_runtime
+
+        return build_runtime({"seed": 3})
+
+    def synthetic(self):
+        return {
+            "meta": {"telescope": "RHINO"},
+            "freq": dict(FREQ),
+            "time": {**TIME, "epoch": {"value": 1.7e9, "unit": "unix_s"}},
+            "site": {"lat_deg": {"value": 53.2367, "unit": "deg"},
+                     "lon_deg": {"value": -2.3085, "unit": "deg"},
+                     "alt_m": {"value": 78.0, "unit": "m"}},
+            "pointing": {"mode": "drift",
+                         "az_deg": {"value": 0.0, "unit": "deg"},
+                         "el_deg": {"value": 90.0, "unit": "deg"},
+                         "materialise": ["pointing", "selfrot_deg"],
+                         "lst": {"mode": "from_site"}},
+            "switching": {"mode": "cycle",
+                          "order": ["antenna", "ambient", "hot", "ns"]},
+            "environment": {"temperature": {"value": 280.0, "unit": "K"}},
+            "extra": {"my_side_channel": {"list": [1.0] * 16}},
+        }
+
+    def test_the_synthetic_form_end_to_end(self):
+        from rheplicant.config.sections.observation import build_observation
+
+        build, context = build_observation(self.synthetic(),
+                                           runtime=self._runtime())
+        assert build.freq_hz.shape == (8,)
+        assert build.time_s.shape == (16,)
+        assert build.epoch_unix_s == pytest.approx(1.7e9)
+        assert build.switch_order == ("antenna", "ambient", "hot", "ns")
+        assert build.pointing.shape == (16, 2)
+        assert set(build.extra) == {"selfrot_deg", "lst_deg", "my_side_channel",
+                                    "receiver_input"}
+        assert build.ingest is None
+        assert context.switch_order == build.switch_order
+        assert float(context.freq[0]) == pytest.approx(60e6)
+        assert context.dtype == "float32"
+
+    def test_a_pointing_extra_colliding_with_a_declared_extra_is_refused(self):
+        from rheplicant.config.sections.observation import build_observation
+
+        section = self.synthetic()
+        section["extra"] = {"lst_deg": {"list": [0.0] * 16}}
+        with pytest.raises(ConfigError, match="lst_deg"):
+            build_observation(section, runtime=self._runtime())
+
+    def test_an_unknown_section_key_is_refused(self):
+        from rheplicant.config.sections.observation import build_observation
+
+        with pytest.raises(ConfigError, match=r"\['freqs'\]"):
+            build_observation({"freqs": {}}, runtime=self._runtime())
+
+    def test_baked_provenance_values_must_be_hashable(self):
+        from rheplicant.config.sections.observation import build_observation
+
+        section = self.synthetic()
+        section["pointing"] = {"mode": "baked",
+                               "provenance": {"cfg": {"x": 1}}}
+        with pytest.raises(ConfigError, match="pointing/cfg"):
+            build_observation(section, runtime=self._runtime())

@@ -448,13 +448,14 @@ class TestTheRegistry:
         assert "resources.beams" in message
         assert "format: cst" in message
 
-    def test_rhino_hdf5_is_refused_and_names_its_route(self, context):
-        """format: rhino_hdf5 lives at observation.from_file, which does not
-        exist until Plan 2 -- named anyway, so the refusal points somewhere
-        real rather than at a section that is not there yet."""
-        with pytest.raises(ConfigError) as excinfo:
-            resolve_value({"file": {"path": "obs.hdf5", "format": "rhino_hdf5"}}, context)
-        assert "observation.from_file" in str(excinfo.value)
+    def test_rhino_hdf5_is_registered_not_routed(self):
+        """Plan 2 landed the reader: the format is in the live table, and the
+        _ELSEWHERE routing entry that once pre-empted it is gone."""
+        from rheplicant.config.files import _ELSEWHERE
+        from rheplicant.config.sections import ingest  # noqa: F401
+
+        assert "rhino_hdf5" in FILE_FORMATS
+        assert "rhino_hdf5" not in _ELSEWHERE
 
     def test_the_healpix_refusal_is_reached_before_the_unknown_format_one(self, context):
         """healpix is not in the reader table, so the generic 'unknown format'

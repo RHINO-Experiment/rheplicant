@@ -26,7 +26,7 @@ from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
 from rheplicant.core.environment import Environment
 
-__all__ = ["ObservationBuild", "SiteFacts"]
+__all__ = ["ObservationBuild", "SiteFacts", "build_observation"]
 
 _OBSERVATION_KEYS = frozenset(
     {"meta", "freq", "time", "site", "pointing", "switching", "environment",
@@ -132,6 +132,26 @@ def _time_facts(spec: Any, context: ResolutionContext):
     return time_s, epoch, integration, width
 
 
+def _hashable(key: str, value: Any) -> Any:
+    """Coerce a list to a tuple and refuse an unhashable meta value, naming
+    ``key``. Shared between ``_meta``'s own sweep and the baked-pointing
+    provenance merge in :func:`build_observation` -- provenance values reach
+    ``meta`` AFTER ``_meta``'s own gate has already run, so they need the
+    same check applied at the merge, not skipped because it ran once."""
+    if isinstance(value, list):
+        value = tuple(value)
+    try:
+        hash(value)
+    except TypeError:
+        raise ConfigError(
+            f"observation.meta.{key}: meta values are hashable scalars -- "
+            "they key the jit cache (core/frozen.py) -- and "
+            f"{type(value).__name__} is not one. Arrays and mappings "
+            "belong in observation.extra / environment / aux."
+        ) from None
+    return value
+
+
 def _meta(spec: Any) -> dict[str, Any]:
     if spec is None:
         return {}
@@ -143,18 +163,7 @@ def _meta(spec: Any) -> dict[str, Any]:
     for key, value in spec.items():
         if not isinstance(key, str):
             raise ConfigError(f"observation.meta keys are strings; got {key!r}.")
-        if isinstance(value, list):
-            value = tuple(value)
-        try:
-            hash(value)
-        except TypeError:
-            raise ConfigError(
-                f"observation.meta.{key}: meta values are hashable scalars -- "
-                "they key the jit cache (core/frozen.py) -- and "
-                f"{type(value).__name__} is not one. Arrays and mappings "
-                "belong in observation.extra / environment / aux."
-            ) from None
-        out[key] = value
+        out[key] = _hashable(key, value)
     return out
 
 
@@ -274,3 +283,122 @@ def _data(node: Any, context: ResolutionContext, *, n_time: int, n_freq: int):
             f"got {tuple(data.shape)}."
         )
     return data
+
+
+def build_observation(section: Any, *, runtime, base_dir: str | None = None):
+    """The full ``observation:`` section -> ``(ObservationBuild, context)``.
+
+    The returned context carries the run's grids, dtype, seeds and switch
+    order -- everything ``build_resources`` and ``build_model`` resolve
+    against (resources are added by ``document.py`` after it builds them).
+    """
+    from rheplicant.config.sections.ingest import parse_from_file
+    from rheplicant.config.sections.pointing import compile_pointing
+    from rheplicant.config.sections.switching import (
+        SwitchingBuild,
+        compile_switching,
+        declared_order,
+    )
+
+    if not isinstance(section, Mapping):
+        raise ConfigError(
+            f"observation: is a mapping; got {type(section).__name__}."
+        )
+    check_unknown_keys("observation", dict(section), _OBSERVATION_KEYS,
+                       label="the observation section")
+    bootstrap = ResolutionContext(
+        dtype=runtime.dtype, base_dir=base_dir, seed=runtime.seed,
+        seeds=dict(runtime.seeds))
+
+    ingest = None
+    meta = _meta(section.get("meta"))
+    if "from_file" in section:
+        for key, why in (
+            ("freq", "the recording carries the frequency axis"),
+            ("time", "the recording carries the time axis"),
+            ("data", "the recording IS the data"),
+            ("aux", "the recording's settle log becomes aux['flags']"),
+        ):
+            if key in section:
+                raise ConfigError(
+                    f"observation: from_file and {key}: together say two "
+                    f"things about one recording -- {why}."
+                )
+        ingest, record = parse_from_file(section["from_file"], bootstrap)
+        meta = {**meta, **record}
+        import numpy as np
+
+        freq_hz = jnp.asarray(ingest.freq_hz)
+        time_s = jnp.asarray(np.asarray(ingest.time_s)
+                             - float(ingest.time_s[0]))
+        epoch = float(ingest.time_s[0])
+        integration = width = None
+        switching_spec = section.get("switching")
+        if switching_spec is not None:
+            extra_keys = sorted(set(switching_spec) - {"order"})
+            if extra_keys:
+                raise ConfigError(
+                    f"observation.switching: an ingested run declares order: "
+                    f"only -- the recording carries the cycle; got "
+                    f"{extra_keys} too."
+                )
+            switching = SwitchingBuild(
+                order=declared_order(switching_spec), receiver_input=None)
+        else:
+            switching = SwitchingBuild(order=(), receiver_input=None)
+        data = None
+        aux: dict[str, Any] = {}
+    else:
+        freq_hz = _freq_grid(section.get("freq", {}), bootstrap)
+        time_s, epoch, integration, width = _time_facts(
+            section.get("time", {}), bootstrap)
+
+    grid_context = ResolutionContext(
+        freq=freq_hz, time=time_s, dtype=runtime.dtype, base_dir=base_dir,
+        seed=runtime.seed, seeds=dict(runtime.seeds))
+    n_time, n_freq = int(time_s.shape[0]), int(freq_hz.shape[0])
+
+    site = _site(section.get("site"), grid_context)
+    env = _environment(section.get("environment"), grid_context)
+    extra = _extra(section.get("extra"), grid_context)
+    if "from_file" not in section:
+        aux = _aux(section.get("aux"), grid_context, n_time=n_time,
+                   n_freq=n_freq)
+        data = _data(section.get("data"), grid_context, n_time=n_time,
+                     n_freq=n_freq)
+        switching = compile_switching(section.get("switching"), grid_context,
+                                      n_time=n_time)
+
+    pointing = compile_pointing(section.get("pointing"), grid_context,
+                                time_s=time_s, epoch_unix_s=epoch, site=site)
+    # Baked-pointing provenance lands in meta AFTER _meta's own hashability
+    # gate has already run (compile_pointing's `provenance:` values are
+    # arbitrary document data, not swept by `_meta`) -- so the same check
+    # applies again here, at the merge, keyed by the `pointing/<key>` name
+    # `compile_pointing` already prefixed them with.
+    meta = {**meta, **{key: _hashable(key, value)
+                       for key, value in pointing.provenance.items()}}
+    if epoch is not None:
+        meta.setdefault("time_epoch_unix_s", epoch)
+
+    for key in pointing.extra:
+        if key in extra:
+            raise ConfigError(
+                f"observation: {key!r} is written both by pointing "
+                f"(materialise/lst) and by observation.extra -- one producer "
+                "per key, or the two silently disagree."
+            )
+    merged_extra = {**extra, **pointing.extra}
+    if switching.receiver_input is not None:
+        merged_extra["receiver_input"] = switching.receiver_input
+
+    build = ObservationBuild(
+        time_s=time_s, freq_hz=freq_hz, epoch_unix_s=epoch,
+        integration_time_s=integration, channel_width_hz=width, site=site,
+        env=env, meta=meta, aux=aux, data=data, pointing=pointing.pointing,
+        extra=merged_extra, switch_order=switching.order, ingest=ingest)
+    context = ResolutionContext(
+        freq=freq_hz, time=time_s, dtype=runtime.dtype, base_dir=base_dir,
+        seed=runtime.seed, seeds=dict(runtime.seeds),
+        switch_order=switching.order)
+    return build, context
