@@ -74,6 +74,7 @@ REAL = frozenset({
     "GroundPickupOperator",
     "NeuralOperator",
     "NoiseWaveOperator",
+    "RadiometerNoiseOperator",
     "SiderealFilter",
     "SkySourceOperator",
     "SkySpaceFilter",

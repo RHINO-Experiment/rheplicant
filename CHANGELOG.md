@@ -529,6 +529,18 @@
   `resources` and the six `kinds` modules. Nitpicky sphinx build still at its
   baseline of 35 warnings.
 
+### The noise node learns the radiometer equation
+
+- `RadiometerNoiseOperator` draws `d(1 + fw)` with `f = 1/sqrt(dnu tau)` — the
+  generator half of the rule `RadiometerNoise` already applies as the
+  likelihood's sigma, with the same static `channel_width`/`integration_time`
+  pair and the same multiplicative form (no absolute value: the forms differ
+  in sign wherever the prediction does). Decided as D-C17, for a twin that
+  must be self-contained. A run carrying both this operator and an
+  `inference.noise` sigma now carries two numbers nothing in the package
+  keeps equal; the config layer's validation is required to cross-check them
+  and refuse a disagreement, naming both paths.
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than

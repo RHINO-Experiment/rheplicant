@@ -183,10 +183,10 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(3359 tests, 84.9 % coverage, jit+grad+vmap through the full twin; assembly
+(3487 tests, 84.9 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
-28 concrete `rheplicant.radio` operator classes — pending ports from limTOD
+29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
 and friends. The other twelve no longer carry that wording: the sky engines
 are real (a general differentiable limTOD port and a drift-scan m-mode fast
 path that agrees with it to float64 roundoff while running ~1000x faster on

@@ -30,7 +30,7 @@ SPLITTERS = (SumOperator, SelectOperator)
 
 #: The shipped operators that draw. Pinned so that adding a third is a
 #: conversation rather than a silent widening of what inference refuses.
-KNOWN_STOCHASTIC = {"NoiseOperator", "RFIOperator"}
+KNOWN_STOCHASTIC = {"NoiseOperator", "RFIOperator", "RadiometerNoiseOperator"}
 
 
 def shipped_operators() -> list[type]:
