@@ -81,16 +81,15 @@ def check_unknown_keys(name: str, spec: dict, allowed: frozenset[str], *, label:
 class BuiltResources(NamedTuple):
     """What a ``resources:`` section produced.
 
-    Attributes:
-        resources: dotted name -> object, ready to put in a
-            :class:`~rheplicant.config.context.ResolutionContext`.
-        shared_objects: groups of names that ended up as one object, for
-            ``config.resolved.yaml``'s ``shared_objects:`` map. Grouped by
-            ``id()``, which treats interned scalars (small ints, ``None``,
-            short strings) as "shared" even when they were built
-            independently -- a kind builder must hand back arrays or other
-            real objects, never a bare Python scalar, or this map over-reports.
-        order: the order entries were built in, for provenance.
+    * ``resources`` — dotted name -> object, ready to put in a
+      :class:`~rheplicant.config.context.ResolutionContext`.
+    * ``shared_objects`` — groups of names that ended up as one object, for
+      ``config.resolved.yaml``'s ``shared_objects:`` map. Grouped by
+      ``id()``, which treats interned scalars (small ints, ``None``, short
+      strings) as "shared" even when they were built independently -- a kind
+      builder must hand back arrays or other real objects, never a bare
+      Python scalar, or this map over-reports.
+    * ``order`` — the order entries were built in, for provenance.
     """
 
     resources: dict[str, Any]

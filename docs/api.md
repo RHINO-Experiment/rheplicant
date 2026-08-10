@@ -8,8 +8,10 @@ them.
 For the prose behind these signatures: [the guided tour](tour.md) for the shape
 of a twin, [the operator catalog](operators.md) for what lives at each graph
 node, [inferring anything](inference.md) for the parameter-space machinery,
-[contracts between stages](contracts.md) for the refusals, and [values in a
-config document](config-values.md) for the grammar the config layer resolves.
+[contracts between stages](contracts.md) for the refusals, [values in a
+config document](config-values.md) for the grammar the config layer resolves,
+and [resources and paths](config-resources.md) for the loader built on top of
+it.
 
 ## rheplicant.core
 
@@ -372,4 +374,43 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.delivery
    :members:
    :show-inheritance:
+```
+
+## rheplicant.config, continued: resources and paths
+
+The resource loader and the path grammar, built on top of the value grammar
+above. [Resources and paths in a config document](config-resources.md) is the
+prose; these are the signatures.
+
+```{eval-rst}
+.. automodule:: rheplicant.config.paths
+   :members:
+   :show-inheritance:
+
+.. automodule:: rheplicant.config.resources
+   :members:
+   :show-inheritance:
+```
+
+```{eval-rst}
+.. automodule:: rheplicant.config.kinds
+   :members:
+
+.. automodule:: rheplicant.config.kinds.arrays
+   :members:
+
+.. automodule:: rheplicant.config.kinds.bases
+   :members:
+
+.. automodule:: rheplicant.config.kinds.sky_models
+   :members:
+
+.. automodule:: rheplicant.config.kinds.beams
+   :members:
+
+.. automodule:: rheplicant.config.kinds.projectors
+   :members:
+
+.. automodule:: rheplicant.config.kinds.s_params
+   :members:
 ```

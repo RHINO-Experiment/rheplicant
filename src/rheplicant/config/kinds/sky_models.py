@@ -6,7 +6,7 @@ apart because they are separately reusable and separately expensive. Giving
 the sky its own top-level section would put the beam in two places, which is
 the coupling ``{ref: ...}`` identity exists to prevent.
 
-``kind: maps`` builds :class:`~rheplicant.radio.MapSky`, and this is the one
+``kind: maps`` builds :class:`~rheplicant.radio.sky.model.MapSky`, and this is the one
 place in the config layer that can catch the failure that class's own
 docstring names: ``MapSky.__call__`` returns the stored maps and *does not
 consult its freq argument* beyond the shape, so maps built for 60-85 MHz

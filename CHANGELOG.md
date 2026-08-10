@@ -419,6 +419,116 @@
   the modules gated on unpublishable data so that the figure means the same in
   every environment.
 
+### A path compiles to a selector, and a `resources:` section builds each of six kinds once
+
+- **The path grammar.** `rheplicant.config.compile_path` turns a dotted string
+  like `"noise_wave.t_unc"` into the callable `inference.parameters.Bind(
+  into=...)` actually takes — `ParameterSpace._resolve_targets` *invokes*
+  selectors against a tagged copy of the twin, it does not parse strings, so
+  synthesising a key path directly would not survive `Pipeline.__getitem__`'s
+  name-to-index translation. `resolve_path_on` resolves eagerly, against a
+  tagged twin, before the forward model is built and anything is traced —
+  ahead of the same refusal arriving from `ParameterSpace` once a CST
+  directory has already been read and analysed. Five of the schema's six path
+  refusals are implemented and tested: a walk that stops short of an array
+  leaf (an operator, or a genuine static field), an ambiguous multi-operator
+  node, a path into an aliased node, two declared paths reaching one leaf, and
+  a multi-node region addressed by any node but the last one it covers. The
+  sixth — a `twin.replace` target colliding with a binding's — is named as
+  Plan 2's, because `twin.replace` does not exist until then; the comparison
+  machinery is already in place for it to call. Every refusal quotes **both**
+  spellings — the path as written and the path as `jax.tree_util.keystr`
+  renders it — because the package's own messages quote only the second, and
+  a reader who typed the first has never seen it.
+- **The resource loader.** `rheplicant.config.build_resources` walks a
+  `resources:` section as a DAG — `{ref: resources.<kind>.<name>}` reads a
+  sibling back, `extends:` deep-merges over one of the same kind — and builds
+  each entry exactly **once**, handing identical objects to every reference.
+  That is a physics requirement, not an optimisation:
+  `BeamSpillOperator.from_projector` is documented as "the one call that
+  cannot get the weight and the sky average out of step", and a loader that
+  rebuilds each reference passes every shape check while decoupling two
+  nominally-shared arrays silently. `config.resolved.yaml`'s promised
+  `shared_objects:` map is populated from the same `id()`-grouping this loader
+  already does to build in dependency order. `extends:` resolves its whole
+  chain before anything is built, so a child declared before its own parent
+  still merges over the parent's fully-resolved spec, and a cycle — in
+  `extends:` or in `{ref: ...}` itself — is refused by name rather than
+  merging over an incomplete parent or recursing forever; four rules govern
+  the merge itself: mappings merge, lists replace rather than merge (schema
+  §5 rule 4 — a comparison split across two files can otherwise silently
+  disagree in exactly the keys the comparison is about), `{append: [...]}`
+  extends a list, and a `~key` entry deletes it.
+- **Six kinds, all registered in `RESOURCE_KINDS`.** `resources.arrays` names
+  any value node, which is this schema's whole answer to "the grammar has no
+  expression language" — bind an inner call to a name, reference it from an
+  outer one. `resources.bases` builds a `SeparableBasis` whose sample count is
+  always `len(observation.<axis>.grid)`, never written by hand, and closes the
+  `basis_fit` value form Plan 1A declared and left unregistered.
+  `resources.sky_models` is the one place that can catch a `MapSky` built for
+  one band and evaluated on another, because `MapSky.__call__` does not
+  consult its `freq` argument beyond the shape. `resources.beams` returns the
+  raw maps *and* the sky fraction a horizon truncation produces — dropping
+  the fraction, v0's behaviour, silently deletes `BeamSpillOperator`'s
+  `(1 - f_sky) * T_ground` term. `resources.projectors` lands the
+  `horizon_fraction` derivation Plan 1A deferred, and refuses it against a
+  projector already folded into its reference frame, where the unmasked
+  denominator is gone. `resources.s_params` reads reflection coefficients from
+  a Touchstone file or from `rhino-cal-jax`, and lands the `interpolate_onto`
+  derivation Plan 1A deferred.
+- **D-C8: `kind: gdsm`.** A real sky, not a placeholder — GSM16 through
+  `limTOD.sky_model.GDSM_sky_model`, evaluated per channel on the run's own
+  `observation.freq.grid` and stacked into a `MapSky`, so there is no
+  separate grid to declare and no band-mismatch check to fail: the maps are
+  generated on the run's grid rather than declared against one. It takes
+  `nside` only. It needs `pygdsm`, optional and arriving through limTOD's own
+  extra, and the missing-package refusal names `pip install
+  "limTOD[gdsm]"` rather than surfacing a bare `ImportError` after everything
+  else has been built.
+- **D-C7: `format: uvbeam` and `format: healpix`.** Both build a beam's raw
+  array from a file. `uvbeam` samples a pyuvdata `UVBeam` file per channel
+  through limTOD's own bridge (`limTOD.uvbeam.uvbeam_to_healpix_maps`) and
+  takes neither `phi0_deg`/`phi_sense` (the bridge carries its own azimuth
+  convention) nor `frame:` (its output is `beam_local` by construction); it
+  needs `pyuvdata`, now declared as this package's own **`uvbeam` extra** in
+  `pyproject.toml` (`uv pip install -e ".[uvbeam]"`), checked before the path
+  is even resolved. `healpix` requires two declarations a FITS file cannot be
+  trusted to carry — `order:` (RING or NESTED; a declaration that contradicts
+  the file's own `ORDERING` header is refused rather than trusted, and a
+  `nested` declaration is reordered to RING exactly) and `freq:` (the grid the
+  file's columns were built on, checked against the run's own grid the same
+  way `kind: maps` checks a sky). The value-node `file:` spelling of healpix
+  stays refused; the refusal now names the route (`resources.beams`, `format:
+  healpix`) instead of calling the capability absent.
+- **`register_reader(..., array=False)`: the first file reader whose result
+  is not an array.** `format: touchstone` returns a `Touchstone` dataclass —
+  three fields, not a tensor — so `files.py`'s `file:` form is now told, per
+  reader, to skip the `jnp.asarray` wrap that would otherwise mangle or
+  refuse it, and to refuse any modifier written on that node: `unit:`,
+  `part:` and `scale:` all describe what an array's numbers *are*, and a
+  `Touchstone` is not one. `kind: touchstone` in `resources.s_params` reads
+  through this same public `file:` route rather than a private reach into
+  `files._READERS`, so it gets the hash check and the format's own unknown-key
+  sweep for free.
+- Nine new modules — `paths.py`, `resources.py`, and the six-module `kinds/`
+  package — 2158 lines net; `files.py`'s new `touchstone` reader and
+  `__init__.py`'s widened surface bring `src/rheplicant/config`'s own total
+  for the whole plan to 2234. 3175 → 3359 tests (184 new, 179 of them in the
+  eight new/kind-specific test modules alone). `RESOURCE_KINDS`,
+  `FILE_FORMATS`, `DERIVATIONS` and `VALUE_FORMS` are all reachable from
+  `rheplicant.config` directly now, and `rheplicant.config.__all__` carries
+  seven more names: `compile_path`, `parse_path`, `resolve_path_on`,
+  `ResolvedPath`, `build_resources`, `BuiltResources`, `RESOURCE_KINDS`.
+  Separately, `resources.bases` registers `basis_fit` as a value form — not
+  an `__all__` name, but the registration that makes `VALUE_FORMS` and the
+  resolver registry agree exactly, closing the one gap Plan 1A left on
+  purpose. New page,
+  [resources and paths in a config
+  document](https://rheplicant.readthedocs.io/en/latest/config-resources.html),
+  and a continuation of the API reference's config section covering `paths`,
+  `resources` and the six `kinds` modules. Nitpicky sphinx build still at its
+  baseline of 35 warnings.
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than

@@ -202,6 +202,7 @@ signal-path
 operators
 contracts
 config-values
+config-resources
 ```
 
 ```{toctree}

@@ -60,3 +60,19 @@ class TestEveryFormHasAResolver:
         deferred = set()  # Plan 1B: resources.bases lands basis_fit, closing the gap
         assert declared - implemented == deferred, declared - implemented
         assert implemented - declared == set()
+
+
+class TestPlan1BOnTheSurface:
+    def test_the_path_and_resource_entry_points_are_exported(self):
+        import rheplicant.config as config
+
+        for name in ("compile_path", "resolve_path_on", "build_resources", "RESOURCE_KINDS"):
+            assert name in config.__all__, name
+
+    def test_every_registry_is_reachable_from_the_package(self):
+        """Four registries, and a reader who wants to know what is available
+        should not have to import four private modules to find out."""
+        import rheplicant.config as config
+
+        for name in ("VALUE_FORMS", "FILE_FORMATS", "DERIVATIONS", "RESOURCE_KINDS"):
+            assert name in config.__all__, name

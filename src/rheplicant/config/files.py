@@ -1,11 +1,23 @@
 """Form 4: a file reference, its search path, its reader and its hash.
 
-The reader table is a registry rather than an ``if`` chain for one reason:
-Plan 1B adds four more formats that construct package objects
-(``touchstone``, ``cst_dir``, ``rhino_hdf5``, ``eqx_leaves``), and a registry
-means the refusal for an unknown format lists what is actually available today
-instead of a set someone remembered to update. That is the shape
-``core/graph.py:350`` ``register_graph`` established.
+The reader table is a registry rather than an ``if`` chain for one reason: a
+registry means the refusal for an unknown format lists what is actually
+available today instead of a set someone remembered to update. That is the
+shape ``core/graph.py:350`` ``register_graph`` established.
+
+Plan 1B registers exactly one new format here, ``touchstone`` -- an object
+reader (``array=False``: it returns a
+:class:`~rheplicant.radio.touchstone.Touchstone`, not an array; see
+:func:`register_reader`). Two more formats the schema names are real but are
+not read through a value node at all: ``cst_dir`` and ``healpix`` build a
+beam's raw array at ``resources.beams`` instead, because the frequency grid,
+``nside`` and (for ``cst_dir``) ``phi0_deg``/``phi_sense`` are all in scope
+there in a way a bare value node cannot express -- ``_ELSEWHERE`` below names
+the route for both, so the refusal points somewhere real instead of claiming
+the capability is absent. ``rhino_hdf5`` and ``eqx_leaves`` arrive with
+Plan 2: the first reads an ``observation:`` section this layer does not own
+yet, and the second reconstructs operator state from a saved equinox pytree,
+which is a ``model:`` concern.
 
 Every file reference is hashed. The cost is one read of a file that is about
 to be read anyway, and it is what lets ``config.resolved.yaml`` state which

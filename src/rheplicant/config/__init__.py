@@ -14,6 +14,13 @@ from rheplicant.config.delivery import FieldSpec, deliver, field_specs
 from rheplicant.config.derive import DERIVATIONS
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import FILE_FORMATS
+from rheplicant.config.paths import (
+    ResolvedPath,
+    compile_path,
+    parse_path,
+    resolve_path_on,
+)
+from rheplicant.config.resources import RESOURCE_KINDS, BuiltResources, build_resources
 from rheplicant.config.symbols import SHAPE_SYMBOLS, ShapeScope, resolve_extent
 from rheplicant.config.units import (
     ACCEPTED_UNITS,
@@ -32,19 +39,26 @@ __all__ = [
     "ACCEPTED_UNITS",
     "DERIVATIONS",
     "FILE_FORMATS",
+    "RESOURCE_KINDS",
     "SHAPE_SYMBOLS",
     "VALUE_FORMS",
     "VALUE_MODIFIERS",
+    "BuiltResources",
     "ConfigError",
     "FieldSpec",
     "ResolutionContext",
+    "ResolvedPath",
     "ResolvedValue",
     "ShapeScope",
     "Unit",
+    "build_resources",
     "canonical_unit",
+    "compile_path",
     "convert_to_canonical",
     "deliver",
     "field_specs",
+    "parse_path",
     "resolve_extent",
+    "resolve_path_on",
     "resolve_value",
 ]

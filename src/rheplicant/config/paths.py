@@ -97,13 +97,12 @@ def compile_path(path: str) -> Callable[[Any], Any]:
 class ResolvedPath(NamedTuple):
     """A path that reached a real array leaf.
 
-    Attributes:
-        declared: the string the document wrote.
-        key_path: the JAX key path, as ``_resolve_targets`` produces it.
-        keystr: that path in ``jax.tree_util.keystr`` form, which is what the
-            package's own refusals quote.
-        leaf: the current value of the leaf.
-        selector: the callable, ready for ``Bind(into=...)``.
+    * ``declared`` — the string the document wrote.
+    * ``key_path`` — the JAX key path, as ``_resolve_targets`` produces it.
+    * ``keystr`` — that path in ``jax.tree_util.keystr`` form, which is what
+      the package's own refusals quote.
+    * ``leaf`` — the current value of the leaf.
+    * ``selector`` — the callable, ready for ``Bind(into=...)``.
     """
 
     declared: str
