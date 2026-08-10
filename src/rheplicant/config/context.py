@@ -32,6 +32,9 @@ class ResolutionContext:
         resources: constructed resources by dotted name. ``ref`` returns the
             object stored here, not a copy.
         n_source_override: set when ``switch_order`` is not yet known.
+        ingest: the ingested recording (``RhinoObservation``) when
+            ``observation.from_file`` was declared; ``from: thermistors``
+            reads its thermistor log.
     """
 
     freq: jax.Array | None = None
@@ -44,6 +47,7 @@ class ResolutionContext:
     switch_order: tuple[str, ...] = ()
     resources: dict[str, Any] = dataclasses.field(default_factory=dict)
     n_source_override: int | None = None
+    ingest: Any = None
 
     @property
     def shape_scope(self) -> ShapeScope:

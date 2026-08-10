@@ -1,5 +1,7 @@
 """model node specs -> operators: delivery, object fields, routes, eqx_leaves."""
 
+import dataclasses
+
 import equinox as eqx
 import jax.numpy as jnp
 import pytest
@@ -182,15 +184,109 @@ class TestFromRoutes:
         assert isinstance(op, BasisTemperatureOperator)
         assert op.coeff.shape == (2, 3)
 
-    def test_cal_loads_from_thermistors_is_deferred_by_name(self, context):
-        with pytest.raises(ConfigError, match="Plan 2B"):
+    def test_an_unknown_route_is_refused(self, context):
+        with pytest.raises(ConfigError, match="from:"):
+            build_node_operator("gain", {"from": "nowhere"}, context)
+
+
+class TestThermistorsRoute:
+    h5py = pytest.importorskip("h5py",
+                               reason="h5py comes with rheplicant[rhino]")
+
+    def _ingested(self, tmp_path, ctx):
+        """Widen the module's context FIXTURE VALUE (ctx) with the recording
+        -- the fixture is not callable from a method body."""
+        from rheplicant.config.sections.ingest import parse_from_file
+        from tests.config.test_config_section_ingest import make_file
+
+        make_file(tmp_path / "obs.hd5f")
+        bootstrap = ResolutionContext(base_dir=str(tmp_path))
+        obs, _ = parse_from_file(
+            {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz",
+             "settle_seconds": 0.0,
+             "thermistor_columns": {"antenna": 0, "internal_load": 0,
+                                    "heated_load": 1}},
+            bootstrap)
+        return dataclasses.replace(ctx, ingest=obs)
+
+    def test_a_thermistor_column_becomes_t_load(self, tmp_path, context):
+        operator = build_node_operator(
+            "cal_loads", {"from": "thermistors", "label": "internal_load"},
+            self._ingested(tmp_path, context))
+        assert operator.t_load.ndim == 2
+        assert operator.t_load.shape[1] == 1
+        assert float(operator.t_load[0, 0]) == pytest.approx(293.15)
+
+    def test_without_an_ingested_recording_it_is_refused(self, context):
+        with pytest.raises(ConfigError, match="from_file"):
             build_node_operator(
                 "cal_loads", {"from": "thermistors", "label": "ambient"},
                 context)
 
-    def test_an_unknown_route_is_refused(self, context):
-        with pytest.raises(ConfigError, match="from:"):
-            build_node_operator("gain", {"from": "nowhere"}, context)
+    def test_label_is_required(self, tmp_path, context):
+        with pytest.raises(ConfigError, match="label"):
+            build_node_operator("cal_loads", {"from": "thermistors"},
+                                self._ingested(tmp_path, context))
+
+    def test_a_label_with_no_thermistor_is_the_readers_own_refusal(
+            self, tmp_path, context):
+        from rheplicant.core.errors import DataIngestionError
+
+        with pytest.raises(DataIngestionError):
+            build_node_operator(
+                "cal_loads", {"from": "thermistors", "label": "ghost_load"},
+                self._ingested(tmp_path, context))
+
+    def test_an_empty_label_is_this_layers_refusal_not_the_readers(
+            self, tmp_path, context):
+        with pytest.raises(ConfigError, match="label"):
+            build_node_operator(
+                "cal_loads", {"from": "thermistors", "label": ""},
+                self._ingested(tmp_path, context))
+
+    def test_an_unknown_key_is_swept(self, tmp_path, context):
+        with pytest.raises(ConfigError, match="smoothing"):
+            build_node_operator(
+                "cal_loads", {"from": "thermistors", "label": "internal_load",
+                              "smoothing": 3},
+                self._ingested(tmp_path, context))
+
+    def test_the_document_threads_the_recording_to_the_model_build(
+            self, tmp_path):
+        """load_document -> build_model: the widening in document.py is what
+        puts the recording on the context this route reads."""
+        from rheplicant.config import load_document
+        from rheplicant.radio import CalLoadOperator
+        from tests.config.test_config_section_ingest import make_file
+
+        make_file(tmp_path / "obs.hd5f")
+        run = load_document({
+            "schema_version": 1,
+            "runtime": {"seed": 1},
+            "observation": {
+                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
+                              "freq_unit": "MHz", "settle_seconds": 0.0,
+                              "thermistor_columns": {"antenna": 0,
+                                                     "internal_load": 0,
+                                                     "heated_load": 1}},
+                "switching": {"order": ["antenna", "internal_load",
+                                        "heated_load"]},
+            },
+            "model": {
+                "gain": {"gain": {"value": 2.0, "unit": "dimensionless"}},
+                "cal_loads": {
+                    "internal_load": {"from": "thermistors",
+                                      "label": "internal_load"},
+                    "heated_load": {"from": "thermistors",
+                                    "label": "heated_load"},
+                },
+            },
+            "runs": [{"kind": "forward"}],
+        }, base_dir=str(tmp_path))
+        operator = run.twin["cal_loads_1"]
+        assert isinstance(operator, CalLoadOperator)
+        assert operator.t_load.shape[1] == 1
+        assert float(operator.t_load[0, 0]) == pytest.approx(293.15)
 
 
 class TestThePythonHatch:

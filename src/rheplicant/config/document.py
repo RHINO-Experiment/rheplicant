@@ -103,7 +103,8 @@ def load_document(document: Mapping, *, variant: str | None = None,
                                              base_dir=base_dir)
     resources = build_resources(doc.get("resources") or {}, context)
     context = dataclasses.replace(context,
-                                  resources=dict(resources.resources))
+                                  resources=dict(resources.resources),
+                                  ingest=observation.ingest)
     twin = build_model(doc["model"], context,
                        switch_order=observation.switch_order)
 

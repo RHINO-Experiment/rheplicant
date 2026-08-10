@@ -195,12 +195,28 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
                              spec["coeff"], context)
         return BasisTemperatureOperator.from_basis(basis, coeff)
     if node_id == "cal_loads" and route == "thermistors":
-        raise ConfigError(
-            "model.cal_loads: from: thermistors needs the ingested recording "
-            "threaded into the model build, which lands with Plan 2B's "
-            "calibration exits; until then, "
-            "rheplicant.radio.rhino.cal_load_operators is the Python route."
-        )
+        unknown = sorted(set(spec) - {"from", "label"})
+        if unknown:
+            raise ConfigError(
+                f"model.cal_loads: from: thermistors does not take "
+                f"{unknown}; it takes ['from', 'label']."
+            )
+        label = spec.get("label")
+        if not isinstance(label, str) or not label:
+            raise ConfigError(
+                "model.cal_loads: from: thermistors requires label: -- the "
+                "switch label whose thermistor column becomes t_load."
+            )
+        if context.ingest is None:
+            raise ConfigError(
+                "model.cal_loads: from: thermistors reads the ingested "
+                "recording's thermistor log, and this document declares no "
+                "observation.from_file. Declare the recording (with "
+                "thermistor_columns), or give t_load a value node."
+            )
+        from rheplicant.radio.rhino import cal_load_operators
+
+        return cal_load_operators(context.ingest, labels=[label])[label]
     raise ConfigError(
         f"model.{node_id}: from: {route!r} is not a route this node offers. "
         "The shipped routes: beam_spill from: projector, t_sys_extra "
