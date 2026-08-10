@@ -183,7 +183,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(3487 tests, 84.9 % coverage, jit+grad+vmap through the full twin; assembly
+(3560 tests, 84.9 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD

@@ -39,7 +39,7 @@ VALUE_FORMS: tuple[str, ...] = (
     "python",
 )
 
-#: Nine modifier keys: the schema's eight plus the delivery declaration ``as:``.
+#: The nine modifier keys -- the schema's eight plus the delivery declaration ``as:``.
 VALUE_MODIFIERS: tuple[str, ...] = (
     "unit",
     "dtype",

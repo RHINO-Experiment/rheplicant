@@ -17,7 +17,7 @@ the route for both, so the refusal points somewhere real instead of claiming
 the capability is absent. ``eqx_leaves`` arrives at ``model.<node>.eqx_leaves``
 (Plan 2A Task 10): it reconstructs operator state onto a template built from
 the node's own declared fields. ``rhino_hdf5`` is registered by
-:mod:`rheplicant.config.sections.ingest` as an object reader.
+``rheplicant.config.sections.ingest`` as an object reader.
 
 Every file reference is hashed. The cost is one read of a file that is about
 to be read anyway, and it is what lets ``config.resolved.yaml`` state which

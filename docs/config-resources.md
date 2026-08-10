@@ -277,14 +277,17 @@ frequency grid without going through `kind: touchstone`'s own resource entry.
 
 ## `array=False`: a reader whose result is not an array
 
-`format: touchstone` is the first file format registered with
-`register_reader(..., array=False)`. Every other reader's result is
-`jnp.asarray`'d before it reaches a field; a `Touchstone` is a dataclass of
-three fields (`freq_hz`, `s`, `z0`), and wrapping it in `jnp.asarray` would
-either mangle it or raise. `array=False` tells `files.py`'s `file:` form to
-hand the reader's return value back unwrapped, and to refuse any modifier
-written on that node — `unit:`, `part:`, `scale:` all describe what an
-array's numbers *are*, and a `Touchstone` is not one.
+`format: touchstone` is the first of three file formats registered with
+`register_reader(..., array=False)` — the other two are `rhino_hdf5`, a RHINO
+recording read as an object in [`observation:`](config-sections.md#observation),
+and `eqx_leaves`, a saved equinox file read onto a `model:` node's own
+template (see [config-sections.md](config-sections.md#model)). Every other
+reader's result is `jnp.asarray`'d before it reaches a field; a `Touchstone`
+is a dataclass of three fields (`freq_hz`, `s`, `z0`), and wrapping it in
+`jnp.asarray` would either mangle it or raise. `array=False` tells
+`files.py`'s `file:` form to hand the reader's return value back unwrapped,
+and to refuse any modifier written on that node — `unit:`, `part:`, `scale:`
+all describe what an array's numbers *are*, and a `Touchstone` is not one.
 
 ## `extends:`, and its four rules
 

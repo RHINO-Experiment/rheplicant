@@ -541,6 +541,18 @@
   keeps equal; the config layer's validation is required to cross-check them
   and refuse a disagreement, naming both paths.
 
+### The config layer builds the run
+
+Plan 2A: `load_document` turns a parsed document's `runtime:`,
+`observation:` and `model:` sections into a `ConfiguredRun` — `State`,
+`Coordinates`, `Environment` and the assembled twin — and `run_forward`
+evaluates it. Variants apply as one-level deep-merge patches. A RHINO
+recording ingests through `format: rhino_hdf5` (an object reader; `freq_unit`
+stays required with no default), operator state reconstructs through
+`model.<node>.eqx_leaves`, and `rheplicant.radio.site.lst_grid_deg` computes
+LSTs from a site and an epoch through the one seam limTOD already offers
+(D-C2).
+
 ## 0.2.0 (2026-08-08)
 
 288 commits since 0.1.4. The minor bump is earned by five removals rather than

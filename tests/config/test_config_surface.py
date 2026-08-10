@@ -76,3 +76,19 @@ class TestPlan1BOnTheSurface:
 
         for name in ("VALUE_FORMS", "FILE_FORMATS", "DERIVATIONS", "RESOURCE_KINDS"):
             assert name in config.__all__, name
+
+
+class TestThePlan2ASurface:
+    def test_the_document_layer_is_exported(self):
+        import rheplicant.config as config
+
+        for name in ("ConfiguredRun", "apply_variant", "load_document",
+                     "recursive_update", "run_forward"):
+            assert name in config.__all__
+            assert getattr(config, name) is not None
+
+    def test_importing_the_package_registers_the_object_readers(self):
+        import rheplicant.config as config
+
+        assert "rhino_hdf5" in config.FILE_FORMATS
+        assert "eqx_leaves" in config.FILE_FORMATS

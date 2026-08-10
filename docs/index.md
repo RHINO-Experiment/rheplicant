@@ -203,6 +203,7 @@ operators
 contracts
 config-values
 config-resources
+config-sections
 ```
 
 ```{toctree}
