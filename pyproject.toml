@@ -84,6 +84,12 @@ rfi = ["MomentRFI"]
 #   uv pip install -e ".[rhino]"
 # The Touchstone reader needs none of it -- it is numpy only.
 rhino = ["h5py"]
+# resources.beams format: uvbeam reads a pyuvdata UVBeam file and samples it
+# through limTOD's own bridge (limTOD.uvbeam) -- the bridge ships with limTOD,
+# so only the file reader is optional. pyuvdata is on PyPI and needs
+# Python >= 3.11, the floor this package already declares:
+#   uv pip install -e ".[uvbeam]"
+uvbeam = ["pyuvdata>=3.0"]
 docs = [
     "sphinx>=7",
     "myst-parser",

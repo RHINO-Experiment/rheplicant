@@ -427,16 +427,34 @@ class TestTheRegistry:
             _READERS.pop("probe_format_for_the_test")
         assert "probe_format_for_the_test" not in FILE_FORMATS
 
-    def test_healpix_is_refused_by_name_with_its_two_routes(self, context):
-        """There is no HEALPix reader in src/ -- `grep -rn "read_map\\|healpy"`
-        finds docstring mentions only -- and adding one needs healpy, which is
-        undeclared and arrives transitively through limTOD."""
+    def test_healpix_is_refused_by_name_and_names_its_route(self, context):
+        """format: healpix is real -- it lives at resources.beams (D-C7) -- but
+        a bare value node has nowhere to put order:, the declared frequency
+        grid or frame:, so it is not read through one."""
         with pytest.raises(ConfigError) as excinfo:
             resolve_value({"file": {"path": "sky.fits", "format": "healpix"}}, context)
         message = str(excinfo.value)
         assert "healpix" in message
-        assert "nside" in message  # remedy 1: an npy array plus an explicit nside
-        assert "python:" in message  # remedy 2
+        assert "resources.beams" in message
+        assert "order" in message
+
+    def test_cst_dir_is_refused_and_names_its_route(self, context):
+        """format: cst_dir is real too -- it lives at resources.beams, format:
+        cst -- and the _ELSEWHERE branch in _file is generic, not a second
+        healpix-only special case, so this exercises that generality."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "cst/", "format": "cst_dir"}}, context)
+        message = str(excinfo.value)
+        assert "resources.beams" in message
+        assert "format: cst" in message
+
+    def test_rhino_hdf5_is_refused_and_names_its_route(self, context):
+        """format: rhino_hdf5 lives at observation.from_file, which does not
+        exist until Plan 2 -- named anyway, so the refusal points somewhere
+        real rather than at a section that is not there yet."""
+        with pytest.raises(ConfigError) as excinfo:
+            resolve_value({"file": {"path": "obs.hdf5", "format": "rhino_hdf5"}}, context)
+        assert "observation.from_file" in str(excinfo.value)
 
     def test_the_healpix_refusal_is_reached_before_the_unknown_format_one(self, context):
         """healpix is not in the reader table, so the generic 'unknown format'

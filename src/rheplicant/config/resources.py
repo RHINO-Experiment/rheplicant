@@ -49,6 +49,35 @@ RESOURCE_KINDS = LiveNames(_KINDS)
 _REF_PREFIX = "resources."
 
 
+def check_unknown_keys(name: str, spec: dict, allowed: frozenset[str], *, label: str) -> None:
+    """Refuse any key of ``spec`` that ``allowed`` does not name.
+
+    Shared rather than reimplemented per kind, because the shape it exists to
+    rule out has already appeared twice independently:
+    ``kinds/sky_models.py``'s own ``_check_unknown_keys`` and (before this
+    helper) the same sweep written by hand in ``kinds/beams.py``. Before
+    either existed, a branch that only read the keys it happened to consume
+    left a stray sibling key -- ``{kind: uniform, ..., spectral_index: 2.5}``
+    -- silently discarded rather than refused. A discriminated union (``kind:``,
+    ``format:``) is exactly the shape where that happens, because each branch
+    is naturally written to read its own keys and nothing else, and nothing
+    forces it to also account for what is left over.
+
+    Args:
+        name: the resource's dotted name, quoted first in the refusal.
+        spec: the entry as written.
+        allowed: every key this discriminator's value takes, including the
+            discriminator key itself and any keys common to every value of it.
+        label: how the discriminator reads in the message, e.g.
+            ``"format: npy"`` or ``"kind: gdsm"``.
+    """
+    unknown = sorted(set(spec) - allowed)
+    if unknown:
+        raise ConfigError(
+            f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}."
+        )
+
+
 class BuiltResources(NamedTuple):
     """What a ``resources:`` section produced.
 

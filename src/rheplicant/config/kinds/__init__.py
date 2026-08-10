@@ -13,6 +13,7 @@ that lists a set which is silently short.
 # arrays` away from this one. The alias names which of the two this import is.
 from rheplicant.config.kinds import arrays as _arrays_kind  # noqa: F401  (registers 'arrays')
 from rheplicant.config.kinds import bases as _bases_kind  # noqa: F401  (registers 'bases')
+from rheplicant.config.kinds import beams as _beams_kind  # noqa: F401  (registers 'beams')
 from rheplicant.config.kinds import (
     sky_models as _sky_models_kind,  # noqa: F401  (registers 'sky_models')
 )

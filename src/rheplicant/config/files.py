@@ -210,16 +210,24 @@ def _read(reader, path: pathlib.Path, spec: dict, fmt: str):
         ) from exc
 
 
+#: Formats that are real but are not read through a value node, and where they are.
+_ELSEWHERE: dict[str, str] = {
+    "cst_dir": "resources.beams, with format: cst -- it needs the frequency grid, an "
+               "nside, and phi0_deg/phi_sense, none of which a value node can carry",
+    "healpix": "resources.beams, with format: healpix -- it needs order: (RING versus "
+               "NESTED is declared, not guessed), the declared frequency grid, and "
+               "frame:, none of which a value node can carry",
+    "rhino_hdf5": "observation.from_file (Plan 2)",
+}
+
+
 def _refuse_healpix(spec: dict) -> None:
     raise ConfigError(
-        "format: healpix is not available. There is no HEALPix map reader anywhere in "
-        "this package, and adding one is a package change with its own decision to "
-        "take: it needs healpy -- which is undeclared here and arrives transitively "
-        "through limTOD -- and it must settle RING versus NESTED and which axis "
-        "carries frequency, neither of which a FITS file states unambiguously. Two "
-        "routes work today: save the maps as npy or npz and declare nside on the "
-        "entry, which is checked against 12*nside**2; or build the sky through the "
-        "python: hatch, which states its own cost."
+        "format: healpix is not read through a value node. It lives at "
+        + _ELSEWHERE["healpix"]
+        + ". A bare value node has nowhere to put those declarations, and a HEALPix "
+        "map read under a guessed ordering keeps its shape and its statistics with "
+        "every pixel in the wrong place."
     )
 
 
@@ -237,12 +245,19 @@ def _file(node, context, modifiers):
                 "that guessing is how a run reads the wrong thing quietly."
             )
     fmt = spec["format"]
-    # Before the table lookup, deliberately. healpix is not registered, so the
-    # generic refusal below would answer it first and name neither remedy --
-    # and "unknown format" reads as a typo, which invites the reader to try
-    # another spelling of a reader that does not exist in any spelling.
+    # Before the table lookup, deliberately. None of _ELSEWHERE's formats are
+    # registered, so the generic refusal below would answer them first and name
+    # neither remedy -- "unknown format" reads as a typo, which invites the
+    # reader to try another spelling of a reader that does not exist in any
+    # spelling. healpix keeps its own wording (the ordering-guess hazard is
+    # worth spelling out); cst_dir and rhino_hdf5 get the route named plainly.
     if fmt == "healpix":
         _refuse_healpix(spec)
+    elif fmt in _ELSEWHERE:
+        raise ConfigError(
+            f"file: format {fmt!r} is not read through a value node. It lives at "
+            f"{_ELSEWHERE[fmt]}."
+        )
     entry = _READERS.get(fmt)
     if entry is None:
         raise ConfigError(
