@@ -20,16 +20,16 @@ from typing import Any
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.resources import register_kind
+from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.units import canonical_unit
 from rheplicant.config.values import ResolvedValue, register_form
 from rheplicant.core.basis import BASIS_KINDS, SeparableBasis, basis_matrix
 
 
-def _axis_matrix(axis: str, spec: Any, context: ResolutionContext):
+def _axis_matrix(name: str, axis: str, spec: Any, context: ResolutionContext):
     grid = {"time": context.time, "freq": context.freq}[axis]
     if not isinstance(spec, dict):
-        raise ConfigError(f"bases: {axis} must be a mapping with kind and n_basis.")
+        raise ConfigError(f"{name}: {axis} must be a mapping with kind and n_basis.")
     # Ordering invariant: the two specific refusals below (file, n) must run
     # BEFORE the generic unknown-keys sweep. Both "file" and "n" are unknown to
     # the {kind, n_basis} vocabulary, so if the sweep ran first it would catch
@@ -38,7 +38,7 @@ def _axis_matrix(axis: str, spec: Any, context: ResolutionContext):
     # refused for. Two tests defend this ordering by wording alone.
     if "file" in spec:
         raise ConfigError(
-            f"bases: {axis} declares a file. A design matrix does not come from a "
+            f"{name}: {axis} declares a file. A design matrix does not come from a "
             "file here: it is built from {kind, n_basis} with n taken from the run's "
             "own grid, because a basis built for another band returns a smooth, "
             "plausible, wrong temperature and nothing downstream can tell. The kinds "
@@ -49,19 +49,18 @@ def _axis_matrix(axis: str, spec: Any, context: ResolutionContext):
         )
     if "n" in spec:
         raise ConfigError(
-            f"bases: {axis} writes 'n'. n is never written -- it is len(observation."
+            f"{name}: {axis} writes 'n'. n is never written -- it is len(observation."
             f"{axis}.grid), which is what makes a basis built for another grid "
             "impossible to declare. Remove it."
         )
-    unknown = sorted(set(spec) - {"kind", "n_basis"})
-    if unknown:
-        raise ConfigError(f"bases: {axis} does not take {unknown}; it takes kind, n_basis.")
+    check_unknown_keys(name, spec, frozenset({"kind", "n_basis"}),
+                       label=f"{axis} axis")
     for required in ("kind", "n_basis"):
         if required not in spec:
-            raise ConfigError(f"bases: {axis} requires {required!r}.")
+            raise ConfigError(f"{name}: {axis} requires {required!r}.")
     if spec["kind"] not in BASIS_KINDS:
         raise ConfigError(
-            f"bases: {axis} asks for kind={spec['kind']!r}; this package builds "
+            f"{name}: {axis} asks for kind={spec['kind']!r}; this package builds "
             f"{list(BASIS_KINDS)}. Each is a different claim about the quantity -- a "
             "Fourier basis says it is periodic on this axis, a polynomial one that it "
             "is smooth -- so the nearest-sounding name is not a safe guess. 'legendre' "
@@ -70,7 +69,7 @@ def _axis_matrix(axis: str, spec: Any, context: ResolutionContext):
         )
     if grid is None:
         raise ConfigError(
-            f"bases: {axis} needs observation.{axis}.grid, which this run does not "
+            f"{name}: {axis} needs observation.{axis}.grid, which this run does not "
             "declare -- that grid is where n comes from."
         )
     return basis_matrix(spec["kind"], n=int(grid.shape[0]), n_basis=int(spec["n_basis"]))
@@ -93,8 +92,8 @@ def build_basis(name: str, spec: dict, context: ResolutionContext) -> SeparableB
                 "says so."
             )
     return SeparableBasis(
-        time=_axis_matrix("time", spec["time"], context),
-        freq=_axis_matrix("freq", spec["freq"], context),
+        time=_axis_matrix(name, "time", spec["time"], context),
+        freq=_axis_matrix(name, "freq", spec["freq"], context),
     )
 
 

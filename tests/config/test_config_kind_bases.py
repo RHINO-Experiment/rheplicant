@@ -5,6 +5,7 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.kinds.bases import build_basis
 from rheplicant.config.resources import build_resources
 from rheplicant.config.values import resolve_value
 from rheplicant.core.basis import SeparableBasis
@@ -160,3 +161,36 @@ class TestBasisFit:
         from rheplicant.config.values import _RESOLVERS, VALUE_FORMS
 
         assert set(VALUE_FORMS) - {"value"} == set(_RESOLVERS)
+
+
+class TestBasisFitRefusals:
+    """_basis_fit's own refusals, pinned (the 1B review found them untested)."""
+
+    def test_a_non_mapping_spec_is_refused(self, context):
+        with pytest.raises(ConfigError, match="basis_fit: expects"):
+            resolve_value({"basis_fit": [1, 2]}, context)
+
+    def test_an_unknown_key_is_refused(self, context):
+        node = {"basis_fit": {"basis": {"ref": "resources.bases.b"},
+                              "field": {"zeros": [2, 2]}, "amplitude": 1.0}}
+        with pytest.raises(ConfigError, match=r"does not take \['amplitude'\]"):
+            resolve_value(node, context)
+
+
+class TestTheAxisRefusalsCarryTheResourceName:
+    def test_a_bad_axis_spec_names_the_resource(self, context):
+        spec = {"time": "chebyshev", "freq": {"kind": "chebyshev", "n_basis": 3}}
+        with pytest.raises(ConfigError) as excinfo:
+            build_basis("resources.bases.mine", spec, context)
+        assert "resources.bases.mine" in str(excinfo.value)
+
+    def test_the_axis_sweep_names_the_resource(self, context):
+        spec = {
+            "time": {"kind": "chebyshev", "n_basis": 3, "stray": 1},
+            "freq": {"kind": "chebyshev", "n_basis": 3},
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            build_basis("resources.bases.mine", spec, context)
+        message = str(excinfo.value)
+        assert "resources.bases.mine" in message
+        assert "stray" in message

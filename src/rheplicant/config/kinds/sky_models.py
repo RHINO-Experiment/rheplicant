@@ -23,7 +23,7 @@ import numpy as np
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
-from rheplicant.config.resources import register_kind
+from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.values import resolve_value
 from rheplicant.radio import MapSky, PowerLawSkyModel, UniformSkyModel
 
@@ -78,25 +78,6 @@ def _static_float(spec: dict, key: str, context: ResolutionContext, name: str) -
     return float(resolved.value)
 
 
-def _check_unknown_keys(name: str, kind: str, spec: dict) -> None:
-    """Refuse any key ``kind``'s builder does not consume, before dispatch.
-
-    Hoisted out of each branch so every kind gets the same sweep, rather than
-    each branch remembering to write its own.
-    """
-    unknown = sorted(set(spec) - _ALLOWED_KEYS[kind])
-    if not unknown:
-        return
-    if kind == "gdsm":
-        raise ConfigError(
-            f"{name}: kind: gdsm does not take {unknown}; it takes nside only. The "
-            "sky IS the GSM16 model evaluated on the run's own frequency grid -- "
-            "there is no amplitude to scale and no grid to declare, because both "
-            "are decided by the model and the run."
-        )
-    raise ConfigError(f"{name}: kind: {kind} does not take {unknown}.")
-
-
 @register_kind("sky_models")
 def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
     """Build one sky model, discriminated on ``kind``."""
@@ -114,7 +95,17 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
             "A sky the package does not ship goes through kind: python, which names "
             "an AbstractSkyModel subclass and states its own cost."
         )
-    _check_unknown_keys(name, kind, spec)
+    if kind == "gdsm":
+        check_unknown_keys(
+            name, spec, _ALLOWED_KEYS[kind], label="kind: gdsm",
+            note=(
+                "The sky IS the GSM16 model evaluated on the run's own frequency "
+                "grid -- there is no amplitude to scale and no grid to declare, "
+                "because both are decided by the model and the run."
+            ),
+        )
+    else:
+        check_unknown_keys(name, spec, _ALLOWED_KEYS[kind], label=f"kind: {kind}")
     if kind == "uniform":
         return UniformSkyModel(
             amplitude=_traced(spec, "amplitude", context, name),
@@ -133,8 +124,15 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
         target = spec.get("python")
         if target is None:
             raise ConfigError(f"{name}: kind: python requires a 'python:' target.")
-        args = spec.get("args") or {}
-        literal = spec.get("literal") or {}
+        args = spec.get("args", {})
+        literal = spec.get("literal", {})
+        for key, given in (("args", args), ("literal", literal)):
+            if not isinstance(given, dict):
+                raise ConfigError(
+                    f"{name}: {key}: is a mapping of argument name to "
+                    + ("value node" if key == "args" else "value")
+                    + f", and this one is {type(given).__name__} ({given!r})."
+                )
         # Refuse rather than let literal silently win on overlap, mirroring
         # hatch.py's own python: form (the value-grammar form this kind's
         # branch otherwise duplicates by hand): which one "won" would decide

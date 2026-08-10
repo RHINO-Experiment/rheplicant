@@ -62,6 +62,10 @@ _TERMINATION_KEYS: frozenset[str] = frozenset({"kind", "termination", "z0", "imp
 #: behind: shape gate and the observation.freq.grid requirement.
 _CABLE_KEYS: frozenset[str] = frozenset({"kind", "behind", "length", "velocity_factor", "loss"})
 
+_TOUCHSTONE_KEYS = frozenset(
+    {"kind", "file", "component", "flipped", "allow_extrapolation", "onto"}
+)
+
 
 @register_reader("touchstone", frozenset({"flipped"}), array=False)
 def _read_touchstone_file(path, spec: dict):
@@ -132,17 +136,16 @@ def build_s_param(name: str, spec: dict, context: ResolutionContext) -> Any:
 def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
     from rheplicant.radio.touchstone import interpolate_onto
 
-    unknown = sorted(set(spec) - {"kind", "file", "component", "flipped",
-                                  "allow_extrapolation", "onto"})
-    if unknown:
-        extra = ""
-        if "z0" in unknown:
-            extra = (
-                " z0 belongs to kind: termination and nowhere else: Touchstone.z0 is "
+    check_unknown_keys(
+        name, spec, _TOUCHSTONE_KEYS, label="kind: touchstone",
+        hints={
+            "z0": (
+                "z0 belongs to kind: termination and nowhere else: Touchstone.z0 is "
                 "parsed and never read by any other module, while termination_gamma("
                 "z0=) is read, so the key exists where it is consumed."
             )
-        raise ConfigError(f"{name}: kind: touchstone does not take {unknown}.{extra}")
+        },
+    )
     component = spec.get("component", "s11")
     if component not in COMPONENTS:
         raise ConfigError(

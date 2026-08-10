@@ -5,7 +5,12 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
-from rheplicant.config.resources import RESOURCE_KINDS, build_resources, merge_extends
+from rheplicant.config.resources import (
+    RESOURCE_KINDS,
+    build_resources,
+    check_unknown_keys,
+    merge_extends,
+)
 
 
 @pytest.fixture
@@ -246,3 +251,28 @@ class TestTheDagWithAProbeKind:
             build_resources({"probe": {"a": {"ref": "resources.probe.a"}}}, context)
         message = str(excinfo.value)
         assert message.count("resources.probe.a") >= 2
+
+
+class TestUnknownKeyHints:
+    def test_a_hint_is_appended_for_the_key_it_names(self):
+        with pytest.raises(ConfigError) as excinfo:
+            check_unknown_keys(
+                "resources.x.y", {"z0": 1.0}, frozenset({"kind"}),
+                label="kind: probe", hints={"z0": "z0 lives elsewhere."},
+            )
+        message = str(excinfo.value)
+        assert message.endswith("z0 lives elsewhere.")
+        assert "does not take ['z0']" in message
+
+    def test_a_note_is_appended_unconditionally(self):
+        with pytest.raises(ConfigError, match=r"it takes \['kind'\]\. Always\."):
+            check_unknown_keys(
+                "resources.x.y", {"w": 1}, frozenset({"kind"}),
+                label="kind: probe", note="Always.",
+            )
+
+    def test_no_unknown_keys_means_no_raise_even_with_hints(self):
+        check_unknown_keys(
+            "resources.x.y", {"kind": "probe"}, frozenset({"kind"}),
+            label="kind: probe", note="Always.", hints={"z0": "..."},
+        )

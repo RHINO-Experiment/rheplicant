@@ -4,9 +4,10 @@ This layer sits ABOVE ``rheplicant.core`` and ``rheplicant.radio``: it imports
 both and neither imports it. That direction is what keeps ``core``
 extractable, and ``tests/core/test_layering.py`` enforces it mechanically.
 
-Plan 1A ships the value grammar only -- the eight forms of a value node, the
-eight modifiers, and the rule that decides whether a resolved value reaches a
-field as a Python scalar or as a traced array.
+Plans 1A and 1B shipped the grammar underneath: the eighteen value forms with
+their nine modifiers, the delivery rule that decides scalar-vs-traced off the
+destination field, the path grammar, and ``resources.<kind>.<name>`` with
+``ref``-is-identity construction.
 """
 
 from rheplicant.config.context import ResolutionContext

@@ -467,3 +467,39 @@ class TestUnknownKeysAreRefused:
         spec["beams"]["horn"]["sufix"] = ".txt"
         with pytest.raises(ConfigError, match="sufix"):
             build_resources(spec, context)
+
+
+class TestTheHorizonInnerKeys:
+    """horizon: is swept like every other mapping: a misspelled apod_dg was
+    silently dropped, shipping a hard-edged cut where a taper was declared."""
+
+    def test_a_misspelled_inner_key_is_refused(self, context):
+        section = _beam(horizon={"mode": "truncate_map", "apod_dg": 3.0})
+        with pytest.raises(ConfigError) as excinfo:
+            build_resources(section, context)
+        message = str(excinfo.value)
+        assert "apod_dg" in message
+        assert "apod_deg" in message  # the allowed list names the correct spelling
+
+    def test_a_non_mapping_horizon_is_refused(self, context):
+        with pytest.raises(ConfigError, match="horizon"):
+            build_resources(_beam(horizon="truncate_map"), context)
+
+
+class TestPresenceRefusals:
+    def test_npy_without_path_is_refused_by_name(self, context):
+        with pytest.raises(ConfigError, match=r"format: npy requires path"):
+            build_resources(_beam(path=None), context)
+
+    def test_python_without_target_is_refused_by_name(self, context):
+        """Start from the file's existing VALID format: python spec (copy it
+        from that test) and drop the python: key."""
+        with pytest.raises(ConfigError, match=r"format: python requires"):
+            build_resources(_beam(format="python", path=None), context)
+
+    def test_a_list_args_is_refused_as_not_a_mapping(self, context):
+        with pytest.raises(ConfigError, match="mapping of argument name"):
+            build_resources(
+                _beam(format="python", path=None, python="numpy:ones",
+                      args=[12]),
+                context)

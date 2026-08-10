@@ -74,6 +74,22 @@ _ENGINE_KEYS: dict[str, frozenset[str]] = {
 }
 
 
+def _require(name: str, spec: dict, key: str, engine: str, what: str) -> None:
+    if key not in spec:
+        raise ConfigError(f"{name}: engine: {engine} requires {key}: -- {what}.")
+
+
+def _beam_ref(name: str, spec: dict, engine: str) -> dict:
+    _require(name, spec, "beam", engine, "a {ref: resources.beams.<name>} mapping")
+    beam = spec["beam"]
+    if not isinstance(beam, dict) or set(beam) != {"ref"}:
+        raise ConfigError(
+            f"{name}: beam: is {{ref: resources.beams.<name>}} -- the beam is a "
+            f"declared resource, not an inline value; got {beam!r}."
+        )
+    return beam
+
+
 def _angle(spec: dict, key: str, context: ResolutionContext, name: str) -> float:
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for this engine.")
@@ -121,6 +137,8 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "records nothing, so it is refused the same as an absent one."
             )
         check_unknown_keys(name, spec, _ENGINE_KEYS["matrix"], label="engine: matrix")
+        _require(name, spec, "matrix", "matrix",
+                 "the (n_data, n_pix) projection matrix as a value node")
         return MatrixProjector(matrix=jnp.asarray(resolve_value(spec["matrix"], context).value,
                                                   dtype=context.dtype))
 
@@ -173,8 +191,11 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
         check_unknown_keys(
             name, spec, _ENGINE_KEYS["general_pointing"], label="engine: general_pointing"
         )
+        _require(name, spec, "lmax", "general_pointing", "the spherical-harmonic band limit")
+        _require(name, spec, "nside", "general_pointing",
+                 "the HEALPix resolution of the sampling grid")
         if beam_alms is None:
-            beam = resolve_reference(spec["beam"]["ref"], context)
+            beam = resolve_reference(_beam_ref(name, spec, "general_pointing")["ref"], context)
             beam_alms = _analyse(
                 name, beam.maps, int(spec["lmax"]), int(spec.get("beam_iterations", 3))
             )
@@ -195,7 +216,8 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
             "nside: is where the resolution is declared."
         )
     check_unknown_keys(name, spec, _ENGINE_KEYS["driftscan"], label="engine: driftscan")
-    beam = resolve_reference(spec["beam"]["ref"], context)
+    _require(name, spec, "lmax", "driftscan", "the spherical-harmonic band limit")
+    beam = resolve_reference(_beam_ref(name, spec, "driftscan")["ref"], context)
     forwarded = {
         key: spec[key]
         for key in ("selfrot_deg", "horizon_mask", "apod_deg", "mask_iterations",

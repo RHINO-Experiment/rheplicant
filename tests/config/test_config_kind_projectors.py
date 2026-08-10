@@ -6,6 +6,7 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.kinds.projectors import build_projector
 from rheplicant.config.resources import build_resources
 
 pytest.importorskip("limtod_jax")
@@ -326,3 +327,43 @@ class TestMatrixEngine:
         built = build_resources(_matrix_doc({"built_by": "test"}), float32_context)
         projector = built.resources["resources.projectors.baked"]
         assert projector.matrix.dtype == jnp.float32  # documents the built dtype
+
+
+class TestPresenceRefusals:
+    """Missing required keys die as crafted refusals, not bare KeyError."""
+
+    @pytest.mark.parametrize(
+        ("engine", "spec", "missing"),
+        [
+            ("driftscan", {"engine": "driftscan", "normalize_beam": True, "lmax": 8,
+                           "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}, "beam"),
+            ("driftscan", {"engine": "driftscan", "normalize_beam": True,
+                           "beam": {"ref": "resources.beams.b"},
+                           "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}, "lmax"),
+            ("general_pointing", {"engine": "general_pointing", "normalize_beam": True,
+                                  "beam": {"ref": "resources.beams.b"}, "lmax": 8,
+                                  "lat_deg": 53.0}, "nside"),
+        ],
+    )
+    def test_missing_keys_are_refused_by_name(self, context, engine, spec, missing):
+        with pytest.raises(ConfigError) as excinfo:
+            build_projector("resources.projectors.p", spec, context)
+        message = str(excinfo.value)
+        assert missing in message
+        assert f"engine: {engine}" in message
+
+    def test_matrix_without_matrix_is_refused_by_name(self, context):
+        """No normalize_beam here: _ENGINE_KEYS['matrix'] does not take it,
+        and the sweep would fire first."""
+        with pytest.raises(ConfigError, match=r"engine: matrix requires matrix"):
+            build_projector(
+                "resources.projectors.p",
+                {"engine": "matrix", "provenance": {"built_by": "test"}},
+                context,
+            )
+
+    def test_a_beam_that_is_not_a_ref_mapping_is_refused(self, context):
+        spec = {"engine": "driftscan", "normalize_beam": True, "beam": "the_beam",
+                "lmax": 8, "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}
+        with pytest.raises(ConfigError, match=r"beam: is \{ref:"):
+            build_projector("resources.projectors.p", spec, context)

@@ -22,7 +22,7 @@ exactly the keys the comparison is about.
 
 import copy
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
@@ -43,14 +43,22 @@ def register_kind(name: str):
     return _register
 
 
-#: Every registered kind, live. Tasks 3-8 add to it by importing their modules.
+#: Every registered kind, live. Kind modules add to it on import.
 RESOURCE_KINDS = LiveNames(_KINDS)
 
 _REF_PREFIX = "resources."
 
 
-def check_unknown_keys(name: str, spec: dict, allowed: frozenset[str], *, label: str) -> None:
-    """Refuse any key of ``spec`` that ``allowed`` does not name.
+def check_unknown_keys(
+    name: str,
+    spec: dict,
+    allowed: frozenset[str],
+    *,
+    label: str,
+    note: str = "",
+    hints: Mapping[str, str] | None = None,
+) -> None:
+    """Refuse any key ``label`` does not consume, naming what it does.
 
     Shared rather than reimplemented per kind, because the shape it exists to
     rule out has already appeared twice independently:
@@ -64,18 +72,28 @@ def check_unknown_keys(name: str, spec: dict, allowed: frozenset[str], *, label:
     forces it to also account for what is left over.
 
     Args:
-        name: the resource's dotted name, quoted first in the refusal.
-        spec: the entry as written.
-        allowed: every key this discriminator's value takes, including the
-            discriminator key itself and any keys common to every value of it.
-        label: how the discriminator reads in the message, e.g.
-            ``"format: npy"`` or ``"kind: gdsm"``.
+        name: the entry's dotted name, quoted first in the refusal.
+        spec: the mapping under inspection.
+        allowed: every key this consumer reads.
+        label: what the sweep speaks for (``"kind: touchstone"``).
+        note: a sentence appended to every refusal from this call site.
+        hints: per-key sentences appended only when that key is among the
+            unknown ones -- the z0-belongs-to-termination redirect, without
+            the call site hand-rolling its own sweep to say it.
     """
     unknown = sorted(set(spec) - allowed)
-    if unknown:
-        raise ConfigError(
-            f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}."
-        )
+    if not unknown:
+        return
+    tail = ""
+    if hints:
+        applicable = " ".join(hints[key] for key in unknown if key in hints)
+        if applicable:
+            tail += " " + applicable
+    if note:
+        tail += " " + note
+    raise ConfigError(
+        f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}.{tail}"
+    )
 
 
 class BuiltResources(NamedTuple):

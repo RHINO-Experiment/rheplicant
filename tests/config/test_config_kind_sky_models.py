@@ -5,6 +5,7 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.kinds.sky_models import build_sky_model
 from rheplicant.config.resources import build_resources
 from rheplicant.radio import MapSky, PowerLawSkyModel, UniformSkyModel
 
@@ -363,3 +364,10 @@ class TestGdsm:
         message = str(excinfo.value)
         assert "pygdsm" in message
         assert "limTOD[gdsm]" in message
+
+
+class TestThePythonKindTypeChecks:
+    def test_a_list_args_is_refused_as_not_a_mapping(self, context):
+        spec = {"kind": "python", "python": "numpy:ones", "args": [3]}
+        with pytest.raises(ConfigError, match="mapping of argument name"):
+            build_sky_model("resources.sky_models.s", spec, context)

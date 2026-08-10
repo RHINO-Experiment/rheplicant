@@ -196,6 +196,13 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
     maps = _normalized(maps, normalize)
     fraction = jnp.ones((maps.shape[0],), dtype=maps.dtype)
     horizon = spec.get("horizon") or {}
+    if not isinstance(horizon, dict):
+        raise ConfigError(
+            f"{name}: horizon: is a mapping (mode, el_deg, apod_deg); got "
+            f"{type(horizon).__name__} ({horizon!r})."
+        )
+    check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}),
+                       label="horizon:")
     mode = horizon.get("mode", "none")
     if mode == "truncate_map":
         maps, fraction = _truncate(name, maps, horizon)
@@ -232,6 +239,10 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
     if fmt == "healpix":
         return _healpix_maps(name, spec, context, nside)
     if fmt in ("npy", "npz"):
+        if "path" not in spec:
+            raise ConfigError(
+                f"{name}: format: {fmt} requires path: -- the file the maps come from."
+            )
         node = {"file": {"path": spec["path"], "format": fmt}}
         if "key" in spec:
             node["file"]["key"] = spec["key"]
@@ -241,9 +252,20 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
             raise ConfigError(f"{name}: format: inline requires a 'maps' value node.")
         return jnp.asarray(resolve_value(spec["maps"], context).value, dtype=context.dtype)
     if fmt == "python":
-        factory = import_target(spec["python"])
-        args = spec.get("args") or {}
-        literal = spec.get("literal") or {}
+        if "python" not in spec:
+            raise ConfigError(
+                f"{name}: format: python requires a 'python:' target "
+                "('pkg.mod:callable')."
+            )
+        args = spec.get("args", {})
+        literal = spec.get("literal", {})
+        for key, given in (("args", args), ("literal", literal)):
+            if not isinstance(given, dict):
+                raise ConfigError(
+                    f"{name}: {key}: is a mapping of argument name to "
+                    + ("value node" if key == "args" else "value")
+                    + f", and this one is {type(given).__name__} ({given!r})."
+                )
         # Refuse rather than let literal silently win on overlap, mirroring
         # sky_models.py's own kind: python branch and for the same reason:
         # which one "won" would decide whether a value node was resolved
@@ -256,6 +278,7 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
                 "resolved through the value grammar and literal values are forwarded "
                 "untouched, so one argument cannot be both."
             )
+        factory = import_target(spec["python"])
         arguments = {key: resolve_value(value, context).value for key, value in args.items()}
         arguments.update(literal)
         return jnp.asarray(factory(**arguments), dtype=context.dtype)

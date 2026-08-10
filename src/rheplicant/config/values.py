@@ -39,8 +39,7 @@ VALUE_FORMS: tuple[str, ...] = (
     "python",
 )
 
-#: Every modifier key, from schema 2.1.10. Eight rows -- the schema's prose
-#: says seven and its own table says eight; the table is right.
+#: Nine modifier keys: the schema's eight plus the delivery declaration ``as:``.
 VALUE_MODIFIERS: tuple[str, ...] = (
     "unit",
     "dtype",
@@ -171,7 +170,7 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
         resolved = _resolve_scalar(node, modifiers)
     else:
         resolver = _RESOLVERS.get(form)
-        if resolver is None:  # pragma: no cover - every form registers in Task 6..12
+        if resolver is None:  # pragma: no cover - every declared form registers a resolver
             raise ConfigError(
                 f"Form {form!r} is declared in the grammar but no resolver is registered "
                 f"for it. Registered: {sorted(_RESOLVERS)}."
