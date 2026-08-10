@@ -138,6 +138,7 @@ from rheplicant.radio.rhino import (
 from rheplicant.radio.rhino import (
     to_state as rhino_to_state,
 )
+from rheplicant.radio.site import lst_grid_deg
 from rheplicant.radio.sky import (
     AbstractSkyModel,
     AbstractSkyProjector,
@@ -210,6 +211,7 @@ __all__ += [
     "cst_beam_maps",
     "cst_frequency_table",
     "horizon_truncated_beam",
+    "lst_grid_deg",
     "read_cst_farfield",
 ]
 __all__ += [
