@@ -13,7 +13,12 @@ document layer: ``load_document`` turns a parsed document's
 ``ConfiguredRun`` and ``run_forward`` evaluates it. Plan 2B adds the fitting
 exits: ``run_document`` executes the ``runs:`` a document declares, each
 against the ``InferenceBuild`` its ``inference:`` section produced, and hands
-back one ``RunResult`` per run.
+back one ``RunResult`` per run. Plan 2C adds nine more kinds -- the conjugate
+family, the cheap diagnostics, ``mmodes`` and ``predict`` -- plus ``reuse:``,
+which lets one run read an earlier one's product. They add no name here on
+purpose: a run kind is something a document *says*, reached through the
+``run_document`` above, and the table that dispatches them
+(``sections.exit_support.EXECUTORS``) is wiring rather than surface.
 """
 
 from rheplicant.config.context import ResolutionContext

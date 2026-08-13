@@ -54,7 +54,10 @@ point). Lighting `beam_spill` and `ground_pickup` together requires
 ## What is refused, and where it goes instead
 
 `inference:` and `runs:` are read now — [their own page](config-inference.md)
-covers them, and `runs:` is required. What still goes elsewhere: `outputs:`,
-`defaults:` and `plugins:` arrive with Plan 4's CLI; the 2C exits (`nuts`,
-the `conjugate.*` family, `predict`, `npe` and friends) with Plan 2C, refused
-by name until then; `campaign:` stays reserved with capability 4.
+covers them, `runs:` is required, and
+[the fourteen kinds it runs](config-inference.md#runs) now include the
+conjugate family and the cheap diagnostics. What still goes elsewhere:
+`outputs:`, `defaults:` and `plugins:` arrive with Plan 4's CLI, and so do
+`compare` and `benchmark`; `nuts`, `npe` and `inference.npe:` arrive with
+Plan 2D, refused by name until then; `campaign:` stays reserved with
+capability 4.

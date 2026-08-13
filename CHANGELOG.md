@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### The linear algebra, and the questions worth asking before a fit
+
+Plan 2C: `runs:` gains nine kinds and grows a memory. `conjugate.wiener`,
+`conjugate.gcr` and `conjugate.gls` are the exact linear-Gaussian solves over
+a named block — a mean, a stack of constrained realisations, and the
+iteratively reweighted route that radiometer noise has to take, since the
+first two need a sigma that has been decided into an array (check A27 names
+both ways out). `identifiability`, `condition` and `score_directions` are the
+diagnostics the package has always documented as the thing to consult
+*before* committing to a long fit, and no document could reach any of them.
+`gradient` differentiates one named objective once, and is the first consumer
+of `include_logdet:`. `mmodes` is what a drift scan actually sees, refusing a
+normalised beam in this layer's own voice rather than four sections later in
+the package's. `predict` pushes a fitted posterior back out to data space,
+choosing between the analytic covariance route and the noiseless sample route
+by what it is asked to reuse.
+
+`reuse: <earlier run name>` is the memory: `run_document` executes in
+declaration order and carries the results forward, so a run may read an
+earlier one's product and may only look backwards. `beam_analysis` joins the
+transform table, so a beam-map latent moves the map rather than the alms it
+happens to be stored as. The exits also split into modules along their own
+seam — shared machinery, the 2B estimators, the conjugate family, the
+diagnostics — behind a registry that refuses an unregistered kind in this
+layer's own voice instead of a bare `KeyError`.
+
+`nuts`, `npe` and `inference.npe:` are refused naming Plan 2D, which brings
+numpyro's sampler and the neural posterior; `compare` and `benchmark` name
+Plan 4, as does consuming any of these products from `outputs:`.
+
 ### A YAML document now runs its own fit
 
 Plan 2B: the document that assembled the twin declares what to do with it.
