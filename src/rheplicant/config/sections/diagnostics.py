@@ -40,8 +40,10 @@ schema's ``chi2``/``sum_squares``/``mean`` exist in no package module
 -- and ``chi2`` is where ``inference.noise.include_logdet`` acquires its
 first consumer in ``src/``.
 
-Task 11 adds ``predict`` to this module.  ``condition`` is NOT here: it
-rides ``_conjugate_block``, so Task 6 put it in ``conjugate.py``.
+``predict`` closes the family and is the only exit here that reads nothing
+from the document but a NAME: its input is an earlier run's product, reached
+through the run-level ``reuse:``.  ``condition`` is NOT here: it rides
+``_conjugate_block``, so Task 6 put it in ``conjugate.py``.
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ from rheplicant.config.sections.exit_support import (
     _space,
     _sweep,
     register,
+    reuse_of,
 )
 from rheplicant.config.sections.runs import RunSpec
 from rheplicant.config.values import resolve_value
@@ -671,3 +674,110 @@ def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
             "something with no shape."
         )
     return projector.mmodes(maps, coords)
+
+
+# --- kind: predict ---------------------------------------------------------
+
+_PREDICT_KEYS = frozenset({"n_draw"})
+
+
+@register("predict")
+def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+    """``kind: predict`` -- an earlier run's product, pushed through the model.
+
+    Two routes, chosen by the ``kind`` of the run ``reuse:`` names, because
+    ``RunResult.product`` has no uniform type:
+
+    * a ``fisher`` run carries a covariance under ``product["covariance"]``,
+      and :func:`~rheplicant.inference.propagate_covariance` turns it into a
+      per-sample prediction standard deviation by the delta method.  Nothing
+      is drawn on this route, so ``n_draw:`` is refused rather than ignored.
+    * a ``plan.sample`` run carries draws, and
+      :func:`~rheplicant.inference.predict_from_samples` runs the pipeline
+      over them.  **Those predictions are NOISELESS** -- the likelihood's own
+      scatter is not added back (numpyro_bridge.py:337-338).  "Predictive"
+      usually means the opposite, so it is said here in full.
+
+    :func:`~rheplicant.inference.push_forward` is neither route.  It is a
+    ``jax.vmap`` over a SAMPLES pytree (uncertainty.py:577) and takes no
+    covariance at all, so routing a fisher product to it would mean this layer
+    inventing a Cholesky, an unflatten and a seed to manufacture draws the
+    package never asked for; and on the samples side it is
+    ``predict_from_samples`` that validates the stacks against ``space.names``
+    before it vmaps.  Schema 4.7.9's ``predict`` row names the pair
+    "push_forward / predict_from_samples" and mislabels it.
+
+    The samples route needs numpyro; the covariance route does not.  Both
+    imports therefore sit inside this body, which is also what keeps
+    ``import rheplicant.config`` off ``rheplicant.inference``.
+
+    ``propagate_covariance`` re-derives the expansion point from THIS run's
+    ``built``, so a ``predict`` declaring a different ``variant:`` from the
+    ``fisher`` it reuses is mixing two builds -- and ``RunResult`` carries no
+    variant, so this layer cannot see it.  Recorded for Plan 2D's ledger
+    rather than enforced here (the fix is one field on ``RunResult`` and one
+    comparison): the package's own structure and name checks
+    (uncertainty.py:533, :544) catch the mismatches that move the parameter
+    LAYOUT, and are silent about the rest.
+
+    The danger is not that mixing two builds is wildly wrong -- it is that it
+    is INVISIBLY wrong.  Measured, and pinned in
+    ``tests/config/test_config_exits_predict.py``: against the un-mixed answer
+    on the SAME variant, a model-only mismatch is off by 1.1 % (a ratio of
+    0.98883, 1.12 % at the worst channel), because with one latent the whole
+    error is the scalar sigma_g(base)/sigma_g(variant).  That is an error
+    nobody will ever notice.
+    """
+    where = f"runs[{run.name!r}]"
+    if "from" in run.options:
+        raise ConfigError(
+            f"{where}: from: is schema 4.7.9's second spelling of the "
+            "cross-run link, and reuse: is the one this layer reads -- "
+            "runs[].reuse is already a member of the run grammar and from: "
+            "is not. Rename from: to reuse:."
+        )
+    _sweep(run, _PREDICT_KEYS)
+    earlier = reuse_of(run, results)
+    space = _space(run, built)
+    if earlier.kind == "fisher":
+        from rheplicant.inference import propagate_covariance
+
+        if "n_draw" in run.options:
+            raise ConfigError(
+                f"{where}: n_draw: thins an earlier run's draws, and "
+                f"reuse: {run.reuse!r} names a kind: fisher run, whose "
+                "product is a covariance -- the delta method draws nothing. "
+                "Drop n_draw:, or reuse a plan.sample run."
+            )
+        forward, values = space.forward_fn(built.inference.fit_twin,
+                                           built.state)
+        return propagate_covariance(forward, values,
+                                    earlier.product["covariance"])
+    if earlier.kind == "plan.sample":
+        from rheplicant.inference import predict_from_samples
+
+        draws = earlier.product
+        available = draws.n_draw
+        keep = available
+        if "n_draw" in run.options:
+            keep = _number(run, "n_draw", run.options["n_draw"], kind=int,
+                           minimum=1)
+            if keep > available:
+                raise ConfigError(
+                    f"{where}: n_draw: {keep} exceeds the {available} draws "
+                    f"reuse: {run.reuse!r} kept -- plan.sample discards its "
+                    "warmup before returning, so this is all there is."
+                )
+        # The LAST draws, not the first: plan.sample has already discarded its
+        # warmup, but the leading kept draws are still the ones nearest the
+        # declared init, and the tail is the part a thinning is meant to keep.
+        samples = {name: stack[-keep:]
+                   for name, stack in draws.samples.items()}
+        return predict_from_samples(built.inference.fit_twin, built.state,
+                                    space, samples)
+    raise ConfigError(
+        f"{where}: reuse: {run.reuse!r} names a kind: {earlier.kind} run, "
+        "and predict pushes forward either a fisher run's covariance or a "
+        "plan.sample run's draws. Those are the two products this exit knows "
+        "how to propagate."
+    )

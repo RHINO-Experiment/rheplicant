@@ -4,12 +4,11 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.sections import exits
+from rheplicant.config.sections import runs as runs_module
 from rheplicant.config.sections.exit_support import EXECUTORS, register, reuse_of
 from rheplicant.config.sections.runs import (
     _KINDS,
-    _KINDS_2C,
     _KINDS_2D,
-    _KINDS_PLAN4,
     RunResult,
     RunSpec,
     parse_runs,
@@ -45,16 +44,25 @@ class TestTheRegistryIsComplete:
     def test_the_kind_tables_are_pairwise_disjoint(self):
         """A runnable kind must not also sit in a deferral tuple.
 
-        `_one` tests the deferral tuples BEFORE `_KINDS`, so a kind left in
-        `_KINDS_2C` after being promoted is refused with "arrives with Plan
-        2C" no matter that it is declared, registered and unit-tested.  The
-        two tests above cannot see this: the registry is complete and every
+        `_one` tests the deferral tuples BEFORE `_KINDS`, so a kind left in a
+        deferral tuple after being promoted is refused with "arrives with Plan
+        N" no matter that it is declared, registered and unit-tested.  The two
+        tests above cannot see this: the registry is complete and every
         executor is declared -- the kind is simply unreachable from any
-        document.  Tasks 3-11 each perform that promotion, so this is the
+        document.  Tasks 3-11 each performed that promotion, so this is the
         assertion that makes forgetting half of it loud.
+
+        The tables are DISCOVERED rather than listed.  Task 11 retired
+        `_KINDS_2C` outright (`predict` was its last member, and an empty
+        tuple would leave `if kind in ()` in the parser), and a test that
+        named its tables would have had to be edited to keep importing --
+        which is the same edit that would silently drop a table a later plan
+        adds.  Discovery covers both directions.
         """
-        tables = {"_KINDS": _KINDS, "_KINDS_2C": _KINDS_2C,
-                  "_KINDS_2D": _KINDS_2D, "_KINDS_PLAN4": _KINDS_PLAN4}
+        tables = {name: getattr(runs_module, name) for name in vars(runs_module)
+                  if name.startswith("_KINDS")}
+        assert "_KINDS" in tables and len(tables) >= 2, sorted(tables)
+        assert "_KINDS_2C" not in tables, "predict was its last member"
         names = sorted(tables)
         for i, left in enumerate(names):
             for right in names[i + 1:]:

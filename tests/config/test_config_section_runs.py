@@ -32,11 +32,6 @@ class TestGrammar:
         with pytest.raises(ConfigError, match="plan.estimate"):
             parse_runs([{"kind": "anneal"}])
 
-    def test_the_still_deferred_kinds_are_refused_by_name(self):
-        for kind in ("predict",):
-            with pytest.raises(ConfigError, match="2C"):
-                parse_runs([{"kind": kind}])
-
     def test_nuts_and_npe_are_plan_2d(self):
         for kind in ("nuts", "npe"):
             with pytest.raises(ConfigError, match="2D"):
