@@ -101,6 +101,80 @@ def _passthrough(options: Mapping, keys: tuple[str, ...]) -> dict:
     return {key: options[key] for key in keys if key in options}
 
 
+def _decided_sigma(run: Any, built: Any) -> Any:
+    """The DECIDED sigma array the conjugate seam takes as ``noise_std=``.
+
+    ``wiener_solve``, ``gcr_sample`` and ``condition_estimate`` compute
+    ``1/sigma**2`` directly and refuse a NoiseModel outright
+    (``linear.py:1031``).  A constant-sigma model is decided here -- its
+    ``std`` ignores the prediction by contract
+    (``depends_on_prediction`` is False), so evaluating it on the run's own
+    grid gives the full-shaped array, which is also the one shape
+    ``check_noise_std_axis`` never has to guess an axis for.  A
+    prediction-dependent one cannot be decided at all, and that is check A27.
+
+    Takes no ``observed``: the shape comes from ``built.state.coords``, so a
+    document with no ``inference.observed`` still decides a sigma (which is
+    what ``condition`` needs).
+    """
+    import jax.numpy as jnp
+
+    from rheplicant.inference import NoiseModel
+
+    decided = _noise(run, built)
+    if not isinstance(decided, NoiseModel):
+        return decided
+    if decided.depends_on_prediction:
+        raise ConfigError(
+            f"runs[{run.name!r}]: kind: {run.kind} takes a DECIDED sigma "
+            "array, and inference.noise.kind: "
+            f"{built.inference.noise.kind} makes sigma a function of the "
+            "prediction -- which a conjugate solve has not got, because the "
+            "prediction is what it solves for (linear.py:1031, check A27). "
+            "Two routes run this noise: kind: conjugate.gls iterates the "
+            "covariance it implies, or inference.noise.kind: "
+            "radiometer_frozen decides the sigma once and keeps this exit."
+        )
+    # Only the SHAPE is load-bearing.  A constant-sigma model's std() ignores
+    # its argument's VALUES by contract and returns the dtype of its own
+    # sigma, not the probe's (measured: a float32 sigma against a float64
+    # prediction comes back float32).  So no dtype= here: passing
+    # built.context.dtype would read as enforcing the document's dtype on the
+    # result, which it does not do -- the document's dtype already reached
+    # this sigma when build_noise resolved it.
+    coords = built.state.coords
+    shape = (int(coords.time.size), int(coords.freq.size))
+    return decided.std(jnp.zeros(shape))
+
+
+def _decided_model(run: Any, built: Any) -> Any:
+    """The noise MODEL an exit that iterates a covariance needs (check A28).
+
+    The mirror of :func:`_decided_sigma`.  ``decided_noise`` returns either a
+    NoiseModel or a frozen sigma array, and the two are not interchangeable
+    at the conjugate seam: ``iterative_gls`` takes ``noise=`` (the RULE,
+    ``gls.py:181-196``) where the three conjugate solves take ``noise_std=``
+    (a decided array), and passing either one where the other belongs is a
+    hard ParameterSpaceError in both directions.  The refusal names the exit
+    that wants the other shape rather than merely rejecting this one.
+    """
+    from rheplicant.inference import NoiseModel
+
+    noise = _noise(run, built)
+    if isinstance(noise, NoiseModel):
+        return noise
+    raise ConfigError(
+        f"runs[{run.name!r}]: kind: {run.kind} solves for the covariance "
+        "a PREDICTION-DEPENDENT sigma implies, so it reads inference.noise "
+        "as a model; inference.noise.kind: "
+        f"{built.inference.noise.kind} decides its sigma into an array "
+        "before any run sees it, and a decided array has no fixed point to "
+        "iterate (check A28). Declare inference.noise.kind: radiometer to "
+        "iterate the rule, or run kind: conjugate.wiener, which is what a "
+        "decided sigma wants."
+    )
+
+
 def reuse_of(run: Any, results: Mapping[str, Any] | None) -> Any:
     """The RunResult an exit's ``reuse:`` names, or a refusal saying why not.
 

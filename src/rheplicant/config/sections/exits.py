@@ -284,3 +284,10 @@ def execute_run(run: RunSpec, built: Any,
     return RunResult(name=run.name, kind=run.kind,
                      product=executor(run, built, results=results),
                      error=None)
+
+
+# Importing the leaf modules is what registers their kinds.  The import sits
+# at the foot rather than the head because they import the shared support
+# this module also imports; the completeness test in
+# tests/config/test_config_exit_support.py is what keeps it from rotting.
+from rheplicant.config.sections import conjugate  # noqa: E402,F401
