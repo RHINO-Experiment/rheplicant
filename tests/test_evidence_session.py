@@ -49,6 +49,29 @@ _PASSED = re.compile(r"(\d+) passed")
 _GATE_MARKER = "jax_enable_x64 is process-global"
 
 
+def _parallel() -> list[str]:
+    """``-n 4`` when xdist is installed, nothing when it is not.
+
+    This child is the whole suite's critical path, and it ran serially while
+    the parent's other seven workers sat idle. Measured on this machine:
+    175 s serial, 80 s at ``-n 8``, 78 s at ``-n 4`` -- so the win is the
+    first few workers and the rest is noise. **Four, not eight**: the parent
+    is itself an ``-n 8`` session, so eight here would oversubscribe the box
+    for a second that the measurement says is not there.
+
+    Conditional because ``pytest-xdist`` is dev-group only, and this module's
+    contract is that plain ``pytest`` stays authoritative over
+    ``tests/evidence/``. A hard ``-n`` would turn a thin environment's run
+    into a usage error, and a usage error here reads as the evidence session
+    failing -- which is exactly the alarm this file exists to raise honestly.
+    """
+    try:
+        import xdist  # noqa: F401
+    except ImportError:
+        return []
+    return ["-n", "4"]
+
+
 @pytest.fixture(scope="module")
 def session() -> subprocess.CompletedProcess:
     """One child run, shared by the assertions that read it.
@@ -67,7 +90,8 @@ def session() -> subprocess.CompletedProcess:
         # `-rs` so skip REASONS are printed: the assertion below has to tell a
         # skip the dtype gate caused from one an optional dependency caused,
         # and only the reason distinguishes them.
-        [sys.executable, "-m", "pytest", "tests/evidence", "--no-cov", "-rs"],
+        [sys.executable, "-m", "pytest", "tests/evidence", "--no-cov", "-rs",
+         *_parallel()],
         cwd=ROOT,
         env={**os.environ, "JAX_ENABLE_X64": "1"},
         capture_output=True,

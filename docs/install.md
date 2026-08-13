@@ -121,15 +121,30 @@ without them `pytest` stops at collection, or reports every documentation link
 as broken.
 
 ```bash
-.venv/bin/python -m pytest                    # ~12 min with coverage
-.venv/bin/python -m pytest -n 8 -o addopts="" # ~4 min, no coverage gate
+.venv/bin/python -m pytest                     # ~12 min with coverage
+.venv/bin/python -m pytest -n 16 -o addopts="" # the one to use while working
 JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
 .venv/bin/python -m ruff check src tests
 ```
 
 The second line is the one to use while working. `pytest-xdist` is in the `dev`
-group and the run is identical — same 2286 passed, 486 skipped — because
-nothing here depends on execution order.
+group and the run is identical — same counts — because nothing here depends on
+execution order.
+
+**How many workers, and why the number stops mattering.** Measured on a
+28-core machine: `-n 8` 183 s, `-n 16` **146 s**, `-n 24` 150 s. The knee is
+around 16 and past it the workers contend rather than help, so `-n auto` on a
+big box is slower than picking a number. On a smaller machine use the core
+count; the suite does not care.
+
+What sets the floor is one test, not the worker count. `tests/evidence/` runs
+as a second pytest session with `JAX_ENABLE_X64=1` (see the admonition above),
+and inside it
+`test_chain_conditioning.py::test_the_accumulated_fisher_plus_the_prior_is_positive_definite[5.0-1000]`
+alone takes ~49 s. That session is itself parallelised — four workers, chosen
+because 8 measured no faster and the parent is already an `-n` session — which
+took it from 175 s to 78 s and the whole suite from 291 s to 146 s. Nothing
+short of shrinking that one test moves the floor further.
 
 :::{admonition} Why parallel rather than fewer tests
 :class: note
