@@ -17,7 +17,9 @@ from typing import Any
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
+    _PROBE,
     EXECUTORS,
+    _binds,
     _noise,
     _number,
     _observed,
@@ -72,7 +74,24 @@ def _loss_fn(run: RunSpec) -> Any:
     if isinstance(loss, dict) and set(loss) == {"python"}:
         from rheplicant.config.hatch import import_target
 
-        return import_target(loss["python"])
+        scoring = import_target(loss["python"])
+        # The sibling of kind: gradient's objective: check, and named by its
+        # refusal.  Without it the natural mistake -- `def my_loss(prediction)`
+        # -- reaches the user as a raw `TypeError: ... takes exactly one
+        # argument (2 given)` naming no run, which the layer's own
+        # single-ConfigError grep cannot see, because it escapes through a
+        # CALL rather than a raise.  mean_squared_error(prediction, observed)
+        # is the shape every loss must take.
+        binds, signature = _binds(scoring, _PROBE, _PROBE)
+        if not binds:
+            raise ConfigError(
+                f"runs[{run.name!r}]: loss: {loss['python']!r} cannot be "
+                f"called as (prediction, observed) -- its signature is "
+                f"{signature}. A loss takes BOTH, the same shape "
+                "kind: gradient's objective: takes, even when it reads only "
+                "the first."
+            )
+        return scoring
     raise ConfigError(
         f"runs[{run.name!r}]: loss: is 'mse' or {{python: 'mod:fn'}}; got "
         f"{loss!r}."

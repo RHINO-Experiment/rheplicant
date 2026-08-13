@@ -14,6 +14,16 @@ def half_mse(prediction, observed):
     return 0.5 * mean_squared_error(prediction, observed)
 
 
+def prediction_only_loss(prediction):
+    """The natural mistake: a loss written for the prediction alone.
+
+    Importable, callable, and unusable -- ``.fit`` passes both.  Named here
+    rather than borrowed from the stdlib so the refusal's signature text is
+    this repository's own.
+    """
+    return (prediction**2).mean()
+
+
 def document(run, inference=None, model_gain=1.1):
     doc = synthetic_document()
     doc["model"] = {key: value for key, value in doc["model"].items()
@@ -175,6 +185,40 @@ class TestOptimize:
                                   "rheplicant.inference:mean_squared_error"}}))
         assert float(results["optimize"].product["params"]["g"]) == \
             pytest.approx(1.5, abs=1e-3)
+
+    def test_a_one_argument_python_loss_is_refused_naming_the_signature(self):
+        """The sibling seam kind: gradient's objective: check names.
+
+        Before this refusal the natural mistake -- a loss written for the
+        prediction alone -- reached the user as a raw TypeError from inside
+        the calibrator, naming no run.  The layer's standing check for that
+        class of escape is a grep for non-ConfigError `raise` statements, and
+        it returns CLEAN over this one, because the exception came out of a
+        CALL rather than a raise.  That is why the guard has to be here and
+        not in the grep.
+        """
+        with pytest.raises(ConfigError, match="cannot be called as") as caught:
+            run_document(document({**self.RUN, "loss": {
+                "python": "tests.config.test_config_exits_estimators"
+                          ":prediction_only_loss"}}))
+        message = str(caught.value)
+        assert message.startswith("runs['optimize']: loss: ")
+        # The signature is quoted so the reader sees WHICH argument is
+        # missing rather than being told to go and look.
+        assert "(prediction)" in message
+        # Not the fallback refusal: that one fires for a loss: that is neither
+        # 'mse' nor a {python:} mapping, and would pass a bare match=.
+        assert "is 'mse' or" not in message
+
+    def test_a_two_argument_python_loss_is_accepted(self):
+        """The other side, so the guard cannot degrade into a blanket no.
+
+        half_mse takes (prediction, observed) and must still run -- a check
+        that refused every python: loss would satisfy the test above.
+        """
+        results = run_document(document({**self.RUN, "loss": {
+            "python": "tests.config.test_config_exits_estimators:half_mse"}}))
+        assert "params" in results["optimize"].product
 
     def test_the_python_loss_is_the_loss_the_fit_minimizes(self):
         # half_mse above scores exactly half of mse everywhere, so the first

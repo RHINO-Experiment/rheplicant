@@ -5,7 +5,13 @@ import pytest
 from rheplicant.config import ConfigError
 from rheplicant.config.sections import exits
 from rheplicant.config.sections import runs as runs_module
-from rheplicant.config.sections.exit_support import EXECUTORS, register, reuse_of
+from rheplicant.config.sections.exit_support import (
+    EXECUTORS,
+    _binds,
+    _number,
+    register,
+    reuse_of,
+)
 from rheplicant.config.sections.runs import (
     _KINDS,
     _KINDS_2D,
@@ -212,3 +218,85 @@ class TestTheDeferredKindsNameTheirPlan:
         for kind in _KINDS_2D:
             with pytest.raises(ConfigError, match="2D"):
                 parse_runs([{"kind": kind}])
+
+
+class TestACountIsAWholeNumber:
+    """``kind=int`` refuses a fractional count instead of truncating it.
+
+    ``int(2.5)`` is 2, so ``n_draws: 2.5`` used to RUN as two draws: the
+    document said one thing and the run did another, with nothing anywhere to
+    notice.  Two things in this repository already refuse the same value --
+    ``transforms._whole``, shipped one task later in the same plan, and the
+    package itself (``n_steps must be a positive int``,
+    ``tests/inference/test_inference_construction_guards.py:191``) -- so the
+    layer held the only permissive reading of three.
+
+    Reached by ``n_draw``, ``n_steps``, ``n_sweeps``, and through ``_knobs``
+    by ``maxiter``, ``iterations``, ``min_reweights`` and ``max_reweights``.
+    """
+
+    class _Run:
+        name = "counted"
+
+    def test_a_fractional_count_is_refused_rather_than_truncated(self):
+        with pytest.raises(ConfigError, match="is a whole number") as caught:
+            _number(self._Run(), "n_draw", 2.5, kind=int, minimum=1)
+        message = str(caught.value)
+        assert message.startswith("runs['counted']: n_draw: ")
+        # BOTH numbers, because the refusal's whole content is that they are
+        # different runs.  A message naming only the declared value leaves the
+        # reader to work out what it would silently have become.
+        assert "2" in message and "2.5" in message
+
+    def test_a_whole_float_is_refused_too_and_says_the_same_thing(self):
+        # 2.0 truncates losslessly, so this leg is the one a "harmless"
+        # relaxation would reintroduce -- and it is exactly the value the
+        # package refuses for n_steps.  Refusing it keeps one rule rather
+        # than a rule with an exception a reader has to remember.
+        with pytest.raises(ConfigError, match="is a whole number"):
+            _number(self._Run(), "n_steps", 2.0, kind=int)
+
+    def test_an_integer_count_still_passes_through(self):
+        assert _number(self._Run(), "n_draw", 3, kind=int, minimum=1) == 3
+
+    def test_kind_float_is_untouched_by_the_rule(self):
+        # The guard is on the int branch alone: a tolerance is a real number
+        # and 1e-6 must not become a refusal.
+        assert _number(self._Run(), "tol", 1e-6, kind=float) == 1e-6
+        assert _number(self._Run(), "tol", 1, kind=float) == 1.0
+
+
+class TestTheSharedCallabilityProbe:
+    """``_binds`` is the one place a ``python:`` seam is checked, not three.
+
+    ``kind: gradient``'s ``objective:``, ``kind: mmodes``' ``sky:`` and
+    ``optimize``'s ``loss:`` all resolve a hook and then call it with a fixed
+    number of arguments.  Each grew its own eight-line inspect/bind/except
+    skeleton; this is the shape they share.
+    """
+
+    def test_a_callable_of_the_wrong_arity_does_not_bind(self):
+        binds, signature = _binds(lambda prediction: prediction, object(),
+                                  object())
+        assert binds is False
+        assert "prediction" in str(signature)
+
+    def test_a_callable_of_the_right_arity_binds(self):
+        binds, signature = _binds(lambda a, b: a, object(), object())
+        assert binds is True
+        assert signature is not None
+
+    def test_defaults_and_star_args_bind_rather_than_being_counted(self):
+        # Counting parameters gets all three of these wrong; binding does not.
+        for fn in (lambda a, b=1: a, lambda *args: args,
+                   lambda a, /, b: a):
+            assert _binds(fn, object(), object())[0] is True
+
+    def test_a_callable_inspect_cannot_describe_is_passed_through(self):
+        # Some C builtins and some jax wrappers have no retrievable
+        # signature.  The call is then its own check, and guessing there
+        # would refuse working hooks -- so the verdict is True and the
+        # signature is None, which callers must not print.
+        binds, signature = _binds(print, object(), object())
+        assert binds is True
+        assert signature is None or isinstance(signature, object)

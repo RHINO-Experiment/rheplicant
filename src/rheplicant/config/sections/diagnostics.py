@@ -56,6 +56,8 @@ import jax.numpy as jnp
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.sections.exit_support import (
+    _PROBE,
+    _binds,
     _noise,
     _number,
     _observed,
@@ -359,10 +361,6 @@ _OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse,
                "sum_squares": _sum_squares}
 
 
-#: A stand-in for the two arguments, so the arity is checked by BINDING the
-#: signature rather than by counting parameters -- which gets ``/``, ``*``,
-#: defaults and ``*args`` right without a special case for each.
-_PROBE = object()
 
 
 def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
@@ -383,15 +381,8 @@ def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
     wrappers -- is passed through: the call itself is then the check, and
     guessing would refuse working objectives.
     """
-    import inspect
-
-    try:
-        signature = inspect.signature(scoring)
-    except (TypeError, ValueError):
-        return
-    try:
-        signature.bind(_PROBE, _PROBE)
-    except TypeError:
+    binds, signature = _binds(scoring, _PROBE, _PROBE)
+    if not binds:
         raise ConfigError(
             f"{where}: objective: {target!r} cannot be called as "
             f"(prediction, observed) -- its signature is {signature}. An "
@@ -399,7 +390,7 @@ def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
             "even when it reads only the first: chi2 and mse weigh the "
             "residual, sum_squares and mean ignore observed and still "
             "accept it."
-        ) from None
+        )
 
 
 def _objective(run: RunSpec, built: Any) -> Any:
@@ -588,22 +579,15 @@ def _evaluates_a_grid(where: str, sky_model: Any) -> None:
     shipped models bind ``(freq)`` -- and a callable ``inspect`` cannot
     describe is passed through, because guessing would refuse working ones.
     """
-    import inspect
-
-    try:
-        signature = inspect.signature(sky_model)
-    except (TypeError, ValueError):
-        return
-    try:
-        signature.bind(_PROBE)
-    except TypeError:
+    binds, signature = _binds(sky_model, _PROBE)
+    if not binds:
         raise ConfigError(
             f"{where}: sky: names a {type(sky_model).__name__} that cannot be "
             f"called as (freq) -- its signature is {signature}. A sky model "
             "is evaluated ON the run's own frequency grid, which is the one "
             "argument every AbstractSkyModel takes and the only one this exit "
             "has to give."
-        ) from None
+        )
 
 
 @register("mmodes")

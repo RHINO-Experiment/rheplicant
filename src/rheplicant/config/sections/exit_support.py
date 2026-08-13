@@ -50,12 +50,60 @@ def _number(run: Any, key: str, value: Any, *, kind: type,
         raise ConfigError(
             f"runs[{run.name!r}]: {key}: is a number; got {value!r}."
         )
+    if kind is int and not isinstance(value, int):
+        # `int(2.5)` is 2, so a count declared 2.5 used to RUN as 2 -- the
+        # document says one thing and the run does another, with nothing to
+        # notice.  Two things in this repository already refuse the same
+        # value: `transforms._whole`, shipped one task later in this very
+        # plan, and the package itself (`n_steps must be a positive int`,
+        # tests/inference/test_inference_construction_guards.py:191).  A
+        # count that is not an integer is a typo, and the detectable reading
+        # is the one this layer takes.
+        raise ConfigError(
+            f"runs[{run.name!r}]: {key}: is a whole number; got {value!r}. "
+            f"It counts, so {kind(value)!r} and {value!r} are different runs "
+            "and only one of them is what this document asked for."
+        )
     if minimum is not None and not value >= minimum:
         raise ConfigError(
             f"runs[{run.name!r}]: {key}: must be >= {minimum:g}; got "
             f"{value!r}."
         )
     return kind(value)
+
+
+#: Stands in for an argument a ``python:`` seam would pass, so a callable can
+#: be probed without being run.  Its identity is all that matters.
+_PROBE = object()
+
+
+def _binds(fn: Any, *probes: Any) -> tuple[bool, Any]:
+    """Does ``fn`` accept ``probes`` positionally? -> (verdict, signature).
+
+    The one place this layer can tell a ``python:`` hook it cannot use from
+    one it can, WITHOUT running it.  A contract check, not a restriction on
+    the hatch (decision D-C11: recorded, not restricted) -- it forbids nothing
+    a working hook can do, and asks only whether the callable accepts the
+    arguments the seam is about to pass, which every hook that runs must.
+
+    ``signature`` is None, and the verdict True, when ``inspect`` cannot
+    describe the callable at all -- some C builtins, some jax wrappers.  The
+    call is then its own check, and guessing there would refuse working code.
+
+    Bind rather than count parameters: ``/``, ``*args``, defaults and
+    keyword-only markers all behave, and none of them can be counted right.
+    """
+    import inspect
+
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return True, None
+    try:
+        signature.bind(*probes)
+    except TypeError:
+        return False, signature
+    return True, signature
 
 
 def _space(run: Any, built: Any) -> Any:
