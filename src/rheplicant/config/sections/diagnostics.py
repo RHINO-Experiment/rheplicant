@@ -24,9 +24,17 @@ exactly what makes the model differentiable at all
 the same object whenever a document declares no ``inference.twin:``, which is
 why the tests build one that does.
 
-Tasks 8, 10 and 11 add ``gradient``, ``mmodes`` and ``predict`` to this
-module.  ``condition`` is NOT here: it rides ``_conjugate_block``, so Task 6
-put it in ``conjugate.py``.
+``gradient`` joins them at the foot: one ``jax.grad`` of a named objective,
+no optimiser, and the point moved by the same ``at:``.  Its four objectives
+are defined HERE -- ``_OBJECTIVES`` is a config-layer table, because the
+schema's ``chi2``/``sum_squares``/``mean`` exist in no package module
+(measured; ``mean_squared_error`` is the only shipped objective of any kind)
+-- and ``chi2`` is where ``inference.noise.include_logdet`` acquires its
+first consumer in ``src/``.
+
+Tasks 10 and 11 add ``mmodes`` and ``predict`` to this module.  ``condition``
+is NOT here: it rides ``_conjugate_block``, so Task 6 put it in
+``conjugate.py``.
 """
 
 from __future__ import annotations
@@ -38,7 +46,9 @@ import jax.numpy as jnp
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
+    _noise,
     _number,
+    _observed,
     _space,
     _sweep,
     register,
@@ -128,9 +138,10 @@ def _at_values(run: RunSpec, built: Any, space: Any) -> dict[str, Any]:
     refuses ``names:`` that way, and one grammar cannot mean "you meant
     nothing" on one key and "you meant something" on its neighbour.
 
-    Task 8's ``gradient`` calls this too -- one helper, three callers, three
-    positional arguments (plan section 3.1).  Task 8 writes no second
-    ``at:`` resolver.
+    ``gradient`` calls this too -- one helper, three callers, three
+    positional arguments (plan section 3.1).  There is no second ``at:``
+    resolver anywhere in this layer, which is what keeps a value node
+    meaning one thing on all three kinds.
     """
     where = f"runs[{run.name!r}]"
     if "at" not in run.options:
@@ -241,3 +252,283 @@ def _run_score_directions(run: RunSpec, built: Any,
         kwargs["at"] = at
     return score_directions(space, built.inference.fit_twin, built.state,
                             **kwargs)
+
+
+# --- kind: gradient --------------------------------------------------------
+
+_GRADIENT_KEYS = frozenset({"objective", "of", "at"})
+
+
+def _chi2(run: RunSpec, built: Any) -> Any:
+    """``-2 log p`` under the document's noise model: ``sum r^2 / sigma^2``,
+    plus the ``log 2 pi sigma^2`` term unless ``include_logdet: false``.
+
+    The term is present by DEFAULT -- undeclared means nothing is passed and
+    :class:`NoiseModelLikelihood`'s own ``include_logdet=True`` stands, so it
+    is ``false`` that removes it, not silence.  This is spelled with the
+    package's likelihood rather than open-coded: the log-determinant belongs
+    to a sigma that may depend on the prediction, and
+    inference/noise.py:382-383 is where its sign and factor are already
+    right.
+
+    ``inference.noise.include_logdet`` has three states.  Undeclared it is
+    None and nothing is passed, so the package's own default stands; True and
+    False are passed through.  The None state is reachable only under a sigma
+    that does NOT depend on the prediction -- noise.py:156-159 requires the
+    key for ``kind: radiometer`` and refuses it everywhere else -- and there
+    the log-determinant is an additive constant no GRADIENT can see.  It is
+    still not the same objective, so it is pinned by evaluating this closure
+    directly rather than by differentiating it.
+
+    ``radiometer_frozen`` decides a sigma ARRAY with no model behind it, so
+    there is no likelihood to build -- and a frozen sigma's log-determinant is
+    again an additive constant, which is why that route is the plain weighted
+    sum.
+    """
+    from rheplicant.inference import NoiseModelLikelihood
+
+    noise = _noise(run, built)
+    observed = _observed(run, built)
+    build = built.inference.noise
+    if build.model is None:
+        def frozen_chi2(prediction: Any) -> Any:
+            return jnp.sum(((observed - prediction) / noise) ** 2)
+
+        return frozen_chi2
+    declared = ({} if build.include_logdet is None
+                else {"include_logdet": bool(build.include_logdet)})
+    likelihood = NoiseModelLikelihood(noise=noise, **declared)
+
+    def chi2(prediction: Any) -> Any:
+        return -2.0 * likelihood(prediction, observed)
+
+    return chi2
+
+
+def _sum_squares(run: RunSpec, built: Any) -> Any:
+    """``sum prediction^2`` -- pure in the prediction, reading no data."""
+
+    def sum_squares(prediction: Any) -> Any:
+        return jnp.sum(prediction ** 2)
+
+    return sum_squares
+
+
+def _mean(run: RunSpec, built: Any) -> Any:
+    """``mean(prediction)`` -- pure in the prediction, reading no data."""
+
+    def mean(prediction: Any) -> Any:
+        return jnp.mean(prediction)
+
+    return mean
+
+
+def _mse(run: RunSpec, built: Any) -> Any:
+    """The package's own mean_squared_error -- what optimize minimises.
+
+    It is here so that a gradient and a fit can be asked about the same
+    objective under the same name; a future author who wants the two
+    vocabularies kept apart drops this entry and one test.
+    """
+    from rheplicant.inference import mean_squared_error
+
+    observed = _observed(run, built)
+
+    def mse(prediction: Any) -> Any:
+        return mean_squared_error(prediction, observed)
+
+    return mse
+
+
+# The schema's chi2/sum_squares/mean do not exist in the package -- measured,
+# see this plan's Executor's note -- so this table IS the definition.  Each
+# entry takes (run, built) and returns a closure over the prediction alone,
+# so an objective that reads no data never reaches for inference.observed.
+_OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse,
+               "sum_squares": _sum_squares}
+
+
+#: A stand-in for the two arguments, so the arity is checked by BINDING the
+#: signature rather than by counting parameters -- which gets ``/``, ``*``,
+#: defaults and ``*args`` right without a special case for each.
+_PROBE = object()
+
+
+def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
+    """Refuse a ``python:`` objective the seam cannot CALL the way it calls.
+
+    This is a contract check, not a restriction on the hatch (decision
+    D-C11: the hatch is recorded, not restricted).  It forbids nothing a
+    working objective can do -- it asks only whether the callable accepts the
+    two arguments this seam passes, which every objective that runs must.
+
+    Without it the natural mistake reaches the user as a raw
+    ``TypeError: math.sqrt() takes exactly one argument (2 given)`` naming no
+    run.  And the mistake is the LIKELY one, not an exotic one: three of the
+    four named objectives read no data, so a user writing the obvious
+    analogue ``def my_objective(prediction)`` lands here immediately.
+
+    A callable ``inspect`` cannot describe -- some C builtins, some jax
+    wrappers -- is passed through: the call itself is then the check, and
+    guessing would refuse working objectives.
+    """
+    import inspect
+
+    try:
+        signature = inspect.signature(scoring)
+    except (TypeError, ValueError):
+        return
+    try:
+        signature.bind(_PROBE, _PROBE)
+    except TypeError:
+        raise ConfigError(
+            f"{where}: objective: {target!r} cannot be called as "
+            f"(prediction, observed) -- its signature is {signature}. An "
+            "objective takes BOTH, the same shape optimize's loss: takes, "
+            "even when it reads only the first: chi2 and mse weigh the "
+            "residual, sum_squares and mean ignore observed and still "
+            "accept it."
+        ) from None
+
+
+def _objective(run: RunSpec, built: Any) -> Any:
+    """``objective:`` -> ``prediction -> scalar``.
+
+    The ``{python: 'mod:fn'}`` branch goes through the same
+    :func:`~rheplicant.config.hatch.import_target` seam ``optimize``'s
+    ``loss:`` uses, and takes the same ``(prediction, observed)`` shape --
+    but it is resolved here rather than through ``exits._loss_fn``, because
+    a loss a calibrator minimises and an objective a gradient
+    differentiates are different vocabularies with different keys.
+    """
+    where = f"runs[{run.name!r}]"
+    objective = run.options.get("objective")
+    if objective is None:
+        raise ConfigError(
+            f"{where}: objective: is required -- one of "
+            f"{sorted(_OBJECTIVES)}, or {{python: 'mod:fn'}}. The four "
+            "differ in sign as well as in size on the same document, so "
+            "there is no default worth guessing."
+        )
+    if isinstance(objective, str) and objective in _OBJECTIVES:
+        return _OBJECTIVES[objective](run, built)
+    if isinstance(objective, Mapping) and set(objective) == {"python"}:
+        from rheplicant.config.hatch import import_target
+
+        target = objective["python"]
+        scoring = import_target(target)
+        _scores_a_pair(where, target, scoring)
+        observed = _observed(run, built)
+
+        def imported(prediction: Any) -> Any:
+            scored = scoring(prediction, observed)
+            if jnp.ndim(scored) != 0:
+                raise ConfigError(
+                    f"{where}: objective: {target!r} returned shape "
+                    f"{tuple(jnp.shape(scored))}; an objective is a SCALAR "
+                    "score, because jax.grad is defined for a scalar output "
+                    "alone. Reduce it -- jnp.sum or jnp.mean over the "
+                    "residual is what the four named objectives do."
+                )
+            return scored
+
+        return imported
+    raise ConfigError(
+        f"{where}: objective: is one of {sorted(_OBJECTIVES)} or "
+        f"{{python: 'mod:fn'}}; got {objective!r}."
+    )
+
+
+def _of_paths(run: RunSpec) -> tuple[str, ...]:
+    """``of:`` -> the declared paths, one or several, in DECLARED order.
+
+    The order is the caller's and is kept, for the reason
+    :func:`_run_score_directions` gives: a product re-keyed into JAX's sorted
+    order is the bug ``reduced_basis.py:171-180`` is named after.
+
+    A repeat is refused, for the reason :func:`_names` gives about
+    ``names:``.  Measured before this guard: ``of: [gain.gain, gain.gain]``
+    was accepted and handed back a product with ONE key for a two-path ask,
+    because a dict keyed by path cannot hold the same path twice -- and a
+    caller zipping that product against their own list reads it off by one.
+    Two derivatives of one leaf are also exactly the same number, so the
+    document can only have meant something it did not write.
+    """
+    where = f"runs[{run.name!r}]"
+    of = run.options.get("of")
+    if of is None:
+        raise ConfigError(
+            f"{where}: of: is required -- the path, or list of paths, whose "
+            "leaves this gradient differentiates."
+        )
+    paths = [of] if isinstance(of, str) else of
+    if (not isinstance(paths, list) or not paths
+            or not all(isinstance(path, str) for path in paths)):
+        raise ConfigError(
+            f"{where}: of: is a path or a non-empty list of paths; got "
+            f"{of!r}."
+        )
+    repeated = sorted({path for path in paths if paths.count(path) > 1})
+    if repeated:
+        raise ConfigError(
+            f"{where}: of: lists {repeated} more than once. The product is "
+            "keyed BY path, so a repeat comes back as one key for two asks "
+            "-- fewer keys than the document named, which a caller zipping "
+            "the two together reads off by one -- and the two derivatives "
+            f"would be the same number anyway; got {of!r}."
+        )
+    return tuple(paths)
+
+
+@register("gradient")
+def _run_gradient(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+    """One differentiation of a named objective (schema section 4.7.9).
+
+    The evaluation point is the document's own: where ``inference.parameters``
+    exists the latents are bound at their declared ``init:``, overridden by
+    whatever ``at:`` names, and where it does not the twin's own leaves
+    stand.  ``of:`` then names leaves of THAT twin, in Plan 1B's path
+    grammar -- resolved through ``resolve_path_on`` rather than synthesised
+    into a key path, because a config path compiles to a selector that walks
+    the object's own accessors and the written string never appears in the
+    key path that comes back (config/paths.py's module docstring).
+
+    The product is ``{declared path: gradient}``: a bare array would lose
+    which leaf it belonged to as soon as ``of:`` named two.
+
+    :func:`_space` is NOT called here on purpose -- ``gradient`` does not
+    require latents, so the shared "fits latents" refusal would say the wrong
+    thing.  The ``at:``-without-parameters refusal below is the one this kind
+    needs.
+    """
+    import equinox as eqx
+    import jax
+
+    from rheplicant.config.paths import resolve_path_on
+    from rheplicant.inference import build_forward_fn
+
+    where = f"runs[{run.name!r}]"
+    _sweep(run, _GRADIENT_KEYS)
+    paths = _of_paths(run)
+    objective = _objective(run, built)
+    space = built.inference.space
+    twin = built.inference.fit_twin
+    if space is None:
+        if "at" in run.options:
+            raise ConfigError(
+                f"{where}: at: overrides the declared init: of a latent, and "
+                "this document declares no inference.parameters. Without "
+                "them the gradient runs at the twin's own leaf values, which "
+                "is what dropping at: asks for."
+            )
+    else:
+        twin = space.bind(twin, {**space.initial_values(),
+                                 **_at_values(run, built, space)})
+    selectors = [resolve_path_on(path, twin).selector for path in paths]
+    spec = jax.tree.map(lambda _: False, twin)
+    for selector in selectors:
+        spec = eqx.tree_at(selector, spec, replace=True)
+    forward, params0 = build_forward_fn(twin, built.state, spec)
+    grads = jax.grad(lambda params: objective(forward(params)))(params0)
+    return {path: selector(grads)
+            for path, selector in zip(paths, selectors, strict=True)}

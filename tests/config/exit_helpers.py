@@ -1,21 +1,27 @@
-"""One linear-Gaussian document the conjugate exits actually converge on.
+"""The documents the exit executors are measured on, and the one repair
+that makes every one of them able to tell the two twins apart.
 
-``tests/config/inference_helpers.py`` hoists a twin; this hoists a whole
-DOCUMENT, because the conjugate family needs more than a twin: a latent whose
+``tests/config/inference_helpers.py`` hoists a twin; this hoists whole
+DOCUMENTS, because the conjugate family needs more than a twin: a latent whose
 prediction really is affine, a noise kind whose sigma is decidable, and
-observed data with a known truth to recover.
+observed data with a known truth to recover.  The diagnostics family
+(``identifiability``, ``score_directions``, ``gradient``) needs less than
+that and is built by :func:`diagnostic_document` at the foot.
 
 Built by extending ``test_config_document.synthetic_document()``: the
-stochastic ``noise`` node is dropped (a conjugate solve fits a deterministic
-twin), ``uniform_sky`` is added so a SECOND additive latent exists, and the
-gain is left fixed at 1.1 so the two-latent block stays affine -- ``gain``
-times ``depth`` would be bilinear and ``check_linearity`` would say so.
+stochastic ``noise`` node is REPAIRED AWAY rather than deleted (see
+:func:`_repaired`), ``uniform_sky`` is added so a SECOND additive latent
+exists, and the gain is left fixed at 1.1 so the two-latent block stays
+affine -- ``gain`` times ``depth`` would be bilinear and ``check_linearity``
+would say so.
 
 Measured on this document: ``wiener_solve`` returns ``g = 1.4999994``
 (truth 1.5) with a relative residual of 1.4e-07 and ``condition_estimate``
 1.0; on the two-latent variant ``d = 1.19989``, ``a = 11.99995`` with
 residual 8.1e-08 and kappa 12.1.
 """
+
+from collections.abc import Mapping
 
 from rheplicant.config.document import load_document
 from rheplicant.config.sections.runs import RunSpec, run_document
@@ -28,6 +34,11 @@ TRUTH_A = 12.0
 CHANNEL_WIDTH_HZ = 1.0e6
 INTEGRATION_TIME_S = 2.0
 
+#: ``synthetic_document``'s own stochastic node, KEPT in every model here and
+#: repaired away in ``inference.twin.without:`` rather than omitted --
+#: see :func:`_repaired` for why the difference is load-bearing.
+MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
+
 # Named CONJUGATE_MODEL, not MODEL: tests/config/inference_helpers.py already
 # exports a MODEL with different contents (no uniform_sky), and Tasks 3-6 all
 # append to one test module.  The first of them to want inference_helpers'
@@ -39,6 +50,7 @@ CONJUGATE_MODEL = {
                       "width": {"value": 5.0, "unit": "MHz"}},
     "uniform_sky": {"amplitude": {"value": 10.0, "unit": "K"}},
     "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
+    "noise": MODEL_NOISE,
 }
 
 HOMOSCEDASTIC = {"kind": "homoscedastic",
@@ -98,6 +110,47 @@ PRIOR_FREE_TWO = {
 }
 
 
+def _repaired(block):
+    """An inference block with the fit-twin repair written into it.
+
+    ``synthetic_document``'s stochastic ``noise`` node stays in ``model:``
+    (:data:`MODEL_NOISE` puts it back into the two models here) and is
+    repaired away in ``inference.twin.without:``.  Deleting it from ``model:``
+    instead -- which is what every document in this file did before -- makes
+    ``built.twin`` and ``built.inference.fit_twin`` the SAME OBJECT, and on
+    such a document no test can tell an executor that reaches for one from an
+    executor that reaches for the other.  Measured: with the repair, pointing
+    ``_conjugate_block``'s ``linear_operator`` at ``built.twin`` fails 74
+    tests -- 20 in ``test_config_conjugate_shared``, 22 in
+    ``test_config_exits_conjugate``, 17 in ``test_config_exits_gcr``, 15 in
+    ``test_config_exits_gls`` -- and without it, none.
+
+    ``observed: {from: simulation}`` defaults to ``twin: full`` -- the FULL
+    twin, NoiseOperator and all -- so the repair alone would turn every
+    simulated observation into a noise realisation and move every pinned
+    number in this suite (measured: ``g`` recovered at 1.5072 instead of
+    1.5000).  Simulating from the FIT twin is what keeps the data exactly the
+    deterministic forward it has always been: measured both ways, the
+    observed arrays are BIT-IDENTICAL to the pre-repair documents.
+
+    Both keys are DEFAULTS, not overrides.  A caller that declares its own
+    ``twin:`` -- ``{replace: ...}``, or a ``without:`` naming another node --
+    keeps it, and so does a caller that wants ``observed.twin: full`` because
+    it is after noise-realised data.  Supplying silently and overwriting
+    silently look identical until the day someone declares one of these and
+    gets the other, with nothing said.
+
+    Both edits are copies, never mutations: the caller's block is untouched.
+    """
+    repaired = dict(block)
+    repaired.setdefault("twin", {"without": ["noise"]})
+    observed = repaired.get("observed")
+    if (isinstance(observed, Mapping) and "twin" not in observed
+            and observed.get("from") == "simulation"):
+        repaired["observed"] = {**observed, "twin": "fit"}
+    return repaired
+
+
 def conjugate_document(*runs, inference=None, parameters=None, noise=None,
                        prior=None, at=None, seeds=None, model=None):
     """The shared document, with the runs a test wants declared on it.
@@ -122,6 +175,13 @@ def conjugate_document(*runs, inference=None, parameters=None, noise=None,
     ``prior`` can only SET a prior, never clear one; for a document with no
     prior at all -- the one a compiled ``prior_std:`` can actually solve on --
     pass ``parameters=PRIOR_FREE`` (or ``PRIOR_FREE_TWO``).
+
+    Every block goes through :func:`_repaired` last, so a caller's
+    ``inference=`` never has to remember the ``twin:`` repair; a caller that
+    declares one of its own keeps it.  A ``model=`` of its own must carry a
+    ``noise`` node (:data:`MODEL_NOISE`) unless it also declares the
+    ``twin:`` it wants, because ``without: [noise]`` is what the default
+    names.
     """
     doc = synthetic_document()
     doc["model"] = {key: dict(value)
@@ -138,7 +198,7 @@ def conjugate_document(*runs, inference=None, parameters=None, noise=None,
     if at is not None:
         block["observed"] = {**block.get("observed", {"from": "simulation"}),
                              "at": at}
-    doc["inference"] = block
+    doc["inference"] = _repaired(block)
     if seeds is not None:
         doc["runtime"] = {**doc["runtime"], "seeds": dict(seeds)}
     doc["runs"] = [dict(one) for one in runs] or [{"kind": "forward"}]
@@ -177,6 +237,7 @@ WIENER_MODEL = {
                       "centre": {"value": 75.0, "unit": "MHz"},
                       "width": {"value": 5.0, "unit": "MHz"}},
     "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
+    "noise": MODEL_NOISE,
 }
 # gain.gain is the LAST node of the synthetic twin, so g scales the whole
 # prediction and the block is exactly affine in it.  scale 10.0 is a prior
@@ -419,3 +480,87 @@ def gls_pair_document(run=None):
 def gls_pair_product(run=None):
     """:func:`gls_pair_document`, executed, and its ``GLSResult``."""
     return run_product(gls_pair_document(run), "gls")
+
+
+# --- What the CHEAP diagnostics are measured on -----------------------------
+#
+# ``identifiability``, ``score_directions`` and ``gradient`` need no conjugate
+# block at all: a ParameterSpace, the fit twin and the state are the whole
+# input for the first two, and the third adds one objective.  So this family
+# keeps ``synthetic_document``'s own model rather than swapping in
+# :data:`CONJUGATE_MODEL`, and goes through the same :func:`_repaired` seam.
+#
+# It lives HERE rather than in a test module because THREE modules now build
+# it -- ``test_config_exits_diagnostics.py`` (Task 7),
+# ``test_config_diagnostics_guards.py`` and ``test_config_exits_gradient.py``
+# (Task 8) -- and a fixture copied per module is how the repair above gets
+# re-derived as the deletion form, after which every copy quietly stops
+# discriminating.
+
+#: ``g`` scales the whole prediction and ``d`` scales the signal the gain
+#: multiplies, so ``d(data)/dg = d * gaussian`` and ``d(data)/dd = g *
+#: gaussian`` are proportional -- the schema's A33 shape (bandpass and gain
+#: both free) in the cheapest model this suite already builds.
+DIAGNOSTIC_GAIN = {"init": 1.0, "linear": True, "into": "gain.gain"}
+DIAGNOSTIC_DEPTH = {"init": 0.5, "into": "global_signal.depth"}
+#: The width enters the gaussian's EXPONENT, so its column is not proportional
+#: to the gain's: measured singular values 1.2572932 and 0.6474673, a ratio of
+#: 0.514969.  That is the pair on which ``rtol`` can move the rank -- on the
+#: degenerate pair the rank is 1 for every tolerance, and an executor that
+#: dropped ``rtol:`` would pass every test built on it.
+DIAGNOSTIC_WIDTH = {"init": {"value": 5.0, "unit": "MHz"},
+                    "into": "global_signal.width"}
+
+#: ``..._PAIR``, because ``DEGENERATE`` is already
+#: ``test_config_exits_diagnostics.py``'s frequency basis for its condition
+#: tests.
+DEGENERATE_PAIR = {"g": DIAGNOSTIC_GAIN, "d": DIAGNOSTIC_DEPTH}
+IDENTIFIED_PAIR = {"g": DIAGNOSTIC_GAIN, "w": DIAGNOSTIC_WIDTH}
+
+
+def diagnostic_document(run, parameters=None, inference=None):
+    """A document whose FIT twin is not its model twin.
+
+    ``synthetic_document``'s stochastic ``noise`` node stays in ``model:`` and
+    is repaired away in ``inference.twin.without:`` rather than being deleted
+    from the model -- see :func:`_repaired` for what that buys, and for what
+    it would cost if the observed data were simulated from the full twin.  The
+    prediction is the same either way -- measured bit-identical reports,
+    singular values 1.41421356 and 4.5236e-17 both ways -- but this way
+    ``built.twin`` still carries NoiseOperator while
+    ``built.inference.fit_twin`` does not, so an executor that differentiated
+    ``built.twin`` raises ``refuse_stochastic_stages`` and every test built on
+    this document fails.  Delete the ``twin:`` repair and reach for
+    ``built.twin`` instead, and nothing notices: with no ``inference.twin:``
+    the two are the same object.
+
+    ``parameters`` names the latents alone (:data:`DEGENERATE_PAIR` by
+    default), which is all ``identifiability`` and ``score_directions`` need;
+    ``inference`` replaces the whole block, which is what ``gradient`` wants
+    when it declares a noise model and observed data beside them.  The two are
+    alternatives: ``inference`` wins, and ``parameters`` is then ignored.
+    """
+    doc = synthetic_document()
+    block = (dict(inference) if inference is not None
+             else {"parameters": dict(parameters or DEGENERATE_PAIR)})
+    doc["inference"] = _repaired(block)
+    doc["runs"] = [run]
+    return doc
+
+
+def diagnostic_report(run, parameters=None):
+    """One ``identifiability`` exit -> its ``IdentifiabilityReport``.
+
+    Keyed by ``"identifiability"``, so like :func:`run_product` above it
+    serves only runs that leave ``name:`` unwritten -- ``runs.py`` then names
+    a run after its kind.  The one test that needs a name of its own calls
+    ``run_document`` directly.
+    """
+    return run_product(diagnostic_document(run, parameters),
+                       "identifiability")
+
+
+def diagnostic_rows(run, parameters=None):
+    """One ``score_directions`` exit -> its ``{latent: (size, n_data)}``."""
+    return run_product(diagnostic_document(run, parameters),
+                       "score_directions")

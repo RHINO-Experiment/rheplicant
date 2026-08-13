@@ -19,7 +19,8 @@ package, so a run with no ``seed:`` returns the same float every time
 only a space: neither reads observed data and neither weighs a residual -- a
 ParameterSpace, the fit twin and the state are the whole input, which is what
 makes them the checks a user runs before paying for a fit.  Every number in
-their two classes was measured against :func:`document` at ``3b26202``, whose
+their two classes was measured against
+:func:`~tests.config.exit_helpers.diagnostic_document` at ``3b26202``, whose
 fit twin is ``data = g * d * gaussian(nu)`` on a 16 x 8 grid: the ``g`` and
 ``d`` columns of the Jacobian are exactly proportional, so the report reads
 n_par 2, n_data 128, rank 1, nullity 1.
@@ -35,6 +36,12 @@ from rheplicant.config.document import load_document
 from rheplicant.config.sections.runs import parse_runs, run_document
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference import identifiability
+from tests.config.exit_helpers import (
+    IDENTIFIED_PAIR,
+    diagnostic_document,
+    diagnostic_report,
+    diagnostic_rows,
+)
 from tests.config.test_config_document import synthetic_document
 
 # Two constant-in-time temperatures summed at t_ant_sum, so the prediction is
@@ -420,67 +427,15 @@ class TestWhatItRefuses:
 
 
 # --- The two diagnostics that need only a space ----------------------------
-
-#: ``g`` scales the whole prediction and ``d`` scales the signal the gain
-#: multiplies, so ``d(data)/dg = d * gaussian`` and ``d(data)/dd = g *
-#: gaussian`` are proportional -- the schema's A33 shape (bandpass and gain
-#: both free) in the cheapest model this suite already builds.
-GAIN = {"init": 1.0, "linear": True, "into": "gain.gain"}
-DEPTH = {"init": 0.5, "into": "global_signal.depth"}
-#: The width enters the gaussian's EXPONENT, so its column is not proportional
-#: to the gain's: measured singular values 1.2572932 and 0.6474673, a ratio of
-#: 0.514969.  That is the pair on which ``rtol`` can move the rank -- on the
-#: degenerate pair the rank is 1 for every tolerance, and an executor that
-#: dropped ``rtol:`` would pass every test built on it.
-#:
-#: ``WIDTH_SPEC``, not ``WIDTH``: this module already binds ``WIDTH_LATENT``
-#: above, and that is a parameters MAPPING (``{"w": {...}}``) rather than one
-#: latent's spec.  Two names one letter apart with different shapes is how the
-#: wrong one gets spliced in.
-WIDTH_SPEC = {"init": {"value": 5.0, "unit": "MHz"},
-              "into": "global_signal.width"}
-
-#: ``..._PAIR``, because ``DEGENERATE`` is already this module's frequency
-#: basis for the condition tests above.
-DEGENERATE_PAIR = {"g": GAIN, "d": DEPTH}
-IDENTIFIED_PAIR = {"g": GAIN, "w": WIDTH_SPEC}
-
-
-def document(run, parameters=None):
-    """A document whose FIT twin is not its model twin.
-
-    ``synthetic_document``'s stochastic ``noise`` node stays in ``model:`` and
-    is repaired away in ``inference.twin.without:`` rather than being deleted
-    from the model.  The prediction is the same either way -- measured
-    bit-identical reports, singular values 1.41421356 and 4.5236e-17 both ways
-    -- but this way ``built.twin`` still carries NoiseOperator while
-    ``built.inference.fit_twin`` does not, so an executor that differentiated
-    ``built.twin`` raises ``refuse_stochastic_stages`` and EVERY test in the
-    two classes below fails.  Delete the ``twin:`` repair and reach for
-    ``built.twin`` instead, and nothing notices: with no ``inference.twin:``
-    the two are the same object.
-    """
-    doc = synthetic_document()
-    doc["inference"] = {"parameters": dict(parameters or DEGENERATE_PAIR),
-                        "twin": {"without": ["noise"]}}
-    doc["runs"] = [run]
-    return doc
-
-
-def report(run, parameters=None):
-    """One identifiability exit -> its IdentifiabilityReport.
-
-    Keyed by ``"identifiability"``, so like ``kappa_of`` above it serves only
-    runs that leave ``name:`` unwritten -- ``runs.py`` then names a run after
-    its kind.  The one test that needs a name of its own calls
-    ``run_document`` directly.
-    """
-    return run_document(document(run, parameters))["identifiability"].product
-
-
-def rows(run, parameters=None):
-    """One score_directions exit -> its ``{latent: (size, n_data)}``."""
-    return run_document(document(run, parameters))["score_directions"].product
+#
+# Their fixture family -- ``diagnostic_document``, ``diagnostic_report``,
+# ``diagnostic_rows``, ``DIAGNOSTIC_GAIN``/``_DEPTH``/``_WIDTH`` and the two
+# pairs -- lives in ``tests/config/exit_helpers.py``, which plan section 3
+# designates the only place any exit document is built.  It was private to
+# this module until ``kind: gradient`` needed exactly it: a fixture COPIED
+# into a second module is how its one load-bearing property (the ``twin:``
+# repair that keeps ``built.twin`` and ``built.inference.fit_twin`` different
+# objects) gets re-derived as the deletion form and stops discriminating.
 
 
 class TestIdentifiability:
@@ -494,7 +449,7 @@ class TestIdentifiability:
         shipped rtol of 1e-8, and this fixture claims more than that --
         measured 1.4142136 against 4.52e-17, sixteen orders apart.
         """
-        out = report({"kind": "identifiability"})
+        out = diagnostic_report({"kind": "identifiability"})
         assert out.names == ("g", "d")
         assert (out.n_par, out.n_data, out.rank, out.nullity) == (2, 128, 1, 1)
         assert out.singular_values[0] == pytest.approx(1.4142136, rel=1e-5)
@@ -511,11 +466,11 @@ class TestIdentifiability:
         statement about ``inference.fit_twin``.  Delete the repair from
         :func:`document` and this test is what fails.
         """
-        built = load_document(document({"kind": "identifiability"}))
+        built = load_document(diagnostic_document({"kind": "identifiability"}))
         assert built.twin is not built.inference.fit_twin
         with pytest.raises(ParameterSpaceError, match="NoiseOperator"):
             identifiability(built.inference.space, built.twin, built.state)
-        assert report({"kind": "identifiability"}).nullity == 1
+        assert diagnostic_report({"kind": "identifiability"}).nullity == 1
 
     def test_names_narrows_the_report_to_the_named_block(self):
         """The whole space reports n_par 2 / nullity 1; ``g`` alone is 1 / 0.
@@ -524,7 +479,7 @@ class TestIdentifiability:
         here -- the conditional question a Gibbs block faces is answered
         ``yes`` exactly where the joint one is answered ``no``.
         """
-        out = report({"kind": "identifiability", "names": ["g"]})
+        out = diagnostic_report({"kind": "identifiability", "names": ["g"]})
         assert out.names == ("g",)
         assert (out.n_par, out.rank, out.nullity) == (1, 1, 0)
 
@@ -539,14 +494,14 @@ class TestIdentifiability:
         Jacobian whose own roundoff is ~1e-16 relative.  Nothing but the
         declared rtol can produce that, and the report echoes it back.
         """
-        loose = report({"kind": "identifiability", "rtol": 0.6},
+        loose = diagnostic_report({"kind": "identifiability", "rtol": 0.6},
                        IDENTIFIED_PAIR)
         assert loose.rtol == pytest.approx(0.6)
         assert loose.threshold == pytest.approx(0.7543759, rel=1e-5)
         assert (loose.rank, loose.nullity) == (1, 1)
         assert loose.singular_values == pytest.approx([1.2572932, 0.6474673],
                                                       rel=1e-5)
-        tight = report({"kind": "identifiability"}, IDENTIFIED_PAIR)
+        tight = diagnostic_report({"kind": "identifiability"}, IDENTIFIED_PAIR)
         assert (tight.rank, tight.nullity) == (2, 0)
 
     def test_at_moves_the_point_the_jacobian_is_taken_at(self):
@@ -563,8 +518,9 @@ class TestIdentifiability:
         it by name is the assertion that a positional construction from that
         docstring would fail.
         """
-        base = report({"kind": "identifiability"})
-        moved = report({"kind": "identifiability", "at": {"d": 1.0}})
+        base = diagnostic_report({"kind": "identifiability"})
+        moved = diagnostic_report({"kind": "identifiability",
+                                   "at": {"d": 1.0}})
         assert base.column_norms == pytest.approx([3.1501079, 6.3002157],
                                                   rel=1e-5)
         assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
@@ -580,7 +536,7 @@ class TestIdentifiability:
         seam.  An executor that did ``float(node)`` instead would raise on
         this mapping, and one that passed the mapping through unresolved
         would reach jnp.asarray with a dict."""
-        moved = report({"kind": "identifiability",
+        moved = diagnostic_report({"kind": "identifiability",
                         "at": {"d": {"value": 1.0, "unit": "K"}}})
         assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
                                                    rel=1e-5)
@@ -593,8 +549,8 @@ class TestIdentifiability:
         legal and inert -- a helper that refused it, or that read ``at: {}``
         as "override every latent with nothing", changes the answer here.
         """
-        empty = report({"kind": "identifiability", "at": {}})
-        base = report({"kind": "identifiability"})
+        empty = diagnostic_report({"kind": "identifiability", "at": {}})
+        base = diagnostic_report({"kind": "identifiability"})
         assert empty.column_norms == pytest.approx(base.column_norms)
         assert (empty.rank, empty.nullity) == (1, 1)
 
@@ -607,7 +563,7 @@ class TestIdentifiability:
         because the type alone is what tells the two apart.
         """
         with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
-            run_document(document({"kind": "identifiability",
+            run_document(diagnostic_document({"kind": "identifiability",
                                    "at": {"q": 1.0}}))
         assert "it declares ['g', 'd']" in str(caught.value)
 
@@ -622,7 +578,7 @@ class TestIdentifiability:
         """
         with pytest.raises(ParameterSpaceError,
                            match="not a latent of this space"):
-            run_document(document({"kind": "identifiability",
+            run_document(diagnostic_document({"kind": "identifiability",
                                    "names": ["q"]}))
 
     def test_a_float32_document_runs_rather_than_being_refused(self):
@@ -632,7 +588,7 @@ class TestIdentifiability:
         x64" refusal is reserved for a model that pins its OUTPUT dtype with
         an explicit cast.  This test exists so that nobody later "fixes" the
         layer by refusing a float32 run here."""
-        doc = document({"kind": "identifiability"})
+        doc = diagnostic_document({"kind": "identifiability"})
         assert load_document(doc).runtime.dtype == "float32"
         assert run_document(doc)["identifiability"].product.nullity == 1
 
@@ -647,11 +603,12 @@ class TestIdentifiability:
         with pytest.raises(
                 ConfigError,
                 match=r"it takes \['at', 'names', 'rtol'\]") as caught:
-            run_document(document({"kind": "identifiability", "rtols": 0.6}))
+            run_document(diagnostic_document(
+                {"kind": "identifiability", "rtols": 0.6}))
         assert "does not take ['rtols']" in str(caught.value)
 
     def test_without_parameters_it_is_refused(self):
-        doc = document({"kind": "identifiability"})
+        doc = diagnostic_document({"kind": "identifiability"})
         doc["inference"] = {}
         with pytest.raises(ConfigError, match="inference.parameters"):
             run_document(doc)
@@ -669,7 +626,7 @@ class TestIdentifiability:
         """
         with pytest.raises(ConfigError,
                            match="non-empty list of latent") as caught:
-            run_document(document({"name": "probe",
+            run_document(diagnostic_document({"name": "probe",
                                    "kind": "identifiability", "names": "g"}))
         assert str(caught.value).startswith("runs['probe']: ")
 
@@ -684,7 +641,7 @@ class TestIdentifiability:
         three different strings.
         """
         with pytest.raises(ConfigError, match="at: is a mapping") as caught:
-            run_document(document({"name": "probe",
+            run_document(diagnostic_document({"name": "probe",
                                    "kind": "identifiability", "at": ["d"]}))
         assert str(caught.value).startswith("runs['probe']: ")
 
@@ -702,7 +659,7 @@ class TestIdentifiability:
         from rheplicant.config.sections.diagnostics import _at_values
 
         (run,) = parse_runs([{"kind": "identifiability"}])
-        built = load_document(document({"kind": "identifiability"}))
+        built = load_document(diagnostic_document({"kind": "identifiability"}))
         assert _at_values(run, built, built.inference.space) == {}
 
     def test_rtol_is_a_number(self):
@@ -713,7 +670,7 @@ class TestIdentifiability:
         which contains the key and says nothing at all about its type.
         """
         with pytest.raises(ConfigError, match=r"rtol: is a number"):
-            run_document(document({"kind": "identifiability",
+            run_document(diagnostic_document({"kind": "identifiability",
                                    "rtol": "loose"}))
 
     def test_a_negative_rtol_is_refused_at_the_floor(self):
@@ -721,7 +678,8 @@ class TestIdentifiability:
         cutoff, so the rank verdict is vacuous rather than loose.  Matched on
         the floor clause, which the ``is a number`` branch does not carry."""
         with pytest.raises(ConfigError, match=r"rtol: must be >= 0"):
-            run_document(document({"kind": "identifiability", "rtol": -0.1}))
+            run_document(diagnostic_document(
+                {"kind": "identifiability", "rtol": -0.1}))
 
 
 class TestScoreDirections:
@@ -732,19 +690,21 @@ class TestScoreDirections:
         alphabetical names.  Sorted here is ``['d', 'g']``, so asking for
         ``['g', 'd']`` and getting ``['g', 'd']`` is the whole assertion --
         and the reversed ask is what makes it non-vacuous."""
-        assert list(rows({"kind": "score_directions",
+        assert list(diagnostic_rows({"kind": "score_directions",
                           "names": ["g", "d"]})) == ["g", "d"]
-        assert list(rows({"kind": "score_directions",
+        assert list(diagnostic_rows({"kind": "score_directions",
                           "names": ["d", "g"]})) == ["d", "g"]
 
     def test_no_names_means_the_declared_order_not_the_sorted_one(self):
         """inference.parameters declares g then d; sorted() would say d then
         g.  An executor that filled ``names`` in for an absent key by sorting
         the space would be caught here and nowhere else."""
-        assert list(rows({"kind": "score_directions"})) == ["g", "d"]
+        assert list(
+            diagnostic_rows({"kind": "score_directions"})) == ["g", "d"]
 
     def test_one_row_per_scalar_degree_of_freedom(self):
-        out = rows({"kind": "score_directions", "names": ["g", "d"]})
+        out = diagnostic_rows({"kind": "score_directions",
+                               "names": ["g", "d"]})
         assert out["g"].shape == (1, 128)
         assert out["d"].shape == (1, 128)
 
@@ -754,8 +714,8 @@ class TestScoreDirections:
         measured max|row| 0.9898477 against 1.9796954.  Both are pinned, not
         only the ratio -- a run that dropped ``at:`` returns the first row
         twice, and one that rescaled the whole Jacobian keeps the ratio."""
-        base = rows({"kind": "score_directions", "names": ["d"]})
-        moved = rows({"kind": "score_directions", "names": ["d"],
+        base = diagnostic_rows({"kind": "score_directions", "names": ["d"]})
+        moved = diagnostic_rows({"kind": "score_directions", "names": ["d"],
                       "at": {"g": 2.0}})
         assert float(np.max(np.abs(base["d"]))) == pytest.approx(0.9898477,
                                                                  rel=1e-5)
@@ -771,7 +731,7 @@ class TestScoreDirections:
         Two routes, one helper, two tests.
         """
         with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
-            run_document(document({"kind": "score_directions",
+            run_document(diagnostic_document({"kind": "score_directions",
                                    "at": {"q": 1.0}}))
         assert "it declares ['g', 'd']" in str(caught.value)
 
@@ -782,15 +742,17 @@ class TestScoreDirections:
         including one raised because this exit had started accepting it."""
         with pytest.raises(ConfigError,
                            match=r"it takes \['at', 'names'\]") as caught:
-            run_document(document({"kind": "score_directions", "rtol": 0.6}))
+            run_document(diagnostic_document(
+                {"kind": "score_directions", "rtol": 0.6}))
         assert "does not take ['rtol']" in str(caught.value)
 
     def test_names_is_a_list_even_for_a_block_of_one(self):
         with pytest.raises(ConfigError, match="non-empty list of latent"):
-            run_document(document({"kind": "score_directions", "names": "g"}))
+            run_document(diagnostic_document(
+                {"kind": "score_directions", "names": "g"}))
 
     def test_without_parameters_it_is_refused(self):
-        doc = document({"kind": "score_directions"})
+        doc = diagnostic_document({"kind": "score_directions"})
         doc["inference"] = {}
         with pytest.raises(ConfigError, match="inference.parameters"):
             run_document(doc)
