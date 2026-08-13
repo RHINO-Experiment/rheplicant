@@ -15,6 +15,7 @@ execute -- executor's decision, recorded in the 2B plan.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
@@ -23,9 +24,10 @@ __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 
 _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample")
-_KINDS_2C = ("nuts", "conjugate.wiener", "conjugate.gcr", "conjugate.gls",
-             "gradient", "identifiability", "score_directions", "condition",
-             "mmodes", "predict", "npe")
+_KINDS_2C = ("conjugate.wiener", "conjugate.gcr", "conjugate.gls", "gradient",
+             "identifiability", "score_directions", "condition", "mmodes",
+             "predict")
+_KINDS_2D = ("nuts", "npe")
 _KINDS_PLAN4 = ("compare", "benchmark")
 
 
@@ -38,6 +40,7 @@ class RunSpec(NamedTuple):
     on: str
     expect: str
     options: dict[str, Any]
+    reuse: str | None = None
 
 
 class RunResult(NamedTuple):
@@ -61,6 +64,12 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
             f"{where}: kind: {kind} arrives with Plan 2C; this layer runs "
             f"{list(_KINDS)}."
         )
+    if kind in _KINDS_2D:
+        raise ConfigError(
+            f"{where}: kind: {kind} arrives with Plan 2D, which brings "
+            "numpyro's NUTS and the neural posterior; this layer runs "
+            f"{list(_KINDS)}."
+        )
     if kind in _KINDS_PLAN4:
         raise ConfigError(
             f"{where}: kind: {kind} arrives with Plan 4 (D-C16), with the "
@@ -71,11 +80,10 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
             f"{where}: kind: {kind!r} is not an exit; this layer runs "
             f"{list(_KINDS)}."
         )
-    if "reuse" in entry:
-        raise ConfigError(
-            f"{where}: reuse: arrives with Plan 2C, alongside predict and "
-            "the cross-run products."
-        )
+    reuse = entry.get("reuse")
+    if reuse is not None and not isinstance(reuse, str):
+        raise ConfigError(f"{where}: reuse: is an earlier run's name; got "
+                          f"{reuse!r}.")
     name = entry.get("name")
     if several and not isinstance(name, str):
         raise ConfigError(
@@ -96,7 +104,8 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
     options = {key: value for key, value in entry.items()
                if key not in _RUN_KEYS}
     return RunSpec(name=name if name is not None else kind, kind=kind,
-                   variant=variant, on=on, expect=expect, options=options)
+                   variant=variant, on=on, expect=expect, options=options,
+                   reuse=reuse)
 
 
 def parse_runs(section: Any) -> tuple[RunSpec, ...]:
@@ -137,5 +146,21 @@ def run_document(document: Mapping, *,
                                            base_dir=base_dir)
         return built[variant]
 
-    return {run.name: execute_run(run, configured(run.variant))
-            for run in runs}
+    # Executors see the accumulation through a read-only view: `reuse_of`
+    # types it as a Mapping, and this is what makes that intent true.  An
+    # executor that wrote here would rewrite an earlier run's recorded
+    # result, or add a key no run declared.
+    #
+    # The view wraps a COPY, not the live dict.  A proxy over the live dict
+    # would keep growing after the executor was handed it, so an executor
+    # that retained the view -- a deferred product closing over it -- would
+    # later see runs that had not executed when it looked.  `reuse_of`
+    # promises a reuse may only look backwards; the copy is what keeps that
+    # promise under retention.  (A caller wanting a mutable copy of the view
+    # takes `dict(view)`: `copy.copy` on a mappingproxy raises about
+    # pickling, which says nothing about what the caller did wrong.)
+    results: dict[str, RunResult] = {}
+    for run in runs:
+        results[run.name] = execute_run(run, configured(run.variant),
+                                        MappingProxyType(dict(results)))
+    return results

@@ -32,12 +32,16 @@ class TestGrammar:
         with pytest.raises(ConfigError, match="plan.estimate"):
             parse_runs([{"kind": "anneal"}])
 
-    def test_the_2c_kinds_are_deferred_by_name(self):
-        for kind in ("nuts", "conjugate.wiener", "conjugate.gcr",
-                     "conjugate.gls", "gradient", "identifiability",
-                     "score_directions", "condition", "mmodes", "predict",
-                     "npe"):
+    def test_the_still_deferred_kinds_are_refused_by_name(self):
+        for kind in ("conjugate.wiener", "conjugate.gcr", "conjugate.gls",
+                     "gradient", "identifiability", "score_directions",
+                     "condition", "mmodes", "predict"):
             with pytest.raises(ConfigError, match="2C"):
+                parse_runs([{"kind": kind}])
+
+    def test_nuts_and_npe_are_plan_2d(self):
+        for kind in ("nuts", "npe"):
+            with pytest.raises(ConfigError, match="2D"):
                 parse_runs([{"kind": kind}])
 
     def test_compare_and_benchmark_are_plan_4(self):
@@ -45,9 +49,9 @@ class TestGrammar:
             with pytest.raises(ConfigError, match="Plan 4"):
                 parse_runs([{"kind": kind}])
 
-    def test_reuse_is_plan_2c(self):
-        with pytest.raises(ConfigError, match="2C"):
-            parse_runs([{"kind": "forward", "reuse": "earlier"}])
+    def test_reuse_is_a_name_on_the_spec(self):
+        (run,) = parse_runs([{"kind": "forward", "reuse": "earlier"}])
+        assert run.reuse == "earlier"
 
     def test_expect_is_ok_or_refuse(self):
         with pytest.raises(ConfigError, match="refuse"):

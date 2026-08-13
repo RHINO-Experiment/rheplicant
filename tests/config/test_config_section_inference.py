@@ -76,8 +76,8 @@ class TestSequence:
             infer({"parameters": {"g": {"init": 1.0}},
                    "bindings": {"latents": ["g"], "into": "gain.gain"}})
 
-    def test_npe_is_plan_2c_by_name(self):
-        with pytest.raises(ConfigError, match="2C"):
+    def test_npe_is_plan_2d_by_name(self):
+        with pytest.raises(ConfigError, match="2D"):
             infer({"npe": {"bank": {"n_simulations": 8}}})
 
     def test_unknown_inference_keys_are_swept(self):

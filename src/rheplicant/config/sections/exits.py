@@ -4,90 +4,37 @@ Each executor sweeps its own kind-specific keys, reads what it needs off the
 ConfiguredRun's InferenceBuild, and drives the package's documented entry
 point.  Package refusals -- stochastic stages, priors, shapes -- speak for
 themselves; the config layer adds only what the grammar can see.
+
+This module holds Plan 2B's five exits and the dispatcher.  The shared
+machinery is in ``exit_support``; the conjugate family and the diagnostics are
+in their own modules, imported at the foot of this one so that importing
+``exits`` leaves every kind registered.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.sections.noise import decided_noise
+from rheplicant.config.sections.exit_support import (
+    EXECUTORS,
+    _noise,
+    _number,
+    _observed,
+    _passthrough,
+    _space,
+    _sweep,
+    register,
+)
 from rheplicant.config.sections.runs import RunResult, RunSpec
 
 __all__ = ["execute_run"]
 
-_EXECUTORS: dict[str, Callable[[RunSpec, Any], Any]] = {}
 
-
-def _sweep(run: RunSpec, allowed: frozenset[str]) -> None:
-    unknown = sorted(set(run.options) - allowed)
-    if unknown:
-        raise ConfigError(
-            f"runs[{run.name!r}]: kind: {run.kind} does not take {unknown}; "
-            f"it takes {sorted(allowed)}."
-        )
-
-
-def _number(run: RunSpec, key: str, value: Any, *, kind: type,
-            minimum: float | None = None) -> Any:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigError(
-            f"runs[{run.name!r}]: {key}: is a number; got {value!r}."
-        )
-    if minimum is not None and not value >= minimum:
-        raise ConfigError(
-            f"runs[{run.name!r}]: {key}: must be >= {minimum:g}; got "
-            f"{value!r}."
-        )
-    return kind(value)
-
-
-def _space(run: RunSpec, built: Any) -> Any:
-    space = built.inference.space
-    if space is None:
-        raise ConfigError(
-            f"runs[{run.name!r}]: kind: {run.kind} fits latents, and this "
-            "document declares no inference.parameters."
-        )
-    return space
-
-
-def _noise(run: RunSpec, built: Any) -> Any:
-    noise = decided_noise(built.inference.noise)
-    if noise is None:
-        raise ConfigError(
-            f"runs[{run.name!r}]: kind: {run.kind} weighs residuals with "
-            "inference.noise, and this document declares kind: none -- "
-            "legal only for forward and optimize."
-        )
-    return noise
-
-
-def _observed(run: RunSpec, built: Any) -> Any:
-    observed = built.inference.observed
-    if observed is None:
-        raise ConfigError(
-            f"runs[{run.name!r}]: kind: {run.kind} compares against "
-            "inference.observed, and this document declares none."
-        )
-    name = run.on
-    if name == "primary" and observed.primary is not None:
-        name = observed.primary
-    if name not in observed.entries:
-        raise ConfigError(
-            f"runs[{run.name!r}]: on: {run.on!r} names no observation; this "
-            f"document declares {sorted(observed.entries)}."
-        )
-    return observed.entries[name]
-
-
-def _run_forward(run: RunSpec, built: Any) -> Any:
+@register("forward")
+def _run_forward(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     _sweep(run, frozenset())
     return built.twin(built.state)
-
-
-_EXECUTORS["forward"] = _run_forward
 
 
 _OPTIMIZE_KEYS = frozenset({"optimizer", "learning_rate", "n_steps", "beta1",
@@ -95,7 +42,8 @@ _OPTIMIZE_KEYS = frozenset({"optimizer", "learning_rate", "n_steps", "beta1",
 _ADAM_ONLY = ("beta1", "beta2", "eps")
 
 
-def _run_fisher(run: RunSpec, built: Any) -> Any:
+@register("fisher")
+def _run_fisher(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     from rheplicant.inference import fisher_information, parameter_covariance
 
     _sweep(run, frozenset({"space", "jitter"}))
@@ -115,9 +63,6 @@ def _run_fisher(run: RunSpec, built: Any) -> Any:
             "covariance": parameter_covariance(fisher, jitter=jitter)}
 
 
-_EXECUTORS["fisher"] = _run_fisher
-
-
 def _loss_fn(run: RunSpec) -> Any:
     from rheplicant.inference import mean_squared_error
 
@@ -134,7 +79,8 @@ def _loss_fn(run: RunSpec) -> Any:
     )
 
 
-def _run_optimize(run: RunSpec, built: Any) -> Any:
+@register("optimize")
+def _run_optimize(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     from rheplicant.inference import AdamCalibrator, GradientCalibrator, build_forward_fn
 
     _sweep(run, _OPTIMIZE_KEYS)
@@ -196,9 +142,6 @@ def _run_optimize(run: RunSpec, built: Any) -> Any:
     return {"params": params_fit, "losses": losses}
 
 
-_EXECUTORS["optimize"] = _run_optimize
-
-
 _BLOCK_KEYS = frozenset({"names", "steps", "engine", "learning_rate"})
 _ESTIMATE_KEYS = frozenset({"blocks", "max_iter", "tol", "min_sweeps",
                             "check_identifiability", "solve_tol",
@@ -244,11 +187,9 @@ def _blocks(where: str, node: Any) -> tuple[Any, ...]:
     return tuple(built)
 
 
-def _passthrough(options: dict, keys: tuple[str, ...]) -> dict:
-    return {key: options[key] for key in keys if key in options}
-
-
-def _run_plan(run: RunSpec, built: Any) -> Any:
+@register("plan.estimate")
+@register("plan.sample")
+def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     import equinox as eqx
     import jax
 
@@ -319,16 +260,19 @@ def _run_plan(run: RunSpec, built: Any) -> Any:
         **kwargs)
 
 
-_EXECUTORS["plan.estimate"] = _run_plan
-_EXECUTORS["plan.sample"] = _run_plan
-
-
-def execute_run(run: RunSpec, built: Any) -> RunResult:
+def execute_run(run: RunSpec, built: Any,
+                results: Any = None) -> RunResult:
     """One run entry against its ConfiguredRun -> a RunResult."""
-    executor = _EXECUTORS[run.kind]
+    executor = EXECUTORS.get(run.kind)
+    if executor is None:
+        raise ConfigError(
+            f"runs[{run.name!r}]: kind: {run.kind} has no executor. Every "
+            f"kind this layer declares must register one; it knows "
+            f"{sorted(EXECUTORS)}."
+        )
     if run.expect == "refuse":
         try:
-            executor(run, built)
+            executor(run, built, results=results)
         except Exception as error:  # noqa: BLE001 -- run-and-capture is the point
             return RunResult(name=run.name, kind=run.kind, product=None,
                              error=error)
@@ -338,4 +282,5 @@ def execute_run(run: RunSpec, built: Any) -> RunResult:
             "longer holds."
         )
     return RunResult(name=run.name, kind=run.kind,
-                     product=executor(run, built), error=None)
+                     product=executor(run, built, results=results),
+                     error=None)

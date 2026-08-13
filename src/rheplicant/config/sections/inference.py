@@ -185,7 +185,7 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                           f"{section!r}.")
     if "npe" in section:
         raise ConfigError(
-            "inference.npe: arrives with Plan 2C, alongside the npe exit."
+            "inference.npe: arrives with Plan 2D, alongside the npe exit."
         )
     check_unknown_keys("inference", dict(section), _INFERENCE_KEYS,
                        label="inference:")
