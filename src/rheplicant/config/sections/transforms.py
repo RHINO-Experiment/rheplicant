@@ -5,7 +5,9 @@
 and refuses anything that is not an array leaf.  The registry is closed for
 the same reason the derivation registry is: every entry names a callable this
 package already ships, so a transform is a reference rather than arithmetic.
-``beam_analysis`` is Plan 2C's, with its consumers.
+``beam_analysis`` is the entry that reaches limTOD: it carries a beam's maps
+to the ``beam_alms`` a ``DriftScanProjector`` actually holds, so a binding
+differentiates d/d(map) rather than d/d(alm).
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
@@ -31,7 +34,8 @@ from rheplicant.config.values import resolve_value
 __all__ = ["build_space", "parse_transform"]
 
 _NAMED = ("identity", "exp", "log", "sum", "split_rows", "unit_mean_bandpass")
-_MAPPING = ("affine", "matmul", "log_link_basis", "basis_expand", "python")
+_MAPPING = ("affine", "matmul", "log_link_basis", "basis_expand",
+            "beam_analysis", "python")
 _BINDING_KEYS = frozenset({"latents", "into", "transform", "fan"})
 
 
@@ -41,6 +45,117 @@ def _operand(where: str, node: Any, context: ResolutionContext) -> Any:
     if isinstance(node, (int, float)):
         return float(node)
     return jnp.asarray(resolve_value(node, context).value)
+
+
+def _whole(where: str, value: Any, minimum: int) -> int:
+    """A configuration integer, with ``bool`` refused: ``True`` is not an
+    ``nside``, and Python would otherwise let it through as ``1``."""
+    if isinstance(value, bool) or not isinstance(value, int) \
+            or value < minimum:
+        raise ConfigError(
+            f"{where}: is an integer >= {minimum}; got {value!r}."
+        )
+    return int(value)
+
+
+def _refuse_unreachable_band(where: str, nside: int, lmax: int) -> None:
+    """The band limit, in the layer's voice rather than s2fft's.
+
+    ``map2alm_iter`` needs ``lmax >= 2 * nside - 1``, an INEQUALITY -- swept,
+    not inferred, at nside 1, 2, 3, 4, 5, 6, 7, 8, 9, 12 and 16: from nside=2
+    up (powers of two and not) the lower edge is exactly ``2 * nside - 1``
+    and there is no upper edge at all, so at nside=4 every lmax from 7 to 89
+    returns alms.  The comparison is therefore ``<`` and never ``!=``: an
+    equality would reject documents s2fft accepts, which is how a
+    mis-measured constant becomes a bug rather than a nuisance.
+
+    ``nside=1`` is the one place the inequality does not describe: the floor
+    would be 1, but the package has no working lmax there at all -- measured,
+    every lmax from 0 to 11 fails inside s2fft with "Need at least one array
+    to stack".  It gets its own refusal, before the band limit speaks, so the
+    promise "this nside admits lmax >= N" is never made where it is false.
+    """
+    if nside < 2:
+        raise ConfigError(
+            f"{where}.beam_analysis: nside: {nside} has no lmax that works. "
+            "map2alm_iter needs nside >= 2 -- measured, at nside=1 every "
+            "lmax from 0 to 11 fails inside s2fft with 'Need at least one "
+            "array to stack', including the one the band limit below would "
+            "otherwise admit. Raise nside: to 2 or more."
+        )
+    floor = 2 * nside - 1
+    if lmax < floor:
+        raise ConfigError(
+            f"{where}.beam_analysis: lmax: {lmax} is below the band limit "
+            f"nside: {nside} admits. map2alm_iter needs "
+            f"lmax >= 2 * nside - 1, so this nside admits lmax >= {floor} "
+            "(swept from nside=2 to nside=16, powers of two and not: the "
+            "lower edge is exactly 2 * nside - 1 every time, and there is no "
+            "upper edge). Below it s2fft's healpix transform fails inside "
+            "itself with a shape error naming neither key. Raise lmax: to "
+            f"{floor} or more, or lower nside:. An lmax ABOVE the limit is "
+            "legal and is not refused here."
+        )
+
+
+def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
+    """``{beam_analysis: {nside, lmax, iterations}}`` -> vmapped map2alm_iter.
+
+    The transform that makes a beam-map gradient the quantity the document
+    meant.  A ``DriftScanProjector``'s only non-static field is ``beam_alms``
+    (``radio/sky/driftscan.py:189-203``), so without this the only binding a
+    document can write is ``into: ...projector.beam_alms``, and what comes
+    back is d(chi2)/d(alm) rather than d(chi2)/d(map) -- a different quantity
+    in a different basis, finite and correctly shaped either way.
+
+    ``map2alm_iter``, not ``map2alm_quad``: the two differ by ``npix/4pi`` and
+    are not interchangeable.  ``_iter`` returns true (healpy-convention) alms
+    and is what ``from_beam_maps`` feeds into ``beam_alms``
+    (``driftscan.py:301``); ``_quad`` returns quadrature alms and is the
+    *sky*'s transform (``sky_to_alms``, ``driftscan.py:605-606``).  Picking
+    the visible one "silently rescales the beam by npix/4pi"
+    (``driftscan.py:269``) -- measured 15.06x against npix/4pi = 15.28 at
+    nside=4, finite and correctly shaped and wrong.
+
+    ``map2alm_iter`` is a single-map function -- ``nside``, ``lmax``,
+    ``iterations`` and ``npol`` all sit behind a bare ``*``, and ``nside`` and
+    ``lmax`` have no defaults -- so the ``(n_freq, n_pix) -> (n_freq, n_alm)``
+    shape of the schema's table is the ``jax.vmap``'s, not the function's.
+    This is ``driftscan.py:300-302`` verbatim.
+
+    limTOD is imported only after the grammar has been checked, so a
+    malformed ``beam_analysis:`` is refused in this layer's voice on an
+    install that lacks it rather than raising ``ImportError`` first.
+    """
+    check_unknown_keys(where, dict(body),
+                       frozenset({"nside", "lmax", "iterations"}),
+                       label="beam_analysis:")
+    missing = sorted({"nside", "lmax"} - set(body))
+    if missing:
+        raise ConfigError(
+            f"{where}.beam_analysis: requires nside: and lmax: -- "
+            "map2alm_iter takes both as keywords and defaults neither; "
+            f"missing {missing}."
+        )
+    numbers = {
+        key: _whole(f"{where}.beam_analysis.{key}", body[key], minimum)
+        for key, minimum in (("nside", 1), ("lmax", 0), ("iterations", 0))
+        if key in body
+    }
+    nside = numbers["nside"]
+    lmax = numbers["lmax"]
+    _refuse_unreachable_band(where, nside, lmax)
+    # What is left is ``iterations``, and only where the document declared it:
+    # the package's own default is never restated here.
+    extra = {key: value for key, value in numbers.items()
+             if key not in ("nside", "lmax")}
+
+    import limtod_jax as ltj
+
+    def analyse(maps: Any) -> Any:
+        return ltj.map2alm_iter(maps, nside=nside, lmax=lmax, **extra)
+
+    return jax.vmap(analyse), "broadcast"
 
 
 def parse_transform(spec: Any, context: ResolutionContext, *,
@@ -67,11 +182,6 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
         )
     if not isinstance(spec, Mapping):
         raise ConfigError(f"{where}: is a name or a mapping; got {spec!r}.")
-    if "beam_analysis" in spec:
-        raise ConfigError(
-            f"{where}: beam_analysis arrives with Plan 2C, alongside the "
-            "driftscan exits that consume it."
-        )
     heads = sorted(set(spec) & set(_MAPPING))
     if len(heads) != 1:
         raise ConfigError(
@@ -134,6 +244,8 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
         matrix = basis_matrix(str(body["kind"]), n=int(grid.shape[0]),
                               n_basis=int(body["n_basis"]))
         return (lambda c, _m=matrix: jnp.exp(_m @ c)), "broadcast"
+    if head == "beam_analysis":
+        return _beam_analysis(where, body)
     # basis_expand
     from rheplicant.core.basis import SeparableBasis
 
