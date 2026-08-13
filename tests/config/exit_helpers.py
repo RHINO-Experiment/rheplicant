@@ -201,7 +201,7 @@ def wiener_document(run, *, parameters=None, at=None, noise=None):
                                 "at": at or {"g": TRUTH_G}}})
 
 
-def two_latent_document(run):
+def two_latent_document(run, *, noise=None):
     """Two latents that are affine JOINTLY -- which a pair including the gain
     never is.
 
@@ -216,6 +216,13 @@ def two_latent_document(run):
     ``eqx.error_if`` from inside jit -- which is what makes a declared
     ``require_convergence: null`` observable.  With the guard off it recovers
     ``dep = 0.9999954`` and ``c = 0.0199999`` (residual 8.9e-08).
+
+    ``noise`` swaps :data:`HOMOSCEDASTIC` out.  It exists for
+    :func:`gls_pair_document`, which needs this pair's CONDITIONING under a
+    prediction-dependent sigma: a one-latent block's normal operator is 1x1
+    and CG reaches its answer in a single iteration, so ``maxiter:`` has no
+    lever there at all -- and a knob with no lever is a knob no test can
+    watch travel.
     """
     return conjugate_document(
         run, model={**WIENER_MODEL, "ground_pickup": GROUND_PICKUP},
@@ -228,7 +235,7 @@ def two_latent_document(run):
                       "into": "ground_pickup.coupling",
                       "prior": {"normal": {"loc": 0.01, "scale": 10.0}}},
             },
-            "noise": HOMOSCEDASTIC,
+            "noise": HOMOSCEDASTIC if noise is None else noise,
             "observed": {"from": "simulation",
                          "at": {"dep": 1.0, "c": 0.02}},
         })
@@ -333,3 +340,82 @@ def gcr_product(run=None, **kwargs):
     the run before executing it -- reach for :func:`gcr_document` directly.
     """
     return run_product(gcr_document(run, **kwargs), "conjugate.gcr")
+
+
+# --- What kind: conjugate.gls is measured on --------------------------------
+#
+# The reweighted route needs a PREDICTION-DEPENDENT sigma -- the one thing
+# check A27 refuses everywhere else in the family -- so this document declares
+# :data:`RADIOMETER` rather than :data:`HOMOSCEDASTIC`.  RADIOMETER and not
+# GCR_RADIOMETER: the two differ in bandwidth (1 MHz against 3.5714286) and
+# every number the gls tests pin was measured under the first.
+
+#: ``name: gls``, deliberately NOT the kind.  ``runs.py`` names an unnamed run
+#: after its kind, so a run named for its kind cannot tell a ``where`` built
+#: from ``run.name`` -- what ``exits.py`` spells -- from one built out of
+#: ``run.kind``.  Under this name the two are different strings, and the
+#: refusal tests read the prefix.
+GLS = {"name": "gls", "kind": "conjugate.gls", "names": ["g"]}
+
+
+def gls_document(run=None, **kwargs):
+    """The shared one-latent document with a ``conjugate.gls`` run on top.
+
+    ``model=WIENER_MODEL`` and ``noise=RADIOMETER`` are pinned rather than
+    left to :func:`conjugate_document`'s defaults, which are
+    :data:`CONJUGATE_MODEL` (it carries ``uniform_sky``, which changes the
+    conditioning of every solve) and :data:`HOMOSCEDASTIC` (whose sigma does
+    not depend on the prediction, so ``iterative_gls`` would return after one
+    step and there would be no reweighting to observe).
+
+    The inference block is :data:`ONE_LATENT`'s: ``g`` into ``gain.gain``,
+    which is the LAST node of the synthetic twin, so ``g`` scales the whole
+    prediction and the block is exactly affine in it.  ``WIENER_MODEL`` is
+    ``synthetic_document()``'s model with the stochastic ``noise`` node
+    dropped, so ``observed`` is a deterministic forward at ``g = 1.5``: every
+    number these tests pin is exact across runs, and the document carries no
+    randomness at all.
+
+    ``run`` is merged over :data:`GLS`, so a caller adds a reweight knob
+    without restating ``names:``; every other keyword goes to
+    :func:`conjugate_document` unchanged (``at=`` moves the value the data is
+    simulated at, ``parameters=`` swaps the latents wholesale).
+    """
+    kwargs.setdefault("model", WIENER_MODEL)
+    kwargs.setdefault("noise", RADIOMETER)
+    return conjugate_document({**GLS, **(run or {})}, **kwargs)
+
+
+def gls_product(run=None, **kwargs):
+    """:func:`gls_document`, executed, and the ``GLSResult`` it hands back.
+
+    Named for :data:`GLS`'s ``name:``, not for its kind -- see that constant.
+    """
+    return run_product(gls_document(run, **kwargs), "gls")
+
+
+#: :func:`two_latent_document`'s pair, reweighted.  ``require_convergence:
+#: null`` is part of the template rather than of each caller's run: this pair
+#: is ill-conditioned enough that the package's own default guard fires on it
+#: (it compares residual x kappa, linear.py:1493), so every test that is not
+#: ABOUT the guard would otherwise spend its first line turning it off.
+GLS_PAIR = {"name": "gls", "kind": "conjugate.gls", "names": ["dep", "c"],
+            "require_convergence": None}
+
+
+def gls_pair_document(run=None):
+    """The two-latent pair under :data:`RADIOMETER`, as a ``conjugate.gls`` run.
+
+    :func:`gls_document`'s block holds ONE latent, whose normal operator is
+    1x1 -- CG reaches its answer in a single iteration there, so ``maxiter:``
+    changes nothing on it whatever value it takes.  This pair is the document
+    where the cap has a lever, and that is the whole reason it exists: a knob
+    the config layer forwards and no test can watch arrive is exactly the
+    defect this plan is written against.
+    """
+    return two_latent_document({**GLS_PAIR, **(run or {})}, noise=RADIOMETER)
+
+
+def gls_pair_product(run=None):
+    """:func:`gls_pair_document`, executed, and its ``GLSResult``."""
+    return run_product(gls_pair_document(run), "gls")

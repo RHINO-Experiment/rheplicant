@@ -2,9 +2,13 @@
 
 The seam against ``test_config_exits_conjugate.py`` is mechanical rather than
 thematic: **nothing in this module calls** :func:`run_document`.  Every test
-here reaches the shared helpers -- ``_conjugate_block``, ``_prior_kwargs``,
-``_decided_sigma``, ``_decided_model`` -- against a document built by hand,
-which is exactly the surface the executors open with.  Some go on to hand
+here reaches the shared helpers -- ``_conjugate_block`` and ``_prior_kwargs``
+from ``sections/conjugate_support.py``, ``_decided_sigma`` and
+``_decided_model`` from ``sections/exit_support.py`` -- against a document
+built by hand, which is exactly the surface the executors open with (the
+executors themselves are ``sections/conjugate.py``, and the split between
+those two modules is the seam this module's own imports follow).  Some go on
+to hand
 what came back to the real ``wiener_solve``, and that is still this side of
 the seam: what no test here does is ask a document's ``runs:`` to execute, so
 none of them depends on which kinds ``runs.py`` currently admits or on which
@@ -18,7 +22,10 @@ import pytest
 from rheplicant.config import ConfigError
 from rheplicant.config.document import load_document
 from rheplicant.config.sections import conjugate as conjugate_module
-from rheplicant.config.sections.conjugate import _conjugate_block, _prior_kwargs
+from rheplicant.config.sections.conjugate_support import (
+    _conjugate_block,
+    _prior_kwargs,
+)
 from rheplicant.config.sections.exit_support import _decided_model, _decided_sigma
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference import (
