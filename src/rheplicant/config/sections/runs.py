@@ -25,8 +25,8 @@ __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
           "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
-          "identifiability", "score_directions", "gradient")
-_KINDS_2C = ("mmodes", "predict")
+          "identifiability", "score_directions", "gradient", "mmodes")
+_KINDS_2C = ("predict",)
 _KINDS_2D = ("nuts", "npe")
 _KINDS_PLAN4 = ("compare", "benchmark")
 

@@ -24,6 +24,14 @@ exactly what makes the model differentiable at all
 the same object whenever a document declares no ``inference.twin:``, which is
 why the tests build one that does.
 
+``mmodes`` is the cheapest of the family and the odd one out: no latents,
+no noise, no observed data, and nothing off ``built.inference`` at all.  It
+reads two declared resources and ``built.state.coords``, which is why
+:func:`resolve_reference` is imported at the head -- ``config.refs`` is a
+config-layer module with no package dependencies, the way ``sections/model.py``
+imports it.  The lazy-import rule in this layer is about
+``rheplicant.inference`` and numpyro, not about ``config.refs``.
+
 ``gradient`` joins them at the foot: one ``jax.grad`` of a named objective,
 no optimiser, and the point moved by the same ``at:``.  Its four objectives
 are defined HERE -- ``_OBJECTIVES`` is a config-layer table, because the
@@ -32,9 +40,8 @@ schema's ``chi2``/``sum_squares``/``mean`` exist in no package module
 -- and ``chi2`` is where ``inference.noise.include_logdet`` acquires its
 first consumer in ``src/``.
 
-Tasks 10 and 11 add ``mmodes`` and ``predict`` to this module.  ``condition``
-is NOT here: it rides ``_conjugate_block``, so Task 6 put it in
-``conjugate.py``.
+Task 11 adds ``predict`` to this module.  ``condition`` is NOT here: it
+rides ``_conjugate_block``, so Task 6 put it in ``conjugate.py``.
 """
 
 from __future__ import annotations
@@ -45,6 +52,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.refs import resolve_reference
 from rheplicant.config.sections.exit_support import (
     _noise,
     _number,
@@ -532,3 +540,134 @@ def _run_gradient(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     grads = jax.grad(lambda params: objective(forward(params)))(params0)
     return {path: selector(grads)
             for path, selector in zip(paths, selectors, strict=True)}
+
+
+# --- kind: mmodes ----------------------------------------------------------
+
+_MMODES_KEYS = frozenset({"projector", "sky"})
+
+
+def _mmodes_ref(run: RunSpec, built: Any, key: str) -> Any:
+    """``projector:``/``sky:`` -> the LIVE object the ``{ref}`` names.
+
+    One helper for both keys, so the two cannot drift into accepting
+    different shapes of the same node.  ``resolve_reference`` returns the
+    object itself rather than a copy (refs.py's module docstring), so this
+    exit and the twin's own operator share one projector -- which is the
+    point, and which is why nothing here assigns to it: Equinox Modules are
+    frozen, and a variant would have to be built with ``eqx.tree_at``.
+    """
+    node = run.options.get(key)
+    if not isinstance(node, Mapping) or set(node) != {"ref"}:
+        raise ConfigError(
+            f"runs[{run.name!r}]: {key}: is {{ref: resources.<kind>.<name>}} "
+            "and is required -- kind: mmodes observes two DECLARED resources "
+            f"and nothing inline; got {node!r}."
+        )
+    return resolve_reference(node["ref"], built.context)
+
+
+def _evaluates_a_grid(where: str, sky_model: Any) -> None:
+    """Refuse a ``sky:`` the exit cannot CALL the way it calls.
+
+    The mirror of :func:`_scores_a_pair`, and for the same reason.
+    ``callable()`` alone is a much weaker predicate than the ``projector:``
+    side's ``hasattr(..., "mmodes")``: it admits any object with a
+    ``__call__`` whatever its arity, and the value grammar hands one over by
+    the front door -- ``resources.arrays.<name>: {python: 'operator:add'}``
+    delivers the uncalled attribute itself (hatch.py's presence-of-the-key
+    rule), and ``{ref}`` to it reaches ``sky_model(freq)`` as
+    ``TypeError: add expected 2 arguments, got 1``, naming no run.  Measured.
+
+    So the two routes are guarded to the same DEPTH: a projector must have
+    the method this exit calls, and a sky must accept the one argument this
+    exit passes.  It forbids nothing a working sky model can do -- all three
+    shipped models bind ``(freq)`` -- and a callable ``inspect`` cannot
+    describe is passed through, because guessing would refuse working ones.
+    """
+    import inspect
+
+    try:
+        signature = inspect.signature(sky_model)
+    except (TypeError, ValueError):
+        return
+    try:
+        signature.bind(_PROBE)
+    except TypeError:
+        raise ConfigError(
+            f"{where}: sky: names a {type(sky_model).__name__} that cannot be "
+            f"called as (freq) -- its signature is {signature}. A sky model "
+            "is evaluated ON the run's own frequency grid, which is the one "
+            "argument every AbstractSkyModel takes and the only one this exit "
+            "has to give."
+        ) from None
+
+
+@register("mmodes")
+def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+    """``kind: mmodes`` -> ``DriftScanProjector.mmodes`` on the run's own grid.
+
+    Two references and nothing else.  The beam is the projector's own traced
+    ``beam_alms`` -- ``mmodes(sky, coords)`` has no ``beam=`` argument to give
+    it (driftscan.py:663) -- and the coords come off ``built.state`` because
+    ``mmodes`` reads ``coords.extra["lst_deg"]`` and cross-checks
+    ``coords.pointing`` against the projector's fixed az/el itself
+    (driftscan.py:387-436).  That cross-check's refusal is the package's and
+    is left alone: it names the disagreement, and nothing this layer could
+    say about it would be more specific.
+
+    The product is the complex ``(n_freq, lmax + 1)`` spectrum, ``lmax``
+    being the PROJECTOR's; ``(lmax+1)(lmax+2)//2`` is the sky's alm width and
+    a different number.
+    """
+    _sweep(run, _MMODES_KEYS)
+    where = f"runs[{run.name!r}]"
+    projector = _mmodes_ref(run, built, "projector")
+    if not hasattr(projector, "mmodes"):
+        raise ConfigError(
+            f"{where}: projector: names a {type(projector).__name__}, which "
+            "has no mmodes(). The m-mode expansion is a drift scan's own "
+            "spectrum, so engine: driftscan is the one engine that offers it."
+        )
+    # Off the BUILT object, never off the spec: a {ref} may name a projector
+    # declared anywhere in resources:, and optimizations: [cache_beam_rotation]
+    # REPLACES that object with to_reference_frame()'s return
+    # (projectors.py:240-241), which keeps normalize_beam and changes the
+    # frame.
+    if projector.normalize_beam:
+        raise ConfigError(
+            f"{where}: kind: mmodes needs a normalize_beam: false projector. "
+            "forward() additionally divides the TOD by the ones-map "
+            "denominator, which the m-mode expansion cannot represent, so "
+            "these coefficients would not be the spectrum of forward() "
+            "(measured ~18x off). The package refuses the same pairing as a "
+            "StateValidationError once the whole document is built; this is "
+            "that refusal, before anything is traced."
+        )
+    sky_model = _mmodes_ref(run, built, "sky")
+    if not callable(sky_model):
+        raise ConfigError(
+            f"{where}: sky: names a {type(sky_model).__name__}, which is not "
+            "a sky model. A {ref: resources.sky_models.<name>} resolves to "
+            "the MODEL, not to maps; this exit evaluates it on the run's own "
+            "frequency grid to get the (n_freq, n_pix) maps mmodes takes."
+        )
+    _evaluates_a_grid(where, sky_model)
+    coords = built.state.coords
+    maps = sky_model(coords.freq)
+    # `shape` and not the extents: `_validate_sky` (driftscan.py:551-557)
+    # already names n_freq, n_pix AND the nside they follow from, and says it
+    # better than this layer could.  What it cannot survive is an argument
+    # with no `shape` at all, which is where it reaches first -- so this
+    # guard is exactly the attribute the package is about to touch, and
+    # nothing more.
+    if not hasattr(maps, "shape"):
+        raise ConfigError(
+            f"{where}: sky: names a {type(sky_model).__name__} whose "
+            f"__call__(freq) returned a {type(maps).__name__}, not maps. The "
+            "contract is __call__(freq) -> (n_freq, n_pix) brightness "
+            "temperatures (radio/sky/model.py's module docstring); the "
+            "projector checks the two extents itself and cannot report on "
+            "something with no shape."
+        )
+    return projector.mmodes(maps, coords)
