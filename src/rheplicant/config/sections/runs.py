@@ -23,10 +23,10 @@ from rheplicant.config.errors import ConfigError
 __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 
 _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
-_KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample")
-_KINDS_2C = ("conjugate.wiener", "conjugate.gcr", "conjugate.gls", "gradient",
-             "identifiability", "score_directions", "condition", "mmodes",
-             "predict")
+_KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
+          "conjugate.wiener")
+_KINDS_2C = ("conjugate.gcr", "conjugate.gls", "gradient", "identifiability",
+             "score_directions", "condition", "mmodes", "predict")
 _KINDS_2D = ("nuts", "npe")
 _KINDS_PLAN4 = ("compare", "benchmark")
 

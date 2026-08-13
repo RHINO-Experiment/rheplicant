@@ -33,9 +33,9 @@ class TestGrammar:
             parse_runs([{"kind": "anneal"}])
 
     def test_the_still_deferred_kinds_are_refused_by_name(self):
-        for kind in ("conjugate.wiener", "conjugate.gcr", "conjugate.gls",
-                     "gradient", "identifiability", "score_directions",
-                     "condition", "mmodes", "predict"):
+        for kind in ("conjugate.gcr", "conjugate.gls", "gradient",
+                     "identifiability", "score_directions", "condition",
+                     "mmodes", "predict"):
             with pytest.raises(ConfigError, match="2C"):
                 parse_runs([{"kind": kind}])
 

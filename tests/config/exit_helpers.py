@@ -157,3 +157,77 @@ def spec(kind="conjugate.wiener", **options):
     """A RunSpec straight to a helper, without going through parse_runs."""
     return RunSpec(name=kind, kind=kind, variant=None, on="primary",
                    expect="ok", options=dict(options))
+
+
+# --- The two documents the RUNNABLE conjugate exits are measured on --------
+#
+# The three above (ONE_LATENT, TWO_LATENTS, NONLINEAR_LATENT) drive the shared
+# helpers directly.  These two go through `run_document`, so they are chosen
+# for what an EXECUTOR has to demonstrate rather than for what a block builder
+# does: a truth to recover, and a pair ill-conditioned enough that the
+# package's own convergence guard fires at its default.
+
+#: :data:`CONJUGATE_MODEL` without ``uniform_sky``.  Kept apart rather than
+#: merged: every number the wiener exit pins was measured on this model, and
+#: the second additive latent CONJUGATE_MODEL exists to provide would change
+#: the conditioning of both documents below.
+WIENER_MODEL = {
+    "global_signal": {"depth": {"value": 0.5, "unit": "K"},
+                      "centre": {"value": 75.0, "unit": "MHz"},
+                      "width": {"value": 5.0, "unit": "MHz"}},
+    "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
+}
+# gain.gain is the LAST node of the synthetic twin, so g scales the whole
+# prediction and the block is exactly affine in it.  scale 10.0 is a prior
+# wide enough that the posterior mean IS the truth, to 1.3e-06 (measured).
+GAIN_LATENT = {"init": 1.0, "linear": True, "into": "gain.gain",
+               "prior": {"normal": {"loc": 1.0, "scale": 10.0}}}
+GROUND_PICKUP = {"coupling": {"value": 0.01, "unit": "dimensionless"},
+                 "t_ground": {"value": 290.0, "unit": "K"}}
+
+
+def wiener_document(run, *, parameters=None, at=None, noise=None):
+    """One linear latent ``g`` into ``gain.gain``; data simulated at g = 1.5.
+
+    Measured on it: ``wiener_solve`` returns ``g = 1.4999987`` with a relative
+    residual of 0.0.
+    """
+    return conjugate_document(
+        run, model=WIENER_MODEL,
+        inference={"parameters": parameters or {"g": GAIN_LATENT},
+                   "noise": noise or HOMOSCEDASTIC,
+                   "observed": {"from": "simulation",
+                                "at": at or {"g": TRUTH_G}}})
+
+
+def two_latent_document(run):
+    """Two latents that are affine JOINTLY -- which a pair including the gain
+    never is.
+
+    The twin runs ``global_signal -> ground_pickup -> gain``, so the gain
+    multiplies everything upstream of it and ``(gain, anything)`` is bilinear;
+    ``check_linearity`` says so in as many words.  ``depth`` and ``coupling``
+    both sit upstream of the gain and add, so the pair passes the check.
+    Data is simulated at ``depth = 1.0 K`` and ``coupling = 0.02``.
+
+    The pair is also ill-conditioned enough that the package's own
+    ``require_convergence=1e-3`` default FIRES on it -- measured, as an
+    ``eqx.error_if`` from inside jit -- which is what makes a declared
+    ``require_convergence: null`` observable.  With the guard off it recovers
+    ``dep = 0.9999954`` and ``c = 0.0199999`` (residual 8.9e-08).
+    """
+    return conjugate_document(
+        run, model={**WIENER_MODEL, "ground_pickup": GROUND_PICKUP},
+        inference={
+            "parameters": {
+                "dep": {"init": 0.5, "linear": True,
+                        "into": "global_signal.depth",
+                        "prior": {"normal": {"loc": 0.5, "scale": 10.0}}},
+                "c": {"init": 0.01, "linear": True,
+                      "into": "ground_pickup.coupling",
+                      "prior": {"normal": {"loc": 0.01, "scale": 10.0}}},
+            },
+            "noise": HOMOSCEDASTIC,
+            "observed": {"from": "simulation",
+                         "at": {"dep": 1.0, "c": 0.02}},
+        })
