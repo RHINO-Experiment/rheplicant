@@ -14,15 +14,27 @@ power iteration, but its ``key`` defaults to ``jax.random.key(0)`` inside the
 package, so a run with no ``seed:`` returns the same float every time
 (measured: two consecutive runs agree bit for bit, which
 :meth:`TestTheSeedRunsTheOtherWay.test_the_seed_is_optional` asserts).
+
+``identifiability`` and ``score_directions`` join it below.  Those two need
+only a space: neither reads observed data and neither weighs a residual -- a
+ParameterSpace, the fit twin and the state are the whole input, which is what
+makes them the checks a user runs before paying for a fit.  Every number in
+their two classes was measured against :func:`document` at ``3b26202``, whose
+fit twin is ``data = g * d * gaussian(nu)`` on a 16 x 8 grid: the ``g`` and
+``d`` columns of the Jacobian are exactly proportional, so the report reads
+n_par 2, n_data 128, rank 1, nullity 1.
 """
 
 import math
 
+import numpy as np
 import pytest
 
 from rheplicant.config import ConfigError
-from rheplicant.config.sections.runs import run_document
+from rheplicant.config.document import load_document
+from rheplicant.config.sections.runs import parse_runs, run_document
 from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.inference import identifiability
 from tests.config.test_config_document import synthetic_document
 
 # Two constant-in-time temperatures summed at t_ant_sum, so the prediction is
@@ -405,3 +417,380 @@ class TestWhatItRefuses:
             kappa_of(pair, extra=WIDTH_LATENT)
         assert math.isnan(kappa_of({**pair, "check": False},
                                    extra=WIDTH_LATENT))
+
+
+# --- The two diagnostics that need only a space ----------------------------
+
+#: ``g`` scales the whole prediction and ``d`` scales the signal the gain
+#: multiplies, so ``d(data)/dg = d * gaussian`` and ``d(data)/dd = g *
+#: gaussian`` are proportional -- the schema's A33 shape (bandpass and gain
+#: both free) in the cheapest model this suite already builds.
+GAIN = {"init": 1.0, "linear": True, "into": "gain.gain"}
+DEPTH = {"init": 0.5, "into": "global_signal.depth"}
+#: The width enters the gaussian's EXPONENT, so its column is not proportional
+#: to the gain's: measured singular values 1.2572932 and 0.6474673, a ratio of
+#: 0.514969.  That is the pair on which ``rtol`` can move the rank -- on the
+#: degenerate pair the rank is 1 for every tolerance, and an executor that
+#: dropped ``rtol:`` would pass every test built on it.
+#:
+#: ``WIDTH_SPEC``, not ``WIDTH``: this module already binds ``WIDTH_LATENT``
+#: above, and that is a parameters MAPPING (``{"w": {...}}``) rather than one
+#: latent's spec.  Two names one letter apart with different shapes is how the
+#: wrong one gets spliced in.
+WIDTH_SPEC = {"init": {"value": 5.0, "unit": "MHz"},
+              "into": "global_signal.width"}
+
+#: ``..._PAIR``, because ``DEGENERATE`` is already this module's frequency
+#: basis for the condition tests above.
+DEGENERATE_PAIR = {"g": GAIN, "d": DEPTH}
+IDENTIFIED_PAIR = {"g": GAIN, "w": WIDTH_SPEC}
+
+
+def document(run, parameters=None):
+    """A document whose FIT twin is not its model twin.
+
+    ``synthetic_document``'s stochastic ``noise`` node stays in ``model:`` and
+    is repaired away in ``inference.twin.without:`` rather than being deleted
+    from the model.  The prediction is the same either way -- measured
+    bit-identical reports, singular values 1.41421356 and 4.5236e-17 both ways
+    -- but this way ``built.twin`` still carries NoiseOperator while
+    ``built.inference.fit_twin`` does not, so an executor that differentiated
+    ``built.twin`` raises ``refuse_stochastic_stages`` and EVERY test in the
+    two classes below fails.  Delete the ``twin:`` repair and reach for
+    ``built.twin`` instead, and nothing notices: with no ``inference.twin:``
+    the two are the same object.
+    """
+    doc = synthetic_document()
+    doc["inference"] = {"parameters": dict(parameters or DEGENERATE_PAIR),
+                        "twin": {"without": ["noise"]}}
+    doc["runs"] = [run]
+    return doc
+
+
+def report(run, parameters=None):
+    """One identifiability exit -> its IdentifiabilityReport.
+
+    Keyed by ``"identifiability"``, so like ``kappa_of`` above it serves only
+    runs that leave ``name:`` unwritten -- ``runs.py`` then names a run after
+    its kind.  The one test that needs a name of its own calls
+    ``run_document`` directly.
+    """
+    return run_document(document(run, parameters))["identifiability"].product
+
+
+def rows(run, parameters=None):
+    """One score_directions exit -> its ``{latent: (size, n_data)}``."""
+    return run_document(document(run, parameters))["score_directions"].product
+
+
+class TestIdentifiability:
+    def test_the_report_lands_with_the_measured_rank_and_nullity(self):
+        """Two parameters, one identified direction, one null.
+
+        A run that fitted a single latent, or that differentiated the wrong
+        twin, cannot produce this quartet.  The singular values are pinned
+        too, because the quartet alone does not say that the degeneracy is
+        EXACT: a merely near-degenerate pair also reports nullity 1 at the
+        shipped rtol of 1e-8, and this fixture claims more than that --
+        measured 1.4142136 against 4.52e-17, sixteen orders apart.
+        """
+        out = report({"kind": "identifiability"})
+        assert out.names == ("g", "d")
+        assert (out.n_par, out.n_data, out.rank, out.nullity) == (2, 128, 1, 1)
+        assert out.singular_values[0] == pytest.approx(1.4142136, rel=1e-5)
+        assert abs(float(out.singular_values[1])) < 1.0e-12
+
+    def test_the_fit_twin_is_what_it_differentiates(self):
+        """The fixture's discriminating property, asserted rather than assumed.
+
+        ``built.twin`` and ``built.inference.fit_twin`` are the same object
+        for every document that declares no ``inference.twin:``, and on such a
+        document the difference between the two executors is invisible.  This
+        document declares one, and the model twin is then not differentiable
+        at all -- which is what makes every assertion in these two classes a
+        statement about ``inference.fit_twin``.  Delete the repair from
+        :func:`document` and this test is what fails.
+        """
+        built = load_document(document({"kind": "identifiability"}))
+        assert built.twin is not built.inference.fit_twin
+        with pytest.raises(ParameterSpaceError, match="NoiseOperator"):
+            identifiability(built.inference.space, built.twin, built.state)
+        assert report({"kind": "identifiability"}).nullity == 1
+
+    def test_names_narrows_the_report_to_the_named_block(self):
+        """The whole space reports n_par 2 / nullity 1; ``g`` alone is 1 / 0.
+
+        An executor that dropped ``names:`` would hand back the first quartet
+        here -- the conditional question a Gibbs block faces is answered
+        ``yes`` exactly where the joint one is answered ``no``.
+        """
+        out = report({"kind": "identifiability", "names": ["g"]})
+        assert out.names == ("g",)
+        assert (out.n_par, out.rank, out.nullity) == (1, 1, 0)
+
+    def test_rtol_reaches_the_package_and_moves_the_rank(self):
+        """``g`` and ``w`` are genuinely two directions, and rtol says so.
+
+        Measured singular values 1.2572932 and 0.6474673, so the rank flips
+        exactly at ``rtol = 0.514969`` and at nothing else.  ``rtol: 0.6``
+        sits between the two with room on both sides: the cutoff it names is
+        0.7543759, which is 1.165x the second singular value and 0.600x the
+        first -- 16.5% of margin below and 66.7% above, against a float64
+        Jacobian whose own roundoff is ~1e-16 relative.  Nothing but the
+        declared rtol can produce that, and the report echoes it back.
+        """
+        loose = report({"kind": "identifiability", "rtol": 0.6},
+                       IDENTIFIED_PAIR)
+        assert loose.rtol == pytest.approx(0.6)
+        assert loose.threshold == pytest.approx(0.7543759, rel=1e-5)
+        assert (loose.rank, loose.nullity) == (1, 1)
+        assert loose.singular_values == pytest.approx([1.2572932, 0.6474673],
+                                                      rel=1e-5)
+        tight = report({"kind": "identifiability"}, IDENTIFIED_PAIR)
+        assert (tight.rank, tight.nullity) == (2, 0)
+
+    def test_at_moves_the_point_the_jacobian_is_taken_at(self):
+        """``d(data)/dg`` is ``d * gaussian``; ``d(data)/dd`` is ``g *
+        gaussian``.
+
+        So doubling ``d`` from its declared init of 0.5 doubles the ``g``
+        column's norm and does not move the ``d`` column at all.  The
+        ASYMMETRY is what makes this a pin on ``at:`` rather than on "some
+        number changed" -- a run evaluated at a uniformly rescaled point
+        would move both.  ``column_norms`` is also the field the report's own
+        docstring forgets to list (identifiability.py:270-292) while the real
+        field order inserts it between ``jacobian`` and ``rtol``, so reading
+        it by name is the assertion that a positional construction from that
+        docstring would fail.
+        """
+        base = report({"kind": "identifiability"})
+        moved = report({"kind": "identifiability", "at": {"d": 1.0}})
+        assert base.column_norms == pytest.approx([3.1501079, 6.3002157],
+                                                  rel=1e-5)
+        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
+                                                   rel=1e-5)
+        assert moved.column_norms[0] == pytest.approx(
+            2.0 * base.column_norms[0], rel=1e-5)
+        assert moved.column_norms[1] == pytest.approx(
+            base.column_norms[1], rel=1e-5)
+
+    def test_at_reads_the_documents_own_value_grammar(self):
+        """``{value:, unit:}`` is what ``inference.observed.<name>.at``
+        accepts, and the executor resolves through the same ``resolve_value``
+        seam.  An executor that did ``float(node)`` instead would raise on
+        this mapping, and one that passed the mapping through unresolved
+        would reach jnp.asarray with a dict."""
+        moved = report({"kind": "identifiability",
+                        "at": {"d": {"value": 1.0, "unit": "K"}}})
+        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
+                                                   rel=1e-5)
+
+    def test_an_empty_at_is_the_report_with_no_at_at_all(self):
+        """``{}`` is the right empty, and it is not "no ``at:``" spelled twice.
+
+        ``_at_values`` returns ``{}`` rather than None because both entry
+        points accept ``at={}``; what this pins is that an empty mapping is
+        legal and inert -- a helper that refused it, or that read ``at: {}``
+        as "override every latent with nothing", changes the answer here.
+        """
+        empty = report({"kind": "identifiability", "at": {}})
+        base = report({"kind": "identifiability"})
+        assert empty.column_norms == pytest.approx(base.column_norms)
+        assert (empty.rank, empty.nullity) == (1, 1)
+
+    def test_at_naming_an_undeclared_latent_is_this_layers_refusal(self):
+        """Refused HERE, with the declared names, not as a package error.
+
+        The package refuses it too, so deleting this branch leaves a document
+        that still fails -- with a different exception type and without
+        ``runs[...]`` to say which run asked.  Both halves are asserted,
+        because the type alone is what tells the two apart.
+        """
+        with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
+            run_document(document({"kind": "identifiability",
+                                   "at": {"q": 1.0}}))
+        assert "it declares ['g', 'd']" in str(caught.value)
+
+    def test_names_naming_an_undeclared_latent_is_the_packages_refusal(self):
+        """The asymmetry with ``at:`` above, and it is deliberate.
+
+        ``_names`` validates the SHAPE of the key only; membership is the
+        package's own refusal, which names the declared set itself.  A
+        layer-level names check would change the exception type on a document
+        that is already refused for the right reason, so this test is what
+        records the decision rather than leaving it to be "fixed".
+        """
+        with pytest.raises(ParameterSpaceError,
+                           match="not a latent of this space"):
+            run_document(document({"kind": "identifiability",
+                                   "names": ["q"]}))
+
+    def test_a_float32_document_runs_rather_than_being_refused(self):
+        """identifiability() forces x64 process-globally for its own duration
+        and casts the selected latents, so the promoted Jacobian is float64
+        and the report LANDS on an ordinary float32 document.  Its "even with
+        x64" refusal is reserved for a model that pins its OUTPUT dtype with
+        an explicit cast.  This test exists so that nobody later "fixes" the
+        layer by refusing a float32 run here."""
+        doc = document({"kind": "identifiability"})
+        assert load_document(doc).runtime.dtype == "float32"
+        assert run_document(doc)["identifiability"].product.nullity == 1
+
+    def test_the_sweep_names_exactly_the_three_keys_this_exit_takes(self):
+        """``rtols`` is a typo, and the message must say what was meant.
+
+        Anchored on the sweep's own tail rather than on the key: a bare
+        ``match="rtol"`` is satisfied by ``rtol: is a number`` and by
+        ``rtol: must be >= 0`` as well, and a bare ``match="rtols"`` cannot
+        see a key set that has grown or lost a member.
+        """
+        with pytest.raises(
+                ConfigError,
+                match=r"it takes \['at', 'names', 'rtol'\]") as caught:
+            run_document(document({"kind": "identifiability", "rtols": 0.6}))
+        assert "does not take ['rtols']" in str(caught.value)
+
+    def test_without_parameters_it_is_refused(self):
+        doc = document({"kind": "identifiability"})
+        doc["inference"] = {}
+        with pytest.raises(ConfigError, match="inference.parameters"):
+            run_document(doc)
+
+    def test_names_is_a_list_even_for_a_block_of_one(self):
+        """identifiability reads a bare string as ONE name (:180) while
+        score_directions splits it into characters, so this refusal is the
+        config layer's own: ``names: g`` means two different things to the
+        two kinds, and ``[g]`` means one thing to both.
+
+        The prefix is asserted alongside because this run carries ``name:
+        probe`` while its kind is ``identifiability`` -- under that name
+        ``runs[0]``, ``runs['identifiability']`` and ``runs['probe']`` are
+        three different strings, and only one of them is the contract.
+        """
+        with pytest.raises(ConfigError,
+                           match="non-empty list of latent") as caught:
+            run_document(document({"name": "probe",
+                                   "kind": "identifiability", "names": "g"}))
+        assert str(caught.value).startswith("runs['probe']: ")
+
+    def test_at_is_a_mapping_of_latent_to_value(self):
+        """The prefix is asserted here because ``_at_values`` builds its own
+        ``where``, and both of its refusals read it.
+
+        Neither ``at:`` refusal said anything about the prefix until this
+        line: hard-coding ``where = "runs[0]"`` inside the helper survived the
+        whole module (measured), which is the index form ``runs.py`` uses and
+        the executors must not.  Under ``name: probe`` the three spellings are
+        three different strings.
+        """
+        with pytest.raises(ConfigError, match="at: is a mapping") as caught:
+            run_document(document({"name": "probe",
+                                   "kind": "identifiability", "at": ["d"]}))
+        assert str(caught.value).startswith("runs['probe']: ")
+
+    def test_the_at_helper_returns_an_empty_mapping_rather_than_none(self):
+        """Plan section 3.1 pins ``{}``, and only a direct call can see it.
+
+        Both executors guard with ``if at:`` and None is falsy, so from a
+        document the two empties are indistinguishable -- measured: a helper
+        returning None survives every other test in this module.  Task 8's
+        ``gradient`` is the third caller of this one helper and will be
+        written against the annotated ``dict``, so the contract is asserted
+        where it is visible instead of being left to the first caller that
+        stops guarding.
+        """
+        from rheplicant.config.sections.diagnostics import _at_values
+
+        (run,) = parse_runs([{"kind": "identifiability"}])
+        built = load_document(document({"kind": "identifiability"}))
+        assert _at_values(run, built, built.inference.space) == {}
+
+    def test_rtol_is_a_number(self):
+        """Anchored on the coercion's own words, not on the key.
+
+        ``match="rtol"`` is satisfied by the sweep as well: drop ``rtol`` from
+        this exit's key set and the sweep refuses ``does not take ['rtol']``,
+        which contains the key and says nothing at all about its type.
+        """
+        with pytest.raises(ConfigError, match=r"rtol: is a number"):
+            run_document(document({"kind": "identifiability",
+                                   "rtol": "loose"}))
+
+    def test_a_negative_rtol_is_refused_at_the_floor(self):
+        """A relative tolerance below zero puts every singular value above the
+        cutoff, so the rank verdict is vacuous rather than loose.  Matched on
+        the floor clause, which the ``is a number`` branch does not carry."""
+        with pytest.raises(ConfigError, match=r"rtol: must be >= 0"):
+            run_document(document({"kind": "identifiability", "rtol": -0.1}))
+
+
+class TestScoreDirections:
+    def test_the_rows_come_back_in_the_callers_order(self):
+        """score_directions returns in the CALLER's order deliberately
+        (reduced_basis.py:171-180): jax rebuilds the jacobian dict from its
+        flattened, SORTED form, so re-keying the result hands back
+        alphabetical names.  Sorted here is ``['d', 'g']``, so asking for
+        ``['g', 'd']`` and getting ``['g', 'd']`` is the whole assertion --
+        and the reversed ask is what makes it non-vacuous."""
+        assert list(rows({"kind": "score_directions",
+                          "names": ["g", "d"]})) == ["g", "d"]
+        assert list(rows({"kind": "score_directions",
+                          "names": ["d", "g"]})) == ["d", "g"]
+
+    def test_no_names_means_the_declared_order_not_the_sorted_one(self):
+        """inference.parameters declares g then d; sorted() would say d then
+        g.  An executor that filled ``names`` in for an absent key by sorting
+        the space would be caught here and nowhere else."""
+        assert list(rows({"kind": "score_directions"})) == ["g", "d"]
+
+    def test_one_row_per_scalar_degree_of_freedom(self):
+        out = rows({"kind": "score_directions", "names": ["g", "d"]})
+        assert out["g"].shape == (1, 128)
+        assert out["d"].shape == (1, 128)
+
+    def test_at_moves_the_derivative_the_rows_report(self):
+        """``d(data)/dd`` is ``g * gaussian``, so evaluating at ``g = 2.0``
+        instead of the declared init 1.0 scales the ``d`` row by exactly two:
+        measured max|row| 0.9898477 against 1.9796954.  Both are pinned, not
+        only the ratio -- a run that dropped ``at:`` returns the first row
+        twice, and one that rescaled the whole Jacobian keeps the ratio."""
+        base = rows({"kind": "score_directions", "names": ["d"]})
+        moved = rows({"kind": "score_directions", "names": ["d"],
+                      "at": {"g": 2.0}})
+        assert float(np.max(np.abs(base["d"]))) == pytest.approx(0.9898477,
+                                                                 rel=1e-5)
+        assert float(np.max(np.abs(moved["d"]))) == pytest.approx(1.9796954,
+                                                                  rel=1e-5)
+
+    def test_at_naming_an_undeclared_latent_is_refused_here_too(self):
+        """The same hole, closed on the other route.
+
+        ``_at_values`` takes the ParameterSpace as its third argument, so an
+        executor that skipped the call, or that handed it something without
+        ``.names``, loses this refusal on ONE kind and keeps it on the other.
+        Two routes, one helper, two tests.
+        """
+        with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
+            run_document(document({"kind": "score_directions",
+                                   "at": {"q": 1.0}}))
+        assert "it declares ['g', 'd']" in str(caught.value)
+
+    def test_rtol_belongs_to_identifiability_alone(self):
+        """The two diagnostics take different key sets, and the sweep says so
+        by naming what score_directions does take.  Anchored on that tail:
+        ``match="rtol"`` would be satisfied by any refusal mentioning the key,
+        including one raised because this exit had started accepting it."""
+        with pytest.raises(ConfigError,
+                           match=r"it takes \['at', 'names'\]") as caught:
+            run_document(document({"kind": "score_directions", "rtol": 0.6}))
+        assert "does not take ['rtol']" in str(caught.value)
+
+    def test_names_is_a_list_even_for_a_block_of_one(self):
+        with pytest.raises(ConfigError, match="non-empty list of latent"):
+            run_document(document({"kind": "score_directions", "names": "g"}))
+
+    def test_without_parameters_it_is_refused(self):
+        doc = document({"kind": "score_directions"})
+        doc["inference"] = {}
+        with pytest.raises(ConfigError, match="inference.parameters"):
+            run_document(doc)
