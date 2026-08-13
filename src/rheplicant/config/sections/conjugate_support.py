@@ -77,11 +77,13 @@ _SOLVE_PASSTHROUGH = tuple(key for key, _cast, _floor, _null in _SOLVER_KNOBS)
 #: key=None)`` -- so of these seven it can use exactly three: ``names`` and
 #: ``check`` (which build the block) and ``prior_std``.  It takes no
 #: ``prior_mean`` and none of the three CG knobs, because it runs power
-#: iteration rather than CG.  Task 6 therefore builds its own set from
-#: ``_BLOCK_KEYS | {"prior_std", "iterations"}`` rather than unioning onto
-#: this one, and it must NOT call :func:`_prior_kwargs`, which emits
-#: ``prior_mean`` whenever the document declares it and would reach
-#: ``condition_estimate`` as a TypeError.
+#: iteration rather than CG.  ``condition`` therefore builds its own set --
+#: shipped as ``_CONDITION_KEYS = _BLOCK_KEYS | {"prior_std", "iterations",
+#: "seed"}`` -- rather than unioning onto this one, and it does not call
+#: :func:`_prior_kwargs`, which emits ``prior_mean`` whenever the document
+#: declares it.  ``seed:`` is there because ``condition_estimate``'s ``key``
+#: is optional (``jax.Array | None = None``) and schema A29 names
+#: ``plan.estimate`` alone as the exit a seed is absent for -- never this one.
 _SOLVE_KEYS = _BLOCK_KEYS | _PRIOR_KEYS | frozenset(_SOLVE_PASSTHROUGH)
 
 

@@ -17,6 +17,13 @@ gives, and the two meet again at :func:`_gls_result` -- the one
 ``noise_from: gls`` route and ``conjugate.gls`` itself both reach, so that one
 condition has one message whichever exit found it.
 
+:func:`_run_condition` is separate again, and shares less with the three than
+they share with each other: ``condition_estimate`` reads no data, takes no
+``prior_mean`` and none of the CG knobs, and answers with a bare scalar.  What
+it does share is the opening -- the grouped block and the decided sigma -- so
+it rides :func:`_conjugate_block` with ``needs_observed=False`` rather than
+growing a second block builder.
+
 The import runs one way: this module imports ``conjugate_support`` and
 ``exit_support``, and neither imports it back.  Nothing here is re-exported
 from either of those, because two importable spellings of one function is how
@@ -29,10 +36,12 @@ from typing import Any
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.conjugate_support import (
+    _BLOCK_KEYS,
     _SOLVE_KEYS,
     _SOLVER_KNOBS,
     _conjugate_block,
     _knobs,
+    _one_prior,
     _prior_kwargs,
 )
 from rheplicant.config.sections.exit_support import (
@@ -84,6 +93,24 @@ _GCR_KEYS = _SOLVE_KEYS | frozenset(
 #: vocabulary.
 _GLS_KEYS = _SOLVE_KEYS | frozenset(
     {"acknowledge_unconverged_covariance", *_GLS_KNOBS})
+#: ``condition``'s own set, and the one member of the family built from
+#: :data:`~rheplicant.config.sections.conjugate_support._BLOCK_KEYS` rather
+#: than from :data:`_SOLVE_KEYS`.  Measured against the venv,
+#: ``condition_estimate(block, *, noise_std, prior_std=None, iterations=12,
+#: key=None)`` takes none of the three CG knobs and no ``prior_mean``: it runs
+#: power iteration, not CG, so of _SOLVE_KEYS' seven it can use exactly three
+#: (``names`` and ``check``, which build the operator, and ``prior_std``).
+#: ``seed`` is its own -- optional here, where ``conjugate.gcr`` requires one,
+#: because ``condition_estimate``'s ``key`` has a default and ``gcr_sample``'s
+#: has none (schema §4.7.9 lists all four; A29's row names ``plan.estimate``
+#: as the exit that REFUSES a seed).
+_CONDITION_KEYS = _BLOCK_KEYS | frozenset({"prior_std", "iterations", "seed"})
+#: The one knob it forwards, in :data:`_SOLVER_KNOBS`' 4-tuple shape so that
+#: one :func:`_knobs` call serves it too.  NOT nullable: ``maxiter: null`` and
+#: ``require_convergence: null`` are how the package spells "no cap" and "no
+#: guard", and power iteration has no such spelling -- ``iterations: null``
+#: would reach ``range(None)`` inside ``extreme_eigenvalues``.
+_CONDITION_KNOBS = (("iterations", int, 1, False),)
 
 
 def _width(run: Any, where: str) -> str:
@@ -511,3 +538,75 @@ def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     # whole suite is green with it removed).
     return found._replace(solution=block.as_dict(found.solution),
                           **_gls_record(found))
+
+
+@register("condition")
+def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+    """kappa for the block a conjugate exit would solve -- and no data at all.
+
+    ``condition_estimate`` (linear.py:1337) takes no ``observed`` and no
+    ``prior_mean``, and never calls ``_check_solve_arguments``: a block and a
+    decided sigma are the whole input, which is why :func:`_conjugate_block`
+    runs with ``needs_observed=False`` -- this is its one caller that does.  It
+    DOES run both noise refusals and ``_require_prior_std``, so the A27 gate
+    reaches it through :func:`_conjugate_block` and A51's mapping rule through
+    :func:`_one_prior`.
+
+    :func:`_prior_kwargs` is deliberately NOT called -- as defence in depth,
+    and the depth is worth stating honestly.  It emits ``prior_mean`` whenever
+    the document declares one, and ``condition_estimate`` has no such
+    parameter; but the refusal above runs BEFORE the sweep and before the
+    block, so on this route ``_prior_kwargs`` could never see a ``prior_mean``
+    to emit.  Measured: splatting it here instead leaves the whole suite
+    green, and no document can tell the two apart.  What shaping
+    ``prior_std`` alone through :func:`_one_prior` buys is independence from
+    that ordering -- if a later task relaxes the centre refusal, this exit
+    still cannot hand ``condition_estimate`` a keyword it does not take.
+
+    Its ``key`` is ``jax.Array | None = None``, defaulting internally to
+    ``jax.random.key(0)`` -- the opposite of ``gcr_sample``'s required
+    keyword-only key.  So ``seed:`` is OPTIONAL here and A29 does not make it
+    required: this is the one exit where that asymmetry runs the other way,
+    and an unseeded run is reproducible rather than arbitrary.
+
+    Returns the package's own scalar array, not a tuple and not a dict.
+    """
+    import jax
+
+    from rheplicant.config.draws import _seed_name, seed_for
+    from rheplicant.inference import condition_estimate
+
+    where = f"runs[{run.name!r}]"
+    # BEFORE the sweep on purpose: the sweep would fire first with the generic
+    # "does not take ['prior_mean']" and the reader would fix the symptom by
+    # deleting a key they had good reason to write.
+    if "prior_mean" in run.options:
+        raise ConfigError(
+            f"{where}: kind: condition does not take prior_mean: -- kappa is "
+            "the conditioning of A^T N^-1 A + S^-1, which the prior's WIDTH "
+            "sets and its centre does not, and condition_estimate has no "
+            "prior_mean parameter to pass it to. Drop it; prior_std: is the "
+            "knob that moves kappa. To see what the centre does, solve: "
+            "kind: conjugate.wiener takes prior_mean."
+        )
+    _sweep(run, _CONDITION_KEYS)
+    # `observed` is None here and is dropped rather than bound: this exit has
+    # no parameter to pass it to, and `on:` therefore decides nothing.
+    block, sigma, _ = _conjugate_block(run, built, where,
+                                       needs_observed=False)
+    # iterations travels through the family's one coercion path, so
+    # `iterations: "twelve"` is refused in the same words `maxiter: "many"` is;
+    # a knob the document omits is omitted from the call, and POWER_ITERATIONS
+    # (12) stands as the package's own default.
+    kwargs: dict[str, Any] = _knobs(run, _CONDITION_KNOBS)
+    if "prior_std" in run.options:
+        kwargs["prior_std"] = _one_prior(run, where, "prior_std",
+                                         run.options["prior_std"], block,
+                                         _space(run, built))
+    if "seed" in run.options:
+        # The NAME is resolved from the run and looked up in built.context, as
+        # _gcr_product does it: seed_for is what makes the integer the estimate
+        # consumes the same integer provenance.json reports.
+        kwargs["key"] = jax.random.key(
+            seed_for(_seed_name(dict(run.options), where), built.context))
+    return condition_estimate(block, noise_std=sigma, **kwargs)

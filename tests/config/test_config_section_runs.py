@@ -34,7 +34,7 @@ class TestGrammar:
 
     def test_the_still_deferred_kinds_are_refused_by_name(self):
         for kind in ("gradient",
-                     "identifiability", "score_directions", "condition",
+                     "identifiability", "score_directions",
                      "mmodes", "predict"):
             with pytest.raises(ConfigError, match="2C"):
                 parse_runs([{"kind": kind}])
