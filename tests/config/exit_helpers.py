@@ -18,7 +18,7 @@ residual 8.1e-08 and kappa 12.1.
 """
 
 from rheplicant.config.document import load_document
-from rheplicant.config.sections.runs import RunSpec
+from rheplicant.config.sections.runs import RunSpec, run_document
 from tests.config.test_config_document import synthetic_document
 
 SIGMA_K = 0.05
@@ -102,11 +102,12 @@ def conjugate_document(*runs, inference=None, parameters=None, noise=None,
                        prior=None, at=None, seeds=None, model=None):
     """The shared document, with the runs a test wants declared on it.
 
-    This is the ONE document builder the conjugate tests use.  Tasks 3, 4 and 5
-    all append to ``tests/config/test_config_exits_conjugate.py``, so a second
-    ``def conjugate_document`` in that module would SHADOW this import rather
-    than sit beside it, and every earlier task's call would start raising
-    TypeError from the later task's commit onward.
+    This is the ONE document builder the conjugate tests use, across both
+    ``tests/config/test_config_conjugate_shared.py`` and
+    ``tests/config/test_config_exits_conjugate.py``, and Tasks 5-6 append to
+    the second.  A second ``def conjugate_document`` in either module would
+    SHADOW this import rather than sit beside it, and every earlier task's
+    call would start raising TypeError from the later task's commit onward.
 
     ``model:`` replaces the whole model block (:data:`CONJUGATE_MODEL` by
     default) and ``inference:`` the whole inference block (:data:`ONE_LATENT`
@@ -231,3 +232,104 @@ def two_latent_document(run):
             "observed": {"from": "simulation",
                          "at": {"dep": 1.0, "c": 0.02}},
         })
+
+
+# --- The runs those documents carry, and the one way to execute them -------
+#
+# These live HERE rather than in a test module because the conjugate tests are
+# TWO modules now -- ``test_config_conjugate_shared.py`` for what never calls
+# run_document, ``test_config_exits_conjugate.py`` for what always does -- and
+# Tasks 5-6 append to the second.  A run template or a product helper copied
+# per module is how the copies drift apart.
+#
+# names: is REQUIRED -- ``_conjugate_block``'s ``_selected`` raises without it,
+# and ``test_names_is_required_and_says_why`` pins that refusal -- so both
+# templates carry one.  ``["g"]`` is :func:`wiener_document`'s and
+# :func:`gcr_document`'s own single latent; the :func:`two_latent_document`
+# call sites override it with ``["dep", "c"]`` or a deliberate sub-block.
+WIENER = {"kind": "conjugate.wiener", "width": "none", "names": ["g"]}
+GCR = {"kind": "conjugate.gcr", "names": ["g"],
+       "seed": {"from": "runtime.seeds.draws"}}
+
+# GAIN_LATENT -- the document's default latent, above -- is what
+# wiener_document() binds when a test passes no parameters=.  The same latent
+# under a prior tight enough that the prior curvature is two thirds of the
+# answer, which is what makes width: fisher's space= visible as a number
+# rather than as a fifth decimal place:
+TIGHT_GAIN = {"init": 1.0, "linear": True, "into": "gain.gain",
+              "prior": {"normal": {"loc": 1.0, "scale": 0.005}}}
+# Declared linear=True and demonstrably not: the prediction is a Gaussian in
+# frequency, so its CENTRE is the knob check_linearity refuses.
+CENTRE_LATENT = {"init": 75.0, "linear": True, "into": "global_signal.centre",
+                 "prior": {"normal": {"loc": 75.0, "scale": 10.0}}}
+
+
+def run_product(document, name="conjugate.wiener"):
+    """The named run of ``document``, executed, and its product.
+
+    ``name`` defaults to the run NAME an unnamed :data:`WIENER` gets: ``runs.py``
+    names a run after its kind when the entry declares no ``name:``.
+    """
+    return run_document(document)[name].product
+
+
+# --- What a DRAW is measured against ---------------------------------------
+#
+# A prior of 0.01 against a likelihood of 0.015872 makes the posterior
+# 0.0084608 -- a width that is NEITHER of its parents, so a draw taken at the
+# prior's width or at the likelihood's is a visibly different number.  All
+# three were measured through run_document on gcr_document()'s own model and
+# prior, via kind: fisher:
+#     {"kind": "fisher"}               -> covariance.sigma("g") = 0.015872
+#     {"kind": "fisher", "space": True} -> 0.0084608
+# model=WIENER_MODEL is not optional: on CONJUGATE_MODEL, which adds
+# uniform_sky, the same two come back 0.00045170 and 0.00045124 -- a fraction
+# of a percent apart, which no scatter test could tell apart.
+TIGHT = {"normal": {"loc": 1.0, "scale": 0.01}}
+PRIOR_SIGMA = 0.01
+LIKELIHOOD_SIGMA = 0.015872
+POSTERIOR_SIGMA = 0.0084608
+
+# 3.5714286 MHz over 8 channels is the synthetic document's own grid spacing,
+# and 2 s its own sample step.  channel_width/integration_time are spelled out
+# because their {from: observation} default reads
+# observation.time.channel_width, which this document does not declare.  The
+# name is GCR_RADIOMETER, not RADIOMETER: this module already exports a
+# RADIOMETER at a different bandwidth, and every number measured under this
+# one would move if the two were confused.
+GCR_RADIOMETER = {"kind": "radiometer",
+                  "channel_width": {"value": 3.5714286, "unit": "MHz"},
+                  "integration_time": {"value": 2.0, "unit": "s"},
+                  "include_logdet": False}
+
+
+def gcr_document(run=None, **kwargs):
+    """The shared one-latent document with a ``conjugate.gcr`` run on top.
+
+    ``model=WIENER_MODEL``, ``prior=TIGHT`` and ``seeds={"draws": 11}`` are
+    pinned rather than left to :func:`conjugate_document`'s defaults, which are
+    :data:`CONJUGATE_MODEL` (it carries ``uniform_sky``), each latent's own
+    ``scale: 0.5``, and no ``runtime.seeds`` at all.  Every number this
+    document is measured at -- :data:`LIKELIHOOD_SIGMA`,
+    :data:`POSTERIOR_SIGMA` and the draw scatter around them -- was measured
+    without the first and with the second; a named seed is what
+    :data:`GCR`'s ``seed: {from: runtime.seeds.draws}`` resolves against.
+
+    ``run`` is merged over :data:`GCR`, so a caller adds ``n_draws:`` or
+    ``noise_from:`` without restating ``names:`` or ``seed:``; every other
+    keyword goes to :func:`conjugate_document` unchanged.
+    """
+    kwargs.setdefault("model", WIENER_MODEL)
+    kwargs.setdefault("prior", TIGHT)
+    kwargs.setdefault("seeds", {"draws": 11})
+    return conjugate_document({**GCR, **(run or {})}, **kwargs)
+
+
+def gcr_product(run=None, **kwargs):
+    """:func:`gcr_document`, executed, and the draw product it hands back.
+
+    The pair is one call because almost every gcr test wants both halves;
+    the tests that need the DOCUMENT alone -- the ones that delete a key from
+    the run before executing it -- reach for :func:`gcr_document` directly.
+    """
+    return run_product(gcr_document(run, **kwargs), "conjugate.gcr")
