@@ -1,5 +1,6 @@
 """The exit registry, the reuse seam, and the ordered execution loop."""
 
+import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
@@ -8,10 +9,15 @@ from rheplicant.config.sections import runs as runs_module
 from rheplicant.config.sections.exit_support import (
     EXECUTORS,
     _binds,
+    _decided_sigma,
+    _noise,
     _number,
+    _observed,
+    _on,
     register,
     reuse_of,
 )
+from rheplicant.config.sections.observed import ObservedBuild
 from rheplicant.config.sections.runs import (
     _KINDS,
     _KINDS_2D,
@@ -19,6 +25,13 @@ from rheplicant.config.sections.runs import (
     RunSpec,
     parse_runs,
     run_document,
+)
+from tests.config.exit_helpers import (
+    FROZEN_FRACTION,
+    HOMOSCEDASTIC,
+    fanned_built,
+    fanned_document,
+    spec,
 )
 from tests.config.test_config_document import synthetic_document
 
@@ -265,6 +278,128 @@ class TestARunResultCarriesItsVariant:
         assert results["a"].product is None
         assert isinstance(results["a"].error, ConfigError)
         assert results["a"].variant == "unity_gain"
+
+
+class TestTheObservationFan:
+    """A run's ``on:`` chooses its own frozen sigma, not the primary's.
+
+    ``radiometer_frozen`` with ``source: observed`` decides the sigma FROM
+    the data, so ``night`` -- simulated at twice ``primary``'s truth -- has
+    twice the sigma in every channel.  Before this task there was one sigma
+    per document and ``_noise`` had no idea a run carried an ``on:`` at all,
+    so a run on ``night`` was weighed with half the sigma it should have
+    been and nothing anywhere said so.  Measured at channel [0, 4]:
+    0.00052495 and 0.00104989.
+    """
+
+    PRIMARY = 0.0005249460227787495
+    NIGHT = 0.001049892045557499
+
+    def test_noise_hands_each_run_its_own_observations_sigma(self):
+        # Two pins, not one: a `_noise` that always returned NIGHT would
+        # satisfy either alone.
+        built = fanned_built()
+        assert float(_noise(spec(kind="fisher"), built)[0, 4]) == (
+            pytest.approx(self.PRIMARY, rel=1e-6))
+        assert float(_noise(spec(kind="fisher", on="night"), built)[0, 4]) == (
+            pytest.approx(self.NIGHT, rel=1e-6))
+
+    def test_the_decided_sigma_route_selects_the_same_way(self):
+        """The twin accessor -- every conjugate exit reaches its sigma here.
+
+        `_decided_sigma` composes over `_noise`, so a fan written into one
+        and not the other is the hole-on-one-route shape.  A frozen sigma
+        passes through `_decided_sigma` untouched, so the numbers are the
+        same two, and that is the point: they must be.
+        """
+        built = fanned_built()
+        assert float(_decided_sigma(spec(), built)[0, 4]) == pytest.approx(
+            self.PRIMARY, rel=1e-6)
+        assert float(_decided_sigma(spec(on="night"), built)[0, 4]) == (
+            pytest.approx(self.NIGHT, rel=1e-6))
+
+    def test_noise_and_observed_agree_about_which_observation(self):
+        """One resolver, or a run is weighed with one and compared to another.
+
+        The two accessors are read by different exits (`fisher` takes only
+        the sigma, `optimize` only the data, `conjugate.*` both), so nothing
+        else in the suite can see them disagree.  The cross pairing at the
+        foot is what makes the agreement an assertion: without it, "sigma
+        equals |some observation| * frac" is satisfied by the bug.
+        """
+        built = fanned_built()
+        for name in ("primary", "night"):
+            run = spec(kind="fisher", on=name)
+            assert jnp.allclose(_noise(run, built),
+                                jnp.abs(_observed(run, built))
+                                * FROZEN_FRACTION)
+        primary, night = spec(kind="fisher"), spec(kind="fisher", on="night")
+        assert not jnp.allclose(_noise(primary, built),
+                                jnp.abs(_observed(night, built))
+                                * FROZEN_FRACTION)
+
+    def test_the_shared_resolver_reads_primary_as_the_documents_own_name(self):
+        """``on: primary`` on a document whose one observation is not.
+
+        ``build_observed`` calls a LONE entry the primary whatever it is
+        named (``observed.py:206-211``), so ``on:``'s default has to travel
+        through that indirection -- and ``_noise`` now leans on it as hard
+        as ``_observed`` always did.  The two-observation fixture above
+        cannot see this: its primary IS named ``primary``, so there the
+        indirection is a no-op and ``by_observation[run.on]`` would answer
+        the same.  Here it would raise a bare KeyError on a document the
+        layer accepts.
+        """
+        observed = ObservedBuild(entries={"night": jnp.asarray([[1.0]])},
+                                 primary="night", at={}, records={})
+        assert _on(spec(kind="fisher"), observed) == "night"
+        assert _on(spec(kind="fisher", on="night"), observed) == "night"
+
+    def test_an_unknown_on_is_refused_rather_than_silently_the_primary(self):
+        """The name the sigma is chosen by is checked where it is used.
+
+        Falling back to the primary for a name the document does not declare
+        is the original bug wearing a typo, so `_noise` refuses -- in
+        `_observed`'s own words, because they resolve through the same
+        helper and a second wording is a second contract.
+        """
+        with pytest.raises(ConfigError, match="names no observation") as got:
+            _noise(spec(kind="fisher", on="dusk"), fanned_built())
+        assert "['night', 'primary']" in str(got.value)
+        assert str(got.value).startswith("runs['fisher']:")
+
+    def test_a_model_noise_kind_is_untouched_by_on(self):
+        """Only the frozen sigma fans, and this is what says "only".
+
+        A homoscedastic document has ONE model for the whole document, so
+        both runs get the same object -- not an equal one.  An implementation
+        that fanned every kind off `observed.entries` would return an array
+        here and fail the identity.
+        """
+        built = fanned_built(noise=HOMOSCEDASTIC)
+        assert (_noise(spec(kind="fisher"), built)
+                is _noise(spec(kind="fisher", on="night"), built))
+
+    def test_the_fan_reaches_the_answer_a_run_returns(self):
+        """The feature's own thesis: it must move a NUMBER, from a document.
+
+        `kind: fisher` reads the sigma and never touches observed data, so
+        its `on:` does exactly one thing -- and the Fisher information is
+        J^T N^-1 J, so a sigma twice as large is a width twice as wide.
+        Measured today, WITHOUT the fan, both of these come back
+        9.375001536682248e-05: the accessor tests above are unit tests of a
+        seam, and this is the one assertion that says the seam is wired to
+        the answer.
+        """
+        narrow = run_document(fanned_document({"name": "cov",
+                                               "kind": "fisher"}))
+        wide = run_document(fanned_document({"name": "cov", "kind": "fisher",
+                                             "on": "night"}))
+        narrow_g = float(narrow["cov"].product["covariance"].sigma("g"))
+        wide_g = float(wide["cov"].product["covariance"].sigma("g"))
+        assert narrow_g == pytest.approx(9.375001536682248e-05, rel=1e-5)
+        assert wide_g == pytest.approx(1.8750003073364496e-04, rel=1e-5)
+        assert wide_g / narrow_g == pytest.approx(2.0, rel=1e-6)
 
 
 class TestTheDeferredKindsNameTheirPlan:

@@ -20,7 +20,12 @@ from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.paths import resolve_path_on
 from rheplicant.config.resources import check_unknown_keys
-from rheplicant.config.sections.noise import NoiseBuild, build_noise, freeze_sigma
+from rheplicant.config.sections.noise import (
+    NoiseBuild,
+    build_noise,
+    freeze_sigma,
+    freeze_sigmas,
+)
 from rheplicant.config.sections.observed import ObservedBuild, build_observed
 from rheplicant.config.sections.parameters import parse_latents
 from rheplicant.config.sections.transforms import build_space
@@ -216,12 +221,16 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                     "from the primary observed data, and this document "
                     "declares none (or several with no primary)."
                 )
-            reference = observed.entries[observed.primary]
+            noise = freeze_sigmas(noise, observed.entries,
+                                  primary=observed.primary)
         else:
+            # source: prediction_at_init reads the TWIN, not the data, so it
+            # is ONE sigma however many observations the document declares
+            # and there is nothing per-observation to fan.  Fanning it would
+            # move the sigma onto the data behind the document's back.
             bound = (space.bind(fit_twin, dict(space.initial_values()))
                      if space is not None else fit_twin)
-            reference = bound(state).data
-        noise = freeze_sigma(noise, reference)
+            noise = freeze_sigma(noise, bound(state).data)
     truth, omitted = _derive_truth(parsed, observed, twin, fit_twin)
     for name, node in (section.get("truth") or {}).items():
         if parsed is None or name not in parsed:

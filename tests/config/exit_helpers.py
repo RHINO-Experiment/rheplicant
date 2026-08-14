@@ -214,9 +214,18 @@ def conjugate_built(*runs, **document):
     return load_document(conjugate_document(*runs, **document))
 
 
-def spec(kind="conjugate.wiener", **options):
-    """A RunSpec straight to a helper, without going through parse_runs."""
-    return RunSpec(name=kind, kind=kind, variant=None, on="primary",
+def spec(kind="conjugate.wiener", *, on="primary", **options):
+    """A RunSpec straight to a helper, without going through parse_runs.
+
+    ``on`` is keyword-only and lands on the SPEC, not among the
+    kind-specific options.  Before it existed, ``spec(on="night")`` built
+    ``RunSpec(on="primary", options={"on": "night"})`` -- measured -- so a
+    test written that way read the PRIMARY's sigma while its name claimed
+    the secondary's, and passed either way.  No caller passes ``on`` as an
+    option today (measured: zero), so making it keyword-only takes nothing
+    away.
+    """
+    return RunSpec(name=kind, kind=kind, variant=None, on=on,
                    expect="ok", options=dict(options))
 
 
@@ -564,3 +573,58 @@ def diagnostic_rows(run, parameters=None):
     """One ``score_directions`` exit -> its ``{latent: (size, n_data)}``."""
     return run_product(diagnostic_document(run, parameters),
                        "score_directions")
+
+
+# --- What the observation FAN is measured on --------------------------------
+#
+# `radiometer_frozen` with `source: observed` decides its sigma FROM the data,
+# so a document with two observations has TWO sigmas -- and a run's `on:` says
+# which of them weighs its residuals.  Every other noise kind is one model or
+# one array for the whole document, and `source: prediction_at_init` reads the
+# twin, so this is the one shape in the layer that fans at all.
+
+#: Twice :data:`TRUTH_G`, so ``night``'s data is exactly twice ``primary``'s
+#: and so is its frozen sigma.  A fixture whose two sigmas were EQUAL could
+#: not tell the fan from the bug it replaces -- which is why the truths differ
+#: rather than, say, the two entries' channel widths.
+TRUTH_NIGHT = 3.0
+
+TWO_OBSERVED = {
+    "parameters": {"g": GAIN_LATENT},
+    "noise": FROZEN,
+    # `twin: fit` is spelled out on BOTH entries: `_repaired` supplies that
+    # default only for the single-observation form (it looks for a top-level
+    # `from:`), and a named mapping without it simulates from the FULL twin,
+    # whose NoiseOperator makes the data a noise realisation and every exact
+    # ratio below a near miss.
+    "observed": {
+        "primary": {"from": "simulation", "twin": "fit",
+                    "at": {"g": TRUTH_G}},
+        "night": {"from": "simulation", "twin": "fit",
+                  "at": {"g": TRUTH_NIGHT}},
+    },
+}
+
+#: 1/sqrt(channel_width * integration_time) for :data:`FROZEN` -- the factor
+#: ``freeze_sigma`` multiplies |reference| by.  Bound here so a test can say
+#: "this sigma is THIS observation's" rather than "this sigma is some array".
+FROZEN_FRACTION = 1.0 / (CHANNEL_WIDTH_HZ * INTEGRATION_TIME_S) ** 0.5
+
+
+def fanned_document(run, *, noise=None):
+    """The two-observation document a run's ``on:`` can actually choose in.
+
+    ``noise`` swaps :data:`FROZEN` out, which is how a test asks what the
+    fan does NOT do: under a model kind there is one noise for the document
+    and ``on:`` chooses nothing.
+    """
+    block = dict(TWO_OBSERVED)
+    if noise is not None:
+        block["noise"] = noise
+    return conjugate_document(run, model=WIENER_MODEL, inference=block)
+
+
+def fanned_built(run=None, *, noise=None):
+    """:func:`fanned_document`, built -- the ``built`` an accessor receives."""
+    return load_document(fanned_document(run or {"kind": "forward"},
+                                         noise=noise))

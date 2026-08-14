@@ -116,8 +116,65 @@ def _space(run: Any, built: Any) -> Any:
     return space
 
 
+def _on(run: Any, observed: Any) -> str:
+    """The observation ``run.on`` names, resolved through ``"primary"``.
+
+    ONE resolver, because two accessors reading ``on:`` two ways is exactly
+    how a run comes to be weighed with one observation's sigma and compared
+    against another's -- which is the bug the frozen sigma had until this
+    task.  The refusal is worded once here rather than per accessor, so the
+    two cannot drift.
+    """
+    name = run.on
+    if name == "primary" and observed.primary is not None:
+        name = observed.primary
+    if name not in observed.entries:
+        raise ConfigError(
+            f"runs[{run.name!r}]: on: {run.on!r} names no observation; this "
+            f"document declares {sorted(observed.entries)}."
+        )
+    return name
+
+
 def _noise(run: Any, built: Any) -> Any:
-    noise = decided_noise(built.inference.noise)
+    """The noise this run weighs with -- ITS observation's, not the primary's.
+
+    UNCHANGED SIGNATURE: the fan is a behavioural change, not a new
+    argument.  Measured, ``_noise(run, built)`` has SIX call sites in
+    ``src`` -- ``exits.py:54`` and ``:229``, ``diagnostics.py:303``,
+    ``conjugate.py:347``, and :func:`_decided_sigma`/:func:`_decided_model`
+    here, through which every conjugate exit reaches its own -- and a new
+    parameter would mean editing all six in a task that is about none of
+    them, and every conjugate caller would need it threaded through as
+    well.  ``forward``, ``identifiability``, ``score_directions``, ``mmodes``
+    and ``predict`` never call it at all, so "one accessor per exit" was never
+    true of this function.
+
+    Only ``radiometer_frozen`` with ``source: observed`` fans at all, and
+    ``by_observation`` is how this function knows: every other kind is one
+    model or one array for the whole document, and ``source:
+    prediction_at_init`` reads the TWIN, so it has nothing per-observation
+    to fan.  When the mapping exists, so does ``inference.observed`` with a
+    primary -- ``build_inference`` refuses the frozen build otherwise -- so
+    the resolution below cannot meet a None.
+
+    An ``on:`` the document does not declare is refused HERE, where a sigma
+    would otherwise have to be chosen for it -- which means ONLY on the
+    fanned kind.  Measured on a two-observation document, ``on: 'dusk'``
+    reaches this function and returns a sigma under BOTH unfanned shapes:
+    a model kind (``homoscedastic``), and ``radiometer_frozen`` with
+    ``source: prediction_at_init``, which is frozen but not fanned because
+    it reads the twin.  Neither resolves the name, so neither can reject it.
+    ``_observed`` refuses the typo in all three cases, so only an exit that
+    takes the sigma alone -- ``fisher`` -- can swallow one.  Catching it on
+    every kind is a whole-document check over ``runs[].on`` against
+    ``inference.observed``, which is Plan 3's static pass rather than this
+    accessor's.
+    """
+    inference = built.inference
+    if inference.noise.by_observation is not None:
+        return inference.noise.by_observation[_on(run, inference.observed)]
+    noise = decided_noise(inference.noise)
     if noise is None:
         raise ConfigError(
             f"runs[{run.name!r}]: kind: {run.kind} weighs residuals with "
@@ -134,15 +191,7 @@ def _observed(run: Any, built: Any) -> Any:
             f"runs[{run.name!r}]: kind: {run.kind} compares against "
             "inference.observed, and this document declares none."
         )
-    name = run.on
-    if name == "primary" and observed.primary is not None:
-        name = observed.primary
-    if name not in observed.entries:
-        raise ConfigError(
-            f"runs[{run.name!r}]: on: {run.on!r} names no observation; this "
-            f"document declares {sorted(observed.entries)}."
-        )
-    return observed.entries[name]
+    return observed.entries[_on(run, observed)]
 
 
 def _passthrough(options: Mapping, keys: tuple[str, ...]) -> dict:

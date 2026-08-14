@@ -136,6 +136,79 @@ class TestFrozenSequencing:
         assert jnp.allclose(build.noise.sigma, expected)
         assert not jnp.allclose(build.noise.sigma, decoy)
 
+    #: NOT ``TWO_OBSERVED``.  ``exit_helpers.py`` binds a module-level
+    #: ``TWO_OBSERVED`` with DIFFERENT contents (it carries ``parameters`` and
+    #: ``noise`` as well), and two names for two things one section apart is
+    #: the HOMOSCEDASTIC shape 2C paid for.  Nothing shadows today -- this
+    #: module imports nothing from ``exit_helpers`` -- and the name is
+    #: different anyway so that the day it does, it is a NameError and not a
+    #: wrong array.
+    OBSERVED_PAIR = {"primary": {"from": "simulation", "at": {"g": 1.5}},
+                     "night": {"from": "simulation", "at": {"g": 3.0}}}
+
+    def test_source_observed_freezes_one_sigma_per_observation(self):
+        """Two observations, two sigmas, each decided from its OWN data.
+
+        `g` scales the whole prediction, so `night` at 3.0 against the
+        primary's 1.5 is exactly twice the primary's data in every channel
+        (measured) and so is its sigma.  A build that froze once and copied
+        the array under both names passes the first assertion and fails the
+        last, which is why the last one is there.
+        """
+        import jax.numpy as jnp
+
+        build = infer({"parameters": PARAMS, "noise": self.NOISE,
+                       "observed": self.OBSERVED_PAIR})
+        entries = build.observed.entries
+        per = build.noise.by_observation
+        assert sorted(per) == ["night", "primary"]
+        for name in ("primary", "night"):
+            assert jnp.allclose(per[name], jnp.abs(entries[name]) * 0.25)
+        assert jnp.allclose(per["night"], 2.0 * per["primary"])
+        assert not jnp.allclose(per["night"], per["primary"])
+
+    def test_prediction_at_init_freezes_one_sigma_and_fans_nothing(self):
+        """The other source reads the TWIN, so there is nothing to fan.
+
+        Its reference is the prediction at the declared inits -- g = 1.0 --
+        which is NEITHER observation's data: two thirds of the primary's
+        magnitude and one third of night's, because both were simulated from
+        it.  A fan written to freeze off `observed.entries` whatever the
+        source says would silently move this sigma onto the data, and the two
+        divisions below are what catch that.  Measured: 0.12373096 against
+        the primary's own 0.18559645 at channel [0, 4].
+        """
+        import jax.numpy as jnp
+
+        build = infer({"parameters": PARAMS,
+                       "noise": {**self.NOISE,
+                                 "source": "prediction_at_init"},
+                       "observed": self.OBSERVED_PAIR})
+        entries = build.observed.entries
+        assert build.noise.by_observation is None
+        assert build.noise.sigma is not None
+        assert jnp.allclose(build.noise.sigma,
+                            jnp.abs(entries["primary"]) * 0.25 / 1.5)
+        assert jnp.allclose(build.noise.sigma,
+                            jnp.abs(entries["night"]) * 0.25 / 3.0)
+        assert not jnp.allclose(build.noise.sigma,
+                                jnp.abs(entries["primary"]) * 0.25)
+
+    def test_several_observations_with_no_primary_are_still_refused(self):
+        """The fan does not make a primary optional.
+
+        `sigma` is still the primary's -- it is what `decided_noise` answers
+        with when no run is in hand -- so a document with several
+        observations and no entry named `primary` has no default to freeze,
+        and the refusal it already gets stands.  Recorded here because "the
+        sigma is now per observation" reads exactly like a licence to drop
+        it.
+        """
+        with pytest.raises(ConfigError, match="or several with no primary"):
+            infer({"parameters": PARAMS, "noise": self.NOISE,
+                   "observed": {"day": {"from": "simulation"},
+                                "night": {"from": "simulation"}}})
+
 
 class TestChecks:
     def test_modes_and_reasons(self):

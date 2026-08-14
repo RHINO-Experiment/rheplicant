@@ -28,7 +28,8 @@ from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.observation import ObservationBuild, _dimensioned
 from rheplicant.config.values import resolve_value
 
-__all__ = ["NoiseBuild", "build_noise", "decided_noise", "freeze_sigma"]
+__all__ = ["NoiseBuild", "build_noise", "decided_noise", "freeze_sigma",
+           "freeze_sigmas"]
 
 _KIND_KEYS = {
     "none": frozenset({"kind"}),
@@ -41,13 +42,26 @@ _KIND_KEYS = {
 
 
 class NoiseBuild(NamedTuple):
-    """What ``inference.noise`` declared: a model, or a sigma to be decided."""
+    """What ``inference.noise`` declared: a model, or a sigma to be decided.
+
+    ``by_observation`` is the frozen sigma of EVERY observation, keyed by
+    its name, and is None for every kind that has nothing to fan -- which is
+    all of them but ``radiometer_frozen`` with ``source: observed``, the one
+    kind whose sigma is decided from the DATA.  ``sigma`` stays the
+    primary's, and on a one-observation document it is the same object under
+    the one key, so nothing that reads ``sigma`` moved.
+
+    The name is ``by_observation`` and not ``sigmas`` on purpose: one letter
+    from ``sigma`` is one typo from a test that reads the wrong field and
+    passes.
+    """
 
     kind: str
     model: Any = None
     sigma: Any = None
     include_logdet: bool | None = None
     frozen: dict[str, float] | None = None
+    by_observation: dict[str, Any] | None = None
 
 
 def _fact(where: str, node: Any, observation: ObservationBuild,
@@ -193,6 +207,29 @@ def freeze_sigma(build: NoiseBuild, reference: Any) -> NoiseBuild:
     fractional = 1.0 / (facts["channel_width_hz"]
                         * facts["integration_time_s"]) ** 0.5
     return build._replace(sigma=base * fractional)
+
+
+def freeze_sigmas(build: NoiseBuild, references: Mapping[str, Any], *,
+                  primary: str) -> NoiseBuild:
+    """One frozen sigma per observation, and the primary's as the default.
+
+    ``source: observed`` decides the sigma FROM the data, so a document with
+    several observations has several sigmas -- and a run's ``on:`` says
+    which of them weighs its residuals.  Freezing once off the primary and
+    handing that array to every run is what this replaces: measured on a
+    two-observation document whose second entry is twice the first, a run on
+    the second was weighed with HALF the sigma it should have been, and the
+    only thing that changed was a number nobody could see.
+
+    ``sigma`` stays the primary's, so :func:`decided_noise` -- which takes
+    no run -- is unchanged, and on one observation this returns that same
+    array under that same name.  The arithmetic is :func:`freeze_sigma`'s,
+    called once per reference rather than reimplemented: a floor that
+    clipped in one function and not the other is the shape this avoids.
+    """
+    sigmas = {name: freeze_sigma(build, reference).sigma
+              for name, reference in references.items()}
+    return build._replace(sigma=sigmas[primary], by_observation=sigmas)
 
 
 def decided_noise(build: NoiseBuild) -> Any:

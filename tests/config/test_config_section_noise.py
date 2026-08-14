@@ -4,7 +4,12 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
-from rheplicant.config.sections.noise import build_noise, decided_noise, freeze_sigma
+from rheplicant.config.sections.noise import (
+    build_noise,
+    decided_noise,
+    freeze_sigma,
+    freeze_sigmas,
+)
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
 from tests.config.inference_helpers import context
@@ -218,3 +223,75 @@ class TestFrozen:
     def test_an_unfrozen_build_refuses_to_decide(self):
         with pytest.raises(ConfigError, match="frozen"):
             decided_noise(self.frozen())
+
+    def test_freeze_sigmas_decides_one_per_observation(self):
+        # 1/sqrt(16*1) = 0.25 on both, off DIFFERENT references: the fan is
+        # about which array each sigma is decided FROM, so two references
+        # sharing a magnitude could not tell it from freezing once.  The
+        # negative entries are deliberate -- |X| is what freeze_sigma takes.
+        build = freeze_sigmas(self.frozen(),
+                              {"primary": jnp.asarray([[-100.0, 4.0]]),
+                               "night": jnp.asarray([[8.0, -40.0]])},
+                              primary="primary")
+        assert sorted(build.by_observation) == ["night", "primary"]
+        assert float(build.by_observation["primary"][0, 0]) == pytest.approx(
+            25.0)
+        assert float(build.by_observation["primary"][0, 1]) == pytest.approx(
+            1.0)
+        assert float(build.by_observation["night"][0, 0]) == pytest.approx(2.0)
+        assert float(build.by_observation["night"][0, 1]) == pytest.approx(
+            10.0)
+
+    def test_the_floor_clips_every_observations_sigma(self):
+        # The floor is the half of `freeze_sigma`'s arithmetic that reusing
+        # it is meant to buy, and the reuse is a claim no other test here can
+        # see: every other `freeze_sigmas` call in this module declares no
+        # floor, so an inline reimplementation applying the fractional factor
+        # and dropping the clip passed all of tests/config (measured).
+        # `floor:` is a legal radiometer_frozen key, so the path is
+        # user-reachable on a two-observation document.
+        build = freeze_sigmas(self.frozen(floor={"value": 8.0, "unit": "K"}),
+                              {"primary": jnp.asarray([[-100.0, 4.0]]),
+                               "night": jnp.asarray([[2.0, -40.0]])},
+                              primary="primary")
+        per = build.by_observation
+        # Each reference dips BELOW the floor in one channel: |4.0| -> 8.0 ->
+        # 2.0 and |2.0| -> 8.0 -> 2.0, where unclipped they would be 1.0 and
+        # 0.5.  Both entries are pinned, so a fan that clipped only the
+        # primary's reference fails on night.
+        assert float(per["primary"][0, 1]) == pytest.approx(2.0)
+        assert float(per["night"][0, 0]) == pytest.approx(2.0)
+        # And the channels ABOVE the floor keep their own magnitude, so this
+        # cannot be satisfied by clamping every channel to the floor.
+        assert float(per["primary"][0, 0]) == pytest.approx(25.0)
+        assert float(per["night"][0, 1]) == pytest.approx(10.0)
+
+    def test_the_default_sigma_is_the_primarys_own_array(self):
+        # `decided_noise` takes no run, so it must keep answering with the
+        # primary's -- and with the SAME array, or `decided_noise(build) is
+        # build.sigma` above stops saying anything.  `is`, not allclose:
+        # identity is what makes a one-observation document bit-identical.
+        build = freeze_sigmas(self.frozen(),
+                              {"primary": jnp.asarray([[-100.0, 4.0]]),
+                               "night": jnp.asarray([[8.0, -40.0]])},
+                              primary="primary")
+        assert build.sigma is build.by_observation["primary"]
+        assert decided_noise(build) is build.sigma
+
+    def test_one_observation_freezes_exactly_what_freeze_sigma_did(self):
+        # The regression claim, as an assertion: with one entry the fan
+        # returns the single-reference answer under the single name.
+        reference = jnp.asarray([[-100.0, 4.0]])
+        one = freeze_sigma(self.frozen(), reference)
+        fanned = freeze_sigmas(self.frozen(), {"primary": reference},
+                               primary="primary")
+        assert list(fanned.by_observation) == ["primary"]
+        assert jnp.array_equal(fanned.sigma, one.sigma)
+
+    def test_an_unfanned_build_carries_no_mapping(self):
+        # `by_observation` is None, not {} -- `_noise` branches on it, and an
+        # empty dict is falsy in exactly the way that makes the two branches
+        # agree by accident.
+        assert self.frozen().by_observation is None
+        assert freeze_sigma(self.frozen(),
+                            jnp.asarray([[1.0]])).by_observation is None
