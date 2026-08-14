@@ -20,7 +20,7 @@ from rheplicant.config.sections.exit_support import (
 from rheplicant.config.sections.observed import ObservedBuild
 from rheplicant.config.sections.runs import (
     _KINDS,
-    _KINDS_2D,
+    _KINDS_PLAN4,
     RunResult,
     RunSpec,
     parse_runs,
@@ -403,15 +403,29 @@ class TestTheObservationFan:
 
 
 class TestTheDeferredKindsNameTheirPlan:
-    def test_npe_is_all_that_is_left_of_plan_2d(self):
-        assert _KINDS_2D == ("npe",)
-        for kind in _KINDS_2D:
-            with pytest.raises(ConfigError, match="2D"):
+    """One deferral tuple is left, and it names its plan.
+
+    ``_KINDS_2C`` went when ``predict`` shipped and ``_KINDS_2D`` when ``npe``
+    did -- both DELETED rather than emptied, because ``_one`` tests the
+    deferral tuples BEFORE ``_KINDS`` and an empty one is a dead branch that
+    reads to the next author as an outstanding promise.
+    ``test_the_kind_tables_are_pairwise_disjoint`` above discovers whatever is
+    left by prefix, so it needs no edit here.
+    """
+
+    def test_compare_and_benchmark_are_plan_4(self):
+        assert _KINDS_PLAN4 == ("compare", "benchmark")
+        for kind in _KINDS_PLAN4:
+            with pytest.raises(ConfigError, match="Plan 4"):
                 parse_runs([{"kind": kind}])
 
-    def test_nuts_has_left_the_tuple_and_is_runnable(self):
-        assert "nuts" not in _KINDS_2D
-        assert parse_runs([{"kind": "nuts"}])[0].kind == "nuts"
+    def test_nuts_and_npe_have_left_and_the_tuple_has_gone_with_them(self):
+        assert not hasattr(runs_module, "_KINDS_2D"), (
+            "runs._KINDS_2D still exists; the last task to move a kind out "
+            "of it deletes the tuple and its refusal branch."
+        )
+        for kind in ("nuts", "npe"):
+            assert parse_runs([{"kind": kind}])[0].kind == kind
 
 
 class TestACountIsAWholeNumber:

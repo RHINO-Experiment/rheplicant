@@ -224,7 +224,7 @@ class TestThePlan2CSurface:
             (spec,) = parse_runs([{"kind": kind}])
             assert spec.kind == kind, f"{kind} is not reachable by a document"
             assert kind in EXECUTORS, f"{kind} declares no executor"
-        assert len(_KINDS) == len(set(_KINDS)) == 15, sorted(_KINDS)
+        assert len(_KINDS) == len(set(_KINDS)) == 16, sorted(_KINDS)
 
     def test_nothing_is_deferred_to_plan_2c_any_more(self):
         """The audit of Tasks 2-11: the deferral tuple itself must be gone.
@@ -238,7 +238,6 @@ class TestThePlan2CSurface:
             "runs._KINDS_2C still exists; the last task to move a kind out of "
             "it deletes the tuple and its refusal branch."
         )
-        assert runs._KINDS_2D == ("npe",)
 
 
 class TestThePagesSayWhatTheLayerDoes:
@@ -334,11 +333,13 @@ class TestThePagesSayWhatTheLayerDoes:
         """The other direction: silence is not honesty either.
 
         Deleting the deferral sentence would satisfy the test above and leave
-        a reader to discover ``kind: nuts`` by being refused.
+        a reader to discover ``kind: compare`` by being refused.  Only
+        ``_KINDS_PLAN4`` is left to defer: ``_KINDS_2C`` went with ``predict``
+        and ``_KINDS_2D`` with ``npe``.
         """
-        from rheplicant.config.sections.runs import _KINDS_2D, _KINDS_PLAN4
+        from rheplicant.config.sections.runs import _KINDS_PLAN4
 
-        deferred = set(_KINDS_2D) | set(_KINDS_PLAN4)
+        deferred = set(_KINDS_PLAN4)
         for name in self.PAGES:
             covered = set()
             for paragraph in _paragraphs(_page(name)):

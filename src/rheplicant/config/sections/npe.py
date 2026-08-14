@@ -53,9 +53,13 @@ later task may touch, and it is EXTENDED rather than rebound.
 imports it added to the ``exit_support`` list and the ``_draw_key``/
 ``_sampled_space`` imports it added from ``posterior_support``:
 :func:`_npe_spec`, :func:`_simulate_bank` and :func:`_estimator`.  **Task 8
-binds ``NpeProduct`` and ``_run_npe`` and nothing else**, and it is the last
-task to write this file: the draw is ``_run_npe``'s own business or a name
-that is not ``_sample``.  That is the whole inventory -- twenty-four names
+bound ``NpeProduct`` and ``_run_npe`` and nothing else**, plus the
+``_observed``/``_sweep``/``register`` imports it added to the
+``exit_support`` list and the ``_unravel`` import it added from
+``posterior_support``; it also EXTENDED ``__all__``, which is the one
+module-level name a later task may touch.  It was the last task to write this
+file: the draw is ``_run_npe``'s own business and never ``_sample``.  That is
+the whole inventory -- twenty-four names
 from Task 3, three from Task 7, two from Task 8 -- and the reason it is kept
 here rather than left to plan §3.1 is that §3.1 lists seven of the
 twenty-four, and a drafter who reads an authoritative list and does not find
@@ -78,15 +82,19 @@ from rheplicant.config.sections.exit_support import (
     _PROBE,
     _binds,
     _decided_model,
+    _observed,
     _passthrough,
+    _sweep,
+    register,
 )
 from rheplicant.config.sections.posterior_support import (
     _draw_key,
     _sampled_space,
+    _unravel,
 )
 from rheplicant.config.sections.transforms import _whole
 
-__all__ = ["NpeSpec", "parse_npe"]
+__all__ = ["NpeProduct", "NpeSpec", "parse_npe"]
 
 _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
 
@@ -479,4 +487,115 @@ def _estimator(run: Any, built: Any, spec: Any, thetas: Any, data: Any) -> Any:
         key=_draw_key(run, "inference.npe.create", built, spec.create),
         embed=spec.embed,
         **_passthrough(spec.create, _CREATE_OPTIONS),
+    )
+
+
+# What ``train_posterior`` forwards is ``_TRAIN_OPTIONS``, ALREADY DEFINED BY
+# TASK 3 at the head of this module.  **Do not re-type it here.**  A draft of
+# this step declared a local ``_TRAIN_KEYS`` tuple, which collided with Task
+# 3's ``_TRAIN_KEYS`` frozenset -- the one the grammar sweeps and Task 3's own
+# test module imports -- and turned ``check_unknown_keys``' ``set(spec) -
+# allowed`` into a raw ``TypeError`` on every document declaring
+# ``inference.npe.train:``.  ``key`` travels on its own, and there is no
+# ``validation_fraction`` default anywhere: the package's is 0.1, and a
+# document that declares 0.0 gets an EMPTY validation curve, which this
+# executor carries as it is and never indexes.
+
+
+class NpeProduct(NamedTuple):
+    """What a ``kind: npe`` run returns.
+
+    ``samples`` and ``n_draw`` are not free choices and carry the same
+    contract :class:`~rheplicant.config.sections.nuts.NutsProduct` does, for
+    the same reason: 2C's shipped ``predict`` reads a samples product as
+    ``product.n_draw`` (an int) and ``product.samples`` (a mapping of latent
+    name -> stack with a leading draw axis), ``diagnostics.py:748`` and
+    ``:763``, and Task 9 makes ``npe`` one of its sources.
+    ``NeuralPosterior.sample`` returns a FLAT ``(n_draws, n_params)`` array,
+    so :func:`~rheplicant.config.sections.posterior_support._unravel` is what
+    gets it to a mapping, in ``space.names`` DECLARATION order.
+
+    ``posterior`` is the trained estimator, so a caller can ``log_prob``
+    against it -- the amortized half of what NPE is for.
+
+    ``best_step`` is an ``int``: ``train_posterior`` returns a traced
+    ``ArrayImpl``, it is 1-based, and it is 50 after 50 steps even when
+    ``validation_loss`` is empty, so it is no signal that validation happened.
+
+    ``validation_loss`` is ``(n_steps,)``, or ``(0,)`` when the document
+    declares ``validation_fraction: 0.0``.  **Nothing in this layer indexes
+    it** -- ``history.validation[-1]`` on the empty one raises IndexError, and
+    the honest product is the empty curve rather than an invented number.  A
+    consumer that plots it must check ``.size`` first, which is recorded to
+    the plan's ledger for Plan 3.
+    """
+
+    samples: dict[str, Any]
+    n_draw: int
+    posterior: Any
+    best_step: int
+    train_loss: Any
+    validation_loss: Any
+
+
+@register("npe")
+def _run_npe(run: Any, built: Any, *, results: Any = None) -> Any:
+    """One ``kind: npe`` run -> an :class:`NpeProduct`."""
+    from rheplicant.inference import train_posterior
+
+    where = f"runs[{run.name!r}]"
+    if "seed" in run.options:
+        raise ConfigError(
+            f"{where}: kind: npe needs FOUR seeds -- the bank draws theta "
+            "from the priors, create initialises the network's weights, "
+            "train shuffles the minibatches and sample draws -- so they are "
+            "declared per subsection in inference.npe: as "
+            "seed: {from: runtime.seeds.<name>}, not once on the run "
+            "(check A29). A run carries one seed and this exit draws four "
+            "times."
+        )
+    # Everything else this exit could take lives in inference.npe:, so the
+    # allowed set is empty -- the same shape `kind: forward` has.
+    _sweep(run, frozenset())
+    spec = _npe_spec(run, built)
+    space, thetas, data = _simulate_bank(run, built, spec)
+    trained, history = train_posterior(
+        _estimator(run, built, spec, thetas, data), thetas, data,
+        key=_draw_key(run, "inference.npe.train", built, spec.train),
+        **_passthrough(spec.train, _TRAIN_OPTIONS),
+    )
+    # `sample(datum, key, n_samples)`: the data FIRST, which is the reverse of
+    # `log_prob(theta, datum)` eighteen lines above it in inference/npe.py.
+    # `sample` is the one entry point on that class with no keyword-only
+    # marker, so both orders bind; the wrong one dies inside embed as
+    # `TypeError: subtract does not accept dtypes key<fry>, float32`.
+    flat = trained.sample(
+        _observed(run, built),
+        _draw_key(run, "inference.npe.sample", built, spec.sample),
+        spec.sample["n_draws"],
+    )
+    return NpeProduct(
+        # `space` is the one `_simulate_bank` checked and banked against, not
+        # a second lookup: `flat`'s columns are laid out in ITS names order,
+        # and checking one space while unravelling against another is a bug no
+        # shape assertion can see.  NO TEST DEFENDS THAT CHOICE and none can
+        # today -- measured, replacing this with `built.inference.space` left
+        # every test in tests/config green, because on every document in the
+        # suite the two ARE the same object (Task 7's first bank test asserts
+        # exactly that identity).  It is discipline, not a guard, and it is
+        # written down so the next reader does not mistake it for one.
+        samples=_unravel(space, flat, where=where),
+        # From the RETURNED stack, not from `spec.sample["n_draws"]`.  The two
+        # are equal by construction on this route -- `sample` draws exactly
+        # what it is asked for and nothing thins -- so the mutation between
+        # them survives the whole suite (measured), and this is the spelling
+        # that stays right the day the package grows a thinning knob.
+        n_draw=int(flat.shape[0]),
+        posterior=trained,
+        # int(), because train_posterior's best_step is a traced ArrayImpl and
+        # a product field that is sometimes an array is a field no caller can
+        # format.
+        best_step=int(history.best_step),
+        train_loss=history.train,
+        validation_loss=history.validation,
     )

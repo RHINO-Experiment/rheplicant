@@ -32,7 +32,10 @@ from rheplicant.config.document import load_document
 from rheplicant.config.sections.runs import RunSpec
 from tests.config.exit_helpers import (
     HOMOSCEDASTIC,
+    MODEL_NOISE,
     ONE_LATENT,
+    TRUTH_A,
+    TRUTH_D,
     conjugate_document,
     run_product,
 )
@@ -283,24 +286,151 @@ def npe_built(run=None, **kwargs):
     return load_document(npe_document(run, **kwargs))
 
 
-def npe_spec(**options):
+def npe_spec():
     """A ``kind: npe`` RunSpec named ``amortized``, straight to a helper.
 
-    Task 7 drives ``_simulate_bank`` and ``_estimator`` through this rather
-    than ``run_document``, because ``parse_runs`` still refuses ``kind: npe``
-    until Task 8 moves it out of ``_KINDS_2D`` -- the same reason
-    :func:`nuts_spec` exists for Task 4.
+    Task 7 drove ``_simulate_bank`` and ``_estimator`` through this rather
+    than ``run_document``, because ``parse_runs`` refused ``kind: npe`` until
+    Task 8 promoted it -- the same reason :func:`nuts_spec` exists for Task 4.
+    Those tests still use it: a test of the bank that does not pay for
+    training is worth keeping, and it reads what a helper RAISED or RETURNED
+    without ``run_document``'s loop turning a refusal into a
+    ``RunResult.error``.
 
-    ``**options`` has NO caller: measured at Task 7, every one of the
-    twenty-one call sites is a bare ``npe_spec()``.  It is kept, and the reason
-    is not symmetry with :func:`nuts_spec` -- whose ``drop=``/``**options``
-    carry the nuts run's own keys, which is a thing ``kind: nuts`` HAS.
-    ``kind: npe`` takes no run-level keys at all (``_npe_spec``'s docstring
-    says why: every knob is in ``inference.npe:``), so the only run-level
-    option a caller can write is one the exit should REFUSE, and Task 8's
-    sweep is the task that adds that refusal and its test.  If Task 8 lands
-    that sweep through some other route, this parameter has no future caller
-    and should go with the commit that decides so.
+    **It took a ``**options`` and no longer does.**  Task 7 kept the parameter
+    with no caller and wrote down the condition for removing it: the only
+    run-level option a caller could write is one the exit must REFUSE, so the
+    parameter had a future only if Task 8's sweep were tested through this
+    helper.  It was not -- ``TestTheRunTakesNoKeysOfItsOwn`` drives both
+    refusals through ``run_document``, which is where a user meets them --
+    so the parameter is gone with the commit that decided it.
     """
     return RunSpec(name="amortized", kind="npe", variant=None, on="primary",
-                   expect="ok", options=dict(options))
+                   expect="ok", options={})
+
+
+def npe_product(run=None, **kwargs):
+    """:func:`npe_document`, EXECUTED, and the ``NpeProduct`` it hands back.
+
+    Named for :data:`NPE`'s ``name:``, not for its kind -- see that constant.
+    The tests that need the DOCUMENT alone, the ones that delete a key before
+    executing it, reach for :func:`npe_document` directly.
+    """
+    return run_product(npe_document(run, **kwargs), "amortized")
+
+
+#: :data:`~tests.config.exit_helpers.CONJUGATE_MODEL` with a PER-TIME gain
+#: leaf.  A latent's shape must match the leaf it binds into --
+#: ``ParameterSpace.validate`` refuses ``Bind for ('m',) produces shape (16,)
+#: for `into` selector 0, but that leaf has shape ()`` -- so a document with a
+#: NON-SCALAR latent needs a model with a non-scalar leaf, and this is the
+#: smallest one this suite can build.  Kept apart from ``CONJUGATE_MODEL``
+#: rather than replacing it: every number the conjugate family pins was
+#: measured on the scalar gain.
+VECTOR_GAIN_MODEL = {
+    "global_signal": {"depth": {"value": 0.5, "unit": "K"},
+                      "centre": {"value": 75.0, "unit": "MHz"},
+                      "width": {"value": 5.0, "unit": "MHz"}},
+    "uniform_sky": {"amplitude": {"value": 10.0, "unit": "K"}},
+    "gain": {"gain": {"full": {"shape": ["n_time"], "value": 1.1},
+                      "unit": "dimensionless"}},
+    "noise": MODEL_NOISE,
+}
+
+#: THREE latents, declared ``d, a, m``.  Sorted is ``a, d, m`` and reversed is
+#: ``m, d, a``, so the three orderings are pairwise different -- which two
+#: latents can never be, because the reverse of a two-name sort IS one of the
+#: two orders it is meant to be told apart from.  ``m`` is ``(16,)``
+#: (measured through ``space.initial_values()`` on this document), so the flat
+#: draws are 18 wide and an unravel assuming scalars consumes 3 of them.  The
+#: three inits are 0.5, 10.0 and 1.1: unmistakable by magnitude, which is what
+#: lets a mis-ordered unravel be read off a mean.
+NPE_TRIO = {
+    "parameters": {
+        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth",
+              "prior": {"normal": {"loc": 0.5, "scale": 0.1}}},
+        "a": {"init": 10.0, "linear": True, "into": "uniform_sky.amplitude",
+              "prior": {"normal": {"loc": 10.0, "scale": 1.0}}},
+        "m": {"init": {"full": {"shape": ["n_time"], "value": 1.1}},
+              "linear": True, "into": "gain.gain",
+              "prior": {"normal": {"loc": 1.1, "scale": 0.05}}},
+    },
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation"},
+}
+
+
+def trio_npe_document():
+    """The three-latent, one-vector document the unravel is measured on.
+
+    32 simulations / 20 steps / 40 draws rather than :data:`NPE_SECTION`'s
+    64 / 50 / 100: this document's estimator is 18-dimensional and the tests
+    on it are about ORDER and SHAPE, not about a recovered posterior.
+
+    It takes NO arguments, deliberately.  :func:`npe_document` carries ``run``
+    and ``npe`` overrides because several tests need them; nothing needs one
+    here, and Task 7's own ``npe_spec`` docstring records what an unexercised
+    parameter costs -- a later edit can drop it while every test stays green.
+    A test that needs a variant of this document calls
+    :func:`npe_document` with these three keywords itself.
+    """
+    return npe_document(
+        None, inference=NPE_TRIO, model=VECTOR_GAIN_MODEL,
+        npe={"bank": {"n_simulations": 32},
+             "train": {"n_steps": 20, "batch_size": 16},
+             "sample": {"n_draws": 40}})
+
+
+#: Two latents with NO ``prior:`` of their own, both covered by a joint prior.
+#: ``to_numpyro_model`` accepts this (``joint.covers(name)``) and
+#: ``simulate_pairs`` does not, which is the half of check A23 the schema does
+#: not record.  ``{jeffreys: {over: [...]}}`` is the grammar;
+#: ``{kind: jeffreys, names: [...]}`` is refused by ``build_space``.
+#: It carries NO ``npe:`` of its own: :func:`joint_prior_document` writes one,
+#: and a key here would be dead -- the builder overrides it -- while being the
+#: last un-copied reference to the shared, module-level :data:`NPE_SECTION`,
+#: which is the hazard that builder's copy exists to prevent.
+JOINT_PRIOR_PAIR = {
+    "parameters": {
+        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth"},
+        "a": {"init": 10.0, "linear": True, "into": "uniform_sky.amplitude"},
+    },
+    "joint_prior": {"jeffreys": {"over": ["d", "a"]}},
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation", "at": {"d": TRUTH_D, "a": TRUTH_A}},
+}
+
+
+def joint_prior_document():
+    """ONE document carrying BOTH exits: npe expecting a refusal, nuts running.
+
+    The two are runs on the same document rather than two documents, because
+    the claim is that ONE space is a posterior on one route and a refusal on
+    the other.  Two documents that merely look alike cannot make that claim,
+    and a refusal with no sibling demonstration cannot make the second half of
+    it.  ``expect: refuse`` is ``runs.py``'s own mechanism for an exit that
+    exists in order to be refused.
+
+    :data:`NUTS` is passed whole rather than with ``progress_bar: False``
+    written over it: that key has been part of the constant since Task 6
+    repaid its debt, and restating it here would read as a claim that this
+    document needs something :data:`NUTS` does not already carry.
+
+    **This builder is what puts ``inference.npe:`` on the document**, and it
+    does so DELIBERATELY: without it the npe run would be refused by
+    :func:`~rheplicant.config.sections.npe._npe_spec` one branch earlier, and
+    ``TestThePriorGate`` would be testing something else entirely.
+    ``test_the_refusal_is_not_the_missing_section_one`` is what keeps that
+    deliberate.
+
+    The subsections are COPIED out of :data:`NPE_SECTION` for the same reason
+    :func:`npe_document` copies them: the constant is module-level and shared,
+    and a test that deletes a key from a built document would otherwise edit
+    the template for every later document in the process.
+    """
+    return conjugate_document(
+        {**NPE, "expect": "refuse"}, NUTS,
+        inference={**JOINT_PRIOR_PAIR,
+                   "npe": {name: dict(sub)
+                           for name, sub in NPE_SECTION.items()}},
+        seeds={**NPE_SEEDS, "chain": 3})

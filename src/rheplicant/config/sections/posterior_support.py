@@ -104,13 +104,24 @@ def _sampled_space(run: Any, built: Any, *, route: str) -> Any:
         # with no prior: and no inference.joint_prior covering them", so a
         # reader sent to the sibling exit is refused again for the same
         # reason.  A test that asserts a string is merely PRESENT locks that
-        # in, so the branches are pinned by two tests that disagree with each
-        # other: test_a_joint_prior_only_space_is_refused_for_npe reads the
-        # opening clause of `because`, and
+        # in, so the branches are pinned by tests that DISAGREE with each
+        # other -- FOUR of them now, grepped rather than remembered, and the
+        # count is written here because it was two when this comment was
+        # first drafted and a stale count is the sentence a later editor
+        # trusts.  In test_config_posterior_shared.py, driving this function
+        # directly: test_a_joint_prior_only_space_is_refused_for_npe reads
+        # the opening clause of `because`, and
         # test_a_prior_free_space_gets_no_joint_prior_advice_from_npe asserts
         # that clause and the joint-prior branch of `instead` are BOTH ABSENT
-        # while the no-coverage branch is present.  Making either clause
-        # unconditional fails one of the two (measured, both directions).
+        # while the no-coverage branch is present.  In
+        # test_config_exits_npe.py, through the two routes a caller has:
+        # test_a_prior_free_latent_is_refused_naming_the_sibling_exit (via
+        # _simulate_bank) and test_the_advice_the_gate_gives_depends_on_the_
+        # document (via run_document), the latter putting BOTH documents in
+        # one test so that a clause appended to the covered branch as well --
+        # advice that contradicts itself on one message -- is caught too, and
+        # it is the only one of the four that catches that.  Making either
+        # clause unconditional fails three of the four (measured).
         #
         # THE WORDING BELOW IS GREPPED, so two rules hold for anyone editing
         # it.  Task 8's Step 8.0 matches four fixed strings against this
