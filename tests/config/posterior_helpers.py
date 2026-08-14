@@ -84,30 +84,29 @@ def nuts_document(run=None, **kwargs):
 
     ``run`` is merged over :data:`NUTS`, so a caller adds ``num_chains:`` or
     ``init:`` without restating ``seed:``; every other keyword goes to
-    :func:`conjugate_document` unchanged.  A ``drop`` key inside ``run``
-    takes keys AWAY, for a document that must be missing a required key.
+    :func:`conjugate_document` unchanged.
 
-    ``drop`` is NOT what the required-key refusals use -- those go through
-    :func:`nuts_spec`'s own ``drop=``, which builds a RunSpec directly and is
-    a different mechanism.  This branch exists for the refusals a LATER task
-    reaches through ``run_document``.
-
-    **Still no caller, and KEPT at Task 7's split, deliberately.**  Measured
-    again here with ``grep``: the only occurrences of ``nuts_document({"drop":``
-    in ``src`` or ``tests`` are the two inside this file's docstrings.  Task 5
-    expected Task 6's ``run_document`` legs to be the callers and they were
-    not -- Task 6's silent document goes through ``nuts_spec(drop=...)``, which
-    builds the RunSpec the executor actually reads -- and Task 6 passed the
-    keep-or-delete decision to whichever task made this split.  This task made
-    it: **kept**, because the split's entire verification is an AST comparison
-    asserting that ZERO bodies changed, and a deletion performed inside a pure
-    move is a deletion nothing verified.  Task 9 is the next task to grow these
-    builders (``predict`` reusing a chain, which is what would want a run
-    beside this one); it deletes the branch if it still has no caller then.
+    **It took a ``drop`` key inside ``run`` and no longer does.**  That branch
+    took keys AWAY, for a document that must be missing a required one, and it
+    never acquired a caller: Task 5 wrote it expecting Task 6's
+    ``run_document`` legs to use it and they did not -- Task 6's silent
+    document goes through :func:`nuts_spec`'s own ``drop=``, which builds the
+    ``RunSpec`` the executor actually reads -- Task 7 kept it because its
+    split's entire verification was an AST comparison asserting that ZERO
+    bodies changed, and Task 9 declined it as outside its Files list.
+    Measured once more before removing it: outside this module
+    ``nuts_document`` is called exactly twice, at
+    ``test_config_exits_nuts.py`` :355 and :360, and inside it twice, by
+    :func:`nuts_built` and :func:`nuts_product`; no other file in ``src`` or
+    ``tests`` names it at all, and not one of the four calls passes ``drop``.
+    A parameter no test exercises is a parameter a later edit can break with
+    every test still green, which is why :func:`npe_spec` lost its own unused
+    ``**options`` at Task 8 and why this went the same way.  What replaces
+    it: :func:`nuts_spec` for a refusal read straight off the executor, and
+    ``del document["runs"][0][key]`` for one read through ``run_document`` --
+    the idiom ``test_config_exits_gcr.py:215`` already uses for exactly this.
     """
     merged = {**NUTS, **(run or {})}
-    for key in merged.pop("drop", ()):
-        merged.pop(key, None)
     kwargs.setdefault("seeds", {"chain": 3})
     return conjugate_document(merged, **kwargs)
 
@@ -127,10 +126,14 @@ def nuts_spec(drop=(), **options):
     executor directly and read what it raised or returned, without
     ``run_document``'s loop turning a refusal into a ``RunResult.error``.
 
-    It is NOT the only way to reach a missing required key -- an earlier
-    draft of this docstring said so and was wrong.  ``nuts_document`` has its
-    own ``drop``, and measured, ``nuts_document({"drop": ("num_samples",)})``
-    reaches the identical refusal.
+    **Its ``drop=`` is now the only helper that takes a required key away.**
+    An earlier draft of this docstring claimed it was the only way to reach a
+    missing required key and was corrected to point at :func:`nuts_document`'s
+    own ``drop``; Task 10 then removed that branch as never once called, so
+    the correction outlived the thing it corrected to.  The route it named is
+    still open and needs no parameter: a test that wants the DOCUMENT to be
+    missing a key builds one and deletes the key, the way
+    ``test_config_exits_gcr.py:215`` does.
     """
     body = {key: value for key, value in NUTS.items()
             if key not in ("name", "kind") and key not in drop}
