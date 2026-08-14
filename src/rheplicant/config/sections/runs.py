@@ -48,12 +48,26 @@ class RunSpec(NamedTuple):
 
 
 class RunResult(NamedTuple):
-    """One executed run: its product, or the refusal it expected."""
+    """One executed run: its product, or the refusal it expected.
+
+    ``variant`` is the ``variant:`` the run was CONFIGURED on, so a later
+    run reading this product can tell whether it is reading its own build.
+
+    It is DEFAULTED so that a construction site which does not know about it
+    still binds.  That buys the FOUR test sites, all of which pass four
+    arguments -- three predate this commit and are unchanged, the fourth
+    pins the default itself; it does not buy the two in ``src`` -- both sit
+    in ``execute_run`` and both were edited to pass ``variant=run.variant``,
+    because a field nothing populates is a field that reads ``None`` forever.
+    The default is therefore a compatibility shim for callers outside this
+    module, not a claim that this was a one-line change.
+    """
 
     name: str
     kind: str
     product: Any
     error: Exception | None
+    variant: str | None = None
 
 
 def _one(index: int, entry: Any, several: bool) -> RunSpec:

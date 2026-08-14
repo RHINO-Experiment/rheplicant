@@ -695,22 +695,17 @@ def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     imports therefore sit inside this body, which is also what keeps
     ``import rheplicant.config`` off ``rheplicant.inference``.
 
-    ``propagate_covariance`` re-derives the expansion point from THIS run's
-    ``built``, so a ``predict`` declaring a different ``variant:`` from the
-    ``fisher`` it reuses is mixing two builds -- and ``RunResult`` carries no
-    variant, so this layer cannot see it.  Recorded for Plan 2D's ledger
-    rather than enforced here (the fix is one field on ``RunResult`` and one
-    comparison): the package's own structure and name checks
-    (uncertainty.py:533, :544) catch the mismatches that move the parameter
-    LAYOUT, and are silent about the rest.
-
-    The danger is not that mixing two builds is wildly wrong -- it is that it
-    is INVISIBLY wrong.  Measured, and pinned in
-    ``tests/config/test_config_exits_predict.py``: against the un-mixed answer
-    on the SAME variant, a model-only mismatch is off by 1.1 % (a ratio of
-    0.98883, 1.12 % at the worst channel), because with one latent the whole
-    error is the scalar sigma_g(base)/sigma_g(variant).  That is an error
-    nobody will ever notice.
+    Both routes re-derive their expansion point or their pipeline from THIS
+    run's ``built``, so a ``predict`` on a different ``variant:`` from the
+    run it reuses MIXES TWO BUILDS.  ``RunResult`` carries the variant its
+    run was configured on, and the comparison below sits before the dispatch
+    so it guards both routes at once.  The package catches only what moves
+    the parameter LAYOUT (uncertainty.py:533, :544) and is silent about the
+    rest: measured, a model-only mismatch returns a finite, correctly-shaped
+    width off by 1.1 % -- a ratio of 0.98883 against the un-mixed answer on
+    the SAME variant, 1.12 % at the worst channel -- because with one latent
+    the whole error is the scalar sigma_g(base)/sigma_g(variant).  An error
+    nobody would ever notice is the argument for refusing it.
     """
     where = f"runs[{run.name!r}]"
     if "from" in run.options:
@@ -722,6 +717,15 @@ def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
         )
     _sweep(run, _PREDICT_KEYS)
     earlier = reuse_of(run, results)
+    if earlier.variant != run.variant:
+        raise ConfigError(
+            f"{where}: variant: {run.variant!r}, and reuse: "
+            f"{run.reuse!r} ran on variant: {earlier.variant!r} -- pushing "
+            "one build's product through another build's model MIXES TWO "
+            "BUILDS. The numbers would come back finite, correctly shaped "
+            "and plausible: measured, a model-only mismatch is 1.1 % wrong. "
+            "Declare the same variant: on both runs."
+        )
     space = _space(run, built)
     if earlier.kind == "fisher":
         from rheplicant.inference import propagate_covariance

@@ -294,7 +294,7 @@ def execute_run(run: RunSpec, built: Any,
             executor(run, built, results=results)
         except Exception as error:  # noqa: BLE001 -- run-and-capture is the point
             return RunResult(name=run.name, kind=run.kind, product=None,
-                             error=error)
+                             error=error, variant=run.variant)
         raise ConfigError(
             f"runs[{run.name!r}]: expect: refuse, and kind: {run.kind} "
             "SUCCEEDED -- the assertion this run makes about the design no "
@@ -302,7 +302,7 @@ def execute_run(run: RunSpec, built: Any,
         )
     return RunResult(name=run.name, kind=run.kind,
                      product=executor(run, built, results=results),
-                     error=None)
+                     error=None, variant=run.variant)
 
 
 # Importing the leaf modules is what registers their kinds.  The import sits

@@ -212,6 +212,61 @@ class TestTheLoopIsOrdered:
         assert set(out) == {"a", "b"}
 
 
+class TestARunResultCarriesItsVariant:
+    """Both results ``execute_run`` builds carry the run's own ``variant:``.
+
+    A later run can only tell whether it is reading its OWN build if the
+    result says which build it came from, and ``execute_run`` is the one
+    place that knows.  The ``expect: refuse`` leg is a second constructor
+    six lines from the first, and nothing downstream reads it today -- which
+    is exactly the leg a fix written once and tested through ``predict``
+    alone leaves at None forever.
+
+    ``unity_gain`` is ``synthetic_document``'s own variant, so these three
+    need no variants: of their own.
+    """
+
+    def test_the_ok_path_records_the_variant_it_ran_on(self):
+        results = run_document(document({"name": "a", "kind": "forward",
+                                         "variant": "unity_gain"}))
+        assert results["a"].variant == "unity_gain"
+
+    def test_a_run_declaring_no_variant_records_none(self):
+        # Not vacuous: it is the other half of the pair a `variant=None`
+        # hard-coded into execute_run would satisfy on its own.
+        results = run_document(document({"name": "a", "kind": "forward"}))
+        assert results["a"].variant is None
+
+    def test_the_field_defaults_so_a_four_argument_construction_still_binds(
+            self):
+        """The DEFAULT, which no route through ``execute_run`` can reach.
+
+        Both constructors now pass ``variant=`` explicitly, so the test above
+        exercises ``run.variant`` and never the default -- the four
+        construction sites in the tests, this one among them, are the only
+        callers that rely on it.
+        ``is None`` rather than a falsiness check: a default of ``""`` binds
+        just as cleanly, is falsey, and would have every such result quietly
+        claim it ran on a build named by the empty string.
+        """
+        result = RunResult(name="a", kind="forward", product=None, error=None)
+        assert result.variant is None
+
+    def test_the_expect_refuse_path_records_it_too(self):
+        """The refusal is the product here, and it still names its build.
+
+        `fisher` on synthetic_document refuses because the document declares
+        no inference.parameters -- which is all this leg needs: a run whose
+        RunResult comes back through the OTHER constructor.
+        """
+        results = run_document(document({"name": "a", "kind": "fisher",
+                                         "variant": "unity_gain",
+                                         "expect": "refuse"}))
+        assert results["a"].product is None
+        assert isinstance(results["a"].error, ConfigError)
+        assert results["a"].variant == "unity_gain"
+
+
 class TestTheDeferredKindsNameTheirPlan:
     def test_nuts_and_npe_are_plan_2d(self):
         assert _KINDS_2D == ("nuts", "npe")

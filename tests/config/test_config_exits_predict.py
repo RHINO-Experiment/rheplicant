@@ -444,75 +444,178 @@ class TestTheReuseGrammar:
         assert "predict" in runs_module._KINDS
 
 
-class TestAVariantMismatchIsThePACKAGESRefusal:
-    """What a predict on a DIFFERENT variant from its fisher actually does.
+class TestAVariantMismatchIsRefused:
+    """A predict must read the build its own product came from.
 
-    ``propagate_covariance`` re-derives the expansion point from THIS run's
-    ``built``, and ``RunResult`` carries no variant, so the config layer cannot
-    see the mixture.  It is Plan 2D's ledger item rather than a refusal here
-    -- and these two tests are what that record is worth: one measures the
-    case the package catches, the other measures the case it does not, so the
-    gap is a number rather than a sentence.
+    Both routes re-derive their expansion point (the covariance route) or
+    their pipeline (the samples route) from THIS run's ``built``, so a
+    ``predict`` naming a different ``variant:`` from the run it reuses mixes
+    two builds.  ``RunResult`` carries the variant its run was configured on,
+    and the comparison sits before the route dispatch, which is why one
+    refusal guards both.
+
+    What the refusal is worth is a NUMBER, and the last two tests keep it
+    measured rather than asserted, by relabelling the earlier result so the
+    guard lets the mixture through: the package catches a variant that moves
+    the parameter LAYOUT (uncertainty.py:533) and is silent about the rest --
+    a model-only mismatch comes back finite, correctly shaped and 1.1 %
+    wrong (0.0014147 against the un-mixed 0.0014307 on the SAME variant: a
+    ratio of 0.98883, 1.12 % at the worst channel).  With one latent the
+    whole error is the scalar sigma_g(base)/sigma_g(at_65).  1.1 % is
+    precisely the error nobody notices, which is the argument for refusing
+    it instead of recording it.
     """
 
+    AT_65 = {"at_65": {"model": {"global_signal": {
+        "depth": {"value": 0.5, "unit": "K"},
+        "centre": {"value": 65.0, "unit": "MHz"},
+        "width": {"value": 5.0, "unit": "MHz"}}}}}
+    #: A variant that moves the parameter LAYOUT -- the half the package
+    #: catches on its own, and the companion measurement at the foot.
+    TWO = {"two": {"inference": {"parameters": {
+        "g": {"init": 1.0, "linear": True, "into": "gain.gain",
+              "prior": {"normal": {"loc": 1.0, "scale": 0.05}}},
+        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth",
+              "prior": {"normal": {"loc": 0.5, "scale": 0.5}}}}}}}
+
     @staticmethod
-    def _with_variants(run, variants):
-        doc = document(FISHER, {**FROM_COV, **run})
-        doc["variants"] = variants
-        return doc
+    def _bypass(variants, name):
+        """The mixture the guard forbids, reached by lying to the guard.
 
-    def test_a_model_only_variant_mixes_two_builds_in_silence(self):
-        """The recorded gap, as a number -- and the number is SMALL.
-
-        The covariance was computed on the base build and the Jacobian on the
-        variant's, and the parameter layout is the same on both, so nothing
-        refuses.  The baseline that says how wrong that is is the un-mixed
-        answer on the SAME variant, not the un-mixed answer on the base
-        document -- 0.0078557 belongs to a different model and the 5.5x
-        between them is the model difference, not the mixing error.  Measured
-        (both runs on at_65): 0.0014307, against 0.0014147 mixed -- a ratio of
-        0.98883, and 1.12 % at the worst channel of the grid.  With one latent
-        the whole error is the scalar sigma_g(base)/sigma_g(at_65).
-
-        So the danger is not that mixing two builds is wildly wrong; it is
-        that it is invisibly wrong, which is the argument for closing the gap
-        rather than living with it.  ``rel=1e-3`` is what makes this pin
-        discriminate: it is tighter than the 1.1 % shift, so a predict that
-        started reading the variant would fail here and have to say so, rather
-        than closing the gap by accident.
+        The fisher run executes on the BASE build and its RunResult is
+        relabelled with the predict's own variant, so the comparison passes
+        and everything downstream is exactly what ``run_document`` did before
+        this task.  It is the only route left to what the refusal prevents,
+        and measuring that is what makes the refusal arguable rather than
+        assumed.  ``_replace(variant=...)`` is also a second, structural
+        assertion that the field exists: without it this raises
+        ``ValueError: Got unexpected field names: ['variant']``.
         """
-        doc = self._with_variants(
-            {"variant": "at_65"},
-            {"at_65": {"model": {"global_signal": {
-                "depth": {"value": 0.5, "unit": "K"},
-                "centre": {"value": 65.0, "unit": "MHz"},
-                "width": {"value": 5.0, "unit": "MHz"}}}}})
-        width = np.asarray(run_document(doc)["p"].product)
-        assert width.shape == (16, 8)
-        assert float(width[0, 4]) == pytest.approx(0.0014147, rel=1e-3)
+        from rheplicant.config.document import load_document
+        from rheplicant.config.sections.diagnostics import _run_predict
+        from rheplicant.config.sections.exits import execute_run
+        from rheplicant.config.sections.runs import RunSpec
 
-    def test_a_variant_that_moves_the_layout_is_refused_by_the_package(self):
-        """And the refusal is the PACKAGE's, in the package's own voice.
+        doc = document(FISHER)
+        doc["variants"] = variants
+        cov = execute_run(RunSpec(name="cov", kind="fisher", variant=None,
+                                  on="primary", expect="ok", options={}),
+                          load_document(doc, variant=None))
+        spec = RunSpec(name="p", kind="predict", variant=name, on="primary",
+                       expect="ok", options={}, reuse="cov")
+        return _run_predict(spec, load_document(doc, variant=name),
+                            results={"cov": cov._replace(variant=name)})
 
-        Not a ConfigError, and it carries no ``runs['p']:`` prefix -- which is
-        the companion measurement for every config-layer refusal above: their
-        prefix and their type are what tells them apart from this one.  The
-        config layer says nothing here on purpose: uncertainty.py:533 names
-        both structures, and nothing this layer could add would be more
-        specific.
+    def test_the_covariance_route_refuses_a_mismatch(self):
+        """Both runs named, both variants named, in the layer's own voice.
+
+        `MIXES TWO BUILDS` belongs to this branch alone -- every neighbouring
+        refusal in this file says `names no earlier run`, `has no product to
+        read`, `second spelling` or `draws nothing`, and matching the bare
+        word `variant` would be satisfied by any of the run grammar's own
+        refusals in runs.py.
+
+        THE ATTRIBUTION IS PINNED AS ONE ORDERED SUBSTRING, not as two
+        membership checks.  Both variants appear in this message, so
+        `"'at_65'" in message and "None" in message` is satisfied just as
+        well by a message that has swapped them -- telling the reader their
+        `predict` ran on the base and the `fisher` on at_65, which is exactly
+        backwards and sends them to edit the wrong line.  Membership cannot
+        see that; the ordered form is what kills it.
+        """
+        doc = document(FISHER, {**FROM_COV, "variant": "at_65"})
+        doc["variants"] = self.AT_65
+        with pytest.raises(ConfigError) as caught:
+            run_document(doc)
+        message = str(caught.value)
+        assert "MIXES TWO BUILDS" in message
+        assert "variant: 'at_65', and reuse: 'cov' ran on variant: None" in \
+            message
+        assert message.startswith("runs['p']:")
+
+    def test_the_samples_route_refuses_the_same_mismatch(self):
+        """The twin route, which no covariance test can reach.
+
+        `predict` has two routes and the comparison sits before the dispatch
+        precisely so that one guard serves both; a fix written inside the
+        `earlier.kind == "fisher"` branch passes the test above and leaves
+        this one open.  Task 9 adds two more routes to the same function,
+        which is what makes the placement worth a test of its own.
+        """
+        doc = document(SAMPLE, {**FROM_CHAIN, "variant": "at_65"})
+        doc["variants"] = self.AT_65
+        with pytest.raises(ConfigError) as caught:
+            run_document(doc)
+        assert "MIXES TWO BUILDS" in str(caught.value)
+        assert str(caught.value).startswith("runs['p']:")
+
+    def test_the_same_variant_on_both_runs_still_runs(self):
+        """The leg a naive `if run.variant or earlier.variant` gets wrong.
+
+        `unity_gain` is synthetic_document's own variant and pins the gain at
+        1.0 -- which is what this document already declares -- so running
+        both runs on it must reproduce the base document's width to the last
+        bit.  A guard that refused whenever EITHER run named a variant fails
+        here; a guard comparing the two passes.  Both-None is every other
+        test in this file and cannot separate those two implementations.
+
+        ONE OF THE TWO NAMES IS BUILT AT RUNTIME AND IS DELIBERATELY NOT THE
+        SAME OBJECT.  Two equal string literals in one module are interned to
+        one object, so `is not` holds between them and a guard written
+        `if earlier.variant is not run.variant` passes this test while
+        spuriously refusing the identical document loaded from YAML --
+        measured: `json.loads('{"a":"at_65","b":"at_65"}')` gives
+        `d['a'] is d['b']` False, and `yaml.safe_load` the same.  With the
+        join below, `is not` FAILS here and `!=` passes, which is what makes
+        this test the thing that says `!=` rather than `is not`.
+        """
+        same = "".join(["unity_", "gain"])   # equal, NOT the same object
+        assert same == "unity_gain" and same is not "unity_gain"  # noqa: F632
+        both = document({**FISHER, "variant": "unity_gain"},
+                        {**FROM_COV, "variant": same})
+        neither = document(FISHER, FROM_COV)
+        on_variant = np.asarray(run_document(both)["p"].product)
+        on_base = np.asarray(run_document(neither)["p"].product)
+        assert float(on_variant[0, 4]) == pytest.approx(0.0078557, rel=1e-4)
+        assert np.array_equal(on_variant, on_base)
+
+    def test_what_the_refusal_prevents_is_one_per_cent(self):
+        """The gap, still a number after the guard closed it.
+
+        Measured both ways: the un-mixed answer on at_65 is 0.0014307 and the
+        mixture 0.0014147, a ratio of 0.98883.  `rel=1e-4` on both is tighter
+        than the 1.1 % between them, so neither pin can be satisfied by the
+        other's number -- which is the whole point of keeping two.  The base
+        document's own 0.0078557 is a DIFFERENT model and 5.5x away; it is
+        not the baseline for a mixing error and was mistaken for one once.
+        """
+        doc = document({**FISHER, "variant": "at_65"},
+                       {**FROM_COV, "variant": "at_65"})
+        doc["variants"] = self.AT_65
+        unmixed = np.asarray(run_document(doc)["p"].product)
+        mixed = np.asarray(self._bypass(self.AT_65, "at_65"))
+        assert unmixed.shape == mixed.shape == (16, 8)
+        assert float(unmixed[0, 4]) == pytest.approx(0.0014307, rel=1e-4)
+        assert float(mixed[0, 4]) == pytest.approx(0.0014147, rel=1e-4)
+        ratio = mixed / unmixed
+        assert float(np.max(ratio)) == pytest.approx(0.98883, rel=1e-4)
+        assert float(np.max(np.abs(1.0 - ratio))) == pytest.approx(0.01117,
+                                                                   rel=1e-3)
+
+    def test_a_variant_that_moves_the_layout_is_the_packages_refusal(self):
+        """Underneath the config guard, the package still speaks first.
+
+        Not a ConfigError, and no ``runs['p']:`` prefix -- the companion
+        measurement for every config-layer refusal in this file, whose prefix
+        and type are what tell them apart from this one.  Reached through the
+        bypass, because this layer now refuses that document before the
+        package ever sees it: the config refusal is a strict ADDITION, not a
+        replacement, and this is the test that says so.
         """
         from rheplicant.core.errors import StateValidationError
 
-        doc = self._with_variants(
-            {"variant": "two"},
-            {"two": {"inference": {"parameters": {
-                "g": {"init": 1.0, "linear": True, "into": "gain.gain",
-                      "prior": {"normal": {"loc": 1.0, "scale": 0.05}}},
-                "d": {"init": 0.5, "linear": True,
-                      "into": "global_signal.depth",
-                      "prior": {"normal": {"loc": 0.5, "scale": 0.5}}}}}}})
         with pytest.raises(StateValidationError) as caught:
-            run_document(doc)
+            self._bypass(self.TWO, "two")
         message = str(caught.value)
         assert not isinstance(caught.value, ConfigError)
         assert "runs['p']:" not in message

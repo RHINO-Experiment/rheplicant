@@ -260,11 +260,11 @@ rather than failing.
   from the tail, and those predictions are **noiseless** — they are the
   model's mean, not simulated data, so do not compare their scatter with an
   observation's. The samples route also needs numpyro, which the covariance
-  route does not. One thing neither route can see: a `predict` that declares
-  a different `variant:` from the run it reuses is mixing two builds, and the
-  answer comes back finite, correctly shaped and about 1 % wrong. The
-  package's structure and name checks catch the mismatches that move the
-  parameter layout and are silent about the rest.
+  route does not. A `predict` that declares a different `variant:` from the
+  run it reuses is refused by name: pushing one build's product through
+  another build's model mixes two builds, and the answer would come back
+  finite, correctly shaped and about 1 % wrong — the package's structure and
+  name checks catch only the mismatches that move the parameter layout.
 
 `nuts`, `npe` and `inference.npe:` are refused by name and arrive with Plan
 2D; `compare` and `benchmark` arrive with Plan 4. Consuming any of these
