@@ -8,7 +8,7 @@ config layer is measured on::
 
 ``exits.py``'s foot import reaches this module from Task 5 onward, so **every
 numpyro import here sits inside a function body** -- the shipped pattern is
-``predict``'s samples route (``config/sections/diagnostics.py:745`` -- the
+``predict``'s samples route (``config/sections/diagnostics.py:771`` -- the
 path is qualified because this repository has TWO ``diagnostics.py`` and the
 sibling, ``inference/diagnostics.py``, is the one every other citation in
 this module resolves to).  A module-level
@@ -132,7 +132,7 @@ class NutsProduct(NamedTuple):
     ``samples`` and ``n_draw`` are not free choices: 2C's shipped ``predict``
     reads a samples product as ``product.n_draw`` (an int) and
     ``product.samples`` (a mapping of latent name -> stack with a leading
-    draw axis), ``config/sections/diagnostics.py:748`` and ``:763`` -- NOT
+    draw axis), ``config/sections/diagnostics.py:774`` and ``:791`` -- NOT
     ``inference/diagnostics.py``, which contains no ``n_draw`` at all.
 
     ``samples`` carries ``space.names`` AND NOTHING ELSE -- in particular not

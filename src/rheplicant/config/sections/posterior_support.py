@@ -15,7 +15,7 @@ drift:
   voice.
 * **The unravel.**  ``NeuralPosterior.sample`` returns a flat
   ``(n_draws, n_params)`` array while 2C's shipped ``predict`` reads a
-  samples product as a MAPPING (``diagnostics.py:763``).
+  samples product as a MAPPING (``diagnostics.py:791``).
   :func:`_unravel` is the inverse of the layout ``simulate_pairs`` documents
   at ``npe.py:100-102``, and getting its ORDER wrong returns finite,
   correctly-shaped, wrong draws.

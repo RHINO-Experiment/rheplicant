@@ -676,7 +676,7 @@ _PREDICT_KEYS = frozenset({"n_draw"})
 _DRAW_SOURCES = {
     "plan.sample": "plan.sample discards its warmup before returning",
     "nuts": "get_samples() returns the post-warmup draws alone -- "
-            "num_samples x num_chains is the whole chain",
+            "num_samples x num_chains, after any thinning:, is the chain",
     "npe": "npe drew exactly the inference.npe.sample.n_draws: it was "
            "asked for and has no warmup to recover",
 }

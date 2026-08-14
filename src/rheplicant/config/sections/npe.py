@@ -34,7 +34,7 @@ this module is loaded by every process that reads a document; measured after
 ``config/paths.py:30`` imports it and so does much of ``core`` -- so it is
 not what the invariant is about.)  The executor's own imports go inside its
 body, which is what ``predict``'s samples route already does
-(``diagnostics.py:745``).
+(``diagnostics.py:771``).
 
 **THREE TASKS APPEND TO THIS ONE MODULE, so every module-level name is
 owned.**  Task 3 (the parser) binds, and no later task may rebind: every
@@ -509,8 +509,8 @@ class NpeProduct(NamedTuple):
     contract :class:`~rheplicant.config.sections.nuts.NutsProduct` does, for
     the same reason: 2C's shipped ``predict`` reads a samples product as
     ``product.n_draw`` (an int) and ``product.samples`` (a mapping of latent
-    name -> stack with a leading draw axis), ``diagnostics.py:748`` and
-    ``:763``, and Task 9 makes ``npe`` one of its sources.
+    name -> stack with a leading draw axis), ``diagnostics.py:774`` and
+    ``:791``, and Task 9 makes ``npe`` one of its sources.
     ``NeuralPosterior.sample`` returns a FLAT ``(n_draws, n_params)`` array,
     so :func:`~rheplicant.config.sections.posterior_support._unravel` is what
     gets it to a mapping, in ``space.names`` DECLARATION order.

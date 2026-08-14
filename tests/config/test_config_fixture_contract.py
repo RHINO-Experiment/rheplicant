@@ -152,8 +152,10 @@ _RAW = "synthetic_document"
 _FIXTURE_HOME = pathlib.Path(inspect.getsourcefile(synthetic_document)).name
 
 #: The four modules that build their own document anyway, with the number of
-#: their tests that consequently cannot tell the two twins apart.  Measured at
-#: commit ``87facd0`` by the recipe in this module's docstring; the values are
+#: their tests that consequently cannot tell the two twins apart.  Measured
+#: when Plan 2D landed, by the recipe in this module's docstring (an earlier
+#: draft named a commit SHA, which an amend then made unresolvable); the
+#: values are
 #: COMMENTS -- no assertion reads them, and they move whenever a test is added
 #: to one of these modules -- while the keys are the contract.  They are
 #: recorded at all because "86 of 90" travelled through two plans as prose and
