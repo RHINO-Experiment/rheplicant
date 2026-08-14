@@ -48,6 +48,19 @@ these.  A second ``def _bank`` here rebinds the parser and every document
 declaring ``inference.npe:`` dies with ``TypeError: _bank() missing 2
 required positional arguments``.  ``__all__`` is the one module-level name a
 later task may touch, and it is EXTENDED rather than rebound.
+
+*Task 7 binds three more*, plus the ``_decided_model``/``_passthrough``
+imports it added to the ``exit_support`` list and the ``_draw_key``/
+``_sampled_space`` imports it added from ``posterior_support``:
+:func:`_npe_spec`, :func:`_simulate_bank` and :func:`_estimator`.  **Task 8
+binds ``NpeProduct`` and ``_run_npe`` and nothing else**, and it is the last
+task to write this file: the draw is ``_run_npe``'s own business or a name
+that is not ``_sample``.  That is the whole inventory -- twenty-four names
+from Task 3, three from Task 7, two from Task 8 -- and the reason it is kept
+here rather than left to plan §3.1 is that §3.1 lists seven of the
+twenty-four, and a drafter who reads an authoritative list and does not find
+the name they need concludes the name is free.  That is how three names in
+this file came to be bound twice before the plan was executed at all.
 """
 
 from __future__ import annotations
@@ -61,7 +74,16 @@ from rheplicant.config.draws import _seed_name
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys
-from rheplicant.config.sections.exit_support import _PROBE, _binds
+from rheplicant.config.sections.exit_support import (
+    _PROBE,
+    _binds,
+    _decided_model,
+    _passthrough,
+)
+from rheplicant.config.sections.posterior_support import (
+    _draw_key,
+    _sampled_space,
+)
 from rheplicant.config.sections.transforms import _whole
 
 __all__ = ["NpeSpec", "parse_npe"]
@@ -336,3 +358,125 @@ def parse_npe(section: Any, context: Any) -> NpeSpec:
                    create=_create(_subsection(section, "create")),
                    train=_train(_subsection(section, "train")),
                    sample=_sample(_subsection(section, "sample")))
+
+
+# --- The kind: npe exit (Tasks 7 and 8) -------------------------------------
+#
+# The parser above and the executor below share a file on purpose: one
+# feature, one place.  ``inference.npe:`` exists only to be read by
+# ``kind: npe``, and a grammar whose consumer lives in another module is a
+# grammar that can drift from it silently.
+#
+# NOTHING here imports ``rheplicant.inference`` at module scope -- see the
+# module docstring's import rule.  Every package import in this section sits
+# inside a function body.
+#
+# What ``create`` forwards is ``_CREATE_OPTIONS``, ALREADY DEFINED AT THE HEAD
+# OF THIS MODULE -- exactly ``NeuralPosterior.create``'s keyword-only knobs
+# minus ``key`` and ``embed``, which travel on their own, and the same tuple
+# the grammar sweeps and ``test_config_section_npe.py`` checks against
+# ``inspect.signature``.  DO NOT RE-TYPE IT AT A CALL SITE.  A local
+# ``_CREATE_KEYS`` tuple here would collide with the frozenset of that name
+# above and turn ``check_unknown_keys``' ``set(spec) - allowed`` into a raw
+# ``TypeError: unsupported operand type(s) for -: 'set' and 'tuple'`` on every
+# document that declared ``inference.npe.create:``.
+
+
+def _npe_spec(run: Any, built: Any) -> Any:
+    """The parsed ``inference.npe:``, or a refusal saying where it goes.
+
+    ``kind: npe`` takes no run-level keys at all: the bank size, the
+    embedding, the estimator's shape, the training schedule, the draw count
+    and FOUR named seeds all live in the section, because a run carries one
+    seed and this exit draws four times.
+    """
+    spec = built.inference.npe
+    if spec is None:
+        raise ConfigError(
+            f"runs[{run.name!r}]: kind: npe trains an amortized posterior and "
+            "reads every knob from inference.npe: -- bank:, embed:, create:, "
+            "train: and sample:, four of them with a seed: "
+            "{from: runtime.seeds.<name>} of their own (check A29) -- and "
+            "this document declares no inference.npe:."
+        )
+    return spec
+
+
+def _simulate_bank(run: Any, built: Any, spec: Any) -> tuple:
+    """``(space, thetas, data)`` -- the simulation bank, and its layout.
+
+    NOT ``_bank``: Task 3 already binds that name in this module to the
+    ``bank:`` SUBSECTION PARSER that :func:`parse_npe` calls.  A second
+    module-level ``def _bank`` here rebinds it, and every document declaring
+    ``inference.npe:`` then dies with ``TypeError: _bank() missing 2 required
+    positional arguments``.
+
+    The space is returned ALONGSIDE the pairs rather than fetched again by the
+    caller, because ``thetas``' columns are laid out in THAT space's ``names``
+    order (``inference/npe.py:100-102``) and Task 8 unravels the draws back
+    through the same object.  Two separate lookups are two chances to check
+    one space and unravel against another.
+
+    ``noise=`` is keyword-only and takes the NoiseModel WHOLE -- the rule, not
+    a decided array -- so this reads :func:`_decided_model` and must never
+    read ``_decided_sigma``.  Measured, a decided array here does not raise
+    the ``ParameterSpaceError`` the plan predicted: it dies inside
+    ``simulate_pairs``' vmap as ``jax.errors.ConcretizationTypeError: ... The
+    axis argument must be known statically``, which names no run and no
+    document key.
+
+    The pipeline is the FIT twin and not ``built.twin``.  That one is loud
+    rather than silent -- measured, banking from it raises
+    ``ParameterSpaceError``, because the model's ``NoiseOperator`` declares
+    ``key`` in ``requires`` and a space refuses a forward model that draws --
+    so every test that simulates a bank kills the mutation.
+    """
+    from rheplicant.inference import simulate_pairs
+
+    space = _sampled_space(run, built, route="npe")
+    thetas, data = simulate_pairs(
+        built.inference.fit_twin, built.state, space,
+        noise=_decided_model(run, built),
+        key=_draw_key(run, "inference.npe.bank", built, spec.bank),
+        n_simulations=spec.bank["n_simulations"],
+    )
+    return space, thetas, data
+
+
+def _estimator(run: Any, built: Any, spec: Any, thetas: Any, data: Any) -> Any:
+    """An untrained ``NeuralPosterior``, sized and standardized to the bank.
+
+    ``embed`` is already a callable -- :func:`parse_npe` resolves it, so a bad
+    ``{python:}`` is refused when the document is READ rather than after the
+    bank has been simulated -- and it is passed unconditionally because the
+    parser's own silent default IS ``jnp.ravel``, which is the package's.
+
+    Everything else travels through ``_passthrough``, so an undeclared key
+    gets the package's default rather than one restated here.  That matters
+    most for ``n_components``: the package's default is 4 and its own tuning
+    table says 4 over-fits (``tests/inference/test_npe.py:145`` and the
+    shipped example both pass 1).  The layer documents that and defaults
+    nothing -- a warning is Plan 3's, on its ledger.
+
+    ``width=``, never ``width_size=``.  ``create`` takes ``width`` and passes
+    it to equinox as ``width_size`` itself (``inference/npe.py:216``); 2C's
+    carry-forward note reads that fact as an instruction to the caller and is
+    wrong about the caller, and the wrong spelling is a ``TypeError`` on the
+    first call.
+
+    The ``where`` strings the two ``_draw_key`` calls carry are DEFENSIVE and
+    no test in this plan can reach them: they prefix ``draws._seed_name``'s
+    refusals, and ``parse_npe`` has already run ``_seed_name`` over every
+    subsection by the time an executor sees the spec, so a seed that could
+    trigger one never reaches here.  They are written correctly rather than
+    left blank because Task 8 adds two more of them and a blank one would
+    read as the pattern to copy.
+    """
+    from rheplicant.inference import NeuralPosterior
+
+    return NeuralPosterior.create(
+        thetas, data,
+        key=_draw_key(run, "inference.npe.create", built, spec.create),
+        embed=spec.embed,
+        **_passthrough(spec.create, _CREATE_OPTIONS),
+    )

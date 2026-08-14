@@ -14,13 +14,15 @@ from rheplicant.config.sections.nuts import (
 from rheplicant.config.sections.runs import run_document
 from tests.config.exit_helpers import (
     FROZEN,
-    NEEDLE,
     ONE_REF,
     PRIOR_FREE,
     RADIOMETER,
     TWO_LATENTS,
     TWO_REFS,
     WIENER_MODEL,
+)
+from tests.config.posterior_helpers import (
+    NEEDLE,
     nuts_built,
     nuts_document,
     nuts_product,

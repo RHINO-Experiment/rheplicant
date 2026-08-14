@@ -19,6 +19,18 @@ Measured on this document: ``wiener_solve`` returns ``g = 1.4999994``
 (truth 1.5) with a relative residual of 1.4e-07 and ``condition_estimate``
 1.0; on the two-latent variant ``d = 1.19989``, ``a = 11.99995`` with
 residual 8.1e-08 and kappa 12.1.
+
+**The POSTERIOR documents are not here.**  ``kind: nuts`` and ``kind: npe``
+are built by :mod:`tests.config.posterior_helpers`, which Task 7 split out
+when this file reached 787 lines against a 800-line ceiling that nothing
+guards automatically.  The import goes ONE WAY -- that module imports this
+one, and this one imports nothing back, because a re-export here would close
+a cycle that survives ``import exit_helpers`` and dies on
+``import posterior_helpers``.  So "one place builds a test document" is now
+one package spelled as two modules, and a test module imports each name from
+whichever of the two defines it.  ``TWO_REFS`` and ``ONE_REF`` at the foot
+below are the exception and stayed: they are built from :data:`TWO_LATENTS`,
+which is this module's.
 """
 
 from collections.abc import Mapping
@@ -629,144 +641,6 @@ def fanned_built(run=None, *, noise=None):
     return load_document(fanned_document(run or {"kind": "forward"},
                                          noise=noise))
 
-
-# --- What kind: nuts is measured on -----------------------------------------
-#
-# ``name: "chain"``, deliberately NOT the kind -- the same reason :data:`GLS`
-# gives: ``runs.py`` names an unnamed run after its kind, so a run named for
-# its kind cannot tell a ``where`` built from ``run.name`` from one built out
-# of ``run.kind``, and every refusal below reads that prefix.
-#
-# 200 warmup + 200 samples on the one-latent document is 1.3-2.7 s on the first
-# call in a process and 0.3-0.6 s on the second (measured over several runs; a
-# single pair of numbers does not reproduce, and the first call carries the
-# numpyro import and the trace), and it is a CHAIN LENGTH rather than a
-# statistical recommendation: it is the pair the plan's budget section pins,
-# and this document's r_hat under it is 0.99527 with n_eff 80.2 (measured
-# through ``numpyro.diagnostics.summary`` on
-# ``get_samples(group_by_chain=True)``).  ``seeds={"chain": 3}`` is what the
-# run's ``seed: {from: runtime.seeds.chain}`` resolves against; every number
-# pinned in tests/config/test_config_exits_nuts.py was measured under it.
-#
-# ``progress_bar: false`` was a DEBT this constant carried from Task 4 to
-# Task 6, and Task 6 has now repaid it.  It could not go in at Task 4:
-# ``_NUTS_KEYS`` held three names there and ``_sweep`` refuses every option
-# outside the table, so declaring it refused every run this constant drives --
-# measured, 11 of the 12 tests in tests/config/test_config_exits_nuts.py
-# failed, the 12th passing only because it is the one asserting that the sweep
-# refuses an unknown key.  What its absence cost was real: numpyro's own
-# default is True, so every chain test wrote a tqdm bar to captured stderr,
-# and -- worse -- with NO document in the suite declaring the key,
-# ``progress_bar`` could be deleted from both ``_NUTS_KEYS`` and
-# ``_MCMC_KEYS`` and every test stayed green.  It is declared here now, in the
-# commit that added the key to those two tables, which closes the SWEEP leg;
-# test_config_exits_nuts.py's MCMC spy closes the FORWARD leg, and the same
-# module's ``product({"drop": ("progress_bar",)})`` is how the silent document
-# is still reachable.
-NUTS = {"name": "chain", "kind": "nuts", "num_warmup": 200,
-        "num_samples": 200, "seed": {"from": "runtime.seeds.chain"},
-        "progress_bar": False}
-
-
-def nuts_document(run=None, **kwargs):
-    """:func:`conjugate_document` with a ``kind: nuts`` run merged over NUTS.
-
-    ``run`` is merged over :data:`NUTS`, so a caller adds ``num_chains:`` or
-    ``init:`` without restating ``seed:``; every other keyword goes to
-    :func:`conjugate_document` unchanged.  A ``drop`` key inside ``run``
-    takes keys AWAY, for a document that must be missing a required key.
-
-    ``drop`` is NOT what the required-key refusals use -- those go through
-    :func:`nuts_spec`'s own ``drop=``, which builds a RunSpec directly and is
-    a different mechanism.  This branch exists for the refusals a LATER task
-    reaches through ``run_document``; if nothing in the finished plan passes
-    ``{"drop": ...}`` here, delete the branch rather than leaving a dead one
-    with a docstring that claims a caller.
-
-    **Nothing in the tree passes it, still** -- measured with ``grep`` at
-    Task 6: the only occurrences of ``nuts_document({"drop":`` in ``src`` or
-    ``tests`` are the two inside this file's docstrings.  Task 5 expected
-    Task 6's ``run_document`` legs to be the callers; **they are not** --
-    Task 6's silent document goes through ``nuts_spec(drop=...)``, which
-    builds the RunSpec the executor actually reads.  The branch works (it
-    reaches the same refusal), so the keep-or-delete decision passes
-    undecided, and deliberately so, to whichever task makes Task 7's split
-    -- rather than dead code moving into a new module unnoticed.
-    """
-    merged = {**NUTS, **(run or {})}
-    for key in merged.pop("drop", ()):
-        merged.pop(key, None)
-    kwargs.setdefault("seeds", {"chain": 3})
-    return conjugate_document(merged, **kwargs)
-
-
-def nuts_built(run=None, **kwargs):
-    """:func:`nuts_document`, BUILT -- the ``built`` the executor receives."""
-    return load_document(nuts_document(run, **kwargs))
-
-
-def nuts_spec(drop=(), **options):
-    """A ``kind: nuts`` RunSpec named ``chain``, straight to the executor.
-
-    Task 4 drove ``_run_nuts`` through this rather than through
-    ``run_document``, because ``parse_runs`` refused ``kind: nuts`` until
-    Task 5 moved it out of ``_KINDS_2D``.  It stays for the reason its
-    callers actually use: it returns a ``RunSpec``, so a test can call the
-    executor directly and read what it raised or returned, without
-    ``run_document``'s loop turning a refusal into a ``RunResult.error``.
-
-    It is NOT the only way to reach a missing required key -- an earlier
-    draft of this docstring said so and was wrong.  ``nuts_document`` has its
-    own ``drop``, and measured, ``nuts_document({"drop": ("num_samples",)})``
-    reaches the identical refusal.
-    """
-    body = {key: value for key, value in NUTS.items()
-            if key not in ("name", "kind") and key not in drop}
-    body.update(options)
-    return RunSpec(name="chain", kind="nuts", variant=None, on="primary",
-                   expect="ok", options=body)
-
-
-def nuts_product(run=None, **kwargs):
-    """:func:`nuts_document`, EXECUTED, and its NutsProduct.
-
-    The ``run_document`` twin of :func:`nuts_spec`, for a test that wants the
-    route a user takes rather than the executor called directly.
-    """
-    return run_product(nuts_document(run, **kwargs), "chain")
-
-
-# --- What ``init:`` is measured on ------------------------------------------
-#
-#: The needle: a Gaussian's CENTRE, where the likelihood is flat everywhere
-#: the line is not.  ``ref: 60 MHz`` is 18 MHz from the declared start and
-#: 20 MHz from the truth, at the very bottom of this document's 60-85 MHz
-#: band, far enough down the shoulder that a chain started there never finds
-#: the line -- which is what makes ``init:`` OBSERVABLE.  On the one-latent
-#: gain document it is not: measured here, the declared start gives g mean
-#: 1.500021 / r_hat 0.99527 / n_eff 80.2 and numpyro's own ``init_to_uniform``
-#: gives 1.499984 / 0.99922 / 106.4.  Those agree to five significant figures
-#: and numpyro's own is marginally the better-mixed of the two, so no
-#: assertion on that document can tell the two starts apart -- which is the
-#: whole reason this one exists.
-#:
-#: Both the init and the ref carry ``unit: MHz``, and that is not decoration.
-#: ``global_signal.centre`` is canonicalised to Hz, so a bare ``78.0`` is 78
-#: Hz -- measured, that is what ``space.initial_values()`` then holds -- which
-#: starts the chain sixty MHz below the bottom of the band and leaves it
-#: there: measured on this document with the init written bare and everything
-#: else unchanged, c comes back mean 2.93e7 std 1.60e7, against 8.00e7 and
-#: 1.11e5 from the unit-carrying one.  A document that proves nothing looks
-#: exactly like one that does.
-NEEDLE_CENTRE = {"init": {"value": 78.0, "unit": "MHz"},
-                 "into": "global_signal.centre",
-                 "ref": {"value": 60.0, "unit": "MHz"},
-                 "prior": {"normal": {"loc": {"value": 78.0, "unit": "MHz"},
-                                      "scale": {"value": 30.0,
-                                                "unit": "MHz"}}}}
-NEEDLE = {"parameters": {"c": NEEDLE_CENTRE}, "noise": HOMOSCEDASTIC,
-          "observed": {"from": "simulation",
-                       "at": {"c": {"value": 80.0, "unit": "MHz"}}}}
 
 #: :data:`TWO_LATENTS` with a ``ref:`` on EACH -- the document the name-to-ref
 #: PAIRING is measured on, which one latent cannot show at all.  The two refs
