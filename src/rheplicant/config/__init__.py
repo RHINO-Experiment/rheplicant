@@ -19,6 +19,14 @@ which lets one run read an earlier one's product. They add no name here on
 purpose: a run kind is something a document *says*, reached through the
 ``run_document`` above, and the table that dispatches them
 (``sections.exit_support.EXECUTORS``) is wiring rather than surface.
+
+Plan 2D adds the last two exits -- ``nuts`` (numpyro's NUTS over the whole
+parameter space) and ``npe`` (the amortized neural posterior, configured by
+``inference.npe:``) -- and gives ``RunResult`` a ``variant``, so a ``predict``
+reusing an earlier run can refuse to mix two builds. It adds no name here
+either, and for the same reason: a caller receives a product through
+``run_document``, never constructs one, so the product types stay module-local
+and free to grow the ``report:``/``timings:`` fields Plan 4 will want.
 """
 
 from rheplicant.config.context import ResolutionContext

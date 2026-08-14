@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### The posterior, sampled exactly and sampled amortized
+
+Plan 2D: the two exits the config layer had been refusing by name. `nuts` runs
+numpyro's No-U-Turn sampler over the whole parameter space through
+`to_numpyro_model`, with `num_warmup:`, `num_samples:` and a named `seed:`
+required — numpyro gives the first two no defaults — and `init:` saying where
+the chain starts: `declared`, each latent's own `init:`, rather than a uniform
+draw, which on the package's own toy is the difference between `r_hat = 1.002`
+and `r_hat = 840`; `init: ref` is the opt-in alternative that starts at each
+latent's `ref:` instead, the first thing to read that field since 2B parsed it.
+Its product carries the latents alone, deliberately not the deterministic
+prediction site whose per-sample shape is the whole data grid, beside `r_hat`,
+`n_eff` and a divergence count. `npe` simulates a bank, trains a density
+estimator and draws from it conditioned on the real data; its whole grammar is
+the new `inference.npe:` section, which exists because that exit needs four
+independent named seeds and a run carries one. The two disagree about what
+counts as a prior — `to_numpyro_model` accepts a latent the space's
+`joint_prior:` covers and `simulate_pairs` does not — and `npe` now refuses
+that document in this layer's own voice, naming the run and both ways out,
+where the package refused it naming the latents and nothing else.
+
+`predict` gains both as sources, dispatching on the reused run's **kind** and
+never on its product's shape, and each source says in its own words why
+`n_draw:` cannot ask for more: `plan.sample` discarded its warmup, `nuts`'
+`get_samples()` returned the post-warmup draws alone, and `npe` drew exactly
+the `inference.npe.sample.n_draws:` it was asked for. `RunResult` now carries
+the `variant:` its run was configured on, so a `predict` that reuses a run from
+another build is refused rather than returning an answer that is finite,
+correctly shaped and about 1 % wrong. `inference.noise`'s `radiometer_frozen`
+freezes **per observation**, so a run's `on:` is weighed with its own sigma
+rather than the primary's, and `parameters.<name>.ref:` acquires its first
+consumer.
+
+`docs/config-inference.md` carries a worked posterior document the suite
+executes rather than describes: on it, 200 warmup and 200 draws land `r_hat` at
+0.9965 with `n_eff` 43.6 and no divergences, and the chain's mean of 1.5216
+agrees with the conjugate document's exact solve at 1.5225 — two exits that
+share no code below `inference.noise`, on one document.
+
+`compare` and `benchmark` are what remain refused, naming Plan 4, as does
+consuming any product from `outputs:`.
+
 ### The linear algebra, and the questions worth asking before a fit
 
 Plan 2C: `runs:` gains nine kinds and grows a memory. `conjugate.wiener`,

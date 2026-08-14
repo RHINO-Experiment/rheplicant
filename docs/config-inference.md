@@ -81,10 +81,10 @@ Two different things in this package are called "noise model";
   `score_directions`, `mmodes`, and `gradient` on any objective but `chi2`.
   The exits that do weigh one are refused naming this kind:
   `fisher`, `plan.estimate`, `plan.sample`, `conjugate.wiener`,
-  `conjugate.gcr`, `conjugate.gls`, `condition`, and `gradient` under
-  `objective: chi2`. `predict` is reachable under neither list — both of its
-  routes reuse a run that needs a noise model, so the refusal arrives from
-  the reused run rather than from the `predict`.
+  `conjugate.gcr`, `conjugate.gls`, `condition`, `nuts`, `npe`, and
+  `gradient` under `objective: chi2`. `predict` is reachable under neither
+  list — every run it can reuse needs a noise model, so the refusal arrives
+  from the reused run rather than from the `predict`.
 - `kind: homoscedastic` — `sigma:` is a value node; a 1-D sigma must declare
   `axis: time` or `axis: freq`, because it reads equally well along either
   axis of `(n_time, n_freq)` data (check A26).
@@ -137,6 +137,39 @@ binding — records *why* the truth is omitted rather than guessing.
 `mode: skip` carries its own `reason:` (check A37) — three unrelated skips
 sharing one sentence was v0's mistake. The section is grammar plus record in
 2B; its gating is Plan 3's validate.
+
+## The npe section
+
+`inference.npe:` configures the amortized neural posterior, and it is a
+section rather than a run's keys because `kind: npe` needs **four**
+independent named seeds and a run carries one. Five subsections, each named
+for the package call it feeds:
+
+| Subsection | What it configures | Keys |
+|---|---|---|
+| `bank:` | `simulate_pairs` — the (parameters, data) training set | `n_simulations:`, `seed:` |
+| `embed:` | the per-datum embedding `create` is handed | `ravel` (the default) or `{python: mod:fn}` |
+| `create:` | `NeuralPosterior.create` — the estimator's architecture | `n_components:`, `width:`, `depth:`, `min_scale:`, `seed:` |
+| `train:` | `train_posterior` — the optimisation | `n_steps:`, `batch_size:`, `learning_rate:`, `validation_fraction:`, `beta1:`, `beta2:`, `eps:`, `seed:` |
+| `sample:` | `NeuralPosterior.sample` — the draw | `n_draws:`, `seed:` |
+
+Two keys are renamed on the way in and nothing else is: `seed:` becomes the
+package's `key=`, and `n_draws:` becomes `n_samples=`. Everything else is the
+package's own parameter name, so a knob this page does not list is a knob the
+package does not take. **No default is restated**: a key the document omits is
+a key the package decides, which matters most at `create.n_components:`, whose
+package default is 4 and whose shipped example passes 1 because 4 over-fits.
+
+`embed:` resolves to a callable when the document is *read*, not when the run
+executes — a bad `{python: ...}` is refused before the bank is simulated, which
+is the expensive half. It takes the datum and nothing else
+(`jax.vmap(embed)(data)`), and `args:`/`literal:` — the value grammar's way of
+spelling a CALL — have no meaning here, because this key hands over a function
+rather than the result of one.
+
+`validation_fraction: 0.0` is legal and makes the trained history's validation
+array empty; the product's `validation_loss` then has length 0, which is honest
+and easy to mis-plot.
 
 ## Runs
 
@@ -276,6 +309,38 @@ rather than failing.
   answer would come back finite, correctly shaped and about 1 % wrong — the
   package's structure and name checks catch only the mismatches that move the
   parameter layout.
+
+### The two that sample a posterior
+
+- `nuts` — numpyro's No-U-Turn sampler over the whole parameter space, through
+  `to_numpyro_model`. `num_warmup:`, `num_samples:` and a named `seed:` are all
+  required — the first two because numpyro's own `MCMC` gives them no defaults,
+  the seed because a draw needs one (check A29). `init:` says where the chain
+  starts: it defaults to `declared`, each latent's own `init:`, rather than to
+  numpyro's uniform default — which is not a tuning knob, because on the
+  package's own ring toy that difference is `r_hat = 1.002` against
+  `r_hat = 840`. `init: ref` is the opt-in alternative and starts at each
+  latent's `ref:` instead; a latent with no `ref:` is refused by name rather
+  than falling back to its `init:`. `num_chains:`, `chain_method:`,
+  `thinning:` and `progress_bar:` ride on `MCMC` and `target_accept_prob:` on
+  the kernel. The product carries the latents **and not** the deterministic
+  prediction site — `get_samples()` returns that too, and its per-sample shape
+  is the whole data grid — beside `r_hat`, `n_eff` and a divergence count.
+  Unlike the conjugate family it takes the noise **model**, not a decided sigma
+  array: a prediction-dependent sigma is the point on this route, because the
+  likelihood's own `-log σ` becomes part of the potential automatically.
+- `npe` — the amortized neural posterior: simulate a bank, train a density
+  estimator on it, and draw from the estimator conditioned on the real data.
+  It takes no kind-specific keys at all; everything it needs is
+  [`inference.npe:`](#the-npe-section). It needs a prior on **every** latent —
+  `simulate_pairs` samples from them and consults `joint_prior:` not at all,
+  which is where it differs from `nuts`, and the refusal names both ways out.
+
+Either product can be reused by `predict`, which thins with `n_draw:` from the
+tail — with the multi-chain caveat the `predict` bullet above spells out. It is
+worth reading twice before quoting a width from a thinned multi-chain product:
+what comes back is the end of one chain, which is what was asked for and is not
+what "the last 50 draws of the posterior" usually means.
 
 `compare` and `benchmark` arrive with Plan 4. Consuming any of these products
 from `outputs:` is Plan 4's too — for now a product is what `run_document`
@@ -440,4 +505,115 @@ as if that run did not exist — declaration order *is* execution order.
 
 This document is executed by
 `tests/config/test_config_surface.py::TestTheWorkedDocumentOnThePage`, which
+reads the YAML out of this page rather than a copy of it.
+
+## A posterior document
+
+The same model again, asked the two questions the exits above exist for: *what
+does the full posterior look like*, sampled exactly, and *what does an
+amortized estimator say about it*. Each is pushed back out to data space by a
+`predict` that reuses it.
+
+**The sizes here are deliberately small so that this page's own document runs
+inside the test suite**, and they are not recommendations: 200 warmup draws
+land `r_hat` at 0.9965 on this one-latent document — with `n_eff` 43.6 out of
+200 and no divergences — and would not be enough on a real one, and 50 training
+steps over 64 simulations is an estimator that has not converged;
+`train_posterior`'s own default is 3000 steps.
+
+```yaml
+schema_version: 1
+
+runtime:
+  seed: 20260806
+  seeds: {chain: 3, bank: 1, create: 2, train: 4, draws: 5}
+
+observation:
+  meta: {telescope: RHINO}
+  freq:
+    grid:
+      linspace: {start: 60.0, stop: 85.0, num: 8, endpoint: true}
+      unit: MHz
+  time:
+    grid:
+      arange: {start: 0.0, step: 2.0, num: 16}
+      unit: s
+  environment:
+    temperature: {value: 280.0, unit: K}
+
+model:
+  global_signal:
+    depth: {value: 0.5, unit: K}
+    centre: {value: 75.0, unit: MHz}
+    width: {value: 5.0, unit: MHz}
+  gain:
+    gain: {value: 1.1, unit: dimensionless}
+
+inference:
+  parameters:
+    g:
+      init: 1.0
+      linear: true
+      into: gain.gain
+      prior: {normal: {loc: 1.0, scale: 10.0}}
+  noise:
+    kind: homoscedastic
+    sigma: {value: 0.05, unit: K}
+  observed:
+    from: simulation
+    at: {g: 1.5}
+    realise:
+      kind: homoscedastic
+      sigma: {value: 0.05, unit: K}
+      seed: {from: runtime.seeds.observed_noise}
+  npe:
+    bank:
+      n_simulations: 64
+      seed: {from: runtime.seeds.bank}
+    create:
+      n_components: 1
+      width: 16
+      depth: 2
+      seed: {from: runtime.seeds.create}
+    train:
+      n_steps: 50
+      batch_size: 32
+      seed: {from: runtime.seeds.train}
+    sample:
+      n_draws: 12
+      seed: {from: runtime.seeds.draws}
+
+runs:
+  - name: chain
+    kind: nuts
+    num_warmup: 200
+    num_samples: 200
+    seed: {from: runtime.seeds.chain}
+  - name: chain_spread
+    kind: predict
+    reuse: chain
+    n_draw: 50
+  - name: amortized
+    kind: npe
+  - name: npe_spread
+    kind: predict
+    reuse: amortized
+```
+
+`chain` comes back with 200 draws of `g` at a mean of 1.5216 — against the
+1.5225 the conjugate document above reaches by an exact solve, from a route
+that shares no code with it below `inference.noise`. `chain_spread` pushes the
+last 50 of those through the twin and comes back `(50, 16, 8)`: one prediction
+per draw, and **noiseless** — the likelihood's own scatter is not added back,
+so these are model means and not simulated data.
+
+`amortized` trains the estimator and draws 12 times from it, and `npe_spread`
+pushes those to `(12, 16, 8)`. At these sizes the npe draws are wide and are
+not a posterior anybody should read: measured, they have a mean of 1.14 and a
+standard deviation of 8.6 around an injected truth of 1.5. What the pair
+demonstrates is the route, which is why the tests over this document pin
+shapes and keys for it and pin a recovered number only for the chain.
+
+This document is executed by
+`tests/config/test_config_surface.py::TestThePosteriorDocumentOnThePage`, which
 reads the YAML out of this page rather than a copy of it.

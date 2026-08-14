@@ -239,6 +239,41 @@ class TestThePlan2CSurface:
             "it deletes the tuple and its refusal branch."
         )
 
+    def test_plan_2d_adds_no_name_to_the_surface_either(self):
+        """The two new products stay off ``__all__``, deliberately.
+
+        2B exported ``RunResult`` and ``InferenceBuild`` because a caller
+        HOLDS both; 2C exported nothing, because a run kind is something a
+        document says.  ``NutsProduct`` and ``NpeProduct`` are the second
+        shape: a caller receives an instance through
+        ``run_document(...)[name].product`` and never constructs, annotates
+        or ``isinstance``-checks one -- and exporting the CLASS would make
+        the field layout of a config-internal NamedTuple public API, which
+        is what a later plan adding ``report:``/``timings:`` to it would then
+        have to break.
+
+        The one counter-argument, answered mechanically rather than in
+        prose: ``NpeProduct.posterior`` hands back a trained estimator a
+        caller may well want to ``log_prob`` against, and wanting the OBJECT
+        is not wanting this wrapper -- ``NeuralPosterior`` is already on
+        ``rheplicant.inference.__all__`` (asserted below), so the type the
+        caller needs is exported by the layer that owns it.
+
+        Whole-list, like ``test_plan_2c_adds_no_name_to_the_surface``: this
+        asserts that neither name reached the package, which a sampled check
+        of ``__all__`` alone would miss if one were bound to the module and
+        left out of the list.
+        """
+        import rheplicant.config as config
+        import rheplicant.inference as inference
+        from rheplicant.config.sections.npe import NpeProduct
+        from rheplicant.config.sections.nuts import NutsProduct
+
+        for product in (NutsProduct, NpeProduct):
+            assert product.__name__ not in config.__all__, product.__name__
+            assert not hasattr(config, product.__name__), product.__name__
+        assert "NeuralPosterior" in inference.__all__
+
 
 class TestThePagesSayWhatTheLayerDoes:
     """The documentation guards check links and counts, never claims.
@@ -261,6 +296,13 @@ class TestThePagesSayWhatTheLayerDoes:
     were found by reading the source, not by a red test. A new per-kind claim
     on either page is unguarded unless someone writes the guard.
     """
+
+    #: The plans that are still in the future.  "Plan 2D" left this tuple when
+    #: 2D landed: a paragraph that names a shipped kind beside the plan that
+    #: SHIPPED it is honest history, and scanning for it made this guard
+    #: assert a contradiction the moment the last 2D kind reached ``_KINDS``.
+    #: The docstring below is written against that; it moves with this tuple.
+    FUTURE_PLANS = ("Plan 4",)
 
     PAGES = ("config-inference.md", "config-sections.md")
 
@@ -299,6 +341,75 @@ class TestThePagesSayWhatTheLayerDoes:
             f"registered but not on the page: {sorted(registered - listed)}"
         )
 
+    #: ``inference.npe:`` subsection -> the name of the frozenset ``npe.py``
+    #: sweeps for it.  ``embed:`` is deliberately absent: it takes a VALUE
+    #: (``ravel`` or a ``{python:}`` hook), not a mapping of keys, so it has
+    #: no frozenset to compare a row against -- but it must still HAVE a row,
+    #: which ``test_every_npe_subsection_has_a_row`` asserts separately.
+    _NPE_TABLES = {
+        "bank": "_BANK_KEYS",
+        "create": "_CREATE_KEYS",
+        "train": "_TRAIN_KEYS",
+        "sample": "_SAMPLE_KEYS",
+    }
+
+    def _npe_rows(self) -> dict[str, set[str]]:
+        """``{subsection: {key names}}`` read off the page's own table."""
+        table = _section(_page("config-inference.md"), "## The npe section")
+        rows = {}
+        for line in table.splitlines():
+            if not line.startswith("|") or set(line) <= set("|- "):
+                continue
+            cells = line.split("|")
+            names = re.findall(r"`([^`]+)`", cells[1])
+            if not names or names[0].rstrip(":") == "Subsection":
+                continue
+            keys = {token.rstrip(":")
+                    for token in re.findall(r"`([^`]+)`", cells[3])}
+            rows[names[0].rstrip(":")] = keys
+        assert len(rows) > 3, f"the npe table stopped parsing: {rows}"
+        return rows
+
+    def test_every_npe_subsection_has_a_row(self):
+        """The five ``parse_npe`` sweeps, against the five the page offers.
+
+        Both directions, for the reason the Transforms table above gives: a
+        subsection the parser accepts and the page omits is shipped and
+        undiscoverable, and a row naming a subsection the parser does not
+        accept sends a reader to a refusal quoting a vocabulary without it.
+        """
+        from rheplicant.config.sections.npe import _NPE_KEYS
+
+        assert set(self._npe_rows()) == set(_NPE_KEYS)
+
+    def test_each_npe_rows_keys_are_the_keys_the_parser_sweeps(self):
+        """The page's Keys column is the parser's own frozenset, per row.
+
+        This is the guard the ``inference.npe:`` section would otherwise not
+        have.  Every other claim Task 11 put on that page is executed (the
+        worked document), driven (``kind: none``) or read off the module
+        (the deferral sentences); the key lists were prose, and prose is
+        what went false for eleven commits the last time.  It kills a knob
+        added to ``_CREATE_OPTIONS``/``_TRAIN_OPTIONS`` without a page entry,
+        a knob dropped from the package and left on the page, and the
+        transposition of two rows' key lists -- none of which any anchor or
+        count check can see.
+
+        ``seed:`` is in every frozenset here and on every row: it is
+        translated to the package's ``key=`` rather than passed through, and
+        a row that omitted it would be describing a subsection a reader
+        cannot seed.
+        """
+        from rheplicant.config.sections import npe
+
+        rows = self._npe_rows()
+        for subsection, table in self._NPE_TABLES.items():
+            assert rows[subsection] == set(getattr(npe, table)), (
+                f"the npe table's {subsection}: row offers "
+                f"{sorted(rows[subsection])}; npe.{table} sweeps "
+                f"{sorted(getattr(npe, table))}."
+            )
+
     def test_no_page_says_a_shipped_kind_arrives_with_a_later_plan(self):
         """A shipped kind may not share a paragraph with a FUTURE plan.
 
@@ -307,23 +418,43 @@ class TestThePagesSayWhatTheLayerDoes:
         by any mention anywhere.
 
         Narrower than the sentence it was written for, and worth saying so.
-        The false sentence named "Plan 2C", and only "Plan 2D" and "Plan 4"
-        are scanned here -- a page claiming a kind arrives with the plan that
-        has already shipped it would still pass. That is defensible while 2C
-        is the current plan and indefensible after 2D lands, at which point
-        "Plan 2D" stops being a future plan and this list moves on with it.
+        The false sentence named "Plan 2C", and only ``FUTURE_PLANS`` is
+        scanned -- a page claiming a kind arrives with a plan that has
+        already shipped it would still pass.  "Plan 2D" was in that tuple
+        until 2D landed and left it at Task 11: after the last 2D kind
+        reached ``_KINDS``, every honest sentence about what 2D shipped names
+        a shipped kind beside "Plan 2D", and a guard that called that an
+        offence would have made the page choose between being accurate and
+        being green.
+
+        The per-page anti-vacuity floor is not a formality.  A tuple narrowed
+        to a string no paragraph contains -- a typo, or a plan number that
+        retires the way "Plan 2D" just did -- makes ``continue`` fire on every
+        paragraph and leaves this guard passing while reading nothing.  It is
+        asserted PER PAGE rather than once at the end because ``_paragraphs``
+        splits on blank lines only: a deferral sentence that wraps between
+        ``Plan`` and ``4`` matches no filter, and a whole-run counter would be
+        held up by the other page while this one went unread.
         """
         from rheplicant.config.sections.runs import _KINDS
 
         offenders = []
         for name in self.PAGES:
+            scanned = 0
             for paragraph in _paragraphs(_page(name)):
-                if "Plan 2D" not in paragraph and "Plan 4" not in paragraph:
+                if not any(plan in paragraph for plan in self.FUTURE_PLANS):
                     continue
+                scanned += 1
                 named = _kinds_named_in(paragraph, _KINDS)
                 if named:
                     offenders.append(f"{name}: {sorted(named)} in "
                                      f"{paragraph.strip()[:120]!r}")
+            assert scanned >= 1, (
+                f"{name}: no paragraph named any of {self.FUTURE_PLANS}, so "
+                "this guard read nothing. Either the pages stopped deferring "
+                "anything -- in which case delete the guard -- or the tuple "
+                "is stale, or a deferral sentence now wraps mid-name."
+            )
         assert not offenders, (
             "these kinds ship today and the page says they arrive later:\n  "
             + "\n  ".join(offenders)
@@ -371,7 +502,24 @@ class TestThePagesSayWhatTheLayerDoes:
                            "seed": {"from": "runtime.seeds.probe"}}, False),
         "conjugate.gls": ({"names": ["g"], "prior_std": {"g": 10.0}}, False),
         "condition": ({"names": ["g"], "prior_std": {"g": 10.0}}, False),
+        # num_warmup/num_samples/seed are required and the sweep refuses a run
+        # without them, so they are written here to get PAST the grammar and
+        # as far as the noise check -- 2 and 2 because this row is about which
+        # refusal fires, not about a posterior.
+        "nuts": ({"num_warmup": 2, "num_samples": 2,
+                  "seed": {"from": "runtime.seeds.probe"}}, False),
+        "npe": ({}, False),
     }
+
+    #: What a kind needs in ``inference:`` BESIDE the noiseless block to reach
+    #: the noise check at all.  ``npe`` reads its whole grammar from
+    #: ``inference.npe:``; without one it is refused for a reason that has
+    #: nothing to do with ``kind: none``, and the row above would pass on the
+    #: wrong message (2C shape 1).  A side table rather than a third element
+    #: on every row: thirteen rows would be rewritten to add one, and the diff
+    #: would hide which row this task actually cares about.  The section is
+    #: read OFF THE PAGE, so there is one spelling of it in this repo.
+    _UNDER_NONE_INFERENCE = {"npe": "npe"}
 
     def _kind_none_sides(self):
         """The bullet's two halves: what still runs, and what is refused."""
@@ -409,11 +557,17 @@ class TestThePagesSayWhatTheLayerDoes:
 
         document = _page_document(TestTheWorkedDocumentOnThePage.HEADING)
         runs_side, refused_side = self._kind_none_sides()
+        posterior_page = _page_document(
+            TestThePosteriorDocumentOnThePage.HEADING)["inference"]
 
         for kind, (options, should_run) in self._UNDER_NONE.items():
+            block = {**document["inference"], "noise": {"kind": "none"}}
+            extra = self._UNDER_NONE_INFERENCE.get(kind)
+            if extra is not None:
+                block[extra] = posterior_page[extra]
             noiseless = {
                 **document,
-                "inference": {**document["inference"], "noise": {"kind": "none"}},
+                "inference": block,
                 "runs": [{"name": "probe", "kind": kind, **options}],
             }
             side = runs_side if should_run else refused_side
@@ -561,3 +715,127 @@ class TestTheWorkedDocumentOnThePage:
         assert names == ["identifiable", "mean", "at_init", "spread"], names
         with pytest.raises(ConfigError, match="names no earlier run"):
             run_document(forward)
+
+
+class TestThePosteriorDocumentOnThePage:
+    """``docs/config-inference.md``'s posterior example is executed here.
+
+    The same promise ``TestTheWorkedDocumentOnThePage`` makes for the
+    conjugate example: a page that carries a document is a page making a
+    promise, and 2B's final review found errors in the one nobody had run.
+    This one is more expensive -- all four runs together are 4.0 s of
+    class-scoped setup, measured with ``--durations``, against 0.9 s for the
+    whole conjugate document -- so it is run ONCE for the class rather than
+    once per assertion.
+
+    What it deliberately does NOT pin: any number the npe run produces.  Fifty
+    training steps on sixty-four simulations is an estimator that has not
+    converged -- measured on this page's own YAML, ``g`` comes back with a
+    mean of 1.14 and a standard deviation of 8.6, against an injected truth of
+    1.5 -- and pinning a posterior from it would be pinning noise.  (An
+    earlier draft of this docstring said "a mean near 1.52 and a standard
+    deviation of 6.2"; neither number came from a drive of this document, and
+    replacing them is why Step 11.6 exists.)  The nuts run's mean IS pinned,
+    because it agrees with the conjugate page's own answer and that agreement
+    is a cross-check between two independent exits rather than a
+    self-comparison.
+    """
+
+    HEADING = "## A posterior document"
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def results(cls):
+        # @classmethod is required, not stylistic: pytest raises
+        # PytestRemovedIn10Warning for a class-scoped fixture defined as an
+        # instance method, and this suite is otherwise warning-clean.
+        # tests/config/test_config_exits_predict.py:371 and :566 use the same
+        # form, for the same reason.
+        from rheplicant.config import run_document
+
+        return run_document(_page_document(cls.HEADING))
+
+    def test_the_pages_chain_agrees_with_the_pages_conjugate_mean(self,
+                                                                  results):
+        """Two exits, one document, one answer.
+
+        The conjugate page recovers ``g = 1.5224889516830444`` by an exact
+        linear-Gaussian solve; this page's NUTS chain reaches 1.521574 by
+        gradient-based sampling from the same likelihood (both measured, on
+        the two documents as they stand on the page).  Agreement between two
+        routes that share no code below ``inference.noise`` is the assertion,
+        and it is a genuine cross-check rather than a self-comparison: the
+        posterior document's ``observed`` array is BIT-IDENTICAL to the
+        conjugate page's (``seed_for`` derives an undeclared name as
+        ``_digest(name) ^ root``, so adding a ``seeds:`` mapping for OTHER
+        names does not perturb ``observed_noise``).
+
+        A chain that never moved would sit at the declared ``init: 1.0``,
+        which ``abs=0.05`` excludes.  **A chain started by
+        ``init_to_uniform`` would NOT be excluded** -- measured on this
+        page's own YAML by monkeypatching ``nuts._init_strategy``, 200 warmup
+        and 200 samples, ``init_to_declared`` gives 1.521574 and
+        ``init_to_uniform`` gives 1.521562: indistinguishable, both far
+        inside this tolerance.  An earlier draft of this docstring claimed
+        the opposite and cited the bridge's ``r_hat`` 840, which belongs to
+        the ring toy and not to this one-latent document -- here the two
+        strategies give ``r_hat`` 0.9965 and 0.9967.  ``init:`` is separated
+        from ``uniform`` by the spy in ``test_config_exits_nuts.py``, not by
+        this number, and Task 5's body already records exactly this for a
+        one-latent document.
+        """
+        import numpy as np
+
+        chain = results["chain"].product
+        assert sorted(chain.samples) == ["g"]
+        assert "prediction" not in chain.samples
+        assert chain.n_draw == 200 and chain.n_chain == 1
+        assert float(np.mean(np.asarray(chain.samples["g"]))) == \
+            pytest.approx(1.52, abs=0.05)
+
+    def test_the_page_s_npe_run_returns_the_shape_it_promises(self, results):
+        """Shapes, keys and the estimator -- not a posterior.
+
+        ``NeuralPosterior.sample`` returns a flat ``(n_draws, n_params)``
+        array and this layer unravels it back to ``{latent: (n_draws,
+        *shape)}``, which is the ONLY form ``predict`` can read.  The page
+        says ``n_draws: 12``; this is that sentence executed.  ``best_step``
+        is asserted to be a plain ``int`` because ``train_posterior`` returns
+        it as a traced array, and one that reached a message or a report
+        would print as ``Array(50, dtype=int32)``.
+        """
+        import numpy as np
+
+        posterior = results["amortized"].product
+        assert sorted(posterior.samples) == ["g"]
+        assert posterior.n_draw == 12
+        assert np.asarray(posterior.samples["g"]).shape == (12,)
+        assert type(posterior.best_step) is int
+        assert np.asarray(posterior.train_loss).shape == (50,)
+
+    def test_both_predicts_come_back_shaped_like_the_data(self, results):
+        """``reuse:`` on the page, on the two routes 2D adds.
+
+        ``(16, 8)`` is the document's own grid, and the leading axis is the
+        draw count each run kept -- 50 for the thinned chain, 12 for the
+        amortized posterior.  A ``predict`` that pushed the mean once would
+        come back ``(16, 8)`` on both, and one that dropped ``n_draw:`` would
+        come back with 200 rows.
+        """
+        import numpy as np
+
+        chain_spread = np.asarray(results["chain_spread"].product)
+        npe_spread = np.asarray(results["npe_spread"].product)
+        assert chain_spread.shape == (50, 16, 8)
+        assert npe_spread.shape == (12, 16, 8)
+        assert np.all(np.isfinite(chain_spread))
+        assert np.all(np.isfinite(npe_spread))
+
+    def test_the_runs_come_back_in_declaration_order(self, results):
+        """The page's own reading order, and the order ``reuse:`` needs.
+
+        Both predicts look backwards, so the page's list is not decoration:
+        moving either above the run it names is refused.
+        """
+        assert list(results) == ["chain", "chain_spread", "amortized",
+                                 "npe_spread"]
