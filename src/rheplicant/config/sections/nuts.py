@@ -8,7 +8,10 @@ config layer is measured on::
 
 ``exits.py``'s foot import reaches this module from Task 5 onward, so **every
 numpyro import here sits inside a function body** -- the shipped pattern is
-``predict``'s samples route (``diagnostics.py:745``).  A module-level
+``predict``'s samples route (``config/sections/diagnostics.py:745`` -- the
+path is qualified because this repository has TWO ``diagnostics.py`` and the
+sibling, ``inference/diagnostics.py``, is the one every other citation in
+this module resolves to).  A module-level
 ``import numpyro`` would fail nothing: the import would simply cost ~2 s and
 drag numpyro into every process that reads a config.
 
@@ -56,13 +59,18 @@ imports -- ``annotations`` (the ``__future__`` import), ``Any``,
 *Two more bound by Task 5*, plus the ``register`` import it added to the
 ``exit_support`` list: ``_INITS`` (a tuple) and :func:`_init_strategy`.
 
-*Reserved, and bound by NO task before its own.*  **Task 6:** ``_MCMC_KEYS``
-(a TUPLE, and ``target_accept_prob`` is NOT in it -- that knob is ``NUTS``'s,
-and a table carrying it would ``TypeError`` on the first document that
-declared it) and ``_NUTS_KERNEL_KEYS``.  Those two are listed because a name
-absent from an authoritative list reads as free -- which is the failure this
-whole block exists to prevent, and which an earlier draft of the block
-committed by reserving ``_MCMC_KEYS`` alone.
+*Two more bound by Task 6*, plus the ``warnings`` and ``_passthrough``
+imports it added: :data:`_MCMC_KEYS` (a TUPLE, and ``target_accept_prob`` is
+NOT in it -- that knob is ``NUTS``'s, and a table carrying it would
+``TypeError`` on the first document that declared it) and
+:data:`_NUTS_KERNEL_KEYS`.  Task 4 reserved exactly those two names here,
+because a name absent from an authoritative list reads as free -- which is
+the failure this whole block exists to prevent, and which an earlier draft of
+the block committed by reserving ``_MCMC_KEYS`` alone.  **That is the whole
+inventory: this module is written by Tasks 4, 5 and 6 and by nobody after
+them.**  The three ``chain_method`` words numpyro takes are a LOCAL inside
+:func:`_run_nuts` rather than a third module constant, so the reservation
+above stays exhaustive.
 
 Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and :class:`NutsProduct` rather than
 rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
@@ -71,6 +79,7 @@ rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
@@ -78,6 +87,7 @@ from rheplicant.config.sections.exit_support import (
     _noise,
     _number,
     _observed,
+    _passthrough,
     _sweep,
     register,
 )
@@ -88,9 +98,26 @@ from rheplicant.config.sections.posterior_support import (
 
 __all__ = ["NutsProduct"]
 
-#: EVERY key ``kind: nuts`` sweeps.  Task 6 adds the last five.  ONE
-#: frozenset, grown by that task.
-_NUTS_KEYS = frozenset({"num_warmup", "num_samples", "seed", "init"})
+#: EVERY key ``kind: nuts`` sweeps.  ONE frozenset, grown to this shape by
+#: Tasks 4, 5 and 6 rather than three unioned at call time.
+_NUTS_KEYS = frozenset({
+    "num_warmup", "num_samples", "seed",
+    "init",
+    "num_chains", "chain_method", "thinning",
+    "target_accept_prob", "progress_bar",
+})
+
+#: The knobs that ride on ``MCMC(...)``.  ``target_accept_prob`` is NOT here
+#: -- it is ``NUTS``'s (plan §2.4) -- and a table that carried it would
+#: ``TypeError: MCMC.__init__() got an unexpected keyword argument
+#: 'target_accept_prob'`` on the first document that declared it.
+_MCMC_KEYS = ("num_chains", "chain_method", "thinning", "progress_bar")
+
+#: The knobs that ride on ``NUTS(...)``.  ``init_strategy`` does NOT travel
+#: through this table, because ``init:`` is a WORD in the document and a
+#: callable at the seam -- :func:`_init_strategy` is that translation, and it
+#: lands BESIDE this passthrough on the kernel line, not around it.
+_NUTS_KERNEL_KEYS = ("target_accept_prob",)
 
 _COUNTS = ("num_warmup", "num_samples")
 #: What ``init:`` may say.  ``declared`` is the DEFAULT, and it is this
@@ -105,18 +132,28 @@ class NutsProduct(NamedTuple):
     ``samples`` and ``n_draw`` are not free choices: 2C's shipped ``predict``
     reads a samples product as ``product.n_draw`` (an int) and
     ``product.samples`` (a mapping of latent name -> stack with a leading
-    draw axis), ``diagnostics.py:748`` and ``:763``.
+    draw axis), ``config/sections/diagnostics.py:748`` and ``:763`` -- NOT
+    ``inference/diagnostics.py``, which contains no ``n_draw`` at all.
 
     ``samples`` carries ``space.names`` AND NOTHING ELSE -- in particular not
     the deterministic ``"prediction"`` site.
 
-    **Task 6 appends ``diagnostics`` and ``divergences``**, in §3.1's order.
-    The three fields here are the first three of the five that section pins.
+    ``diagnostics`` is ``{latent: {"r_hat": float, "n_eff": float}}`` and
+    ``divergences`` the number of divergent transitions across every chain.
+    A diverging chain returns finite, plausible, WRONG draws, so the count is
+    carried here and warned about, never silently dropped.  It is NOT a
+    refusal: the number at which it becomes fatal is a judgement this layer
+    has no basis for (measured on one document at four seeds under a sloppy
+    target: 200, 101, 77 and 52 out of 200), and ``expect: refuse`` discards
+    the product (``exits.py:296``), which would make the count unreachable
+    exactly when someone wanted to ask how bad it was.
     """
 
     samples: dict[str, Any]
     n_draw: int
     n_chain: int
+    diagnostics: dict[str, Any]
+    divergences: int
 
 
 def _init_strategy(run: Any, built: Any, space: Any) -> Any:
@@ -177,11 +214,62 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
 def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
     """One ``kind: nuts`` run -> a :class:`NutsProduct`."""
     import numpyro
+    from numpyro.diagnostics import summary
 
     from rheplicant.inference import to_numpyro_model
 
     _sweep(run, _NUTS_KEYS)
     where = f"runs[{run.name!r}]"
+    # `_sweep` checks key NAMES.  Nothing checked VALUES, and every knob here
+    # reached the package raw: `num_chains: 0` as `IndexError: tuple index out
+    # of range`, `thinning: 1.5` as numpyro's own bare ValueError,
+    # `target_accept_prob: "hi"` as a TypeError about a DynamicJaxprTracer --
+    # and `target_accept_prob: 2.0` did not raise at all.  Meanwhile
+    # `num_samples: 2.5` was already refused by `_number` a few lines below,
+    # so half this exit's counts were guarded and half were not.
+    for key in ("num_chains", "thinning"):
+        if key in run.options:
+            _number(run, key, run.options[key], kind=int, minimum=1)
+    if "target_accept_prob" in run.options:
+        # minimum=0.0 and NO upper bound: 1.0 as a ceiling would be this layer
+        # restating numpyro's parametrisation, and 2.0 measurably just runs.
+        _number(run, "target_accept_prob", run.options["target_accept_prob"],
+                kind=float, minimum=0.0)
+    if "progress_bar" in run.options and not isinstance(
+            run.options["progress_bar"], bool):
+        # The fifth knob of this commit, and the one `_number` cannot check.
+        # Every non-empty string is truthy, so `progress_bar: "false"` printed
+        # the bar the document asked to be rid of and said nothing (measured).
+        raise ConfigError(
+            f"{where}: progress_bar: is true or false; got "
+            f"{run.options['progress_bar']!r}. Every non-empty string is "
+            'truthy, so progress_bar: "false" would print the very bar the '
+            "document asked to be rid of, and say nothing about it."
+        )
+    # numpyro's own three words, not this layer's invention and not a default
+    # restated: the layer forwards whatever is declared and refuses only what
+    # the package would refuse anyway, in its own voice instead of
+    # `ValueError: Only supporting the following methods`, which names no run
+    # and no document key.  A LOCAL rather than a module constant -- the
+    # module docstring's reserved-name list is exhaustive and stays so.
+    #
+    # "Declared" here MUST mean PRESENT, the way `_passthrough` means it.  An
+    # earlier form of this guard read `.get("chain_method")` and tested
+    # `is not None`, which disagrees with the forwarder on exactly one input:
+    # `chain_method: null` slipped through the gap and reached `MCMC(...)` as
+    # the very ValueError quoted above.  Measured on that form, `num_chains`,
+    # `thinning`, `target_accept_prob` and `init: null` all refused by name
+    # and `chain_method` alone leaked -- a hole closed on one route and left
+    # open on its twin, by the commit that closed it for the other four.
+    methods = ("parallel", "sequential", "vectorized")
+    if ("chain_method" in run.options
+            and run.options["chain_method"] not in methods):
+        raise ConfigError(
+            f"{where}: chain_method: {run.options['chain_method']!r} is not "
+            f"one of numpyro's {', '.join(methods)}. parallel needs one "
+            "device per chain and falls back to sequential with a warning "
+            "when it does not have them; vectorized runs them under one vmap."
+        )
     for key in _COUNTS:
         if key not in run.options:
             raise ConfigError(
@@ -202,14 +290,49 @@ def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
     # object is the difference between a posterior and noise, not a tuning
     # knob.  Which strategy the document asked for is _init_strategy's.
     kernel = numpyro.infer.NUTS(
-        model, init_strategy=_init_strategy(run, built, space))
-    mcmc = numpyro.infer.MCMC(kernel, **counts)
+        model, init_strategy=_init_strategy(run, built, space),
+        **_passthrough(run.options, _NUTS_KERNEL_KEYS))
+    mcmc = numpyro.infer.MCMC(kernel, **counts,
+                              **_passthrough(run.options, _MCMC_KEYS))
     # `observed=` by keyword.  The model is a one-parameter closure, so the
     # positional form binds identically today; the keyword is what survives a
     # to_numpyro_model that grows a second parameter.
     mcmc.run(_draw_key(run, where, built), observed=observed)
     drawn = mcmc.get_samples()
     samples = {name: drawn[name] for name in space.names}
-    return NutsProduct(samples=samples,
-                       n_draw=int(samples[space.names[0]].shape[0]),
-                       n_chain=int(mcmc.num_chains))
+    # `summary` needs the chain axis -- (1, 200) with one chain, (2, 200) with
+    # two -- and it is restricted to the latents for the same reason `samples`
+    # is: run over everything `get_samples` returns it would summarise the
+    # deterministic "prediction" site too, 200 x 16 x 8 of it, and hand back a
+    # row under a key no latent owns.  `r_hat` and `n_eff` are two of the
+    # seven keys it returns, and both arrive as numpy scalars, which is why
+    # `float(...)` sits on each below rather than after someone finds a numpy
+    # scalar in a message.  No `prob=` argument: the plan's snippet passed
+    # `prob=0.9`, which IS the package default and controls only the
+    # '5.0%'/'95.0%' rows the comprehension below discards -- restating a
+    # default two lines above the comment refusing to restate one.
+    grouped = mcmc.get_samples(group_by_chain=True)
+    table = summary({name: grouped[name] for name in space.names})
+    # `diverging` is in get_extra_fields() with NO extra_fields= argument
+    # (measured); passing one would restate a package default.
+    diverging = mcmc.get_extra_fields()["diverging"]
+    divergences = int(diverging.sum())
+    if divergences:
+        warnings.warn(
+            f"{where}: kind: nuts recorded {divergences} divergent "
+            f"transition(s) out of {int(diverging.size)}. A diverging chain "
+            "returns finite, plausible, WRONG draws; the count is on the "
+            "product as .divergences and is not a refusal, because the "
+            "number at which it becomes fatal is a judgement this layer has "
+            "no basis for.",
+            UserWarning, stacklevel=2,
+        )
+    return NutsProduct(
+        samples=samples,
+        n_draw=int(samples[space.names[0]].shape[0]),
+        n_chain=int(mcmc.num_chains),
+        diagnostics={name: {"r_hat": float(row["r_hat"]),
+                            "n_eff": float(row["n_eff"])}
+                     for name, row in table.items()},
+        divergences=divergences,
+    )

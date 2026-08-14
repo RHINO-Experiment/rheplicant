@@ -648,24 +648,24 @@ def fanned_built(run=None, *, noise=None):
 # run's ``seed: {from: runtime.seeds.chain}`` resolves against; every number
 # pinned in tests/config/test_config_exits_nuts.py was measured under it.
 #
-# ``progress_bar: false`` is NOT declared here, and its absence is a DEBT this
-# constant carries until Task 6.  The plan's own Step 4.1 wrote it in, and it
-# cannot go in yet: ``_NUTS_KEYS`` holds three names at Task 4 and ``_sweep``
-# refuses every option outside the table, so declaring it here refuses every
-# run this constant drives -- measured, 11 of the 12 tests in
-# tests/config/test_config_exits_nuts.py fail, and the 12th passes only
-# because it is the one asserting that the sweep refuses an unknown key.
-# (From Task 5 it would take every ``run_document`` call on this document
-# down as well.)  What leaving it out costs is real and belongs written down:
-# numpyro's own default is True, so every chain test here writes a tqdm bar to
-# captured stderr, and -- worse -- with NO document in the suite declaring the
-# key, ``progress_bar`` could be deleted from both ``_NUTS_KEYS`` and
-# ``_MCMC_KEYS`` and every test would stay green.
-# **Task 6 adds ``"progress_bar": False`` to this dict in the commit that adds
-# the key to those two tables**, which closes the sweep leg; its MCMC spy
-# closes the forward leg.
+# ``progress_bar: false`` was a DEBT this constant carried from Task 4 to
+# Task 6, and Task 6 has now repaid it.  It could not go in at Task 4:
+# ``_NUTS_KEYS`` held three names there and ``_sweep`` refuses every option
+# outside the table, so declaring it refused every run this constant drives --
+# measured, 11 of the 12 tests in tests/config/test_config_exits_nuts.py
+# failed, the 12th passing only because it is the one asserting that the sweep
+# refuses an unknown key.  What its absence cost was real: numpyro's own
+# default is True, so every chain test wrote a tqdm bar to captured stderr,
+# and -- worse -- with NO document in the suite declaring the key,
+# ``progress_bar`` could be deleted from both ``_NUTS_KEYS`` and
+# ``_MCMC_KEYS`` and every test stayed green.  It is declared here now, in the
+# commit that added the key to those two tables, which closes the SWEEP leg;
+# test_config_exits_nuts.py's MCMC spy closes the FORWARD leg, and the same
+# module's ``product({"drop": ("progress_bar",)})`` is how the silent document
+# is still reachable.
 NUTS = {"name": "chain", "kind": "nuts", "num_warmup": 200,
-        "num_samples": 200, "seed": {"from": "runtime.seeds.chain"}}
+        "num_samples": 200, "seed": {"from": "runtime.seeds.chain"},
+        "progress_bar": False}
 
 
 def nuts_document(run=None, **kwargs):
@@ -683,13 +683,15 @@ def nuts_document(run=None, **kwargs):
     ``{"drop": ...}`` here, delete the branch rather than leaving a dead one
     with a docstring that claims a caller.
 
-    **As of Task 5 nothing in the tree passes it** (measured: no caller in
-    ``src`` or ``tests``).  It works -- ``nuts_document({"drop":
-    ("num_samples",)})`` reaches the same refusal ``nuts_spec(drop=...)``
-    does -- and it is left in place for Task 6, whose ``run_document`` legs
-    are the callers it was written for.  Recorded here so that whichever task
-    reaches Task 7's split decides to keep or delete it deliberately, rather
-    than moving dead code into a new module without noticing.
+    **Nothing in the tree passes it, still** -- measured with ``grep`` at
+    Task 6: the only occurrences of ``nuts_document({"drop":`` in ``src`` or
+    ``tests`` are the two inside this file's docstrings.  Task 5 expected
+    Task 6's ``run_document`` legs to be the callers; **they are not** --
+    Task 6's silent document goes through ``nuts_spec(drop=...)``, which
+    builds the RunSpec the executor actually reads.  The branch works (it
+    reaches the same refusal), so the keep-or-delete decision passes
+    undecided, and deliberately so, to whichever task makes Task 7's split
+    -- rather than dead code moving into a new module unnoticed.
     """
     merged = {**NUTS, **(run or {})}
     for key in merged.pop("drop", ()):
