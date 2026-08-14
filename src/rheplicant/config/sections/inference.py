@@ -26,6 +26,7 @@ from rheplicant.config.sections.noise import (
     freeze_sigma,
     freeze_sigmas,
 )
+from rheplicant.config.sections.npe import NpeSpec, parse_npe
 from rheplicant.config.sections.observed import ObservedBuild, build_observed
 from rheplicant.config.sections.parameters import parse_latents
 from rheplicant.config.sections.transforms import build_space
@@ -64,6 +65,7 @@ class InferenceBuild(NamedTuple):
     checks: dict[str, CheckSpec]
     trainable: Any
     replaced: tuple[str, ...]
+    npe: NpeSpec | None = None
 
 
 def _checks(section: Any) -> dict[str, CheckSpec]:
@@ -188,12 +190,9 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
     if not isinstance(section, Mapping):
         raise ConfigError(f"inference: is a mapping of subsections; got "
                           f"{section!r}.")
-    if "npe" in section:
-        raise ConfigError(
-            "inference.npe: arrives with Plan 2D, alongside the npe exit."
-        )
     check_unknown_keys("inference", dict(section), _INFERENCE_KEYS,
                        label="inference:")
+    npe = parse_npe(section["npe"], context) if "npe" in section else None
     fit_twin, replaced = build_fit_twin(section.get("twin"), twin, context)
     parsed = (parse_latents(section["parameters"], context)
               if "parameters" in section else None)
@@ -248,4 +247,4 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                               section.get("checks")),
                           trainable=_trainable(section.get("trainable"),
                                                fit_twin),
-                          replaced=replaced)
+                          replaced=replaced, npe=npe)

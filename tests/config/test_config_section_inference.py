@@ -29,6 +29,15 @@ def infer(section, model=None, ctx=None):
 
 PARAMS = {"g": {"init": 1.0, "linear": True, "into": "gain.gain"}}
 
+#: The smallest legal ``inference.npe:``: four subsections, four named
+#: seeds, two required counts, no optional knob at all.
+NPE = {
+    "bank": {"n_simulations": 8, "seed": {"from": "runtime.seeds.npe_bank"}},
+    "create": {"seed": {"from": "runtime.seeds.npe_create"}},
+    "train": {"seed": {"from": "runtime.seeds.npe_train"}},
+    "sample": {"n_draws": 4, "seed": {"from": "runtime.seeds.npe_sample"}},
+}
+
 
 class TestSequence:
     def test_none_still_yields_a_build_with_the_twin_as_fit_twin(self):
@@ -76,9 +85,23 @@ class TestSequence:
             infer({"parameters": {"g": {"init": 1.0}},
                    "bindings": {"latents": ["g"], "into": "gain.gain"}})
 
-    def test_npe_is_plan_2d_by_name(self):
-        with pytest.raises(ConfigError, match="2D"):
-            infer({"npe": {"bank": {"n_simulations": 8}}})
+    def test_npe_parses_rather_than_being_deferred_by_name(self):
+        """The 2D deferral is gone: the section is grammar now.
+
+        Its own module (``test_config_section_npe.py``) owns the grammar;
+        what this asserts is the SEQUENCE -- ``build_inference`` calls
+        ``parse_npe`` and lands the result -- and that the half-written
+        section this test used to hand to the deferral is now refused for
+        its own reason. ``match`` names the subsection, because
+        ``draws._seed_name``'s message is identical across all four.
+        """
+        build = infer({"npe": NPE})
+        assert build.npe is not None
+        assert build.npe.bank["n_simulations"] == 8
+        with pytest.raises(
+                ConfigError,
+                match=r"inference\.npe\.bank: 'seed' is required"):
+            infer({"npe": {**NPE, "bank": {"n_simulations": 8}}})
 
     def test_unknown_inference_keys_are_swept(self):
         with pytest.raises(ConfigError, match="observations"):
