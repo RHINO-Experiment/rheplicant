@@ -250,21 +250,32 @@ rather than failing.
   `x` is ASCII there and `×` in schema §4.7.9, and the message follows the
   source rather than the schema.
 - `predict` — push a fitted posterior back out to data space, choosing its
-  route from what `reuse:` names — a `fisher` run or a `plan.sample` run, and
-  nothing else (any other kind is refused by name, and so is spelling the
-  link `from:`). A `fisher` run's covariance goes through
+  route from what `reuse:` names — a `fisher` run, or a `plan.sample`, `nuts`
+  or `npe` run, and nothing else (any other kind is refused by name, and so is
+  spelling the link `from:`). A `fisher` run's covariance goes through
   `propagate_covariance`, the delta method, and comes back as a prediction
   standard deviation shaped like the data; nothing is drawn on that route, so
-  `n_draw:` is refused there rather than ignored. A `plan.sample` run's
-  **samples** are pushed through the twin one by one, `n_draw:` thinning them
-  from the tail, and those predictions are **noiseless** — they are the
+  `n_draw:` is refused there rather than ignored. The other three carry
+  **samples**, which are pushed through the twin one by one, `n_draw:` thinning
+  them from the tail, and those predictions are **noiseless** — they are the
   model's mean, not simulated data, so do not compare their scatter with an
-  observation's. The samples route also needs numpyro, which the covariance
-  route does not. A `predict` that declares a different `variant:` from the
-  run it reuses is refused by name: pushing one build's product through
-  another build's model mixes two builds, and the answer would come back
-  finite, correctly shaped and about 1 % wrong — the package's structure and
-  name checks catch only the mismatches that move the parameter layout.
+  observation's. `n_draw:` above what the run kept is refused, and the refusal
+  says why in that run's own terms: `plan.sample` discarded its warmup before
+  returning, `nuts`' `get_samples()` returns the post-warmup draws alone
+  (`num_samples` × `num_chains` is the whole chain), and `npe` drew exactly the
+  `inference.npe.sample.n_draws:` it was asked for and has no warmup to
+  recover — so on that last one the remedy is to raise `n_draws:` and draw
+  more. On a multi-chain `nuts` product an `n_draw:` at or below `num_samples`
+  reads **one chain**: `get_samples()` concatenates the chains in order, so the
+  tail of the flat stack is the last chain's tail — ask for more than
+  `num_samples` and you get the whole of the last chain plus the tail of the
+  one before it. The samples route also needs
+  numpyro, which the covariance route does not. A `predict` that declares a
+  different `variant:` from the run it reuses is refused by name: pushing one
+  build's product through another build's model mixes two builds, and the
+  answer would come back finite, correctly shaped and about 1 % wrong — the
+  package's structure and name checks catch only the mismatches that move the
+  parameter layout.
 
 `compare` and `benchmark` arrive with Plan 4. Consuming any of these products
 from `outputs:` is Plan 4's too — for now a product is what `run_document`

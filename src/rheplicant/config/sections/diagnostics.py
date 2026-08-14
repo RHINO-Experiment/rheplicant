@@ -664,23 +664,49 @@ def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
 
 _PREDICT_KEYS = frozenset({"n_draw"})
 
+#: The kinds whose product IS a stack of draws, mapped to the clause that
+#: says why the count they kept is a ceiling.  A dict rather than a tuple
+#: because the three reach that ceiling for three different reasons and one
+#: sentence for all of them would be false twice: ``nuts`` has a warmup and
+#: ``get_samples()`` has already dropped it, ``npe`` has no warmup at all.
+#: The dispatch is on the KIND -- never on ``hasattr(product, "samples")``,
+#: which ``conjugate.wiener`` with ``width: fisher`` already defeats on the
+#: covariance side (conjugate.py:195, :392) and which would let any future
+#: kind carrying a ``.samples`` in past this table.
+_DRAW_SOURCES = {
+    "plan.sample": "plan.sample discards its warmup before returning",
+    "nuts": "get_samples() returns the post-warmup draws alone -- "
+            "num_samples x num_chains is the whole chain",
+    "npe": "npe drew exactly the inference.npe.sample.n_draws: it was "
+           "asked for and has no warmup to recover",
+}
+
 
 @register("predict")
 def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     """``kind: predict`` -- an earlier run's product, pushed through the model.
 
-    Two routes, chosen by the ``kind`` of the run ``reuse:`` names, because
+    TWO routes, over ``fisher`` plus every kind :data:`_DRAW_SOURCES` lists,
+    chosen by the ``kind`` of the run ``reuse:`` names, because
     ``RunResult.product`` has no uniform type:
 
     * a ``fisher`` run carries a covariance under ``product["covariance"]``,
       and :func:`~rheplicant.inference.propagate_covariance` turns it into a
       per-sample prediction standard deviation by the delta method.  Nothing
       is drawn on this route, so ``n_draw:`` is refused rather than ignored.
-    * a ``plan.sample`` run carries draws, and
+    * a ``plan.sample``, ``nuts`` or ``npe`` run carries draws, and
       :func:`~rheplicant.inference.predict_from_samples` runs the pipeline
       over them.  **Those predictions are NOISELESS** -- the likelihood's own
       scatter is not added back (numpyro_bridge.py:337-338).  "Predictive"
       usually means the opposite, so it is said here in full.
+
+    ``n_draw:`` keeps the LAST draws on all three, and on a multi-chain
+    ``nuts`` product an ``n_draw:`` at or below ``num_samples`` reads ONE
+    chain: ``get_samples()`` concatenates the chains in order (measured --
+    the flat stack equals the grouped stack reshaped), so the flat tail is
+    the last chain's tail.  That is the thinning the document asked for and
+    not the pooled posterior; it is said here because the answer comes back
+    finite, correctly shaped and silent about which chain it came from.
 
     :func:`~rheplicant.inference.push_forward` is neither route.  It is a
     ``jax.vmap`` over a SAMPLES pytree (uncertainty.py:577) and takes no
@@ -735,13 +761,13 @@ def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
                 f"{where}: n_draw: thins an earlier run's draws, and "
                 f"reuse: {run.reuse!r} names a kind: fisher run, whose "
                 "product is a covariance -- the delta method draws nothing. "
-                "Drop n_draw:, or reuse a plan.sample run."
+                f"Drop n_draw:, or reuse one of {' / '.join(_DRAW_SOURCES)}."
             )
         forward, values = space.forward_fn(built.inference.fit_twin,
                                            built.state)
         return propagate_covariance(forward, values,
                                     earlier.product["covariance"])
-    if earlier.kind == "plan.sample":
+    if earlier.kind in _DRAW_SOURCES:
         from rheplicant.inference import predict_from_samples
 
         draws = earlier.product
@@ -753,19 +779,21 @@ def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
             if keep > available:
                 raise ConfigError(
                     f"{where}: n_draw: {keep} exceeds the {available} draws "
-                    f"reuse: {run.reuse!r} kept -- plan.sample discards its "
-                    "warmup before returning, so this is all there is."
+                    f"reuse: {run.reuse!r} kept -- "
+                    f"{_DRAW_SOURCES[earlier.kind]}, so this is all there is."
+                    f" Lower n_draw:, or make {run.reuse!r} draw more."
                 )
-        # The LAST draws, not the first: plan.sample has already discarded its
-        # warmup, but the leading kept draws are still the ones nearest the
-        # declared init, and the tail is the part a thinning is meant to keep.
+        # The LAST draws, not the first: no source here still carries a
+        # warmup -- two discarded theirs and npe never had one -- but the
+        # leading kept draws are still the ones nearest the declared init,
+        # and the tail is the part a thinning is meant to keep.
         samples = {name: stack[-keep:]
                    for name, stack in draws.samples.items()}
         return predict_from_samples(built.inference.fit_twin, built.state,
                                     space, samples)
     raise ConfigError(
         f"{where}: reuse: {run.reuse!r} names a kind: {earlier.kind} run, "
-        "and predict pushes forward either a fisher run's covariance or a "
-        "plan.sample run's draws. Those are the two products this exit knows "
-        "how to propagate."
+        "and predict pushes forward either a fisher run's covariance or the "
+        f"draws of a {' / '.join(_DRAW_SOURCES)} run. Those are the "
+        f"{len(_DRAW_SOURCES) + 1} products this exit knows how to propagate."
     )

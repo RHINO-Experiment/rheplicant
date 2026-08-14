@@ -6,6 +6,8 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.sections.runs import run_document
+from tests.config.exit_helpers import conjugate_document
+from tests.config.posterior_helpers import NUTS, npe_document
 from tests.config.test_config_document import synthetic_document
 
 FORWARD = {"name": "fwd", "kind": "forward"}
@@ -169,6 +171,14 @@ class TestTheCovarianceRoute:
         `draws nothing` is this branch's phrase alone: the sweep would accept
         n_draw: (it is the one key _PREDICT_KEYS holds), and the samples
         route's own two n_draw refusals say `exceeds` and `must be >= 1`.
+
+        THE LIST IS MATCHED AS ONE ORDERED STRING, and the closing refusal's
+        own test matches the identical literal.  Both sentences are built from
+        `_DRAW_SOURCES` and both must name it in the SAME order -- two
+        orderings for one table in one function is two lists a reader has to
+        recognise as the same one.  Membership cannot see that: measured,
+        `' / '.join(sorted(_DRAW_SOURCES))` in both messages survived every
+        other test in this module.
         """
         with pytest.raises(ConfigError) as caught:
             run_document(document(FISHER, {**FROM_COV, "n_draw": 4}))
@@ -176,7 +186,7 @@ class TestTheCovarianceRoute:
         message = str(caught.value)
         assert "draws nothing" in message
         assert message.startswith("runs['p']:")
-        assert "plan.sample" in message
+        assert "reuse one of plan.sample / nuts / npe." in message
 
     def test_an_unknown_key_is_swept(self):
         """n_draws: is the plural typo, and it is the SWEEP that catches it.
@@ -277,13 +287,44 @@ class TestTheSamplesRoute:
                                                              rel=1e-4)
         assert not np.allclose(draws[-2:], draws[:2], rtol=1e-3)
 
-    def test_n_draw_beyond_the_chain_is_refused(self):
+    def test_n_draw_equal_to_the_chain_is_the_boundary_that_RUNS(self):
+        """``n_draw: 6`` on a six-draw chain is not a refusal.
+
+        The ceiling is ``keep > available``, and ``>=`` is the mutation that
+        reads identically to a careless eye: it refuses a document asking for
+        exactly the draws it has -- which is what an explicit ``n_draw:``
+        equal to the chain length means -- and tells it "6 exceeds the 6
+        draws", a sentence that is false on its face.  Measured: ``>=``
+        survived every other test in this module on all three sources,
+        because the refusal tests ask for one MORE than there is and the
+        thinning tests for fewer, so the boundary itself was never evaluated.
+        """
+        results = run_document(document(SAMPLE, {**FROM_CHAIN, "n_draw": 6}))
+        draws = np.asarray(results["chain"].product.samples["g"])
+        predictive = np.asarray(results["p"].product)
+        assert draws.shape == (6,)
+        assert predictive.shape == (6, 16, 8)
+
+    def test_n_draw_beyond_the_chain_names_PLAN_SAMPLES_OWN_reason(self):
+        """Renamed and strengthened: the per-kind clause is what makes
+        ``_DRAW_SOURCES`` a table rather than a set.
+
+        ``exceeds the N draws`` is boilerplate every source shares, so
+        asserting it alone passes on an implementation that told every source
+        ``plan.sample``'s sentence -- and on one that told none of them any
+        sentence at all.  Measured before this task: mutating the clause to
+        ``MUTANT CLAUSE`` survived the whole predict module, and no test or
+        page anywhere matched ``discards its warmup``.  The clause below
+        belongs to this row, and ``get_samples()`` belongs to ``nuts``'.
+        """
         with pytest.raises(ConfigError) as caught:
             run_document(document(SAMPLE, {**FROM_CHAIN, "n_draw": 7}))
         assert type(caught.value) is ConfigError
         message = str(caught.value)
-        assert "exceeds the 6 draws" in message
         assert message.startswith("runs['p']:")
+        assert "exceeds the 6 draws" in message
+        assert "plan.sample discards its warmup before returning" in message
+        assert "get_samples()" not in message
 
     def test_n_draw_is_a_positive_count(self):
         """0 is the one that would pass in silence.
@@ -298,6 +339,346 @@ class TestTheSamplesRoute:
             run_document(document(SAMPLE, {**FROM_CHAIN, "n_draw": 0}))
         with pytest.raises(ConfigError, match="n_draw: is a number"):
             run_document(document(SAMPLE, {**FROM_CHAIN, "n_draw": "all"}))
+
+
+class TestTheNutsRoute:
+    """``reuse:`` naming a ``kind: nuts`` run -- the third leg.
+
+    Built on ``posterior_helpers``' own :data:`NUTS` and ``exit_helpers``'
+    ``conjugate_document`` rather than on this module's local ``document()``:
+    that builder deletes the model's noise node instead of repairing it away,
+    so on a bare ``document()`` ``built.twin`` and ``built.inference.fit_twin``
+    are the same object, and a test written against one cannot tell an
+    executor reaching for it from an executor reaching for the other.  THE
+    QUALIFIER MATTERS: pass ``twin=``, as the two fit-twin tests above do, and
+    they separate again -- the sentence was copied from
+    ``exit_helpers._repaired`` without it and read as unconditional, which
+    those two tests disprove.  The helper's documents keep the two apart with
+    no ``twin=`` to remember.
+
+    The class fixture saves ONE chain of the five this class runs: four tests
+    build their own document -- the spy, the ``n_draw: 5`` slice, the
+    ``n_draw: 201`` refusal and the two-chain layout -- because each needs a
+    DIFFERENT one.  That is five ``run_document`` calls and it is NOT five
+    chains' worth of time: measured with the class run in isolation, the
+    fixture is 1.85 s and the four later tests are 1.01 / 0.43 / 0.31 / 0.30,
+    ~3.9 s for the class.  The cold pipeline is the fixture's, and everything
+    after it rides that JAX compilation.  The fixture is still worth having:
+    it is free, and it is what lets the first test assert a relation inside a
+    product that a second run would not reproduce bit-for-bit.
+    """
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def chain(cls):
+        return run_document(conjugate_document(
+            NUTS, {"name": "p", "kind": "predict", "reuse": "chain"},
+            seeds={"chain": 3}))
+
+    def test_every_draw_reaches_the_prediction_and_none_of_it_is_noisy(
+            self, chain):
+        """The pushed predictions differ from each other EXACTLY as the draws
+        do.
+
+        ``g`` enters at ``gain.gain``, the last node of the twin, so the
+        prediction is exactly proportional to it and
+        ``predictive[i] / predictive[0]`` must equal ``draws[i] / draws[0]``
+        everywhere.  This is a relation INSIDE the product, so it needs no
+        forward run to compare against -- which matters here, because
+        ``conjugate_document``'s model keeps its stochastic ``noise`` node and
+        a ``forward`` run on it is a noise realisation, not the signal.
+
+        Three wrong implementations die here: one that pushed the posterior
+        MEAN n times (every row identical -- the third assertion), one that
+        realised the likelihood's scatter on top (``predict_from_samples`` is
+        documented noiseless, numpyro_bridge.py:337-338 -- the ratio stops
+        being exact), and one that pushed the deterministic ``"prediction"``
+        site that ``get_samples()`` also returns (wrong shape).
+        """
+        draws = np.asarray(chain["chain"].product.samples["g"])
+        predictive = np.asarray(chain["p"].product)
+        assert draws.shape == (200,)
+        assert predictive.shape == (200, 16, 8)
+        assert not np.allclose(predictive, predictive[0], rtol=1e-6)
+        assert np.allclose(predictive / predictive[0],
+                           (draws / draws[0])[:, None, None], rtol=1e-4)
+
+    def test_the_prediction_site_never_reaches_predict_from_samples(
+            self, monkeypatch):
+        """``samples`` carries the latents and NOT the whole TOD.
+
+        ``mcmc.get_samples()`` returns the deterministic ``"prediction"`` site
+        beside every latent, and its per-sample shape is the whole data grid
+        -- measured on this document, ``g (200,)`` against
+        ``prediction (200, 16, 8)``, 128 times the latent's footprint.  The
+        assertion is the ABSENCE of that key, by name: asserting that ``"g"``
+        is present passes just as well when the TOD is there too.  The spy is
+        what makes this a statement about what CROSSED the seam rather than
+        about what the product happened to store.
+        """
+        import rheplicant.inference as inference
+
+        seen = {}
+        real = inference.predict_from_samples
+
+        def spy(pipeline, state_template, space, samples):
+            seen["samples"] = samples
+            return real(pipeline, state_template, space, samples)
+
+        monkeypatch.setattr(inference, "predict_from_samples", spy)
+        monkeypatch.setattr(inference, "propagate_covariance", _never)
+        run_document(conjugate_document(
+            NUTS, {"name": "p", "kind": "predict", "reuse": "chain"},
+            seeds={"chain": 3}))
+        assert sorted(seen["samples"]) == ["g"]
+        assert "prediction" not in seen["samples"]
+
+    def test_n_draw_keeps_the_last_draws_of_the_chain(self):
+        """``n_draw: 5`` over a 200-draw chain takes the LAST five.
+
+        The chain's two ends are distinguishable on this document -- the final
+        assertion is what keeps this test honest if they ever stop being -- so
+        an executor that sliced from the front, or that ignored ``n_draw:``,
+        fails here.  A separate ``run_document`` because the class fixture's
+        predict declares no ``n_draw:``.
+        """
+        results = run_document(conjugate_document(
+            NUTS, {"name": "p", "kind": "predict", "reuse": "chain",
+                   "n_draw": 5},
+            seeds={"chain": 3}))
+        draws = np.asarray(results["chain"].product.samples["g"])
+        predictive = np.asarray(results["p"].product)
+        assert predictive.shape == (5, 16, 8)
+        assert np.allclose(predictive / predictive[0],
+                           (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4)
+        assert not np.allclose(draws[-5:], draws[:5], rtol=1e-9)
+
+    def test_n_draw_beyond_the_chain_names_NUTS_OWN_reason(self):
+        """The ceiling clause belongs to ``nuts`` alone.
+
+        ``plan.sample``'s clause says "discards its warmup before returning"
+        and ``npe``'s says "has no warmup to recover"; neither contains
+        ``get_samples()``.  Matching the shared boilerplate ("exceeds the",
+        "all there is") would pass on a single hard-coded plan.sample sentence
+        told to every source -- which is the implementation this test exists
+        to kill, because that sentence is FALSE for npe.
+        """
+        with pytest.raises(ConfigError) as caught:
+            run_document(conjugate_document(
+                NUTS, {"name": "p", "kind": "predict", "reuse": "chain",
+                       "n_draw": 201},
+                seeds={"chain": 3}))
+        message = str(caught.value)
+        assert message.startswith("runs['p']:")
+        assert "exceeds the 200 draws" in message
+        assert "get_samples() returns the post-warmup draws alone" in message
+        assert "plan.sample discards" not in message
+
+    def test_a_thinned_multi_chain_product_reads_the_LAST_chain(self):
+        """Measured, said on the page, and not refused.
+
+        ``get_samples()`` concatenates the chains in order -- measured
+        directly on a two-chain NUTS run, ``get_samples()`` is
+        ``get_samples(group_by_chain=True)`` reshaped, and ``flat[20:]`` IS
+        chain 1 element for element -- so a tail thin of a two-chain product
+        reads chain 1 alone.  This test is what makes that a documented
+        property of ``predict`` rather than a surprise: the thinning happens
+        after the chains are already flat, so ``n_draw: 20`` of 40 is one
+        chain and not a pooled 20.
+
+        WHICH assertion kills what, measured rather than reasoned -- because
+        the first attempt at this paragraph attributed the front slice to the
+        wrong one.  The RATIO assertion is what kills a front slice: under
+        ``stack[:keep]`` it ends up comparing ``draws[:20] / draws[0]``
+        against ``draws[-20:] / draws[-20]``, and those two normalised
+        profiles differ by 1.3e-03 against its own rtol of 1e-04.  Measured:
+        that mutation fails the ratio assertion and no other in this test.
+
+        The LAST assertion kills no ``predict`` mutation at all -- ``draws``
+        is the PRODUCT's stack and this exit never touches it.  It is the
+        precondition that keeps the ratio assertion able to discriminate: if
+        the two halves coincided, a front slice and a tail slice would
+        predict the same thing and the ratio assertion would pass on both.
+        It fails on a product that returned one chain twice or pooled them
+        into a repeated block.  Neither assertion can see an interleave; the
+        flat/grouped identity that would is not reachable from here, because
+        ``NutsProduct`` carries the flat stack alone.
+
+        50 + 20 on two sequential chains rather than the helper's 200 + 200:
+        this test is about the LAYOUT of the flat stack, and the layout does
+        not get truer with a longer chain.  Measured at ~0.8 s.
+        """
+        run = {**NUTS, "num_warmup": 50, "num_samples": 20, "num_chains": 2,
+               "chain_method": "sequential"}
+        results = run_document(conjugate_document(
+            run, {"name": "p", "kind": "predict", "reuse": "chain",
+                  "n_draw": 20},
+            seeds={"chain": 3}))
+        product = results["chain"].product
+        draws = np.asarray(product.samples["g"])
+        predictive = np.asarray(results["p"].product)
+        assert product.n_draw == 40 and product.n_chain == 2
+        assert draws.shape == (40,)
+        assert predictive.shape == (20, 16, 8)
+        assert np.allclose(predictive / predictive[0],
+                           (draws[-20:] / draws[-20])[:, None, None],
+                           rtol=1e-4)
+        # Not a claim about predict: `draws` is the PRODUCT's stack.  This is
+        # what keeps the ratio assertion above able to see a front slice --
+        # with the halves coincident both slice directions predict the same
+        # thing -- and it fails on a product that returned one chain twice or
+        # pooled them into a repeated block.  Measured: the halves differ by
+        # 1.2e-03.
+        assert not np.allclose(draws[-20:], draws[:20], rtol=1e-9)
+
+
+class TestTheNpeRoute:
+    """``reuse:`` naming a ``kind: npe`` run -- the fourth leg.
+
+    Task 7's ``posterior_helpers.npe_document`` builds every document here.
+    Its run is named **amortized** (not the kind, for the reason :data:`NUTS`
+    gives) and its four seeds are 11/12/13/14, so every ``reuse:`` and every
+    result key below is ``"amortized"``.
+
+    ``npe={"sample": {"n_draws": 12}}`` on every call.  The helper's own
+    section draws 100, and this module pins draw COUNTS and stack SHAPES;
+    twelve is a CHOICE and not a minimum -- with one latent the flat draws are
+    ``(n, 1)`` and only ``n == 1`` makes that ambiguous with ``(1, n)``, so 2
+    would show the unravel reached ``predict`` just as well.  Twelve is cheap,
+    leaves room for a ``n_draw: 5`` tail that is visibly not the head, and is
+    what every number below was taken at.  The subsection merge keeps
+    ``sample``'s seed, which is the point of merging per subsection.
+
+    The class fixture saves ONE pipeline of the four these tests run, and the
+    three that build their own document are NOT three more cold pipelines:
+    measured with the class run in isolation, the fixture is ~3.5 s and the
+    three later tests are 0.42 / 0.29 / 0.24, about 4.5 s for the class (the
+    tenths move a little between runs).  The fixture pays the JAX compilation
+    and everything after it rides that.  An earlier version of this paragraph
+    said the later tests "each pay the full ~2.8 s", which was wrong by ~11x
+    in the paragraph written to be honest about cost -- and a reader told a
+    cheap test is expensive deletes the wrong test.
+    """
+
+    #: The one override every test in this class passes.
+    TWELVE = {"sample": {"n_draws": 12}}
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def amortized(cls):
+        return run_document(npe_document(
+            {}, {"name": "p", "kind": "predict", "reuse": "amortized"},
+            npe=cls.TWELVE))
+
+    def test_the_unravelled_draws_reach_the_prediction(self, amortized):
+        """The npe product's ``samples`` is a MAPPING, and predict reads it.
+
+        ``NeuralPosterior.sample`` returns a flat ``(n_draws, n_params)``
+        array; ``predict_from_samples`` takes ``{name: stack}`` and validates
+        it against ``space.names``.  Task 8's ``_unravel`` is what bridges the
+        two, and this is the assertion that it bridged them for THIS consumer
+        rather than only for its own tests -- the shape ``(12, 16, 8)`` is
+        reachable no other way.
+
+        THE LAST TWO ASSERTIONS ARE ATTRIBUTION, and without them the counts,
+        keys, shapes and ``isfinite`` above are all presence: measured,
+        replacing this leg's draws with twelve copies of the last one --
+        ``stack[-keep:] * 0 + stack[-1]``, same shape, same key, all finite --
+        left the whole module green, and the spy test below could not see it
+        either, because the mutation changes precisely the dict the spy
+        records.  Both sibling classes carry this pair; this one did not.
+        ``g`` enters at ``gain.gain`` here exactly as it does on the nuts
+        document, so the prediction is proportional to the draw and the ratio
+        relation is exact -- measured, max deviation 1.19e-07, float32
+        roundoff.
+        """
+        product = amortized["amortized"].product
+        draws = np.asarray(product.samples["g"])
+        predictive = np.asarray(amortized["p"].product)
+        assert product.n_draw == 12
+        assert sorted(product.samples) == ["g"]
+        assert draws.shape == (12,)
+        assert predictive.shape == (12, 16, 8)
+        assert np.all(np.isfinite(predictive))
+        assert not np.allclose(predictive, predictive[0], rtol=1e-6)
+        assert np.allclose(predictive / predictive[0],
+                           (draws / draws[0])[:, None, None], rtol=1e-4)
+
+    def test_the_npe_leg_calls_predict_from_samples(self, monkeypatch):
+        """The mirror of the covariance route's binding test, on the fourth
+        leg.
+
+        ``propagate_covariance`` is stubbed to raise, so an executor that
+        routed an npe product to the delta method fails HERE and not somewhere
+        downstream -- and the recorded arguments pin that the draws crossed
+        the seam keyed by latent name rather than as the flat array the
+        package returned.
+        """
+        import rheplicant.inference as inference
+
+        seen = {}
+        real = inference.predict_from_samples
+
+        def spy(pipeline, state_template, space, samples):
+            seen["samples"] = samples
+            return real(pipeline, state_template, space, samples)
+
+        monkeypatch.setattr(inference, "predict_from_samples", spy)
+        monkeypatch.setattr(inference, "propagate_covariance", _never)
+        run_document(npe_document(
+            {}, {"name": "p", "kind": "predict", "reuse": "amortized"},
+            npe=self.TWELVE))
+        assert sorted(seen["samples"]) == ["g"]
+        assert np.asarray(seen["samples"]["g"]).shape == (12,)
+
+    def test_n_draw_thins_the_npe_draws_from_the_tail(self):
+        """The third source's ``n_draw:`` is driven at a VALID count.
+
+        ``plan.sample`` is driven at 2, 6 and 7 and ``nuts`` at 5, 20 and 201;
+        this class's only other ``n_draw`` test is the ``13 > 12`` refusal,
+        which returns BEFORE the slice.  So the thinning branch was never
+        entered on this leg: measured, ``keep = available`` for ``npe`` alone
+        left the whole module green, and the page promises "the other three
+        carry samples, which are pushed through the twin one by one,
+        ``n_draw:`` thinning them from the tail".
+
+        The tail, not the front -- the same relation the sibling classes pin,
+        against ``draws[-5:]`` rather than ``draws[:5]``, and the last
+        assertion is what keeps that distinction visible: twelve independent
+        posterior draws do not repeat.
+        """
+        results = run_document(npe_document(
+            {}, {"name": "p", "kind": "predict", "reuse": "amortized",
+                 "n_draw": 5},
+            npe=self.TWELVE))
+        draws = np.asarray(results["amortized"].product.samples["g"])
+        predictive = np.asarray(results["p"].product)
+        assert draws.shape == (12,)
+        assert predictive.shape == (5, 16, 8)
+        assert np.allclose(predictive / predictive[0],
+                           (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4)
+        assert not np.allclose(draws[-5:], draws[:5], rtol=1e-9)
+
+    def test_n_draw_beyond_the_draws_names_NPES_OWN_reason(self):
+        """npe has no warmup, so "this is all there is" needs a different why.
+
+        The remedy differs too, and the message has to carry it: a short
+        ``plan.sample`` cannot be lengthened after the fact, but an npe
+        document raises ``inference.npe.sample.n_draws:`` and draws more.  A
+        single shared sentence would send the user looking for a warmup that
+        does not exist.
+        """
+        with pytest.raises(ConfigError) as caught:
+            run_document(npe_document(
+                {}, {"name": "p", "kind": "predict", "reuse": "amortized",
+                     "n_draw": 13},
+                npe=self.TWELVE))
+        message = str(caught.value)
+        assert message.startswith("runs['p']:")
+        assert "exceeds the 12 draws" in message
+        assert "inference.npe.sample.n_draws:" in message
+        assert "no warmup to recover" in message
+        assert "get_samples()" not in message
 
 
 class TestTheReuseGrammar:
@@ -366,49 +747,88 @@ class TestTheReuseGrammar:
         [(ESTIMATE, "point"), (FORWARD, "fwd"), (OPTIMIZE, "fit"),
          (WIENER_FISHER, "w")],
     )
-    def test_reusing_another_kind_names_the_two_that_work(self, earlier,
-                                                          reuse):
+    def test_reusing_another_kind_names_the_four_that_work(self, earlier,
+                                                           reuse):
         """The dispatch is on the run's KIND, never on its product's shape.
 
         plan.estimate is the near miss of family -- same estimators, no
         distribution -- while forward carries a State and optimize a
-        {params, losses}: three shapes that could not be mistaken for either
+        {params, losses}: three shapes that could not be mistaken for any
         route.  ``conjugate.wiener`` with ``width: fisher`` is the near miss
         that COLLIDES: `_gaussian_width` merges {"fisher", "covariance"} into
         its product (conjugate.py:195, :392), so a predict dispatching on
         `"covariance" in earlier.product` accepts it and returns a finite,
         correctly-shaped delta-method width computed from a covariance over
         the CONJUGATE BLOCK's latents rather than inference.parameters.
-        Measured: with the three legs above alone that refactor survives the
-        whole 1276-test config suite.  Plan 2D's `nuts` product will carry
-        `.samples`, so the same temptation exists on the other route.
 
-        The phrase matched is ``kind: <name>`` and not the bare kind, because
-        the refusal's own boilerplate says "predict pushes FORWARD either a
-        fisher run's ..." -- on which the `forward` leg's bare-word assertion
-        passed no matter what the message said about the run.
+        ALL FOUR runnable sources are asserted, not two.  The message named
+        two kinds when this test was written and names four now, and a message
+        that grows satisfies more substrings than it did: `"fisher" in message
+        and "plan.sample" in message` passes on a four-kind message that has
+        dropped `nuts` and `npe` from the sentence entirely, which is exactly
+        the half-shipped state this task can reach.
+
+        The phrase matched for the BRANCH is "knows how to propagate", which
+        belongs to this refusal alone (grep: one hit in src/).  The bare kind
+        is not enough -- the refusal's own boilerplate says "predict pushes
+        FORWARD either a fisher run's ...", on which the `forward` leg's
+        bare-word assertion passed no matter what the message said about the
+        run -- and "kind: <name>" is not enough either, because the covariance
+        route's n_draw refusal also says "names a kind: fisher run".
+
+        The three draw sources are ALSO matched as one ordered string, the
+        identical literal `test_n_draw_on_the_covariance_route_is_refused`
+        matches: both sentences are built from `_DRAW_SOURCES` and both must
+        name it in the same order.  Membership alone cannot see a reordering
+        -- measured, `sorted(_DRAW_SOURCES)` in both messages survived every
+        other test in this module.
+
+        AND THE SENTENCE'S OWN COUNT, which is the same trap one turn later.
+        Half of it grows with the table (`' / '.join(...)`) and the count was
+        hand-written "four" -- measured, "four" -> "three" survived all 39
+        tests, and this commit's own `conjugate.gcr` docstring below calls
+        that kind the most plausible one for a later plan to promote.  The
+        source now derives the count from `len(_DRAW_SOURCES) + 1` so the two
+        halves cannot disagree; this assertion is what pins the rendered
+        result, so growing the table turns BOTH literals red together and the
+        author updates one test rather than discovering a self-contradictory
+        message.
         """
         with pytest.raises(ConfigError) as caught:
             run_document(document(earlier, {**FROM_CHAIN, "reuse": reuse}))
         assert type(caught.value) is ConfigError
         message = str(caught.value)
+        assert "knows how to propagate" in message
         assert f"kind: {earlier['kind']}" in message
-        assert "fisher" in message
-        assert "plan.sample" in message
+        for source in ("fisher", "plan.sample", "nuts", "npe"):
+            assert source in message, source
+        assert "draws of a plan.sample / nuts / npe run" in message
+        assert "Those are the 4 products this exit knows how to " \
+               "propagate." in message
         assert message.startswith("runs['p']:")
 
-    def test_a_future_kind_whose_product_HAS_samples_is_still_refused(self):
+    @pytest.mark.parametrize("kind", ["condition", "conjugate.gcr"])
+    def test_a_kind_whose_product_HAS_samples_is_still_refused(self, kind):
         """The samples branch dispatches on the kind, not on `.samples`.
 
-        The wiener leg above closes the covariance half of that through a real
-        document, because `conjugate.wiener` with `width: fisher` already
-        carries a colliding "covariance" key.  Nothing SHIPPED collides on the
-        samples side, so a `hasattr(earlier.product, "samples")` refactor is
-        today an equivalent mutation -- and stops being one the moment Plan
-        2D lands `nuts`, whose product carries draws under exactly that name.
-        This is that future, brought forward: the executor is called directly
-        with a RunResult of another kind whose product answers `.samples`, and
-        it must still refuse by name.
+        This is 2C's `test_a_future_kind_whose_product_HAS_samples_is_still_
+        refused`, rewritten rather than deleted at the moment its own
+        docstring anticipated: it asserted that a `nuts`-kinded product was
+        refused, and Plan 2D made `nuts` a source.  What the test was ABOUT --
+        that a `hasattr(earlier.product, "samples")` refactor is caught -- is
+        unchanged, so the kind moves and the assertion stays.
+
+        Two kinds, for two different reasons.  `condition` returns a
+        conditioning number and can never be a predict source, so this leg
+        will not have to move again.  `conjugate.gcr` is the real near miss:
+        its product genuinely IS a stack of posterior draws (a dict under
+        `"draws"`, measured), it is the most plausible kind for a later plan
+        to promote, and it is refused today because the TABLE does not list
+        it -- not because its product looks wrong.  A `hasattr` refactor
+        accepts both of these fakes and fails here.
+
+        The executor is called directly, because a document cannot construct
+        a product of one kind and a run of another.
         """
         from rheplicant.config.document import load_document
         from rheplicant.config.sections.diagnostics import _run_predict
@@ -421,14 +841,14 @@ class TestTheReuseGrammar:
             samples = {"g": jnp.ones((3,))}
 
         spec = RunSpec(name="p", kind="predict", variant=None, on="primary",
-                       expect="ok", options={}, reuse="future")
-        results = {"future": RunResult(name="future", kind="nuts",
-                                       product=Chainlike(), error=None)}
+                       expect="ok", options={}, reuse="other")
+        results = {"other": RunResult(name="other", kind=kind,
+                                      product=Chainlike(), error=None)}
         with pytest.raises(ConfigError) as caught:
             _run_predict(spec, built, results=results)
         message = str(caught.value)
-        assert "kind: nuts" in message
-        assert "plan.sample" in message
+        assert f"kind: {kind}" in message
+        assert "knows how to propagate" in message
         assert message.startswith("runs['p']:")
 
     def test_the_2c_deferral_table_is_gone(self):
