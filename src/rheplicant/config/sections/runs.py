@@ -26,12 +26,15 @@ _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
           "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
           "identifiability", "score_directions", "gradient", "mmodes",
-          "predict")
+          "predict", "nuts")
 # Plan 2C's own deferral tuple is GONE rather than emptied: `predict` was its
 # last member, and an empty one would leave `if kind in ()` in `_one` below --
 # dead, green and forever.  The name is not written here either, so that
-# `grep -rn <that name> src` stays the check it was meant to be.
-_KINDS_2D = ("nuts", "npe")
+# `grep -rn <that name> src` stays the check it was meant to be.  `nuts` left
+# THIS tuple the same way, in the commit that put it in `_KINDS` above; `npe`
+# is its last member, and the task that promotes it deletes the tuple
+# outright rather than emptying it, for the reason above.
+_KINDS_2D = ("npe",)
 _KINDS_PLAN4 = ("compare", "benchmark")
 
 

@@ -53,17 +53,19 @@ imports -- ``annotations`` (the ``__future__`` import), ``Any``,
 ``__all__``, :data:`_NUTS_KEYS`, ``_COUNTS``, :class:`NutsProduct` and
 :func:`_run_nuts`.
 
-*Reserved, and bound by NO task before its own.*  **Task 5:** ``_INITS`` (a
-tuple) and ``_init_strategy`` (a function).  **Task 6:** ``_MCMC_KEYS`` (a
-TUPLE, and ``target_accept_prob`` is NOT in it -- that knob is ``NUTS``'s,
+*Two more bound by Task 5*, plus the ``register`` import it added to the
+``exit_support`` list: ``_INITS`` (a tuple) and :func:`_init_strategy`.
+
+*Reserved, and bound by NO task before its own.*  **Task 6:** ``_MCMC_KEYS``
+(a TUPLE, and ``target_accept_prob`` is NOT in it -- that knob is ``NUTS``'s,
 and a table carrying it would ``TypeError`` on the first document that
-declared it) and ``_NUTS_KERNEL_KEYS``.  Those four are listed because a name
+declared it) and ``_NUTS_KERNEL_KEYS``.  Those two are listed because a name
 absent from an authoritative list reads as free -- which is the failure this
 whole block exists to prevent, and which an earlier draft of the block
 committed by reserving ``_MCMC_KEYS`` alone.
 
 Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and :class:`NutsProduct` rather than
-rebinding them, and Task 5 adds the ``@register("nuts")`` decorator to
+rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
 :func:`_run_nuts`.
 """
 
@@ -77,6 +79,7 @@ from rheplicant.config.sections.exit_support import (
     _number,
     _observed,
     _sweep,
+    register,
 )
 from rheplicant.config.sections.posterior_support import (
     _draw_key,
@@ -85,11 +88,15 @@ from rheplicant.config.sections.posterior_support import (
 
 __all__ = ["NutsProduct"]
 
-#: EVERY key ``kind: nuts`` sweeps.  Task 5 adds ``init``; Task 6 adds the
-#: last five.  ONE frozenset, grown by those tasks.
-_NUTS_KEYS = frozenset({"num_warmup", "num_samples", "seed"})
+#: EVERY key ``kind: nuts`` sweeps.  Task 6 adds the last five.  ONE
+#: frozenset, grown by that task.
+_NUTS_KEYS = frozenset({"num_warmup", "num_samples", "seed", "init"})
 
 _COUNTS = ("num_warmup", "num_samples")
+#: What ``init:`` may say.  ``declared`` is the DEFAULT, and it is this
+#: layer's own choice rather than a restatement of numpyro's -- see
+#: :func:`_init_strategy`.
+_INITS = ("declared", "ref")
 
 
 class NutsProduct(NamedTuple):
@@ -112,18 +119,66 @@ class NutsProduct(NamedTuple):
     n_chain: int
 
 
-def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
-    """One ``kind: nuts`` run -> a :class:`NutsProduct`.
+def _init_strategy(run: Any, built: Any, space: Any) -> Any:
+    """``init:`` -> the ``init_strategy=`` the KERNEL takes.
 
-    **NOT registered yet.**  ``register("nuts")`` would put the kind in
-    ``EXECUTORS`` while ``_KINDS`` still refuses it, and
-    ``test_every_executor_is_a_declared_kind`` fails on exactly that
-    (measured: ``registered but unreachable from a document: ['nuts']``).
-    Task 5 adds the decorator in the commit that adds the kind.
+    ``declared`` is this layer's default and is a deliberate override of
+    numpyro's, not a restatement of it: numpyro's default is
+    ``init_to_uniform``, which draws in the unconstrained space with no
+    knowledge of the declaration, and on ``examples/tutorial_nuts.py``'s ring
+    toy that is ``r_hat = 840`` and ``n_eff = 2`` against ``r_hat = 1.002``
+    and ``n_eff = 1327`` from the identical model started at the declaration
+    (``numpyro_bridge.py:296-310``).  The schema says ``init=declared`` for
+    the same reason.
+
+    ``ref`` starts at each latent's ``ref:`` instead -- the first consumer
+    ``ParsedLatent.ref`` has had since it was parsed in Plan 2B.  A latent
+    with no ``ref:`` is refused **by name**: falling back to its ``init:``
+    would run a document that asked for one start from another, which is the
+    invisible-wrong shape this whole effort is written against.
+
+    ``ParsedLatent.ref`` reaches no ``ParameterSpace`` -- ``build_space``
+    keeps ``entry.latent`` and drops the rest (``transforms.py:402``) -- so
+    this reads :attr:`~rheplicant.config.sections.inference.InferenceBuild.refs`,
+    populated by ``build_inference`` where the latents are ALREADY parsed.
+    It does not re-parse the section: a second ``parse_latents`` per run is a
+    second validator that can disagree with the first the day either grows a
+    context-dependent branch, and that shape is already on Plan 3's ledger
+    once.
     """
+    where = f"runs[{run.name!r}]"
+    asked = run.options.get("init", "declared")
+    if asked not in _INITS:
+        raise ConfigError(
+            f"{where}: init: is one of {list(_INITS)} -- where the chain "
+            f"STARTS, not how it moves; got {asked!r}."
+        )
+    if asked == "declared":
+        from rheplicant.inference import init_to_declared
+
+        return init_to_declared(space)
     import numpyro
 
-    from rheplicant.inference import init_to_declared, to_numpyro_model
+    refs = built.inference.refs or {}
+    without = [name for name in space.names if refs.get(name) is None]
+    if without:
+        raise ConfigError(
+            f"{where}: init: ref starts the chain at each latent's own ref:, "
+            f"and inference.parameters declares no ref: for {without}. "
+            "Declare one for each, or say init: declared to start at init: "
+            "-- starting the named ones at ref: and the rest at init: would "
+            "be a third starting point no document asked for."
+        )
+    return numpyro.infer.init_to_value(
+        values={name: refs[name] for name in space.names})
+
+
+@register("nuts")
+def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
+    """One ``kind: nuts`` run -> a :class:`NutsProduct`."""
+    import numpyro
+
+    from rheplicant.inference import to_numpyro_model
 
     _sweep(run, _NUTS_KEYS)
     where = f"runs[{run.name!r}]"
@@ -143,10 +198,11 @@ def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
     # _noise, never _decided_sigma: see the module docstring.
     model = to_numpyro_model(built.inference.fit_twin, built.state, space,
                              _noise(run, built))
-    # init_strategy on the KERNEL.  Task 5 makes the choice declarable; it is
-    # passed from here because passing it to neither object is the difference
-    # between a posterior and noise, not a tuning knob.
-    kernel = numpyro.infer.NUTS(model, init_strategy=init_to_declared(space))
+    # init_strategy on the KERNEL, and never on MCMC: passing it to neither
+    # object is the difference between a posterior and noise, not a tuning
+    # knob.  Which strategy the document asked for is _init_strategy's.
+    kernel = numpyro.infer.NUTS(
+        model, init_strategy=_init_strategy(run, built, space))
     mcmc = numpyro.infer.MCMC(kernel, **counts)
     # `observed=` by keyword.  The model is a one-parameter closure, so the
     # positional form binds identically today; the keyword is what survives a

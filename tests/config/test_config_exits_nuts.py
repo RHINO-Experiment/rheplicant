@@ -4,18 +4,39 @@ import pytest
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.nuts import NutsProduct, _run_nuts
+from rheplicant.config.sections.runs import run_document
 from tests.config.exit_helpers import (
     FROZEN,
+    NEEDLE,
+    ONE_REF,
     PRIOR_FREE,
     RADIOMETER,
     TWO_LATENTS,
+    TWO_REFS,
+    WIENER_MODEL,
     nuts_built,
+    nuts_document,
+    nuts_product,
     nuts_spec,
 )
 
 
 def product(run=None, **document):
     return _run_nuts(nuts_spec(**(run or {})), nuts_built(**document))
+
+
+def needle(run=None):
+    """:data:`NEEDLE` on :data:`WIENER_MODEL`, straight through the executor.
+
+    The model is named rather than left to ``conjugate_document``'s default
+    because every number pinned below was measured on this one -- NOT because
+    the default breaks the document: measured, ``CONJUGATE_MODEL``'s extra
+    fixed ``uniform_sky`` amplitude appears in the prediction and in the
+    simulated data alike, and the declared start finds the line under it just
+    as well (mean 7.99978e7 against 7.99955e7 here).
+    """
+    return _run_nuts(nuts_spec(**(run or {})),
+                     nuts_built(model=WIENER_MODEL, inference=NEEDLE))
 
 
 class TestTheChainComesBack:
@@ -160,3 +181,169 @@ class TestTheRequiredKeys:
     def test_a_prior_free_space_is_refused(self):
         with pytest.raises(ConfigError, match="draws a POSTERIOR"):
             _run_nuts(nuts_spec(), nuts_built(parameters=PRIOR_FREE))
+
+
+class TestTheStartMoves:
+    """``init:`` is tested by what the chain DID, not by what parsed.
+
+    A test that ``init: ref`` was accepted proves nothing.  These legs
+    together prove the start moved AND that it moved to the ref: the
+    posterior contrast shows a different chain, and the spy shows which value
+    reached the kernel.  Either alone is satisfiable by the wrong
+    implementation -- ``init_to_uniform`` under ``init: ref`` passes the first
+    (measured on this document, with the kernel's ``init_strategy`` stripped:
+    mean 3.01e7, the same side of every threshold below as the ref's 3.06e7),
+    and a kernel built and then thrown away passes the second.
+    """
+
+    def test_declared_finds_the_line(self):
+        drawn = needle({"init": "declared"})
+        assert float(drawn.samples["c"].mean()) == pytest.approx(8.0e7,
+                                                                 rel=1e-3)
+
+    def test_declared_is_the_default(self):
+        """Silence and ``init: declared`` are the same chain, bit for bit.
+
+        The default is the layer's own choice and not a restatement of
+        numpyro's -- numpyro's is ``init_to_uniform`` -- so the branch a
+        silent document takes is worth pinning as an identity rather than as
+        another approximate mean, which ``init_to_uniform`` would also pass.
+        """
+        assert float(needle().samples["c"].mean()) == float(
+            needle({"init": "declared"}).samples["c"].mean())
+
+    def test_ref_starts_somewhere_else_and_the_chain_shows_it(self):
+        drawn = needle({"init": "ref"})
+        assert float(drawn.samples["c"].mean()) < 5.0e7
+
+    def test_ref_puts_the_ref_on_the_kernel(self, monkeypatch):
+        import numpyro
+
+        captured = {}
+        real = numpyro.infer.NUTS
+
+        def spy(model, **kwargs):
+            captured.update(kwargs)
+            return real(model, **kwargs)
+
+        monkeypatch.setattr(numpyro.infer, "NUTS", spy)
+        needle({"init": "ref"})
+        values = captured["init_strategy"].keywords["values"]
+        assert float(values["c"]) == pytest.approx(6.0e7)
+
+    def test_declared_puts_the_init_on_the_kernel(self, monkeypatch):
+        """The twin of the leg above.
+
+        ``init_to_declared(space)`` is ``init_to_value(values=
+        space.initial_values())``, so both branches produce the same KIND of
+        object and only the numbers differ -- which is why both are asserted
+        rather than one being taken on trust.
+        """
+        import numpyro
+
+        captured = {}
+        real = numpyro.infer.NUTS
+
+        def spy(model, **kwargs):
+            captured.update(kwargs)
+            return real(model, **kwargs)
+
+        monkeypatch.setattr(numpyro.infer, "NUTS", spy)
+        needle({"init": "declared"})
+        values = captured["init_strategy"].keywords["values"]
+        assert float(values["c"]) == pytest.approx(7.8e7)
+
+    def test_each_latent_gets_its_own_ref(self, monkeypatch):
+        """The PAIRING, which a one-latent document cannot show.
+
+        On :data:`NEEDLE` the pairing is an identity, so a strategy built by
+        zipping ``space.names`` against a separately-ordered list of values
+        is right by accident: measured, reversing the values against the
+        names leaves the whole config suite green, and sends this document's
+        ``{'d': 0.25, 'a': 40.0}`` to the kernel as ``{'d': 40.0, 'a':
+        0.25}`` -- finite, correctly shaped, wrong, which is the failure this
+        plan is written against.
+
+        The whole mapping is asserted rather than one key, so a strategy that
+        carried an extra latent (or dropped one) is caught here too.
+        """
+        import numpyro
+
+        captured = {}
+        real = numpyro.infer.NUTS
+
+        def spy(model, **kwargs):
+            captured.update(kwargs)
+            return real(model, **kwargs)
+
+        monkeypatch.setattr(numpyro.infer, "NUTS", spy)
+        _run_nuts(nuts_spec(init="ref"), nuts_built(inference=TWO_REFS))
+        values = captured["init_strategy"].keywords["values"]
+        assert {name: float(value) for name, value in values.items()} == {
+            "d": 0.25, "a": 40.0}
+
+    def test_ref_without_a_ref_is_refused_by_name(self):
+        """ONE_LATENT declares no ref:, and silence is not a fallback."""
+        with pytest.raises(ConfigError) as caught:
+            _run_nuts(nuts_spec(init="ref"), nuts_built())
+        message = str(caught.value)
+        assert message.startswith("runs['chain']:")
+        assert "['g']" in message
+        assert "init: declared" in message
+
+    def test_a_ref_on_only_SOME_latents_is_refused_by_name(self):
+        """The mixed document the refusal's own sentence is about.
+
+        ``ONE_LATENT`` above has ZERO refs, so it cannot tell "every latent
+        needs one" from "at least one does": measured, a check that refuses
+        only when NO latent carries a ref survives the whole config suite,
+        and this document then dies inside numpyro with a bare ``KeyError:
+        'a'`` -- naming no run, no key: and no way out.
+
+        The latent WITH a ref must not be named: the refusal is about the
+        one that has none.
+        """
+        with pytest.raises(ConfigError) as caught:
+            _run_nuts(nuts_spec(init="ref"), nuts_built(inference=ONE_REF))
+        message = str(caught.value)
+        assert message.startswith("runs['chain']:")
+        assert "['a']" in message
+        assert "init: declared" in message
+
+    def test_an_unknown_init_is_refused(self):
+        """And the refusal names the run, and BOTH ways out.
+
+        Measured, both unpinned before this: a ``where`` built from
+        ``run.kind`` rather than ``run.name`` passed (and on a document with
+        two ``kind: nuts`` runs it names neither), and so did an enumeration
+        with ``ref`` hidden from it -- a refusal that offers a user half the
+        grammar.
+        """
+        with pytest.raises(ConfigError) as caught:
+            _run_nuts(nuts_spec(init="uniform"), nuts_built())
+        message = str(caught.value)
+        assert message.startswith("runs['chain']:")
+        assert "init: is one of ['declared', 'ref']" in message
+
+
+class TestTheKindIsReachableFromADocument:
+    """Declared, registered and parseable -- three places to half-ship.
+
+    Every assertion in this module until now called ``_run_nuts`` directly,
+    which passes whether or not ``parse_runs`` accepts the kind.
+    """
+
+    def test_run_document_runs_it(self):
+        drawn = nuts_product()
+        assert float(drawn.samples["g"].mean()) == pytest.approx(1.5,
+                                                                 abs=1e-3)
+
+    def test_the_run_is_named_and_not_the_kind(self):
+        results = run_document(nuts_document())
+        assert set(results) == {"chain"}
+        assert results["chain"].kind == "nuts"
+
+    def test_a_refusal_can_be_expected(self):
+        results = run_document(nuts_document({"expect": "refuse",
+                                              "init": "uniform"}))
+        assert isinstance(results["chain"].error, ConfigError)

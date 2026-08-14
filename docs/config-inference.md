@@ -266,8 +266,8 @@ rather than failing.
   finite, correctly shaped and about 1 % wrong — the package's structure and
   name checks catch only the mismatches that move the parameter layout.
 
-`nuts`, `npe` and `inference.npe:` are refused by name and arrive with Plan
-2D; `compare` and `benchmark` arrive with Plan 4. Consuming any of these
+`npe` and `inference.npe:` are refused by name and arrive with
+Plan 2D; `compare` and `benchmark` arrive with Plan 4. Consuming any of these
 products from `outputs:` is Plan 4's too — for now a product is what
 `run_document` hands back.
 

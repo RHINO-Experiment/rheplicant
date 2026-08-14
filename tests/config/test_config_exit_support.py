@@ -403,11 +403,15 @@ class TestTheObservationFan:
 
 
 class TestTheDeferredKindsNameTheirPlan:
-    def test_nuts_and_npe_are_plan_2d(self):
-        assert _KINDS_2D == ("nuts", "npe")
+    def test_npe_is_all_that_is_left_of_plan_2d(self):
+        assert _KINDS_2D == ("npe",)
         for kind in _KINDS_2D:
             with pytest.raises(ConfigError, match="2D"):
                 parse_runs([{"kind": kind}])
+
+    def test_nuts_has_left_the_tuple_and_is_runnable(self):
+        assert "nuts" not in _KINDS_2D
+        assert parse_runs([{"kind": "nuts"}])[0].kind == "nuts"
 
 
 class TestACountIsAWholeNumber:

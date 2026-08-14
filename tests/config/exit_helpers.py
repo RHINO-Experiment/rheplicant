@@ -682,6 +682,14 @@ def nuts_document(run=None, **kwargs):
     reaches through ``run_document``; if nothing in the finished plan passes
     ``{"drop": ...}`` here, delete the branch rather than leaving a dead one
     with a docstring that claims a caller.
+
+    **As of Task 5 nothing in the tree passes it** (measured: no caller in
+    ``src`` or ``tests``).  It works -- ``nuts_document({"drop":
+    ("num_samples",)})`` reaches the same refusal ``nuts_spec(drop=...)``
+    does -- and it is left in place for Task 6, whose ``run_document`` legs
+    are the callers it was written for.  Recorded here so that whichever task
+    reaches Task 7's split decides to keep or delete it deliberately, rather
+    than moving dead code into a new module without noticing.
     """
     merged = {**NUTS, **(run or {})}
     for key in merged.pop("drop", ()):
@@ -698,12 +706,80 @@ def nuts_built(run=None, **kwargs):
 def nuts_spec(drop=(), **options):
     """A ``kind: nuts`` RunSpec named ``chain``, straight to the executor.
 
-    Task 4 drives ``_run_nuts`` through this rather than through
-    ``run_document``, because ``parse_runs`` still refuses ``kind: nuts``
-    until Task 5 moves it out of ``_KINDS_2D``.
+    Task 4 drove ``_run_nuts`` through this rather than through
+    ``run_document``, because ``parse_runs`` refused ``kind: nuts`` until
+    Task 5 moved it out of ``_KINDS_2D``.  It stays for the reason its
+    callers actually use: it returns a ``RunSpec``, so a test can call the
+    executor directly and read what it raised or returned, without
+    ``run_document``'s loop turning a refusal into a ``RunResult.error``.
+
+    It is NOT the only way to reach a missing required key -- an earlier
+    draft of this docstring said so and was wrong.  ``nuts_document`` has its
+    own ``drop``, and measured, ``nuts_document({"drop": ("num_samples",)})``
+    reaches the identical refusal.
     """
     body = {key: value for key, value in NUTS.items()
             if key not in ("name", "kind") and key not in drop}
     body.update(options)
     return RunSpec(name="chain", kind="nuts", variant=None, on="primary",
                    expect="ok", options=body)
+
+
+def nuts_product(run=None, **kwargs):
+    """:func:`nuts_document`, EXECUTED, and its NutsProduct.
+
+    The ``run_document`` twin of :func:`nuts_spec`, for a test that wants the
+    route a user takes rather than the executor called directly.
+    """
+    return run_product(nuts_document(run, **kwargs), "chain")
+
+
+# --- What ``init:`` is measured on ------------------------------------------
+#
+#: The needle: a Gaussian's CENTRE, where the likelihood is flat everywhere
+#: the line is not.  ``ref: 60 MHz`` is 18 MHz from the declared start and
+#: 20 MHz from the truth, at the very bottom of this document's 60-85 MHz
+#: band, far enough down the shoulder that a chain started there never finds
+#: the line -- which is what makes ``init:`` OBSERVABLE.  On the one-latent
+#: gain document it is not: measured here, the declared start gives g mean
+#: 1.500021 / r_hat 0.99527 / n_eff 80.2 and numpyro's own ``init_to_uniform``
+#: gives 1.499984 / 0.99922 / 106.4.  Those agree to five significant figures
+#: and numpyro's own is marginally the better-mixed of the two, so no
+#: assertion on that document can tell the two starts apart -- which is the
+#: whole reason this one exists.
+#:
+#: Both the init and the ref carry ``unit: MHz``, and that is not decoration.
+#: ``global_signal.centre`` is canonicalised to Hz, so a bare ``78.0`` is 78
+#: Hz -- measured, that is what ``space.initial_values()`` then holds -- which
+#: starts the chain sixty MHz below the bottom of the band and leaves it
+#: there: measured on this document with the init written bare and everything
+#: else unchanged, c comes back mean 2.93e7 std 1.60e7, against 8.00e7 and
+#: 1.11e5 from the unit-carrying one.  A document that proves nothing looks
+#: exactly like one that does.
+NEEDLE_CENTRE = {"init": {"value": 78.0, "unit": "MHz"},
+                 "into": "global_signal.centre",
+                 "ref": {"value": 60.0, "unit": "MHz"},
+                 "prior": {"normal": {"loc": {"value": 78.0, "unit": "MHz"},
+                                      "scale": {"value": 30.0,
+                                                "unit": "MHz"}}}}
+NEEDLE = {"parameters": {"c": NEEDLE_CENTRE}, "noise": HOMOSCEDASTIC,
+          "observed": {"from": "simulation",
+                       "at": {"c": {"value": 80.0, "unit": "MHz"}}}}
+
+#: :data:`TWO_LATENTS` with a ``ref:`` on EACH -- the document the name-to-ref
+#: PAIRING is measured on, which one latent cannot show at all.  The two refs
+#: are far from each other and from both inits (0.5, 10.0), so a swapped
+#: pairing is a number no assertion can read as rounding; ``d`` is declared
+#: before ``a``, which is NOT alphabetical, because ``space.names`` carries
+#: declaration order and everything downstream inherits it.
+TWO_REFS = {**TWO_LATENTS,
+            "parameters": {
+                "d": {**TWO_LATENTS["parameters"]["d"], "ref": 0.25},
+                "a": {**TWO_LATENTS["parameters"]["a"], "ref": 40.0}}}
+
+#: The same pair with a ``ref:`` on ONE of them: the MIXED document
+#: ``_init_strategy``'s refusal is written about and that no document with
+#: zero refs (:data:`ONE_LATENT`) or two (above) can stand in for.
+ONE_REF = {**TWO_REFS,
+           "parameters": {**TWO_REFS["parameters"],
+                          "a": TWO_LATENTS["parameters"]["a"]}}

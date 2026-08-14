@@ -66,6 +66,15 @@ class InferenceBuild(NamedTuple):
     trainable: Any
     replaced: tuple[str, ...]
     npe: NpeSpec | None = None
+    #: ``{latent name: its ref: as a jnp array in context.dtype}``, for
+    #: every latent that declares one.  ``ParsedLatent.ref`` reaches no
+    #: other build field -- ``build_space`` keeps ``entry.latent`` and drops
+    #: the rest (``transforms.py:402``) -- and ``kind: nuts``'s ``init: ref``
+    #: is its first consumer since Plan 2B parsed it.  Populated HERE, where
+    #: the latents are already parsed, rather than by a second
+    #: ``parse_latents`` inside the executor: two validators for one grammar
+    #: is a shape this effort has paid for once already.
+    refs: dict[str, Any] | None = None
 
 
 def _checks(section: Any) -> dict[str, CheckSpec]:
@@ -247,4 +256,7 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                               section.get("checks")),
                           trainable=_trainable(section.get("trainable"),
                                                fit_twin),
-                          replaced=replaced, npe=npe)
+                          replaced=replaced, npe=npe,
+                          refs={name: entry.ref
+                                for name, entry in (parsed or {}).items()
+                                if entry.ref is not None})

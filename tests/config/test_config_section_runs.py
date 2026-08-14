@@ -32,10 +32,10 @@ class TestGrammar:
         with pytest.raises(ConfigError, match="plan.estimate"):
             parse_runs([{"kind": "anneal"}])
 
-    def test_nuts_and_npe_are_plan_2d(self):
-        for kind in ("nuts", "npe"):
-            with pytest.raises(ConfigError, match="2D"):
-                parse_runs([{"kind": kind}])
+    def test_npe_is_plan_2d_and_nuts_no_longer_is(self):
+        with pytest.raises(ConfigError, match="2D"):
+            parse_runs([{"kind": "npe"}])
+        assert parse_runs([{"kind": "nuts"}])[0].kind == "nuts"
 
     def test_compare_and_benchmark_are_plan_4(self):
         for kind in ("compare", "benchmark"):
