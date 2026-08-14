@@ -628,3 +628,82 @@ def fanned_built(run=None, *, noise=None):
     """:func:`fanned_document`, built -- the ``built`` an accessor receives."""
     return load_document(fanned_document(run or {"kind": "forward"},
                                          noise=noise))
+
+
+# --- What kind: nuts is measured on -----------------------------------------
+#
+# ``name: "chain"``, deliberately NOT the kind -- the same reason :data:`GLS`
+# gives: ``runs.py`` names an unnamed run after its kind, so a run named for
+# its kind cannot tell a ``where`` built from ``run.name`` from one built out
+# of ``run.kind``, and every refusal below reads that prefix.
+#
+# 200 warmup + 200 samples on the one-latent document is 1.3-2.7 s on the first
+# call in a process and 0.3-0.6 s on the second (measured over several runs; a
+# single pair of numbers does not reproduce, and the first call carries the
+# numpyro import and the trace), and it is a CHAIN LENGTH rather than a
+# statistical recommendation: it is the pair the plan's budget section pins,
+# and this document's r_hat under it is 0.99527 with n_eff 80.2 (measured
+# through ``numpyro.diagnostics.summary`` on
+# ``get_samples(group_by_chain=True)``).  ``seeds={"chain": 3}`` is what the
+# run's ``seed: {from: runtime.seeds.chain}`` resolves against; every number
+# pinned in tests/config/test_config_exits_nuts.py was measured under it.
+#
+# ``progress_bar: false`` is NOT declared here, and its absence is a DEBT this
+# constant carries until Task 6.  The plan's own Step 4.1 wrote it in, and it
+# cannot go in yet: ``_NUTS_KEYS`` holds three names at Task 4 and ``_sweep``
+# refuses every option outside the table, so declaring it here refuses every
+# run this constant drives -- measured, 11 of the 12 tests in
+# tests/config/test_config_exits_nuts.py fail, and the 12th passes only
+# because it is the one asserting that the sweep refuses an unknown key.
+# (From Task 5 it would take every ``run_document`` call on this document
+# down as well.)  What leaving it out costs is real and belongs written down:
+# numpyro's own default is True, so every chain test here writes a tqdm bar to
+# captured stderr, and -- worse -- with NO document in the suite declaring the
+# key, ``progress_bar`` could be deleted from both ``_NUTS_KEYS`` and
+# ``_MCMC_KEYS`` and every test would stay green.
+# **Task 6 adds ``"progress_bar": False`` to this dict in the commit that adds
+# the key to those two tables**, which closes the sweep leg; its MCMC spy
+# closes the forward leg.
+NUTS = {"name": "chain", "kind": "nuts", "num_warmup": 200,
+        "num_samples": 200, "seed": {"from": "runtime.seeds.chain"}}
+
+
+def nuts_document(run=None, **kwargs):
+    """:func:`conjugate_document` with a ``kind: nuts`` run merged over NUTS.
+
+    ``run`` is merged over :data:`NUTS`, so a caller adds ``num_chains:`` or
+    ``init:`` without restating ``seed:``; every other keyword goes to
+    :func:`conjugate_document` unchanged.  A ``drop`` key inside ``run``
+    takes keys AWAY, for a document that must be missing a required key.
+
+    ``drop`` is NOT what the required-key refusals use -- those go through
+    :func:`nuts_spec`'s own ``drop=``, which builds a RunSpec directly and is
+    a different mechanism.  This branch exists for the refusals a LATER task
+    reaches through ``run_document``; if nothing in the finished plan passes
+    ``{"drop": ...}`` here, delete the branch rather than leaving a dead one
+    with a docstring that claims a caller.
+    """
+    merged = {**NUTS, **(run or {})}
+    for key in merged.pop("drop", ()):
+        merged.pop(key, None)
+    kwargs.setdefault("seeds", {"chain": 3})
+    return conjugate_document(merged, **kwargs)
+
+
+def nuts_built(run=None, **kwargs):
+    """:func:`nuts_document`, BUILT -- the ``built`` the executor receives."""
+    return load_document(nuts_document(run, **kwargs))
+
+
+def nuts_spec(drop=(), **options):
+    """A ``kind: nuts`` RunSpec named ``chain``, straight to the executor.
+
+    Task 4 drives ``_run_nuts`` through this rather than through
+    ``run_document``, because ``parse_runs`` still refuses ``kind: nuts``
+    until Task 5 moves it out of ``_KINDS_2D``.
+    """
+    body = {key: value for key, value in NUTS.items()
+            if key not in ("name", "kind") and key not in drop}
+    body.update(options)
+    return RunSpec(name="chain", kind="nuts", variant=None, on="primary",
+                   expect="ok", options=body)
