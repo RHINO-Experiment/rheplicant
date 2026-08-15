@@ -23,14 +23,24 @@ this task's brief said.**  Fifteen documents were driven directly through
   leave the run refused for the second reason;
 * a repeated name inside ONE block and an unknown ``engine:`` are also
   ``Block``'s (``plan.py:344-359``), not ``SamplingPlan``'s, which is why the
-  differential below builds the ``Block`` inside its own ``try``.
+  differential below builds the ``Block`` inside its own ``try``;
+* **``learning_rate:`` is NOT A17's shape**, which the first draft of this
+  module said it was.  Measured: ``Block('d','a', learning_rate=0.1)`` --
+  a block that DERIVES conjugate -- is **ACCEPTED**, and only the explicit
+  ``engine='conjugate', learning_rate=...`` pair is refused
+  (``plan.py:369-381``), because ``Block._check`` sees the DECLARED engine
+  and never the derived one.  A17 is conjugate by derivation *or* by
+  declaration, so implementing ``learning_rate`` "at A17's shape" would
+  have refused a document the package builds and runs.
 
 **And ``warm_start.blocks`` is the same partition, one call along.**
-``exits.py:268`` builds ``_blocks(f"{where}: warm_start", ...)`` and hands the
-result to ``SamplingPlan(space, *warm_blocks)`` -- the same constructor, the
-same space, the same four refusals, at P3 behind the same beam.  A check
+``exits.py:287-288`` builds ``_blocks(f"{where}: warm_start", ...)`` and hands
+the result to ``SamplingPlan(space, *warm_blocks)`` -- the same constructor,
+the same space, the same four refusals, at P3 behind the same beam.  A check
 written on ``runs[].blocks`` alone would guard one route and leave its
-identical sibling open.
+identical sibling open -- and one written on BOTH, with no gate, answers
+about a warm block list the executor never reaches (see
+``TestTheWarmStartIsTheSamePartition``).
 """
 
 import pytest
@@ -41,6 +51,7 @@ from rheplicant.config.preflight.fitting import (
     _ENGINES,
     _a18_linear,
     _blocks,
+    _engine_of,
     _kinds,
     _latents,
     _runs,
@@ -55,6 +66,11 @@ LINEAR_D = {"init": 0.5, "linear": True, "into": "global_signal.depth"}
 LINEAR_A = {"init": 10.0, "linear": True, "into": "uniform_sky.amplitude"}
 NONLINEAR_W = {"init": 5.0, "into": "global_signal.width"}
 THREE = {"d": LINEAR_D, "a": LINEAR_A, "w": NONLINEAR_W}
+
+
+#: A partition that earns nothing, so a warm-start test's MAIN blocks are
+#: never the subject.  `engine: gradient` on the linear pair keeps A17 off it.
+CLEAN = [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}]
 
 
 def _plan(blocks, kind="plan.estimate", **options):
@@ -123,7 +139,7 @@ class TestBlocks:
         # A16's third leg, which schema line 1193's wording does not describe.
         # Kills an implementation that only walks `latents` and asks "is it
         # owned" -- `zzz` is in no `latents` iteration, so that direction
-        # never sees it and the run is refused at P3 by `plan.py:551-558`.
+        # never sees it and the run is refused at P3 by `plan.py:545-558`.
         found = _found(_doc([{"names": ["d", "a", "w", "zzz"]}]))
         assert [f.check for f in found] == ["A16"]
         assert "'zzz'" in found[0].message
@@ -142,7 +158,7 @@ class TestBlocks:
         # as non-linear beside the linear 'd'), and an implementation that
         # derives the engine first tells the user their block "mixes
         # declared-linear latents ['d'] with non-linear ones ['zzz']" -- about
-        # a latent that does not exist.  `plan.py:539-541` argues the order in
+        # a latent that does not exist.  `plan.py:541-542` argues the order in
         # as many words; this is that argument as an assertion.
         found = _found(_doc([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]))
         assert {f.check for f in found} == {"A16"}
@@ -224,6 +240,13 @@ class TestBlocks:
         found = _found(_doc([{"names": ["d", "w"]}, {"names": ["a"]}]))
         assert [f.check for f in found] == ["A18"]
         assert "['d']" in found[0].message and "['w']" in found[0].message
+        # ...and BY POSITION, which the two `in` assertions above cannot see.
+        # Kills the swap `{other} with non-linear ones {linear}`, under which
+        # the reader is told `['w']` is the declared-linear one and `['d']` is
+        # not -- the exact inverse of the document, with both fragments still
+        # present.  `d` is the linear latent here and `w` is not.
+        assert ("declared-linear latents ['d'] with non-linear ones ['w']"
+                in found[0].message)
 
     def test_engine_conjugate_over_a_non_linear_member_is_refused(self):
         found = _found(_doc([{"names": ["w"], "engine": "conjugate"},
@@ -242,9 +265,9 @@ class TestBlocks:
         assert [f.check for f in found] == ["A19"]
 
     def test_an_unknown_engine_is_refused_here_and_names_the_two(self):
-        # `_BLOCK_KEYS` (exits.py:164) accepts any string, so today
+        # `_BLOCK_KEYS` (exits.py:165) accepts any string, so today
         # `engine: banana` reaches the user as a ParameterSpaceError from
-        # `plan.py:353-358` -- measured.  Kills deleting the enum clause:
+        # `plan.py:353-359` -- measured.  Kills deleting the enum clause:
         # without it `_engine_of` returns "banana", `engine == CONJUGATE` is
         # False, and this pass accepts a document the run refuses.
         found = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
@@ -343,7 +366,8 @@ class TestBlocks:
         """The differential that catches mirroring drift.
 
         `_engine_of` mirrors `plan.py:643-682` and `_a16_partition` mirrors
-        `plan.py:544-586`.  Mirrored logic drifts, and every test above would
+        `plan.py:544-586` (the three legs at `:545-558`, `:560-574` and
+        `:576-584`).  Mirrored logic drifts, and every test above would
         stay green while the pass and the run disagreed about which engine a
         block takes -- a document refused at P-1 for a reason the run would
         not have given.  So this drives BOTH: the package's own `Block` and
@@ -360,11 +384,26 @@ class TestBlocks:
         all -- which is exactly where a hand-written engine enum or a dropped
         repeat clause would hide.
 
-        **What this differential deliberately does not cover**, stated rather
-        than left as a gap: `learning_rate:` on a conjugate block, which
-        `Block._check` refuses (`plan.py:369-381`, measured) and nothing here
-        does.  It is A17's shape and it has no schema §6 row, so it is not one
-        of the four ids this function claims; recorded for §6's ledger.
+        **What this differential does not cover, measured rather than
+        estimated.**  The first draft of this docstring said "one case"; a
+        sweep of `steps:` and `learning_rate:` values across conjugate and
+        gradient blocks found **nine** documents the package refuses and this
+        pass accepts, in two families:
+
+        * `steps:` that is not a positive int on a block whose engine is NOT
+          conjugate -- `0`, `-1`, `True`, `'5'`, `1.5` on a derived-gradient
+          block, and `engine: gradient, steps: 0` on an all-linear one.
+          `Block._check` (`plan.py:360-368`) refuses every one; A17's rule is
+          about a CONJUGATE block, so none of them is A17's. A numeric bound
+          on `steps:` is A24/A25's row, not this function's;
+        * `learning_rate:` -- `0.0` on any block (`plan.py:369-374`), and any
+          value beside an explicit `engine: conjugate` (`:375-381`).
+
+        Every one is a GAP (a refusal that stays at P3, behind the beam),
+        never a wrong refusal, which is the direction this pass may fail in.
+        Recorded for §6's ledger; `TestBlocks::
+        test_learning_rate_is_not_A17s_shape` pins why the second family in
+        particular is not this task's to close.
 
         Measured: `ParameterSpace.raw` builds in 0.019 s and each
         `SamplingPlan` settles in 0.0001 s, so the whole parametrization is
@@ -404,6 +443,44 @@ class TestBlocks:
             package_refuses = True
         assert bool(_found(_doc(document))) is package_refuses, label
 
+    def test_learning_rate_is_not_A17s_shape(self):
+        """Why the second family of the blind spot above is not this task's.
+
+        The first draft of this module declined `learning_rate:` for the
+        reason *"it is A17's exact shape and has no schema §6 row"*.  The
+        second clause is true and the first is **false**, and the difference
+        is not academic: A17 is a conjugate block **by derivation or by
+        explicit `engine:`** (§2.6 item 3), while `Block._check`
+        (`plan.py:375-381`) reads `self.engine` and never the derived one.
+        So a check written "at A17's shape" would refuse the first row below
+        -- a document the package BUILDS AND RUNS.  That is the direction
+        this pass may not fail in, and the class Task 5 shipped twice.
+
+        This test is the measurement, so the reason in the docstring above
+        cannot rot back into the wrong one.  It is the only place in Tasks
+        7-9 that builds a `Block`, and it builds no document at all.
+        """
+        from rheplicant.core.errors import ParameterSpaceError
+        from rheplicant.inference import Block
+
+        # DERIVED conjugate + learning_rate: accepted, so a P-1 refusal here
+        # would be a wrong refusal.
+        assert Block("d", "a", learning_rate=0.1).learning_rate == 0.1
+        # DECLARED conjugate + learning_rate: refused, and by `engine:`, not
+        # by the derivation.
+        with pytest.raises(ParameterSpaceError, match="contradiction"):
+            Block("d", "a", engine="conjugate", learning_rate=0.1)
+        # ...and `0.0` is refused on any engine at all, which is the other
+        # half of the family and is a numeric bound rather than an engine
+        # rule.
+        with pytest.raises(ParameterSpaceError, match="must be > 0"):
+            Block("w", engine="gradient", learning_rate=0.0)
+        # This pass says nothing about any of the three -- stated as an
+        # assertion so "recorded, not implemented" is a fact rather than a
+        # promise.
+        assert _found(_doc([{"names": ["d", "a"], "learning_rate": 0.1},
+                            {"names": ["w"]}])) == []
+
     def test_the_space_names_are_the_declared_parameter_keys(self):
         """The assumption A16 rests on, pinned against a BUILT document.
 
@@ -437,6 +514,20 @@ class TestBlocks:
             runs=[{"name": "f", "kind": "fisher", "blocks": [{"names": ["d"]}]}])
         assert _found(document) == []
         assert _kinds(document) == frozenset({"fisher"})
+
+    @pytest.mark.parametrize("kind", ["plan", "explain", "planner", "PLAN."],
+                             ids=["plan", "explain", "planner", "upper"])
+    def test_the_prefix_is_plan_DOT_and_nothing_looser(self, kind):
+        # Kills `startswith("plan")` and `"plan" in kind`, both of which
+        # survive a suite whose only negative case is `fisher`.  `kind: plan`
+        # is refused by `runs.py:87` as "not an exit"; earning it an A16
+        # partition refusal first would send the reader to `blocks:` for a
+        # fault that is in `kind:`.
+        document = preflight_document(
+            inference={"parameters": THREE},
+            runs=[{"name": "x", "kind": kind,
+                   "blocks": [{"names": ["d"]}]}])
+        assert _found(document) == []
 
     def test_the_four_ids_are_registered_and_the_pass_runs_them_once(self):
         # 2C's shape 3: a correct decision shipped with no test, so reverting
@@ -623,7 +714,7 @@ class TestTheMessagesNameWhoMustEdit:
 class TestTheWarmStartIsTheSamePartition:
     """`warm_start.blocks` reaches the same `SamplingPlan`, one call along.
 
-    `exits.py:268` -- `SamplingPlan(space, *_blocks(f"{where}: warm_start",
+    `exits.py:287-288` -- `SamplingPlan(space, *_blocks(f"{where}: warm_start",
     warm.get("blocks")))`.  Same constructor, same space, same four refusals,
     same P3.  Every test here kills a `_blocks` that reads `run["blocks"]`
     alone, which is the shape every task in this plan so far has shipped and
@@ -662,7 +753,7 @@ class TestTheWarmStartIsTheSamePartition:
         assert "warm_start.blocks[0]" in found[0].message
 
     def test_a_warm_start_on_plan_estimate_is_left_to_A1(self):
-        # `_ESTIMATE_KEYS` (exits.py:165) has no `warm_start`, and Task 3's
+        # `_ESTIMATE_KEYS` (exits.py:166) has no `warm_start`, and Task 3's
         # A1 already refuses it at P-1 -- measured: "kind: plan.estimate does
         # not take ['warm_start']".  Kills reading `warm_start` on every
         # `plan.*` run: the reader would get a partition refusal about a
@@ -676,6 +767,101 @@ class TestTheWarmStartIsTheSamePartition:
                                     "blocks": [{"names": ["d"]}]})])
         assert _found(document) == []
         assert "A1" in preflight(document).checks()
+
+    def _sample(self, **run):
+        """A ``plan.sample`` whose MAIN blocks earn nothing, patched by ``run``."""
+        return preflight_document(
+            inference={"parameters": THREE},
+            runs=[{"name": "s", "kind": "plan.sample", "blocks": CLEAN,
+                   "n_sweeps": 4, "seed": {"from": "runtime.seeds.sample"},
+                   **run}])
+
+    #: Every ``warm_start`` shape whose ``blocks:`` the executor never READS,
+    #: each paired with the refusal the package gives instead.  Measured by
+    #: reading ``_run_plan`` top to bottom: the main ``blocks:`` grammar at
+    #: ``exits.py:250``, ``warm_start.kind`` at ``:268-271``,
+    #: ``warm_start.move`` at ``:273-278``, and only then the warm
+    #: ``blocks:`` at ``:287``.
+    UNREACHED = [
+        ("no-blocks-at-all", {"blocks": None}),
+        ("blocks-not-a-list", {"blocks": "nope"}),
+        ("blocks-empty", {"blocks": []}),
+        ("warm-kind-missing", {"warm_kind": None}),
+        ("warm-kind-wrong", {"warm_kind": "fisher"}),
+        ("warm-kind-plan-sample", {"warm_kind": "plan.sample"}),
+        ("move-missing", {"move": None}),
+        ("move-empty", {"move": []}),
+        ("move-not-a-list", {"move": "d"}),
+        ("move-not-all-strings", {"move": ["d", 7]}),
+    ]
+
+    @pytest.mark.parametrize("patch", [row[1] for row in UNREACHED],
+                             ids=[row[0] for row in UNREACHED])
+    def test_a_warm_start_the_executor_never_reaches_is_left_alone(self,
+                                                                   patch):
+        """THE live defect the first draft shipped, as ten documents.
+
+        `_t7_sites` read the warm site whenever `warm_start` was a mapping,
+        and the package does not: `exits._run_plan` refuses the run's own
+        `blocks:` (`:250`), then `warm_start.kind` (`:268-271`), then
+        `warm_start.move` (`:273-278`), and only then reads the warm
+        `blocks:` (`:287`).  So a `plan.sample` that simply FORGOT `blocks:`
+        used to be told *"runs['s']: warm_start.blocks: does not cover
+        ['a', 'w']"* -- about a different key -- while the refusal it earns is
+        *"blocks: is a non-empty list of block mappings; got None"*, which is
+        hoisted by nothing and so never appeared at all.
+
+        Kills reverting `_t7_warm_start` to `isinstance(warm, Mapping)`: the
+        warm partition below is broken on purpose, so every row of this table
+        emits an A16 under that implementation.
+        """
+        warm = {"kind": patch.get("warm_kind", "plan.estimate"),
+                "move": patch.get("move", ["d"]),
+                "blocks": [{"names": ["d"]}]}       # covers 'd' and nothing else
+        if "warm_kind" in patch and patch["warm_kind"] is None:
+            warm.pop("kind")
+        if "move" in patch and patch["move"] is None:
+            warm.pop("move")
+        run = {"warm_start": warm}
+        if "blocks" in patch:
+            run["blocks"] = patch["blocks"]
+        document = self._sample(**run)
+        assert _found(document) == []
+
+    def test_that_stand_down_is_not_the_whole_check_giving_up(self):
+        # ANTI-VACUITY for the table above: with the SAME broken warm
+        # partition and nothing else wrong, the refusal still arrives.  Kills
+        # `_t7_warm_start` returning None unconditionally, which passes every
+        # one of the ten rows.
+        document = self._sample(warm_start={"kind": "plan.estimate",
+                                            "move": ["d"],
+                                            "blocks": [{"names": ["d"]}]})
+        found = _found(document)
+        assert [(f.check, f.where) for f in found] == [
+            ("A16", "runs[0].warm_start.blocks")]
+
+    @pytest.mark.parametrize("dropped", ["n_sweeps", "seed"])
+    def test_n_sweeps_and_the_seed_are_NOT_gates_and_that_is_the_line(
+            self, dropped):
+        """The other side of the gate, and why it is where it is.
+
+        `_run_plan` also refuses a missing `n_sweeps` (`exits.py:255-256`) and
+        an unnamed seed (`:257`) before it reads the warm blocks -- so by the
+        "would the executor reach it" test alone these would be gates too.
+        They are not, and the distinction is that they are independent RUN
+        keys rather than the warm start's own grammar: a document missing one
+        AND carrying a broken warm partition has two faults the user must fix
+        either way, and reporting both is what collect-rather-than-raise is
+        for (§2.3).  Gating on them trades one round trip for another.
+
+        Kills widening `_t7_warm_start` to "everything `_run_plan` checks
+        first", which is the obvious over-correction and looks strictly safer.
+        """
+        run = {"warm_start": {"kind": "plan.estimate", "move": ["d"],
+                              "blocks": [{"names": ["d"]}]}}
+        document = self._sample(**run)
+        del document["runs"][0][dropped]
+        assert [f.check for f in _found(document)] == ["A16"]
 
     def test_a_clean_warm_start_earns_nothing(self):
         assert _found(_warm([{"names": ["d", "a"], "engine": "gradient"},
@@ -694,10 +880,10 @@ class TestWhatThisCheckStandsDownOn:
 
     def test_a_run_that_EXPECTS_a_refusal_is_left_alone(self):
         # `expect: refuse` is an assertion ABOUT the refusal: `execute_run`
-        # (exits.py:292-302) runs the executor and captures its error as the
+        # (exits.py:311-321) runs the executor and captures its error as the
         # run's product.  A P-1 refusal makes the document unloadable, so the
         # assertion can never be made at all -- measured,
-        # `test_config_exits_plan.py:107` is exactly such a document
+        # `test_config_exits_plan.py:108-113` is exactly such a document
         # (`blocks: [{names: [g, ghost]}]`, `expect: refuse`) and it asserts
         # the captured error names `ghost`.  Kills a `_blocks` that reads
         # every run: that implementation turns that test red and takes
@@ -710,25 +896,37 @@ class TestWhatThisCheckStandsDownOn:
         "nope", {"names": ["d"]}, [], [5], [{"names": "d"}], [{"names": []}],
         [{"names": ["d", 7]}], [{"names": None}], [{}],
         [{"names": ["d", "a", "w"]}, "nope"],
+        [{"names": ["d"], "step": 5}],
+        [{"names": ["d", "a", "w"]}, {"names": ["d"], "learning_Rate": 1.0}],
     ], ids=["a-string", "a-mapping", "empty", "not-a-mapping", "names-a-string",
             "names-empty", "names-not-all-strings", "names-none", "no-names",
-            "a-second-entry-that-is-not-a-mapping"])
+            "a-second-entry-that-is-not-a-mapping", "a-key-a-block-does-not-take",
+            "a-key-a-block-does-not-take-on-the-SECOND-entry"])
     def test_a_blocks_list_the_grammar_refuses_by_shape_is_left_alone(
             self, blocks):
-        """`exits._blocks` (`exits.py:180-202`) refuses each of these in its
+        """`exits._blocks` (`exits.py:181-207`) refuses each of these in its
         own words -- *"blocks: is a non-empty list of block mappings"*,
         *"blocks[0] is a mapping"*, *"blocks[0].names is a non-empty list of
         latent names"*.
 
         Kills the brief's literal guard, `isinstance(entries, list)`, on
-        **six** of these ten rows: an empty list, a non-mapping entry and
-        every malformed `names:` all pass it, after which `owner` stays empty
-        and the reader is told their blocks *"do not cover ['d', 'a', 'w']"*
-        -- a coverage sentence whose fix ("add it to a block") is not the
-        fault, in front of the grammar's own.  Two rows kill something worse:
-        `names: "d"` iterates a STRING into the characters `['d']`, and
-        `names: 5` (not shown -- see the raising battery) iterates an int and
-        aborts the whole pass.
+        **eight** of these twelve rows: an empty list, a non-mapping entry,
+        every malformed `names:` and both unknown keys all pass it, after
+        which `owner` stays empty and the reader is told their blocks *"do not
+        cover ['d', 'a', 'w']"* -- a coverage sentence whose fix ("add it to a
+        block") is not the fault, in front of the grammar's own.  Two rows
+        kill something worse: `names: "d"` iterates a STRING into the
+        characters `['d']`, and `names: 5` (not shown -- see the raising
+        battery) iterates an int and aborts the whole pass.
+
+        **The two unknown-key rows are the FIFTH shape**, and they were the
+        one `exits._blocks` guard the first draft of `_t7_entries` did not
+        mirror: `blocks: [{names: [d], step: 5}]` passed the four and reached
+        the engine derivation, so a document whose real fault is a typo'd
+        `step:` (`exits.py:192-197`, *"does not take ['step']"*) was answered
+        with a coverage sentence instead.  The second of the two puts the bad
+        key on a LATER entry, which kills a gate written to look at
+        `entries[0]` alone.
         """
         document = preflight_document(inference={"parameters": THREE},
                                       runs=[_plan(blocks)])
@@ -819,6 +1017,232 @@ class TestNoHostileDocumentCanAbortThePass:
 # `LINEAR_D`/`LINEAR_A`/`NONLINEAR_W`/`THREE` above are Task 7's and are reused
 # rather than re-declared: a second three-latent constant in one module is the
 # shape §3.1 pins names against, one file in.
+
+class TestTheReadersTasksEightToElevenImport:
+    """`_engine_of` and `_kinds` DIRECTLY, on input `_blocks` never hands them.
+
+    Both are §3.1 names four later tasks import, and both were reachable in
+    this module only THROUGH `_blocks` -- where the enum clause `continue`s
+    before `_engine_of` is ever called on a bad `engine:`, and where `_kinds`
+    is not called at all.  Every guard below therefore survived the whole
+    module: measured, four of them.  A raise in either one is §2.3's TRAP on
+    the reader every fitting check calls first, and it discards the WHOLE
+    report, not just this check's findings.
+    """
+
+    def test_kinds_skips_a_malformed_entry_rather_than_raising(self):
+        # `_runs` emits a bare `{}` for a non-mapping entry, so
+        # `frozenset(run["kind"] for run in _runs(...))` written without the
+        # `isinstance(run.get("kind"), str)` guard raises KeyError here.
+        assert _kinds({"runs": [7, {"kind": "fisher"}]}) == frozenset({"fisher"})
+        assert _kinds({"runs": [{}, {"kind": "forward"}]}) == frozenset(
+            {"forward"})
+
+    @pytest.mark.parametrize("kind", [["plan.estimate"], {"a": 1}, {"x"}],
+                             ids=["list", "mapping", "set"])
+    def test_kinds_survives_an_UNHASHABLE_kind(self, kind):
+        # `run.get("kind")` reaching a `frozenset(...)` comprehension over an
+        # unhashable value raises `TypeError: unhashable type`. The guard is
+        # `isinstance(..., str)`, and dropping it to a truthiness test lets
+        # every one of these through.
+        assert _kinds({"runs": [{"kind": kind}]}) == frozenset()
+
+    def test_kinds_reads_a_single_run_mapping_and_ignores_a_non_string(self):
+        assert _kinds({"runs": {"kind": "forward"}}) == frozenset({"forward"})
+        assert _kinds({"runs": [{"kind": 7}, {"kind": None}]}) == frozenset()
+
+    @pytest.mark.parametrize("declared", [["conjugate"], 5, {"a": 1}, True],
+                             ids=["list", "int", "mapping", "bool"])
+    def test_engine_of_answers_a_NON_STRING_override_with_the_empty_string(
+            self, declared):
+        # Kills `return declared` (the `isinstance` dropped): `_engine_of` is
+        # exported, and a Task 8-11 caller writing `engine in _ENGINES` on the
+        # returned list gets `TypeError: unhashable type: 'list'`.  `""` is
+        # the module's own "cannot be derived" answer and every caller in it
+        # already tests for that.
+        assert _engine_of({"names": ["d"], "engine": declared},
+                          {"d": LINEAR_D}) == ""
+
+    @pytest.mark.parametrize("names", [5, "d", {"d": 1}, None, [], ["d", 7]],
+                             ids=["int", "a-string", "mapping", "none",
+                                  "empty", "not-all-strings"])
+    def test_engine_of_reads_names_through_the_grammar_and_never_iterates_it(
+            self, names):
+        # THE spelling `_t7_names` exists to stop, on the one function that
+        # still reaches it from outside: `names = block.get("names") or ()`
+        # raises TypeError on `names: 5` and iterates `names: "d"` into the
+        # characters `['d']` -- under which this block derives CONJUGATE off a
+        # latent nobody wrote.  With the grammar reader, a `names:` the
+        # grammar rejects has no linear member and derives GRADIENT, which is
+        # the answer that refuses nothing.
+        assert _engine_of({"names": names}, {"d": LINEAR_D}) == "gradient"
+
+    def test_engine_of_derives_the_two_engines_from_the_latents(self):
+        # The anti-vacuity partner: the guards above all answer "" or
+        # "gradient", so a `_engine_of` that returned one of those
+        # unconditionally would pass every one of them.
+        assert _engine_of({"names": ["d"]}, {"d": LINEAR_D}) == "conjugate"
+        assert _engine_of({"names": ["w"]}, {"w": NONLINEAR_W}) == "gradient"
+        assert _engine_of({"names": ["d", "w"]},
+                          {"d": LINEAR_D, "w": NONLINEAR_W}) == ""
+        assert _engine_of({"names": ["d"], "engine": "gradient"},
+                          {"d": LINEAR_D}) == "gradient"
+
+    def test_the_block_key_set_is_the_packages_own(self):
+        # `_T7_BLOCK_KEYS` is a COPY of `exits._BLOCK_KEYS`, for the reason
+        # `_ENGINES` is a copy of `ENGINES`: importing `sections/exits` at
+        # module scope foot-imports conjugate/diagnostics/npe/nuts and,
+        # measured, adds ~30 ms to every `import rheplicant.config`.  The copy
+        # is held closed HERE -- a fifth block key turns this red rather than
+        # leaving `_t7_entries` standing down on a key the grammar accepts.
+        from rheplicant.config.preflight.fitting import _T7_BLOCK_KEYS
+        from rheplicant.config.sections.exits import _BLOCK_KEYS
+
+        assert _T7_BLOCK_KEYS == _BLOCK_KEYS
+
+
+#: Every message shape this task ships, pinned WHOLE.
+#:
+#: `match=` on one fragment leaves every other clause free to be wrong, and
+#: measured on the first draft that left **23** mutations alive in the text --
+#: nine of which made the refusal state the opposite of the truth or handed
+#: the reader a fix that gets them refused again: A18's two lists swapped,
+#: A18's fix clause naming the engine A19 refuses, A17's head naming the
+#: gradient engine, A16's doubled leg advising SEPARATE blocks, A16's rule
+#: restated as "at least one block", the enum blaming `steps:`.  For a
+#: validation layer the message IS the product, so it is pinned the way
+#: `test_config_preflight.py` pins `_structural`'s five: by equality.
+_VERBATIM = [
+    ('a16-one-name-twice-in-one-block',
+     _doc([{"names": ["d", "d", "a", "w"]}]),
+     'A16', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0].names lists 'd' twice, and two copies of one "
+     "latent in a block are exactly degenerate with each other -- the "
+     "block's normal operator is singular in a direction that says "
+     "nothing about the model, and the answer has one entry per name, so "
+     "one copy's result silently overwrites the other's (check A16)."),
+    ('a16-a-name-nobody-declared',
+     _doc([{"names": ["d", "a", "w", "zzz"]}]),
+     'A16', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] names 'zzz', which inference.parameters does "
+     "not declare; it declares ['d', 'a', 'w']. A block over a name "
+     "nobody declared updates nothing and leaves the latent it was meant "
+     "to cover sitting at its declared init (check A16)."),
+    ('a16-one-latent-in-two-blocks',
+     _doc([{"names": ["d", "a", "w"]}, {"names": ["d"]}]),
+     'A16', 'runs[0].blocks[1]',
+     "runs['fit']: 'd' is in blocks[0] and in blocks[1]. A Gibbs sweep "
+     "updates each block against the conditional that holds when it runs, "
+     "so the second update solves a conditional the first one just "
+     "invalidated -- and every diagnostic reports the second's answer as "
+     "if the first had never happened. Put each latent in exactly one "
+     "block; to update two together, put them in ONE block (check A16)."),
+    ('a16-a-latent-nobody-covers',
+     _doc([{"names": ["d", "a"]}]),
+     'A16', 'runs[0].blocks',
+     "runs['fit']: blocks: does not cover ['w']; every latent "
+     "inference.parameters declares must be in exactly one block. An "
+     "omitted latent is silently frozen at its declared init for the "
+     "whole run -- the sweep converges, the joint chi-squared settles, "
+     "and nothing anywhere reports that a parameter you declared was "
+     "never inferred. Add it to a block, or drop it from "
+     "inference.parameters (check A16)."),
+    ('a16-a-latent-the-WARM-start-does-not-cover',
+     _warm(CLEAN, [{"names": ["d", "a"]}]),
+     'A16', 'runs[0].warm_start.blocks',
+     "runs['fit']: warm_start.blocks: does not cover ['w']; every latent "
+     "inference.parameters declares must be in exactly one block. "
+     "warm_start builds a SamplingPlan of its own over the same space "
+     "(exits.py:287-288), so an omitted latent sits at its declared init "
+     "for the whole warm estimate, and warm_start.move: can only carry "
+     "over a value that estimate produced. Add it to a block, or drop it "
+     "from inference.parameters (check A16)."),
+    ('the-engine-enum',
+     _doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
+     '', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] asks for engine: 'banana'; the engines are "
+     "['conjugate', 'gradient']. Leave engine: out and it is derived from "
+     "linear: true on each member, which is the normal case -- an "
+     "explicit engine is an override."),
+    ('a18-a-mixed-block',
+     _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),
+     'A18', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] mixes declared-linear latents ['d'] with "
+     "non-linear ones ['w'], so which engine it takes cannot be derived. "
+     "A conjugate solve needs the whole block affine; a gradient step "
+     "does not exploit the linear members' structure at all, which for a "
+     "high-dimensional linear block is the difference between tractable "
+     "and hopeless. Split them into separate blocks, or declare engine: "
+     "gradient to step the whole block by gradient deliberately (check "
+     "A18)."),
+    ('a19-conjugate-over-a-non-linear-member',
+     _doc([{"names": ["w"], "engine": "conjugate"}, {"names": ["d", "a"]}]),
+     'A19', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] asks for engine: conjugate, but ['w'] do not "
+     "declare linear: true. The conjugate machinery solves (A^T N^-1 A + "
+     "S^-1)x = b, which is the posterior only if the prediction really is "
+     "affine in the block -- and that claim belongs in the latent's "
+     "declaration, where check_linearity verifies it, not in a run that "
+     "asserts it. Declare linear: true and the claim will be checked; "
+     "leave it out and this block is stepped by gradient (check A19)."),
+    ('a17-a-step-count-the-package-would-have-taken',
+     _doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
+     'A17', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
+     "no inner steps, so steps: 5 would be silently ignored. A conjugate "
+     "block's estimate is one Wiener solve and its draw is one exact "
+     "constrained realization -- there is no step count to tune, which is "
+     "the whole advantage. Drop steps:, or declare engine: gradient if a "
+     "gradient step was what you meant (check A17)."),
+    ('a17-a-step-count-the-package-refuses-outright',
+     _doc([{"names": ["d", "a"], "steps": 0}, {"names": ["w"]}]),
+     'A17', 'runs[0].blocks[0]',
+     "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
+     "no inner steps, so steps: 0 is not a knob it has. A conjugate "
+     "block's estimate is one Wiener solve and its draw is one exact "
+     "constrained realization -- there is no step count to tune, which is "
+     "the whole advantage. Drop steps:. Moving to engine: gradient would "
+     "not rescue 0 either -- inner steps are a positive int on every "
+     "engine (plan.py:360-368), so the block would be refused a second "
+     "time (check A17)."),
+    ('a17-on-the-WARM-start',
+     _warm(CLEAN, [{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
+     'A17', 'runs[0].warm_start.blocks[0]',
+     "runs['fit']: warm_start.blocks[0] is solved by the conjugate "
+     "engine, which has no inner steps, so steps: 5 would be silently "
+     "ignored. A conjugate block's estimate is one Wiener solve and its "
+     "draw is one exact constrained realization -- there is no step count "
+     "to tune, which is the whole advantage. Drop steps:, or declare "
+     "engine: gradient if a gradient step was what you meant (check A17)."),
+]
+
+
+class TestTheRefusalsAreThePRODUCT:
+    """The whole message, not a fragment of it."""
+
+    @pytest.mark.parametrize(
+        "document, check, where, message",
+        [row[1:] for row in _VERBATIM], ids=[row[0] for row in _VERBATIM])
+    def test_the_message_is_exactly_this(self, document, check, where,
+                                         message):
+        [found] = _found(document)
+        assert found.check == check
+        assert found.where == where
+        assert found.message == message
+
+    def test_the_table_covers_every_shape_this_module_emits(self):
+        """ANTI-VACUITY: a table is only as good as its rows.
+
+        Kills deleting a row -- which is how a pinned-message suite quietly
+        stops covering the clause someone is about to break.  Five ids and
+        both sites, counted from the table itself rather than written down
+        twice.
+        """
+        assert {row[2] for row in _VERBATIM} == {"A16", "A17", "A18", "A19", ""}
+        sites = {row[3].split(".", 1)[1].split("[")[0] for row in _VERBATIM}
+        assert sites == {"blocks", "warm_start.blocks"}
+        assert len(_VERBATIM) == 11
+
 
 #: `inference.joint_prior:`'s only grammar -- `transforms._joint_prior`
 #: (`:298-321`) refuses anything else, and `{kind: jeffreys, names: [...]}` by

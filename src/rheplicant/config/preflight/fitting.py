@@ -1,8 +1,11 @@
 """The checks that need ``runs[]`` and ``inference:`` at the same time.
 
 No function in this layer sees both today (the plan's finding 2):
-``parse_runs`` sees ``runs`` alone and inspects five keys -- every other run
-key travels untouched in ``RunSpec.options`` (``runs.py:113-117``) and is
+``parse_runs`` sees ``runs`` alone and inspects the SIX keys of
+``_RUN_KEYS`` (``runs.py:25``: ``name``, ``kind``, ``variant``, ``on``,
+``reuse``, ``expect``; the plan's "five" was inherited and is wrong, and
+``_one`` validates all six) -- every other run key travels untouched in
+``RunSpec.options`` (``runs.py:113-117``) and is
 swept for the first time inside the executor at P3; ``build_inference`` sees
 ``inference`` alone; ``run_document`` (``runs.py:138``) holds both and hands
 them to ``load_document`` one at a time, calling ``parse_runs`` at
@@ -50,7 +53,7 @@ _T7_CONJUGATE: str = "conjugate"
 _T7_GRADIENT: str = "gradient"
 
 #: The engines a block may ask for, closed.  ``_BLOCK_KEYS``
-#: (``exits.py:164``) accepts ANY string for ``engine:``, so today
+#: (``exits.py:165``) accepts ANY string for ``engine:``, so today
 #: ``engine: banana`` reaches the user as a ParameterSpaceError from
 #: ``Block._check`` (``plan.py:353-359``) -- measured.
 #:
@@ -62,6 +65,17 @@ _T7_GRADIENT: str = "gradient"
 #: ``GRADIENT`` and ``ENGINES`` in the TEST and asserts all three against
 #: these three names.  A third engine turns that test red.
 _ENGINES: frozenset[str] = frozenset({_T7_CONJUGATE, _T7_GRADIENT})
+
+#: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py:165``), copied
+#: for the same reason :data:`_ENGINES` is: reaching it means importing
+#: ``sections/exits``, which foot-imports ``conjugate``, ``diagnostics``,
+#: ``npe`` and ``nuts``, and measured that adds ~30 ms to every ``import
+#: rheplicant.config`` for one frozenset.  ``test_the_block_key_set_is_the_
+#: packages_own`` imports ``exits._BLOCK_KEYS`` in the TEST and pins it, so a
+#: fifth block key turns that red rather than leaving this check reading an
+#: entry the grammar rejects.
+_T7_BLOCK_KEYS: frozenset[str] = frozenset({"names", "steps", "engine",
+                                            "learning_rate"})
 
 #: What an uncovered latent costs, per SITE.  Two sentences rather than one
 #: because the main partition and a ``warm_start``'s are not the same claim:
@@ -77,9 +91,9 @@ _A16_FROZEN: dict[str, str] = {
                "declared was never inferred."),
     "warm_start.blocks": (
         "warm_start builds a SamplingPlan of its own over the same space "
-        "(exits.py:268), so an omitted latent sits at its declared init for "
-        "the whole warm estimate, and warm_start.move: can only carry over a "
-        "value that estimate produced."),
+        "(exits.py:287-288), so an omitted latent sits at its declared init "
+        "for the whole warm estimate, and warm_start.move: can only carry "
+        "over a value that estimate produced."),
 }
 
 
@@ -125,11 +139,23 @@ def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
       ``Finding.where`` of ``runs[2]`` points where the user must type.  Such
       an entry carries NO ``name`` -- read it with ``.get`` or behind a test
       on ``kind``;
-    * ``name`` is filled in by ``parse_runs``' own rule -- ``entry.get("name")``
-      when it is a string, else the kind (``runs.py:115``) -- because every
-      refusal in this layer is prefixed ``runs['<name>']:`` and three tasks
-      would otherwise each re-derive it.  A NEW dict is built; the caller's
-      document is never mutated.
+    * ``name`` is filled in by ``parse_runs``' own rule -- the entry's
+      ``name`` when it has one, else the kind (``runs.py:115``) -- because
+      every refusal in this layer is prefixed ``runs['<name>']:`` and three
+      tasks would otherwise each re-derive it.  A NEW dict is built; the
+      caller's document is never mutated.
+
+      **``runs.py:115``'s test is ``is not None``, not "is a string"**, and
+      the difference is one document: a non-string ``name:`` is REFUSED at
+      ``runs.py:101-102`` (*"name: is a string; got 7"*) rather than
+      defaulted, so ``parse_runs`` has no such run to name.  This function
+      does fill it -- ``name: 7`` is prefixed ``runs['<kind>']`` -- because
+      ``parse_runs`` runs only on the ``run_document`` path (``runs.py:149``)
+      and a ``load_document`` caller would otherwise get a check that
+      declined on a document nothing else refuses.  The cost is a prefix
+      naming a run the user did not write, on a document already refused for
+      its ``name:``; recorded rather than repaired, because repairing it is
+      a stand-down that loses the block checks on that document entirely.
     """
     section = document.get("runs")
     if isinstance(section, Mapping):
@@ -164,7 +190,7 @@ def _kinds(document: Mapping[str, Any]) -> frozenset[str]:
 def _t7_names(entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """``names:`` when the grammar accepts it, and ``None`` when it does not.
 
-    ``exits.py:198-202``'s own three tests -- a list, non-empty, all strings
+    ``exits.py:198-203``'s own three tests -- a list, non-empty, all strings
     -- because everything else is that refusal's, in its own words: *"blocks[0]
     .names is a non-empty list of latent names"*.
 
@@ -186,12 +212,19 @@ def _t7_names(entry: Mapping[str, Any]) -> tuple[str, ...] | None:
 def _t7_entries(node: Any) -> tuple[Mapping[str, Any], ...] | None:
     """A ``blocks:`` list this check may read, or ``None`` to stand down.
 
-    ``exits._blocks`` (``exits.py:180-202``) refuses four shapes before a
-    ``Block`` is ever built: a ``blocks:`` that is not a list, an empty one,
-    an entry that is not a mapping, and a malformed ``names:``.  Each has a
+    ``exits._blocks`` (``exits.py:181-207``) refuses **five** shapes before a
+    ``Block`` is ever built, and all five are mirrored here: a ``blocks:``
+    that is not a list and an empty one (``:184-186``), an entry that is not a
+    mapping (``:189-191``), an entry carrying a key a block does not take
+    (``:192-197``), and a malformed ``names:`` (``:198-203``).  Each has a
     sentence naming the fault; a partition answer in front of one would say
     *"blocks: does not cover ['d', 'a', 'w']"* -- true, useless, and offering
     a fix ("add it to a block") that is not the fault.
+
+    The unknown-key one was missed in the first draft of this function, whose
+    docstring said "four shapes": measured, ``blocks: [{names: [d], step: 5}]``
+    passed the four and reached the engine derivation, so a document whose
+    real fault is a typo'd ``step:`` was answered with a coverage sentence.
 
     **All or nothing per list.**  One malformed entry makes the whole
     partition undecidable: the names it would have owned are unknown, so
@@ -201,7 +234,11 @@ def _t7_entries(node: Any) -> tuple[Mapping[str, Any], ...] | None:
     if not isinstance(node, list) or not node:
         return None
     for entry in node:
-        if not isinstance(entry, Mapping) or _t7_names(entry) is None:
+        if not isinstance(entry, Mapping):
+            return None
+        if set(entry) - _T7_BLOCK_KEYS:
+            return None
+        if _t7_names(entry) is None:
             return None
     return tuple(node)
 
@@ -270,33 +307,76 @@ def _engine_of(block: Mapping[str, Any], latents: Mapping[str, Any]) -> str:
     return _T7_CONJUGATE if linear else _T7_GRADIENT
 
 
+def _t7_warm_start(run: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The ``warm_start`` whose ``blocks:`` the executor would actually READ.
+
+    ``_run_plan`` reaches ``warm_start.blocks`` (``exits.py:287``) only after
+    five earlier refusals, and three of them are this check's business.  Each
+    of the three means the warm block list is **never read at all**, so a
+    partition answer about it is an answer about a structure the package
+    discards -- and it is the only sentence the reader gets, because none of
+    the three is hoisted to P-1 by anything:
+
+    * the run's own ``blocks:`` grammar (``exits.py:250``, into
+      ``_blocks``/``:181-207``).  Measured: a ``plan.sample`` with no
+      ``blocks:`` at all, and one with ``blocks: "nope"``, both used to earn
+      *"runs['s']: warm_start.blocks: does not cover [...]"* -- telling a user
+      who omitted a key about a different key, and never about theirs;
+    * ``warm_start.kind`` (``exits.py:268-271``): anything but
+      ``plan.estimate`` and the whole warm start is refused;
+    * ``warm_start.move`` (``exits.py:273-278``): required, and without it the
+      warm start never runs.
+
+    **``n_sweeps`` (``exits.py:255-256``) and the seed (``:257``) are NOT
+    gates**, and that is the line rather than an omission.  They are
+    independent run keys, not the warm start's own grammar: a document
+    missing one AND carrying a broken warm partition has two faults the user
+    must fix either way, and reporting both is what collect-rather-than-raise
+    is for (§2.3).  Gating on them would trade one round trip for another.
+
+    ``warm_start`` is read on ``plan.sample`` only, because ``_ESTIMATE_KEYS``
+    (``exits.py:166``) does not take it and Task 3's ``A1.runs`` already
+    refuses it at P-1 -- measured: *"kind: plan.estimate does not take
+    ['warm_start']"*.
+    """
+    if run.get("kind") != "plan.sample":
+        return None
+    warm = run.get("warm_start")
+    if not isinstance(warm, Mapping):
+        return None
+    if warm.get("kind") != "plan.estimate":
+        return None
+    move = warm.get("move")
+    if not isinstance(move, list) or not move or not all(
+            isinstance(name, str) for name in move):
+        return None
+    return warm
+
+
 def _t7_sites(run: Mapping[str, Any]) -> tuple[tuple[str, tuple], ...]:
     """Every ``blocks:`` list in this run that reaches a ``SamplingPlan``.
 
-    **Two, not one.**  ``exits.py:268`` builds ``_blocks(f"{where}:
+    **Two, not one.**  ``exits.py:287-288`` builds ``_blocks(f"{where}:
     warm_start", warm.get("blocks"))`` and hands the result to
     ``SamplingPlan(space, *warm_blocks)`` -- the same constructor, over the
     same space, refused by the same four rules, at the same P3 behind the
     same beam.  A16-A19 written on ``runs[].blocks`` alone would guard one
     route and leave its identical sibling open.
 
-    **``warm_start`` is read on ``plan.sample`` only**, because
-    ``_ESTIMATE_KEYS`` (``exits.py:165``) does not take it and Task 3's
-    ``A1.runs`` already refuses it at P-1 -- measured: *"kind: plan.estimate
-    does not take ['warm_start']"*.  Reading it on every ``plan.*`` run would
-    put a partition refusal about an unread block list in front of the
-    refusal that names the real fault.
+    The warm site is reached only when the main one was READABLE -- the first
+    of :func:`_t7_warm_start`'s three gates, kept here because it is the same
+    ``_t7_entries`` answer the main site already needed.
     """
     sites: list[tuple[str, tuple]] = []
     entries = _t7_entries(run.get("blocks"))
-    if entries is not None:
-        sites.append(("blocks", entries))
-    if run.get("kind") == "plan.sample":
-        warm = run.get("warm_start")
-        if isinstance(warm, Mapping):
-            entries = _t7_entries(warm.get("blocks"))
-            if entries is not None:
-                sites.append(("warm_start.blocks", entries))
+    if entries is None:
+        return ()
+    sites.append(("blocks", entries))
+    warm = _t7_warm_start(run)
+    if warm is not None:
+        warm_entries = _t7_entries(warm.get("blocks"))
+        if warm_entries is not None:
+            sites.append(("warm_start.blocks", warm_entries))
     return tuple(sites)
 
 
@@ -316,12 +396,13 @@ def _t7_step_count(steps: Any) -> bool:
 def _a16_partition(named: str, listed: str, site: str,
                    entries: tuple[Mapping[str, Any], ...],
                    latents: Mapping[str, Any]) -> Iterable[Finding]:
-    """A16: the partition, in the order ``plan.py:545-586`` settles it.
+    """A16: the partition, in the order ``plan.py:544-586`` settles it.
 
     Three legs, one id.  The schema row (line 1193) describes two of them --
     "every latent appears in exactly one block" -- and the third, a block
     naming a name ``inference.parameters`` never declared, is
-    ``plan.py:545-558``'s and is refused FIRST there.  A fourth shape,
+    ``plan.py:545-558``'s and is refused FIRST there (the covered pair is
+    ``:560-574`` and ``:576-584``).  A fourth shape,
     one name written twice inside ONE block, is ``Block._check``'s
     (``plan.py:344-352``) rather than the plan's and carries the same id: it
     is the same property (each latent in exactly one place) one level in.
@@ -415,7 +496,7 @@ def _t7_engines(named: str, listed: str, site: str,
     broken partition they answer about names that do not exist -- an
     undeclared name reads as non-linear (:func:`_a18_linear` returns False for
     an absent latent) and produces an A18 *"mixes linear with non-linear"*
-    refusal naming a latent nobody declared.  That is ``plan.py:539-541``'s
+    refusal naming a latent nobody declared.  That is ``plan.py:541-542``'s
     own argument: *"a block naming an undeclared latent cannot have its engine
     derived at all, so the partition is settled first"*.
 
@@ -514,11 +595,11 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``preflight()`` calls this function once.
 
     **A run declaring ``expect: refuse`` is left alone**, and that is not
-    politeness.  ``execute_run`` (``exits.py:292-302``) runs such a run's
+    politeness.  ``execute_run`` (``exits.py:311-321``) runs such a run's
     executor and CAPTURES its error as the run's product -- the run is an
     assertion ABOUT the refusal.  A P-1 refusal makes the whole document
     unloadable, so the assertion could never be made; measured,
-    ``tests/config/test_config_exits_plan.py:107-112`` is exactly that
+    ``tests/config/test_config_exits_plan.py:108-113`` is exactly that
     document (``blocks: [{names: [g, ghost]}]`` under ``expect: refuse``) and
     it asserts the captured error names ``ghost``.
 
