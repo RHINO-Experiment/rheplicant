@@ -37,6 +37,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
 
@@ -548,3 +549,312 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
             yield from partition
             yield from _t7_engines(named, listed, site, entries, latents,
                                    derive=not partition)
+
+
+# --- Task 8: the prior gates, and the seed asymmetry ------------------------
+
+
+def _a20_joint_over(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """The latent names ``inference.joint_prior`` covers, or ``()``.
+
+    ``{jeffreys: {over: [...]}}`` is the grammar and the only one:
+    ``transforms._joint_prior`` (``:298-321``) refuses anything else, and
+    ``{kind: jeffreys, names: [...]}`` is refused by name there.  So coverage
+    is a list of strings in the document and nothing has to be built to read
+    it.
+
+    Every level is type-tested rather than subscripted.  ``_structural``
+    guarantees a SECTION is present, never that it is a mapping (Task 4's
+    measurement), and ``over:`` is user text that reaches this function
+    before ``JeffreysPrior`` ever sees it -- inside the pass a ``TypeError``
+    becomes "check A20 RAISED" and discards every other finding.  A shape the
+    grammar refuses reads as no coverage, which stands this check down and
+    leaves the sentence to ``_joint_prior``.
+
+    **One hole, recorded rather than closed.**  ``over: da`` -- a bare YAML
+    scalar -- is read by ``_joint_prior`` as ``tuple("da") == ('d', 'a')``
+    (measured), so such a document does reach ``JeffreysPrior`` and this
+    reader answers ``()`` for it.  Splitting a string into characters is an
+    accident of ``tuple()`` rather than a grammar, and A20 telling somebody
+    who wrote ``over: da`` that their joint prior "covers ['d', 'a']" would
+    name a coverage they did not write.  A non-string MEMBER of a real list
+    is dropped for the same reason and the rest of the list is still read:
+    ``over: [d, 7]`` covers ``['d']`` here, and which name is wrong is
+    ``JeffreysPrior.validate_against``'s sentence.
+    """
+    inference = document.get("inference")
+    if not isinstance(inference, Mapping):
+        return ()
+    joint = inference.get("joint_prior")
+    if not isinstance(joint, Mapping):
+        return ()
+    body = joint.get("jeffreys")
+    if not isinstance(body, Mapping):
+        return ()
+    over = body.get("over")
+    if not isinstance(over, list):
+        return ()
+    return tuple(name for name in over if isinstance(name, str))
+
+
+def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
+                    covered: tuple[str, ...] = ()) -> list[str]:
+    """The names among ``names`` that declare no prior this route accepts.
+
+    ``Latent.prior`` comes from ``spec.get("prior")`` and from nowhere else
+    (``parameters.py:195``; ``_parse_prior`` returns None for a missing key at
+    ``:69-70``), so "does this latent declare a prior" is a text question.
+    ``covered`` is non-empty only for the ``nuts`` route, which is the one
+    route that counts ``inference.joint_prior`` coverage as a prior --
+    ``to_numpyro_model`` accepts a covered latent (``numpyro_bridge.py:66-79``)
+    and ``simulate_pairs`` does not (``npe.py:111-118``).
+
+    **``names`` must already be names the document DECLARES.**  An absent
+    latent reads as prior-free here, and on the ``plan.sample`` leg -- the one
+    route whose names come from a block rather than from
+    ``inference.parameters`` -- that would put an A23 refusal beside A16's
+    *"names 'zzz', which inference.parameters does not declare"*: one typo,
+    two refusals, two different fixes.  The caller filters; this function
+    cannot, because on the other three routes ``names`` IS the declaration.
+    """
+    return [name for name in names
+            if latents.get(name, {}).get("prior") is None
+            and name not in covered]
+
+
+@register("A20", "A21", "A23")
+def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A20, A21 and A23 -- and A20/A21 make two of A23's four legs moot.
+
+    **The order inside this function is the decision §2.6 item 4 records, and
+    it is structural rather than positional.**  A20 refuses
+    ``inference.joint_prior`` beside ANY ``kind: plan.*``
+    (``plan.py:588-641``, unconditional -- ``_refuse_split_joint_prior``
+    chooses only its wording from whether the partition splits the prior) and
+    A21 refuses it beside ``fisher`` with ``space: true``
+    (``rheplicant/inference/uncertainty.py:313-326`` -- ``inference/``, not
+    ``config/sections/``).  So a run refused by either ``continue``s and never
+    reaches its A23 leg: the joint-prior branches of A23's
+    ``plan.sample``-gradient and ``fisher(space=)`` legs are UNREACHABLE, not
+    merely later.  An implementation that ordered them the other way would
+    tell a ``joint_prior`` + ``plan.sample`` document that its latents
+    "declare no prior", contradicting A20's refusal of the same document, and
+    the two refusals name different edits.
+
+    ``nuts`` and ``npe`` keep their own gate at
+    ``posterior_support._sampled_space`` (``:68-149``) as the P3 second
+    opinion; this function does not call it and does not change it -- it
+    needs a BUILT space (``:76``), which P-1 may not make.
+
+    **A run declaring ``expect: refuse`` is left alone**, for the reason
+    :func:`_blocks` gives and with a document to point at:
+    ``execute_run`` (``exits.py:293-303``) captures such a run's error as its
+    product, and a P-1 refusal makes the whole document unloadable, so the
+    assertion could never be made.  ``posterior_helpers.joint_prior_document``
+    is exactly that document -- ``kind: npe`` under ``expect: refuse`` beside
+    a ``kind: nuts`` that runs, over ONE joint-prior space -- and it is what
+    ``test_config_exits_npe.py::TestThePriorGate`` reads.  This clause was not
+    in the task this function was written from; without it that class goes
+    red.  The guard is per RUN, so the nuts run of that same document is
+    still read.
+    """
+    latents = _latents(document)
+    covered = _a20_joint_over(document)
+    for index, run in enumerate(_runs(document)):
+        kind = run.get("kind")
+        if not isinstance(kind, str):
+            continue
+        if run.get("expect") == "refuse":
+            continue
+        where = f"runs[{index}]"
+        named = f"runs[{run['name']!r}]"
+
+        if covered and kind.startswith("plan."):
+            yield refuse(
+                "A20", where,
+                f"{named}: inference.joint_prior covers {list(covered)}, and "
+                f"kind: {kind} does not evaluate a joint prior -- each block's "
+                "conditional is built from the latent's OWN prior:, and a "
+                "covered latent declares none, so the density contributes "
+                "exactly zero. The sweep would run, settle, and report a "
+                "converged chi-squared computed entirely from blocks that "
+                "never saw the prior. kind: nuts is the exit that evaluates "
+                "it; use that, or drop inference.joint_prior (check A20).")
+            continue
+
+        if covered and kind == "fisher" and run.get("space") is True:
+            yield refuse(
+                "A21", where,
+                f"{named}: inference.joint_prior covers {list(covered)}, and "
+                "space: true means 'add the declared priors' curvature to "
+                "this matrix'. A Jeffreys prior is DEFINED as sqrt(det of "
+                "that matrix), so adding it would put it inside its own "
+                "definition: what comes back is not the posterior precision "
+                "it would be labelled as, and it is finite, symmetric and "
+                "positive definite, so nothing downstream would say "
+                "otherwise. Drop space: true -- the likelihood Fisher is what "
+                "the prior is built from -- or read the posterior with "
+                "kind: nuts (check A21).")
+            continue
+
+        if kind == "nuts":
+            missing = _a23_prior_free(latents, latents, covered)
+            because = ("and no inference.joint_prior covering them"
+                       if covered else "and this document declares no "
+                                       "inference.joint_prior")
+        elif kind == "npe":
+            missing = _a23_prior_free(latents, latents)
+            because = ("and kind: npe SIMULATES a bank from each latent's OWN "
+                       "prior, consulting inference.joint_prior not at all")
+        elif kind == "fisher" and run.get("space") is True:
+            missing = _a23_prior_free(latents, latents)
+            because = ("and space: true asks for a posterior precision, which "
+                       "a prior-free latent has no row of")
+        elif kind == "plan.sample":
+            # `_t7_entries`, not `run.get("blocks") or ()`: a `blocks: 5`
+            # raises on iteration and a `blocks: "nope"` iterates into
+            # characters, and a malformed list is one `exits._blocks`
+            # (`:180-202`) refuses in its own words.  `warm_start.blocks` is
+            # NOT a site here, and that is measured rather than forgotten:
+            # `require_priors` is called from `SamplingPlan.sample`
+            # (`plan.py:1064-1066`) and a warm start is `.estimate()`d.
+            missing = sorted({
+                name
+                for entry in (_t7_entries(run.get("blocks")) or ())
+                if _engine_of(entry, latents) == _T7_GRADIENT
+                for name in _a23_prior_free(
+                    latents,
+                    [one for one in (_t7_names(entry) or ())
+                     if one in latents])})
+            because = ("and a block stepped by the gradient engine needs a "
+                       "prior on every member -- the potential is flat in a "
+                       "prior-free latent and the chain wanders without any "
+                       "diagnostic saying so")
+        else:
+            continue
+
+        if missing:
+            yield refuse(
+                "A23", where,
+                f"{named}: kind: {kind} draws a POSTERIOR, and "
+                f"inference.parameters declares {missing} with no prior: "
+                f"{because}. A prior-free latent is a free parameter, which "
+                "the calibrator exits (kind: optimize, kind: plan.estimate) "
+                "fit and a posterior cannot. Give each one a prior:, or run "
+                "one of those (check A23).")
+
+
+#: Which ``runs[].kind`` needs a seed on the RUN.  ``npe`` is absent on
+#: purpose: it draws four times and declares its seeds per subsection in
+#: ``inference.npe:`` (``npe.py:216-228``), and a run-level ``seed:`` on it is
+#: refused rather than required.  ``condition`` is absent on purpose too: it
+#: takes an OPTIONAL seed (``conjugate.py:568-572``) and is correctly outside
+#: A29.
+_A29_SEEDED_KINDS: frozenset[str] = frozenset({"plan.sample", "conjugate.gcr",
+                                               "nuts"})
+
+#: The subsections of ``inference.npe:`` that declare a seed, in the order
+#: ``parse_npe`` (``npe.py:364-368``) reads them.  ``embed:`` is the fifth
+#: member of ``_NPE_KEYS`` and is absent here because it declares none --
+#: measured, ``_seeded`` is called at ``npe.py:240``, ``:251``, ``:263`` and
+#: ``:283`` and nowhere else.
+_A29_NPE_SUBSECTIONS: tuple[str, ...] = ("bank", "create", "train", "sample")
+
+
+@register("A29")
+def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A29: the seed asymmetry, decided from the document's text.
+
+    A MOVE, not a rewrite.  All five routes already refuse, all five already
+    say ``ConfigError``, and all five messages are reproduced here by CALLING
+    the function that holds them rather than by restating it -- three of them
+    lifted to module level in their own sections for exactly that purpose
+    (``exits._a29_estimate_takes_no_seed``,
+    ``conjugate._a29_gcr_needs_a_seed``, ``npe._a29_npe_takes_no_run_seed``),
+    and the other two through ``draws._seed_name`` (``:98-121``), which was
+    already pure: it takes a dict and a prefix, refuses a missing key, a
+    literal seed and a name outside ``runtime.seeds.``, and resolves nothing.
+    The RESOLUTION (``seed_for``) stays where the context is.
+
+    What moves is the phase.  ``nuts``'s seed is checked at ``nuts.py:300``,
+    i.e. AFTER ``to_numpyro_model`` is built at ``:287`` -- the most expensive
+    object that executor makes is constructed before the cheapest key on the
+    run is looked at -- and all five sit behind ``build_resources``, which is
+    90.9 % of ``load_document`` (§2.7).
+
+    Two things are deliberately NOT A29's, both measured:
+    ``inference.observed.<name>.realise.seed`` (``observed.py:63``) and a
+    ``{normal: {seed: ...}}`` value node (``draws.py:144``) also go through
+    ``_seed_name``, and neither is a ``runs[].kind`` -- schema §6's A29 row
+    is about the run kinds and the npe subsections, and answering for the
+    other two here would put this check in front of two grammars that own
+    their own sentences.
+    """
+    from rheplicant.config.draws import _seed_name
+    from rheplicant.config.sections.conjugate import _a29_gcr_needs_a_seed
+    from rheplicant.config.sections.exits import _a29_estimate_takes_no_seed
+    from rheplicant.config.sections.npe import _a29_npe_takes_no_run_seed
+    from rheplicant.config.sections.runs import _RUN_KEYS
+
+    for index, run in enumerate(_runs(document)):
+        kind = run.get("kind")
+        if not isinstance(kind, str):
+            continue
+        # `expect: refuse` is an assertion ABOUT the refusal and a P-1 one
+        # cannot be captured -- `_prior_gates`' docstring argues it at length.
+        if run.get("expect") == "refuse":
+            continue
+        where = f"runs[{index}]"
+        named = f"runs[{run['name']!r}]"
+        # `RunSpec.options` is exactly this (`runs.py:113-114`), and
+        # `_RUN_KEYS` is imported rather than restated -- measured, it is
+        # {expect, kind, name, on, reuse, variant}, and a sixth key added
+        # there would otherwise reach `_seed_name` as an option here while
+        # travelling on the spec at P3.
+        options = {key: value for key, value in run.items()
+                   if key not in _RUN_KEYS}
+        # THE GATE AND `_seed_name` ARE ALTERNATIVES, NOT A PAIR.
+        # `conjugate.gcr` is in both `_A29_SEEDED_KINDS` and the gate chain,
+        # so a seedless gcr run would be described TWICE -- once by
+        # `_a29_gcr_needs_a_seed` and once by `_seed_name`, in two different
+        # voices, for one missing key.  `gated` is what makes the bespoke
+        # refusal the only one the user reads.  It is set only when the gate
+        # FIRED, so a gcr run with a seed of the wrong FORM still reaches
+        # `_seed_name`, which is the leg that decides form.
+        gated = False
+        gate = (_a29_estimate_takes_no_seed if kind == "plan.estimate"
+                else _a29_gcr_needs_a_seed if kind == "conjugate.gcr"
+                else _a29_npe_takes_no_run_seed if kind == "npe"
+                else None)
+        if gate is not None:
+            try:
+                gate(named, options)
+            except ConfigError as refusal:
+                # No `(check A29)` tail: all three of these messages already
+                # carry one mid-sentence, and §3.2(c) appends only when the
+                # message does not.
+                yield refuse("A29", where, str(refusal))
+                gated = True
+        if kind in _A29_SEEDED_KINDS and not gated:
+            try:
+                _seed_name(options, named)
+            except ConfigError as refusal:
+                yield refuse("A29", where, f"{refusal} (check A29).")
+
+    inference = document.get("inference")
+    npe = inference.get("npe") if isinstance(inference, Mapping) else None
+    if not isinstance(npe, Mapping) or "npe" not in _kinds(document):
+        return
+    for subsection in _A29_NPE_SUBSECTIONS:
+        body = npe.get(subsection)
+        # An ABSENT or malformed subsection is `npe._subsection`'s
+        # (``:199-207``), whose sentence is that the subsection is required
+        # rather than that a seed is missing.  Standing down leaves the
+        # reader the fault they actually have.
+        if not isinstance(body, Mapping):
+            continue
+        where = f"inference.npe.{subsection}"
+        try:
+            _seed_name(dict(body), where)
+        except ConfigError as refusal:
+            yield refuse("A29", where, f"{refusal} (check A29).")

@@ -32,6 +32,7 @@ the two drift apart.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from rheplicant.config.errors import ConfigError
@@ -283,6 +284,29 @@ def _wiener_plan(run: Any, *, where: str) -> dict:
     return {"width": _width(run, where)}
 
 
+def _a29_gcr_needs_a_seed(where: str, options: Mapping[str, Any]) -> None:
+    """``conjugate.gcr`` draws, so it needs a seed; its two siblings refuse one.
+
+    Module-level and taking plain data for plan §2.2's reason: the pre-flight
+    pass (``preflight/fitting.py``) calls THIS function from the raw document,
+    so the sentence a user reads before the beam and the one the executor
+    raises are the same object rather than two copies.
+
+    PRESENCE only.  The FORM of the declaration -- a literal, or a name
+    outside ``runtime.seeds.`` -- is ``draws._seed_name``'s, which
+    :func:`_gcr_product` reaches at ``:425`` and which the pass calls
+    separately.  Splitting them that way is what lets a seedless run be
+    described once, in this voice, rather than twice in two.
+    """
+    if "seed" not in options:
+        raise ConfigError(
+            f"{where}: conjugate.gcr draws from the posterior, so seed: is "
+            "required and has no default -- gcr_sample's key= has none either "
+            "(check A29). The deterministic conjugate exits, conjugate.wiener "
+            "and conjugate.gls, refuse one instead."
+        )
+
+
 def _gcr_plan(run: Any, *, where: str) -> dict:
     """``conjugate.gcr``'s own grammar, decided before anything is built.
 
@@ -293,13 +317,7 @@ def _gcr_plan(run: Any, *, where: str) -> dict:
     ``seed:`` surfaces as a ``ParameterSpaceError`` from inside the package,
     which is the seam this layer exists to close.
     """
-    if "seed" not in run.options:
-        raise ConfigError(
-            f"{where}: conjugate.gcr draws from the posterior, so seed: is "
-            "required and has no default -- gcr_sample's key= has none either "
-            "(check A29). The deterministic conjugate exits, conjugate.wiener "
-            "and conjugate.gls, refuse one instead."
-        )
+    _a29_gcr_needs_a_seed(where, run.options)
     noise_from = run.options.get("noise_from", "declared")
     if noise_from not in _NOISE_FROM:
         raise ConfigError(

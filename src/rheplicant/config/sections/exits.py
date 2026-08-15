@@ -13,6 +13,7 @@ in their own modules, imported at the foot of this one so that importing
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from rheplicant.config.errors import ConfigError
@@ -206,6 +207,28 @@ def _blocks(where: str, node: Any) -> tuple[Any, ...]:
     return tuple(built)
 
 
+def _a29_estimate_takes_no_seed(where: str, options: Mapping[str, Any]) -> None:
+    """``plan.estimate`` refuses a seed; ``plan.sample`` requires one.
+
+    Module-level and taking plain data so that ``preflight/fitting.py`` calls
+    the SAME refusal from the raw document (plan §2.2: one name, one binding,
+    two call sites).  A copy of this string in the pass is the
+    ``_number``-vs-``_whole`` divergence with a new name.
+
+    ``warm_start:`` is deliberately not a second caller.  It builds a
+    ``plan.estimate`` of its own (:func:`_run_plan`'s warm branch, and
+    ``kind:`` there may be nothing else), but ``_WARM_KEYS`` carries no
+    ``seed`` at all, so the sweep at ``:245-248`` already refuses one by name
+    -- a more specific sentence than this asymmetry.
+    """
+    if "seed" in options:
+        raise ConfigError(
+            f"{where}: plan.estimate refuses a seed -- the asymmetry is the "
+            "package's own (sample takes key=, estimate has no key "
+            "parameter; check A29). Drop it, or make this run plan.sample."
+        )
+
+
 @register("plan.estimate")
 @register("plan.sample")
 def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
@@ -217,12 +240,8 @@ def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
 
     estimate = run.kind == "plan.estimate"
     where = f"runs[{run.name!r}]"
-    if estimate and "seed" in run.options:
-        raise ConfigError(
-            f"{where}: plan.estimate refuses a seed -- the asymmetry is the "
-            "package's own (sample takes key=, estimate has no key "
-            "parameter; check A29). Drop it, or make this run plan.sample."
-        )
+    if estimate:
+        _a29_estimate_takes_no_seed(where, run.options)
     _sweep(run, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
     inference = built.inference
     space = _space(run, built)

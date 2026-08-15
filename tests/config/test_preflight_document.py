@@ -282,23 +282,33 @@ class TestRunOptionKeys:
         test covers.  A test that restated the five keys could not see that;
         this one goes red on the commit that adds the sixth.
 
-        **Measured against `d3ab22e`**: this derivation returns exactly
-        `{condition: {prior_mean}, npe: {seed}, plan.estimate: {seed},
-        plan.sample: {seed}, predict: {from}}` -- five kinds, five keys, no
-        extras -- which is the table in `preflight/document.py` character for
-        character."""
-        derived: dict[str, frozenset[str]] = {}
-        for kind, fn in EXECUTORS.items():
-            tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-            sweeps = [node.lineno for node in ast.walk(tree)
-                      if isinstance(node, ast.Call)
-                      and isinstance(node.func, ast.Name)
-                      and node.func.id == "_sweep"]
-            assert sweeps, f"{kind}: no _sweep call"
-            cut = min(sweeps)
+        **The derivation follows one level of CALL**, into a helper defined in
+        the executor's own module, and that is not generality for its own
+        sake: plan 3A's Task 8 lifted three of these refusals to module level
+        so that `preflight/fitting.py` could call the same object from the raw
+        document (§2.2, one name, one binding, two call sites).  The BEHAVIOUR
+        is untouched -- `_run_plan` and `_run_npe` still refuse a `seed:`
+        before their sweep -- and only the line the comparison sits on moved.
+        A derivation that read the executor's body alone would have gone red
+        on a refactor that changed nothing it is about, and "update
+        `_TASK3_SPOKEN_FOR`" is the wrong repair for that: dropping
+        `plan.estimate: {seed}` would let A1's generic sweep displace the A29
+        message again, which is the very thing the table exists to stop.
+        Restricted to the SAME module, so an `exit_support` helper called
+        before the sweep does not drag its own membership tests in.
+
+        **Measured against `d3ab22e` and again after that refactor**: this
+        derivation returns exactly `{condition: {prior_mean}, npe: {seed},
+        plan.estimate: {seed}, plan.sample: {seed}, predict: {from}}` -- five
+        kinds, five keys, no extras -- which is the table in
+        `preflight/document.py` character for character."""
+
+        def options_membership(tree, cut):
             keys = set()
             for node in ast.walk(tree):
-                if not isinstance(node, ast.Compare) or node.lineno >= cut:
+                if not isinstance(node, ast.Compare):
+                    continue
+                if cut is not None and node.lineno >= cut:
                     continue
                 if not any(isinstance(op, ast.In) for op in node.ops):
                     continue
@@ -308,6 +318,30 @@ class TestRunOptionKeys:
                            for one in node.comparators):
                     continue
                 keys.add(node.left.value)
+            return keys
+
+        derived: dict[str, frozenset[str]] = {}
+        for kind, fn in EXECUTORS.items():
+            tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+            sweeps = [node.lineno for node in ast.walk(tree)
+                      if isinstance(node, ast.Call)
+                      and isinstance(node.func, ast.Name)
+                      and node.func.id == "_sweep"]
+            assert sweeps, f"{kind}: no _sweep call"
+            cut = min(sweeps)
+            keys = options_membership(tree, cut)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.lineno < cut):
+                    continue
+                helper = fn.__globals__.get(node.func.id)
+                if (not inspect.isfunction(helper)
+                        or helper.__module__ != fn.__module__):
+                    continue
+                keys |= options_membership(
+                    ast.parse(textwrap.dedent(inspect.getsource(helper))),
+                    None)
             if keys:
                 derived[kind] = frozenset(keys)
         assert derived == _TASK3_SPOKEN_FOR, (
