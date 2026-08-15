@@ -31,7 +31,11 @@ import copy
 
 from rheplicant.config.findings import Finding
 from rheplicant.config.preflight import preflight
-from tests.config.exit_helpers import ONE_LATENT, conjugate_document
+from tests.config.exit_helpers import (
+    HOMOSCEDASTIC,
+    ONE_LATENT,
+    conjugate_document,
+)
 
 #: A ``resources:`` patch whose beam file does not exist.  Loading a document
 #: carrying it reaches ``build_resources`` (``document.py:75``, measured at
@@ -96,6 +100,53 @@ def _base() -> dict:
 BASE_MODEL = dict(_base()["model"])
 BASE_OBSERVATION = dict(_base()["observation"])
 
+#: A ``model:`` lighting a node whose class declares randomness -- A30's
+#: subject.  **Measured EQUAL to** :data:`BASE_MODEL`: every document this
+#: module delegates to already carries ``exit_helpers.MODEL_NOISE`` at
+#: ``noise`` (``{type: NoiseOperator}``), because ``_repaired``'s whole point
+#: is a stochastic node in ``model:`` repaired away in
+#: ``inference.twin.without:``.  So this RENAMES the base model rather than
+#: adding to it, and it is bound anyway for one reason: a test written against
+#: ``BASE_MODEL`` would not say what its subject is, and
+#: ``test_the_base_model_is_the_one_A30_is_about`` is what goes red the day
+#: the helper stops carrying the node -- under which every A30 positive test
+#: would keep passing while testing nothing at all.  Plan §4's Task 11 spells
+#: it ``{**BASE_MODEL, "noise": {...}}``; written that way it is a second
+#: literal that must track ``MODEL_NOISE`` by hand, which is the duplication
+#: this file exists to avoid.
+STOCHASTIC_MODEL = dict(BASE_MODEL)
+
+#: ``model.noise`` under ``RadiometerNoiseOperator``, WITHOUT the ``type:``
+#: key -- callers supply that, because ``inference.twin.replace`` and
+#: ``model:`` want the same fields under different spellings.  The key set is
+#: load-bearing: measured with ``dataclasses.fields``,
+#: ``RadiometerNoiseOperator`` takes exactly ``channel_width`` and
+#: ``integration_time``, and a third key here would be refused by the delivery
+#: layer while a missing one would refuse the REPLACEMENT rather than
+#: exercising A30's ``replace:`` leg.
+RADIOMETER_NODE = {
+    "channel_width": {"value": 1.0, "unit": "MHz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+}
+
+#: The base model with the receiver's ``bandpass`` node lit as well as its
+#: ``gain`` -- the pair A33 is about.  ``ReceiverOperator``'s only field is
+#: ``bandpass`` (measured with ``dataclasses.fields``).
+BANDPASS_MODEL = {**BASE_MODEL,
+                  "bandpass": {"bandpass": {"ones": ["n_freq"]}}}
+
+#: An ``inference:`` patch freeing one latent into ``bandpass`` and one into
+#: ``gain``, with no identifiability convention on either -- A33's document.
+#: The latents are deliberately DIFFERENT names: one latent written into both
+#: leaves is one parameter and no null direction, which is a case A33 must
+#: stand down on rather than refuse.
+BANDPASS_AND_GAIN = {
+    "parameters": {"b": {"init": {"ones": ["n_freq"]},
+                         "into": "bandpass.bandpass"},
+                   "g": {"init": 1.0, "into": "gain.gain"}},
+    "noise": HOMOSCEDASTIC,
+}
+
 
 def preflight_document(**patch):
     """The valid base document, with ``patch`` merged one level deep.
@@ -129,6 +180,37 @@ def preflight_document(**patch):
         else:
             doc[section] = value
     return doc
+
+
+def repatch(document, **sections):
+    """``document`` with whole SECTIONS replaced, by copy and without loading.
+
+    Deliberately NOT :func:`preflight_document`'s one-level-deep merge: this
+    is what a product test uses to say a key is ABSENT, and a merge cannot
+    express a removal.  ``None`` removes the section outright, as it does
+    there.
+
+    It exists for cost.  :func:`preflight_document` deep-copies a delegated
+    document -- measured at 0.6 ms -- which a cartesian product of tens of
+    thousands of cells turns into a minute of fixture around a second of
+    subject.  Built ONCE and repatched per cell, the same product costs the
+    subject and nothing else.
+
+    It lives HERE and not in a test module for the reason §3 gives: a
+    document assembled beside the tests that read it is outside
+    ``test_config_fixture_contract``'s census, and 2D shipped that census
+    after four modules rolled their own builder and 86 of 90 tests went
+    blind.  No ``_document`` suffix, because that suffix is what
+    ``_builders()`` discovers and the property walk then drives with no
+    argument -- and this one takes a document.
+    """
+    patched = dict(document)
+    for name, value in sections.items():
+        if value is None:
+            patched.pop(name, None)
+        else:
+            patched[name] = value
+    return patched
 
 
 def findings(document) -> tuple[Finding, ...]:

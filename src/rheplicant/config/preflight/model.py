@@ -12,11 +12,13 @@ analysed.
 Three sources and no fourth (§2.4): the document mapping, ``RADIO_GRAPH``, and
 operator classes resolved BY NAME off ``rheplicant.radio``.  No value node is
 resolved, no operator is constructed, no file is read.  Re-measured with Task
-5's three checks added (median of 2000 calls in one process, two runs): the
-**six** checks here answer a **six**-node document -- ``preflight_helpers``'
-base model, which has four, plus ``foregrounds:`` and ``bandpass:`` -- in
-**2.5e-05 s**; the first call is **2.2e-04 s**.  §0.1's budget for the whole
-pass is 0.05 s, against ``load_document``'s 1.536 s on a toy beam.
+11's two checks added (median of 2000 calls, in two separate processes so the
+first-call figure is not warmed by the loop): the **eight** checks here answer
+a **six**-node document -- ``preflight_helpers``' base model, which has four,
+plus ``foregrounds:`` and ``bandpass:`` -- in **3.1e-05 s**; the first call is
+**2.5e-04 s**.  §0.1's budget for the whole pass is 0.05 s, against
+``load_document``'s 1.536 s on a toy beam, and the whole pass on a Task 11
+document measures **3.5e-04 s**.
 
 **That first call is not a deferred import**, which is what this file said
 until Task 5 checked: pre-importing ``sections/switching``, ``core/fold`` and
@@ -34,8 +36,10 @@ from typing import Any
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
+from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import register
 from rheplicant.config.preflight.document import _task3_where
+from rheplicant.config.preflight.fitting import _kinds, _latents
 from rheplicant.config.sections.compose import (
     cal_load_order_problem,
     double_count_problem,
@@ -47,6 +51,8 @@ from rheplicant.config.sections.model import (
     ambiguous_class_problem,
     operator_table,
 )
+from rheplicant.config.sections.transforms import _NAMED
+from rheplicant.core.contract import RANDOMNESS
 
 
 def _t4_graph():
@@ -689,3 +695,440 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
         "GENERATES its own data, so the array declared here would be "
         "discarded rather than fitted. Drop observation.data (the twin makes "
         "it), or drop the sources to leave a transform chain (check A31).")
+
+
+# ---------------------------------------------------------------------------
+# Task 11 -- A30 (a stochastic stage the fit twin keeps) and A33 (a bandpass
+# left free beside a gain).
+# ---------------------------------------------------------------------------
+
+#: The two exits that build neither a ``ParameterSpace`` over the fit twin nor
+#: a forward function from it, so a stochastic stage is legal under them.
+#: Everything else in ``sections/runs._KINDS`` does -- measured one kind at a
+#: time through ``run_document`` on a ``twin: {without: []}`` document:
+#: ``forward`` RUNS (``_run_forward`` is ``return built.twin(built.state)``,
+#: ``exits.py:38-40``); thirteen kinds raise ``ParameterSpaceError`` naming
+#: *"NoiseOperator at 'noise', which declares 'key' in requires"*; ``predict``
+#: reaches ``space.forward_fn`` (``diagnostics.py:766``) and its ``reuse:``
+#: can only name a kind that refuses first (``_DRAW_SOURCES``,
+#: ``diagnostics.py:676-682``); and ``_run_mmodes`` (``diagnostics.py:
+#: 594-684``) contains no ``_space(``, no ``forward_fn``, no
+#: ``build_forward_fn`` and no ``fit_twin`` at all.
+#:
+#: Written as the COMPLEMENT on purpose (§3.2 (e) 2): a kind added to
+#: ``_KINDS`` defaults to FITTING, so a new exit inherits the check rather
+#: than escaping it.  A wrong refusal is loud; a lost check is silent.
+#: ``test_the_complement_is_a_subset_of_the_declared_kinds`` is what makes the
+#: day a genuinely non-fitting kind ships a day someone looks.
+_A30_NOT_FITTING: frozenset[str] = frozenset({"forward", "mmodes"})
+
+#: The registry name of the identifiability convention A33 advises.
+#: ``transforms._NAMED`` holds it (``transforms.py:36``) and it resolves to
+#: ``radio.instrument.receiver.unit_mean_bandpass`` (``:175-178``).  Advising
+#: a word the registry does not hold would send a reader to a refusal quoting
+#: a vocabulary without it, so a test pins this against ``_NAMED``.
+_A33_CONVENTION: str = "unit_mean_bandpass"
+
+
+def _a30_stochastic(node_id: Any, spec: Any, table: Mapping) -> str | None:
+    """The operator class name, IF this entry's text says it draws randomness.
+
+    ``None`` where it does not, and ``None`` where the text cannot say -- the
+    two are deliberately not distinguished, because A30 refuses only a certain
+    "yes".
+
+    The declaration is ``RANDOMNESS in cls.requires``, read off the **class**.
+    §2.5 names ``stages_requiring(pipeline, RANDOMNESS)`` instead, which takes
+    a CONSTRUCTED ``AbstractOperator`` and reads ``stage.requires`` off
+    instances -- and §3.2 (f) forbids constructing one.  They reconcile
+    because ``requires`` is a ``ClassVar`` (``core/operator.py:85``), so the
+    same capability predicate applied to the class satisfies §2.5's intent
+    (it still catches any operator that declares ``'key'``, and never goes
+    stale on the next one) and §3.2 (f)'s no-construction rule at once.  Only
+    §2.5's literal function CALL is dropped.
+
+    ``node_id`` is the node the entry LANDS ON, which is not always the key it
+    is written under -- see :func:`_a30_placements`.
+
+    Five routes, each measured at ``0263e0f`` through ``load_document``:
+
+    * a ``python:`` target is resolved BY NAME through Task 5's
+      :func:`_t5_radio_class` -- §2.4 item 3 puts exactly that in scope.  A
+      target outside ``rheplicant.radio``, or one it does not export, answers
+      ``None``: the class such a node builds is not knowable here, and
+      guessing in the stochastic direction refuses a legal document.
+      **Standing down on every ``python:`` spec would be a lost check**:
+      measured, ``{emi: {python: 'rheplicant.radio:NoiseOperator', sigma:
+      ...}}`` builds, lands ``NoiseOperator`` at ``noise``, and its fit twin
+      keeps the draw.
+    * ``from:`` derives the operator from another node, which is
+      CONSTRUCTION; nothing in the text names a class.
+    * ``compose:`` is expanded STAGE BY STAGE rather than asked about its
+      node.  Measured: a block composing two ``python:`` ``GainOperator``
+      stages at ``noise`` builds with no randomness anywhere, so the
+      unanimity clause below applied to the composing mapping would refuse a
+      document the package runs.
+    * a ``type:`` is looked up among the node's own classes, which is
+      ``_pick_class``' vocabulary; a name that is not one of them is check
+      A7's refusal, in its own words.
+    * with no ``type:``, the verdict is UNANIMITY over the node's classes.
+      Measured, the three multi-class nodes are ``noise`` (both classes draw),
+      ``flagging`` and ``filters`` (neither of theirs does), so no shipped
+      node is mixed and the mixed branch is unreachable today.
+      ``test_no_shipped_node_mixes_stochastic_and_deterministic_classes`` is
+      what says so, and what will fail on the day a mixed node ships rather
+      than this function guessing.
+
+    Two clauses here are EQUIVALENT MUTANTS by construction rather than
+    untested decisions, and both were measured that way against a 27-row
+    battery:
+
+    * ``all(...)`` versus ``any(...)`` in the unanimity clause.  They can
+      differ only at a node whose classes DISAGREE about randomness, and no
+      shipped node does -- which is precisely what the test named above
+      asserts, so the day the two spellings can disagree is the day that test
+      goes red.
+    * ``not isinstance(declared, str)``.  Given the loop below it changes no
+      answer: a non-string ``type:`` matches no ``cls.__name__``, so the loop
+      falls to its own ``return None``.  It is here so the shape is refused
+      where it is read.  What is NOT equivalent, and is pinned, is testing
+      ``"type" in spec`` rather than ``spec.get("type") is not None``.
+    """
+    if isinstance(spec, (list, tuple)):
+        # A `many` node's entries, and a `compose:` block's stages.
+        for one in spec:
+            found = _a30_stochastic(node_id, one, table)
+            if found is not None:
+                return found
+        return None
+    if not isinstance(spec, Mapping):
+        return None
+    if "python" in spec:
+        cls = _t5_radio_class(spec)
+        if cls is None or RANDOMNESS not in getattr(cls, "requires", ()):
+            return None
+        return cls.__name__
+    if "from" in spec:
+        return None
+    if "compose" in spec:
+        stages = spec.get("stages")
+        if not isinstance(stages, (list, tuple)):
+            # `_compose` refuses the shape in its own words; a mapping read as
+            # a node spec here would reach the unanimity clause and call a
+            # malformed block stochastic on the strength of its NODE.
+            return None
+        return _a30_stochastic(node_id, stages, table)
+    classes = table.get(node_id) if isinstance(node_id, str) else None
+    if not classes:
+        return None
+    if "type" in spec:
+        # PRESENCE, not truthiness: `type: null` is a spec that named a class
+        # and failed to, so falling through to the unanimity clause below
+        # would answer about a class the document never chose -- and at
+        # ``noise``, where both classes draw, that answer is a refusal.
+        declared = spec["type"]
+        if not isinstance(declared, str):
+            return None
+        for cls in classes:
+            if cls.__name__ == declared:
+                return cls.__name__ if RANDOMNESS in cls.requires else None
+        return None
+    if all(RANDOMNESS in cls.requires for cls in classes):
+        return classes[0].__name__
+    return None
+
+
+def _a30_placements(document: Mapping[str, Any],
+                    table: Mapping) -> dict[str, tuple[str, str]]:
+    """node id -> ``(the site that put it there, the class name)``.
+
+    **Keyed by NODE, not by the model key**, and that is the whole reason this
+    is a function rather than a dict comprehension over :func:`_nodes`:
+    ``inference.twin.without:`` names node ids -- ``Assembly.without``
+    (``twin.py:59-60``) -- and a ``python:`` entry lands where its class
+    declares rather than under the key it is written beneath.  Measured at
+    ``0263e0f``: ``{emi: {python: 'rheplicant.radio:NoiseOperator', ...}}``
+    with ``without: [noise]`` BUILDS and its fit twin is clean, while
+    ``without: [emi]`` is the one the assembly itself refuses.  A reader
+    keyed on the model key gets both of those backwards -- one a false
+    refusal, one a lost check.
+
+    :func:`_t5_claims` is the one placement reader in this file (§2.2), and a
+    REGION's operator sits at the LAST node it covers -- ``paths.
+    refuse_misaddressed_region`` says so and the assembly agrees (measured:
+    ``at: ['noise', 'emi']`` reports the stage at ``emi``).  ``placed[-1]``
+    is therefore right for a single placement and for a region alike.
+
+    First claimant wins where two entries land on one node; that document is
+    check A5's refusal, and A30's fix -- drop the node -- is the same
+    whichever key it names.
+    """
+    placements: dict[str, tuple[str, str]] = {}
+    for key, spec in _nodes(document).items():
+        placed = _t5_claims(key, spec)
+        if not placed:
+            continue
+        node_id = placed[-1]
+        found = _a30_stochastic(node_id, spec, table)
+        if found is not None:
+            placements.setdefault(node_id, (f"model.{key}", found))
+    return placements
+
+
+def stochastic_nodes(document: Mapping[str, Any]) -> frozenset[str]:
+    """The node ids whose declared operator class declares ``RANDOMNESS``.
+
+    §3.2 (f)'s shared name: Task 11 (A30) binds it and Task 12 (A42) imports
+    it, because two private predicates for one property is the collision
+    §3.2 (f) calls "the likeliest remaining collision in the plan".  Public
+    for that reason -- it crosses a module boundary, the precedent
+    ``sections/observed.py:23`` sets.
+
+    Read off the CLASS (``operator_table()``, measured at 0.2 ms on its first
+    call and 0.02 ms after, importing nothing on §0's forbidden list) --
+    never off a constructed operator, which is out of scope.
+
+    The MODEL's nodes, before any ``inference.twin`` repair: A42 asks whether
+    a node the observed data was simulated through has left the fit twin, so
+    it needs the unrepaired answer, and A30 applies the repair itself.
+    """
+    return frozenset(_a30_placements(document, operator_table()))
+
+
+@register("A30")
+def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """Check A30: a stochastic stage the fit twin keeps, under an exit that
+    closes over ONE template state.
+
+    ``inference.twin`` is applied the way ``build_fit_twin`` applies it
+    (``twin.py:59-69``): ``without:`` first, then ``replace:``.  Reading
+    ``replace:`` is what keeps this honest on the twin route -- measured, a
+    document whose only ``twin:`` key is ``replace: {noise:
+    RadiometerNoiseOperator}`` builds a fit twin that still draws, and a check
+    reading ``model:`` alone would name the wrong class about it.
+
+    A ``replace:`` on a node ``without:`` has already dropped is skipped:
+    measured, ``Assembly.replace_node`` raises ``KeyError("No node named
+    'noise' in this assembly")`` there, so the document is refused whatever
+    this says, and saying "write without: [noise]" about a document that
+    contains that line names a fix it already has.
+
+    A malformed ``twin:`` -- not a mapping, or a ``without:`` that is not a
+    list -- reads as NO repair rather than as a stand-down.  ``build_fit_twin``
+    refuses both shapes in its own words one phase later, and A30's advice
+    (the list form, spelled out) is the right thing to say first.  What it may
+    never do is RAISE: a ``without:`` entry that is a list is unhashable, and
+    popping by it would abort the pass and discard every other finding
+    (§2.3's TRAP).
+
+    **A document that declares no latent stands the whole check down**, and
+    that is Task 5's "do not pre-empt a more specific refusal" rather than a
+    convenience.  A fitting exit with no ``inference.parameters`` fits
+    nothing, and the package already says exactly that: measured at
+    ``0263e0f``, ``fisher``, ``identifiability`` and ``score_directions`` on a
+    document whose ``inference:`` is ``{}`` each refuse naming
+    ``inference.parameters``, and three tests in ``tests/config/`` pin that
+    sentence on purpose.  Without this clause A30 displaces all three --
+    which also makes the task body's claim that this check "refuses nothing in
+    the shipped suite" false, measured.  Repairing a twin for a fit the
+    document does not declare is the wrong fix named first.
+    """
+    fitting = sorted(_kinds(document) - _A30_NOT_FITTING)
+    if not fitting or not _latents(document):
+        return ()
+    table = operator_table()
+    placements = _a30_placements(document, table)
+    section = document.get("inference")
+    section = section if isinstance(section, Mapping) else {}
+    twin = section.get("twin")
+    twin = twin if isinstance(twin, Mapping) else {}
+
+    dropped = twin.get("without")
+    dropped = tuple(one for one in dropped
+                    if isinstance(one, str)) if isinstance(
+                        dropped, (list, tuple)) else ()
+    for node_id in dropped:
+        placements.pop(node_id, None)
+    replace = twin.get("replace")
+    if isinstance(replace, Mapping):
+        for node_id, spec in replace.items():
+            if not isinstance(node_id, str) or node_id in dropped:
+                continue
+            found = _a30_stochastic(node_id, spec, table)
+            if found is None:
+                placements.pop(node_id, None)
+            else:
+                placements[node_id] = (
+                    f"inference.twin.replace.{node_id}", found)
+    if not placements:
+        return ()
+
+    named = " / ".join(f"kind: {kind}" for kind in fitting)
+    findings: list[Finding] = []
+    # Sorted by NODE id, so blame order is a property of the graph rather than
+    # of the order the user happened to type two nodes in (Task 5's lesson).
+    for node_id in sorted(placements):
+        site, operator = placements[node_id]
+        findings.append(refuse("A30", "inference.twin.without", (
+            f"{site} puts {operator} at node {node_id!r}, which draws its own "
+            f"randomness -- {operator} declares {RANDOMNESS!r} in requires "
+            "-- and inference.twin.without: does not drop it. This document "
+            f"declares {named}, and every exit but forward and mmodes closes "
+            "the fit twin over ONE template state, so that draw would be the "
+            "SAME realisation added to every prediction alike: a bias that is "
+            "exactly affine and full rank, which is why no shape check, no "
+            "linearity check and no rank test sees it. Write "
+            f"inference.twin.without: [{node_id}] -- kind: forward keeps the "
+            "node, and simulating with it is what it is for (check A30).")))
+    return tuple(findings)
+
+
+def _t11_bindings(
+        document: Mapping[str, Any]
+) -> tuple[tuple[str, frozenset[str], tuple[str, ...], Any], ...]:
+    """``(document path, latent NAMES, into-path HEADS, transform)`` per binding.
+
+    BOTH spellings, because ``build_space`` walks two loops over one meaning:
+    ``inference.parameters.<n>.into`` (``transforms.py:344-361``) and
+    ``inference.bindings[i].into`` (``:362-399``).  Both carry ``transform:``.
+    A check that read one is 2C's shape 4 -- a hole closed on one route and
+    left open on its twin -- in the one place this layer has an actual twin.
+
+    The latent NAMES travel with the binding because A33's question is about
+    two DIFFERENT parameters.  One latent written into both leaves (``into:
+    [bandpass.bandpass, gain.gain]``, or two ``bindings`` entries naming the
+    same latent) is one degree of freedom and no null direction at all, and a
+    check that compared only path heads refuses it.
+
+    A binding whose latent names cannot be read stands for its own ``where``,
+    which no latent name can equal -- so it is never mistaken for the latent
+    on the other node.  The malformed ``latents:`` itself is
+    ``transforms.py:369-374``'s refusal.
+
+    ``parse_path`` RAISES on a malformed path (measured: ``''``, ``'a..b'``,
+    ``None`` and ``['a']`` all give ``ConfigError``), and a check that raises
+    aborts the pass and hides every later finding (§2.3's TRAP).  So an
+    unparseable ``into:`` is skipped here and left to
+    ``_selectors``/``parse_path`` at build time, which already names it.
+    """
+    section = document.get("inference")
+    section = section if isinstance(section, Mapping) else {}
+    written: list[tuple[str, tuple[str, ...], Any, Any]] = [
+        (f"inference.parameters.{name}", (name,), spec.get("into"),
+         spec.get("transform"))
+        for name, spec in _latents(document).items()
+        if spec.get("into") is not None
+    ]
+    bindings = section.get("bindings")
+    if isinstance(bindings, (list, tuple)):
+        for index, entry in enumerate(bindings):
+            if not isinstance(entry, Mapping) or entry.get("into") is None:
+                continue
+            latents = entry.get("latents")
+            latents = (latents,) if isinstance(latents, str) else latents
+            names = tuple(one for one in latents if isinstance(one, str)) \
+                if isinstance(latents, (list, tuple)) else ()
+            written.append((f"inference.bindings[{index}]", names,
+                            entry.get("into"), entry.get("transform")))
+
+    out: list[tuple[str, frozenset[str], tuple[str, ...], Any]] = []
+    for where, names, into, transform in written:
+        paths = [into] if isinstance(into, str) else into
+        if not isinstance(paths, (list, tuple)):
+            continue
+        heads: list[str] = []
+        for path in paths:
+            if not isinstance(path, str):
+                continue
+            try:
+                head = parse_path(path)[0]
+            except ConfigError:
+                continue
+            if isinstance(head, str):
+                heads.append(head)
+        out.append((where, frozenset(names or (where,)), tuple(heads),
+                    transform))
+    return tuple(out)
+
+
+def _a33_convention(transform: Any) -> bool | None:
+    """Is ``transform`` the bandpass's identifiability convention?
+
+    Three answers.  ``True`` -- it is :data:`_A33_CONVENTION`.  ``False`` --
+    it is a registered NAME that is not: ``identity`` binds the leaf
+    unchanged, ``exp`` and ``log`` are elementwise, ``sum`` reduces and
+    ``split_rows`` re-shapes, and none of the five moves the mean, so the
+    product of bandpass and gain stays the only constrained combination.
+    ``None`` -- text cannot say: a MAPPING transform is an arbitrary callable
+    (``{python: ...}``) or an affine map whose operands may be value nodes,
+    and an unregistered name is ``parse_transform``'s own refusal
+    (``transforms.py:179-182``), in its own words.
+
+    The ``None`` answers stand A33 down rather than refusing, because the
+    reader HAS declared a transform and telling them to declare one names a
+    fix they have already applied -- Task 5's "do not pre-empt a more
+    specific refusal", in the direction where the more specific sentence is
+    the value grammar's.
+    """
+    if transform is None:
+        return False
+    if transform == _A33_CONVENTION:
+        return True
+    if isinstance(transform, str) and transform in _NAMED:
+        return False
+    return None
+
+
+@register("A33")
+def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """Check A33: a latent free into ``bandpass`` beside a DIFFERENT one free
+    into ``gain``, with no identifiability convention on the bandpass.
+
+    Every declared latent is free -- ``_LATENT_KEYS`` (``parameters.py:
+    27-29``) has no freeze -- so "both free" is "both bound".
+
+    Pure text: the head of each ``into:`` path.  ``parse_path(path)[0]`` gives
+    it (``config/paths.py:38``) -- measured, ``parse_path('bandpass.taps[0]')``
+    is ``('bandpass', 'taps', 0)``, so a deeper path still counts by its node.
+
+    The SHAPE half of A33 -- that ``unit_mean_bandpass`` maps ``(n,)`` to
+    ``(n-1,)``, so a latent bound through it is one channel shorter than the
+    node it writes -- is check C17 and needs a resolved shape.  That is Plan
+    3C's; this half is two path heads, two latent names and a transform.
+
+    **Measured absent today** at ``0263e0f``: a document lighting ``bandpass``
+    and ``gain`` with a free latent into each and no transform builds with no
+    refusal, and no document in ``tests/config/`` or ``docs/`` binds a latent
+    into a ``bandpass.*`` path at all -- so this check refuses nothing that
+    exists and its own tests are the only coverage it will have.
+    ``exit_helpers.py:521-524`` calls its ``gain`` + ``global_signal.depth``
+    pair *"the schema's A33 shape"*; that is an analogy about degeneracy and
+    not an A33 document, because neither latent goes into ``bandpass``.
+    """
+    bindings = _t11_bindings(document)
+    on_bandpass = [one for one in bindings if "bandpass" in one[2]]
+    if not on_bandpass:
+        return ()
+    on_bandpass_latents = frozenset().union(
+        *(names for _, names, _, _ in on_bandpass))
+    on_gain_latents = frozenset().union(
+        *(names for _, names, heads, _ in bindings if "gain" in heads))
+    # The DIFFERENCE, not the presence: a latent written into both leaves is
+    # one degree of freedom and the product IS constrained, so there is
+    # nothing to trade and nothing to refuse.
+    if not on_gain_latents - on_bandpass_latents:
+        return ()
+    verdicts = [_a33_convention(transform) for _, _, _, transform
+                in on_bandpass]
+    if any(verdict is not False for verdict in verdicts):
+        return ()
+    where = on_bandpass[0][0]
+    return (refuse("A33", _task3_where(f"{where}.transform"), (
+        f"{where} is free into bandpass and this document also frees a "
+        "latent into gain. The receiver's bandpass and the gain multiply the "
+        "same prediction, so only their PRODUCT is constrained: the fit has "
+        "one exactly null direction and returns a finite, correctly-shaped "
+        "answer in which the two have traded an arbitrary constant. Declare "
+        f"transform: {_A33_CONVENTION} on the bandpass binding -- it divides "
+        "out the mean, which is the convention that makes the pair "
+        "identifiable (check A33).")),)

@@ -31,23 +31,35 @@ from rheplicant.config import ConfigError, ResolutionContext
 from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import CHECKS, preflight
 from rheplicant.config.preflight.model import (
+    _A30_NOT_FITTING,
+    _A33_CONVENTION,
     _a14_cal_load_keys,
+    _bandpass_and_gain,
     _data_with_sources,
     _double_count,
     _graph_shape,
     _lit,
     _nodes,
+    _stochastic_in_fit_twin,
     _tone_placement,
     _two_at_one_node,
+    stochastic_nodes,
 )
 from rheplicant.config.sections.compose import build_model, node_specs
+from rheplicant.config.sections.model import operator_table
 from rheplicant.core.graph import AssemblyError
 from rheplicant.radio import CWCalibrationOperator
 from rheplicant.radio.graph import RADIO_GRAPH
 from tests.config.preflight_helpers import (
+    BANDPASS_AND_GAIN,
+    BANDPASS_MODEL,
+    BASE_MODEL,
+    RADIOMETER_NODE,
+    STOCHASTIC_MODEL,
     UNREADABLE_BEAM,
     only,
     preflight_document,
+    repatch,
 )
 
 GAIN = {"gain": {"value": 1.1, "unit": "dimensionless"}}
@@ -2083,3 +2095,844 @@ class TestTheReVoicedChecksInThePass:
             load_document(document)
         assert "model.gain already fills" in str(caught.value)
         assert "no_such_beam" not in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Task 11 -- A30 (a stochastic stage the fit twin keeps) and A33 (a bandpass
+# left free beside a gain).  Tasks 4 and 5's classes are above.
+# ---------------------------------------------------------------------------
+
+#: The ids Task 11 decides.  Task 4's :data:`MINE` and Task 5's
+#: :data:`T5_CHECKS` are their own; an "and nothing else" assertion written
+#: over the whole report goes red on whichever later task first fires on one
+#: of these documents.
+T11_CHECKS = frozenset({"A30", "A33"})
+
+#: ``model.noise`` written the ordinary way -- the node id as the key, the
+#: class named by ``type:``.  Spelled out rather than read off
+#: :data:`STOCHASTIC_MODEL` because half the documents below REPLACE the model
+#: section outright (:func:`_model_only`), so it has to stand on its own.
+NOISE_NODE = {"type": "NoiseOperator", "sigma": SIGMA}
+#: The same class named through ``python:`` instead, which is what makes it
+#: RELOCATABLE: ``NoiseOperator.graph_node`` is ``noise``, so this entry lands
+#: at ``noise`` whatever key it is written under (measured at ``0263e0f``
+#: through ``load_document``).
+PY_NOISE = {"python": "rheplicant.radio:NoiseOperator", "sigma": SIGMA}
+#: A ``python:`` target this layer will not import.
+FOREIGN_NOISE = {"python": "some.module:factory", "sigma": SIGMA}
+#: ``rfi_field``, the schema's OTHER stochastic node: ``RFIOperator`` declares
+#: ``'key'`` the same way ``NoiseOperator`` does.
+RFI = {"amplitude": {"value": 1.0, "unit": "K"}, "occupancy": 0.1}
+
+#: A30's message, whole.  A LITERAL and not a call into the module under test
+#: -- comparing the module with itself is ``f(x) == f(x)`` and cannot fail
+#: however the sentence is reworded, which is how three of Task 8's lifted
+#: messages were "pinned".  Every clause here was read off the live refusal.
+A30_MESSAGE = (
+    "model.noise puts NoiseOperator at node 'noise', which draws its own "
+    "randomness -- NoiseOperator declares 'key' in requires -- and "
+    "inference.twin.without: does not drop it. This document declares "
+    "kind: fisher, and every exit but forward and mmodes closes the fit twin "
+    "over ONE template state, so that draw would be the SAME realisation "
+    "added to every prediction alike: a bias that is exactly affine and full "
+    "rank, which is why no shape check, no linearity check and no rank test "
+    "sees it. Write inference.twin.without: [noise] -- kind: forward keeps "
+    "the node, and simulating with it is what it is for (check A30)."
+)
+
+#: A33's message, whole, for the ``inference.parameters.b`` spelling.
+A33_MESSAGE = (
+    "inference.parameters.b is free into bandpass and this document also "
+    "frees a latent into gain. The receiver's bandpass and the gain multiply "
+    "the same prediction, so only their PRODUCT is constrained: the fit has "
+    "one exactly null direction and returns a finite, correctly-shaped "
+    "answer in which the two have traded an arbitrary constant. Declare "
+    "transform: unit_mean_bandpass on the bandpass binding -- it divides out "
+    "the mean, which is the convention that makes the pair identifiable "
+    "(check A33)."
+)
+
+
+def _t11_fit(model=None, twin=_ABSENT, runs=None, **inference):
+    """A document with ``model``, an ``inference.twin`` and a fitting run.
+
+    ``twin`` defaults to ABSENT, which leaves the base document's repair
+    (``{"without": ["noise"]}``) in place; pass ``twin=None`` to strip it.
+    That default is why :data:`_ABSENT` is worth having here too: ``twin:
+    null`` and no ``twin:`` key are two different documents, and only the
+    first is what A30 reads as "no repair".
+    """
+    block = dict(inference)
+    if twin is not _ABSENT:
+        block["twin"] = twin
+    return preflight_document(model=model or STOCHASTIC_MODEL,
+                              inference=block,
+                              runs=[{"kind": "fisher"}] if runs is None
+                              else runs)
+
+
+def _t11_relocated(twin):
+    """A fitting document whose ONLY stochastic operator is RELOCATED.
+
+    ``model.emi`` names ``NoiseOperator`` through ``python:``, so the entry
+    lands at node ``noise`` while its key says ``emi``.  The model is replaced
+    rather than patched -- ``preflight_document`` merges one level deep and a
+    merge cannot express the removal of the base document's own ``noise``
+    node, which would otherwise fill the node this relocation is aimed at.
+
+    The ``twin:`` is written NESTED, inside the block the helper returned,
+    which is the only form that is not a rolled-own document: a depth-1
+    ``doc["inference"] = ...`` REPLACES the repaired block and
+    ``test_config_fixture_contract._rolls_its_own`` route B is written to
+    catch exactly that.
+    """
+    document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
+                            "emi": PY_NOISE})
+    document["inference"]["twin"] = twin
+    document["runs"] = [{"kind": "fisher"}]
+    return document
+
+
+class TestTheStochasticFitTwin:
+    """A30 -- and the conditions without which it is a regression."""
+
+    def test_the_base_model_is_the_one_A30_is_about(self):
+        """The discrimination guard for every positive test below.
+
+        ``STOCHASTIC_MODEL`` is measured EQUAL to ``BASE_MODEL``, because
+        ``exit_helpers._repaired``'s whole design is a stochastic ``noise``
+        node in ``model:`` repaired away in ``inference.twin.without:``.  If a
+        later change to the helper drops the node, every A30 positive test
+        below keeps passing while testing nothing -- this is what goes red
+        instead.
+        """
+        assert STOCHASTIC_MODEL == BASE_MODEL
+        assert STOCHASTIC_MODEL["noise"]["type"] == "NoiseOperator"
+
+    def test_the_base_documents_twin_repair_is_what_these_tests_remove(self):
+        """The second discrimination guard: dropping the repair is what makes
+        A30 reachable at all.
+
+        Kills a helper change that reinstates ``inference.twin.without`` under
+        a patch -- under which every negative test here keeps passing and says
+        nothing.
+        """
+        base = preflight_document()
+        assert base["inference"]["twin"] == {"without": ["noise"]}
+        kept = _t11_fit()
+        assert kept["inference"]["twin"] == {"without": ["noise"]}
+        assert "A30" not in preflight(kept).checks()
+        dropped = _t11_fit(twin=None)
+        # `None` REMOVES a top-level section; one level down it is a VALUE, so
+        # the key survives carrying `None` -- which is what the check must
+        # read as "no repair", and this is the assertion that says so.
+        assert dropped["inference"]["twin"] is None
+        assert "A30" in preflight(dropped).checks()
+
+    def test_a_stochastic_node_the_fit_twin_keeps_is_A30(self):
+        # Kills: the check absent.  Measured at be2027b, this document reaches
+        # P3 and dies as ParameterSpaceError from inside the package -- after
+        # build_resources has read every beam.
+        found = only(_t11_fit(twin=None), "A30")
+        assert found.where == "inference.twin.without"
+
+    def test_the_message_is_pinned_whole(self):
+        # Where every recent task's surviving mutants concentrated: a `match=`
+        # fragment leaves every other clause free to be wrong.  Equality
+        # against a LITERAL, so a reword fails here rather than passing an
+        # assertion that compares the module with itself.
+        assert only(_t11_fit(twin=None), "A30").message == A30_MESSAGE
+
+    def test_the_message_names_the_node_and_the_class_it_read(self):
+        # The CLASS name is what proves the verdict came from the DECLARATION
+        # rather than from a hard-coded node id -- a check written as
+        # `node_id == "noise"` cannot produce it.
+        message = only(_t11_fit(twin=None), "A30").message
+        assert "model.noise" in message
+        assert "NoiseOperator" in message
+        assert "'key' in requires" in message
+        assert "inference.twin.without: [noise]" in message
+        assert "kind: fisher" in message
+
+    def test_a_forward_only_document_is_not_refused(self):
+        # THE design decision, and the half a positive-only test cannot see.
+        # Measured: `forward` evaluates built.twin (exits.py:38-40), never the
+        # fit twin, and simulating WITH the noise is what a forward run is
+        # for.  A check that fired here would refuse every simulation this
+        # package exists to produce.
+        assert "A30" not in preflight(
+            _t11_fit(twin=None, runs=[{"kind": "forward"}])).checks()
+
+    def test_mmodes_is_not_a_fitting_exit_either(self):
+        # Kills: _A30_NOT_FITTING == {"forward"}.  _run_mmodes
+        # (diagnostics.py:594-684) expands a projector against a sky and
+        # closes over no twin at all.
+        assert "A30" not in preflight(
+            _t11_fit(twin=None, runs=[{"kind": "mmodes"}])).checks()
+
+    def test_a_forward_run_beside_a_fitting_one_is_still_refused(self):
+        # Kills: the condition read off the FIRST run, or the complement test
+        # written as an intersection.  A document that simulates and then fits
+        # is the ordinary case, and the fit is what cannot have the node.
+        report = preflight(_t11_fit(
+            twin=None, runs=[{"name": "sim", "kind": "forward"},
+                             {"name": "fit", "kind": "fisher"}]))
+        assert "A30" in report.checks()
+
+    def test_every_fitting_kind_the_document_declares_is_named(self):
+        # Kills: naming only the first fitting kind.  The reader has to know
+        # which of its runs the refusal is about.
+        found = only(_t11_fit(twin=None,
+                              runs=[{"name": "a", "kind": "nuts"},
+                                    {"name": "b", "kind": "fisher"},
+                                    {"name": "c", "kind": "forward"}]), "A30")
+        assert "kind: fisher / kind: nuts" in found.message
+
+    def test_the_without_repair_clears_it(self):
+        # Kills: ignoring inference.twin.without entirely, which would refuse
+        # every document in tests/config -- all twelve *_document builders
+        # carry the node in model: and drop it in the repair.
+        assert "A30" not in preflight(
+            _t11_fit(twin={"without": ["noise"]})).checks()
+
+    def test_a_without_that_is_not_a_list_is_no_repair_and_never_raises(self):
+        # §2.3's TRAP: `without: "noise"` is a string, and a check that
+        # iterated it would pop 'n', 'o', 'i'...; one that used an unhashable
+        # `["noise"]` entry as a dict key would RAISE -- which `preflight`
+        # turns into "check 'A30' RAISED" and which costs the document every
+        # other finding.  build_fit_twin refuses both shapes in its own words
+        # one phase later; A30's advice (write the LIST form) is right to say
+        # first.
+        for bad in ("noise", 7, {"noise": True}, [["noise"]], [7]):
+            assert "A30" in preflight(_t11_fit(twin={"without": bad})).checks()
+
+    def test_a_replace_is_read_rather_than_assumed_away(self):
+        # The twin route.  `replace:` swaps the operator at a node
+        # (twin.py:67-69) AFTER `without:` has run, so a check that read only
+        # `model:` would report the wrong class.  Measured through
+        # load_document: this exact twin gives a fit twin carrying
+        # RadiometerNoiseOperator at 'noise'.
+        found = only(_t11_fit(twin={"replace": {
+            "noise": {"type": "RadiometerNoiseOperator",
+                      **RADIOMETER_NODE}}}), "A30")
+        assert "RadiometerNoiseOperator" in found.message
+        assert found.message.startswith("inference.twin.replace.noise puts ")
+
+    @pytest.mark.parametrize("spec", [{"from": "gain"}, None, 3, "noise", []],
+                             ids=["from", "null", "int", "str", "list"])
+    def test_a_replace_this_pass_cannot_decide_stands_the_node_down(self,
+                                                                   spec):
+        # `from:` derives the operator from another node, which is
+        # CONSTRUCTION and outside P-1 (§2.4); the other four are shapes
+        # `build_node_operator` refuses in its own words.  A replacement A30
+        # cannot read clears the node rather than being guessed at in either
+        # direction -- and reading a non-mapping as `{}` would reach the
+        # unanimity clause, where both classes at `noise` draw and every one
+        # of these becomes a refusal.
+        assert "A30" not in preflight(_t11_fit(
+            twin={"replace": {"noise": spec}})).checks()
+
+    def test_a_replace_after_a_without_is_left_to_the_package(self):
+        # Measured: `without: [noise]` then `replace: {noise: ...}` raises
+        # KeyError("No node named 'noise' in this assembly") out of
+        # Assembly.replace_node -- there is nothing left to replace.  A30
+        # inventing a refusal there would name a fix the document contains.
+        assert "A30" not in preflight(_t11_fit(twin={
+            "without": ["noise"],
+            "replace": {"noise": {"type": "NoiseOperator",
+                                  "sigma": SIGMA}}})).checks()
+
+    def test_a_python_target_this_layer_will_not_import_stands_down(self):
+        # Kills: operator_table()[node_id] on a spec that names its own
+        # callable.  The class such a node builds is not in the table, so
+        # reading the table there attributes a declaration to an operator the
+        # document did not ask for.
+        assert "A30" not in preflight(_t11_fit(
+            model={**STOCHASTIC_MODEL, "noise": FOREIGN_NOISE},
+            twin=None)).checks()
+
+    def test_a_python_target_this_layer_CAN_resolve_is_not_a_stand_down(self):
+        """The hole the task body's draft left open, measured shut.
+
+        Plan §4's Task 11 stands A30 down on ANY ``python:`` spec.  Measured
+        at ``0263e0f`` through ``load_document``: ``{emi: {python:
+        'rheplicant.radio:NoiseOperator', sigma: ...}}`` BUILDS, lands
+        ``NoiseOperator`` at node ``noise`` (``_t5_claims`` says so and the
+        assembly agrees), and with no repair its fit twin keeps the draw.
+        §2.4 puts "operator classes resolved BY NAME" in scope explicitly and
+        Task 5's :func:`_t5_radio_class` already does it, so standing down
+        there is a lost check rather than a boundary.
+        """
+        found = only(_t11_relocated(None), "A30")
+        assert found.message.startswith(
+            "model.emi puts NoiseOperator at node 'noise'")
+        assert "inference.twin.without: [noise]" in found.message
+
+    def test_the_repair_is_read_in_NODE_ids_and_not_in_model_keys(self):
+        """The other half of the same defect, and the direction that is a
+        FALSE REFUSAL rather than a lost check.
+
+        ``inference.twin.without:`` names NODE ids -- ``Assembly.without``
+        (``twin.py:59-60``) -- and a relocated entry's key is not its node.
+        Measured at ``0263e0f``: this document BUILDS and its fit twin is
+        clean, so a check keyed on the model KEY refuses a document the
+        package runs; and ``without: ['emi']`` is the one the package itself
+        refuses (``AssemblyError``: no operator sits at 'emi').
+        """
+        from rheplicant.config.document import load_document
+        from rheplicant.core.contract import RANDOMNESS, stages_requiring
+
+        cleared = _t11_relocated({"without": ["noise"]})
+        assert "A30" not in preflight(cleared).checks()
+        built = load_document(repatch(cleared, runs=[{"kind": "forward"}]))
+        assert stages_requiring(built.twin, RANDOMNESS)
+        assert stages_requiring(built.inference.fit_twin, RANDOMNESS) == ()
+        assert "A30" in preflight(
+            _t11_relocated({"without": ["emi"]})).checks()
+
+    def test_a_compose_is_read_stage_by_stage_and_not_off_the_node(self):
+        """Kills the unanimity fallback applied to a ``compose:`` block.
+
+        Both classes at ``noise`` draw, so a check that asked the NODE would
+        call any composing block there stochastic.  Measured at ``0263e0f``:
+        a block composing two ``python:`` ``GainOperator`` stages at ``noise``
+        BUILDS and its twin declares no randomness at all, so that check would
+        refuse a document the package runs.
+        """
+        stages = [{"name": "a", **PY_GAIN}, {"name": "b", **PY_GAIN}]
+        assert "A30" not in preflight(_t11_fit(
+            model={**STOCHASTIC_MODEL,
+                   "noise": {"compose": "cascade", "stages": stages}},
+            twin=None)).checks()
+        noisy = [{"name": "a", **NOISE_NODE}, {"name": "b", **NOISE_NODE}]
+        assert "A30" in preflight(_t11_fit(
+            model={**STOCHASTIC_MODEL,
+                   "noise": {"compose": "cascade", "stages": noisy}},
+            twin=None)).checks()
+
+    def test_a_region_is_answered_at_the_node_its_operator_occupies(self):
+        """A relocating ``at:`` naming SEVERAL nodes is an ``At(...)`` region,
+        and the operator sits at the LAST node it covers --
+        ``paths.refuse_misaddressed_region`` says so and the assembly agrees
+        (measured at ``0263e0f``: ``at: ['noise', 'emi']`` reports the stage
+        at ``emi``).
+
+        Kills ``placed[0]``, which is the same answer as ``placed[-1]`` for
+        every single placement and names the wrong node here -- and a
+        ``without:`` naming that node is the one the assembly refuses.
+        """
+        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
+                                "emi": {**PY_NOISE, "at": ["noise", "emi"]}})
+        document["inference"]["twin"] = None
+        document["runs"] = [{"kind": "fisher"}]
+        found = only(document, "A30")
+        assert "at node 'emi'" in found.message
+        assert "inference.twin.without: [emi]" in found.message
+
+    def test_the_capability_route_finds_rfi_field_too(self):
+        # Kills: `node_id == "noise"`.  rfi_field is the schema's OTHER
+        # stochastic node; a check reading the declaration finds it and a
+        # check reading a hard-coded id does not.  Two nodes, two findings,
+        # each naming its own -- Task 3's per-index lesson, on this loop.
+        #
+        # `rfi_field` is written FIRST, and the model is REPLACED rather than
+        # patched to keep it there -- `preflight_document` merges, and a merge
+        # puts the base's own keys first, which would make document order and
+        # sorted order agree and this assertion decide nothing.  Measured:
+        # with the merge, blaming in document order survives every test here.
+        document = _model_only({"rfi_field": RFI,
+                                "global_signal": GLOBAL_SIGNAL,
+                                "gain": GAIN, "noise": NOISE_NODE})
+        document["inference"]["twin"] = None
+        document["runs"] = [{"kind": "fisher"}]
+        report = preflight(document)
+        found = [one for one in report.refusals() if one.check == "A30"]
+        assert len(found) == 2, found
+        assert [one.message.split(" puts ")[0] for one in found] == [
+            "model.noise", "model.rfi_field"]
+        assert "RFIOperator" in found[1].message
+
+    def test_a_deterministic_node_is_not_refused_however_lit(self):
+        # The negative half of the capability route.  `_model_only`, not a
+        # `model=` patch: `preflight_document` MERGES one level deep, so a
+        # patch cannot express the REMOVAL of the base document's noise node.
+        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
+                                "bandpass": BANDPASS})
+        document["inference"]["twin"] = None
+        document["runs"] = [{"kind": "fisher"}]
+        assert "A30" not in preflight(document).checks()
+
+    @pytest.mark.parametrize("declared",
+                             ["GainOperator", 7, [], {}, True, None])
+    def test_a_type_this_node_does_not_offer_stands_down(self, declared):
+        # `_pick_class` refuses the vocabulary in its own words (check A7);
+        # A30 answering first would name the wrong fix.  The NON-STRING cells
+        # are the ones that kill "fall through to unanimity when type: is not
+        # a name I recognise" -- both classes at `noise` draw, so that
+        # fall-through calls every malformed spec there stochastic.  `None` is
+        # the cell that needs the test to be on key PRESENCE rather than on
+        # `spec.get("type") is not None`.
+        assert "A30" not in preflight(_t11_fit(
+            model={**STOCHASTIC_MODEL,
+                   "noise": {"type": declared, "sigma": SIGMA}},
+            twin=None)).checks()
+
+    @pytest.mark.parametrize("spec", [None, 3, "noise", []])
+    def test_a_node_spec_that_is_not_a_mapping_places_nothing(self, spec):
+        # `_single` refuses a non-mapping spec outright, so nothing is placed
+        # and there is no operator to ask about -- and reading `{}` in its
+        # place would reach the unanimity clause and call it stochastic.
+        assert "A30" not in preflight(_t11_fit(
+            model={**STOCHASTIC_MODEL, "noise": spec}, twin=None)).checks()
+
+    def test_a_fitting_run_with_no_latents_is_someone_elses_refusal(self):
+        """Task 5's rule, and the one that says the task body's "this refuses
+        nothing in the shipped suite" was wrong.
+
+        Measured at ``0263e0f``: without this stand-down A30 displaces three
+        SHIPPED pins -- ``test_config_exits_diagnostics``'s two copies of
+        ``test_without_parameters_it_is_refused`` and
+        ``test_config_exit_support.py:281`` -- each of which blanks
+        ``inference:`` to reach *"inference.parameters"* on purpose.  A fit
+        with no latents fits nothing, so repairing its twin is the wrong fix
+        named one phase early.
+        """
+        document = repatch(_t11_fit(twin=None), inference={})
+        assert "A30" not in preflight(document).checks()
+        document = repatch(_t11_fit(twin=None), inference={"parameters": {}})
+        assert "A30" not in preflight(document).checks()
+
+    def test_a_pipeline_model_has_no_nodes_to_read(self):
+        # `_nodes` answers {} for kind: pipeline, and reading a pipeline's
+        # stages: as node ids would report every stage as a node.
+        document = _t11_fit(twin=None)
+        document["model"] = {"kind": "pipeline", "stages": []}
+        assert "A30" not in preflight(document).checks()
+
+    def test_no_shipped_node_mixes_stochastic_and_deterministic_classes(self):
+        # The fact behind the unanimity branch.  Measured, the three
+        # multi-class nodes are noise (both draw), flagging and filters
+        # (neither of theirs does).  The day one is mixed, a spec with no
+        # `type:` becomes genuinely undecidable and this is what says so,
+        # rather than the check silently choosing.
+        from rheplicant.core.contract import RANDOMNESS
+
+        multi = {node: classes for node, classes in operator_table().items()
+                 if len(classes) > 1}
+        assert set(multi) == {"noise", "flagging", "filters"}
+        for node, classes in multi.items():
+            declared = {RANDOMNESS in cls.requires for cls in classes}
+            assert len(declared) == 1, node
+
+    def test_the_declaration_is_a_class_attribute_and_not_an_instance_one(self):
+        """§2.5 names ``stages_requiring(pipeline, RANDOMNESS)``, which reads
+        ``stage.requires`` off CONSTRUCTED operators; §3.2(f) forbids
+        constructing one.  They reconcile only because ``requires`` is a
+        ``ClassVar`` (``core/operator.py:85``) -- this is the assertion that
+        says so, and it goes red the day the declaration moves onto instances
+        and this pass stops being able to answer A30 at all.
+        """
+        from rheplicant.core.contract import RANDOMNESS
+
+        for classes in operator_table().values():
+            for cls in classes:
+                assert isinstance(cls.requires, tuple)
+        assert RANDOMNESS in operator_table()["noise"][0].requires
+
+    def test_the_complement_is_a_subset_of_the_declared_kinds(self):
+        # Kills: a typo in _A30_NOT_FITTING.  "forwards" would silently make
+        # every forward document a refusal; the membership test would just
+        # never match.  A PROPER subset, so the day someone writes the set out
+        # in full rather than as the complement, this says so.
+        from rheplicant.config.sections.runs import _KINDS
+
+        assert _A30_NOT_FITTING < frozenset(_KINDS)
+
+    def test_stochastic_nodes_is_the_name_the_next_task_imports(self):
+        # §3.2(f): ONE predicate for "does this node's class declare key",
+        # bound here and imported by Task 12.  Node IDS, not model keys --
+        # which is the whole reason it is worth sharing.
+        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
+                                "emi": PY_NOISE})
+        assert stochastic_nodes(document) == frozenset({"noise"})
+        assert stochastic_nodes(preflight_document()) == frozenset({"noise"})
+        assert stochastic_nodes({"model": {"gain": GAIN}}) == frozenset()
+
+    def test_a_stochastic_fit_twin_wins_against_an_unreadable_beam(self):
+        # §5's PHASE PROPERTY, this task's one real assertion of it.  Task 2's
+        # phase guard registers four synthetic lambdas: it proves the HOOK's
+        # position and says nothing about any shipped check.  The assertion is
+        # symmetric -- the violation's own words come back, and `no_such_beam`
+        # does NOT.
+        #
+        # `load_document`, never `run_document`: §2.1 measured that parse_runs
+        # (runs.py:149) speaks BEFORE P-1 on the run_document path.
+        from rheplicant.config.document import load_document
+
+        document = preflight_document(
+            model=STOCHASTIC_MODEL,
+            inference={"twin": None},
+            runs=[{"kind": "fisher"}],
+            resources=UNREADABLE_BEAM)
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert "check A30" in str(caught.value)
+        assert "no_such_beam" not in str(caught.value)
+
+
+class TestTheBandpassAndTheGain:
+    """A33 -- two path heads, two latent names and a transform."""
+
+    def test_bandpass_and_gain_both_free_is_A33(self):
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL, **BANDPASS_AND_GAIN)).checks()
+
+    def test_the_message_is_pinned_whole(self):
+        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
+                     "A33")
+        assert found.message == A33_MESSAGE
+
+    def test_the_finding_names_the_bandpass_binding_and_not_the_gain_one(self):
+        # Kills the attribution failure: `"gain" in msg and "bandpass" in msg`
+        # passes when the two are swapped, and a reader sent to add
+        # `transform: unit_mean_bandpass` to the GAIN entry gets a refusal
+        # from parse_transform's fan check and no idea why.  `where` is the
+        # line to edit and it must be the bandpass one.
+        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
+                     "A33")
+        assert found.where == "inference.parameters.b.transform"
+
+    def test_the_transform_on_the_bandpass_binding_clears_it(self):
+        parameters = {
+            "b": {**BANDPASS_AND_GAIN["parameters"]["b"],
+                  "transform": "unit_mean_bandpass"},
+            "g": BANDPASS_AND_GAIN["parameters"]["g"],
+        }
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL, parameters=parameters,
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_the_transform_on_the_GAIN_binding_does_not_clear_it(self):
+        # Kills: `any(transform == CONVENTION for EVERY binding)`.  The
+        # convention has to be on the binding it constrains; on the gain it
+        # constrains nothing and the null direction is still there.
+        parameters = {
+            "b": BANDPASS_AND_GAIN["parameters"]["b"],
+            "g": {**BANDPASS_AND_GAIN["parameters"]["g"],
+                  "transform": "unit_mean_bandpass"},
+        }
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL, parameters=parameters,
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    @pytest.mark.parametrize("named",
+                             ["identity", "exp", "log", "sum", "split_rows"])
+    def test_another_registered_transform_does_not_clear_it(self, named):
+        # `exp` and `log` are elementwise and `sum` reduces; none divides out
+        # a mean, so none removes the null direction.  Only the registry's own
+        # convention does.
+        parameters = {
+            "b": {**BANDPASS_AND_GAIN["parameters"]["b"], "transform": named},
+            "g": BANDPASS_AND_GAIN["parameters"]["g"],
+        }
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL, parameters=parameters,
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    @pytest.mark.parametrize("transform", [
+        {"python": "m:f", "fan": "broadcast"}, {"affine": {"scale": 2.0}},
+        "nope", 7, [],
+    ], ids=["python", "affine", "unregistered", "int", "list"])
+    def test_a_transform_this_pass_cannot_read_stands_it_down(self, transform):
+        # A mapping transform is an arbitrary callable or an affine map and
+        # TEXT cannot say whether it fixes the scale; an unregistered name is
+        # parse_transform's own refusal, in its own words.  Refusing either
+        # would tell a reader who declared a transform to declare one.
+        parameters = {
+            "b": {**BANDPASS_AND_GAIN["parameters"]["b"],
+                  "transform": transform},
+            "g": BANDPASS_AND_GAIN["parameters"]["g"],
+        }
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL, parameters=parameters,
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_the_bindings_spelling_is_covered_too(self):
+        # 2C's shape 4, in the one place this layer has a real twin:
+        # build_space walks parameters.<n>.into (transforms.py:344-361) AND
+        # bindings[i].into (:362-399), and a check reading one leaves the
+        # other open.  Same document, second spelling -- and `where` must name
+        # the bindings entry by INDEX.
+        found = only(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": {"ones": ["n_freq"]}},
+                        "g": {"init": 1.0}},
+            bindings=[{"latents": ["b"], "into": "bandpass.bandpass"},
+                      {"latents": ["g"], "into": "gain.gain"}],
+            noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        assert found.where == "inference.bindings[0].transform"
+        assert found.message.startswith("inference.bindings[0] is free into ")
+
+    def test_the_two_spellings_mix(self):
+        # The bandpass sugared and the gain in bindings:.  A check that read
+        # one list per document rather than both together would find a
+        # bandpass with no gain and stand down.
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"],
+                        "g": {"init": 1.0}},
+            bindings=[{"latents": ["g"], "into": "gain.gain"}],
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_bandpass_alone_is_not_refused(self):
+        # Kills: the check firing on the bandpass half alone.  A bandpass with
+        # no free gain is identifiable and needs no convention.
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"]},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_gain_alone_is_not_refused(self):
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"g": BANDPASS_AND_GAIN["parameters"]["g"]},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_one_latent_written_into_both_is_no_null_direction(self):
+        """The twin a head-only reading opens.
+
+        ``into: [bandpass.bandpass, gain.gain]`` is ONE parameter driving both
+        leaves, so the product IS constrained and there is nothing to trade.
+        A check that asked only "is a bandpass head present and a gain head
+        present" refuses it, and the fix it names -- divide out the mean --
+        would change what the document computes.
+        """
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0,
+                              "into": ["bandpass.bandpass", "gain.gain"]}},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0}},
+            bindings=[{"latents": ["b"], "into": "bandpass.bandpass"},
+                      {"latents": ["b"], "into": "gain.gain"}],
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_second_latent_on_the_gain_beside_a_shared_one_still_fires(self):
+        # The other side of the same rule: `b` writes both, and `g` writes the
+        # gain as well -- so `g` is free against `b`'s bandpass and the null
+        # direction is back.
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0,
+                              "into": ["bandpass.bandpass", "gain.gain"]},
+                        "g": {"init": 1.0, "into": "gain.gain"}},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_deeper_path_still_counts_by_its_head(self):
+        # Kills: an equality test against the whole path string.  A binding
+        # into `bandpass.bandpass[0]` is the same node; parse_path returns
+        # ('bandpass', 'bandpass', 0) and only [0] is the node id.
+        assert "A33" in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0, "into": "bandpass.bandpass[0]"},
+                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_an_unparseable_into_is_left_to_the_binding_parser(self):
+        # Kills: letting parse_path's ConfigError out.  A check that raises
+        # aborts the whole pass and hides every later finding (§2.3), so a
+        # user with a typo'd path AND three other errors sees one.
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0, "into": "a..b"},
+                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_latent_name_the_path_grammar_cannot_spell_never_kills_the_pass(
+            self):
+        """Task 3's first lesson, on this task's call site.
+
+        ``parameters: {b-1: ...}`` loads today -- ``parse_latents`` validates
+        no name -- and ``preflight._check_where`` calls ``parse_path`` OUTSIDE
+        the per-check ``try``, so an un-spellable ``where`` kills the whole
+        pass rather than reporting the violation.  ``_task3_where`` cuts back
+        to the deepest spellable prefix; the FULL path stays in the message,
+        which is what the reader is shown.
+        """
+        found = only(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b-1": {"init": 1.0, "into": "bandpass.bandpass"},
+                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
+            noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        assert found.where == "inference.parameters"
+        assert found.message.startswith("inference.parameters.b-1 is free ")
+
+    def test_the_advised_transform_is_still_the_registrys_name(self):
+        # Kills: the transform renamed in transforms.py and the advice left
+        # behind, after which the message tells a reader to write a word the
+        # registry refuses -- the same failure the Transforms table guard in
+        # test_config_surface.py was written for.
+        from rheplicant.config.sections.transforms import _NAMED
+
+        assert _A33_CONVENTION in _NAMED
+        assert _A33_CONVENTION in A33_MESSAGE
+
+    def test_two_bandpass_bindings_name_the_first_and_clear_on_either(self):
+        # Attribution when there is more than one line to edit: the FIRST in
+        # document order, so the answer does not depend on how far down the
+        # walk happened to get.  And one convention is enough -- it fixes the
+        # bandpass's mean, so the pair is identifiable however many other
+        # latents write the same node.
+        both = {"b1": {"init": 1.0, "into": "bandpass.bandpass"},
+                "b2": {"init": 1.0, "into": "bandpass.bandpass[0]"},
+                "g": BANDPASS_AND_GAIN["parameters"]["g"]}
+        found = only(_t11_fit(model=BANDPASS_MODEL, parameters=both,
+                              noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        assert found.where == "inference.parameters.b1.transform"
+        conventional = {**both,
+                        "b2": {**both["b2"],
+                               "transform": _A33_CONVENTION}}
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL, parameters=conventional,
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_latent_with_no_into_binds_nothing(self):
+        # `into: null` is a latent with no binding at all
+        # (transforms.py:346-352) -- it cannot be free into anything.
+        assert "A33" not in preflight(_t11_fit(
+            model=BANDPASS_MODEL,
+            parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
+            noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+
+class TestTaskElevensChecksInThePass:
+    """Registration, attribution, the tag and §2.3's TRAP, for A30 and A33."""
+
+    def test_each_check_owns_its_slot(self):
+        # Two functions written and never registered leave every test above
+        # green, because they all go through `preflight`.  Subset form, per
+        # §3.1 rule 3 -- never `len(CHECKS)` or an exact set.
+        assert CHECKS["A30"] is _stochastic_in_fit_twin
+        assert CHECKS["A33"] is _bandpass_and_gain
+
+    def test_both_checks_reach_the_report_from_one_document(self):
+        document = _t11_fit(model=BANDPASS_MODEL, twin=None,
+                            **BANDPASS_AND_GAIN)
+        assert T11_CHECKS <= preflight(document).checks()
+
+    @pytest.mark.parametrize("check", ["A30", "A33"])
+    def test_every_message_ends_with_its_own_check_tag_once(self, check):
+        """The convention Task 3 shipped over its own five checks.
+
+        Both halves: the tail is THERE (a finding citing no check leaves a
+        reader with nothing to look up) and it is there ONCE.
+        """
+        document = (_t11_fit(twin=None) if check == "A30" else
+                    _t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN))
+        message = only(document, check).message
+        assert re.search(r"\(check A\d+\)\.$", message)
+        assert message.count(f"check {check}") == 1
+
+    def test_every_where_is_a_path_into_the_document(self):
+        document = _t11_fit(model=BANDPASS_MODEL, twin=None,
+                            **BANDPASS_AND_GAIN)
+        emitted = [*_stochastic_in_fit_twin(document),
+                   *_bandpass_and_gain(document)]
+        assert len(emitted) == 2, emitted
+        assert {parse_path(one.where)[0] for one in emitted} == {"inference"}
+
+    @pytest.mark.parametrize("section", [["gain"], "gain", 3])
+    def test_neither_check_reads_a_document_that_is_not_a_mapping(self,
+                                                                 section):
+        """``_structural`` guarantees a section is PRESENT, never that it is a
+        MAPPING (Task 4's carry-forward), and the same one level in.
+
+        What this kills is a RAISING A30 or A33: without the guards
+        ``.items()`` on a list is an ``AttributeError``, which ``preflight``
+        reports as "check 'A30' RAISED" and which costs the document every
+        other finding.
+        """
+        document = repatch(_t11_fit(twin=None), model=section,
+                           inference=section)
+        assert not T11_CHECKS & preflight(document).checks()
+
+    def test_a_document_with_no_inference_section_reaches_neither_check(self):
+        # `_structural` requires runtime, observation, model and runs -- not
+        # inference -- so an absent section is a shape both checks see.
+        document = preflight_document(inference=None,
+                                      runs=[{"kind": "fisher"}])
+        assert "inference" not in document
+        assert not T11_CHECKS & preflight(document).checks()
+
+    def test_neither_check_raises_on_hostile_text(self):
+        """§2.3's TRAP, driven as a product rather than as a list of cases.
+
+        A check that raises aborts the pass and discards every other finding,
+        so the property worth proving is not "these six documents are fine"
+        but "nothing in the grammar's neighbourhood raises".  Every value
+        below is a shape the YAML grammar admits: an UNHASHABLE ``without:``
+        entry (a live ``TypeError`` for any reader that pops by it), a
+        ``replace:`` key that is not a string (a live ``TypeError`` for any
+        reader that sorts the node ids), an ``into:`` the path grammar
+        refuses, a ``transform:`` that is a list, a ``runs:`` that is a bare
+        mapping.
+
+        The cells are COUNTED rather than described, so a product silently
+        shrunk to one row fails here rather than passing in a tenth of the
+        time.
+        """
+        twins = (_ABSENT, None, "nope", 7, [], {},
+                 {"without": "noise"}, {"without": ["noise"]},
+                 {"without": [["x"], 7, None]}, {"without": None},
+                 {"replace": "x"}, {"replace": {"noise": None}},
+                 {"replace": {"noise": {"type": 3}}},
+                 {"replace": {7: {"type": "NoiseOperator"}}},
+                 # The one that lands a DECIDED class under a non-string node
+                 # id: the `python:` route answers without consulting the
+                 # node, so an unfiltered key reaches `sorted(placements)`
+                 # beside the string ones and raises there.
+                 {"replace": {7: PY_NOISE}},
+                 {"replace": {"noise": {"python": None}}})
+        specs = (None, 3, {}, NOISE_NODE, {"type": 7}, PY_NOISE,
+                 {"python": "rheplicant.radio:Typo"}, {"from": "gain"},
+                 {"compose": "cascade", "stages": {"a": 1}},
+                 {"compose": "cascade", "stages": [3, None]},
+                 [NOISE_NODE], "noise")
+        intos = (None, "", "a..b", 7, "gain.gain", "bandpass.bandpass",
+                 ["bandpass.bandpass", 7], {}, ["a..b"])
+        transforms = (None, "identity", _A33_CONVENTION, "nope", 7,
+                      {"python": "m:f"}, [])
+        runs = ([{"kind": "fisher"}], [{"kind": "forward"}], [], "x", [7],
+                {"kind": "fisher"})
+        # The base is built ONCE and repatched per cell.  `preflight_document`
+        # deep-copies a delegated document (measured at 0.6 ms), which at this
+        # many cells is 40 s of fixture around 1 s of subject; `repatch` is
+        # what keeps the product affordable, and it lives in the helper module
+        # because a document assembled here is outside the fixture census.
+        base = _t11_fit()
+        cells = 0
+        for twin in twins:
+            for spec in specs:
+                for into in intos:
+                    for transform in transforms:
+                        for run in runs:
+                            latent = {"init": 1.0, "into": into,
+                                      "transform": transform}
+                            block = {
+                                "parameters": {"b": latent,
+                                               "g": {"init": 1.0,
+                                                     "into": "gain.gain"}},
+                                "bindings": [{"latents": ["b"], "into": into,
+                                              "transform": transform}],
+                            }
+                            if twin is not _ABSENT:
+                                block["twin"] = twin
+                            document = repatch(
+                                base, inference=block, runs=run,
+                                model={**BANDPASS_MODEL, "noise": spec})
+                            tuple(_stochastic_in_fit_twin(document))
+                            tuple(_bandpass_and_gain(document))
+                            cells += 1
+        assert cells == 16 * 12 * 9 * 7 * 6 == 72576
