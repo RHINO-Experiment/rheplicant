@@ -2203,16 +2203,65 @@ class TestSeeds:
             "inference.npe.bank", "inference.npe.create",
             "inference.npe.train", "inference.npe.sample"]
 
-    def test_the_npe_subsections_are_read_only_when_a_npe_run_is_declared(
-            self):
-        # `inference.npe:` may sit on a document whose runs do not use it --
-        # `npe_document`'s own builder writes the section unconditionally.
-        # Kills reading the section off `inference:` alone: that direction
-        # refuses a document with no npe run at all, which is the plan's
-        # finding 2 in the other direction.
+    def test_the_npe_subsections_are_read_without_a_npe_run_declared(self):
+        """The gate that used to be here, and the false premise it rested on.
+
+        It read ``or "npe" not in _kinds(document)`` and its comment said
+        ``inference.npe:`` "may sit on a document whose runs do not use it".
+        It may -- and the seed is read anyway.  ``sections/inference.py:204``
+        is ``npe = parse_npe(section["npe"], context) if "npe" in section else
+        None``, unconditional on ``runs:``, and ``build_inference``
+        (``document.py:108``) runs AFTER ``build_resources`` (``:75``).
+        Measured on an ``inference.npe:`` complete but for one seed, beside
+        ``runs: [{kind: forward}]``: this check was silent and ``_seeded``
+        refused at P2 -- and with an unreadable beam in the same document the
+        BEAM spoke first, which is the one outcome this plan exists to stop.
+
+        This is Task 9's finding in ``_counts`` one function up, in Task 8's
+        code, and the two gates were the same line.
+
+        Kills the gate's restoration, in both directions: the section IS read
+        with no npe run (first assertion) and a section with nothing wrong in
+        it earns nothing (second), so "read it always" cannot be satisfied by
+        refusing everything.
+        """
+        seedless = {name: dict(body) for name, body in NPE_SECTION.items()}
+        seedless["train"] = {key: value
+                             for key, value in seedless["train"].items()
+                             if key != "seed"}
+        found = _seedings(preflight_document(
+            inference={"parameters": PRIORED, "npe": seedless},
+            runs=[{"kind": "forward"}]))
+        assert [f.where for f in found] == ["inference.npe.train"]
+        assert "'seed' is required" in found[0].message
         assert _seedings(preflight_document(
-            inference={"parameters": PRIORED, "npe": {"train": {}}},
+            inference={"parameters": PRIORED,
+                       "npe": {name: dict(body)
+                               for name, body in NPE_SECTION.items()}},
             runs=[{"kind": "forward"}])) == []
+
+    def test_a_seedless_npe_subsection_wins_against_an_unreadable_beam(self):
+        # The phase assertion the gate made impossible.  Measured with the
+        # gate in place: this exact document refused with `No file at
+        # 'no_such_beam.npy'`, because P-1 stood down and `parse_npe` is at
+        # P2, behind `build_resources`.  Symmetric, like every other phase
+        # assertion in this plan: the finding's own words come back and
+        # `no_such_beam` does not.
+        from rheplicant.config.document import load_document
+        from rheplicant.config.errors import ConfigError
+
+        seedless = {name: dict(body) for name, body in NPE_SECTION.items()}
+        seedless["train"] = {key: value
+                             for key, value in seedless["train"].items()
+                             if key != "seed"}
+        document = preflight_document(
+            inference={"parameters": PRIORED, "npe": seedless},
+            runs=[{"kind": "forward"}], resources=UNREADABLE_BEAM)
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert "inference.npe.train" in str(caught.value)
+        assert "check A29" in str(caught.value)
+        assert "no_such_beam" not in str(caught.value)
 
     def test_the_embed_subsection_is_not_swept_for_a_seed(self):
         # `inference.npe.embed:` is a member of `_NPE_KEYS` (`npe.py:108`,
@@ -3269,12 +3318,20 @@ class TestCounts:
         # side of the beam -- and the measurement that condemned it: with the
         # gate in place this document loaded past P-1 and the BEAM spoke
         # first.  A `kind: forward` run, so the gate is what is under test.
+        #
+        # THE SEED IS DECLARED, and it was not until `_seeds`' identical gate
+        # went the same way.  `raise_if_refused` quotes the FIRST refusal and
+        # A29 is registered ahead of A24/A25, so a bank with no seed made
+        # A29's sentence the one this assertion read -- a test passing or
+        # failing on a fault it is not about.  One fault per document.
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
 
         document = {**preflight_document(
             inference={"parameters": PRIORED,
-                       "npe": {"bank": {"n_simulations": 0}}},
+                       "npe": {"bank": {"n_simulations": 0,
+                                        "seed": {"from":
+                                                 "runtime.seeds.bank"}}}},
             runs=[{"kind": "forward"}]), "resources": UNREADABLE_BEAM}
         with pytest.raises(ConfigError) as caught:
             load_document(document)
@@ -3725,13 +3782,23 @@ def _t10_document(noise, *runs, **sections):
     because A29 (:func:`~rheplicant.config.preflight.fitting._seeds`) refuses
     the four missing subsection seeds otherwise and every finding below would
     arrive beside four that are nothing to do with the noise.
+
+    **A run entry that is not a mapping passes through unchanged**, so a
+    malformed FIRST entry can be put in front of a real one.  ``_runs``
+    replaces such an entry with ``{}`` and preserves the index; what the
+    guard in ``_decided`` does with it -- ``continue`` or ``break`` -- is a
+    property only a multi-run document can see, and the whole hostile battery
+    below is single-run.
     """
     inference = {"noise": noise}
-    if any(one.get("kind") == "npe" for one in runs):
+    if any(isinstance(one, dict) and one.get("kind") == "npe"
+           for one in runs):
         inference["npe"] = {name: dict(body)
                             for name, body in NPE_SECTION.items()}
-    return preflight_document(inference=inference,
-                              runs=[dict(one) for one in runs], **sections)
+    return preflight_document(
+        inference=inference,
+        runs=[dict(one) if isinstance(one, dict) else one for one in runs],
+        **sections)
 
 
 def _t10_call_graph() -> dict[str, set[str]]:
@@ -3940,6 +4007,36 @@ class TestTheDecidedTable:
         # not say so would be the sibling-check trap Task 7 shipped nine of.
         assert "check A27's answer" in found.message
 
+    def test_the_gcr_gls_sentence_names_A27_without_BEING_A27(self):
+        """The cross-reference above makes ``"check A27" in message`` TRUE of
+        an A28 finding, and that is a trap worth pinning rather than removing.
+
+        The clause is the most useful sentence in that message -- it tells a
+        reader who followed A27's advice twice why they landed here -- so it
+        stays, and what decides the id is ``Finding.check`` and the TAIL,
+        both of which say A28.  Measured: the first run of this task's
+        P-1/P3 differential mis-filed this cell for exactly this reason, and
+        a future ``pytest.raises(ConfigError, match="check A27")`` could be
+        satisfied by it.
+
+        No live assertion is fooled today -- measured, the five ``check A27``
+        assertions in ``tests/config/`` all drive a ``radiometer`` document
+        and none can reach a frozen sigma under ``noise_from: gls`` -- and
+        this test is what turns that from luck into a checked property.
+        """
+        [found] = _t10_decided(_t10_document(
+            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        assert "check A27" in found.message
+        assert found.check == "A28"
+        assert found.message.endswith("(check A28).")
+        # ...and the asymmetry the differential's classifier rests on: no A27
+        # sentence mentions A28, so testing for A28 first is safe and testing
+        # for A27 first is not.
+        for kind in ("conjugate.wiener", "condition", "conjugate.gcr"):
+            [one] = _t10_decided(_t10_document(RADIOMETER, _T10_RUN[kind]))
+            assert one.check == "A27"
+            assert "check A28" not in one.message
+
     def test_a_radiometer_under_the_two_rule_readers_is_what_they_are_for(
             self):
         # The mirror, and it is not decoration: `gls_document()`'s own
@@ -4049,6 +4146,35 @@ class TestTheDecidedTable:
         assert found[0].message.startswith("runs['gls']: ")
         assert found[1].message.startswith("runs['amortized']: ")
 
+    @pytest.mark.parametrize(
+        "malformed",
+        [None, "conjugate.wiener", {"name": "draft"}, {"kind": 7},
+         {"kind": ["conjugate.wiener"]}],
+        ids=["null", "a-bare-string", "no-kind", "an-int-kind",
+             "an-unhashable-kind"])
+    def test_a_malformed_FIRST_run_does_not_silence_the_ones_after_it(
+            self, malformed):
+        """The loop guard's control flow, which nothing else here can see.
+
+        ``continue`` -> ``break`` on ``if not isinstance(exit_kind, str)``
+        exits 0 against every other test in this module and against all of
+        ``tests/config``: the hostile battery below is entirely SINGLE-run,
+        and the per-index test above uses three well-formed entries whose
+        kinds are all strings, so none of them ever reaches the guard with a
+        later run still to read.  Under the mutant every document in this
+        table loses A27 completely -- one malformed entry anywhere ahead of a
+        real run silences the check for the whole document, silently.
+
+        Task 3's carry-forward asked every task that writes a loop for a
+        per-index test; this is the half of that ask a well-formed loop
+        cannot discharge.
+        """
+        [found] = _t10_decided(_t10_document(
+            RADIOMETER, malformed, _T10_RUN["conjugate.wiener"]))
+        assert found.check == "A27"
+        assert found.where == "runs[1].kind"
+        assert found.message.startswith("runs['conjugate.wiener']: ")
+
     def test_a_run_declaring_expect_refuse_is_still_refused(self):
         """``expect: refuse`` does NOT stand this check down, and that is a
         decision rather than an omission.
@@ -4092,6 +4218,35 @@ class TestTheDecidedTable:
         assert _T10_NOISE_SHAPE["radiometer"] == "iterated"
         assert _T10_NOISE_SHAPE["radiometer_frozen"] == "array"
         assert _T10_NOISE_SHAPE["none"] == "absent"
+
+    def test_a_flags_entry_never_moves_a_row(self):
+        # `_T10_NOISE_SHAPE`'s docstring says `FlaggedNoise` forwards its
+        # inner model's `depends_on_prediction`, and that claim carried no
+        # test: the two ClassVars above are readable off the class, but
+        # `FlaggedNoise.depends_on_prediction` is a `@property`
+        # (`inference/noise.py:221-223`), so reading it off the class gives
+        # the property OBJECT and says nothing.  It has to be constructed.
+        #
+        # Kills: `flags:` given a row of its own in the table.  Every kind
+        # but `radiometer_frozen` takes `flags:` (`noise.py:34-41`), so if
+        # wrapping moved a row, `kind: homoscedastic` with `flags:` would be
+        # `iterated` and this pass would refuse every flagged conjugate
+        # document the suite runs.
+        import jax.numpy as jnp
+
+        from rheplicant.inference import (
+            FlaggedNoise,
+            HomoscedasticNoise,
+            RadiometerNoise,
+        )
+
+        flags = jnp.zeros((2, 2), dtype=bool)
+        constant = FlaggedNoise(HomoscedasticNoise(sigma=jnp.asarray(0.05)),
+                                flags)
+        iterated = FlaggedNoise(
+            RadiometerNoise(channel_width=1.0e6, integration_time=2.0), flags)
+        assert constant.depends_on_prediction is False
+        assert iterated.depends_on_prediction is True
 
     def test_the_decides_sigma_set_is_the_packages_own(self):
         # Kills: this constant drifting from
@@ -4257,6 +4412,131 @@ class TestTheDecidedRefusalsAreThePRODUCT:
             _T10_DECIDES_SIGMA | _T10_ITERATES)
         assert {row[2].get("noise_from") for row in _DECIDED_VERBATIM
                 if row[2]["kind"] == "conjugate.gcr"} == {None, "gls"}
+
+
+class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
+    """The differential that keeps two validators for one property in step.
+
+    :func:`_decided`'s docstring claims the pass and the runtime accessors
+    "agree on every document v1 can express".  Task 8's A23 got
+    ``TestA23AgreesWithTheGATEItRunsInFrontOf`` for the same claim and it held
+    under widening; A27/A28 had the sentence and nothing else, so the next
+    task to add a noise kind or an exit had nothing to fail.
+
+    Both sides are driven for real.  P3 is ``_decided_sigma`` for the two
+    kinds ``_conjugate_block`` resolves a sigma for, ``_draw_sigma`` for both
+    ``conjugate.gcr`` routes -- that function, not ``_decided_sigma``,
+    because the declared route has its OWN A27 and the gls route reaches
+    ``_decided_model`` through ``_gls_result`` -- and ``_decided_model`` with
+    each caller's own clauses for the two that read the rule directly.
+    Twenty-four cells: four ``inference.noise.kind``\\ s by six routes.
+
+    ``block``, ``observed``, ``prior`` and ``solve`` are dummies on the gcr
+    legs: every refusal under test is raised while the argument list is still
+    being evaluated, so a document that is NOT refused falls through into the
+    package and dies of the dummies instead.  That is the verdict this asks
+    for -- "the accessor did not refuse" -- and :meth:`_p3` returns ``""``
+    for it by name rather than by accident.
+    """
+
+    NOISES = ("none", "homoscedastic", "radiometer", "radiometer_frozen")
+    ROUTES = ("conjugate.wiener", "condition", "conjugate.gcr/declared",
+              "conjugate.gcr/gls", "conjugate.gls", "npe")
+
+    @staticmethod
+    def _noise(label):
+        return {"none": {"kind": "none"}, "homoscedastic": HOMOSCEDASTIC,
+                "radiometer": RADIOMETER, "radiometer_frozen": FROZEN}[label]
+
+    @staticmethod
+    def _p3(route, built):
+        """``"A27"``, ``"A28"`` or ``""`` -- what P3 says about this route.
+
+        **A28 is tested for FIRST, and that is not arbitrary.**  The gcr/gls
+        A28 sentence cross-references A27 in as many words -- *"noise_from:
+        gls is check A27's answer for inference.noise.kind: radiometer"* --
+        so ``"check A27" in message`` is TRUE of that A28 message and an
+        A27-first classifier reports a disagreement that is its own.
+        Measured: it did, on the first run of this differential.  No A27
+        message mentions A28, so the asymmetry is safe in this direction
+        only; ``test_the_gcr_gls_sentence_names_A27_without_BEING_A27`` pins
+        the property this rests on.
+
+        ``_A28_GCR_CLAUSES`` is deliberately NOT imported below:
+        ``_draw_sigma`` spreads it itself, which is the whole point of
+        binding it at the call site's own module scope, and passing a copy in
+        here would be this test testing itself.
+        """
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.conjugate import (
+            _A28_GLS_CLAUSES,
+            _draw_sigma,
+        )
+        from rheplicant.config.sections.exit_support import (
+            _decided_model,
+            _decided_sigma,
+        )
+        from rheplicant.config.sections.npe import _A28_NPE_CLAUSES
+        from tests.config.exit_helpers import spec
+
+        try:
+            if route in ("conjugate.wiener", "condition"):
+                _decided_sigma(spec(kind=route), built)
+            elif route.startswith("conjugate.gcr"):
+                _draw_sigma(spec(kind="conjugate.gcr"), built, block=None,
+                            observed=None, prior={}, solve={},
+                            noise_from=route.split("/")[1],
+                            where="runs['conjugate.gcr']")
+            elif route == "conjugate.gls":
+                _decided_model(spec(kind="conjugate.gls"), built,
+                               **_A28_GLS_CLAUSES)
+            else:
+                _decided_model(spec(kind="npe"), built, **_A28_NPE_CLAUSES)
+        except ConfigError as refusal:
+            text = str(refusal)
+            # A refusal that is NEITHER is `kind: none`'s shared "legal only
+            # for forward and optimize", which both sides leave to `_noise`.
+            return ("A28" if "check A28" in text
+                    else "A27" if "check A27" in text else "")
+        except Exception:                                      # noqa: BLE001
+            # The dummies reaching the package -- see the class docstring.
+            return ""
+        return ""
+
+    def _run(self, route):
+        run = dict(_T10_RUN[route.split("/")[0]])
+        if route == "conjugate.gcr/gls":
+            run["noise_from"] = "gls"
+        return run
+
+    @pytest.mark.parametrize("label", NOISES)
+    def test_the_text_rule_and_the_built_rule_decide_the_same_documents(
+            self, label):
+        from tests.config.exit_helpers import conjugate_built
+
+        noise = self._noise(label)
+        built = conjugate_built(noise=noise)
+        for route in self.ROUTES:
+            found = _t10_decided(_t10_document(noise, self._run(route)))
+            here = found[0].check if found else ""
+            assert len(found) <= 1, (label, route)
+            assert here == self._p3(route, built), (label, route)
+
+    def test_the_differential_is_not_vacuous(self):
+        """ANTI-VACUITY: a differential that never sees a refusal agrees
+        trivially.
+
+        Measured over the twenty-four cells: six say A27 or A28 and eighteen
+        say nothing, and both ids are among the six.  A grid whose every cell
+        was clean would pass the test above against an empty ``_decided``.
+        """
+        from tests.config.exit_helpers import conjugate_built
+
+        verdicts = [self._p3(route, conjugate_built(noise=self._noise(label)))
+                    for label in self.NOISES for route in self.ROUTES]
+        assert len(verdicts) == 24
+        assert {one for one in verdicts if one} == {"A27", "A28"}
+        assert len([one for one in verdicts if one]) == 6
 
 
 class TestTheDecidedTableIsRegisteredAndReachesTheUser:
