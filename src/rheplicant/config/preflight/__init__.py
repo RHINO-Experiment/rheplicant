@@ -298,9 +298,19 @@ def _check_where(check: str, finding: Finding) -> None:
 # `document`, so a foot import binding the bare name gives F811 at both `def`
 # lines.
 #
-# `document` registers A1.runs, A1.variants, A1.horizon, A38 and A39.
-# `model` registers A2 (which decides A2, A3, A4, A6 and A7), A32 and
-# A14.cal_loads.
+# WHICH MODULE CLAIMS WHICH SLOT IS NOT WRITTEN HERE, AND THAT IS THE POINT.
+# `sorted(CHECKS)` is the answer and it cannot go stale; a list in this
+# comment can, and did.  An earlier version said `model` "registers A2 (which
+# decides A2, A3, A4, A6 and A7)" -- false, and consequentially so: A2, A3,
+# A4, A6 and A7 are five registry SLOTS bound to one function variadically
+# (`model.py:201`), which is what stops a later function claiming one of
+# them.  Plan 3A's Task 13 predicted 29 slots and 27 bare ids by counting
+# from that sentence, against a measured 34 and 31.  Count from `CHECKS`:
+#
+#     {slot.split(".")[0] for slot in CHECKS}   # the bare schema §6 ids
+#
+# A dotted slot (`A1.runs`) is several functions deciding parts of one check
+# (§3.2 (a)); `Finding.check` is always the bare id.
 
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401

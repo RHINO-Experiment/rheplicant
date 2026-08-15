@@ -695,9 +695,24 @@ class TestThePagesSayWhatTheLayerDoes:
     #: A kind's own bullet under a ``### `` subsection: ``- `forward` — ``.
     #: The BULLET HEADS, never the body -- measured, the ``predict`` bullet
     #: names fisher/plan.sample/nuts/npe in its prose and the ``conjugate.gls``
-    #: bullet names its two siblings, so a body-wide scan is not a partition
-    #: and would have made every assertion below pass while measuring nothing.
+    #: bullet names its two siblings, so a body-wide scan is not a partition.
+    #:
+    #: An earlier version of this comment said such a scan "would have made
+    #: every assertion below pass while measuring nothing". That undersells
+    #: the guard and is false: measured, widening this pattern to
+    #: ``r"`([a-z][a-z._]*)`"`` turns TWO assertions red --
+    #: ``test_the_runs_subsections_partition_every_declared_kind`` (on the
+    #: duplicate and the set equality) and
+    #: ``test_every_subsection_heading_that_counts_counts_right`` (on the
+    #: lengths). The reason to read heads is that the partition would be
+    #: meaningless, not that nothing would notice.
     _KIND_BULLET = re.compile(r"^- `([a-z][a-z._]*)` — ", re.MULTILINE)
+
+    #: The same bullets with their BODIES, ``{kind: text}``. Terminated by the
+    #: next bullet, the next ``### `` heading, or the end of ``## Runs``.
+    _KIND_BULLET_BODY = re.compile(
+        r"^- `([a-z][a-z._]*)` — (.*?)(?=^- `|^### |\Z)",
+        re.MULTILINE | re.DOTALL)
 
     def _runs_subsections(self):
         """``[(heading, [kinds bulleted])]`` for ``## Runs``."""
@@ -780,6 +795,148 @@ class TestThePagesSayWhatTheLayerDoes:
             f"{len(_KINDS)}."
         )
 
+    def _kind_bullets(self) -> dict:
+        """``{kind: the whole text of its bullet}`` under ``## Runs``."""
+        runs = _section(_page("config-inference.md"), "## Runs")
+        found = dict(self._KIND_BULLET_BODY.findall(runs))
+        assert len(found) > 5, f"the bullet-body scan stopped matching: {found}"
+        return found
+
+    def test_every_exit_that_reads_the_noise_as_a_rule_documents_a28(self):
+        """A28 appeared NOWHERE under ``docs/`` while five sentences shipped it.
+
+        ``config-inference.md`` documented A27 correctly on the
+        ``conjugate.gls`` bullet and its mirror was simply absent, so a user
+        refused by A28 had the check id and no page naming it. The gate is
+        read from the package: ``_T10_ITERATES`` is the set of kinds that read
+        ``inference.noise`` as a RULE and is what gates A28's three legs, so a
+        fourth kind joining it arrives here as a red test rather than as an
+        undocumented refusal.
+
+        Per BULLET and not per page: a page-wide search for "A28" passes as
+        soon as any one of the three carries it, which is the hole this closes.
+        """
+        from rheplicant.config.preflight.fitting import _T10_ITERATES
+
+        bullets = self._kind_bullets()
+        missing = sorted(kind for kind in _T10_ITERATES
+                         if "A28" not in bullets.get(kind, ""))
+        assert not missing, (
+            f"these kinds read inference.noise as a rule and their bullets on "
+            f"config-inference.md do not mention check A28: {missing}"
+        )
+
+    def test_every_config_page_is_reachable_from_a_toctree(self):
+        """A page in no toctree is a sphinx warning and nothing else.
+
+        Measured: deleting ``config-validation`` from ``docs/index.md`` moves
+        the nitpicky count from 35 to 36 and turns NO test red -- the only
+        gate is a clean ``sphinx -n`` build, which no test runs and which a
+        contributor has to remember. ``test_docs_links.py`` checks that a page
+        is tracked by git and that its anchors resolve, never that anyone can
+        reach it.
+        """
+        index = _page("index.md")
+        listed = set(re.findall(r"^(config-[a-z-]+)$", index, re.MULTILINE))
+        pages = {path.stem for path in _DOCS.glob("config-*.md")}
+        assert pages, "no config-*.md pages found; the glob has drifted"
+        assert pages <= listed, (
+            f"these pages are in no toctree in docs/index.md and will each "
+            f"cost one nitpicky sphinx warning: {sorted(pages - listed)}"
+        )
+
+    def test_the_validation_pages_report_table_is_the_report_api(self):
+        """The method table is prose about an object the suite can ask.
+
+        A row for a method ``Report`` does not have sends a reader to an
+        ``AttributeError``; a method the page omits is one they will not
+        find. Both directions, against ``Report``'s own public surface --
+        which is how this test found ``of(severity)`` missing from the table
+        on its first run, and with it the ``report`` severity, which the page
+        named nowhere.
+        """
+        from rheplicant.config import Report
+
+        body = _section(_page("config-validation.md"), "## What a Report carries")
+        listed = set(re.findall(r"\| `report\.(\w+)\([^)]*\)` \|", body))
+        assert listed, "the Report method table stopped parsing"
+        public = {name for name in vars(Report)
+                  if not name.startswith("_") and callable(getattr(Report, name))}
+        assert listed == public, (
+            f"on the page and not on Report: {sorted(listed - public)}; on "
+            f"Report and not on the page: {sorted(public - listed)}"
+        )
+
+    def test_the_validation_page_counts_a_findings_fields(self):
+        """"A ``Finding`` is four fields" -- and it names all four.
+
+        The count and the names together, because either alone drifts: a
+        fifth field added to ``findings.py`` leaves the word "four" false, and
+        a field renamed leaves the page pointing at a name that is gone.
+        """
+        import dataclasses
+
+        from rheplicant.config import Finding
+
+        body = _section(_page("config-validation.md"), "## What a Report carries")
+        opens = re.search(r"A `Finding` is (\w+) fields: (.*?)\n\n", body,
+                          re.DOTALL)
+        assert opens, "config-validation.md no longer counts a Finding's fields"
+        word = opens.group(1).lower()
+        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
+        fields = {field.name for field in dataclasses.fields(Finding)}
+        assert self._NUMBER_WORDS[word] == len(fields), (
+            f"the page says {word} fields; Finding has {len(fields)}."
+        )
+        named = set(re.findall(r"`(\w+)`", opens.group(2)))
+        assert fields <= named, (
+            f"the page counts {word} fields and names {sorted(named & fields)}; "
+            f"it does not name {sorted(fields - named)}."
+        )
+
+    def test_the_validation_page_counts_the_sources_it_lists(self):
+        """"reads three things and no fourth" and "Three sources", once each.
+
+        Self-consistency rather than a check against the package: the three
+        sources are §2.4's scope boundary, which no shipped constant holds.
+        What this kills is the two sentences drifting away from the list they
+        introduce -- a fourth bullet added under *What it decides* leaves both
+        words saying three, and nothing else here would notice.
+
+        **What stays PROSE on that page, said plainly so no one assumes
+        otherwise.** "It never constructs an operator, never resolves a value
+        node, never opens a file" is enforced by ``test_config_preflight.py``'s
+        static call and import bans, not by anything reading the sentence.
+        "``where`` is never a path into the package" is enforced by
+        ``preflight._check_where`` and asserted behaviourally
+        (``test_every_where_on_it_is_a_path_into_the_document``); inverting
+        the SENTENCE alone turns nothing red. So is every clause of *What it
+        cannot decide*, and the 90.9 % figure in the opening paragraph, which
+        is §2.7's pinned measurement and re-derivable by no test in this
+        plan's budget.
+        """
+        page = _page("config-validation.md")
+        body = _section(page, "## What it decides, and from what")
+        bullets = re.findall(r"^- \*\*", body, re.MULTILINE)
+        assert len(bullets) >= 2, (
+            f"the source bullets stopped parsing: {len(bullets)} found"
+        )
+        claims = [
+            (r"reads (\w+) things and no fourth", "the pass's own sentence"),
+            (r"^(\w+) sources, and the third", "the list's lead-in"),
+        ]
+        for pattern, what in claims:
+            found = re.search(pattern, page, re.MULTILINE | re.IGNORECASE)
+            assert found, (
+                f"config-validation.md no longer counts its sources in {what}, "
+                f"in the {pattern!r} form this guard reads."
+            )
+            word = found.group(1).lower()
+            assert word in self._NUMBER_WORDS, f"{what}: unknown word {word!r}"
+            assert self._NUMBER_WORDS[word] == len(bullets), (
+                f"{what} says {word} and the section bullets {len(bullets)}."
+            )
+
     def test_the_validation_page_names_the_sections_structurally_refused(self):
         """``config-validation.md`` lists them; ``_structural`` decides them.
 
@@ -861,6 +1018,23 @@ class TestTheCountsProseStatesAboutThisLayer:
         (``A1.runs``), so the comparison is over the bare ids. Measured at
         this commit the two are EQUAL -- 31 each, 34 slots -- but only the
         subset is asserted, because 3B adds to the same table.
+
+        **The direction this is open on, for whoever writes Plan 3B.** The
+        DROP direction is defended in depth and not only here: measured, all
+        34 slots are pinned by their owning task's own module -- 29 by
+        IDENTITY (``CHECKS[id] is <fn>``, several of them through a loop over
+        the ids one function claims) and Task 3's five (``A1.runs``,
+        ``A1.variants``, ``A1.horizon``, ``A38``, ``A39``) by MEMBERSHIP
+        (``set(_IDS) <= set(CHECKS)``, ``test_preflight_document.py:112``).
+        So removing an id from the registry AND from ``PLAN_3A`` together
+        still goes red there. The INFLATE direction does not:
+        registering an extra id, adding it to ``PLAN_3A`` and bumping the
+        changelog to "thirty-two" exits 0. It is unreachable today --
+        swapping this ``<=`` for ``==`` still passes, measured -- and it
+        becomes live the moment 3B registers its first check, which is why
+        the equality is not asserted. If 3B wants the tighter form back, the
+        way to have it is a per-plan id set beside this one, not a widening
+        of this one.
         """
         from rheplicant.config.preflight import CHECKS
 
@@ -971,6 +1145,22 @@ class TestTheValidationPageDocument:
 
     HEADING = "## A document that is wrong three ways"
 
+    #: Every place the page states the SIZE of what its document earns, as
+    #: ``(pattern, what it is)``. Anchored per sentence rather than a
+    #: whole-word sweep for number words, because this section legitimately
+    #: says "one call", "one template state", "one sigma up front" and "one
+    #: exactly null direction" -- a blanket sweep would read four of those as
+    #: counts and fail on a page that is entirely correct.
+    #:
+    #: The heading is scanned too, and it is the one that most needed it: it
+    #: is also this class's locator, so a page corrected to four findings and
+    #: a heading left saying "three" keeps every other assertion here passing.
+    _COUNT_CLAIMS = (
+        (r"wrong (\w+) ways", "the heading"),
+        (r"and all (\w+) come back from one call", "the opening sentence"),
+        (r"^(\w+) findings,", "the bullet list's lead-in"),
+    )
+
     def _document(self):
         return _page_document(self.HEADING, "config-validation.md")
 
@@ -996,6 +1186,64 @@ class TestTheValidationPageDocument:
     def test_the_page_lists_ids_at_all(self):
         """A regex that stopped matching would make the tests below vacuous."""
         assert len(self._ids_on_the_page()) >= 3
+
+    def test_every_count_word_on_the_page_is_the_number_of_findings(self):
+        """The bullet LIST is guarded both ways; the words beside it were not.
+
+        Measured by review: registering one extra check that fires only on
+        this document and adding its bullet in registry order left the
+        heading ("wrong **three** ways"), the opening sentence ("all
+        **three** come back from one call") and the lead-in ("**Three**
+        findings") all stale, and the module exited 0. Every equality here is
+        over a SET or a LIST, and no set knows its own size in words.
+
+        ``len(report.findings)`` and not ``len(report.checks())``: the page
+        counts findings, and a check that fired twice would make the two
+        differ -- which is precisely the case a reader would want the page to
+        be honest about.
+        """
+        from rheplicant.config import preflight
+
+        report = preflight(self._document())
+        text = f"{self.HEADING}\n{self._body()}"
+        words = TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS
+        for pattern, what in self._COUNT_CLAIMS:
+            found = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
+            assert found, (
+                f"config-validation.md no longer counts its findings in "
+                f"{what}, in the {pattern!r} form this guard reads. Reword the "
+                "pattern or the page, but do not leave the count unread."
+            )
+            word = found.group(1).lower()
+            assert word in words, f"{what}: unknown number word {word!r}"
+            assert words[word] == len(report.findings), (
+                f"{what} says {word} and the document earns "
+                f"{len(report.findings)} findings "
+                f"({[f.check for f in report.findings]})."
+            )
+
+    def test_the_kinds_a30_lets_keep_the_node_are_the_packages_own(self):
+        """"`kind: forward` keeps the node" was true and INCOMPLETE.
+
+        ``mmodes`` keeps it too -- §3.2 (e) 2 expressed A30's fitting
+        condition as the complement ``{"forward", "mmodes"}`` precisely so
+        that a kind added later defaults to *fitting*, and the page named one
+        of the two. A reader running ``mmodes`` and reading this bullet is
+        told their document is one A30 refuses, which it is not.
+
+        Read off ``_A30_NOT_FITTING`` so the page moves when the complement
+        does, and both directions: a kind on the page that A30 does refuse is
+        worse than one it omits.
+        """
+        from rheplicant.config.preflight.model import _A30_NOT_FITTING
+
+        [bullet] = re.findall(r"^- \*\*A30\*\*.*?(?=^- \*\*|\Z)", self._body(),
+                              re.MULTILINE | re.DOTALL)
+        named = set(re.findall(r"`kind: ([a-z][a-z._]*)`", bullet))
+        assert named == set(_A30_NOT_FITTING), (
+            f"the A30 bullet says {sorted(named)} keep the node; the package "
+            f"exempts {sorted(_A30_NOT_FITTING)}."
+        )
 
     def test_the_page_s_document_earns_exactly_the_findings_it_lists(self):
         """Both directions, and the second is the one that goes stale.
@@ -1096,7 +1344,15 @@ class TestTheValidationPageDocument:
 
         Kills a bullet that names the wrong key, the wrong value or the wrong
         latent: measured, ``transform: unit_mean_bandpass`` on ``g`` instead
-        of ``b`` leaves A33 firing.
+        of ``b`` leaves A33 firing. A patch that does LESS than its bullet is
+        killed too -- a typo'd key leaves the finding standing.
+
+        **What it does not kill, measured by review:** a patch that does MORE
+        than its bullet says. One that also rewrote ``runtime.seed`` exits 0,
+        because the extra edit changes no finding. Closing that would mean
+        asserting the patch's own shape rather than its effect, and the shape
+        is what the phrase test above is for -- so the pair is asymmetric on
+        purpose and this is the side it is open on.
         """
         from rheplicant.config import preflight
 

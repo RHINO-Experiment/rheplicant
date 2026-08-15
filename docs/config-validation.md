@@ -40,6 +40,7 @@ the package — and `message`, one sentence carrying the fix.
 |---|---|
 | `report.refusals()` | the findings that stop the document running |
 | `report.warnings()` | the findings that do not |
+| `report.of(severity)` | the findings at one severity — `"refuse"`, `"warn"` or `"report"`, the third being a finding that is neither fatal nor advice |
 | `report.checks()` | the set of ids that fired |
 | `report.raise_if_refused()` | `ConfigError` with the first refusal verbatim, and a tail naming how many others there are |
 | `report.emit_warnings()` | each warning through `warnings.warn(..., ConfigWarning)` |
@@ -139,7 +140,8 @@ A33. Write the bullets in that order and keep them in it;
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction
-  alike. `kind: forward` keeps the node; a fit cannot. Fix:
+  alike. `kind: forward` and `kind: mmodes` keep the node — neither closes over
+  a fit twin — and every other kind cannot. Fix:
   `inference.twin: {without: [noise]}`.
 - **A33** — `b` is free into `bandpass` and `g` is free into `gain`. The two
   multiply the same prediction, so only their product is constrained and the

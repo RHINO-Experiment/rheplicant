@@ -999,7 +999,9 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     is missing -- but ``parse_npe`` runs inside ``build_inference``, which is
     after ``build_resources``, so that refusal still costs the beam.  Closing
     it means A29 answering for a section the user has not written, which is a
-    worse sentence; recorded for §6's ledger.
+    worse sentence.  **This docstring is the record**, and §6's residue list
+    is where it was copied to; an earlier wording ("recorded for §6's ledger")
+    read as a citation to a §6 entry that did not exist at the time.
     """
     from rheplicant.config.draws import _seed_name
     from rheplicant.config.sections.conjugate import _a29_gcr_needs_a_seed
