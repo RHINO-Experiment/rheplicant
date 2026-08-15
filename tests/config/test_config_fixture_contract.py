@@ -181,7 +181,14 @@ _OFFENDER_CEILING = 4
 #: A FLOOR, not an equality: adding a builder is free and the property test
 #: covers it on the day it lands.  Every helper module that defines a builder
 #: must appear, which is what stops a row being deleted to shrink the walk.
-_BUILDER_FLOOR = {"exit_helpers": 8, "posterior_helpers": 4}
+#: ``preflight_helpers`` joined at Plan 3A's Task 2 with one: its
+#: ``preflight_document`` DELEGATES to ``exit_helpers.conjugate_document``, so
+#: the repair travels with it and the property below holds it to the same
+#: standard as a builder that rolls its own -- measured when the row landed,
+#: and measured again without the row, where this file goes red naming
+#: ``['preflight_helpers']``.
+_BUILDER_FLOOR = {"exit_helpers": 8, "posterior_helpers": 4,
+                  "preflight_helpers": 1}
 
 #: A run every builder in every helper module accepts as its first argument.
 #: The property below is about the document's two TWINS, which no run touches,
