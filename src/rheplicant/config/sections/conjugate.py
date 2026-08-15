@@ -196,8 +196,58 @@ def _gaussian_width(built: Any, space: Any, sigma: Any,
     return {"fisher": fisher, "covariance": parameter_covariance(fisher)}
 
 
+#: What ``conjugate.gls`` tells ``_decided_model`` it wants the noise RULE
+#: for, and what it offers a document that decided its sigma into an array
+#: (check A28).  ``_decided_model`` takes both keyword-only and REQUIRED --
+#: it wrote ONE sentence for both its callers until Plan 3A, and ``npe.py``
+#: inherited this one, which is false of ``kind: npe`` in both halves.
+#:
+#: Bound here, at the caller's own module scope, rather than written inline
+#: at the call site: the only document that reaches the raise below is one
+#: the pre-flight pass now refuses at P-1, so ``conjugate.py``'s clause is
+#: unreachable through ``run_document`` and a copy of it in a test would pin
+#: nothing.  ``test_config_conjugate_shared.py``'s four direct
+#: ``_decided_model`` calls spread THIS mapping, and
+#: ``test_the_pass_writes_the_clause_its_caller_supplies``
+#: (``test_preflight_fitting.py``) holds the pass's own A28 sentence to it.
+_A28_GLS_CLAUSES: dict[str, str] = {
+    "wants": "solves for the covariance a PREDICTION-DEPENDENT sigma implies",
+    "instead": ("Declare inference.noise.kind: radiometer to iterate the "
+                "rule, or run kind: conjugate.wiener, which is what a "
+                "decided sigma wants."),
+}
+
+#: The same two clauses for the OTHER exit that reaches :func:`_gls_result`,
+#: and it is not the same advice.  Measured at this task: ``kind:
+#: conjugate.gcr`` under ``noise_from: gls`` reaches ``_decided_model``
+#: through this function, so a frozen sigma there earned
+#: :data:`_A28_GLS_CLAUSES` -- a gcr user told to *"run kind:
+#: conjugate.wiener"* when ``noise_from: declared`` is one key and, measured,
+#: RUNS on exactly that document.  That is the defect this plan's Task 10
+#: exists to fix, on the sibling route neither §6 nor the task's own table
+#: noticed; ``_gls_result`` now takes ``clauses`` keyword-only and REQUIRED
+#: for the same reason ``_decided_model`` does -- a third caller has no
+#: default left to inherit.
+#:
+#: The last clause is not decoration.  Check A27's own gcr sentence offers
+#: ``noise_from: gls`` OR ``inference.noise.kind: radiometer_frozen``, so a
+#: user who takes both lands precisely here, and a refusal that did not say
+#: so would be a fix clause pointing at what its sibling check refuses.
+_A28_GCR_CLAUSES: dict[str, str] = {
+    "wants": ("under noise_from: gls runs iterative_gls first and draws at "
+              "the covariance it converges to"),
+    "instead": ("Drop noise_from: gls: the declared route draws at that "
+                "array directly, which is what a frozen sigma is for -- and "
+                "noise_from: gls is check A27's answer for "
+                "inference.noise.kind: radiometer, so declaring both asks a "
+                "reweighting to find a fixed point in a number that is "
+                "already fixed."),
+}
+
+
 def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
-                prior: dict, solve: dict, where: str) -> Any:
+                prior: dict, solve: dict, where: str,
+                clauses: dict[str, str]) -> Any:
     """``iterative_gls`` at this document's noise model -> a ``GLSResult``.
 
     Shared by ``conjugate.gcr``'s ``noise_from: gls`` and by
@@ -206,6 +256,14 @@ def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
     way, the knobs are coerced the same way, and the same acknowledgement is
     demanded of a fixed point that was never reached.  One condition, one
     message, whichever exit reached it.
+
+    ``clauses`` is the ONE thing the two callers must not share, and it is
+    REQUIRED and keyword-only for that reason.  This function is where a
+    ``conjugate.gcr`` run reaches :func:`_decided_model` (A28), and until
+    Plan 3A it handed that accessor ``conjugate.gls``'s sentence -- so a gcr
+    document with a frozen sigma was told to *"run kind: conjugate.wiener"*
+    when ``noise_from: declared`` is one key away and, measured, runs.  The
+    two mappings are :data:`_A28_GLS_CLAUSES` and :data:`_A28_GCR_CLAUSES`.
 
     ``prior`` is :func:`_prior_kwargs`' output and ``solve`` is
     :func:`_knobs`' over :data:`_SOLVER_KNOBS` -- both compiled ONCE by the
@@ -238,7 +296,8 @@ def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
             f"{where}: acknowledge_unconverged_covariance: is a bool; got "
             f"{acknowledged!r}."
         )
-    found = iterative_gls(block, observed, noise=_decided_model(run, built),
+    found = iterative_gls(block, observed,
+                          noise=_decided_model(run, built, **clauses),
                           **prior, **solve,
                           **_knobs(run, _GLS_KNOB_SPECS))
     if not bool(found.converged) and not acknowledged:
@@ -360,7 +419,8 @@ def _draw_sigma(run: Any, built: Any, *, block: Any, observed: Any,
     """
     if noise_from == "gls":
         found = _gls_result(run, built, block=block, observed=observed,
-                            prior=prior, solve=solve, where=where)
+                            prior=prior, solve=solve, where=where,
+                            clauses=_A28_GCR_CLAUSES)
         return found.noise_std, _gls_record(found)
     if getattr(_noise(run, built), "depends_on_prediction", False):
         raise ConfigError(
@@ -545,7 +605,8 @@ def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     # inside a refusal branch a passing test need never reach.
     found = _gls_result(run, built, block=block, observed=observed,
                         prior=_prior_kwargs(run, built, block, where),
-                        solve=_knobs(run, _SOLVER_KNOBS), where=where)
+                        solve=_knobs(run, _SOLVER_KNOBS), where=where,
+                        clauses=_A28_GLS_CLAUSES)
     # iterations/delta/converged are jax.Arrays on the way out (gls.py:97-99);
     # _gls_record casts all three, so neither a report nor diagnostics.json
     # ever sees a traced value -- examples/gls_gcr.py:150-152 is the idiom.

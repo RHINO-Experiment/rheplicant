@@ -1351,3 +1351,227 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
             _whole(where, body[key], 1)
         except ConfigError as refusal:
             yield refuse("A25", where, f"{refusal} (check A25).")
+
+
+# --- Task 10: the (kind, noise.kind) table, and the clause npe was denied ---
+
+
+#: Every ``inference.noise.kind`` ``build_noise`` accepts.  A COPY of
+#: ``sections/noise.py``'s ``_KIND_KEYS`` keys (``noise.py:34-41``), and the
+#: copy is CHECKED -- ``test_the_noise_kinds_are_the_ones_build_noise_accepts``
+#: asserts the two are equal, so a fifth kind added there and forgotten here
+#: is a red test rather than a check that silently stands down on every
+#: document declaring it.  Bound once, and as a frozenset (plan §3.1): 2D lost
+#: a task to one drafter's frozenset meeting another's tuple inside
+#: ``set(spec) - allowed``.
+#:
+#: **Every membership test against it is guarded by ``isinstance(..., str)``
+#: first**, and that is not defensive typing.  ``inference.noise.kind:
+#: [radiometer]`` is a document a user can write; ``['radiometer'] in
+#: frozenset(...)`` raises ``TypeError`` on the unhashable list, and inside
+#: the pass a ``TypeError`` becomes "check A27 RAISED" and discards every
+#: other finding (§2.3's TRAP).  Task 9 met the same shape on
+#: ``check_identifiability`` and answered it by making that container a
+#: tuple; §3.1 pins THIS one as a frozenset, so the guard goes on the test.
+_NOISE_KINDS: frozenset[str] = frozenset(
+    {"none", "homoscedastic", "radiometer", "radiometer_frozen"})
+
+#: ``inference.noise.kind`` -> what ``decided_noise`` (``noise.py:235-247``)
+#: hands an exit, decided from the WORD and nothing else.
+#:
+#: * ``absent``  -- ``kind: none``; ``decided_noise`` returns None and
+#:   ``_noise`` (``exit_support.py:205-209``) refuses in its own words.
+#:   Neither A27 nor A28 may speak here: A28's sentence would tell a document
+#:   that declares no sigma that it "decides its sigma into an array", which
+#:   is precisely what ``test_noise_kind_none_keeps_the_shared_refusal``
+#:   (``test_config_conjugate_shared.py:483``) exists to prevent.
+#: * ``decided`` -- a NoiseModel whose ``std`` ignores its argument's values
+#:   by contract, so an exit wanting an array evaluates it and an exit
+#:   wanting a rule takes it.  Refused by neither.
+#: * ``iterated`` -- a NoiseModel whose sigma depends on the prediction.
+#:   Check A27.
+#: * ``array``   -- not a model at all.  Check A28.
+#:
+#: Measured: ``HomoscedasticNoise.depends_on_prediction`` is False and
+#: ``RadiometerNoise.depends_on_prediction`` is True, both as CLASS
+#: attributes, and ``FlaggedNoise`` forwards its inner model's -- so a
+#: ``flags:`` entry never moves a row.
+#: ``test_the_shape_table_matches_the_noise_classes`` reads the two class
+#: attributes back rather than trusting this comment.
+_T10_NOISE_SHAPE: dict[str, str] = {
+    "none": "absent",
+    "homoscedastic": "decided",
+    "radiometer": "iterated",
+    "radiometer_frozen": "array",
+}
+
+#: The exits that ALWAYS resolve a decided sigma array, so A27 is theirs
+#: unconditionally.  This is ``conjugate_support._DECIDES_SIGMA_HERE``'s
+#: membership (``conjugate_support.py:62``, read at ``:135``).
+#: ``conjugate.gcr`` is deliberately NOT here: it reaches ``_decided_sigma``
+#: only under ``noise_from: declared`` (``conjugate.py:380``, ``:426``,
+#: ``:435``) and has a third way out that costs it nothing, so it is branched
+#: on in the body and hears its own sentence.
+_T10_DECIDES_SIGMA: frozenset[str] = frozenset({"conjugate.wiener",
+                                                "condition"})
+
+#: The ``runs[].kind``\ s that read ``inference.noise`` as a RULE and
+#: therefore reach ``_decided_model``.  **THREE, not two, and the third was
+#: measured rather than read**: ``_decided_model`` has two CALL SITES in
+#: ``src`` (``conjugate.py``, inside ``_gls_result``; ``npe.py``, inside
+#: ``_simulate_bank``), but ``_gls_result`` has two callers of its own --
+#: ``_run_gls`` and ``_draw_sigma`` -- and ``_draw_sigma`` is ``kind:
+#: conjugate.gcr``'s ``noise_from: gls`` route.  Counting call sites per
+#: MODULE gives two and is the count this plan's §6 table carries; counting
+#: run KINDS gives three, and the third earned ``conjugate.gls``'s sentence
+#: (measured: a gcr run with a frozen sigma was told to *"run kind:
+#: conjugate.wiener"* when ``noise_from: declared`` is one key and RUNS).
+#: ``test_every_exit_that_reads_the_rule_has_a_branch`` walks that call graph
+#: with ``ast`` rather than reading module stems, because the stem form is
+#: exactly what hid this.
+#:
+#: ``conjugate.gcr`` is the one CONDITIONAL member -- it reaches the rule
+#: only under ``noise_from: gls``, and under ``noise_from: declared`` it
+#: resolves a decided sigma like ``conjugate.wiener`` does -- so the body
+#: tests the key as well as the kind.
+_T10_ITERATES: frozenset[str] = frozenset({"conjugate.gls", "npe",
+                                           "conjugate.gcr"})
+
+
+@register("A27", "A28")
+def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A27 and A28: the ``(runs[].kind, inference.noise.kind)`` table.
+
+    Two words of text decide both.  Today they are decided at P3, inside
+    ``_decided_sigma`` (``exit_support.py:227-270``) and ``_decided_model``
+    (``:273-317``), after ``build_resources`` has read and analysed every
+    beam -- which is 90.9 % of ``load_document``'s wall time on a toy
+    nside-16 beam (§2.7).
+
+    **The runtime refusals stay.**  They are not the same predicate: this one
+    reads two strings, theirs reads ``isinstance(noise, NoiseModel)`` and
+    ``depends_on_prediction`` off a BUILT object, and only the second one can
+    see a fanned ``by_observation`` mapping (``exit_support.py:201-202``) or
+    a noise this layer has not finished resolving.  The two agree on every
+    document v1 can express, and :data:`_T10_NOISE_SHAPE`'s own test is what
+    keeps them agreeing -- so this is the second opinion plan §2.2 sanctions,
+    not the copy it forbids.
+
+    Returns findings and raises nothing (§2.3): an unknown ``noise.kind`` is
+    left to ``build_noise`` (``noise.py:112-116``), which names the
+    vocabulary, rather than becoming a ``KeyError`` out of this table, and
+    both membership tests are guarded by ``isinstance(..., str)`` because a
+    frozenset raises on an unhashable left operand.
+
+    **``expect: refuse`` does NOT stand this check down**, where it does
+    stand :func:`_blocks` and :func:`_prior_gates` down.  Those two have a
+    real document each that would otherwise lose the assertion it exists to
+    make; measured, none of the five ``expect: refuse`` documents in
+    ``tests/config/`` is A27/A28 shaped, and
+    ``test_config_section_runs.py:88`` records that a P-1 refusal raising out
+    of ``run_document`` rather than being captured is the correct shape.
+
+    **``where`` names the run, not the noise, and that is a decision.**  The
+    user may fix either end.  The pass names the run because a run index is
+    unambiguous where "which of my four runs made this a problem" is not, and
+    every message carries ``inference.noise.kind: <kind>`` verbatim so the
+    other end is named too.
+
+    **One ordering this hoist REVERSES, recorded rather than gated.**  The
+    ``inference.noise:`` grammar is ``build_noise``'s, at P2, so on a
+    document with a readable beam it used to speak before A27 did.  Measured,
+    ``kind: radiometer`` with no ``include_logdet`` earns *"is required for a
+    prediction-dependent noise model and has no default"* and a stray key
+    earns ``check_unknown_keys``' sentence; beside a ``conjugate.wiener`` run
+    both now arrive after A27.  Standing down for them would mean
+    re-implementing ``_KIND_KEYS``' sweep here, which §2.5 forbids and which
+    would be a second validator for a grammar ``build_noise`` owns; hoisting
+    that grammar to P-1 as well is the real answer and belongs to whichever
+    plan takes A49.  ``test_a_noise_wrong_in_its_GRAMMAR_too_still_hears_
+    A27`` is what keeps this paragraph a measurement rather than a claim.
+    """
+    section = document.get("inference")
+    noise = section.get("noise") if isinstance(section, Mapping) else None
+    kind = noise.get("kind") if isinstance(noise, Mapping) else None
+    if not isinstance(kind, str) or kind not in _NOISE_KINDS:
+        return ()
+    shape = _T10_NOISE_SHAPE[kind]
+    if shape not in ("iterated", "array"):
+        return ()
+
+    findings: list[Finding] = []
+    for index, entry in enumerate(_runs(document)):
+        exit_kind = entry.get("kind")
+        if not isinstance(exit_kind, str):
+            continue
+        # `_runs` filled `name` by `parse_runs`' own rule (`runs.py:115`: an
+        # unnamed run is named after its kind), and every executor's message
+        # spells the prefix `runs['<that name>']:`.
+        # `test_config_exits_gls.py:422` asserts startswith("runs['gls']: "),
+        # so the INDEX form would be a red test and a message that does not
+        # match the one the user gets from the executor.
+        name = entry["name"]
+        where = f"runs[{index}].kind"
+
+        if shape == "iterated" and exit_kind in _T10_DECIDES_SIGMA:
+            findings.append(refuse("A27", where, (
+                f"runs[{name!r}]: kind: {exit_kind} takes a DECIDED sigma "
+                f"array, and inference.noise.kind: {kind} makes sigma a "
+                "function of the prediction -- which a conjugate solve has "
+                "not got, because the prediction is what it solves for "
+                "(linear.py:1031). Two routes run this noise: kind: "
+                "conjugate.gls iterates the covariance it implies, or "
+                "inference.noise.kind: radiometer_frozen decides the sigma "
+                "once and keeps this exit (check A27).")))
+        elif (shape == "iterated" and exit_kind == "conjugate.gcr"
+                and entry.get("noise_from", "declared") != "gls"):
+            findings.append(refuse("A27", where, (
+                f"runs[{name!r}]: inference.noise.kind: {kind} has a sigma "
+                "that depends on the prediction, and a conjugate draw has no "
+                "prediction to evaluate it at -- the prediction is what it "
+                "draws. Declare noise_from: gls, which runs iterative_gls "
+                "first and draws at the covariance it converges to, or "
+                "inference.noise.kind: radiometer_frozen, which decides one "
+                "sigma array up front (check A27).")))
+        elif shape == "array" and exit_kind == "conjugate.gls":
+            findings.append(refuse("A28", where, (
+                f"runs[{name!r}]: kind: conjugate.gls solves for the "
+                "covariance a PREDICTION-DEPENDENT sigma implies, so it "
+                "reads inference.noise as a RULE; inference.noise.kind: "
+                f"{kind} decides its sigma into an array before any run sees "
+                "it, and a decided array is not a rule. Declare "
+                "inference.noise.kind: radiometer to iterate the rule, or "
+                "run kind: conjugate.wiener, which is what a decided sigma "
+                "wants (check A28).")))
+        elif (shape == "array" and exit_kind == "conjugate.gcr"
+                and entry.get("noise_from", "declared") == "gls"):
+            # The third caller of `_decided_model`, reached through
+            # `_gls_result` rather than by a call site of its own -- and the
+            # one whose fix is a KEY rather than an exit.  Its `instead`
+            # clause names A27, because A27's gcr sentence offers
+            # `noise_from: gls` and `radiometer_frozen` as alternatives and a
+            # user who takes both arrives exactly here.
+            findings.append(refuse("A28", where, (
+                f"runs[{name!r}]: kind: conjugate.gcr under noise_from: gls "
+                "runs iterative_gls first and draws at the covariance it "
+                "converges to, so it reads inference.noise as a RULE; "
+                f"inference.noise.kind: {kind} decides its sigma into an "
+                "array before any run sees it, and a decided array is not a "
+                "rule. Drop noise_from: gls: the declared route draws at "
+                "that array directly, which is what a frozen sigma is for "
+                "-- and noise_from: gls is check A27's answer for "
+                "inference.noise.kind: radiometer, so declaring both asks a "
+                "reweighting to find a fixed point in a number that is "
+                "already fixed (check A28).")))
+        elif shape == "array" and exit_kind == "npe":
+            findings.append(refuse("A28", where, (
+                f"runs[{name!r}]: kind: npe SIMULATES a bank of (theta, "
+                "data) pairs and draws the noise for each one, so it reads "
+                "inference.noise as a RULE; inference.noise.kind: "
+                f"{kind} decides its sigma into an array before any run sees "
+                "it, and a decided array is not a rule. Declare "
+                "inference.noise.kind: radiometer or homoscedastic -- either "
+                "is a rule simulate_pairs can draw from. There is no "
+                "amortized-posterior exit that takes a decided array, so the "
+                "sigma is what has to change (check A28).")))
+    return tuple(findings)

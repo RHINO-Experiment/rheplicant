@@ -22,6 +22,7 @@ import pytest
 from rheplicant.config import ConfigError
 from rheplicant.config.document import load_document
 from rheplicant.config.sections import conjugate as conjugate_module
+from rheplicant.config.sections.conjugate import _A28_GLS_CLAUSES
 from rheplicant.config.sections.conjugate_support import (
     _conjugate_block,
     _prior_kwargs,
@@ -62,6 +63,14 @@ TWO = conjugate_built(inference=TWO_LATENTS)
 # 3.1.  spec() names its runs after their kind, so this is what they carry.
 WHERE = "runs['conjugate.wiener']"
 CONDITION_WHERE = "runs['condition']"
+# `_decided_model` took two positional arguments until Plan 3A's Task 10 and
+# now takes `wants` and `instead` as REQUIRED keyword-only clauses -- the fix
+# for one sentence written for `conjugate.gls` and inherited by `npe.py`,
+# which does neither of the two things it claims.  The four direct calls
+# below spread `conjugate.py`'s OWN mapping rather than a copy of it: the
+# only document that reaches that call site's raise is one the pre-flight
+# pass now refuses at P-1, so a copied clause here would pin nothing and a
+# reword of the production one would leave these four green.
 
 
 class TestTheLeafIsWired:
@@ -433,12 +442,14 @@ class TestTheDecidedSigma:
 
 class TestTheDecidedModel:
     def test_a_homoscedastic_document_hands_back_the_model(self):
-        assert isinstance(_decided_model(spec(), ONE), HomoscedasticNoise)
+        assert isinstance(_decided_model(spec(), ONE, **_A28_GLS_CLAUSES),
+                          HomoscedasticNoise)
 
     def test_what_A27_refuses_is_exactly_what_gls_takes(self):
         """The mirror: the radiometer the array route refuses is gls's input."""
         built = conjugate_built(noise=RADIOMETER)
-        assert isinstance(_decided_model(spec(), built), RadiometerNoise)
+        assert isinstance(_decided_model(spec(), built, **_A28_GLS_CLAUSES),
+                          RadiometerNoise)
 
     def test_a_decided_array_is_refused_naming_conjugate_wiener(self):
         """Run it as gls, so the named alternative is not the interpolated kind.
@@ -446,12 +457,28 @@ class TestTheDecidedModel:
         Under spec()'s default kind the message would carry
         "kind: conjugate.wiener" from the interpolation alone, and this match
         would pin nothing: gls is the kind that actually calls this.
+
+        **The whole sentence, since Plan 3A's Task 10.**  Its two variable
+        clauses are `conjugate.py`'s own `_A28_GLS_CLAUSES`, spread into this
+        call exactly as `_gls_result` spreads them, and `conjugate.gls` is
+        the only caller whose raise a user can no longer reach -- the
+        pre-flight pass refuses that document first.  A `match=` on one
+        fragment would leave every other clause free to be wrong, which is
+        the defect class this task exists to close.
         """
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(ConfigError, match="conjugate.wiener") as caught:
-            _decided_model(spec(kind="conjugate.gls"), built)
-        assert "check A28" in str(caught.value)
-        assert "radiometer_frozen" in str(caught.value)
+            _decided_model(spec(kind="conjugate.gls"), built,
+                           **_A28_GLS_CLAUSES)
+        assert str(caught.value) == (
+            "runs['conjugate.gls']: kind: conjugate.gls solves for the "
+            "covariance a PREDICTION-DEPENDENT sigma implies, so it reads "
+            "inference.noise as a RULE; inference.noise.kind: "
+            "radiometer_frozen decides its sigma into an array before any "
+            "run sees it, and a decided array is not a rule (check A28). "
+            "Declare inference.noise.kind: radiometer to iterate the rule, "
+            "or run kind: conjugate.wiener, which is what a decided sigma "
+            "wants.")
 
     def test_noise_kind_none_keeps_the_shared_refusal(self):
         """The mirror of the sigma route's own kind: none test.
@@ -466,5 +493,6 @@ class TestTheDecidedModel:
         built = conjugate_built(inference={"parameters":
                                            NO_OBSERVED["parameters"]})
         with pytest.raises(ConfigError, match="forward and optimize") as got:
-            _decided_model(spec(kind="conjugate.gls"), built)
+            _decided_model(spec(kind="conjugate.gls"), built,
+                           **_A28_GLS_CLAUSES)
         assert "check A28" not in str(got.value)

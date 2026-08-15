@@ -270,16 +270,36 @@ def _decided_sigma(run: Any, built: Any) -> Any:
     return decided.std(jnp.zeros(shape))
 
 
-def _decided_model(run: Any, built: Any) -> Any:
-    """The noise MODEL an exit that iterates a covariance needs (check A28).
+def _decided_model(run: Any, built: Any, *, wants: str, instead: str) -> Any:
+    """The noise MODEL an exit that reads the noise as a RULE needs (A28).
 
     The mirror of :func:`_decided_sigma`.  ``decided_noise`` returns either a
     NoiseModel or a frozen sigma array, and the two are not interchangeable
     at the conjugate seam: ``iterative_gls`` takes ``noise=`` (the RULE,
-    ``gls.py:181-196``) where the three conjugate solves take ``noise_std=``
+    ``gls.py:102-107``) where the three conjugate solves take ``noise_std=``
     (a decided array), and passing either one where the other belongs is a
-    hard ParameterSpaceError in both directions.  The refusal names the exit
-    that wants the other shape rather than merely rejecting this one.
+    hard ParameterSpaceError in both directions.
+
+    ``wants`` and ``instead`` are REQUIRED and keyword-only, and that is the
+    fix rather than an ergonomic choice.  Until Plan 3A this function wrote
+    ONE sentence for BOTH callers -- ``conjugate.gls``'s -- so ``npe.py:477``
+    told a ``kind: npe`` run that it "solves for the covariance a
+    PREDICTION-DEPENDENT sigma implies" and offered it ``kind:
+    conjugate.wiener``.  Measured on
+    ``posterior_helpers.npe_document(noise=FROZEN)``, both clauses were
+    false: npe simulates a bank (``npe.py:475-480`` hands ``noise=`` to
+    ``simulate_pairs``, which draws from it) and no conjugate exit produces
+    an amortized posterior.  A third caller inheriting conjugate prose is the
+    same defect a third time, and a REQUIRED argument is what stops it --
+    there is no default left to inherit.
+
+    ``wants`` completes ``kind: X <wants>, so it reads inference.noise as a
+    RULE``; ``instead`` is a whole sentence of advice, ending in its own full
+    stop.  Both are supplied by the caller, which is the only place that
+    knows what it does with the rule, and each caller binds its pair ONCE at
+    its own module scope (``conjugate._A28_GLS_CLAUSES``,
+    ``npe._A28_NPE_CLAUSES``) so that the clause a reader is pinned against
+    is the clause the call site spreads.
     """
     from rheplicant.inference import NoiseModel
 
@@ -287,14 +307,11 @@ def _decided_model(run: Any, built: Any) -> Any:
     if isinstance(noise, NoiseModel):
         return noise
     raise ConfigError(
-        f"runs[{run.name!r}]: kind: {run.kind} solves for the covariance "
-        "a PREDICTION-DEPENDENT sigma implies, so it reads inference.noise "
-        "as a model; inference.noise.kind: "
+        f"runs[{run.name!r}]: kind: {run.kind} {wants}, so it reads "
+        "inference.noise as a RULE; inference.noise.kind: "
         f"{built.inference.noise.kind} decides its sigma into an array "
-        "before any run sees it, and a decided array has no fixed point to "
-        "iterate (check A28). Declare inference.noise.kind: radiometer to "
-        "iterate the rule, or run kind: conjugate.wiener, which is what a "
-        "decided sigma wants."
+        "before any run sees it, and a decided array is not a rule "
+        f"(check A28). {instead}"
     )
 
 

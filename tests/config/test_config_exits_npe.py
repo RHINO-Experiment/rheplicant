@@ -144,15 +144,30 @@ class TestTheBank:
         # known statically` (measured), naming no run, no key and no exit.
         #
         # The match is on `radiometer_frozen`, which is the part of
-        # _decided_model's message true for every caller.  The rest of it is
-        # conjugate prose -- measured here, it offers kind: conjugate.wiener
-        # to a document that asked for a neural posterior -- and that drift is
-        # recorded to the plan's §6 rather than fixed here, because
-        # exit_support.py is Task 2's alone.
-        built = npe_built(noise=FROZEN)
+        # _decided_model's message true for every caller.  Plan 3A's Task 10
+        # gave the rest of it a caller-supplied clause: this run is now told
+        # that npe SIMULATES a bank, and is no longer offered
+        # kind: conjugate.wiener, which is not an alternative to an amortized
+        # posterior.  The positive assertion for that wording is
+        # TestTheDecidedModelAccessor in tests/config/test_preflight_fitting.py;
+        # what is pinned here is that the executor's own route still reaches
+        # the accessor and still names this run.
+        #
+        # THE DOCUMENT'S RUN IS `forward` AND THE SPEC IS STILL `npe`.  Task
+        # 10's pass refuses `kind: npe` beside a decided sigma at P-1, so
+        # `npe_built(noise=FROZEN)` -- which is a `load_document` -- now
+        # raises on the line that BUILDS the fixture rather than inside the
+        # `raises` below, and this test would error instead of asserting.
+        # `npe_spec()` fabricates the RunSpec independently of the document's
+        # `runs:` (that is what it is for), so swapping the document's run
+        # kind leaves the subject exactly what it was: `_simulate_bank`
+        # reaching `_decided_model` and not `_decided_sigma`.
+        built = npe_built({"kind": "forward"}, noise=FROZEN)
         with pytest.raises(ConfigError, match="radiometer_frozen") as caught:
             _simulate_bank(npe_spec(), built, built.inference.npe)
         assert str(caught.value).startswith("runs['amortized']: ")
+        assert "SIMULATES a bank" in str(caught.value)
+        assert "conjugate.wiener" not in str(caught.value)
 
     def test_a_prior_free_latent_is_refused_naming_the_sibling_exit(self):
         # _sampled_space(route="npe") is Task 4's, and this is the FIRST

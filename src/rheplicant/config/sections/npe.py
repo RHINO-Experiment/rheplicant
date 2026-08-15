@@ -107,6 +107,27 @@ __all__ = ["NpeProduct", "NpeSpec", "parse_npe"]
 
 _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
 
+#: What ``kind: npe`` tells ``_decided_model`` it wants the noise RULE for,
+#: and what it offers a document that decided its sigma into an array
+#: (check A28).  **Neither clause existed until Plan 3A**: the accessor wrote
+#: ONE sentence for both its callers, ``conjugate.gls``'s, so a ``kind: npe``
+#: run was told it "solves for the covariance a PREDICTION-DEPENDENT sigma
+#: implies" and was offered ``kind: conjugate.wiener``.  Measured on
+#: ``posterior_helpers.npe_document(noise=FROZEN)``, both were false: this
+#: exit hands ``noise=`` to ``simulate_pairs``, which DRAWS from the rule
+#: (``:475-480``), and no conjugate exit produces an amortized posterior.
+#: ``_decided_model`` takes both keyword-only and REQUIRED, so a third caller
+#: has no default left to inherit -- which is exactly how this defect
+#: arrived.
+_A28_NPE_CLAUSES: dict[str, str] = {
+    "wants": ("SIMULATES a bank of (theta, data) pairs and draws the noise "
+              "for each one"),
+    "instead": ("Declare inference.noise.kind: radiometer or homoscedastic "
+                "-- either is a rule simulate_pairs can draw from. There is "
+                "no amortized-posterior exit that takes a decided array, so "
+                "the sigma is what has to change."),
+}
+
 #: The optional knobs of each call, IN THE PACKAGE'S OWN PARAMETER NAMES and
 #: as tuples, because that is what ``_passthrough(options, keys)`` takes and
 #: Tasks 7 and 8 forward them through it.  A key that is not a parameter of
@@ -453,7 +474,7 @@ def _simulate_bank(run: Any, built: Any, spec: Any) -> tuple:
     space = _sampled_space(run, built, route="npe")
     thetas, data = simulate_pairs(
         built.inference.fit_twin, built.state, space,
-        noise=_decided_model(run, built),
+        noise=_decided_model(run, built, **_A28_NPE_CLAUSES),
         key=_draw_key(run, "inference.npe.bank", built, spec.bank),
         n_simulations=spec.bank["n_simulations"],
     )

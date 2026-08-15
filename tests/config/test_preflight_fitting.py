@@ -43,19 +43,30 @@ about a warm block list the executor never reaches (see
 ``TestTheWarmStartIsTheSamePartition``).
 """
 
+import pathlib
+
 import pytest
 
 from rheplicant.config.findings import REFUSE
 from rheplicant.config.preflight import CHECKS, preflight
 from rheplicant.config.preflight.fitting import (
     _ENGINES,
+    _NOISE_KINDS,
+    _T10_DECIDES_SIGMA,
+    _T10_ITERATES,
+    _T10_NOISE_SHAPE,
     _a18_linear,
     _blocks,
+    _decided,
     _engine_of,
     _kinds,
     _latents,
     _runs,
 )
+from rheplicant.config.sections.exit_support import _decided_model
+from rheplicant.config.sections.npe import _simulate_bank
+from tests.config.exit_helpers import FROZEN, HOMOSCEDASTIC, RADIOMETER
+from tests.config.posterior_helpers import NPE_SECTION, npe_built, npe_spec
 from tests.config.preflight_helpers import UNREADABLE_BEAM, preflight_document
 
 #: A linear and a non-linear latent, and the third that makes "uncovered"
@@ -3118,3 +3129,837 @@ class TestNoHostileDocumentCanAbortTheCounts:
         # cleanly.  This task's three `where` shapes are `runs[<int>]`,
         # `runs[<int>].warm_start` and `inference.npe.<literal>.<literal>`.
         preflight(_hostile_document(patch))
+
+
+# --- Task 10: the (kind, noise.kind) table ---------------------------------
+
+
+#: One run per kind, spelled the way that kind's OWN key set accepts it.
+#: Task 3's ``A1.runs`` sweeps every run key at P-1, so a ``width:`` on a gls
+#: run earns a second, unrelated finding -- measured, *"kind: conjugate.gls
+#: does not take ['width']"* -- and every document below would then be broken
+#: twice, which is what makes an "and nothing else" assertion stop meaning
+#: anything.
+_T10_RUN = {
+    "conjugate.wiener": {"kind": "conjugate.wiener", "width": "none",
+                         "names": ["g"]},
+    "condition": {"kind": "condition", "names": ["g"]},
+    "conjugate.gcr": {"kind": "conjugate.gcr", "names": ["g"], "n_draws": 4,
+                      "seed": {"from": "runtime.seeds.draws"}},
+    "conjugate.gls": {"name": "gls", "kind": "conjugate.gls", "names": ["g"]},
+    "npe": {"name": "amortized", "kind": "npe"},
+    "forward": {"kind": "forward"},
+}
+
+
+def _t10_document(noise, *runs, **sections):
+    """The base document with THIS ``inference.noise:`` and THESE ``runs:``.
+
+    ``inference.npe:`` rides along whenever a ``kind: npe`` run is declared,
+    because A29 (:func:`~rheplicant.config.preflight.fitting._seeds`) refuses
+    the four missing subsection seeds otherwise and every finding below would
+    arrive beside four that are nothing to do with the noise.
+    """
+    inference = {"noise": noise}
+    if any(one.get("kind") == "npe" for one in runs):
+        inference["npe"] = {name: dict(body)
+                            for name, body in NPE_SECTION.items()}
+    return preflight_document(inference=inference,
+                              runs=[dict(one) for one in runs], **sections)
+
+
+def _t10_call_graph() -> dict[str, set[str]]:
+    """``function name -> the names it calls``, over ``config/sections/``.
+
+    By NAME rather than by qualified target, which over-approximates when
+    two modules define a private helper of the same name.  That direction is
+    the safe one for what it is used for: an extra edge turns a pinned set
+    red and is looked at, where a missing edge is a route nobody sees.
+    """
+    import ast
+
+    root = pathlib.Path(_decided.__code__.co_filename).parents[1] / "sections"
+    calls: dict[str, set[str]] = {}
+    for path in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            named = set()
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call):
+                    continue
+                if isinstance(inner.func, ast.Name):
+                    named.add(inner.func.id)
+                elif isinstance(inner.func, ast.Attribute):
+                    named.add(inner.func.attr)
+            calls.setdefault(node.name, set()).update(named)
+    return calls
+
+
+def _t10_callers_of(callee: str) -> set[str]:
+    """The functions that call ``callee`` directly."""
+    return {name for name, named in _t10_call_graph().items()
+            if callee in named and name != callee}
+
+
+def _t10_reaching(callee: str) -> set[str]:
+    """``callee`` and every function that reaches it, transitively."""
+    calls = _t10_call_graph()
+    found = {callee}
+    while True:
+        grown = found | {name for name, named in calls.items()
+                         if named & found}
+        if grown == found:
+            return found
+        found = grown
+
+
+def _t10_decided(document):
+    """What ``_decided`` alone found, in run order.
+
+    Driven directly, the way :func:`_found` drives ``_blocks``: a finding
+    read off ``preflight()`` is ordered across every registered check, and
+    the tests that need the PASS (registration, de-duplication, the phase
+    property) say so in their names.
+    """
+    return list(_decided(document))
+
+
+class TestTheDecidedTable:
+    """A27 and A28 from two words, before anything is built.
+
+    **The ordering improvement, recorded here rather than in a test of its
+    own.**  Measured before this task, a ``conjugate.wiener`` run with NO
+    ``width:`` on a radiometer noise refused with *"width: is required ..."*
+    and said nothing about A27 -- ``_run_conjugate`` refuses the missing
+    width at ``conjugate.py:127`` before ``_conjugate_block`` resolves a
+    sigma.  The static pass fixes that as a side effect.  A test of it lives
+    where it can discriminate -- ``test_config_exits_conjugate.py``'s
+    ``test_the_undecidable_sigma_is_now_heard_before_the_missing_width``,
+    which drives ``run_document`` -- because ``_decided`` never reads
+    ``width:`` at all, so a document written here without one is
+    byte-identical in effect to this class's first test.
+    """
+
+    def test_a_wiener_run_on_a_radiometer_is_A27_and_names_the_run(self):
+        # Kills: the table keyed on the noise alone.  `where` must name the
+        # RUN -- an implementation that emitted "inference.noise.kind" sends
+        # a four-run document's author to the one line that is shared by all
+        # four, which is exactly the attribution failure 2C paid for seven
+        # times.  The message must still name the noise, so both are pinned.
+        [found] = _t10_decided(
+            _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
+        assert found.check == "A27"
+        assert found.severity == REFUSE
+        assert found.where == "runs[0].kind"
+        assert "inference.noise.kind: radiometer" in found.message
+        assert "conjugate.gls" in found.message
+        assert "radiometer_frozen" in found.message
+        assert found.message.endswith("(check A27).")
+
+    def test_condition_is_in_the_table_beside_wiener(self):
+        # Kills: _T10_DECIDES_SIGMA shrunk to {"conjugate.wiener"}.  condition
+        # is the OTHER member of conjugate_support._DECIDES_SIGMA_HERE, and
+        # test_check_A27_fires_under_kind_condition_too
+        # (test_config_conjugate_shared.py:216) records what a missing
+        # condition costs at P3: a package TypeError instead of the refusal.
+        [found] = _t10_decided(
+            _t10_document(RADIOMETER, _T10_RUN["condition"]))
+        assert found.check == "A27"
+        assert "kind: condition takes a DECIDED sigma" in found.message
+
+    def test_gcr_hears_its_own_third_way_out(self):
+        # Kills: gcr falling into wiener's branch.  Both sentences carry
+        # "check A27" and "radiometer_frozen", so those two literals cannot
+        # tell them apart -- `noise_from: gls` is the word that can, and
+        # test_config_exits_gcr.py:309 matches on exactly it.  A gcr user sent
+        # to `kind: conjugate.gls` is being told to change exits when one key
+        # would do.
+        [found] = _t10_decided(
+            _t10_document(RADIOMETER, _T10_RUN["conjugate.gcr"]))
+        assert found.check == "A27"
+        assert "noise_from: gls" in found.message
+        assert "radiometer_frozen" in found.message
+        assert "conjugate.gls" not in found.message
+
+    def test_gcr_declaring_noise_from_gls_is_the_document_the_route_serves(
+            self):
+        # Kills: the check firing on gcr unconditionally.  Measured, that
+        # document RUNS today -- test_gls_closes_the_radiometer_dead_end
+        # (test_config_exits_gcr.py:267) pins its numbers -- so an
+        # unconditional gcr branch is a regression on a passing suite, and a
+        # test that only asserted the positive case would not see it.
+        assert _t10_decided(_t10_document(
+            RADIOMETER,
+            {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"})) == []
+
+    def test_gcr_declaring_noise_from_declared_is_the_same_as_omitting_it(
+            self):
+        # The other half of the branch, and the one an implementation reading
+        # `entry.get("noise_from") != "gls"` gets right by accident: the
+        # package's default is the WORD `declared` (conjugate.py:380), so a
+        # document that writes it out must be refused exactly as one that
+        # leaves it out is.  Kills `if "noise_from" in entry`.
+        [found] = _t10_decided(_t10_document(
+            RADIOMETER,
+            {**_T10_RUN["conjugate.gcr"], "noise_from": "declared"}))
+        assert "noise_from: gls" in found.message
+
+    def test_gls_on_a_frozen_sigma_is_A28_naming_the_conjugate_alternative(
+            self):
+        # Kills: A28 keyed on `radiometer` rather than `radiometer_frozen` --
+        # the two words differ by a suffix and the mirror is easy to write
+        # backwards.  Under `radiometer` this exact document is the one gls
+        # exists for, so the swap turns a working document into a refusal and
+        # a broken one into a run.
+        [found] = _t10_decided(
+            _t10_document(FROZEN, _T10_RUN["conjugate.gls"]))
+        assert found.check == "A28"
+        assert found.message.startswith("runs['gls']: ")
+        assert "radiometer_frozen" in found.message
+        assert "conjugate.wiener" in found.message
+
+    def test_npe_on_a_frozen_sigma_is_told_something_true_of_npe(self):
+        # THE test for the defect this task fixes.  Kills: npe sharing
+        # conjugate.gls's sentence -- which is what shipped, and which
+        # test_config_exits_npe.py:139 could not see because it matches only
+        # on `radiometer_frozen`, the half true for every caller.  The two
+        # NEGATIVE assertions are the whole discrimination: an implementation
+        # that reused the gls branch satisfies every positive one.
+        [found] = _t10_decided(_t10_document(FROZEN, _T10_RUN["npe"]))
+        assert found.check == "A28"
+        assert found.message.startswith("runs['amortized']: ")
+        assert "SIMULATES a bank" in found.message
+        assert "conjugate.wiener" not in found.message
+        assert "solves for the covariance" not in found.message
+
+    def test_a_frozen_sigma_under_wiener_is_the_document_it_exists_for(self):
+        # Kills: A28 keyed on the SHAPE alone.  `radiometer_frozen` is the
+        # answer A27's own message offers a wiener run, so a check that
+        # refused `array` for every exit would refuse the very document it
+        # had just recommended -- the "fix clause naming what the sibling
+        # check refuses" shape Task 6 shipped.  `conjugate.gcr` is here on
+        # its DECLARED route, which is the one that takes the array; the gls
+        # route is the test below.
+        for kind in ("conjugate.wiener", "condition", "conjugate.gcr"):
+            assert _t10_decided(_t10_document(FROZEN, _T10_RUN[kind])) == [], (
+                kind)
+
+    def test_gcr_on_the_gls_route_is_the_THIRD_reader_of_the_rule(self):
+        """The route this plan's own §6 table missed, found by measurement.
+
+        `conjugate.gcr` under `noise_from: gls` reaches `_decided_model`
+        through `_gls_result` -- there is no call site of its own to grep --
+        so a frozen sigma there earned `conjugate.gls`'s sentence: *"run
+        kind: conjugate.wiener"*, to a document that needs one KEY changed.
+        Measured before the fix: `run_document(gcr_document({"noise_from":
+        "gls", "n_draws": 4}, noise=FROZEN))` raised exactly that, and the
+        same document under `noise_from: declared` RAN.
+
+        Kills three things at once: the leg missing altogether (`== []`), the
+        leg reusing the gls sentence (`conjugate.wiener` absent), and the leg
+        firing on the DECLARED route as well, which would refuse the working
+        document the test above pins.
+        """
+        [found] = _t10_decided(_t10_document(
+            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        assert found.check == "A28"
+        assert found.where == "runs[0].kind"
+        assert "Drop noise_from: gls" in found.message
+        assert "conjugate.wiener" not in found.message
+        assert "solves for the covariance" not in found.message
+        # ...and it says WHY this reader is here: A27's gcr sentence offers
+        # `noise_from: gls` and `radiometer_frozen` as two ways out, so a
+        # user who takes both lands on this refusal, and a message that did
+        # not say so would be the sibling-check trap Task 7 shipped nine of.
+        assert "check A27's answer" in found.message
+
+    def test_a_radiometer_under_the_two_rule_readers_is_what_they_are_for(
+            self):
+        # The mirror, and it is not decoration: `gls_document()`'s own
+        # default noise is RADIOMETER under `kind: conjugate.gls` (measured),
+        # so an A27 that walked runs without consulting _T10_DECIDES_SIGMA
+        # would refuse a document five modules of this suite run today.
+        for kind in ("conjugate.gls", "npe"):
+            assert _t10_decided(_t10_document(RADIOMETER,
+                                              _T10_RUN[kind])) == [], kind
+
+    def test_a_homoscedastic_document_is_refused_by_neither(self):
+        # Kills: `decided` mis-filed as `iterated`, which would refuse every
+        # conjugate document this suite already runs -- loud, but only if
+        # something asserts the negative.
+        for kind in ("conjugate.wiener", "condition", "conjugate.gcr",
+                     "conjugate.gls", "npe"):
+            assert _t10_decided(_t10_document(HOMOSCEDASTIC,
+                                              _T10_RUN[kind])) == [], kind
+
+    def test_kind_none_is_left_to_the_shared_refusal(self):
+        # Kills: `absent` falling into A28's branch, which would tell a
+        # document declaring NO sigma that it "decides its sigma into an
+        # array".  That is the exact substitution
+        # test_noise_kind_none_keeps_the_shared_refusal
+        # (test_config_conjugate_shared.py:483) exists to prevent, one phase
+        # earlier.  Both ids, because `absent` is adjacent to both rows.
+        for kind in ("conjugate.wiener", "conjugate.gls", "npe"):
+            assert _t10_decided(_t10_document({"kind": "none"},
+                                              _T10_RUN[kind])) == [], kind
+
+    def test_an_unknown_noise_kind_is_left_to_build_noise(self):
+        # Kills: `_T10_NOISE_SHAPE[kind]` unguarded.  A check that RAISES
+        # aborts the pass and hides every later finding (plan §2.3's TRAP),
+        # and a KeyError is not even a refusal a user can read.  `build_noise`
+        # (noise.py:112-116) names the vocabulary; this stands down for it.
+        assert _t10_decided(_t10_document(
+            {"kind": "banana"}, _T10_RUN["conjugate.wiener"])) == []
+
+    def test_a_noise_wrong_in_its_GRAMMAR_too_still_hears_A27(self):
+        """The one ordering this hoist REVERSES, pinned so the docstring that
+        records it is a measurement.
+
+        ``inference.noise:``'s grammar is ``build_noise``'s, at P2, so on a
+        document with a readable beam it used to speak before A27 did.
+        Measured on a ``kind: forward`` document, which reaches it: a
+        ``radiometer`` with no ``include_logdet`` earns *"is required for a
+        prediction-dependent noise model and has no default"*, and a stray
+        key earns *"kind: radiometer does not take ['banana']"*.  Beside a
+        ``conjugate.wiener`` run both now arrive after A27, and the user pays
+        a second round trip if they take the ``conjugate.gls`` way out rather
+        than the ``radiometer_frozen`` one (which drops ``include_logdet``
+        from the key set entirely).
+
+        Not gated, and the alternative is why: standing down would mean
+        re-implementing ``_KIND_KEYS``' sweep in this module, which §2.5
+        forbids by name.  Hoisting that grammar to P-1 as well is the real
+        answer and is nobody's in Plan 3A.
+        """
+        broken = {key: value for key, value in RADIOMETER.items()
+                  if key != "include_logdet"}
+        [found] = _t10_decided(
+            _t10_document(broken, _T10_RUN["conjugate.wiener"]))
+        assert found.check == "A27"
+        [stray] = _t10_decided(_t10_document({**RADIOMETER, "banana": 1},
+                                             _T10_RUN["conjugate.wiener"]))
+        assert stray.check == "A27"
+
+    def test_an_absent_or_malformed_noise_section_decides_nothing(self):
+        # `_structural` guarantees a SECTION is present, never that it is a
+        # MAPPING (Task 4's measurement), and `inference.noise` is one level
+        # further in than that guarantee reaches.
+        for noise in (None, "nope", {}, {"kind": None}):
+            assert _t10_decided(_t10_document(
+                noise, _T10_RUN["conjugate.wiener"])) == [], noise
+
+    def test_the_run_name_is_the_one_the_executors_use(self):
+        # Kills: the index form, and kills re-deriving the name here rather
+        # than reading the one `_runs` filled.  runs.py:115 names an unnamed
+        # run after its kind, and test_config_exits_gls.py:422 asserts the
+        # executor's prefix literally -- a pass that wrote runs[0] would put
+        # two different spellings of the same run in front of one user.
+        [unnamed] = _t10_decided(
+            _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
+        assert unnamed.message.startswith("runs['conjugate.wiener']: ")
+        [named] = _t10_decided(_t10_document(
+            RADIOMETER, {**_T10_RUN["conjugate.wiener"], "name": "fit"}))
+        assert named.message.startswith("runs['fit']: ")
+
+    def test_a_kind_that_reads_neither_shape_is_refused_by_neither(self):
+        # Kills: a table that fires on the NOISE alone.  `forward` is in
+        # neither `_T10_DECIDES_SIGMA` nor `_T10_ITERATES`, so a radiometer
+        # beside it decides nothing -- and a check that walked runs without
+        # consulting either set would refuse it.
+        assert _t10_decided(_t10_document(RADIOMETER,
+                                          _T10_RUN["forward"])) == []
+
+    def test_each_run_is_blamed_by_its_own_index_and_its_own_name(self):
+        # Attribution, per index.  Hard-coding an index or reading
+        # `_runs(document)[0]` survives every single-run document above; this
+        # is the loop test Task 3's carry-forward asks of every task that
+        # writes one.  The two runs earn DIFFERENT ids, so a swap is visible.
+        found = _t10_decided(_t10_document(
+            FROZEN, _T10_RUN["forward"], _T10_RUN["conjugate.gls"],
+            _T10_RUN["npe"]))
+        assert [one.where for one in found] == ["runs[1].kind", "runs[2].kind"]
+        assert [one.check for one in found] == ["A28", "A28"]
+        assert found[0].message.startswith("runs['gls']: ")
+        assert found[1].message.startswith("runs['amortized']: ")
+
+    def test_a_run_declaring_expect_refuse_is_still_refused(self):
+        """``expect: refuse`` does NOT stand this check down, and that is a
+        decision rather than an omission.
+
+        ``_blocks`` and ``_prior_gates`` do stand down, because a real
+        document in this repository would otherwise lose the assertion it
+        exists to make.  Measured for A27/A28, there is no such document:
+        ``grep -rn "expect.*refuse" tests/config/`` finds five, at
+        ``test_config_exits_gls.py:244``, ``test_config_exits_nuts.py:360``,
+        ``test_config_exits_plan.py:110``, ``test_config_exits_predict.py:709``
+        and ``posterior_helpers.py:435``, and not one of them is A27/A28
+        shaped.  The layer's own policy test says the general shape is this
+        way round: ``test_config_section_runs.py``'s
+        ``test_a_text_decidable_refusal_is_not_a_runs_to_expect`` (``:88``)
+        records that a P-1 refusal raising out of ``run_document`` rather
+        than being captured is CORRECT, because ``expect: refuse`` is for a
+        run that fails when it RUNS.
+        """
+        [found] = _t10_decided(_t10_document(
+            FROZEN, {**_T10_RUN["conjugate.gls"], "expect": "refuse"}))
+        assert found.check == "A28"
+
+    def test_the_noise_kinds_are_the_ones_build_noise_accepts(self):
+        # Kills: a fifth noise kind added to noise.py and forgotten here,
+        # after which _decided stands down on every document declaring it and
+        # nothing says so.  The copy is legal BECAUSE this assertion exists.
+        from rheplicant.config.sections.noise import _KIND_KEYS
+
+        assert _NOISE_KINDS == frozenset(_KIND_KEYS)
+        assert set(_T10_NOISE_SHAPE) == _NOISE_KINDS
+
+    def test_the_shape_table_matches_the_noise_classes(self):
+        # Kills: flipping a row.  `radiometer` and `radiometer_frozen` differ
+        # by a suffix and their rows are opposite; the class attributes are
+        # the source of truth and are readable without constructing anything.
+        from rheplicant.inference import HomoscedasticNoise, RadiometerNoise
+
+        assert HomoscedasticNoise.depends_on_prediction is False
+        assert RadiometerNoise.depends_on_prediction is True
+        assert _T10_NOISE_SHAPE["homoscedastic"] == "decided"
+        assert _T10_NOISE_SHAPE["radiometer"] == "iterated"
+        assert _T10_NOISE_SHAPE["radiometer_frozen"] == "array"
+        assert _T10_NOISE_SHAPE["none"] == "absent"
+
+    def test_the_decides_sigma_set_is_the_packages_own(self):
+        # Kills: this constant drifting from
+        # conjugate_support._DECIDES_SIGMA_HERE, which is what actually
+        # decides at P3 whether an exit resolves a sigma array.  A fifth
+        # member added there and forgotten here leaves that exit's A27 behind
+        # the beam again; a member dropped there leaves this pass refusing a
+        # document the package would run.
+        from rheplicant.config.sections.conjugate_support import (
+            _DECIDES_SIGMA_HERE,
+        )
+
+        assert _T10_DECIDES_SIGMA == _DECIDES_SIGMA_HERE
+
+    def test_every_exit_that_reads_the_rule_has_a_branch(self):
+        """The CALL GRAPH, not the module list -- the module list is what hid
+        a whole route.
+
+        Reading `_T10_ITERATES` and checking its branches exist is circular:
+        a route nobody added to the constant satisfies it, and that is
+        exactly the mutation this test claims to kill.  The naive
+        non-circular form is the one below -- glob `src/` for
+        `_decided_model(`, get `{conjugate, npe}`, one kind family per module
+        -- and it is WRONG, measured: `_decided_model`'s two call sites are
+        inside `_gls_result` and `_simulate_bank`, and `_gls_result` has TWO
+        callers of its own, `_run_gls` and `_draw_sigma`.  `_draw_sigma` is
+        `kind: conjugate.gcr`'s `noise_from: gls` route, so THREE run kinds
+        reach the accessor and the third inherited `conjugate.gls`'s sentence
+        until this task -- *"run kind: conjugate.wiener"*, to a gcr document
+        one key away from running.
+
+        So the closure is walked upwards with `ast` and pinned WHOLE.  A new
+        function anywhere under `config/sections/` that reaches
+        `_decided_model` changes this set and turns the test red, which is
+        the decision point: does `_T10_ITERATES` need another member?
+        """
+        assert _t10_reaching("_decided_model") == {
+            "_decided_model", "_draw_sigma", "_gcr_product", "_gls_result",
+            "_run_conjugate", "_run_gls", "_run_npe", "_simulate_bank"}
+        # The two functions that hold the call sites, and their own callers:
+        # this is the edge the module-stem form cannot see.
+        assert _t10_callers_of("_gls_result") == {"_draw_sigma", "_run_gls"}
+        assert _t10_callers_of("_simulate_bank") == {"_run_npe"}
+        assert _T10_ITERATES == {"conjugate.gls", "conjugate.gcr", "npe"}
+        source = pathlib.Path(_decided.__code__.co_filename).read_text()
+        for kind in _T10_ITERATES:
+            assert f'exit_kind == "{kind}"' in source, kind
+
+    def test_every_decided_finding_carries_its_own_tag(self):
+        # Task 3 shipped the equivalent over its five checks and the
+        # carry-forward asks every later task for its own.  Kills a tail
+        # appended to three branches of four.
+        documents = [_t10_document(RADIOMETER, _T10_RUN[kind])
+                     for kind in ("conjugate.wiener", "condition",
+                                  "conjugate.gcr")]
+        documents += [_t10_document(FROZEN, _T10_RUN[kind])
+                      for kind in ("conjugate.gls", "npe")]
+        documents.append(_t10_document(
+            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        found = [one for document in documents
+                 for one in _t10_decided(document)]
+        assert len(found) == 6
+        for one in found:
+            assert one.check in ("A27", "A28")
+            assert one.severity == REFUSE
+            assert one.message.endswith(f"(check {one.check}).")
+
+
+#: The five sentences this task writes, pinned WHOLE.  A ``match=`` on one
+#: fragment leaves every other clause free to be wrong, and Task 6 shipped
+#: eight surviving mutants in refusal TEXT while Task 7 shipped 23 -- nine of
+#: which made the sentence state the opposite of the truth.  For a validation
+#: layer the message IS the product, and this task's whole subject is a
+#: message that was fluent, plausible and false.
+_DECIDED_VERBATIM = [
+    ('a27-wiener',
+     RADIOMETER, _T10_RUN["conjugate.wiener"], 'A27', 'runs[0].kind',
+     "runs['conjugate.wiener']: kind: conjugate.wiener takes a DECIDED sigma "
+     "array, and inference.noise.kind: radiometer makes sigma a function of "
+     "the prediction -- which a conjugate solve has not got, because the "
+     "prediction is what it solves for (linear.py:1031). Two routes run this "
+     "noise: kind: conjugate.gls iterates the covariance it implies, or "
+     "inference.noise.kind: radiometer_frozen decides the sigma once and "
+     "keeps this exit (check A27)."),
+    ('a27-condition',
+     RADIOMETER, _T10_RUN["condition"], 'A27', 'runs[0].kind',
+     "runs['condition']: kind: condition takes a DECIDED sigma array, and "
+     "inference.noise.kind: radiometer makes sigma a function of the "
+     "prediction -- which a conjugate solve has not got, because the "
+     "prediction is what it solves for (linear.py:1031). Two routes run this "
+     "noise: kind: conjugate.gls iterates the covariance it implies, or "
+     "inference.noise.kind: radiometer_frozen decides the sigma once and "
+     "keeps this exit (check A27)."),
+    ('a27-gcr',
+     RADIOMETER, _T10_RUN["conjugate.gcr"], 'A27', 'runs[0].kind',
+     "runs['conjugate.gcr']: inference.noise.kind: radiometer has a sigma "
+     "that depends on the prediction, and a conjugate draw has no prediction "
+     "to evaluate it at -- the prediction is what it draws. Declare "
+     "noise_from: gls, which runs iterative_gls first and draws at the "
+     "covariance it converges to, or inference.noise.kind: radiometer_frozen, "
+     "which decides one sigma array up front (check A27)."),
+    ('a28-gls',
+     FROZEN, _T10_RUN["conjugate.gls"], 'A28', 'runs[0].kind',
+     "runs['gls']: kind: conjugate.gls solves for the covariance a "
+     "PREDICTION-DEPENDENT sigma implies, so it reads inference.noise as a "
+     "RULE; inference.noise.kind: radiometer_frozen decides its sigma into an "
+     "array before any run sees it, and a decided array is not a rule. "
+     "Declare inference.noise.kind: radiometer to iterate the rule, or run "
+     "kind: conjugate.wiener, which is what a decided sigma wants "
+     "(check A28)."),
+    ('a28-gcr-on-the-gls-route',
+     FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"},
+     'A28', 'runs[0].kind',
+     "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: gls runs "
+     "iterative_gls first and draws at the covariance it converges to, so it "
+     "reads inference.noise as a RULE; inference.noise.kind: "
+     "radiometer_frozen decides its sigma into an array before any run sees "
+     "it, and a decided array is not a rule. Drop noise_from: gls: the "
+     "declared route draws at that array directly, which is what a frozen "
+     "sigma is for -- and noise_from: gls is check A27's answer for "
+     "inference.noise.kind: radiometer, so declaring both asks a reweighting "
+     "to find a fixed point in a number that is already fixed (check A28)."),
+    ('a28-npe',
+     FROZEN, _T10_RUN["npe"], 'A28', 'runs[0].kind',
+     "runs['amortized']: kind: npe SIMULATES a bank of (theta, data) pairs "
+     "and draws the noise for each one, so it reads inference.noise as a "
+     "RULE; inference.noise.kind: radiometer_frozen decides its sigma into an "
+     "array before any run sees it, and a decided array is not a rule. "
+     "Declare inference.noise.kind: radiometer or homoscedastic -- either is "
+     "a rule simulate_pairs can draw from. There is no amortized-posterior "
+     "exit that takes a decided array, so the sigma is what has to change "
+     "(check A28)."),
+]
+
+
+class TestTheDecidedRefusalsAreThePRODUCT:
+    """The whole message, not a fragment of it."""
+
+    @pytest.mark.parametrize(
+        "noise, run, check, where, message",
+        [row[1:] for row in _DECIDED_VERBATIM],
+        ids=[row[0] for row in _DECIDED_VERBATIM])
+    def test_the_message_is_exactly_this(self, noise, run, check, where,
+                                         message):
+        [found] = _t10_decided(_t10_document(noise, run))
+        assert found.check == check
+        assert found.where == where
+        assert found.message == message
+
+    def test_the_table_covers_every_sentence_this_task_WRITES(self):
+        """ANTI-VACUITY: a table is only as good as its rows.
+
+        Five sentences and six rows -- wiener and condition share one, and
+        the pair is here because the exit's own kind is interpolated into it
+        and a table with only one of them cannot see a branch that hard-coded
+        ``conjugate.wiener``.  Every kind either set names has a row, and
+        ``conjugate.gcr`` has TWO, one per ``noise_from:`` route, because the
+        two routes earn different ids.
+        """
+        assert {row[3] for row in _DECIDED_VERBATIM} == {"A27", "A28"}
+        assert len({row[5] for row in _DECIDED_VERBATIM}) == 6
+        assert {row[2]["kind"] for row in _DECIDED_VERBATIM} == (
+            _T10_DECIDES_SIGMA | _T10_ITERATES)
+        assert {row[2].get("noise_from") for row in _DECIDED_VERBATIM
+                if row[2]["kind"] == "conjugate.gcr"} == {None, "gls"}
+
+
+class TestTheDecidedTableIsRegisteredAndReachesTheUser:
+    def test_the_two_ids_are_registered_to_this_one_function(self):
+        assert CHECKS["A27"] is _decided
+        assert CHECKS["A28"] is _decided
+
+    def test_the_pass_emits_them_once(self):
+        # `preflight()` de-duplicates by function identity, and a document
+        # that fires both ids is what says so: a naive `CHECKS.values()` loop
+        # would call `_decided` twice and every finding would arrive doubled.
+        #
+        # FILTERED, never `report.refusals()` whole: that list is ordered
+        # across every registered check and is a function of how many tasks
+        # have landed (§3.2(b)).
+        report = preflight(_t10_document(
+            FROZEN, _T10_RUN["conjugate.gls"], _T10_RUN["npe"]))
+        mine = [one.check for one in report.refusals()
+                if one.check in ("A27", "A28")]
+        assert mine == ["A28", "A28"]
+        assert {"A28"} <= report.checks()
+
+    def test_a_wiener_on_a_radiometer_wins_against_an_unreadable_beam(self):
+        # §5's PHASE PROPERTY, this task's one real assertion of it.  Task
+        # 2's phase guard registers four synthetic lambdas: it proves the
+        # HOOK's position and says nothing about any shipped check.  The
+        # assertion is symmetric -- the violation's own words come back, and
+        # `no_such_beam` does NOT.
+        #
+        # `load_document`, never `run_document`: §2.1 measured that
+        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # path, so a `runs`-shaped violation driven that way proves nothing.
+        from rheplicant.config.document import load_document
+        from rheplicant.config.errors import ConfigError
+
+        document = _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"],
+                                 resources=UNREADABLE_BEAM)
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert "check A27" in str(caught.value)
+        assert "takes a DECIDED sigma array" in str(caught.value)
+        assert "no_such_beam" not in str(caught.value)
+
+
+class TestNoHostileDocumentCanAbortTheDecidedTable:
+    """The §2.3 TRAP, for `_decided`.
+
+    A check that RAISES aborts the pass and discards every other finding.
+    Two values here are read straight out of the user's text and used as the
+    left operand of `in` over a FROZENSET -- `inference.noise.kind` and
+    `runs[].kind` -- and `['x'] in frozenset(...)` raises TypeError on the
+    unhashable list.  §3.1 pins `_NOISE_KINDS` as a frozenset, so the guard
+    has to be an `isinstance` on the operand; Task 9 met the same shape and
+    answered it by making its container a tuple, which is not open here.
+    """
+
+    HOSTILE = [
+        {},
+        {"inference": None},
+        {"inference": "nope"},
+        {"inference": {"noise": None}},
+        {"inference": {"noise": "nope"}},
+        {"inference": {"noise": {}}},
+        {"inference": {"noise": {"kind": None}}},
+        {"inference": {"noise": {"kind": 7}}},
+        {"inference": {"noise": {"kind": True}}},
+        {"inference": {"noise": {"kind": ["radiometer"]}}},
+        {"inference": {"noise": {"kind": {"radiometer": 1}}}},
+        {"runs": "nope"},
+        {"runs": 7},
+        {"runs": [None]},
+        {"runs": [{}]},
+        {"runs": [{"kind": None}]},
+        {"runs": [{"kind": 7}]},
+        {"runs": [{"kind": ["conjugate.wiener"]}]},
+        {"runs": [{"kind": {"conjugate.wiener": 1}}]},
+        {"runs": [{"kind": "conjugate.wiener", "name": 7}]},
+        {"runs": [{"kind": "conjugate.gcr", "noise_from": ["gls"]}]},
+        {"runs": [{"kind": "conjugate.gcr", "noise_from": None}]},
+        {"runs": {"kind": "conjugate.wiener"}},
+    ]
+
+    @staticmethod
+    def _document(patch):
+        sections = {"inference": {"noise": RADIOMETER}}
+        sections.update(patch)
+        return preflight_document(**sections)
+
+    @pytest.mark.parametrize("patch", HOSTILE,
+                             ids=[str(index) for index in
+                                  range(len(HOSTILE))])
+    def test_the_check_returns_findings_and_raises_nothing(self, patch):
+        for finding in _t10_decided(self._document(patch)):
+            assert finding.check in ("A27", "A28")
+
+    @pytest.mark.parametrize("patch", HOSTILE,
+                             ids=[str(index) for index in
+                                  range(len(HOSTILE))])
+    def test_the_whole_pass_survives_each_of_them(self, patch):
+        # `_check_where` runs OUTSIDE the per-check `try`, so a `where` built
+        # from user text could kill the pass even when the check returns
+        # cleanly.  This task's one `where` shape is `runs[<int>].kind`.
+        preflight(self._document(patch))
+
+
+class TestTheDecidedModelAccessor:
+    """``exit_support._decided_model``'s two callers, and the clause each owes.
+
+    These live here rather than in ``test_config_exit_support.py`` because
+    ``exit_support.py`` is in THIS task's Files list and in no other Plan 3A
+    task's; keeping the change and its tests in one place is what makes the
+    task's footprint reviewable.
+
+    **Only the npe caller can still be reached through a document.**  The
+    other two call sites are inside ``_gls_result``, and every document that
+    reaches its raise is one the pass now refuses at P-1 -- so the gls
+    clauses are exercised by ``test_config_conjugate_shared.py``'s four
+    DIRECT calls, which spread the same ``_A28_GLS_CLAUSES`` the call site
+    does.  That the two are one binding rather than two copies is why those
+    four tests still pin the sentence a gls run would get.
+
+    **Three callers, not two**, and the third is why ``_gls_result`` now
+    takes ``clauses`` keyword-only and required as well: ``kind:
+    conjugate.gcr`` under ``noise_from: gls`` reaches ``_decided_model``
+    through it, with no call site of its own for a grep to find.
+    """
+
+    def test_it_cannot_be_called_without_saying_what_it_wants(self):
+        # Kills the fix's own regression: giving `wants`/`instead` defaults.
+        # A default is a clause a third caller inherits without choosing, and
+        # inheriting conjugate prose is the defect being repaired.
+        #
+        # Imported HERE and not at this module's head: `spec` is already a
+        # loop variable in `TestBlocks`' differential against the package
+        # (`for spec in blocks:`), so a module-level binding of that name
+        # shadows it and ruff refuses the whole file with F402.
+        from tests.config.exit_helpers import conjugate_built, spec
+
+        built = conjugate_built(noise=FROZEN)
+        with pytest.raises(TypeError):
+            _decided_model(spec(kind="conjugate.gls"), built)
+
+    def test_the_npe_caller_supplies_its_own_and_it_is_exactly_this(self):
+        # The accessor's own sentence, WHOLE, through the real call site --
+        # `_simulate_bank` hands `noise=` to `simulate_pairs` and is where
+        # npe reaches `_decided_model` (npe.py:475-480).  Kills every reword
+        # of the npe clauses, and the `(check A28).` mid-sentence position,
+        # which is the accessor's own frame rather than a Finding's.
+        from rheplicant.config.errors import ConfigError
+
+        built = npe_built({"kind": "forward"}, noise=FROZEN)
+        with pytest.raises(ConfigError) as caught:
+            _simulate_bank(npe_spec(), built, built.inference.npe)
+        assert str(caught.value) == (
+            "runs['amortized']: kind: npe SIMULATES a bank of (theta, data) "
+            "pairs and draws the noise for each one, so it reads "
+            "inference.noise as a RULE; inference.noise.kind: "
+            "radiometer_frozen decides its sigma into an array before any run "
+            "sees it, and a decided array is not a rule (check A28). Declare "
+            "inference.noise.kind: radiometer or homoscedastic -- either is a "
+            "rule simulate_pairs can draw from. There is no "
+            "amortized-posterior exit that takes a decided array, so the "
+            "sigma is what has to change.")
+
+    def test_the_gcr_gls_route_supplies_its_own_and_it_is_exactly_this(self):
+        """The third caller's own sentence, WHOLE, through its own route.
+
+        ``_draw_sigma`` is where ``kind: conjugate.gcr`` reaches
+        ``_gls_result`` and so ``_decided_model``; the accessor raises while
+        the argument list is still being evaluated, so ``block``,
+        ``observed``, ``prior`` and ``solve`` are never read and the test
+        costs one ``load_document``.
+
+        Two mutations survived the whole battery without this: handing
+        ``_gls_result`` the GLS clauses from this call site, and giving
+        ``_gls_result``'s ``clauses`` a default.  Both restore the exact
+        defect this task exists to fix, on the route that had it and nobody
+        had noticed.
+        """
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.conjugate import _draw_sigma
+        from tests.config.exit_helpers import conjugate_built, spec
+
+        built = conjugate_built(noise=FROZEN)
+        with pytest.raises(ConfigError) as caught:
+            _draw_sigma(spec(kind="conjugate.gcr"), built, block=None,
+                        observed=None, prior={}, solve={}, noise_from="gls",
+                        where="runs['conjugate.gcr']")
+        assert str(caught.value) == (
+            "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: "
+            "gls runs iterative_gls first and draws at the covariance it "
+            "converges to, so it reads inference.noise as a RULE; "
+            "inference.noise.kind: radiometer_frozen decides its sigma into "
+            "an array before any run sees it, and a decided array is not a "
+            "rule (check A28). Drop noise_from: gls: the declared route "
+            "draws at that array directly, which is what a frozen sigma is "
+            "for -- and noise_from: gls is check A27's answer for "
+            "inference.noise.kind: radiometer, so declaring both asks a "
+            "reweighting to find a fixed point in a number that is already "
+            "fixed.")
+
+    def test_gls_result_cannot_be_called_without_saying_what_it_wants(self):
+        # The SECOND place a default would let a route inherit a clause, and
+        # the one that actually did: `_gls_result` has two callers of its
+        # own, so `_decided_model`'s required arguments were satisfied once,
+        # by `conjugate.gls`, for both of them.  A default here restores that
+        # silently and the accessor cannot see it.
+        from rheplicant.config.sections.conjugate import _gls_result
+        from tests.config.exit_helpers import conjugate_built, spec
+
+        built = conjugate_built(noise=FROZEN)
+        with pytest.raises(TypeError):
+            _gls_result(spec(kind="conjugate.gcr"), built, block=None,
+                        observed=None, prior={}, solve={},
+                        where="runs['conjugate.gcr']")
+
+    def test_no_two_of_the_three_callers_share_a_clause(self):
+        # Kills: two call sites passing the same strings, which compiles,
+        # passes every literal assertion above, and reproduces the defect
+        # this task exists to fix -- twice, since `_gls_result` handed the
+        # gls clauses to `conjugate.gcr` as well until this task.  Read off
+        # the three CONSTANTS the call sites spread, so a reword of any of
+        # them is a red test here as well as at its own call site.
+        from rheplicant.config.sections.conjugate import (
+            _A28_GCR_CLAUSES,
+            _A28_GLS_CLAUSES,
+        )
+        from rheplicant.config.sections.npe import _A28_NPE_CLAUSES
+
+        every = [_A28_GLS_CLAUSES, _A28_GCR_CLAUSES, _A28_NPE_CLAUSES]
+        for clauses in every:
+            assert set(clauses) == {"wants", "instead"}
+            assert clauses["instead"].endswith(".")
+        for key in ("wants", "instead"):
+            assert len({clauses[key] for clauses in every}) == 3, key
+        # ...and the one clause that was false on two routes out of three is
+        # now on exactly the one it is true of.
+        assert "conjugate.wiener" in _A28_GLS_CLAUSES["instead"]
+        assert "conjugate.wiener" not in _A28_NPE_CLAUSES["instead"]
+        assert "conjugate.wiener" not in _A28_GCR_CLAUSES["instead"]
+        assert "solves for the covariance" not in _A28_NPE_CLAUSES["wants"]
+        assert "solves for the covariance" not in _A28_GCR_CLAUSES["wants"]
+
+    @pytest.mark.parametrize("family", ["conjugate.gls", "conjugate.gcr",
+                                        "npe"])
+    def test_the_pass_writes_the_clause_its_caller_supplies(self, family):
+        # DRIFT is the one defect neither message's own test can see: the
+        # pass writes its sentence out and the caller writes its clauses out,
+        # so a reword of one leaves the other green, and after this task the
+        # accessor's raise is unreachable through `run_document` -- a reader
+        # of the source would be the only one to notice.  Every clause, every
+        # caller.
+        #
+        # `.rstrip(".")` on `instead`: the accessor ends its message with the
+        # caller's own full stop, while a Finding ends with `(check A28).`
+        # (§3.2(c)), so the clause is a substring of the pass's message
+        # without its final period and not with it.
+        from rheplicant.config.sections.conjugate import (
+            _A28_GCR_CLAUSES,
+            _A28_GLS_CLAUSES,
+        )
+        from rheplicant.config.sections.npe import _A28_NPE_CLAUSES
+
+        clauses = {"conjugate.gls": _A28_GLS_CLAUSES,
+                   "conjugate.gcr": _A28_GCR_CLAUSES,
+                   "npe": _A28_NPE_CLAUSES}[family]
+        run = _T10_RUN[family]
+        if family == "conjugate.gcr":
+            run = {**run, "noise_from": "gls"}
+        [found] = _t10_decided(_t10_document(FROZEN, run))
+        assert clauses["wants"] in found.message
+        assert clauses["instead"].rstrip(".") in found.message

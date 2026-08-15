@@ -472,6 +472,14 @@ class TestCheckReachesLinearOperator:
 class TestTheCheapChecksComeFirst:
     """A document broken in its grammar AND its model hears about the grammar.
 
+    **Since Plan 3A, the pre-flight pass is in front of both.**  A27 and A28
+    are decided from two words of text before any executor exists, so a
+    document that is wrong in its NOISE and in its per-kind grammar now hears
+    about the noise first -- ``test_the_undecidable_sigma_is_now_heard_
+    before_the_missing_width`` is that case and it inverted deliberately.
+    What this class still pins is the order WITHIN ``_run_conjugate``, for
+    the documents the pass does not decide:
+
     ``_run_conjugate`` runs the per-kind grammar -- ``width:`` for wiener,
     ``seed:``/``noise_from:``/``n_draws:`` for gcr -- and the solver-knob
     coercion BEFORE ``_conjugate_block``, which builds the operator and runs
@@ -486,10 +494,23 @@ class TestTheCheapChecksComeFirst:
     close.  The other two changed which refusal a doubly-broken document got.
     """
 
-    def test_a_missing_width_is_heard_before_the_undecidable_sigma(self):
-        with pytest.raises(ConfigError, match="width: is required") as caught:
+    def test_the_undecidable_sigma_is_now_heard_before_the_missing_width(self):
+        """The order this document gets REVERSED with Plan 3A, deliberately.
+
+        Until the pre-flight pass existed, ``_run_conjugate`` refused the
+        missing ``width:`` at ``conjugate.py:127`` and A27 was never reached
+        on a doubly-wrong document -- measured, the refusal named the width
+        and said nothing about the sigma.  Both are real, and the sigma is
+        the one the user cannot fix by reading the message they were given:
+        ``width: none`` is one word and leaves the document still broken.
+        The pass decides A27 from two words before any executor exists, so it
+        is now first.  The width refusal is unchanged and still fires on a
+        document whose noise is fine -- ``test_a_missing_width_is_heard_
+        before_a_bad_solver_knob`` below is what keeps it alive.
+        """
+        with pytest.raises(ConfigError, match="check A27") as caught:
             run_document(wiener_document(NO_WIDTH, noise=RADIOMETER))
-        assert "check A27" not in str(caught.value)
+        assert "width: is required" not in str(caught.value)
 
     def test_a_missing_width_is_heard_before_a_bad_solver_knob(self):
         # Both keys wrong at once: _width runs before _knobs, so the width is
