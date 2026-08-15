@@ -15,10 +15,12 @@ resolved, no operator is constructed, no file is read.  Re-measured with Task
 11's two checks added (median of 2000 calls, in two separate processes so the
 first-call figure is not warmed by the loop): the **eight** checks here answer
 a **six**-node document -- ``preflight_helpers``' base model, which has four,
-plus ``foregrounds:`` and ``bandpass:`` -- in **3.1e-05 s**; the first call is
-**2.5e-04 s**.  §0.1's budget for the whole pass is 0.05 s, against
+plus ``foregrounds:`` and ``bandpass:`` -- in **3.3e-05 s**; the first call is
+**2.3e-04 s**.  §0.1's budget for the whole pass is 0.05 s, against
 ``load_document``'s 1.536 s on a toy beam, and the whole pass on a Task 11
-document measures **3.5e-04 s**.
+document measures **4.2e-04 s**.  (Re-measured after A30 and A33 each grew a
+:func:`_lit` call at the review: **3.1e-05 -> 3.3e-05 s** here and 3.5e-04 ->
+4.2e-04 s for the pass.)
 
 **That first call is not a deferred import**, which is what this file said
 until Task 5 checked: pre-importing ``sections/switching``, ``core/fold`` and
@@ -712,14 +714,22 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: reaches ``space.forward_fn`` (``diagnostics.py:766``) and its ``reuse:``
 #: can only name a kind that refuses first (``_DRAW_SOURCES``,
 #: ``diagnostics.py:676-682``); and ``_run_mmodes`` (``diagnostics.py:
-#: 594-684``) contains no ``_space(``, no ``forward_fn``, no
-#: ``build_forward_fn`` and no ``fit_twin`` at all.
+#: 594-660``, its ``def`` and ``end_lineno`` by AST) contains no ``_space(``,
+#: no ``forward_fn``, no ``build_forward_fn`` and no ``fit_twin`` at all.
 #:
 #: Written as the COMPLEMENT on purpose (§3.2 (e) 2): a kind added to
 #: ``_KINDS`` defaults to FITTING, so a new exit inherits the check rather
 #: than escaping it.  A wrong refusal is loud; a lost check is silent.
-#: ``test_the_complement_is_a_subset_of_the_declared_kinds`` is what makes the
-#: day a genuinely non-fitting kind ships a day someone looks.
+#:
+#: **Two tests, because they catch different things and the subset alone
+#: catches almost nothing.**  ``test_the_complement_is_a_subset_of_the_
+#: declared_kinds`` catches a TYPO here -- ``"forwards"`` would never match
+#: and every forward document would become a refusal.  It cannot catch a new
+#: kind: measured, adding one to ``_KINDS`` leaves a proper subset even more
+#: proper and that test exits 0.  ``test_every_declared_kind_is_classified``
+#: pins ``_KINDS`` by MEMBERSHIP and is what makes the day a genuinely
+#: non-fitting kind ships a day someone looks; its failure message is the
+#: instruction to classify the new one.
 _A30_NOT_FITTING: frozenset[str] = frozenset({"forward", "mmodes"})
 
 #: The registry name of the identifiability convention A33 advises.
@@ -844,14 +854,14 @@ def _a30_placements(document: Mapping[str, Any],
 
     **Keyed by NODE, not by the model key**, and that is the whole reason this
     is a function rather than a dict comprehension over :func:`_nodes`:
-    ``inference.twin.without:`` names node ids -- ``Assembly.without``
-    (``twin.py:59-60``) -- and a ``python:`` entry lands where its class
-    declares rather than under the key it is written beneath.  Measured at
-    ``0263e0f``: ``{emi: {python: 'rheplicant.radio:NoiseOperator', ...}}``
-    with ``without: [noise]`` BUILDS and its fit twin is clean, while
-    ``without: [emi]`` is the one the assembly itself refuses.  A reader
-    keyed on the model key gets both of those backwards -- one a false
-    refusal, one a lost check.
+    ``inference.twin.without:`` names node ids -- it calls
+    ``Assembly.without`` (``core/graph.py:526``, from ``twin.py:59-60``) --
+    and a ``python:`` entry lands where its class declares rather than under
+    the key it is written beneath.  Measured at ``0263e0f``: ``{emi: {python:
+    'rheplicant.radio:NoiseOperator', ...}}`` with ``without: [noise]`` BUILDS
+    and its fit twin is clean, while ``without: [emi]`` is the one the
+    assembly itself refuses.  A reader keyed on the model key gets both of
+    those backwards -- one a false refusal, one a lost check.
 
     :func:`_t5_claims` is the one placement reader in this file (§2.2), and a
     REGION's operator sits at the LAST node it covers -- ``paths.
@@ -859,11 +869,17 @@ def _a30_placements(document: Mapping[str, Any],
     ``at: ['noise', 'emi']`` reports the stage at ``emi``).  ``placed[-1]``
     is therefore right for a single placement and for a region alike.
 
-    First claimant wins where two entries land on one node; that document is
-    check A5's refusal, and A30's fix -- drop the node -- is the same
-    whichever key it names.
+    **Where two entries land on one node, the OCCUPANT is named** -- the entry
+    written under the node it fills, and failing that the alphabetically first
+    key.  ``_two_at_one_node`` picks the same way (``occupant = node if node
+    in keys else keys[0]``, over a list built in document order), and the
+    reason is Task 5's: naming whichever key the user happened to type first
+    makes the same collision blame a different line when the document is
+    reordered.  That document is check A5's refusal as well, and A30's fix --
+    drop the node -- is the same whichever key it names, but the blame still
+    has to be stable.
     """
-    placements: dict[str, tuple[str, str]] = {}
+    claims: dict[str, list[tuple[str, str]]] = {}
     for key, spec in _nodes(document).items():
         placed = _t5_claims(key, spec)
         if not placed:
@@ -871,7 +887,12 @@ def _a30_placements(document: Mapping[str, Any],
         node_id = placed[-1]
         found = _a30_stochastic(node_id, spec, table)
         if found is not None:
-            placements.setdefault(node_id, (f"model.{key}", found))
+            claims.setdefault(node_id, []).append((key, found))
+    placements: dict[str, tuple[str, str]] = {}
+    for node_id, entries in claims.items():
+        key, found = next(
+            (one for one in entries if one[0] == node_id), min(entries))
+        placements[node_id] = (f"model.{key}", found)
     return placements
 
 
@@ -879,10 +900,14 @@ def stochastic_nodes(document: Mapping[str, Any]) -> frozenset[str]:
     """The node ids whose declared operator class declares ``RANDOMNESS``.
 
     §3.2 (f)'s shared name: Task 11 (A30) binds it and Task 12 (A42) imports
-    it, because two private predicates for one property is the collision
-    §3.2 (f) calls "the likeliest remaining collision in the plan".  Public
-    for that reason -- it crosses a module boundary, the precedent
-    ``sections/observed.py:23`` sets.
+    it (``preflight/values.py:70``), because two private predicates for one
+    property is the collision §3.2 (f) calls "the likeliest remaining
+    collision in the plan".  **Public because it crosses a module boundary,
+    and §3.2 (f) says so outright** -- an earlier draft of this sentence
+    offered ``sections/observed.py:23`` as the precedent, which is
+    ``from rheplicant.config.draws import _seed_name, seed_for``: a PRIVATE
+    name pulled across a boundary, so it is evidence against the rule rather
+    than for it.  (That module's ``__all__`` is at ``:28``.)
 
     Read off the CLASS (``operator_table()``, measured at 0.2 ms on its first
     call and 0.02 ms after, importing nothing on §0's forbidden list) --
@@ -907,11 +932,26 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     RadiometerNoiseOperator}`` builds a fit twin that still draws, and a check
     reading ``model:`` alone would name the wrong class about it.
 
-    A ``replace:`` on a node ``without:`` has already dropped is skipped:
-    measured, ``Assembly.replace_node`` raises ``KeyError("No node named
-    'noise' in this assembly")`` there, so the document is refused whatever
-    this says, and saying "write without: [noise]" about a document that
-    contains that line names a fix it already has.
+    **A ``replace:`` is read only for a node the model actually lights**, and
+    the gate is one predicate for two shapes that produce the identical
+    ``KeyError``.  ``Assembly.replace_node`` (``core/graph.py:473``) looks the
+    node up in the repaired assembly, so it raises *"No node named 'X' in this
+    assembly"* both when ``without:`` has just dropped X and when ``model:``
+    never lit it -- and ``kind: pipeline`` is the third face of the same
+    thing, an assembly with no nodes at all, which ``build_fit_twin`` refuses
+    in its own words (*"inference.twin: repairs a graph assembly, and this
+    model is kind: pipeline ... declare the fit pipeline as its own
+    variant"*).  Measured at ``36b7e54``, all three reached A30, and on the
+    unlit one the fix A30 named was itself an error: *"Write
+    inference.twin.without: [rfi_field]"* gives ``AssemblyError: without
+    ('rfi_field'): no operator sits at 'rfi_field' in this assembly``.  A
+    refusal whose advice errors is worse than no refusal.
+
+    :func:`_lit` is the predicate, and it is one place LOOSER than the
+    assembly: a REGION lights every node it covers while its operator occupies
+    only the last, so a ``replace:`` naming an interior node of a region would
+    still be read.  Recorded rather than closed -- the tighter reader would be
+    a second definition of "where does this operator sit", which §2.2 forbids.
 
     A malformed ``twin:`` -- not a mapping, or a ``without:`` that is not a
     list -- reads as NO repair rather than as a stand-down.  ``build_fit_twin``
@@ -951,8 +991,18 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
         placements.pop(node_id, None)
     replace = twin.get("replace")
     if isinstance(replace, Mapping):
+        lit = _lit(document)
         for node_id, spec in replace.items():
+            # The `isinstance` test is SUBSUMED by the `lit` test below --
+            # every member of `_lit` is a RADIO_GRAPH node id, so a YAML
+            # mapping key that is not a string can never be in it, and
+            # measured, dropping the test changes no answer.  Kept because
+            # what it protects against is `sorted(placements)` raising on
+            # mixed key types, which is a property of THIS loop rather than
+            # of the gate that happens to cover it today.
             if not isinstance(node_id, str) or node_id in dropped:
+                continue
+            if node_id not in lit:
                 continue
             found = _a30_stochastic(node_id, spec, table)
             if found is None:
@@ -969,7 +1019,11 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     # of the order the user happened to type two nodes in (Task 5's lesson).
     for node_id in sorted(placements):
         site, operator = placements[node_id]
-        findings.append(refuse("A30", "inference.twin.without", (
+        # `where` is the SITE and not the constant `inference.twin.without`:
+        # two stochastic nodes give two findings, and a constant makes
+        # `raise_if_refused`'s tail locate the second one by a path that names
+        # nothing.  The line to ADD is spelled out in the message instead.
+        findings.append(refuse("A30", site, (
             f"{site} puts {operator} at node {node_id!r}, which draws its own "
             f"randomness -- {operator} declares {RANDOMNESS!r} in requires "
             "-- and inference.twin.without: does not drop it. This document "
@@ -1000,10 +1054,20 @@ def _t11_bindings(
     same latent) is one degree of freedom and no null direction at all, and a
     check that compared only path heads refuses it.
 
-    A binding whose latent names cannot be read stands for its own ``where``,
-    which no latent name can equal -- so it is never mistaken for the latent
-    on the other node.  The malformed ``latents:`` itself is
-    ``transforms.py:369-374``'s refusal.
+    **A binding whose latent names cannot be read is DROPPED**, not carried
+    with a stand-in.  Its own refusal is more specific and arrives with the
+    value the user wrote -- *"inference.bindings[0]: latents: is a non-empty
+    list of latent names; got 7."* (``transforms.py:369-374``) -- and A33
+    answering first hands that reader a degeneracy lecture instead.  An
+    earlier draft substituted the binding's ``where`` for its latent set, on
+    the reasoning that no latent name can equal it; measured at ``36b7e54``
+    that is true and beside the point, because it made A33 decide *"these are
+    two different parameters"* from a value it had just failed to read, and
+    it did so ASYMMETRICALLY -- the substitute counted as a difference on the
+    gain side and as no difference on the bandpass side.
+
+    ``inference.parameters.<n>`` entries are unaffected: their name is the
+    mapping key, so it is always readable.
 
     ``parse_path`` RAISES on a malformed path (measured: ``''``, ``'a..b'``,
     ``None`` and ``['a']`` all give ``ConfigError``), and a check that raises
@@ -1028,6 +1092,8 @@ def _t11_bindings(
             latents = (latents,) if isinstance(latents, str) else latents
             names = tuple(one for one in latents if isinstance(one, str)) \
                 if isinstance(latents, (list, tuple)) else ()
+            if not names:
+                continue
             written.append((f"inference.bindings[{index}]", names,
                             entry.get("into"), entry.get("transform")))
 
@@ -1046,8 +1112,7 @@ def _t11_bindings(
                 continue
             if isinstance(head, str):
                 heads.append(head)
-        out.append((where, frozenset(names or (where,)), tuple(heads),
-                    transform))
+        out.append((where, frozenset(names), tuple(heads), transform))
     return tuple(out)
 
 
@@ -1055,14 +1120,18 @@ def _a33_convention(transform: Any) -> bool | None:
     """Is ``transform`` the bandpass's identifiability convention?
 
     Three answers.  ``True`` -- it is :data:`_A33_CONVENTION`.  ``False`` --
-    it is a registered NAME that is not: ``identity`` binds the leaf
-    unchanged, ``exp`` and ``log`` are elementwise, ``sum`` reduces and
-    ``split_rows`` re-shapes, and none of the five moves the mean, so the
-    product of bandpass and gain stays the only constrained combination.
-    ``None`` -- text cannot say: a MAPPING transform is an arbitrary callable
-    (``{python: ...}``) or an affine map whose operands may be value nodes,
-    and an unregistered name is ``parse_transform``'s own refusal
-    (``transforms.py:179-182``), in its own words.
+    it is absent, or a registered NAME that is not the convention:
+    ``identity`` binds the leaf unchanged, ``exp`` and ``log`` are
+    elementwise, ``sum`` reduces and ``split_rows`` re-shapes, and none of the
+    five moves the mean, so the product of bandpass and gain stays the only
+    constrained combination.  ``None`` -- **anything else**, which is text
+    this pass cannot decide: a MAPPING transform is an arbitrary callable
+    (``{python: ...}``) or an affine map whose operands may be value nodes; an
+    unregistered NAME is ``parse_transform``'s own refusal
+    (``transforms.py:179-182``); and every other type -- ``7``, ``[]``,
+    ``True``, ``0``, ``""`` -- is *"is a name or a mapping; got ..."*
+    (``transforms.py:183-184``).  All of them land here, not only the two the
+    sentence used to name.
 
     The ``None`` answers stand A33 down rather than refusing, because the
     reader HAS declared a transform and telling them to declare one names a
@@ -1104,7 +1173,22 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``exit_helpers.py:521-524`` calls its ``gain`` + ``global_signal.depth``
     pair *"the schema's A33 shape"*; that is an analogy about degeneracy and
     not an A33 document, because neither latent goes into ``bandpass``.
+
+    **The MODEL is consulted as well as the bindings**, and that is a live
+    correction rather than belt and braces.  An ``into:`` head is a node the
+    user TYPED, not a node the document lights: measured at ``36b7e54``, a
+    document whose model has no ``bandpass`` node at all earned A33 for
+    ``into: bandpass.bandpass``, while the package's own sentence is *"Path
+    'bandpass.bandpass' could not be walked against this twin: No node named
+    'bandpass' in this assembly"*.  A typo'd head was answered with a
+    degeneracy lecture and told to declare ``transform: unit_mean_bandpass``,
+    which cannot help -- the path still resolves to nothing.  Both heads are
+    gated, because a free ``gain`` the model does not light is the same
+    mistake on the other side.
     """
+    lit = _lit(document)
+    if "bandpass" not in lit or "gain" not in lit:
+        return ()
     bindings = _t11_bindings(document)
     on_bandpass = [one for one in bindings if "bandpass" in one[2]]
     if not on_bandpass:

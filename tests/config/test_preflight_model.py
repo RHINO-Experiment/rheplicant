@@ -2171,6 +2171,28 @@ def _t11_fit(model=None, twin=_ABSENT, runs=None, **inference):
                               else runs)
 
 
+def _walks(document, segments):
+    """Does ``segments`` -- a :func:`parse_path` tuple -- resolve in the
+    document as written?
+
+    Plain data only: a mapping key or a list index at each step.  It is the
+    honest reading of "a path into the USER'S DOCUMENT" (§3.1 rule 2), which
+    a first-segment test cannot make -- ``inference.twin.without`` passes that
+    on a document whose ``twin:`` is ``None``.
+    """
+    here = document
+    for segment in segments:
+        if isinstance(segment, int):
+            if not isinstance(here, (list, tuple)) or segment >= len(here):
+                return False
+            here = here[segment]
+        elif isinstance(here, dict) and segment in here:
+            here = here[segment]
+        else:
+            return False
+    return True
+
+
 def _t11_relocated(twin):
     """A fitting document whose ONLY stochastic operator is RELOCATED.
 
@@ -2199,15 +2221,24 @@ class TestTheStochasticFitTwin:
     def test_the_base_model_is_the_one_A30_is_about(self):
         """The discrimination guard for every positive test below.
 
-        ``STOCHASTIC_MODEL`` is measured EQUAL to ``BASE_MODEL``, because
         ``exit_helpers._repaired``'s whole design is a stochastic ``noise``
-        node in ``model:`` repaired away in ``inference.twin.without:``.  If a
-        later change to the helper drops the node, every A30 positive test
-        below keeps passing while testing nothing -- this is what goes red
-        instead.
+        node in ``model:`` repaired away in ``inference.twin.without:``, so
+        ``STOCHASTIC_MODEL`` renames the base model rather than adding to it.
+        If a later change to the helper drops the node, every A30 positive
+        test below keeps passing while testing nothing -- this is what goes
+        red instead.
+
+        **Against a freshly BUILT document, not against ``BASE_MODEL``.**
+        ``preflight_helpers`` binds ``STOCHASTIC_MODEL = dict(BASE_MODEL)``,
+        so ``STOCHASTIC_MODEL == BASE_MODEL`` is ``dict(x) == x`` -- the same
+        ``f(x) == f(x)`` shape this module's own comments cite as how three of
+        Task 8's lifted messages were falsely pinned.  The document is what
+        can drift.
         """
-        assert STOCHASTIC_MODEL == BASE_MODEL
-        assert STOCHASTIC_MODEL["noise"]["type"] == "NoiseOperator"
+        model = preflight_document()["model"]
+        assert model["noise"]["type"] == "NoiseOperator"
+        assert STOCHASTIC_MODEL == model
+        assert stochastic_nodes(preflight_document()) == frozenset({"noise"})
 
     def test_the_base_documents_twin_repair_is_what_these_tests_remove(self):
         """The second discrimination guard: dropping the repair is what makes
@@ -2234,7 +2265,11 @@ class TestTheStochasticFitTwin:
         # P3 and dies as ParameterSpaceError from inside the package -- after
         # build_resources has read every beam.
         found = only(_t11_fit(twin=None), "A30")
-        assert found.where == "inference.twin.without"
+        # The SITE, not the constant `inference.twin.without`: with two
+        # stochastic nodes a constant makes `raise_if_refused`'s tail locate
+        # the second finding by a path that names nothing.  The line to ADD is
+        # spelled out in the message.
+        assert found.where == "model.noise"
 
     def test_the_message_is_pinned_whole(self):
         # Where every recent task's surviving mutants concentrated: a `match=`
@@ -2265,7 +2300,7 @@ class TestTheStochasticFitTwin:
 
     def test_mmodes_is_not_a_fitting_exit_either(self):
         # Kills: _A30_NOT_FITTING == {"forward"}.  _run_mmodes
-        # (diagnostics.py:594-684) expands a projector against a sky and
+        # (diagnostics.py:594-660) expands a projector against a sky and
         # closes over no twin at all.
         assert "A30" not in preflight(
             _t11_fit(twin=None, runs=[{"kind": "mmodes"}])).checks()
@@ -2341,6 +2376,43 @@ class TestTheStochasticFitTwin:
             "without": ["noise"],
             "replace": {"noise": {"type": "NoiseOperator",
                                   "sigma": SIGMA}}})).checks()
+
+    def test_a_replace_naming_a_node_the_model_never_lights_is_the_same(self):
+        """The other face of the SAME ``KeyError``, and the one that shipped.
+
+        ``Assembly.replace_node`` (``core/graph.py:473``) looks the node up in
+        the repaired assembly, so *"No node named 'rfi_field' in this
+        assembly"* is what a ``replace:`` on an unlit node gets -- exactly
+        what a ``replace:`` after a ``without:`` gets.  Measured at
+        ``36b7e54``: A30 refused this document and the fix it named was
+        itself an error -- ``without: [rfi_field]`` gives ``AssemblyError:
+        no operator sits at 'rfi_field' in this assembly``.
+        """
+        assert "rfi_field" not in _lit(_t11_fit())
+        # With the repair kept, `rfi_field` is the only thing A30 could
+        # possibly be about -- so a presence assertion is exact here.
+        assert "A30" not in preflight(_t11_fit(twin={
+            "without": ["noise"], "replace": {"rfi_field": RFI}})).checks()
+        # Without it, `model.noise` earns a CORRECT refusal, so the assertion
+        # has to be about the SUBJECT: nothing may be said about rfi_field.
+        # A presence assertion here would have passed for the wrong reason.
+        found = only(_t11_fit(twin={"replace": {"rfi_field": RFI}}), "A30")
+        assert found.where == "model.noise"
+        assert "rfi_field" not in found.message
+
+    def test_a_pipeline_model_with_a_replace_is_the_third_face_of_it(self):
+        # `kind: pipeline` is an assembly with no nodes at all, and
+        # build_fit_twin refuses the whole block: "inference.twin: repairs a
+        # graph assembly, and this model is kind: pipeline ... declare the fit
+        # pipeline as its own variant".  A30 displaced that with `Write
+        # inference.twin.without: [noise]`, which build_fit_twin would refuse
+        # for the same reason.  `test_a_pipeline_model_has_no_nodes_to_read`
+        # drives `twin=None` only and never reached this.
+        document = repatch(
+            _t11_fit(twin={"replace": {"noise": NOISE_NODE}}),
+            model={"kind": "pipeline", "stages": []})
+        assert _lit(document) == frozenset()
+        assert "A30" not in preflight(document).checks()
 
     def test_a_python_target_this_layer_will_not_import_stands_down(self):
         # Kills: operator_table()[node_id] on a spec that names its own
@@ -2452,6 +2524,24 @@ class TestTheStochasticFitTwin:
             "model.noise", "model.rfi_field"]
         assert "RFIOperator" in found[1].message
 
+    def test_two_entries_at_one_node_blame_the_occupant_either_way_round(self):
+        """Task 5's lesson, on this loop.
+
+        ``model.emi`` relocates ``NoiseOperator`` onto ``noise``, which
+        ``model.noise`` already fills -- check A5's document.  A30 emits ONE
+        finding for the node, and the entry it names must be the OCCUPANT
+        rather than whichever key came first, or reordering the document sends
+        the reader to a different line about the same fault.
+        """
+        for model in ({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
+                       "noise": NOISE_NODE, "emi": PY_NOISE},
+                      {"emi": PY_NOISE, "noise": NOISE_NODE,
+                       "gain": GAIN, "global_signal": GLOBAL_SIGNAL}):
+            document = _model_only(model)
+            document["inference"]["twin"] = None
+            document["runs"] = [{"kind": "fisher"}]
+            assert only(document, "A30").where == "model.noise", list(model)
+
     def test_a_deterministic_node_is_not_refused_however_lit(self):
         # The negative half of the capability route.  `_model_only`, not a
         # `model=` patch: `preflight_document` MERGES one level deep, so a
@@ -2544,9 +2634,39 @@ class TestTheStochasticFitTwin:
         # every forward document a refusal; the membership test would just
         # never match.  A PROPER subset, so the day someone writes the set out
         # in full rather than as the complement, this says so.
+        #
+        # It does NOT catch a new kind, and the constant's comment used to
+        # claim it did: measured, adding one to _KINDS leaves a proper subset
+        # even more proper and this exits 0.  The test below is the tripwire.
         from rheplicant.config.sections.runs import _KINDS
 
         assert _A30_NOT_FITTING < frozenset(_KINDS)
+
+    def test_every_declared_kind_is_classified(self):
+        """The tripwire the complement's comment promises.
+
+        A30's set is written as a complement so a NEW kind defaults to
+        fitting, which is the safe direction -- but "safe" is a default, not a
+        decision, and nobody looks at a default.  Pinning ``_KINDS`` by
+        MEMBERSHIP is what makes the day a kind is added a day someone
+        classifies it: this goes red, and the failure message is the
+        instruction.
+        """
+        from rheplicant.config.sections.runs import _KINDS
+
+        assert frozenset(_KINDS) == frozenset({
+            "condition", "conjugate.gcr", "conjugate.gls", "conjugate.wiener",
+            "fisher", "forward", "gradient", "identifiability", "mmodes",
+            "npe", "nuts", "optimize", "plan.estimate", "plan.sample",
+            "predict", "score_directions",
+        }), (
+            "runs._KINDS has changed. A30 classifies every kind as FITTING "
+            "unless it is in _A30_NOT_FITTING, so a new kind silently "
+            "inherits the check. Decide whether it builds a ParameterSpace "
+            "or a forward function over built.inference.fit_twin: if it does "
+            "not, add it to _A30_NOT_FITTING with the measurement; if it "
+            "does, add it here."
+        )
 
     def test_stochastic_nodes_is_the_name_the_next_task_imports(self):
         # §3.2(f): ONE predicate for "does this node's class declare key",
@@ -2782,9 +2902,19 @@ class TestTheBandpassAndTheGain:
     def test_two_bandpass_bindings_name_the_first_and_clear_on_either(self):
         # Attribution when there is more than one line to edit: the FIRST in
         # document order, so the answer does not depend on how far down the
-        # walk happened to get.  And one convention is enough -- it fixes the
-        # bandpass's mean, so the pair is identifiable however many other
-        # latents write the same node.
+        # walk happened to get.  And ANY bandpass binding carrying the
+        # convention clears it.
+        #
+        # That second half is a scope decision and not a physics claim, and an
+        # earlier comment overstated it as "one convention is enough however
+        # many other latents write the same node" -- which is false as a rule:
+        # a second latent writing the bandpass RAW re-opens the null
+        # direction.  Measured, the case is unreachable today --
+        # `ReceiverOperator` has one field (`bandpass`), so a second binding
+        # into the node must index into it, and `bandpass.bandpass[0]` is
+        # refused outright ("stops on ArrayImpl ..., which is not a leaf").
+        # Recorded rather than enforced; the full rule needs a resolved shape,
+        # which is C17's and Plan 3C's.
         both = {"b1": {"init": 1.0, "into": "bandpass.bandpass"},
                 "b2": {"init": 1.0, "into": "bandpass.bandpass[0]"},
                 "g": BANDPASS_AND_GAIN["parameters"]["g"]}
@@ -2797,6 +2927,54 @@ class TestTheBandpassAndTheGain:
         assert "A33" not in preflight(_t11_fit(
             model=BANDPASS_MODEL, parameters=conventional,
             noise=BANDPASS_AND_GAIN["noise"])).checks()
+
+    def test_a_head_the_model_does_not_light_is_left_to_the_path_walker(self):
+        """A33 must consult the MODEL, not only the ``into:`` heads.
+
+        An ``into:`` head is a node the user TYPED.  Measured at ``36b7e54``,
+        this document -- ``BASE_MODEL``, which has no ``bandpass`` node --
+        earned A33, while the package's own sentence is *"Path
+        'bandpass.bandpass' could not be walked against this twin: No node
+        named 'bandpass' in this assembly"*.  A typo'd head was answered with
+        a degeneracy lecture and told to declare ``transform:
+        unit_mean_bandpass``, which cannot help: the path still resolves to
+        nothing.  Both heads are gated, because a free ``gain`` the model does
+        not light is the same mistake on the other side.
+        """
+        assert "bandpass" not in _lit(_t11_fit(model=BASE_MODEL))
+        assert "A33" not in preflight(_t11_fit(model=BASE_MODEL,
+                                               **BANDPASS_AND_GAIN)).checks()
+        # `repatch`, not `doc["inference"] = ...`: a depth-1 write to that key
+        # REPLACES the repaired block, which is what
+        # `test_config_fixture_contract._rolls_its_own` route B catches -- and
+        # it caught this line when it was written that way.
+        gainless = repatch(
+            _t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
+            model={"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
+                   "noise": NOISE_NODE})
+        assert "gain" not in _lit(gainless)
+        assert "A33" not in preflight(gainless).checks()
+
+    def test_a_binding_whose_latents_cannot_be_read_is_dropped(self):
+        """Both sides, because the stand-in was ASYMMETRIC.
+
+        ``transforms.py:369-374`` refuses ``latents: 7`` with the value the
+        user wrote; A33 answering first hands that reader a degeneracy lecture
+        instead.  An earlier draft substituted the binding's ``where`` for its
+        latent set, which counted as a difference on the gain side (so A33
+        fired) and as no difference on the bandpass side -- the check deciding
+        "two different parameters" from a value it had just failed to read.
+        """
+        for bad_index, other in ((0, 1), (1, 0)):
+            entries = [{"latents": ["b"], "into": "bandpass.bandpass"},
+                       {"latents": ["g"], "into": "gain.gain"}]
+            entries[bad_index] = {**entries[bad_index], "latents": 7}
+            document = _t11_fit(
+                model=BANDPASS_MODEL,
+                parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
+                bindings=entries, noise=BANDPASS_AND_GAIN["noise"])
+            assert "A33" not in preflight(document).checks(), bad_index
+            assert entries[other]["latents"]  # the readable one is untouched
 
     def test_a_latent_with_no_into_binds_nothing(self):
         # `into: null` is a latent with no binding at all
@@ -2836,12 +3014,26 @@ class TestTaskElevensChecksInThePass:
         assert message.count(f"check {check}") == 1
 
     def test_every_where_is_a_path_into_the_document(self):
+        """§3.1 rule 2, asserted rather than named.
+
+        An earlier version of this checked only that the first segment was a
+        section name -- which ``inference.twin.without`` satisfies on a
+        document whose ``twin:`` is ``None``, so the check was passing about a
+        path that leads nowhere.  What "a path into the document" means for a
+        validation layer is: it RESOLVES, or it resolves once its last segment
+        is dropped -- that last segment being the key the reader must ADD
+        (``...transform`` on a binding that has none).
+        """
         document = _t11_fit(model=BANDPASS_MODEL, twin=None,
                             **BANDPASS_AND_GAIN)
         emitted = [*_stochastic_in_fit_twin(document),
                    *_bandpass_and_gain(document)]
         assert len(emitted) == 2, emitted
-        assert {parse_path(one.where)[0] for one in emitted} == {"inference"}
+        for one in emitted:
+            segments = parse_path(one.where)
+            assert segments[0] in document, one.where
+            assert (_walks(document, segments)
+                    or _walks(document, segments[:-1])), one.where
 
     @pytest.mark.parametrize("section", [["gain"], "gain", 3])
     def test_neither_check_reads_a_document_that_is_not_a_mapping(self,
