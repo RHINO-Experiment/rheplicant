@@ -353,7 +353,7 @@ def _a29_gcr_needs_a_seed(where: str, options: Mapping[str, Any]) -> None:
 
     PRESENCE only.  The FORM of the declaration -- a literal, or a name
     outside ``runtime.seeds.`` -- is ``draws._seed_name``'s, which
-    :func:`_gcr_product` reaches at ``:425`` and which the pass calls
+    :func:`_gcr_product` reaches at ``:503`` and which the pass calls
     separately.  Splitting them that way is what lets a seedless run be
     described once, in this voice, rather than twice in two.
     """

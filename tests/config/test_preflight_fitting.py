@@ -1298,6 +1298,13 @@ class TestPriorGates:
             assert [f.check for f in found] == ["A20"], kind
 
     def test_a_joint_prior_beside_fisher_space_true_is_refused(self):
+        # ...and A23 does NOT also fire, which is the second half of §2.6
+        # item 4's ordering pin: both latents here are prior-free, so an
+        # implementation missing the `continue` after A21 tells this document
+        # BOTH that its joint prior would sit inside its own definition (drop
+        # space:) and that its latents declare no prior (declare one) -- two
+        # refusals naming two different edits, the second contradicting the
+        # first.  The `== ["A21"]` is what says so; `"A21" in` would not.
         found = _gates(preflight_document(
             inference={"parameters": COVERED, "joint_prior": JOINT},
             runs=[{"name": "f", "kind": "fisher", "space": True}]))
@@ -1315,27 +1322,27 @@ class TestPriorGates:
                 inference={"parameters": COVERED, "joint_prior": JOINT},
                 runs=[run])) == []
 
-    def test_the_joint_prior_reader_takes_only_a_LIST_OF_STRINGS(self):
-        """Both halves of ``_a20_joint_over``'s filter, which no document
-        test above can see.
+    def test_the_joint_prior_reader_reads_WHAT_THE_PACKAGE_READS(self):
+        """``_a20_joint_over`` mirrors ``tuple(body["over"])``, and the five
+        shapes that used to escape it are the point of this test.
 
-        Kills ``return tuple(over)``: ``over: [d, 7]`` then makes A20 announce
-        that ``inference.joint_prior covers ['d', 7]`` -- a message naming
-        something that is not a latent name, in front of
-        ``JeffreysPrior.validate_against``'s, which says which name is wrong.
-        And kills ``if over is None`` in place of the list test: ``over: 7``
-        raises ``TypeError`` inside ``tuple()``, which the pass reports as
-        "check 'A20' RAISED" and which costs the report every other finding.
+        ``transforms._joint_prior`` ends ``JeffreysPrior(over=tuple(
+        body["over"]), **kwargs)`` (``:320``).  Measured through
+        ``run_document``: ``over: da`` and ``over: {d: 1, a: 2}`` build a real
+        prior and reach ``ParameterSpaceError: ... no block would step it at
+        all`` -- BEHIND THE BEAM, which is the one thing A20 exists to
+        prevent.  An earlier version of this reader required a ``list`` and
+        answered ``()`` for all five, and an earlier version of this test
+        asserted that ``()`` was CORRECT, which is how a hole gets locked in
+        by the suite that is supposed to find it.
 
-        **The recorded hole**: ``over: da`` -- a bare YAML scalar -- IS read
-        by ``transforms._joint_prior`` as ``tuple("da") == ('d', 'a')``
-        (measured), so a document writing it and a ``kind: plan.*`` run does
-        reach the package's refusal and this check stands down on it.  That
-        is a decision, not an oversight: splitting a string into characters
-        is an accident of ``tuple()`` rather than a grammar, and A20 saying
-        "covers ['d', 'a']" to somebody who wrote ``over: da`` would name a
-        coverage they did not write.  Recorded here so the next plan inherits
-        a decision.
+        Kills the list requirement (all five rows below), and kills dropping
+        the ``TypeError`` guard: ``over: 7`` raises inside ``tuple()``, which
+        the pass reports as "check 'A20' RAISED" and which costs the report
+        every other finding.  The all-strings test is what keeps a mixed
+        ``over:`` out of a dict lookup that could be handed an unhashable
+        member, and hands that document to
+        ``JeffreysPrior.validate_against``, which names WHICH member is wrong.
         """
         from rheplicant.config.preflight.fitting import _a20_joint_over
 
@@ -1343,16 +1350,121 @@ class TestPriorGates:
             return _a20_joint_over(
                 {"inference": {"joint_prior": {"jeffreys": {"over": value}}}})
 
-        assert over(["d", 7, None]) == ("d",)
+        # the five shapes the package builds a real prior from
+        assert over("da") == ("d", "a")
+        assert over("d") == ("d",)
+        assert over({"d": 1, "a": 2}) == ("d", "a")
+        assert over({"d": 1}) == ("d",)
+        assert over(("d", "a")) == ("d", "a")
         assert over(["d", "a"]) == ("d", "a")
-        for bad in (7, 3.5, "da", {"d": 1}, None, True):
+        # ...and the two that must answer `()` rather than raise or guess
+        for bad in (7, 3.5, None, True, ["d", 7], [["x"]]):
             assert over(bad) == (), bad
-        # ...and the message that reads it names only the names.
+        # A `over: da` document beside a plan run is now refused HERE.
         [one] = _gates(preflight_document(
             inference={"parameters": COVERED,
-                       "joint_prior": {"jeffreys": {"over": ["d", 7]}}},
+                       "joint_prior": {"jeffreys": {"over": "da"}}},
             runs=[{"name": "fit", "kind": "plan.estimate"}]))
-        assert "covers ['d']" in one.message
+        assert "covers ['d', 'a']" in one.message
+
+    def test_a_joint_prior_the_PACKAGE_would_refuse_stands_this_check_down(
+            self):
+        """A20 must not pre-empt the two refusals about the joint prior
+        itself, because neither of them is fixed by what A20 advises.
+
+        Measured at P3 on the two documents below:
+
+        * ``over: [zzz]`` -> *"JeffreysPrior(over=['zzz']) names ['zzz'],
+          which this space does not declare"*;
+        * ``over: [d]`` where ``d`` also declares ``prior:`` -> *"Latent(s)
+          ['d'] are covered by JeffreysPrior AND declare their own
+          Latent(prior=...)"* (check A22).
+
+        A20's advice is *"use kind: nuts, or drop inference.joint_prior"*, and
+        switching to ``kind: nuts`` leaves both faults exactly where they
+        were -- the pattern Tasks 5 and 6 each paid for.  Kills the gate
+        written as ``if covered:`` alone.
+        """
+        assert _gates(preflight_document(
+            inference={"parameters": COVERED,
+                       "joint_prior": {"jeffreys": {"over": ["zzz"]}}},
+            runs=[{"name": "fit", "kind": "plan.estimate"}])) == []
+        assert _gates(preflight_document(
+            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}},
+                       "joint_prior": {"jeffreys": {"over": ["d"]}}},
+            runs=[{"name": "fit", "kind": "plan.estimate"}])) == []
+        # ...and A21 is stood down by the same gate, while A23 -- which is
+        # about the LATENTS rather than about the joint prior -- still
+        # speaks, and speaks in the no-coverage voice, because a coverage the
+        # package refuses covers nothing.  Kills a gate written as an early
+        # `return`, which would take A23 with it.
+        [one] = _gates(preflight_document(
+            inference={"parameters": COVERED,
+                       "joint_prior": {"jeffreys": {"over": ["zzz"]}}},
+            runs=[{"name": "f", "kind": "fisher", "space": True}]))
+        assert one.check == "A23"
+        assert "no prior: and space: true asks for" in one.message
+        # ...while a joint prior the package DOES accept still fires, which
+        # is what stops the gate being written as `covered = ()`.
+        assert [f.check for f in _gates(preflight_document(
+            inference={"parameters": COVERED, "joint_prior": JOINT},
+            runs=[{"name": "fit", "kind": "plan.estimate"}]))] == ["A20"]
+
+    def test_a_MALFORMED_latent_body_is_left_to_the_grammar(self):
+        """``_latents`` keeps the NAME of a latent whose body is not a mapping
+        and reads it as ``{}`` -- right for A16, wrong for A23.
+
+        Measured: with ``w: 7`` beside a priored ``d`` and a ``kind: nuts``
+        run, the pass said *"declares ['w'] with no prior: ... Give each one a
+        prior:"* while the package says *"inference.parameters.w: is a
+        mapping; got 7"*.  ``w: {}`` is the same shape one step in: the
+        grammar refuses it as *"init: is required"*, so an empty body is never
+        a latent A23 could be right about.  Kills
+        ``latents = _latents(document)``, which is what this check shipped
+        with, and which every other test in this module survives.
+        """
+        for body in (7, ["x"], "oops", {}):
+            for kind, run in (("nuts", {"name": "chain", "kind": "nuts"}),
+                              ("npe", {"name": "a", "kind": "npe"})):
+                assert _gates(preflight_document(
+                    inference={"parameters": {
+                        "d": {**LINEAR_D, "prior": PRIOR}, "w": body}},
+                    runs=[run])) == [], (body, kind)
+        # ...and a WELL-FORMED prior-free neighbour still fires, so the fix
+        # is a filter rather than a switch that turns A23 off.
+        assert [f.check for f in _gates(preflight_document(
+            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR},
+                                      "w": NONLINEAR_W}},
+            runs=[{"name": "chain", "kind": "nuts"}]))] == ["A23"]
+
+    def test_only_a_GRADIENT_block_is_read_and_not_the_complement(self):
+        """``== _T7_GRADIENT``, never ``!= _T7_CONJUGATE``.
+
+        ``_engine_of`` answers ``""`` for a block whose engine cannot be
+        derived (A18's mixed case) and returns a DECLARED engine unvalidated,
+        so the complement selects those two as well.  Under it a mixed block
+        earns A23 beside A18's *"mixes declared-linear latents"*, and an
+        ``engine: banana`` block earns A23 beside the enum clause's *"asks
+        for engine: 'banana'"* -- in both cases an answer about a block whose
+        engine nobody knows.  Kills the complement; the equality test above
+        it is what every other plan.sample row here already covers.
+        """
+        # Every list below is a COMPLETE partition of {d, w}, so A16 has
+        # nothing to say and the only checks left are the ones that own the
+        # engine.
+        for blocks in ([{"names": ["d", "w"]}],
+                       [{"names": ["w"], "engine": "banana"},
+                        {"names": ["d"]}],
+                       [{"names": ["w"], "engine": 5}, {"names": ["d"]}]):
+            document = preflight_document(
+                inference={"parameters": {"d": LINEAR_D, "w": NONLINEAR_W}},
+                runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
+                       "seed": {"from": "runtime.seeds.s"},
+                       "blocks": blocks}])
+            assert _gates(document) == [], blocks
+            # ...and the block IS reported, by the check that owns it: A18
+            # for the mixed one, the id-less enum clause for the other two.
+            assert {f.check for f in _found(document)} <= {"A18", ""}, blocks
 
     def test_a_space_that_is_not_a_BOOL_is_left_to_the_executors_own_check(
             self):
@@ -1395,18 +1507,14 @@ class TestPriorGates:
                    "blocks": [{"names": ["d", "a"], "engine": "gradient"}]}]))
         assert [f.check for f in found] == ["A20"]
 
-    def test_A21_fires_and_A23_does_not_on_one_document(self):
-        # A21's half of the same pin, and it is a DIFFERENT line: the
-        # `continue` after A20 and the one after A21 are two statements, and
-        # deleting the second alone leaves the test above green while a
-        # `fisher` document is told BOTH that its joint prior would sit
-        # inside its own definition (drop space:) and that its latents
-        # declare no prior (declare one) -- two refusals naming two different
-        # edits for one document, the second contradicting the first.
-        found = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
-        assert [f.check for f in found] == ["A21"]
+    # `test_A21_fires_and_A23_does_not_on_one_document` USED to sit here and
+    # is gone: it was byte for byte the same document and the same assertion
+    # as `test_a_joint_prior_beside_fisher_space_true_is_refused` above, while
+    # its comment claimed it killed a different line.  It did not -- the two
+    # `continue`s are killed by that test and by
+    # `test_A20_fires_and_A23_does_not_on_one_document` respectively, and a
+    # third copy proves only that the file is longer.  Its reasoning moved
+    # into the surviving test's comment.
 
     def test_the_registry_puts_A20_and_A21_before_A23(self):
         # The other half of the ordering pin, and the one that fails if a
@@ -1483,8 +1591,8 @@ class TestPriorGates:
         # A16-A19 read `warm_start.blocks` because `exits.py:269` hands them
         # to the same `SamplingPlan`; A23 must not, because that plan is
         # `.estimate()`d and `require_priors` is called from `.sample()`
-        # alone (`plan.py:1064-1066`) -- and `_WARM_KEYS` (`exits.py:171`)
-        # plus `exits.py:250` allow no `kind:` there but `plan.estimate`.
+        # alone (`plan.py:1064-1066`) -- and `_WARM_KEYS` (`exits.py:172`)
+        # plus `exits.py:268-271` allow no `kind:` there but `plan.estimate`.
         # Kills copying Task 7's `_t7_sites` walk into this check: that
         # refuses a document the package runs.
         assert _gates(preflight_document(
@@ -1516,8 +1624,8 @@ class TestPriorGates:
         decision is inherited rather than rediscovered.
 
         ``fisher_information(space=...)`` has TWO callers under ``config/``:
-        ``exits.py:60`` (``kind: fisher`` with ``space: true``, which A21 and
-        A23's fisher leg guard) and ``conjugate.py:194``, where
+        ``exits.py:61`` (``kind: fisher`` with ``space: true``, which A21 and
+        A23's fisher leg guard) and ``conjugate.py:195``, where
         ``width: fisher`` on a ``kind: conjugate.wiener`` run passes
         ``space=`` UNCONDITIONALLY.  Measured through ``run_document`` this
         session, on a two-latent block that IS the whole space:
@@ -1529,7 +1637,7 @@ class TestPriorGates:
           document reaches ``uncertainty.py:313`` verbatim (*"fisher_
           information was given space= a ParameterSpace declaring
           JeffreysPrior(over=['d', 'a'])"*) and the prior-free one reaches
-          ``:348`` (*"latent 'a' declares no prior"*) -- both after every
+          ``:347-357`` (*"latent 'a' declares no prior"*) -- both after every
           beam.
 
         **Not closed, deliberately, and the reason is P-1's own boundary.**
@@ -1553,7 +1661,7 @@ class TestPriorGates:
                    "names": ["w"], "width": "fisher"}])) == []
 
     def test_a_declared_but_MALFORMED_prior_is_still_a_declared_prior(self):
-        # `_parse_prior` (`parameters.py:69-75`) returns None for an ABSENT
+        # `_parse_prior` (`parameters.py:71-72`) returns None for an ABSENT
         # `prior:` and for nothing else; anything present is refused in its
         # own words ("is a mapping naming one family").  Kills
         # `.get("prior") is None` weakened to `not .get("prior")`: an empty
@@ -1587,8 +1695,9 @@ class TestPriorGates:
         ``run_document``.  A P-1 refusal makes the whole document unloadable,
         so ``results['amortized'].error`` could never exist: measured, without
         this guard that class goes red naming a check it was never about.
-        Task 7's ``_blocks`` stands down for the same reason
-        (``exits.py:293-303`` captures the executor's error as the product).
+        Task 7's ``_blocks`` stands down for the same reason (``execute_run``
+        at ``exits.py:301`` captures the executor's error as the run's
+        product at ``:314-316``).
         """
         from tests.config.posterior_helpers import joint_prior_document
 
@@ -1680,83 +1789,186 @@ class TestPriorGates:
         assert seen == {"A20", "A21", "A23"}
 
 
-class TestThePriorGateMessagesSayWhichEditToMake:
-    """Clause by clause, because for a validation layer the message IS the
-    product.
+#: A one-latent, prior-free space, and a joint prior over IT, so that every
+#: message row below can be driven at a coverage other than ``['d', 'a']``.
+#: A hard-coded ``covers ['d', 'a']`` survives any suite whose joint-prior
+#: documents all cover the same pair.
+ONLY_W = {"w": NONLINEAR_W}
+JOINT_W = {"jeffreys": {"over": ["w"]}}
+
+#: Every refusal Task 8 can emit, frozen WHOLE.
+#:
+#: A ``match=`` on one fragment leaves every other clause free to be wrong,
+#: and that is where Task 6's survivors lived (eight of nine) and where this
+#: task's first review found ten more.  Whole-string equality against a
+#: LITERAL is the only form that pins all of them at once: an equality
+#: against ``str(the function that produced it)`` -- which this module shipped
+#: for the ``plan.estimate`` row -- compares a value with itself and can
+#: never fail.
+#:
+#: Each row was read out of the shipped code once and then reasoned about
+#: clause by clause: the verb is per route (``fisher`` computes, it does not
+#: draw), the ``because`` names why THIS route needs a prior, and the fix
+#: names an edit that does not walk into another refusal.  Re-wrapping a
+#: string here is not a cosmetic change -- it is a change to what a user
+#: reads, and the test says so by failing.
+_T8_MESSAGES = [
+    ("A20", dict(inference={"parameters": COVERED, "joint_prior": JOINT},
+                 runs=[{"name": "fit", "kind": "plan.sample"}]),
+     "runs['fit']: inference.joint_prior covers ['d', 'a'], and kind: "
+     "plan.sample does not evaluate a joint prior -- each block's conditional "
+     "is built from the latent's OWN prior:, and a covered latent declares "
+     "none, so the density contributes exactly zero. The sweep would run, "
+     "settle, and report a converged chi-squared computed entirely from "
+     "blocks that never saw the prior. kind: nuts is the exit that evaluates "
+     "it; use that, or drop inference.joint_prior (check A20)."),
+    ("A20-at-another-coverage",
+     dict(inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
+          runs=[{"name": "fit", "kind": "plan.estimate"}]),
+     "runs['fit']: inference.joint_prior covers ['w'], and kind: "
+     "plan.estimate does not evaluate a joint prior -- each block's "
+     "conditional is built from the latent's OWN prior:, and a covered latent "
+     "declares none, so the density contributes exactly zero. The sweep would "
+     "run, settle, and report a converged chi-squared computed entirely from "
+     "blocks that never saw the prior. kind: nuts is the exit that evaluates "
+     "it; use that, or drop inference.joint_prior (check A20)."),
+    ("A21", dict(inference={"parameters": COVERED, "joint_prior": JOINT},
+                 runs=[{"name": "f", "kind": "fisher", "space": True}]),
+     "runs['f']: inference.joint_prior covers ['d', 'a'], and space: true "
+     "means 'add the declared priors' curvature to this matrix'. A Jeffreys "
+     "prior is DEFINED as sqrt(det of that matrix), so adding it would put it "
+     "inside its own definition: what comes back is not the posterior "
+     "precision it would be labelled as, and it is finite, symmetric and "
+     "positive definite, so nothing downstream would say otherwise. Drop "
+     "space: true -- the likelihood Fisher is what the prior is built from -- "
+     "or read the posterior with kind: nuts (check A21)."),
+    ("A21-at-another-coverage",
+     dict(inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
+          runs=[{"name": "f", "kind": "fisher", "space": True}]),
+     "runs['f']: inference.joint_prior covers ['w'], and space: true means "
+     "'add the declared priors' curvature to this matrix'. A Jeffreys prior "
+     "is DEFINED as sqrt(det of that matrix), so adding it would put it "
+     "inside its own definition: what comes back is not the posterior "
+     "precision it would be labelled as, and it is finite, symmetric and "
+     "positive definite, so nothing downstream would say otherwise. Drop "
+     "space: true -- the likelihood Fisher is what the prior is built from -- "
+     "or read the posterior with kind: nuts (check A21)."),
+    ("A23-nuts-no-joint-prior",
+     dict(inference={"parameters": ONLY_W},
+          runs=[{"name": "chain", "kind": "nuts"}]),
+     "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
+     "declares ['w'] with no prior: and no inference.joint_prior covers them. "
+     "A prior-free latent is a free parameter, which the calibrator exits "
+     "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
+     "each one a prior:, or run one of those (check A23)."),
+    ("A23-nuts-covering-somebody-else",
+     dict(inference={"parameters": {**COVERED, "w": NONLINEAR_W},
+                     "joint_prior": JOINT},
+          runs=[{"name": "chain", "kind": "nuts"}]),
+     "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
+     "declares ['w'] with no prior: and the inference.joint_prior this "
+     "document declares covers ['d', 'a'] and not them. A prior-free latent "
+     "is a free parameter, which a posterior cannot fit. Give each one a "
+     "prior:, or add it to inference.joint_prior.over, which already covers "
+     "['d', 'a']. Not kind: plan.estimate or kind: plan.sample -- A20 refuses "
+     "both beside a joint prior, so switching would trade this refusal for "
+     "that one (check A23)."),
+    ("A23-npe-no-joint-prior",
+     dict(inference={"parameters": ONLY_W},
+          runs=[{"name": "amortized", "kind": "npe"}]),
+     "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
+     "declares ['w'] with no prior: and kind: npe SIMULATES a bank from each "
+     "latent's OWN prior, consulting inference.joint_prior not at all. A "
+     "prior-free latent is a free parameter, which the calibrator exits "
+     "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
+     "each one a prior:, or run one of those (check A23)."),
+    ("A23-npe-covering-the-named-latents",
+     dict(inference={"parameters": COVERED, "joint_prior": JOINT},
+          runs=[{"name": "amortized", "kind": "npe"}]),
+     "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
+     "declares ['d', 'a'] with no prior: and kind: npe SIMULATES a bank from "
+     "each latent's OWN prior, consulting inference.joint_prior not at all. A "
+     "prior-free latent is a free parameter, which a posterior cannot fit. "
+     "inference.joint_prior already covers ['d', 'a'], and a latent may not "
+     "be covered AND declare a prior: of its own (check A22), so declaring "
+     "one is not the fix here: run kind: nuts, which reads joint-prior "
+     "coverage as a prior, or drop inference.joint_prior and give every "
+     "latent a prior: of its own. Not kind: plan.estimate or kind: "
+     "plan.sample -- A20 refuses both beside a joint prior (check A23)."),
+    ("A23-fisher",
+     dict(inference={"parameters": ONLY_W},
+          runs=[{"name": "f", "kind": "fisher", "space": True}]),
+     "runs['f']: kind: fisher computes a POSTERIOR precision, and "
+     "inference.parameters declares ['w'] with no prior: and space: true asks "
+     "for a posterior precision, which a prior-free latent has no row of -- "
+     "drop space: and what comes back is the likelihood Fisher, which is that "
+     "same matrix without the priors in it. A prior-free latent is a free "
+     "parameter, which the calibrator exits (kind: optimize, kind: "
+     "plan.estimate) fit and a posterior cannot. Give each one a prior:, or "
+     "run one of those (check A23)."),
+    ("A23-plan-sample-gradient-block",
+     dict(inference={"parameters": ONLY_W},
+          runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
+                 "seed": {"from": "runtime.seeds.s"},
+                 "blocks": [{"names": ["w"]}]}]),
+     "runs['fit']: kind: plan.sample draws a POSTERIOR, and "
+     "inference.parameters declares ['w'] with no prior: and a block stepped "
+     "by the gradient engine needs a prior on every member -- the potential "
+     "is flat in a prior-free latent and the chain wanders without any "
+     "diagnostic saying so. A prior-free latent is a free parameter, which "
+     "the calibrator exits (kind: optimize, kind: plan.estimate) fit and a "
+     "posterior cannot. Give each one a prior:, or run one of those "
+     "(check A23)."),
+]
+
+
+class TestThePriorGateMessagesAreExactlyThese:
+    """Whole-string equality, against literals, for every route.
 
     Task 6's carry-forward: eight of nine surviving mutants lived in refusal
-    TEXT rather than in predicate logic, and a ``match=`` on one fragment
-    leaves every other clause free to be wrong.  Each assertion below reads a
-    separate clause, so each can be mutated on its own.
+    TEXT rather than in predicate logic.  This task's first review found ten
+    more in the three lifted A29 strings and six in A20/A21/A23 -- including
+    a hard-coded ``kind: nuts`` that told an ``npe`` run it was a ``nuts``
+    run, a hard-coded ``covers ['d', 'a']``, an A21 clause reading ``space:
+    false`` three clauses before advising ``Drop space: true``, and the whole
+    actionable half of A23 deletable.  Every one of them is a single string
+    away from a green suite under fragment assertions and dead under these.
     """
 
-    def test_A20_names_the_covered_latents_the_kind_and_BOTH_ways_out(self):
-        [one] = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"}}]))
-        assert one.message.startswith("runs['fit']: ")
-        assert "inference.joint_prior covers ['d', 'a']" in one.message
-        # the KIND, not the family: a user with a plan.sample must not be
-        # told about plan.estimate.
-        assert ("kind: plan.sample does not evaluate a joint prior"
-                in one.message)
-        # WHY it is silent rather than merely wrong -- the package's own
-        # measured sentence, which is the reason this is a refusal at all.
-        assert "contributes exactly zero" in one.message
-        assert "converged chi-squared" in one.message
-        # both ways out, by name
-        assert "kind: nuts is the exit that evaluates it" in one.message
-        assert "drop inference.joint_prior" in one.message
+    @pytest.mark.parametrize("label, patch, expected", _T8_MESSAGES,
+                             ids=[row[0] for row in _T8_MESSAGES])
+    def test_the_message_is_this_one(self, label, patch, expected):
+        [one] = _gates(preflight_document(**patch))
+        assert one.message == expected, label
 
-    def test_A21_says_the_prior_would_be_inside_its_own_definition(self):
-        [one] = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
-        assert one.message.startswith("runs['f']: ")
-        assert "inference.joint_prior covers ['d', 'a']" in one.message
-        assert "inside its own definition" in one.message
-        # the clause that says why nothing downstream would notice, which is
-        # what makes this a refusal rather than a note.
-        assert "positive definite" in one.message
-        assert "Drop space: true" in one.message
-        assert "kind: nuts" in one.message
+    def test_the_fix_clause_never_routes_a_reader_into_A20(self):
+        """The rule the literals encode, stated once so it is not only
+        implicit in them.
 
-    def test_the_nuts_clause_says_whether_a_joint_prior_is_there_at_all(self):
-        # The `because` fork on the nuts leg, which no other test reads.
-        # Kills one wording for both: on a document with NO joint_prior,
-        # "this document declares no inference.joint_prior" is what tells the
-        # reader that covering it is an option they have not used, and on one
-        # that declares a joint prior covering somebody else the true
-        # sentence is the other.
+        Measured: with the calibrator-exit advice unconditional, a document
+        with ``inference.joint_prior`` over prior-free latents and a
+        ``kind: npe`` run is told *"or run one of those"*, and a reader who
+        writes ``kind: plan.estimate`` is refused by A20 for the joint prior
+        -- §2.6 item 4's contradiction running the other way, and a second
+        round trip for following the advice.  So no message that names a
+        joint prior may offer a ``plan.*`` exit as a fix.
+        """
+        for patch in (
+                dict(inference={"parameters": COVERED, "joint_prior": JOINT},
+                     runs=[{"name": "amortized", "kind": "npe"}]),
+                dict(inference={"parameters": {**COVERED, "w": NONLINEAR_W},
+                                "joint_prior": JOINT},
+                     runs=[{"name": "chain", "kind": "nuts"}])):
+            [one] = _gates(preflight_document(**patch))
+            assert "or run one of those" not in one.message
+            assert "A20 refuses both beside a joint prior" in one.message
+        # ...and on a document with NO joint prior the calibrator exits are
+        # the right advice and must still be there.
         [bare] = _gates(preflight_document(
-            inference={"parameters": {"w": NONLINEAR_W}},
-            runs=[{"name": "chain", "kind": "nuts"}]))
-        assert ("this document declares no inference.joint_prior"
-                in bare.message)
-        [partial] = _gates(preflight_document(
-            inference={"parameters": {**COVERED, "w": NONLINEAR_W},
-                       "joint_prior": JOINT},
-            runs=[{"name": "chain", "kind": "nuts"}]))
-        assert "no inference.joint_prior covering them" in partial.message
-        assert "['w']" in partial.message
-        # ...and the covered pair is NOT named as missing, which is the whole
-        # asymmetry: `to_numpyro_model` accepts them.
-        assert "'d'" not in partial.message and "'a'" not in partial.message
-
-    def test_the_fisher_clause_is_not_the_npe_clause(self):
-        # Four routes, one sentence, and `because` is the only thing telling
-        # them apart.  Kills a route handed another route's clause.
-        [fisher] = _gates(preflight_document(
-            inference={"parameters": {"w": NONLINEAR_W}},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
-        [npe] = _gates(preflight_document(
-            inference={"parameters": {"w": NONLINEAR_W}},
+            inference={"parameters": ONLY_W},
             runs=[{"name": "amortized", "kind": "npe"}]))
-        assert "posterior precision" in fisher.message
-        assert "SIMULATES a bank" in npe.message
-        assert "SIMULATES" not in fisher.message
-        assert "posterior precision" not in npe.message
+        assert "(kind: optimize, kind: plan.estimate)" in bare.message
+        assert "or run one of those" in bare.message
 
 
 class TestA23AgreesWithTheGATEItRunsInFrontOf:
@@ -1829,27 +2041,84 @@ SEED = {"from": "runtime.seeds.s"}
 NPE_SEEDS = {sub: {"seed": {"from": f"runtime.seeds.{sub}"}}
              for sub in ("bank", "create", "train", "sample")}
 
+#: The three refusals Task 8 lifted to module level in the sections that own
+#: them, as ``(id, run, body)``.  The ``runs['<name>']: `` prefix is applied
+#: by the caller, which is what lets ONE literal pin both the pass's finding
+#: and the section function's own raise -- without the literal being compared
+#: against the function that produced it.
+_T8_A29_LIFTED = [
+    ("plan.estimate", {"name": "fit", "kind": "plan.estimate", "seed": SEED},
+     "plan.estimate refuses a seed -- the asymmetry is the package's own "
+     "(sample takes key=, estimate has no key parameter; check A29). Drop "
+     "it, or make this run plan.sample."),
+    ("conjugate.gcr", {"name": "g", "kind": "conjugate.gcr", "n_draws": 4},
+     "conjugate.gcr draws from the posterior, so seed: is required and has "
+     "no default -- gcr_sample's key= has none either (check A29). The "
+     "deterministic conjugate exits, conjugate.wiener and conjugate.gls, "
+     "refuse one instead."),
+    ("npe", {"name": "a", "kind": "npe", "seed": SEED},
+     "kind: npe needs FOUR seeds -- the bank draws theta from the priors, "
+     "create initialises the network's weights, train shuffles the "
+     "minibatches and sample draws -- so they are declared per subsection in "
+     "inference.npe: as seed: {from: runtime.seeds.<name>}, not once on the "
+     "run (check A29). A run carries one seed and this exit draws four "
+     "times."),
+]
+
 
 class TestSeeds:
-    def test_plan_estimate_refuses_a_seed_in_the_EXECUTORS_own_words(self):
-        # The move, as a byte-for-byte claim.  Kills a re-worded copy: §2.3
-        # makes `Report.raise_if_refused()` re-raise the first refusal
-        # verbatim, so a pass that says something else changes what every
-        # `pytest.raises(ConfigError, match=...)` in tests/config sees.  The
-        # string is compared against the extracted function's OWN output, so
-        # the two cannot drift.
-        from rheplicant.config.errors import ConfigError
-        from rheplicant.config.sections.exits import _a29_estimate_takes_no_seed
+    @pytest.mark.parametrize("run, body", [row[1:] for row in _T8_A29_LIFTED],
+                             ids=[row[0] for row in _T8_A29_LIFTED])
+    def test_the_three_lifted_refusals_say_exactly_this(self, run, body):
+        """The move, as a byte-for-byte claim -- against a LITERAL.
 
-        with pytest.raises(ConfigError) as caught:
-            _a29_estimate_takes_no_seed("runs['fit']", {"seed": SEED})
+        This test used to compare ``found[0].message`` with
+        ``str(caught.value)`` from the very function that produced it, which
+        is a value compared with itself and can never fail.  Under it ten
+        text mutants survived, every one of them reachable by an ordinary
+        document: the ``plan.estimate`` asymmetry stated backwards
+        (*"estimate takes key=, sample has no key parameter"*); its fix
+        clause changed to *"make this run plan.estimate"*, which tells the
+        reader to keep the very kind being refused; the whole fix sentence
+        deleted; ``gcr``'s *"gcr_sample's key= has none either"* flipped to
+        *"has one already"*, contradicting its own clause; *"draws from the
+        posterior"* -> *"from the prior"*; *"refuse one instead"* ->
+        *"require one instead"*, inverting the sibling rule; npe's four roles
+        permuted so ``train`` initialises weights and ``create`` shuffles
+        minibatches; *"draws theta from the priors"* -> *"from the
+        posterior"*; npe's fix clause changed to name ``runs[]:``, the very
+        place the message is refusing; and the declared form changed to
+        ``seed: <integer>``, which ``_seed_name`` then refuses.
+
+        §2.3 makes ``Report.raise_if_refused()`` re-raise the first refusal
+        verbatim, so these three strings are what nearly every user with a
+        seed mistake now reads -- the pass reaches them before the executor
+        does on every document route.
+        """
         found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.estimate", "seed": SEED,
-                   "blocks": [{"names": ["d", "a", "w"]}]}]))
+            inference={"parameters": PRIORED}, runs=[run]))
         assert [f.check for f in found] == ["A29"]
-        assert found[0].message == str(caught.value)
-        assert "plan.estimate refuses a seed" in found[0].message
+        assert found[0].message == f"runs[{run['name']!r}]: {body}"
+
+    def test_the_lifted_refusals_are_the_SECTIONS_own_strings(self):
+        # The literals above are not a second copy of the sections': each is
+        # asserted here against what the section's own function RAISES, at a
+        # `where` no document produces.  So a deliberate reword fails the
+        # rows above (which is the point of freezing them) and an accidental
+        # divergence between the pass and the executor fails this one.
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.conjugate import _a29_gcr_needs_a_seed
+        from rheplicant.config.sections.exits import _a29_estimate_takes_no_seed
+        from rheplicant.config.sections.npe import _a29_npe_takes_no_run_seed
+
+        gates = ((_a29_estimate_takes_no_seed, {"seed": SEED}),
+                 (_a29_gcr_needs_a_seed, {}),
+                 (_a29_npe_takes_no_run_seed, {"seed": SEED}))
+        for (gate, options), (_, _, body) in zip(gates, _T8_A29_LIFTED,
+                                                 strict=True):
+            with pytest.raises(ConfigError) as caught:
+                gate("runs['x']", options)
+            assert str(caught.value) == f"runs['x']: {body}"
 
     def test_plan_sample_requires_one(self):
         found = _seedings(preflight_document(
@@ -1874,16 +2143,19 @@ class TestSeeds:
         assert "conjugate.wiener" in found[0].message
         assert "A29" in found[0].message
 
-    def test_nuts_requires_one_BEFORE_to_numpyro_model_would_be_built(self):
-        # The sentence this task exists for.  `nuts.py:300` reads the seed
-        # after `:287` builds `to_numpyro_model`; the pass reads text.  The
-        # brief's second assertion here was `"numpyro" not in sys.modules or
-        # True` -- a tautology, and an honest one would be flaky, because
-        # another test in the same session may already have imported numpyro.
-        # The real guard for that property is Task 2's import-time invariant
-        # (`test_config_preflight.py` runs `import rheplicant.config` in a
-        # fresh interpreter and asserts numpyro is absent), so this test
-        # asserts what it can actually decide and points at the one that can.
+    def test_a_nuts_run_with_no_seed_is_refused_from_the_text(self):
+        # RENAMED.  It was `test_nuts_requires_one_BEFORE_to_numpyro_model_
+        # would_be_built`, and it asserted no such thing -- only that A29
+        # fires.  The phase claim is real (`nuts.py:300` reads the seed after
+        # `:287` builds `to_numpyro_model`) but it belongs to
+        # `test_a_missing_seed_wins_against_a_beam_that_cannot_be_read`,
+        # which drives `load_document`, and to Task 2's import-time
+        # invariant, which runs `import rheplicant.config` in a fresh
+        # interpreter and asserts numpyro is absent.  The brief's own
+        # second assertion here was `"numpyro" not in sys.modules or True`,
+        # a tautology; an honest one would be flaky, because another test in
+        # the session may already have imported numpyro.  A test name that
+        # claims more than its assertions is the shape this plan is about.
         found = _seedings(preflight_document(
             inference={"parameters": PRIORED},
             runs=[{"name": "chain", "kind": "nuts"}]))
@@ -1905,7 +2177,7 @@ class TestSeeds:
         assert found[1].where == "inference.npe.train"
         assert "'seed' is required and has no default" in found[1].message
         # the per-subsection message wears the subsection's own prefix, which
-        # is what `_seeded` (`npe.py:227`) passes -- a reader told
+        # is what `_seeded` (`npe.py:257`) passes -- a reader told
         # `runs['amortized']:` would go and edit the run the FIRST finding
         # told them to strip a seed from.
         assert found[1].message.startswith("inference.npe.train: ")
@@ -1942,9 +2214,10 @@ class TestSeeds:
             runs=[{"kind": "forward"}])) == []
 
     def test_the_embed_subsection_is_not_swept_for_a_seed(self):
-        # `inference.npe.embed:` is the fifth member of `_NPE_KEYS` and it
-        # declares NO seed -- measured, `_seeded` is called at `npe.py:240`,
-        # `:251`, `:263` and `:283`, all four of them a subsection this check
+        # `inference.npe.embed:` is a member of `_NPE_KEYS` (`npe.py:108`,
+        # where it is written second -- and a frozenset orders nothing) and
+        # it declares NO seed: measured, `_seeded` is called at `npe.py:270`,
+        # `:281`, `:293` and `:313`, all four of them a subsection this check
         # lists, and never for `embed`.  Kills a loop over the section's OWN
         # keys instead of `_A29_NPE_SUBSECTIONS`: that refuses a document the
         # package runs, telling the reader a seed is missing from a
@@ -1970,8 +2243,12 @@ class TestSeeds:
             runs=[{"name": "amortized", "kind": "npe"}])) == []
 
     def test_condition_is_OUTSIDE_a29(self):
-        # `conjugate.py:568-572` takes an OPTIONAL seed.  Kills "every exit
-        # that touches a key called seed needs one": that would refuse a
+        # `_CONDITION_KEYS` (`conjugate.py:108`) carries `seed`, and
+        # `_run_condition` reads it only `if "seed" in run.options`
+        # (`:685-690`), so it is OPTIONAL -- `condition_estimate`'s `key`
+        # defaults internally, which that executor's docstring argues at
+        # `:645-649`.  Kills "every exit that touches a key called seed
+        # needs one": that would refuse a
         # `kind: condition` run the package runs, and the survey's own table
         # calls this out as correctly excluded.
         assert _seedings(preflight_document(
@@ -1996,7 +2273,7 @@ class TestSeeds:
         # `_seed_name` decides FORM.  Kills `gated` widened to "skip
         # `_seed_name` whenever a gate exists for this kind", under which a
         # `seed: {from: nowhere.x}` on a gcr run passes P-1 and dies at
-        # `draws.py:114`, behind the beam.
+        # `draws.py:115-120`, behind the beam.
         found = _seedings(preflight_document(
             inference={"parameters": THREE},
             runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4,
@@ -2005,13 +2282,16 @@ class TestSeeds:
         assert "it must be under runtime.seeds." in found[0].message
 
     def test_the_run_keys_come_from_runs_py(self):
-        # `_seeds` builds `options` as "every key that is not a RUN key", so
-        # `_RUN_KEYS` decides what reaches `_seed_name`.  The CONTENT
-        # assertion is the test and it is stated honestly: no document can
-        # distinguish `dict(run)` from the filtered form today, because no
-        # RUN key is called `seed` -- what the pin buys is that a sixth key
-        # added to `runs.py`'s tuple turns this red rather than arriving as
-        # an OPTION at P-1 while travelling on the RunSpec at P3.
+        # `_seeds` builds `options` as "every key that is not a RUN key", and
+        # `options = dict(run)` is an EQUIVALENT MUTANT: measured, it
+        # survives this whole module, because the only key any consumer of
+        # `options` reads is `seed` and no RUN key is called `seed`.  The
+        # CONTENT assertion below is therefore the whole test, and its scope
+        # is narrower than an earlier version of this comment claimed -- a
+        # sixth `_RUN_KEYS` member changes what reaches `_seed_name` only if
+        # it is literally named `seed`, and what this pin actually buys is
+        # that the pass and `RunSpec.options` (`runs.py:113-114`) go on
+        # agreeing about which keys are the RUN's rather than the exit's.
         from rheplicant.config.sections.runs import _RUN_KEYS
 
         assert set(_RUN_KEYS) == {"expect", "kind", "name", "on", "reuse",
@@ -2067,10 +2347,11 @@ class TestSeeds:
                    "blocks": [{"names": ["d", "a", "w"]}]}]))) == 1
 
     def test_a_warm_starts_seed_is_left_to_the_key_sweep(self):
-        # THE TWIN of `plan.estimate refuses a seed`: `exits.py:269` builds a
-        # SECOND plan and `.estimate()`s it, from `warm_start:`, whose own
-        # `kind:` must be `plan.estimate` (`exits.py:250`).  It is NOT A29's,
-        # because `_WARM_KEYS` (`exits.py:171`) has no `seed` at all, so the
+        # THE TWIN of `plan.estimate refuses a seed`: `exits.py:287-288`
+        # builds a SECOND plan and `.estimate()`s it, from `warm_start:`,
+        # whose own `kind:` must be `plan.estimate` (`exits.py:268-271`).  It
+        # is NOT A29's, because `_WARM_KEYS` (`exits.py:172`) has no `seed`
+        # at all, so the
         # unknown-key sweep already says "warm_start does not take ['seed']"
         # -- a more specific sentence, and Task 3's `A1.runs` reaches the run
         # level of the same document before the beam.  Kills widening the

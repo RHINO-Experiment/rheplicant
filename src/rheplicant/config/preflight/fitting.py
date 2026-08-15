@@ -641,30 +641,31 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
 def _a20_joint_over(document: Mapping[str, Any]) -> tuple[str, ...]:
     """The latent names ``inference.joint_prior`` covers, or ``()``.
 
-    ``{jeffreys: {over: [...]}}`` is the grammar and the only one:
-    ``transforms._joint_prior`` (``:298-321``) refuses anything else, and
+    ``{jeffreys: {over: ...}}`` is the grammar and the only one:
+    ``transforms._joint_prior`` (``:298-320``) refuses anything else, and
     ``{kind: jeffreys, names: [...]}`` is refused by name there.  So coverage
-    is a list of strings in the document and nothing has to be built to read
-    it.
+    is text in the document and nothing has to be built to read it.
 
-    Every level is type-tested rather than subscripted.  ``_structural``
-    guarantees a SECTION is present, never that it is a mapping (Task 4's
-    measurement), and ``over:`` is user text that reaches this function
-    before ``JeffreysPrior`` ever sees it -- inside the pass a ``TypeError``
-    becomes "check A20 RAISED" and discards every other finding.  A shape the
-    grammar refuses reads as no coverage, which stands this check down and
-    leaves the sentence to ``_joint_prior``.
+    **``tuple(over)`` is what the package does, and this mirrors it rather
+    than narrowing it.**  ``_joint_prior`` ends
+    ``JeffreysPrior(over=tuple(body["over"]), **kwargs)`` (``:320``), so FIVE
+    shapes besides a list of strings build a real prior -- measured through
+    ``run_document``: ``over: da`` and ``over: 'd'`` (a bare YAML scalar,
+    split into characters), ``over: {d: 1, a: 2}`` and ``over: {d: 1}``
+    (ordinary YAML, iterated as its keys) and ``over: ('d', 'a')``.  An
+    earlier version of this reader required a ``list`` and answered ``()`` for
+    all five, so ``over: da`` on a ``kind: plan.*`` document reached
+    ``ParameterSpaceError: ... no block would step it at all`` **behind the
+    beam**, which is the one thing A20 exists to prevent.  Reading what the
+    package reads is what closes that.
 
-    **One hole, recorded rather than closed.**  ``over: da`` -- a bare YAML
-    scalar -- is read by ``_joint_prior`` as ``tuple("da") == ('d', 'a')``
-    (measured), so such a document does reach ``JeffreysPrior`` and this
-    reader answers ``()`` for it.  Splitting a string into characters is an
-    accident of ``tuple()`` rather than a grammar, and A20 telling somebody
-    who wrote ``over: da`` that their joint prior "covers ['d', 'a']" would
-    name a coverage they did not write.  A non-string MEMBER of a real list
-    is dropped for the same reason and the rest of the list is still read:
-    ``over: [d, 7]`` covers ``['d']`` here, and which name is wrong is
-    ``JeffreysPrior.validate_against``'s sentence.
+    Two guards, and both are about the pass rather than about the grammar.
+    ``tuple()`` raises ``TypeError`` on ``over: 7``, and inside the pass a
+    ``TypeError`` becomes "check A20 RAISED" and discards every other
+    finding.  And a member that is not a string cannot be looked up in the
+    latents without risking an unhashable key, so a mixed ``over:`` reads as
+    no coverage and ``JeffreysPrior.validate_against`` -- which names WHICH
+    member is wrong, as A20 does not -- keeps that document.
     """
     inference = document.get("inference")
     if not isinstance(inference, Mapping):
@@ -675,10 +676,35 @@ def _a20_joint_over(document: Mapping[str, Any]) -> tuple[str, ...]:
     body = joint.get("jeffreys")
     if not isinstance(body, Mapping):
         return ()
-    over = body.get("over")
-    if not isinstance(over, list):
+    try:
+        names = tuple(body.get("over"))
+    except TypeError:
         return ()
-    return tuple(name for name in over if isinstance(name, str))
+    if not all(isinstance(name, str) for name in names):
+        return ()
+    return names
+
+
+def _a23_latents(document: Mapping[str, Any]) -> dict[str, Any]:
+    """:func:`_latents`, minus every latent whose BODY the grammar refuses.
+
+    ``_latents`` (Task 7) keeps the NAME of a latent whose body is not a
+    mapping and reads the body as ``{}``, deliberately and rightly for A16:
+    dropping it would make a block that covers that latent look like a block
+    over a name ``inference.parameters`` never declared.  **A23 must not
+    inherit that**, and did until this was written.  A ``{}`` body has no
+    ``prior:``, so ``w: 7`` reads as prior-free and A23 answers *"declare a
+    prior:"* in front of ``sections/parameters.py``'s *"inference.parameters.w:
+    is a mapping; got 7"* -- which is the fault the reader actually has.
+
+    ``if body`` is the whole filter and it needs no second reader of
+    ``inference.parameters``: measured, every body that reads as empty here
+    is one the grammar refuses on its own terms -- ``w: 7``, ``w: ['x']`` and
+    ``w: 'oops'`` as *"is a mapping; got ..."*, and a genuinely empty
+    ``w: {}`` as *"init: is required"*, because ``init:`` is required of every
+    latent.  So an empty body is never a latent A23 could be right about.
+    """
+    return {name: body for name, body in _latents(document).items() if body}
 
 
 def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
@@ -687,23 +713,72 @@ def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
 
     ``Latent.prior`` comes from ``spec.get("prior")`` and from nowhere else
     (``parameters.py:195``; ``_parse_prior`` returns None for a missing key at
-    ``:69-70``), so "does this latent declare a prior" is a text question.
+    ``:71-72`` and for no other value), so "does this latent declare a prior"
+    is a text question -- and a prior that is present but malformed is a
+    DECLARED prior, refused by ``_parse_prior`` in its own words.
     ``covered`` is non-empty only for the ``nuts`` route, which is the one
     route that counts ``inference.joint_prior`` coverage as a prior --
-    ``to_numpyro_model`` accepts a covered latent (``numpyro_bridge.py:66-79``)
-    and ``simulate_pairs`` does not (``npe.py:111-118``).
+    ``to_numpyro_model`` accepts a covered latent (``numpyro_bridge.py:68-73``)
+    and ``simulate_pairs`` does not (``npe.py:111-117``).
 
-    **``names`` must already be names the document DECLARES.**  An absent
-    latent reads as prior-free here, and on the ``plan.sample`` leg -- the one
-    route whose names come from a block rather than from
-    ``inference.parameters`` -- that would put an A23 refusal beside A16's
-    *"names 'zzz', which inference.parameters does not declare"*: one typo,
-    two refusals, two different fixes.  The caller filters; this function
-    cannot, because on the other three routes ``names`` IS the declaration.
+    **``names`` must already be names the document DECLARES WELL** -- the
+    keys of :func:`_a23_latents`, or a subset of them.  An absent latent reads
+    as prior-free here, and on the ``plan.sample`` leg -- the one route whose
+    names come from a block rather than from ``inference.parameters`` -- that
+    would put an A23 refusal beside A16's *"names 'zzz', which
+    inference.parameters does not declare"*: one typo, two refusals, two
+    different fixes.  The caller filters; this function cannot, because on the
+    other three routes ``names`` IS the declaration.
     """
     return [name for name in names
             if latents.get(name, {}).get("prior") is None
             and name not in covered]
+
+
+def _a23_message(named: str, kind: str, missing: list[str], because: str,
+                 covered: tuple[str, ...]) -> str:
+    """A23's refusal: one shape, and three clauses the document decides.
+
+    **The verb is per route.**  ``kind: fisher`` with ``space: true`` does not
+    draw anything -- ``fisher_information`` computes a posterior precision
+    (``uncertainty.py:346-357``) -- so a shared *"draws a POSTERIOR"* is false
+    on one of the four routes, and measured, nothing in the suite could tell.
+
+    **The fix clause is the one that can send a reader into another
+    refusal.**  *"or run one of those"* names the calibrator exits, and
+    ``kind: plan.estimate`` and ``kind: plan.sample`` are both refused beside
+    an ``inference.joint_prior`` by A20 -- so on a covered document the advice
+    trades this refusal for that one, which is §2.6 item 4's contradiction
+    running the other way.  And where a NAMED latent is itself covered (only
+    ``kind: npe`` reaches that, because it ignores coverage by design)
+    *"declare a prior:"* is refused by A22, so that branch says so and offers
+    the exit that does read coverage as a prior.
+    """
+    verb = ("computes a POSTERIOR precision" if kind == "fisher"
+            else "draws a POSTERIOR")
+    overlap = [name for name in missing if name in covered]
+    if not covered:
+        fix = ("A prior-free latent is a free parameter, which the calibrator "
+               "exits (kind: optimize, kind: plan.estimate) fit and a "
+               "posterior cannot. Give each one a prior:, or run one of those")
+    elif overlap:
+        fix = ("A prior-free latent is a free parameter, which a posterior "
+               f"cannot fit. inference.joint_prior already covers {overlap}, "
+               "and a latent may not be covered AND declare a prior: of its "
+               "own (check A22), so declaring one is not the fix here: run "
+               "kind: nuts, which reads joint-prior coverage as a prior, or "
+               "drop inference.joint_prior and give every latent a prior: of "
+               "its own. Not kind: plan.estimate or kind: plan.sample -- A20 "
+               "refuses both beside a joint prior")
+    else:
+        fix = ("A prior-free latent is a free parameter, which a posterior "
+               "cannot fit. Give each one a prior:, or add it to "
+               "inference.joint_prior.over, which already covers "
+               f"{list(covered)}. Not kind: plan.estimate or kind: "
+               "plan.sample -- A20 refuses both beside a joint prior, so "
+               "switching would trade this refusal for that one")
+    return (f"{named}: kind: {kind} {verb}, and inference.parameters declares "
+            f"{missing} with no prior: {because}. {fix} (check A23).")
 
 
 @register("A20", "A21", "A23")
@@ -726,24 +801,39 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
     the two refusals name different edits.
 
     ``nuts`` and ``npe`` keep their own gate at
-    ``posterior_support._sampled_space`` (``:68-149``) as the P3 second
+    ``posterior_support._sampled_space`` (``:68-150``) as the P3 second
     opinion; this function does not call it and does not change it -- it
-    needs a BUILT space (``:76``), which P-1 may not make.
+    needs a BUILT space (``:77``), which P-1 may not make.
 
     **A run declaring ``expect: refuse`` is left alone**, for the reason
-    :func:`_blocks` gives and with a document to point at:
-    ``execute_run`` (``exits.py:293-303``) captures such a run's error as its
-    product, and a P-1 refusal makes the whole document unloadable, so the
-    assertion could never be made.  ``posterior_helpers.joint_prior_document``
-    is exactly that document -- ``kind: npe`` under ``expect: refuse`` beside
-    a ``kind: nuts`` that runs, over ONE joint-prior space -- and it is what
+    :func:`_blocks` gives and with a document to point at: ``execute_run``
+    (``exits.py:301``) runs such a run's executor and captures its error as
+    the run's product (``:314-316``), and a P-1 refusal makes the whole
+    document unloadable, so the assertion could never be made.
+    ``posterior_helpers.joint_prior_document`` is exactly that document --
+    ``kind: npe`` under ``expect: refuse`` beside a ``kind: nuts`` that runs,
+    over ONE joint-prior space -- and it is what
     ``test_config_exits_npe.py::TestThePriorGate`` reads.  This clause was not
     in the task this function was written from; without it that class goes
     red.  The guard is per RUN, so the nuts run of that same document is
     still read.
+
+    **The joint prior is only this pass's business when the PACKAGE would
+    accept it.**  ``JeffreysPrior.validate_against`` refuses an ``over:``
+    naming a latent the space does not declare, and A22 refuses a covered
+    latent that also declares its own ``prior:`` -- and both of those name
+    WHICH latent is wrong, which A20's sentence does not.  A20 in front of
+    either would send the reader to ``kind: nuts``, where the real fault is
+    waiting unchanged.  So ``covered`` is emptied unless every name in it is
+    declared and prior-free, which stands A20 and A21 down and costs A23
+    nothing: an undeclared name is in no A23 iteration, and a covered latent
+    that declares its own prior is not prior-free.
     """
-    latents = _latents(document)
+    latents = _a23_latents(document)
     covered = _a20_joint_over(document)
+    if not all(name in latents and latents[name].get("prior") is None
+               for name in covered):
+        covered = ()
     for index, run in enumerate(_runs(document)):
         kind = run.get("kind")
         if not isinstance(kind, str):
@@ -783,25 +873,45 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
 
         if kind == "nuts":
             missing = _a23_prior_free(latents, latents, covered)
-            because = ("and no inference.joint_prior covering them"
-                       if covered else "and this document declares no "
-                                       "inference.joint_prior")
+            # "no inference.joint_prior COVERS them", never "this document
+            # declares none": `covered` is emptied above for a joint prior
+            # the package would refuse, and a document that declares an
+            # `over: [zzz]` does declare one.  The earlier wording was false
+            # on exactly that document.
+            because = ("and the inference.joint_prior this document declares "
+                       f"covers {list(covered)} and not them"
+                       if covered else "and no inference.joint_prior covers "
+                                       "them")
         elif kind == "npe":
             missing = _a23_prior_free(latents, latents)
             because = ("and kind: npe SIMULATES a bank from each latent's OWN "
                        "prior, consulting inference.joint_prior not at all")
         elif kind == "fisher" and run.get("space") is True:
             missing = _a23_prior_free(latents, latents)
+            # The package's own way out, which A23 owes the reader as well as
+            # the calibrator exits: `uncertainty.py:354` says drop `space=`
+            # and what comes back is exactly the likelihood matrix.
             because = ("and space: true asks for a posterior precision, which "
-                       "a prior-free latent has no row of")
+                       "a prior-free latent has no row of -- drop space: and "
+                       "what comes back is the likelihood Fisher, which is "
+                       "that same matrix without the priors in it")
         elif kind == "plan.sample":
             # `_t7_entries`, not `run.get("blocks") or ()`: a `blocks: 5`
             # raises on iteration and a `blocks: "nope"` iterates into
             # characters, and a malformed list is one `exits._blocks`
-            # (`:180-202`) refuses in its own words.  `warm_start.blocks` is
+            # (`:181-207`) refuses in its own words.  `warm_start.blocks` is
             # NOT a site here, and that is measured rather than forgotten:
             # `require_priors` is called from `SamplingPlan.sample`
-            # (`plan.py:1064-1066`) and a warm start is `.estimate()`d.
+            # (`plan.py:1064-1066`) and a warm start is `.estimate()`d
+            # (`exits.py:287-288`).
+            #
+            # `== _T7_GRADIENT` and never `!= _T7_CONJUGATE`: `_engine_of`
+            # answers `""` for a block whose engine cannot be derived (A18's
+            # case) and returns a DECLARED engine unvalidated, so the
+            # complement also selects a mixed block and an `engine: banana`
+            # one -- putting an A23 refusal beside A18's "mixes
+            # declared-linear latents" and beside the enum clause's "asks for
+            # engine: 'banana'", about a block whose engine nobody knows.
             missing = sorted({
                 name
                 for entry in (_t7_entries(run.get("blocks")) or ())
@@ -818,30 +928,29 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
             continue
 
         if missing:
-            yield refuse(
-                "A23", where,
-                f"{named}: kind: {kind} draws a POSTERIOR, and "
-                f"inference.parameters declares {missing} with no prior: "
-                f"{because}. A prior-free latent is a free parameter, which "
-                "the calibrator exits (kind: optimize, kind: plan.estimate) "
-                "fit and a posterior cannot. Give each one a prior:, or run "
-                "one of those (check A23).")
+            yield refuse("A23", where,
+                         _a23_message(named, kind, missing, because, covered))
 
 
 #: Which ``runs[].kind`` needs a seed on the RUN.  ``npe`` is absent on
 #: purpose: it draws four times and declares its seeds per subsection in
-#: ``inference.npe:`` (``npe.py:216-228``), and a run-level ``seed:`` on it is
-#: refused rather than required.  ``condition`` is absent on purpose too: it
-#: takes an OPTIONAL seed (``conjugate.py:568-572``) and is correctly outside
-#: A29.
+#: ``inference.npe:`` (``npe._seeded``, ``:246-258``), and a run-level
+#: ``seed:`` on it is refused rather than required.  ``condition`` is absent
+#: on purpose too: ``_CONDITION_KEYS`` (``conjugate.py:108``) carries ``seed``
+#: and ``_run_condition`` reads it only ``if "seed" in run.options``
+#: (``:685-690``), so it is OPTIONAL there and correctly outside A29 --
+#: ``condition_estimate``'s ``key`` defaults internally, which that function's
+#: own docstring argues at ``:645-649``.
 _A29_SEEDED_KINDS: frozenset[str] = frozenset({"plan.sample", "conjugate.gcr",
                                                "nuts"})
 
 #: The subsections of ``inference.npe:`` that declare a seed, in the order
-#: ``parse_npe`` (``npe.py:364-368``) reads them.  ``embed:`` is the fifth
-#: member of ``_NPE_KEYS`` and is absent here because it declares none --
-#: measured, ``_seeded`` is called at ``npe.py:240``, ``:251``, ``:263`` and
-#: ``:283`` and nowhere else.
+#: ``parse_npe`` (``npe.py:394-398``) reads them.  ``embed:`` is the one
+#: member of ``_NPE_KEYS`` (``npe.py:108``) missing here, and it is missing
+#: because it declares no seed -- measured, ``_seeded`` is called at
+#: ``npe.py:270``, ``:281``, ``:293`` and ``:313`` and nowhere else.  (It is
+#: written second in that frozenset, which orders nothing; the order below is
+#: ``parse_npe``'s.)
 _A29_NPE_SUBSECTIONS: tuple[str, ...] = ("bank", "create", "train", "sample")
 
 
@@ -860,6 +969,14 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     literal seed and a name outside ``runtime.seeds.``, and resolves nothing.
     The RESOLUTION (``seed_for``) stays where the context is.
 
+    **Not byte for byte on every route**, and the difference is §3.2(c)'s.
+    The three lifted refusals already carry ``(check A29)`` mid-sentence and
+    are re-emitted verbatim; the two that come through ``_seed_name`` carry
+    no tag at all, so those two -- and every ``inference.npe.<sub>`` finding
+    -- get ``" (check A29)."`` APPENDED. Appending is safe because measured,
+    all 442 ``pytest.raises(ConfigError, match=...)`` assertions in
+    ``tests/config/`` are searches and none is anchored with ``$``.
+
     What moves is the phase.  ``nuts``'s seed is checked at ``nuts.py:300``,
     i.e. AFTER ``to_numpyro_model`` is built at ``:287`` -- the most expensive
     object that executor makes is constructed before the cheapest key on the
@@ -873,6 +990,15 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     is about the run kinds and the npe subsections, and answering for the
     other two here would put this check in front of two grammars that own
     their own sentences.
+
+    **And one leg of A29 is NOT hoisted, which is a hole in this plan's own
+    thesis rather than a decision about wording.**  An ABSENT
+    ``inference.npe.<sub>`` is left to ``npe._subsection`` (``:230-243``),
+    whose sentence is that the subsection is required rather than that a seed
+    is missing -- but ``parse_npe`` runs inside ``build_inference``, which is
+    after ``build_resources``, so that refusal still costs the beam.  Closing
+    it means A29 answering for a section the user has not written, which is a
+    worse sentence; recorded for §6's ledger.
     """
     from rheplicant.config.draws import _seed_name
     from rheplicant.config.sections.conjugate import _a29_gcr_needs_a_seed
@@ -932,9 +1058,10 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     for subsection in _A29_NPE_SUBSECTIONS:
         body = npe.get(subsection)
         # An ABSENT or malformed subsection is `npe._subsection`'s
-        # (``:199-207``), whose sentence is that the subsection is required
+        # (`:230-243`), whose sentence is that the subsection is required
         # rather than that a seed is missing.  Standing down leaves the
-        # reader the fault they actually have.
+        # reader the fault they actually have -- and leaves that leg behind
+        # the beam, which the docstring records as a hole.
         if not isinstance(body, Mapping):
             continue
         where = f"inference.npe.{subsection}"
