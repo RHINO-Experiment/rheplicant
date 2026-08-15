@@ -85,12 +85,23 @@ def _collected() -> dict[str, int]:
     # `-q` prints "path/to/test_x.py: N" per file. Summing those is exact,
     # where parsing a summary line is not: `addopts` already carries `-q`, so
     # this run is effectively `-qq` and prints no summary line at all.
+    #
+    # It prints a WARNINGS SUMMARY, though, and the sentence above missed it.
+    # Measured at Plan 3A's Task 12, the first task whose checks emit a
+    # `ConfigWarning` from a document a test module loads at import time: the
+    # summary's group header is bare `path/to/x.py:LINENO`, which the split
+    # below read as "LINENO tests in path/to/x.py". Two headers reading
+    # `tests/config/exit_helpers.py:226` credited 452 phantom tests and named a
+    # helper module as a collector, and the guard reported 6137 against a true
+    # 5685 -- a wrong number offered to a reader told to trust this message.
+    # The separator is what tells them apart: a count is `": "` and a line
+    # reference is `":"`.
     per_module: dict[str, int] = {}
     for line in result.stdout.splitlines():
         if not line.startswith("tests/"):
             continue
-        path, _, count = line.rpartition(":")
-        if not count.strip().isdigit():
+        path, sep, count = line.rpartition(": ")
+        if not sep or not count.strip().isdigit():
             continue
         per_module[path] = per_module.get(path, 0) + int(count)
     return per_module
