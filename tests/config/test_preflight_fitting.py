@@ -2269,3 +2269,852 @@ class TestNoHostileDocumentCanAbortTheTaskEightChecks:
         # cleanly.  Both of this task's `where`s are `runs[<int>]` and
         # `inference.npe.<literal>`, and this is what says so.
         preflight(_hostile_document(patch))
+
+
+# --- Task 9: the counts a run declares, and the six knobs A25 never named ---
+
+
+def _counted(document):
+    from rheplicant.config.preflight.fitting import _counts
+
+    return list(_counts(document))
+
+
+def _sample(**options):
+    return preflight_document(
+        inference={"parameters": PRIORED},
+        runs=[{"name": "fit", "kind": "plan.sample", "seed": SEED,
+               "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
+               **options}])
+
+
+def _estimate(**options):
+    return preflight_document(
+        inference={"parameters": PRIORED},
+        runs=[{"name": "fit", "kind": "plan.estimate",
+               "blocks": [{"names": ["d", "a"]}], **options}])
+
+
+def _warmed(**warm):
+    """A ``plan.sample`` whose ``warm_start`` the executor really reaches.
+
+    ``n_sweeps: 12`` keeps six draws, so nothing here earns A24 and the warm
+    start is the only subject.  All four gates ``_t7_warm_start`` applies are
+    satisfied -- the run's own ``kind: plan.sample``, a mapping, the warm
+    ``kind: plan.estimate``, and a usable ``move:`` -- because
+    ``exits.py:259-285`` refuses the run outright when any of them is not and
+    the passthrough at ``:288-290`` is then never reached.
+    """
+    return _sample(n_sweeps=12,
+                   warm_start={"kind": "plan.estimate", "move": ["d"],
+                               "blocks": [{"names": ["d", "a"]}], **warm})
+
+
+def _chain(**options):
+    return preflight_document(
+        inference={"parameters": PRIORED},
+        runs=[{"name": "chain", "kind": "nuts", "num_warmup": 2,
+               "num_samples": 2, "seed": {"from": "runtime.seeds.chain"},
+               **options}])
+
+
+class TestCounts:
+    @pytest.mark.parametrize("value", [0, -3])
+    def test_n_sweeps_below_one_is_refused(self, value):
+        # `exits.py:297` calls `_number(..., kind=int)` with NO `minimum=`,
+        # so today this reaches the package: `plan.py:1043-1045`, "sample()
+        # needs n_sweeps >= 1", at P3 behind the beam.  Kills deleting the
+        # `("n_sweeps", int, 1)` row from `_A25_KNOBS`.
+        #
+        # The `== ["A25"]` is also the whole test of `refused_counts`: with
+        # `n_sweeps: -3` and no guard, `_a24_kept_draws` returns `(-1, -2)`
+        # and A24 arrives beside A25 reading "keep -1 draw(s) (-3 sweeps
+        # minus -2 warmup)" -- a draw count nobody asked for.
+        found = _counted(_sample(n_sweeps=value))
+        assert [f.check for f in found] == ["A25"]
+        assert "n_sweeps: must be >= 1" in found[0].message
+
+    def test_a_count_that_is_not_whole_is_told_it_is_not_whole(self):
+        # The message this task FIXES, not merely moves.  `plan.py:900-902`
+        # tests `not isinstance(max_iter, int) or max_iter < 1` and reports
+        # only the second half, so `max_iter: 2.5` reaches the user as
+        # "estimate() needs max_iter >= 1, got 2.5" -- a false sentence,
+        # since 2.5 IS >= 1.  Kills an implementation that writes its own
+        # `value < minimum` test: that one accepts 2.5 and hands it on.
+        found = _counted(_estimate(max_iter=2.5))
+        assert [f.check for f in found] == ["A25"]
+        assert "is a whole number" in found[0].message
+        assert "must be >= 1" not in found[0].message
+
+    def test_the_bound_comes_from_the_layers_own_validator(self):
+        # 2C's shape 2: a docstring stating a caller that no test defends.
+        # `_a25_bounded` claims it calls `exit_support._number`; this asserts
+        # the message is byte-for-byte `_number`'s, so a hand-rolled copy
+        # fails even when it happens to refuse the same values.
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.exit_support import _number
+
+        with pytest.raises(ConfigError) as caught:
+            _number(type("R", (), {"name": "fit"})(), "max_iter", 2.5,
+                    kind=int, minimum=1)
+        found = _counted(_estimate(max_iter=2.5))
+        assert found[0].message == f"{caught.value} (check A25)."
+
+    def test_the_name_handed_to_the_validator_is_the_BARE_run_name(self):
+        # `_number` BUILDS the `runs['<name>']:` prefix itself (`:77`, `:89`,
+        # `:95`), so handing it the already-formatted `named` makes every A25
+        # message read `runs["runs['fit']"]:`.  Kills exactly that, which
+        # every `in` assertion in this class passes with.
+        found = _counted(_estimate(max_iter=2.5))
+        assert found[0].message.startswith("runs['fit']: max_iter:")
+
+    def test_min_sweeps_above_max_iter_is_refused_only_when_tol_is_live(self):
+        # BOTH directions in one test.  `plan.py:909` gates the pair on
+        # `tol is not None`, and `:943-946` short-circuits the same way, so
+        # with `tol: null` the pair is never consulted.  Kills an ungated
+        # pair check, which refuses a document the package runs, and kills
+        # dropping the check, which lets `min_sweeps: 9, max_iter: 2` reach
+        # `plan.py:913` at P3.
+        found = _counted(_estimate(min_sweeps=9, max_iter=2))
+        assert [f.check for f in found] == ["A25"]
+        assert "min_sweeps: 9 is above max_iter: 2" in found[0].message
+        assert _counted(_estimate(min_sweeps=9, max_iter=2, tol=None)) == []
+        # THE BOUNDARY, both sides.  `plan.py:910` reads
+        # `not 1 <= min_sweeps <= max_iter`, so EQUALITY is legal and only
+        # `floor > cap` is not.  Kills the guard written `floor >= cap` --
+        # which refuses a document the package runs and which `9 > 2` cannot
+        # see.  The pair either side of the threshold is the whole test.
+        assert _counted(_estimate(min_sweeps=2, max_iter=2)) == []
+        assert [f.check for f in
+                _counted(_estimate(min_sweeps=3, max_iter=2))] == ["A25"]
+
+    def test_the_min_sweeps_ROW_is_gated_on_tol_as_well_as_the_pair(self):
+        # The plan's own measurement table says `min_sweeps: 0` with
+        # `tol: null` earns NO REFUSAL from the package, and reading
+        # `plan.py:909` and `:943-946` says why: both are `tol is not None
+        # and ...`, so a `min_sweeps` beside `tol: null` is forwarded,
+        # validated by nothing and consulted by nothing.  Kills the
+        # ungated `("min_sweeps", int, 1)` row the task body shipped, which
+        # refuses a document the package RUNS -- Task 5's defect exactly.
+        assert _counted(_estimate(min_sweeps=0, tol=None)) == []
+        assert _counted(_estimate(min_sweeps=2.5, tol=None)) == []
+        # ...and with `tol` live the same two values ARE refused, so the
+        # gate cannot be widened into "never check min_sweeps".
+        assert [f.check for f in _counted(_estimate(min_sweeps=0))] == ["A25"]
+        assert "is a whole number" in _counted(
+            _estimate(min_sweeps=2.5))[0].message
+
+    def test_warmup_below_zero_is_refused_and_a_fractional_one_by_type(self):
+        # `plan.py:1048-1050` tests `not isinstance(warmup, int) or warmup <
+        # 0` and reports only the second half, so BOTH reach the user as
+        # "sample() needs warmup >= 0, got -1" and "... got 2.5" -- the
+        # second sentence being false.
+        below = _counted(_sample(n_sweeps=12, warmup=-1))
+        assert [f.check for f in below] == ["A25"]
+        assert "warmup: must be >= 0" in below[0].message
+        fractional = _counted(_sample(n_sweeps=12, warmup=2.5))
+        assert [f.check for f in fractional] == ["A25"]
+        assert "is a whole number" in fractional[0].message
+
+    @pytest.mark.parametrize("sweeps, kept, refused",
+                             [(5, 3, True), (6, 3, True), (7, 4, False)])
+    def test_the_default_warmup_boundary_is_exactly_MIN_DRAWS(self, sweeps,
+                                                              kept, refused):
+        # Boundary-validated on BOTH sides rather than at one point:
+        # `plan.py:1047` is `n_sweeps // 2 if warmup is None`, and `:1055` is
+        # `n_draw < MIN_DRAWS`, so 6 keeps 3 and refuses, 7 keeps 4 and runs.
+        # Kills `> MIN_DRAWS` (which refuses n_sweeps: 7, a document the
+        # package runs) and kills `>= MIN_DRAWS - 1` (which accepts
+        # n_sweeps: 6, which the package refuses at `plan.py:1055`).
+        found = _counted(_sample(n_sweeps=sweeps))
+        assert bool(found) is refused
+        if refused:
+            assert [f.check for f in found] == ["A24"]
+            assert f"keep {kept} draw(s)" in found[0].message
+            assert "the default n_sweeps // 2" in found[0].message
+            # The `where` is the line the user edits, and A24's is the RUN --
+            # `n_sweeps` and `warmup` are run options, not block keys.  Kills
+            # `where = f"runs[{index}].blocks[0]"` copied from A16/A17, which
+            # sends the reader into a block that declares neither and which
+            # every message assertion here passes with.
+            assert found[0].where == "runs[0]"
+
+    @pytest.mark.parametrize("sweeps, warmup, refused",
+                             [(8, 4, False), (8, 5, True), (12, 8, False),
+                              (12, 9, True)])
+    def test_an_explicit_warmup_replaces_the_default_at_the_same_boundary(
+            self, sweeps, warmup, refused):
+        # All four cells against `plan.py:1047`'s `if warmup is None` arm.
+        # Kills an implementation that always uses `n_sweeps // 2`: at
+        # (12, 9) that reads 6 kept and accepts a document the package
+        # refuses, and at (8, 5) likewise.
+        found = _counted(_sample(n_sweeps=sweeps, warmup=warmup))
+        assert bool(found) is refused
+        if refused:
+            assert "the default" not in found[0].message
+            assert f"minus {warmup} warmup)" in found[0].message
+
+    def test_an_explicit_null_warmup_is_the_default_and_says_so(self):
+        # `plan.py:1047` reads `warmup is None`, not `"warmup" in options`,
+        # so `warmup: null` TAKES the default rather than overriding it.
+        # Kills the message clause written `"warmup" in run`, which on this
+        # document reports "minus 3 warmup" as if the user had written 3.
+        found = _counted(_sample(n_sweeps=6, warmup=None))
+        assert [f.check for f in found] == ["A24"]
+        assert "the default n_sweeps // 2" in found[0].message
+
+    def test_each_run_is_blamed_by_its_own_index_and_its_own_name(self):
+        # Carry-forward's Task 3 rule 3: a hard-coded `runs[0]`, or a
+        # `named` built from `_runs(document)[0]`, survives a suite that
+        # only ever puts ONE run in the document -- and every other test
+        # in this class puts one.  Three runs, the middle one clean, so
+        # neither the index nor the name can come from a counter that
+        # skips.
+        document = preflight_document(
+            inference={"parameters": PRIORED},
+            runs=[{"name": "warm", "kind": "plan.estimate",
+                   "blocks": [{"names": ["d", "a"]}], "max_iter": 2.5},
+                  {"name": "middle", "kind": "forward"},
+                  {"name": "chain", "kind": "plan.sample", "seed": SEED,
+                   "blocks": [{"names": ["d", "a"],
+                               "engine": "gradient"}],
+                   "n_sweeps": 6}])
+        found = _counted(document)
+        assert [f.check for f in found] == ["A25", "A24"]
+        assert found[0].where == "runs[0]"
+        assert found[0].message.startswith("runs['warm']:")
+        assert found[1].where == "runs[2]"
+        assert found[1].message.startswith("runs['chain']:")
+
+    def test_nuts_other_numeric_knobs_are_left_where_they_are(self):
+        # The third residue this task's docstring names, asserted so
+        # that widening `_A25_KNOBS['nuts']` is a deliberate change to a
+        # red test rather than a silent one.  `num_chains`, `thinning`
+        # and `target_accept_prob` are outside A25's schema row and are
+        # already checked by `_number` at `nuts.py:230-238` -- at P3,
+        # behind the beam.  Applying the CORRECT (wider) implementation
+        # as a mutant is the cheapest discriminator there is, and
+        # without this the wider one passes the whole module.
+        assert _counted(_chain(num_chains=0)) == []
+        assert _counted(_chain(thinning=2.5)) == []
+        assert _counted(_chain(target_accept_prob=-1.0)) == []
+
+    def test_a_boolean_count_earns_no_SECOND_message_about_itself(self):
+        # `isinstance(True, int)` is True, so a bare `isinstance` in
+        # `_t9_whole_number` lets `min_sweeps: true` into the pair
+        # comparison, where `True > 0` yields a THIRD refusal reading
+        # "min_sweeps: True is above max_iter: 0" beside the two `_number`
+        # already wrote -- a sentence about an ordering that was never the
+        # fault.  Kills dropping the bool arm, which nothing else in this
+        # class can see: every other path a bool takes is already refused by
+        # `_number` and suppressed by `refused_counts`.
+        found = _counted(_estimate(min_sweeps=True, max_iter=0))
+        assert [f.check for f in found] == ["A25", "A25"]
+        assert all("is above" not in f.message for f in found), found
+
+    def test_the_kept_draws_reader_is_the_packages_arithmetic(self):
+        # The reader on its own, because `_counts` suppresses A24 whenever
+        # A25 refused one of the two counts, so every wrong answer this
+        # function could give on a bad value is invisible through the check.
+        # `plan.py:1047` and `:1054` are the two lines it mirrors.
+        from rheplicant.config.preflight.fitting import _a24_kept_draws
+
+        assert _a24_kept_draws({"n_sweeps": 6}) == (3, 3)
+        assert _a24_kept_draws({"n_sweeps": 7}) == (4, 3)
+        assert _a24_kept_draws({"n_sweeps": 8, "warmup": 5}) == (3, 5)
+        assert _a24_kept_draws({"n_sweeps": 12, "warmup": None}) == (6, 6)
+        assert _a24_kept_draws({"n_sweeps": True}) is None
+        assert _a24_kept_draws({"n_sweeps": 6, "warmup": True}) is None
+        assert _a24_kept_draws({"n_sweeps": 2.5}) is None
+        assert _a24_kept_draws({"n_sweeps": "six"}) is None
+        assert _a24_kept_draws({}) is None
+
+    def test_MIN_DRAWS_is_imported_and_not_written(self):
+        # §2.5 says so and nothing else checks it.  Kills the literal 4: a
+        # hard-coded floor stops tracking the package the day split-r_hat
+        # needs six.
+        #
+        # NEITHER `==` NOR `is` CAN SEE IT.  CPython interns small ints, so
+        # `MIN_DRAWS = 4` written out in `fitting.py` would satisfy
+        # `fitting.MIN_DRAWS is MIN_DRAWS`.  The IMPORT is what is asserted:
+        # `MIN_DRAWS` must appear in an import statement of this module and
+        # in no assignment of its own.  `ast.walk` reaches a DEFERRED import
+        # inside a function body, which is where this one has to live -- see
+        # `test_the_pass_still_does_not_import_the_inference_layer`.
+        import ast
+        import inspect
+
+        from rheplicant.config.preflight import fitting
+
+        tree = ast.parse(inspect.getsource(fitting))
+        imported = {alias.name for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                    for alias in node.names}
+        assigned = {target.id for node in ast.walk(tree)
+                    if isinstance(node, ast.Assign)
+                    for target in node.targets
+                    if isinstance(target, ast.Name)}
+        annotated = {node.target.id for node in ast.walk(tree)
+                     if isinstance(node, ast.AnnAssign)
+                     and isinstance(node.target, ast.Name)}
+        assert "MIN_DRAWS" in imported
+        assert "MIN_DRAWS" not in assigned | annotated
+
+    def test_the_pass_still_does_not_import_the_inference_layer(self):
+        # Why the MIN_DRAWS import is DEFERRED rather than at the head.
+        # `rheplicant/inference/__init__.py` re-exports the layer eagerly, so
+        # a head import puts `rheplicant.inference` in `sys.modules` on every
+        # `import rheplicant.config` -- which `test_config_exits_predict.py`
+        # forbids by name, in a fresh interpreter.  Task 7 ships the same
+        # probe for `_ENGINES`; this one names the module Task 9 writes, so
+        # moving the import up here fails HERE rather than three files away.
+        import os
+        import subprocess
+        import sys
+
+        script = ("import sys, rheplicant.config.preflight.fitting;"
+                  "print('rheplicant.inference' in sys.modules)")
+        env = {"PATH": "/usr/bin:/bin"}
+        if os.environ.get("PYTHONPATH"):
+            env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+        done = subprocess.run([sys.executable, "-c", script], env=env,
+                              capture_output=True, text=True, check=True)
+        assert done.stdout.strip() == "False", done.stdout
+
+    def test_the_restated_default_is_still_the_packages_own(self):
+        # The drift guard for the ONE thing this task restates.  A grep with
+        # exactly one expected hit, on a CODE line (2D's tripwire got four
+        # hits from a comment while the code it counted could be deleted).
+        import inspect
+
+        from rheplicant.inference import SamplingPlan
+
+        source = inspect.getsource(SamplingPlan.sample)
+        lines = [line for line in source.splitlines()
+                 if "n_sweeps // 2" in line
+                 and not line.lstrip().startswith("#")]
+        assert len(lines) == 1, lines
+        assert "warmup is None" in lines[0]
+
+    def test_a_tolerance_that_is_not_a_number_is_refused_here(self):
+        # `plan.py:946` is `progress <= tol * max(abs(chi2[-1]), 1.0)`, so
+        # `tol: "banana"` reaches the user as a bare `TypeError: can't
+        # multiply sequence by non-int of type 'float'` naming no run and no
+        # key.  Kills dropping the three tolerance rows from `_A25_KNOBS`.
+        found = _counted(_estimate(tol="banana"))
+        assert [f.check for f in found] == ["A25"]
+        assert "tol: is a number" in found[0].message
+
+    @pytest.mark.parametrize("key", ["tol", "solve_tol", "solve_guard"])
+    def test_a_negative_solver_bound_is_refused_here(self, key):
+        # A convergence tolerance, a CG tolerance and a relative-error
+        # bound.  None of the three is refused anywhere in `config/` today:
+        # grepped, `solve_tol`, `solve_guard` and `rhat_max` occur only
+        # inside `_ESTIMATE_KEYS`, `_SAMPLE_KEYS`, `_WARM_KEYS` and the two
+        # passthrough tuples (`exits.py:166-178`) and nowhere else.  So a
+        # negative one is forwarded raw -- `tol: -1.0` into a comparison the
+        # run can never satisfy, the other two into a solver whose bound is
+        # an `equinox.error_if` (`engines.py:286`, `linear.py:1504`), inside
+        # jit, at P3, behind the beam.
+        found = _counted(_estimate(**{key: -1.0}))
+        assert [f.check for f in found] == ["A25"]
+        assert f"{key}: must be >= 0" in found[0].message
+        if key != "tol":
+            # `solve_tol` and `solve_guard` are in BOTH key sets
+            # (`exits.py:166-171`) and both passthrough tuples (`:175-178`),
+            # so a row present on `plan.estimate` and missing from
+            # `plan.sample` is a hole no estimate-only test can see.  `tol`
+            # is excluded because it is not a `_SAMPLE_KEYS` member: Task 3's
+            # `A1.runs` refuses it on a sample run by name.
+            sampled = _counted(_sample(n_sweeps=12, **{key: -1.0}))
+            assert [f.check for f in sampled] == ["A25"]
+            assert f"{key}: must be >= 0" in sampled[0].message
+
+    def test_solve_guard_null_stays_legal(self):
+        # `plan.py:884-887`: `solve_guard=None` skips the condition-number
+        # estimate, which is what a 10^6-coefficient block wants.  Kills
+        # `if key in run:` without the `is None` arm, which would refuse a
+        # document that works and take the package's own "turn the guard
+        # off" knob away.
+        assert _counted(_estimate(solve_guard=None)) == []
+        assert _counted(_estimate(tol=None)) == []
+        assert _counted(_sample(n_sweeps=12, warmup=None)) == []
+
+    def test_a_null_on_a_row_where_null_is_NOT_legal_is_left_to_the_package(
+            self):
+        # The residue, asserted rather than forgotten.  `null` is the
+        # package's own off-switch on three rows only (`tol`, `solve_guard`,
+        # `warmup`); on the rest it is a typo the package refuses -- measured
+        # from source, `max_iter: null` reaches `plan.py:900`'s `not
+        # isinstance(max_iter, int)` and `n_sweeps: null` reaches `_number`
+        # at `exits.py:297`.  Closing it needs a fourth column on every row
+        # and a measurement per key, so it is RECORDED: this test is what
+        # makes closing it a deliberate change to a red assertion rather than
+        # a silent widening, and what stops the docstring claiming otherwise.
+        assert _counted(_estimate(max_iter=None)) == []
+        assert _counted(_sample(n_sweeps=None)) == []
+        assert _counted(_chain(num_samples=None)) == []
+
+    def test_check_identifiability_is_a_closed_enum_read_from_the_package(
+            self):
+        # Kills a hand-written set: `plan.py:708` accepts exactly False,
+        # 'once' and 'each_sweep', and a fourth mode shipping there would be
+        # refused here while the package ran it.
+        from rheplicant.config.preflight.fitting import _A25_CHECK_MODES
+        from rheplicant.inference.plan import CHECK_EACH_SWEEP, CHECK_ONCE
+
+        assert _A25_CHECK_MODES == (False, CHECK_ONCE, CHECK_EACH_SWEEP)
+        for good in (False, "once", "each_sweep"):
+            assert _counted(_estimate(check_identifiability=good)) == []
+        found = _counted(_estimate(check_identifiability="banana"))
+        assert [f.check for f in found] == ["A25"]
+        assert "'banana'" in found[0].message
+        # BOTH plan kinds.  `check_identifiability` is a `_SAMPLE_KEYS`
+        # member (`exits.py:169-171`) and a `_SAMPLE_PASSTHROUGH` one
+        # (`:177-178`), so a clause gated on `plan.estimate` alone would
+        # leave `plan.sample`'s open -- and every other assertion in this
+        # class drives an estimate, so nothing else could see it.
+        on_sample = _counted(_sample(n_sweeps=12,
+                                     check_identifiability="banana"))
+        assert [f.check for f in on_sample] == ["A25"]
+
+    def test_the_package_guard_this_enum_mirrors_is_still_that_guard(self):
+        # Value equality above cannot see a FOURTH mode arriving in
+        # `plan.py`, because it compares against the same two names.  This
+        # reads the guard expression itself -- one code line, the way
+        # `test_the_restated_default_is_still_the_packages_own` does -- so a
+        # third accepted string turns it red here instead of leaving this
+        # pass refusing a document the package runs.
+        import inspect
+
+        from rheplicant.inference.plan import SamplingPlan
+
+        source = inspect.getsource(SamplingPlan._prepare)
+        lines = [line.strip() for line in source.splitlines()
+                 if "check not in" in line and not line.lstrip().startswith("#")]
+        assert lines == ["if check is not False and check not in "
+                         "(CHECK_ONCE, CHECK_EACH_SWEEP):"], lines
+
+    def test_a_check_identifiability_the_package_refuses_by_IDENTITY(self):
+        # `plan.py:708` reads `check is not False`, an IDENTITY test, so
+        # `check_identifiability: 0` is refused there.  A frozenset carrying
+        # `False` cannot see that: `hash(0) == hash(False)` and `0 == False`,
+        # so `0 in frozenset({False, ...})` is True -- measured -- and the
+        # obvious `mode not in _A25_CHECK_MODES` spelling would accept a
+        # document the package refuses.  Kills the frozenset.
+        for sneaky in (0, 0.0):
+            found = _counted(_estimate(check_identifiability=sneaky))
+            assert [f.check for f in found] == ["A25"], sneaky
+
+    def test_an_unhashable_check_identifiability_does_not_abort_the_pass(self):
+        # `["once"] in frozenset(...)` RAISES TypeError -- measured -- and
+        # inside the pass a TypeError becomes "check A25 RAISED" and
+        # discards every other finding in the report.  A tuple compares with
+        # `==` and cannot.  Kills the frozenset a second way, on a document
+        # a user can really write.
+        found = _counted(_estimate(check_identifiability=["once"]))
+        assert [f.check for f in found] == ["A25"]
+        assert "['once']" in found[0].message
+
+    def test_nuts_is_not_asked_about_check_identifiability(self):
+        # `_NUTS_KEYS` (`nuts.py:103-108`) does not carry the key at all, so
+        # Task 3's `A1.runs` already refuses it by name -- "kind: nuts does
+        # not take ['check_identifiability']".  Answering here too would give
+        # the user two refusals for one typo, in two voices.  Kills the
+        # ungated clause the task body shipped.
+        from rheplicant.config.sections.nuts import _NUTS_KEYS
+
+        assert "check_identifiability" not in _NUTS_KEYS
+        assert _counted(_chain(check_identifiability="banana")) == []
+
+    def test_rhat_max_zero_is_LEGAL_and_that_is_recorded_not_forgotten(self):
+        # The one residue this task names in its own docstring, as an
+        # assertion so that closing it later is a deliberate change to a red
+        # test rather than a silent widening.  `_number`'s `minimum=` is
+        # inclusive (`exit_support.py:93`: `not value >= minimum`), and a
+        # strictly-positive floor written here would be a second validator
+        # for a bound `_number` owns.  §6 carries it.
+        assert _counted(_sample(n_sweeps=12, rhat_max=0.0)) == []
+        negative = _counted(_sample(n_sweeps=12, rhat_max=-1.0))
+        assert [f.check for f in negative] == ["A25"]
+        assert "rhat_max: must be >= 0" in negative[0].message
+
+    def test_the_npe_counts_go_through_transforms_whole(self):
+        # A25's already-DONE half, moved off P2.  The message is compared
+        # against `_whole`'s own output, so a restatement fails even when it
+        # refuses the same values -- `npe._count` (`:240-244`) is the other
+        # call site and the two must not drift.
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.transforms import _whole
+
+        with pytest.raises(ConfigError) as caught:
+            _whole("inference.npe.bank.n_simulations", 0, 1)
+        found = _counted(preflight_document(
+            inference={"parameters": PRIORED,
+                       "npe": {"bank": {"n_simulations": 0},
+                               "sample": {"n_draws": 2.5}}},
+            runs=[{"name": "amortized", "kind": "npe"}]))
+        assert [f.check for f in found] == ["A25", "A25"]
+        assert found[0].message == f"{caught.value} (check A25)."
+        assert found[0].where == "inference.npe.bank.n_simulations"
+        assert "is an integer >= 1; got 2.5" in found[1].message
+        assert found[1].where == "inference.npe.sample.n_draws"
+        # THE GATE.  `inference.npe:` may sit on a document whose runs do not
+        # use it.  Kills `"npe" not in _kinds(document)` deleted -- under
+        # which a document with no npe run at all is refused for a count
+        # nothing will read.  Nothing above reaches that branch.
+        assert _counted(preflight_document(
+            inference={"parameters": PRIORED,
+                       "npe": {"bank": {"n_simulations": 0}}},
+            runs=[{"kind": "forward"}])) == []
+
+    def test_plan_estimate_gets_no_A24_and_nuts_gets_no_A24(self):
+        # A24 is `sample()`'s (`plan.py:1054-1063`); `estimate()` keeps every
+        # sweep and `nuts` counts warmup and samples separately.  Kills a
+        # kept-draws computation applied to every kind, which would refuse a
+        # `max_iter: 2` estimate for keeping too few draws it never had.
+        assert _counted(_estimate(max_iter=2, min_sweeps=1)) == []
+        # ...and with `n_sweeps` actually DECLARED on the estimate, which is
+        # the cell that reaches the `kind == "plan.sample"` gate at all.
+        # Without it the estimate run has no `n_sweeps`, `_a24_kept_draws`
+        # returns None, and the A24 leg is unreachable whether the gate is
+        # there or not -- so `if kind == "plan.sample"` deleted survives.
+        assert _counted(_estimate(max_iter=2, min_sweeps=1, n_sweeps=6)) == []
+        assert _counted(_chain()) == []
+
+    @pytest.mark.parametrize("key", ["num_samples", "num_warmup"])
+    def test_the_nuts_counts_are_floored_at_one(self, key):
+        # `_A25_KNOBS["nuts"]` is the only entry no other test reads, so
+        # `"nuts": ()` -- an empty knob tuple -- passes the whole module.
+        # Both keys, because a tuple that lost ONE of them is the likelier
+        # mutation and a single-key cell cannot see it.
+        found = _counted(_chain(**{key: 0}))
+        assert [f.check for f in found] == ["A25"]
+        assert f"{key}: must be >= 1" in found[0].message
+
+    def test_a_run_declaring_expect_refuse_is_still_refused_for_its_counts(
+            self):
+        # NOT the stand-down `_blocks` and `_prior_gates` carry, and the
+        # difference is measured rather than stylistic.  Those two stand down
+        # because a REAL document loses the assertion it exists to make
+        # (`test_config_exits_plan.py:108-113`,
+        # `posterior_helpers.joint_prior_document`).  No document in this
+        # repository expects a count refusal, and the layer's own policy test
+        # -- `test_config_section_runs.py:88-110`,
+        # `test_a_text_decidable_refusal_is_not_a_runs_to_expect` -- says a
+        # P-1 refusal raising out of `run_document` rather than being
+        # captured is "the correct shape".  Kills adding the clause for
+        # symmetry, which would silently take A24 off every such document.
+        found = _counted(_sample(n_sweeps=6, expect="refuse"))
+        assert [f.check for f in found] == ["A24"]
+
+
+class TestTheWarmStartIsTheSameEstimateOneCallAlong:
+    """``exits.py:288-290`` forwards the warm knobs to the same method.
+
+    ``_passthrough(warm, _ESTIMATE_PASSTHROUGH)`` (``exit_support.py:223``)
+    reads ``max_iter``, ``tol``, ``min_sweeps``, ``check_identifiability``,
+    ``solve_tol`` and ``solve_guard`` off the WARM mapping and hands them to
+    ``SamplingPlan.estimate`` -- the same method, the same guards, at the
+    same P3 behind the same beam.  A25 written on ``runs[]`` alone guards one
+    route and leaves its identical sibling open, which is the shape Task 7
+    found on ``blocks:`` and the shape this class exists to close.
+    """
+
+    def test_the_passthrough_really_is_the_same_six_keys(self):
+        # ANTI-VACUITY.  The class above rests on the warm mapping reaching
+        # `estimate()` with the estimate keys; this reads the tuple rather
+        # than trusting the docstring, so a seventh key added there shows up
+        # as a red test rather than as a knob nobody checks.
+        from rheplicant.config.sections.exits import (
+            _ESTIMATE_PASSTHROUGH,
+            _WARM_KEYS,
+        )
+
+        assert set(_ESTIMATE_PASSTHROUGH) <= _WARM_KEYS
+        assert set(_ESTIMATE_PASSTHROUGH) == {
+            "max_iter", "tol", "min_sweeps", "check_identifiability",
+            "solve_tol", "solve_guard"}
+
+    @pytest.mark.parametrize("key, value, fragment", [
+        ("max_iter", 2.5, "warm_start.max_iter: is a whole number"),
+        ("solve_tol", -1.0, "warm_start.solve_tol: must be >= 0"),
+        ("tol", "banana", "warm_start.tol: is a number"),
+    ])
+    def test_a_warm_knob_is_refused_where_it_is_written(self, key, value,
+                                                        fragment):
+        found = _counted(_warmed(**{key: value}))
+        assert [f.check for f in found] == ["A25"]
+        assert fragment in found[0].message
+        # The `where` is the warm start, not the run.  `runs[0]` would send
+        # the reader to a `plan.sample` that declares none of these three
+        # keys -- `_SAMPLE_KEYS` (`exits.py:169-171`) has no `max_iter`, no
+        # `tol` and no `min_sweeps` -- so there would be nothing there to
+        # edit.  Kills `site = where`.
+        assert found[0].where == "runs[0].warm_start"
+
+    def test_the_warm_pair_and_the_warm_enum_travel_with_the_knobs(self):
+        pair = _counted(_warmed(min_sweeps=9, max_iter=2))
+        assert [f.check for f in pair] == ["A25"]
+        assert "warm_start.min_sweeps: 9 is above warm_start.max_iter: 2" \
+            in pair[0].message
+        mode = _counted(_warmed(check_identifiability="banana"))
+        assert [f.check for f in mode] == ["A25"]
+        assert "warm_start.check_identifiability:" in mode[0].message
+
+    def test_the_warm_start_gets_no_A24_of_its_own(self):
+        # `warm_start` is `.estimate()`d (`exits.py:288-290`), which keeps every
+        # sweep, and `n_sweeps` is not a `_WARM_KEYS` member at all.  Kills
+        # applying the kept-draws arithmetic per SITE rather than per run.
+        assert _counted(_warmed()) == []
+
+    def test_a_warm_start_the_executor_never_reaches_is_left_alone(self):
+        # `exits.py:259-285` refuses the run outright when `warm_start.kind`
+        # is not `plan.estimate` or `move:` is missing, and the passthrough
+        # at `:288-290` is never evaluated.  A25 about a mapping the package
+        # discards would be the only sentence the reader gets, for a knob
+        # that was never read.  `_t7_warm_start` is the binding that decides
+        # this and it is IMPORTED rather than re-derived (carry-forward's
+        # rule 1).  Kills reading `run["warm_start"]` directly.
+        assert _counted(_sample(
+            n_sweeps=12,
+            warm_start={"kind": "plan.sample", "move": ["d"],
+                        "max_iter": 2.5})) == []
+        assert _counted(_sample(
+            n_sweeps=12,
+            warm_start={"kind": "plan.estimate", "max_iter": 2.5})) == []
+        assert _counted(_sample(n_sweeps=12, warm_start="nope")) == []
+        # ...and a warm start on a `plan.estimate` run is not a warm start at
+        # all: `_ESTIMATE_KEYS` does not take the key, so Task 3's `A1.runs`
+        # owns it.
+        assert _counted(_estimate(
+            warm_start={"kind": "plan.estimate", "move": ["d"],
+                        "max_iter": 2.5})) == []
+
+
+#: The three messages this task WRITES rather than borrows, pinned WHOLE --
+#: six rows, because A24's warmup clause varies with the document and the
+#: other two shapes are emitted at both sites.
+#:
+#: The two BORROWED shapes are pinned by equality against the validator that
+#: produced them (`test_the_bound_comes_from_the_layers_own_validator`,
+#: `test_the_npe_counts_go_through_transforms_whole`), which is stronger.
+#: These three have no such author, and Task 7 measured 23 surviving
+#: mutations in refusal text on its first draft -- nine of which made the
+#: sentence state the opposite of the truth.  For a validation layer the
+#: message IS the product.
+_COUNT_VERBATIM = [
+    ('a24-the-default-warmup',
+     _sample(n_sweeps=6), 'A24', 'runs[0]',
+     "runs['fit']: this run would keep 3 draw(s) (6 sweeps minus 3 warmup, "
+     "the default n_sweeps // 2), and a split-r_hat needs at least 4 -- two "
+     "halves of two. Below that the mixing diagnostic is not weak, it is "
+     "undefined, and a run whose only convergence evidence is undefined is "
+     "the silent answer this exit exists to refuse. Raise n_sweeps or lower "
+     "warmup (check A24)."),
+    ('a24-an-explicit-warmup',
+     _sample(n_sweeps=8, warmup=5), 'A24', 'runs[0]',
+     "runs['fit']: this run would keep 3 draw(s) (8 sweeps minus 5 warmup), "
+     "and a split-r_hat needs at least 4 -- two halves of two. Below that "
+     "the mixing diagnostic is not weak, it is undefined, and a run whose "
+     "only convergence evidence is undefined is the silent answer this exit "
+     "exists to refuse. Raise n_sweeps or lower warmup (check A24)."),
+    ('a25-the-min-sweeps-pair',
+     _estimate(min_sweeps=9, max_iter=2), 'A25', 'runs[0]',
+     "runs['fit']: min_sweeps: 9 is above max_iter: 2, so the convergence "
+     "test is never consulted -- the run always exhausts max_iter and always "
+     "refuses, including on a model it converged on at sweep two. Lower "
+     "min_sweeps, raise max_iter, or declare tol: null to run a fixed number "
+     "of sweeps with no verdict (check A25)."),
+    ('a25-the-min-sweeps-pair-on-the-warm-start',
+     _warmed(min_sweeps=9, max_iter=2), 'A25', 'runs[0].warm_start',
+     "runs['fit']: warm_start.min_sweeps: 9 is above warm_start.max_iter: 2, "
+     "so the convergence test is never consulted -- the run always exhausts "
+     "max_iter and always refuses, including on a model it converged on at "
+     "sweep two. Lower min_sweeps, raise max_iter, or declare "
+     "warm_start.tol: null to run a fixed number of sweeps with no verdict "
+     "(check A25)."),
+    ('a25-the-check-identifiability-enum',
+     _estimate(check_identifiability="banana"), 'A25', 'runs[0]',
+     "runs['fit']: check_identifiability: is false, 'once' (before the first "
+     "sweep) or 'each_sweep' (at every parameter tuple visited); got "
+     "'banana'. There is no size heuristic here on purpose: the cost is a "
+     "dense Jacobian and an SVD, so which of the three a run wants is a "
+     "decision the document makes (check A25)."),
+    ('a25-the-check-identifiability-enum-on-the-warm-start',
+     _warmed(check_identifiability="banana"), 'A25', 'runs[0].warm_start',
+     "runs['fit']: warm_start.check_identifiability: is false, 'once' "
+     "(before the first sweep) or 'each_sweep' (at every parameter tuple "
+     "visited); got 'banana'. There is no size heuristic here on purpose: "
+     "the cost is a dense Jacobian and an SVD, so which of the three a run "
+     "wants is a decision the document makes (check A25)."),
+]
+
+
+class TestTheCountRefusalsAreThePRODUCT:
+    """The whole message, not a fragment of it."""
+
+    @pytest.mark.parametrize(
+        "document, check, where, message",
+        [row[1:] for row in _COUNT_VERBATIM],
+        ids=[row[0] for row in _COUNT_VERBATIM])
+    def test_the_message_is_exactly_this(self, document, check, where,
+                                         message):
+        [found] = _counted(document)
+        assert found.check == check
+        assert found.where == where
+        assert found.message == message
+
+    def test_the_table_covers_every_shape_this_task_WRITES(self):
+        """ANTI-VACUITY: a table is only as good as its rows.
+
+        Both ids, both sites, and the default/explicit warmup pair -- which
+        is the one clause of A24 that varies with the document.
+        """
+        assert {row[2] for row in _COUNT_VERBATIM} == {"A24", "A25"}
+        assert {row[3] for row in _COUNT_VERBATIM} == {"runs[0]",
+                                                       "runs[0].warm_start"}
+        assert len(_COUNT_VERBATIM) == 6
+
+    def test_every_count_finding_carries_its_own_tag(self):
+        # Task 3 shipped the equivalent over its five checks; this is Task
+        # 9's.  Kills the missing full stop on the two borrowed messages --
+        # `_number`'s and `_whole`'s both end in a period of their own, so
+        # `f"{refusal} (check A25)"` reads "... got 0. (check A25)" and stops
+        # mid-sentence.
+        documents = [_estimate(max_iter=2.5), _sample(n_sweeps=6),
+                     _estimate(min_sweeps=9, max_iter=2),
+                     _estimate(check_identifiability="banana"),
+                     _warmed(solve_tol=-1.0), _chain(num_samples=0),
+                     preflight_document(
+                         inference={"parameters": PRIORED,
+                                    "npe": {"bank": {"n_simulations": 0}}},
+                         runs=[{"name": "a", "kind": "npe"}])]
+        found = [one for document in documents
+                 for one in _counted(document)]
+        assert len(found) == 7
+        for one in found:
+            assert one.message.endswith(f"(check {one.check})."), one.message
+            assert one.severity == REFUSE
+
+
+class TestTheCountsAreRegisteredAndReachTheUser:
+    def test_the_two_ids_are_registered_to_this_one_function(self):
+        from rheplicant.config.preflight.fitting import _counts
+
+        assert CHECKS["A24"] is _counts
+        assert CHECKS["A25"] is _counts
+
+    def test_the_pass_emits_them_once(self):
+        # `preflight()` de-duplicates by function identity, and a document
+        # that fires both ids is what says so: a naive `CHECKS.values()` loop
+        # would call `_counts` twice and every finding would arrive doubled.
+        #
+        # FILTERED, never `report.refusals()` whole: that list is ordered
+        # across every registered check and is a function of how many tasks
+        # have landed (§3.2(b)).
+        report = preflight(_sample(n_sweeps=6, rhat_max=-1.0))
+        mine = [f.check for f in report.refusals()
+                if f.check in ("A24", "A25")]
+        assert mine == ["A25", "A24"]
+        assert {"A24", "A25"} <= report.checks()
+
+    def test_a_draw_count_wins_against_a_beam_that_cannot_be_read(self):
+        # §5's PHASE PROPERTY, this task's one real assertion of it.  Task
+        # 2's phase guard registers four synthetic lambdas: it proves the
+        # HOOK's position and says nothing about any shipped check.  The
+        # assertion is symmetric -- the violation's own words come back, and
+        # `no_such_beam` does NOT.
+        #
+        # `load_document`, never `run_document`: §2.1 measured that
+        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # path, so a `runs`-shaped violation driven that way proves nothing.
+        from rheplicant.config.document import load_document
+        from rheplicant.config.errors import ConfigError
+
+        document = {**_sample(n_sweeps=6), "resources": UNREADABLE_BEAM}
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert "check A24" in str(caught.value)
+        assert "keep 3 draw(s)" in str(caught.value)
+        assert "no_such_beam" not in str(caught.value)
+
+
+class TestNoHostileDocumentCanAbortTheCounts:
+    """The §2.3 TRAP, for `_counts`.
+
+    A check that RAISES aborts the pass and discards every other finding.
+    Every value below is read straight out of the user's text and handed to
+    `_number`, `_whole`, a comparison or a membership test -- and two of
+    those raise on a shape a document can carry: `>` between an int and a
+    str, and `in` over a SET with an unhashable left operand, which is why
+    `_A25_CHECK_MODES` is a tuple.  Task 4 measured the two shapes that reach
+    here: a section that is present but not a MAPPING, and a value used as a
+    key or an operand.
+    """
+
+    HOSTILE = [
+        {},
+        {"inference": None},
+        {"inference": "nope"},
+        {"inference": {"npe": "nope"}},
+        {"inference": {"npe": {"bank": "nope"}}},
+        {"inference": {"npe": {"bank": {"n_simulations": ["4"]}}}},
+        {"inference": {"npe": {"sample": {"n_draws": {"a": 1}}}}},
+        {"runs": "nope"},
+        {"runs": 7},
+        {"runs": [None]},
+        {"runs": [{"kind": None}]},
+        {"runs": [{"kind": 7, "n_sweeps": "many"}]},
+        {"runs": [{"kind": "plan.sample"}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": "many"}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": ["6"]}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": True}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 6, "warmup": True}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 6, "warmup": "two"}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 6,
+                   "rhat_max": {"a": 1}}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": "nine",
+                   "max_iter": 2}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": 9,
+                   "max_iter": "two"}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": True,
+                   "max_iter": True}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": [9],
+                   "max_iter": [2]}]},
+        {"runs": [{"kind": "plan.estimate", "tol": {"a": 1},
+                   "min_sweeps": 9, "max_iter": 2}]},
+        {"runs": [{"kind": "plan.estimate",
+                   "check_identifiability": ["once"]}]},
+        {"runs": [{"kind": "plan.estimate",
+                   "check_identifiability": {"once": 1}}]},
+        {"runs": [{"kind": "plan.estimate", "check_identifiability": 0}]},
+        {"runs": [{"kind": "nuts", "num_samples": ["2"]}]},
+        {"runs": [{"kind": "plan.sample", "warm_start": "nope"}]},
+        {"runs": [{"kind": "plan.sample", "warm_start": 7}]},
+        {"runs": [{"kind": "plan.sample",
+                   "warm_start": {"kind": "plan.estimate", "move": ["d"],
+                                  "max_iter": ["2"]}}]},
+        {"runs": [{"kind": "plan.sample",
+                   "warm_start": {"kind": "plan.estimate", "move": "d",
+                                  "max_iter": 2.5}}]},
+        {"runs": [{"kind": "plan.sample", "name": 7, "n_sweeps": 6}]},
+        {"runs": {"kind": "plan.sample", "n_sweeps": 6}},
+    ]
+
+    @pytest.mark.parametrize("patch", HOSTILE,
+                             ids=[str(index) for index in
+                                  range(len(HOSTILE))])
+    def test_the_check_returns_findings_and_raises_nothing(self, patch):
+        for finding in _counted(_hostile_document(patch)):
+            assert finding.check in ("A24", "A25")
+
+    @pytest.mark.parametrize("patch", HOSTILE,
+                             ids=[str(index) for index in
+                                  range(len(HOSTILE))])
+    def test_the_whole_pass_survives_each_of_them(self, patch):
+        # `_check_where` runs OUTSIDE the per-check `try`, so a `where` built
+        # from user text could kill the pass even when the check returns
+        # cleanly.  This task's three `where` shapes are `runs[<int>]`,
+        # `runs[<int>].warm_start` and `inference.npe.<literal>.<literal>`.
+        preflight(_hostile_document(patch))

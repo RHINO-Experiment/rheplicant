@@ -492,8 +492,15 @@ class TestThePagesSayWhatTheLayerDoes:
         "score_directions": ({"names": ["g"]}, True),
         "fisher": ({}, False),
         "plan.estimate": ({"blocks": [{"names": ["g"]}]}, False),
-        "plan.sample": ({"blocks": [{"names": ["g"]}], "n_sweeps": 2,
-                         "warmup": 1, "check_identifiability": False,
+        # `n_sweeps: 8, warmup: 4` and not `2, 1`: this row is about WHICH
+        # refusal fires, and a run keeping one draw is now refused by A24
+        # (`preflight/fitting.py::_counts`) before the noise check is
+        # reached at all -- correctly, since the package refuses it too
+        # (`plan.py:1055`), just three phases later.  Four kept draws is
+        # `MIN_DRAWS` exactly, so the document gets past P-1 and the row
+        # measures the sentence it was written to measure.
+        "plan.sample": ({"blocks": [{"names": ["g"]}], "n_sweeps": 8,
+                         "warmup": 4, "check_identifiability": False,
                          "seed": {"from": "runtime.seeds.probe"}}, False),
         "conjugate.wiener": ({"names": ["g"], "prior_std": {"g": 10.0},
                               "width": "none"}, False),
