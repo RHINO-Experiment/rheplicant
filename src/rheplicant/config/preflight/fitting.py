@@ -37,6 +37,7 @@ package's own ``ENGINES``.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -1120,8 +1121,9 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE,
 #: ``>= 1``).  The three tolerances carry ``0.0`` because nothing in
 #: ``config/`` refuses a negative one -- grepped: ``solve_tol`` and
 #: ``solve_guard`` appear only in the key sets and the passthrough tuples --
-#: so it is forwarded raw into a solver whose bound is an
-#: ``equinox.error_if`` (``engines.py:286``, ``linear.py:1504``), inside jit.
+#: so it is forwarded raw into a solver whose bound is the ``eqx.error_if`` at
+#: ``linear.py:1504``, inside jit -- ``engines.py:284-288`` is the DOCSTRING
+#: that describes how that surfaces, not the guard itself.
 #: ``rhat_max`` carries ``0.0`` and NOT a strictly-positive floor: see
 #: :func:`_counts`' residues.
 _A25_KNOBS: dict[str, tuple[tuple[str, type, float | None], ...]] = {
@@ -1144,10 +1146,34 @@ _A25_KNOBS: dict[str, tuple[tuple[str, type, float | None], ...]] = {
 #: unconditionally while its own measurement table said it must not.
 _A25_TOL_GATED: frozenset[str] = frozenset({"min_sweeps"})
 
-#: ``inference.npe``'s two counts, and the subsection each lives in.  They go
-#: through ``transforms._whole`` (``:50``), not ``_number``: that is the
-#: binding ``npe._count`` (``:240-244``) already uses, and a second reading
-#: here would be the ``_number``-vs-``_whole`` divergence the 2C ledger names.
+#: The rows where ``null`` is the package's OWN off-switch rather than a typo,
+#: DERIVED rather than judged: they are exactly the ``SamplingPlan.estimate``
+#: and ``.sample`` parameters whose annotation admits ``None`` -- ``tol:
+#: float | None`` (no convergence test at all, ``plan.py:874-878``),
+#: ``solve_guard: float | None`` (no condition-number estimate, ``:884-887``)
+#: and ``warmup: int | None`` (the ``n_sweeps // 2`` default, ``:1047``).
+#: ``test_the_nullable_rows_are_the_packages_own_optional_parameters`` reads
+#: those signatures back out, so a fourth optional parameter turns it red.
+#:
+#: On every other row a ``null`` is REFUSED here, and the two that most needed
+#: it are the two the package handles worst: ``rhat_max`` is annotated
+#: ``float`` and reaches ``plan.py:1102``'s ``bool(rhat <= rhat_max)`` -- a
+#: ``TypeError`` naming no run and no key, raised AFTER the whole chain has
+#: been drawn -- and ``solve_tol`` is annotated ``float`` and reaches the CG
+#: solver as ``tol=None``.  ``max_iter``, ``min_sweeps``, ``n_sweeps`` and the
+#: two ``nuts`` counts the package does refuse in its own voice, so for those
+#: five this only moves the phase.
+_A25_NULLABLE: frozenset[str] = frozenset({"tol", "solve_guard", "warmup"})
+
+#: The two counts ``inference.npe:`` REQUIRES, and the subsection each lives
+#: in.  Two of seven, not two of two: ``_whole`` guards seven whole-number
+#: knobs in that section (``npe.py:265``, ``:301``, ``:304``, ``:316``), and
+#: these are the two ``npe._count`` (``:261-265``) refuses when absent as well
+#: as when out of range.  The other five are optional and are Plan 3B's row.
+#:
+#: They go through ``transforms._whole`` (``:50``), not ``_number``: that is
+#: the binding ``npe._count`` already uses, and a second reading here would be
+#: the ``_number``-vs-``_whole`` divergence the 2C ledger names.
 _A25_NPE_COUNTS: tuple[tuple[str, str], ...] = (("bank", "n_simulations"),
                                                 ("sample", "n_draws"))
 
@@ -1155,12 +1181,17 @@ _A25_NPE_COUNTS: tuple[tuple[str, str], ...] = (("bank", "n_simulations"),
 def _t9_whole_number(value: Any) -> bool:
     """Is this an ``int`` the package would treat as a count?
 
-    ``bool`` refused, because ``isinstance(True, int)`` is True and
-    ``plan.py:900`` and ``:1043`` both read ``isinstance(..., int)`` beside a
-    comparison -- so ``max_iter: true`` would sail through a bare
-    ``isinstance`` here and then arrive as the count ``1``.  Bound once and
-    used by :func:`_a24_kept_draws` and by the ``min_sweeps``/``max_iter``
-    pair, which are the two places this module does arithmetic on user text.
+    ``bool`` refused, because ``isinstance(True, int)`` is True.  What that
+    buys is NOT that a boolean would otherwise reach the package as the count
+    ``1`` -- ``_number`` refuses it first, as *"max_iter: is a number; got
+    True"*, measured -- but that a boolean would otherwise reach the
+    ARITHMETIC in this module: ``min_sweeps: true`` beside ``max_iter: 0``
+    makes ``True > 0`` and yields a spurious second refusal, *"min_sweeps:
+    True is above max_iter: 0"*, beside the two ``_number`` already wrote.
+    ``test_a_boolean_count_earns_no_SECOND_message_about_itself`` is that
+    document.  Bound once and used by :func:`_a24_kept_draws` and by the
+    ``min_sweeps``/``max_iter`` pair, which are the two places this module
+    does arithmetic on user text.
     """
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -1200,7 +1231,33 @@ def _a25_bounded(where: str, name: str, key: str, value: Any, *,
     ``isinstance``.  ``_number``'s own wording for that case says what is
     wrong: *"is a whole number; got 2.5. It counts, so 2 and 2.5 are
     different runs"*.
+
+    **The one value ``_number`` cannot be ASKED about, and it aborts the whole
+    pass.**  That same whole-number refusal formats ``kind(value)``
+    (``exit_support.py:90``) to show what the count would round to, and
+    ``int(float('inf'))`` raises ``OverflowError`` while ``int(float('nan'))``
+    raises ``ValueError``.  Neither is a ``ConfigError``, so neither is caught
+    below; inside the pass it becomes "check A24 RAISED" and **every other
+    finding in the report is discarded** -- measured, an infinite ``n_sweeps``
+    beside two ordinary A16 violations loses both of them, while the same
+    document with a finite count reports all three.  It arrives from an
+    ordinary document: PyYAML 6.0.3 resolves ``.inf``, ``-.inf`` and ``.nan``,
+    and ``json.loads`` turns ``1e400`` into ``float('inf')``.
+
+    So a non-finite value on an ``int`` row is refused HERE, in a sentence
+    that opens the way ``_number``'s does and then says the thing ``_number``
+    could not.  ``float`` rows need no guard -- ``kind(value)`` is
+    ``float(value)`` there and never raises -- and what a ``float`` row does
+    with ``inf`` is a residue :func:`_counts` records rather than a bound this
+    layer invents.
     """
+    if kind is int and isinstance(value, float) and not math.isfinite(value):
+        return refuse(
+            "A25", where,
+            f"runs[{name!r}]: {key}: is a whole number; got {value!r}, and "
+            f"there is no integer {value!r} rounds to. It reaches this "
+            "document from ordinary YAML and JSON -- .inf, -.inf and .nan "
+            "are resolved values and 1e400 parses to infinity (check A25).")
     try:
         _number(SimpleNamespace(name=name), key, value, kind=kind,
                 minimum=minimum)
@@ -1216,23 +1273,26 @@ def _a25_bounds(where: str, name: str, prefix: str,
     it -- the caller needs the key, because A24 is computed from two of them.
 
     An ABSENT key takes the package's default, which this layer does not
-    restate.  A ``null`` is skipped too, and that is a RESIDUE rather than a
-    rule: ``null`` is the package's own off-switch on exactly three of these
-    rows -- ``tol`` (no convergence test at all, ``plan.py:874-878``),
-    ``solve_guard`` (no condition-number estimate, ``:884-887``) and
-    ``warmup`` (the ``n_sweeps // 2`` default, ``:1047``) -- and on the rest
-    it is a typo the package refuses in its own voice: ``max_iter: null``
-    reaches ``plan.py:900``'s ``isinstance`` and ``n_sweeps: null`` reaches
-    ``_number`` at ``exits.py:297``.  Telling the three apart needs a fourth
-    column on every row and a measurement per key, so the whole of ``null``
-    is left where it is today.
-    ``test_a_null_on_a_row_where_null_is_NOT_legal_is_left_to_the_package``
-    is what stops that becoming a claim nothing defends.
+    restate.  A ``null`` is skipped on :data:`_A25_NULLABLE`'s three rows and
+    REFUSED everywhere else -- an earlier form skipped every ``null`` and
+    justified it with "on the rest it is a typo the package refuses in its own
+    voice", which is false of two of the seven: ``rhat_max: null`` is a
+    ``TypeError`` from ``plan.py:1102`` after the chain has been drawn, and
+    ``solve_tol: null`` is a ``TypeError`` from inside the solver.  Both are
+    annotated ``float`` rather than ``float | None``, which is where
+    :data:`_A25_NULLABLE` comes from and why it is derived rather than judged.
+
+    ``live`` is read off ``spec``, never off the run: on a warm start the two
+    genuinely differ, because ``tol`` is not a ``_SAMPLE_KEYS`` member at all
+    (``exits.py:169-171``), so a ``plan.sample`` carrying a ``warm_start`` with
+    ``tol: null`` has a live run-``tol`` and a dead warm one.
     """
     live = spec.get("tol", 1) is not None
     found: list[tuple[str, Finding]] = []
     for key, kind_of, minimum in rows:
-        if key not in spec or spec[key] is None:
+        if key not in spec:
+            continue
+        if spec[key] is None and key in _A25_NULLABLE:
             continue
         if key in _A25_TOL_GATED and not live:
             continue
@@ -1241,6 +1301,31 @@ def _a25_bounds(where: str, name: str, prefix: str,
         if finding is not None:
             found.append((key, finding))
     return found
+
+
+def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
+                      floor: int, cap: int) -> str:
+    """A25's ``1 <= min_sweeps <= max_iter`` refusal, naming only what the
+    document actually wrote.
+
+    Either half may be the PACKAGE's default, and a message that spelled a
+    default as though the user had typed it is the "hard-coded value the user
+    never wrote" shape Task 7 shipped: ``max_iter: 1`` with no ``min_sweeps``
+    would otherwise read *"min_sweeps: 3 is above max_iter: 1"* and send the
+    reader looking for a key that is not in their document.  The fix clause
+    says "declare a lower min_sweeps" rather than "lower min_sweeps" for the
+    same reason -- there may be nothing there to lower.
+    """
+    floor_said = (f"{prefix}min_sweeps: {floor}" if "min_sweeps" in spec
+                  else f"min_sweeps, which defaults to {floor},")
+    cap_said = (f"{prefix}max_iter: {cap}" if "max_iter" in spec
+                else f"max_iter, which defaults to {cap}")
+    return (
+        f"{named}: {floor_said} is above {cap_said}, so the convergence test "
+        "is never consulted -- the run always exhausts max_iter and always "
+        "refuses, including on a model it converged on at sweep two. Declare "
+        f"a lower min_sweeps, raise max_iter, or declare {prefix}tol: null to "
+        "run a fixed number of sweeps with no verdict (check A25).")
 
 
 def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
@@ -1262,10 +1347,16 @@ def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
     ``_t7_warm_start`` decides whether the executor reaches the warm start at
     all -- IMPORTED from Task 7 rather than re-derived, because two
     independently written "would this warm start be read?" predicates is the
-    two-validators shape one function over.  Its gates are the executor's own
-    (``exits.py:259-285``): anything they reject means the run is refused
-    before ``_passthrough`` is evaluated, and an A25 about a mapping the
-    package discards would be the only sentence the reader gets.
+    two-validators shape one function over.  It implements **three of the
+    executor's five** gates (``exits.py:259-285``): a mapping (``:260``),
+    ``kind: plan.estimate`` (``:268``) and a usable ``move:`` (``:273``).  It
+    does NOT implement the unknown-key sweep (``:264-267``) or the test that
+    ``move`` names a DECLARED latent (``:280-285``), so a warm start carrying
+    a typo'd key, or ``move: [ghost]``, still earns A25 here for a mapping the
+    executor discards.  That is a residue rather than an oversight: the A25
+    sentence is true of the value the user wrote either way, unlike a
+    partition answer about a block list nobody reads, and closing it means a
+    second reader of ``move`` against ``inference.parameters``.
     """
     kind = run.get("kind")
     if not isinstance(kind, str) or kind not in _A25_KNOBS:
@@ -1344,23 +1435,29 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     the CORRECT shape, because ``expect: refuse`` is for a run that fails
     when it RUNS.
 
-    Residues, all three named so that no later task reads this as complete:
+    Residues, all named so that no later task reads this as complete:
 
-    * **``rhat_max: 0.0`` stays legal.**  It decides a chain's convergence
-      verdict and no value of it is refused today.  This check closes the
-      type and the negative half; ``0.0`` cannot be closed with ``_number``,
-      whose ``minimum=`` is inclusive (``exit_support.py:93``: ``not value >=
-      minimum``), and a strictly-positive floor written here would be a
-      second validator for a bound ``_number`` owns.  A threshold nobody can
-      satisfy is a warning rather than a refusal, and the warning channel's
-      first consumers are Task 12's.
-    * **``null`` on a row where ``null`` is not the package's own
-      off-switch** -- see :func:`_a25_bounds`.
+    * **A threshold nobody can fail or satisfy stays legal on a ``float``
+      row** -- ``rhat_max: 0.0``, and equally ``rhat_max: .inf``,
+      ``tol: .inf`` and ``solve_guard: .inf``.  ``rhat_max`` decides a chain's
+      convergence verdict and no value of it is refused today; this check
+      closes the type and the negative half, but ``0.0`` cannot be closed with
+      ``_number``, whose ``minimum=`` is inclusive (``exit_support.py:93``:
+      ``not value >= minimum``), and neither an exclusive floor nor a ceiling
+      written here would be anything but a second validator for a bound
+      ``_number`` owns.  A threshold nobody can fail is a warning rather than
+      a refusal, and the warning channel's first consumers are Task 12's.
     * **``nuts``'s other three numeric knobs** -- ``num_chains``,
       ``thinning`` and ``target_accept_prob`` -- are outside A25's schema row
       and outside this plan's §1 wording.  They ARE checked, by ``_number``,
       at ``nuts.py:230-238``, which is P3 and behind the beam; hoisting them
       is a widening rather than a hole this check leaves in a rule it states.
+    * **A warm start the executor refuses for a key it cannot read** still
+      earns A25 for the counts inside it -- :func:`_a25_sites` says which two
+      of the executor's five gates are not mirrored, and why.
+
+    The ``null`` residue is CLOSED: :data:`_A25_NULLABLE` is derived from the
+    package's own optional parameters and every other ``null`` is refused.
 
     **Variant layers are not walked**, the same way :func:`_blocks` does not.
     ``load_document`` calls the pass on the variant-APPLIED document
@@ -1414,22 +1511,33 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # with no convergence test there is no floor for
                 # ``min_sweeps`` to raise.  ``:910`` is ``not 1 <=
                 # min_sweeps <= max_iter``, so EQUALITY is legal and only
-                # ``floor > cap`` is not.
-                floor = spec.get("min_sweeps")
-                cap = spec.get("max_iter")
+                # ``floor > cap`` is not.  ``spec``, never ``run``: on a warm
+                # start the two `tol`s genuinely differ, because `tol` is not
+                # a `_SAMPLE_KEYS` member (`exits.py:169-171`).
+                #
+                # THE DEFAULTS ARE THE PACKAGE'S AND ARE IMPORTED.  An earlier
+                # form read `spec.get("min_sweeps")` and `spec.get("max_iter")`
+                # and so fired only when BOTH keys were written -- which skips
+                # `max_iter: 1` and `max_iter: 2`, ordinary documents that
+                # `plan.py:909-910` refuses against MIN_SWEEPS = 3, and
+                # `min_sweeps: 101` against DEFAULT_MAX_ITER = 100.  That is
+                # one of the four clauses A25's own schema row names.  The
+                # deferred import is `MIN_DRAWS`' precedent, twelve lines
+                # below and for the same reason.
+                from rheplicant.inference.plan import (
+                    DEFAULT_MAX_ITER,
+                    MIN_SWEEPS,
+                )
+
+                floor = spec.get("min_sweeps", MIN_SWEEPS)
+                cap = spec.get("max_iter", DEFAULT_MAX_ITER)
                 if (spec.get("tol", 1) is not None
                         and _t9_whole_number(floor)
                         and _t9_whole_number(cap)
                         and floor > cap):
-                    yield refuse(
-                        "A25", site,
-                        f"{named}: {prefix}min_sweeps: {floor} is above "
-                        f"{prefix}max_iter: {cap}, so the convergence test is "
-                        "never consulted -- the run always exhausts max_iter "
-                        "and always refuses, including on a model it "
-                        "converged on at sweep two. Lower min_sweeps, raise "
-                        f"max_iter, or declare {prefix}tol: null to run a "
-                        "fixed number of sweeps with no verdict (check A25).")
+                    yield refuse("A25", site,
+                                 _a25_pair_message(named, prefix, spec,
+                                                   floor, cap))
 
         if run["kind"] == "plan.sample" and not refused_counts:
             kept = _a24_kept_draws(run)
@@ -1461,16 +1569,23 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     inference = document.get("inference")
     npe = inference.get("npe") if isinstance(inference, Mapping) else None
-    # The section may sit on a document whose runs do not use it, and a count
-    # nothing will read is not a fault.
-    if not isinstance(npe, Mapping) or "npe" not in _kinds(document):
+    # NOT gated on a `kind: npe` run being declared, and the earlier gate that
+    # was ("a count nothing will read is not a fault") rested on a claim that
+    # is false. `sections/inference.py:204` is `npe = parse_npe(section["npe"],
+    # context) if "npe" in section else None` -- unconditional on `runs:` -- so
+    # the count IS read, at P2, and `build_inference` (`document.py:107`) runs
+    # AFTER `build_resources` (`:75`). Measured: `n_simulations: 0` beside
+    # `runs: [{kind: forward}]` was silent here and refused by the package, and
+    # with UNREADABLE_BEAM in the same document the BEAM spoke first -- which
+    # is the one outcome this plan exists to stop.
+    if not isinstance(npe, Mapping):
         return
     for subsection, key in _A25_NPE_COUNTS:
         body = npe.get(subsection)
         # An ABSENT or malformed subsection is ``npe._subsection``'s
-        # (``:209``) and a MISSING count is ``npe._count``'s
-        # (``:240-242``), whose sentences say the subsection or the key is
-        # required rather than that a number is out of range.
+        # (``:230``) and a MISSING count is ``npe._count``'s (``:263-264``),
+        # whose sentences say the subsection or the key is required rather
+        # than that a number is out of range.
         if not isinstance(body, Mapping) or key not in body:
             continue
         where = f"inference.npe.{subsection}.{key}"
