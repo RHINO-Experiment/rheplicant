@@ -3128,3 +3128,525 @@ class TestTaskElevensChecksInThePass:
                             tuple(_bandpass_and_gain(document))
                             cells += 1
         assert cells == 16 * 12 * 9 * 7 * 6 == 72576
+
+
+# ---------------------------------------------------------------------------
+# The whole-branch review's item 1: ONE class, two spellings, six checks that
+# answered differently about them -- and the two polarities the collapsed
+# answer produced.
+# ---------------------------------------------------------------------------
+
+#: The same class object, spelled by the umbrella and by its own module.
+LOAD_EXPORTED = "rheplicant.radio:CalLoadOperator"
+LOAD_SUBMODULE = "rheplicant.radio.instrument.calibration:CalLoadOperator"
+
+
+def _respelled(target, name, module):
+    """``target`` with the class name and submodule swapped for another's.
+
+    One document shape per check, built twice from ONE lambda, so the two
+    reports differ in nothing but the module spelling.  Writing the pair out
+    by hand is how a test comes to compare two documents that differ in
+    something else as well.
+    """
+    return target.replace("CalLoadOperator", name).replace(
+        "instrument.calibration", module)
+
+
+class TestOneClassOneAnswer:
+    """``_t5_radio_class`` resolves the CLASS, not the spelling of its module.
+
+    The defect this class exists for was measured six ways on one document
+    shape and is a single root cause: the pass tested ``module !=
+    "rheplicant.radio"`` while the build resolves the same ``python:`` target
+    through ``hatch.import_target`` (``sections/model.py:260``), which imports
+    any module.  A14 refuses on ABSENCE, so it refused a document that builds;
+    A5, A8, A15, A31, A52 and A30's ``replace:`` gate refuse on PRESENCE, so
+    they lost their subject on the same document and said nothing.
+    """
+
+    def test_the_two_spellings_are_one_object(self):
+        """The premise, measured rather than assumed.
+
+        If these were two classes the rest of this class would be asserting a
+        preference rather than a correctness property.
+        """
+        from rheplicant.config.hatch import import_target
+        from rheplicant.radio import CalLoadOperator
+
+        assert import_target(LOAD_SUBMODULE) is CalLoadOperator
+        assert import_target(LOAD_EXPORTED) is CalLoadOperator
+
+    def test_this_pass_and_the_build_agree_on_every_exported_class(self):
+        """The property, over all of ``rheplicant.radio.__all__``.
+
+        For each exported name, the target spelled with the name's OWN
+        defining module is put to both resolvers.  ``import_target`` is the
+        build's; ``_t5_radio_class`` is P-1's.  Wherever the build resolves
+        the object radio exports, this pass must answer with the identical
+        object; wherever the build refuses, this pass must answer ``None``.
+
+        Kills every partial widening: a rule about ``rheplicant.radio`` alone,
+        and a ``module.startswith("rheplicant")`` that would resolve names
+        their module does not carry -- measured, ``rheplicant.core.graph:
+        RADIO_GRAPH`` and ``rheplicant.radio.rhino:rhino_to_state`` are two
+        cells where the build refuses a spelling that looks right, and a
+        prefix rule answers where it must decline.
+        """
+        import rheplicant.radio as radio
+        from rheplicant.config.hatch import import_target
+        from rheplicant.config.preflight.model import _t5_radio_class
+
+        checked = 0
+        for name in radio.__all__:
+            shipped = getattr(radio, name)
+            module = getattr(shipped, "__module__", None)
+            if module is None:
+                continue
+            try:
+                built = import_target(f"{module}:{name}")
+            except ConfigError:
+                built = None
+            answered = _t5_radio_class({"python": f"{module}:{name}"})
+            assert answered is (shipped if built is shipped else None), (
+                f"{module}:{name} -- the build says {built!r} and this pass "
+                f"says {answered!r}")
+            checked += 1
+        # 57 of the 58 exported names: measured, ``PROTECTED_KEY`` is a plain
+        # string constant and carries no ``__module__`` at all, so there is no
+        # "its own module" spelling to put to either resolver.  The number is
+        # here so that a name leaving ``__all__`` is a red test rather than a
+        # quietly shorter loop.
+        assert checked == 57
+        assert len(radio.__all__) == 58
+
+    def test_answering_imports_nothing(self):
+        """§2.4 and §0 at once: the widening reads ``sys.modules`` and never
+        ``import_module``.
+
+        Kills the obvious widening -- ``importlib.import_module(module)`` --
+        which would run a user's module at pre-flight (a file read and an
+        unbounded cost) and, on a first-party module that pulls an optional
+        dependency, would put ``healpy`` or ``numpyro`` into a process that
+        only read a config.  ``email.parser`` is the cell that discriminates:
+        it is a real importable module this test session does not hold.
+        """
+        import sys
+
+        from rheplicant.config.preflight.model import _t5_radio_class
+
+        before = set(sys.modules)
+        for target in (LOAD_SUBMODULE, "myproject.radio:CalLoadOperator",
+                       "email.parser:CalLoadOperator"):
+            _t5_radio_class({"python": target})
+        assert set(sys.modules) - before == set()
+
+    def test_a_module_this_process_does_not_hold_is_a_decline(self):
+        from rheplicant.config.preflight.model import _t5_radio_class
+
+        assert _t5_radio_class(
+            {"python": "myproject.radio:CalLoadOperator"}) is None
+
+    def test_a_module_that_binds_the_name_to_something_else_is_a_decline(
+            self, monkeypatch):
+        """The identity test, killed directly.
+
+        A resolver that widened by NAME alone -- "the attribute is one radio
+        exports, so whatever module was asked for must mean that class" --
+        would answer with rheplicant's class for a third party's identically
+        named one.  This puts such a module in ``sys.modules`` and asserts the
+        decline.
+        """
+        import sys
+        import types
+
+        from rheplicant.config.preflight.model import _t5_radio_class
+
+        impostor = types.ModuleType("impostor_pkg")
+        impostor.CalLoadOperator = object()
+        monkeypatch.setitem(sys.modules, "impostor_pkg", impostor)
+        assert _t5_radio_class(
+            {"python": "impostor_pkg:CalLoadOperator"}) is None
+
+    def test_the_widening_did_not_widen_which_classes_can_be_named(self):
+        """``rheplicant.core.operator:SnapshotOperator`` is a real class in an
+        imported module, and this pass still declines it.
+
+        The membership test against ``rheplicant.radio.__all__`` is what
+        bounds the widening to classes this layer ships; dropping it is what
+        the old module test used to hide.
+        """
+        import rheplicant.core.operator as operator
+        from rheplicant.config.preflight.model import _t5_radio_class
+
+        assert hasattr(operator, "SnapshotOperator")
+        assert _t5_radio_class(
+            {"python": "rheplicant.core.operator:SnapshotOperator"}) is None
+
+    @pytest.mark.parametrize("check", ["A5", "A8", "A14", "A15", "A31", "A52"])
+    def test_no_check_answers_differently_about_the_two_spellings(self, check):
+        """The six, as one property over one document per check.
+
+        Each document is built twice, differing in NOTHING but the spelling of
+        one ``python:`` target, and the two reports must be equal -- message
+        included, because a message naming the class or the node is where a
+        partial widening would show.  Anti-vacuity is the second assertion:
+        the exported spelling must actually make the check speak.  A14 is the
+        one whose polarity is inverted -- it refuses on ABSENCE, so its cell
+        asserts silence on both spellings and its refusal is earned in
+        :class:`TestTheLoadThePassCouldNotSee`.
+        """
+        base_observation = preflight_document()["observation"]
+        cycling = {**base_observation,
+                   "switching": {"mode": "cycle",
+                                 "order": ["antenna", "ambient"]}}
+        documents = {
+            "A5": lambda target: preflight_document(
+                model={**BASE_MODEL, "bandpass": dict(
+                    GAIN, python=_respelled(target, "GainOperator",
+                                            "instrument.gain"))}),
+            "A8": lambda target: preflight_document(
+                model={**BASE_MODEL, "cw_tone": dict(
+                    TONE, at=["gain"],
+                    python=_respelled(target, "CWCalibrationOperator",
+                                      "instrument.calibration"))}),
+            "A14": lambda target: preflight_document(
+                model={**BASE_MODEL, "bandpass": dict(LOAD, python=target)},
+                observation=cycling),
+            "A15": lambda target: preflight_document(
+                model={**BASE_MODEL, "bandpass": {
+                    "python": _respelled(target, "NoiseWaveOperator",
+                                         "instrument.noise_wave"),
+                    "gamma_src_re": {"zeros": [3, 8]},
+                    "gamma_src_im": {"zeros": [3, 8]}}},
+                observation=cycling),
+            "A31": lambda target: _with_data(_model_only(
+                {"gain": GAIN, "emi": dict(SKY, python=_respelled(
+                    target, "SkyOperator", "sky.uniform"))})),
+            "A52": lambda target: _model_only(
+                {"gain": GAIN, "emi": {"python": _respelled(
+                    target, "SkySourceOperator", "sky.source")}}),
+        }[check]
+
+        def report(target):
+            return [(one.check, one.where, one.message)
+                    for one in preflight(documents(target)).findings
+                    if one.check == check]
+
+        assert report(LOAD_EXPORTED) == report(LOAD_SUBMODULE)
+        if check != "A14":
+            assert report(LOAD_EXPORTED) != []
+
+    def test_the_placement_reader_says_cannot_say_rather_than_nothing(self):
+        """``_t5_placement`` is the distinction ``_t5_claims`` collapses.
+
+        Kills a ``_t5_placement`` that is an alias of ``_t5_claims``: the two
+        must differ on exactly this entry and agree everywhere else.
+        """
+        from rheplicant.config.preflight.model import (
+            _t5_claims,
+            _t5_placement,
+        )
+
+        foreign = {"python": "myproject.radio:GainOperator"}
+        assert _t5_placement("noise", foreign) is None
+        assert _t5_claims("noise", foreign) == ()
+
+    @pytest.mark.parametrize(("key", "spec"), [
+        ("gian", GAIN),
+        ("gain", None),
+        ("bandpass", {"at": ["gain"]}),
+        ("bandpass", dict(PY_GAIN, at="noise")),
+        ("bandpass", dict(PY_GAIN, at=7)),
+        ("noise", {"python": "rheplicant.radio:AbstractSkyModel"}),
+    ], ids=["not-a-node", "not-a-mapping", "at-with-no-python",
+            "a-string-at-that-does-not-restate-its-key", "a-malformed-at",
+            "a-class-that-declares-no-graph-node"])
+    def test_every_other_empty_answer_stays_empty(self, key, spec):
+        """The other polarity, and the one a lazy fix would break.
+
+        ``_t5_placement`` answering ``None`` for every empty case would stand
+        A14 down on every document -- a silent loss of the check, in the name
+        of fixing it.  Each cell below is a placement the BUILD makes nowhere,
+        so ``()`` is the true answer and ``None`` would be a lie about it.
+        """
+        from rheplicant.config.preflight.model import _t5_placement
+
+        assert _t5_placement(key, spec) == ()
+
+
+#: The tone written at its own key and RELOCATED onto the gain node -- the
+#: document on which A5 and A8 co-fire with opposite advice.
+TONE_AT_GAIN = dict(TONE, at=["gain"])
+
+#: A5's remedy applied verbatim to that document: the two operators composed
+#: under one key.  Measured before the fix, this produced a CLEAN report with
+#: the tone still inside the gain slot.
+COMPOSED_AFTER = {"compose": "cascade", "stages": [GAIN, TONE]}
+
+#: The same cascade with the tone FIRST, which is the ordering the physics
+#: allows: ``Pipeline`` applies stages in order at one node.
+COMPOSED_FIRST = {"compose": "cascade", "stages": [TONE, GAIN]}
+
+
+class TestA5AndA8DoNotContradictEachOther:
+    """The worst shape the whole-branch review found: advice that silences a
+    check without fixing what it was about.
+
+    Measured on ``TONE_AT_GAIN``: A5 and A8 both fire on node ``gain``, A5
+    says *"Compose them under one key"*, A8 says *"Give it its own node"*, and
+    ``raise_if_refused`` quotes A5 -- the first registered.  Applying A5's
+    advice produced a report with NO findings at all, while the tone sat
+    inside the gain slot: exactly A8's physical objection, now unsaid.
+    """
+
+    def test_both_checks_still_fire_on_the_document(self):
+        """The premise.  Kills a "fix" that resolved the contradiction by
+        standing one of the two down -- which would lose a check rather than
+        reconcile two."""
+        report = preflight(preflight_document(
+            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}))
+        assert {"A5", "A8"} <= report.checks()
+
+    def test_A5_no_longer_advises_what_A8_forbids(self):
+        """The whole message, by equality against a literal.
+
+        A fragment assertion cannot see this: the old clause and the new one
+        share the sentence before them, and *"its own node"* appears in A8's
+        message too, so ``in`` on either would pass under the defect.
+        """
+        found = only(preflight_document(
+            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A5")
+        assert found.message == (
+            "model.cw_tone: puts a second operator at node 'gain', which "
+            "model.gain already fills, and this node accepts a single "
+            "instance. Give it its own node, 'cw_tone': CWCalibrationOperator "
+            "declares must_precede=['bandpass', 'gain'], so it has to come "
+            "BEFORE the 'gain' operator and composing the two under 'gain' "
+            "puts it inside the stage it is there to track -- check A8, which "
+            "fires on this same node, says what that costs (check A5).")
+
+    def test_an_ordinary_collision_keeps_the_compose_remedy(self):
+        """ANTI-VACUITY, and the direction an over-eager fix loses.
+
+        ``GainOperator`` declares no ``must_precede``, so composing really is
+        the right answer for it and withdrawing the clause everywhere would
+        leave every ordinary collision without a fix.  Pinned whole for the
+        same reason as the row above.
+        """
+        found = only(preflight_document(
+            model={**BASE_MODEL, "bandpass": PY_GAIN}), "A5")
+        assert found.message == (
+            "model.bandpass: puts a second operator at node 'gain', which "
+            "model.gain already fills, and this node accepts a single "
+            "instance. Compose them under one key instead -- compose: cascade "
+            "at a transform node, compose: sum at a source node, which is how "
+            "this document spells At(...) (check A5).")
+
+    def test_A5s_old_advice_applied_is_no_longer_a_clean_report(self):
+        """The defect itself.  Before the fix this document earned NOTHING.
+
+        A8 read the composing MAPPING for a ``python:``, which a composing
+        mapping never carries, so the tone inside the cascade was invisible.
+        """
+        found = only(preflight_document(
+            model={**{key: value for key, value in BASE_MODEL.items()
+                      if key != "gain"},
+                   "gain": COMPOSED_AFTER}), "A8")
+        assert found.where == "model.gain.stages[1]"
+        assert found.message == (
+            "model.gain.stages[1]: puts CWCalibrationOperator at node 'gain' "
+            "-- the node it declares it must precede -- as stage 1 of a "
+            "compose: cascade, which applies its stages in order at ONE node, "
+            "so this operator is injected after stage 0 rather than before "
+            "the 'gain' operator. "
+            f"{CWCalibrationOperator.must_precede_because} Neither backstop "
+            "sees it: assemble() sees one placement at 'gain' "
+            "(core/fold.py:271-274), and check_stage_ordering compares only "
+            "stages the document gave a name: to (core/pipeline.py:129-131). "
+            "Make it stage 0 of the cascade, or give it its own node, "
+            "'cw_tone' (check A8).")
+
+    def test_the_tone_composed_FIRST_is_not_refused(self):
+        """``compose: cascade`` is ``Pipeline(*stages)`` and applies them in
+        order, so a tone written first has every other stage at that node
+        downstream of it -- which is what ``must_precede`` asks for.
+
+        Kills a fix that refuses any composed tone at a target node: that
+        would refuse a document whose ordering is correct, and would leave
+        the message's own *"Make it stage 0 of the cascade"* advice naming a
+        fix the check itself rejects.
+        """
+        assert _t5_refused(preflight_document(
+            model={**{key: value for key, value in BASE_MODEL.items()
+                      if key != "gain"},
+                   "gain": COMPOSED_FIRST}), "A8") == []
+
+    def test_a_cascade_of_stages_that_declare_no_ordering_is_silent(self):
+        """ANTI-VACUITY on the widening: reading composed stages must not
+        make every ``compose:`` block a finding."""
+        assert _t5_refused(preflight_document(
+            model={**{key: value for key, value in BASE_MODEL.items()
+                      if key != "gain"},
+                   "gain": {"compose": "cascade",
+                            "stages": [GAIN, PY_GAIN]}}), "A8") == []
+
+    def test_a_compose_the_build_refuses_outright_stands_A8_down(self):
+        """Task 5's rule, on the shape the widening opened.
+
+        ``compose: sum`` at a TRANSFORM node is ``_compose``'s own refusal --
+        *"compose: sum adds source contributions, and this is a transform
+        node -- transforms chain; use compose: cascade"*
+        (``compose.py:247-251``) -- and A8's sentence in front of it would
+        name a fix that is not the fault.  A ``sum`` has no order for "stage
+        0" to mean anything about either: its branches run in parallel on the
+        same input, which is why ``check_stage_ordering`` deliberately says
+        nothing about a ``SumOperator``.
+
+        Kills a widening written ``"compose" in spec`` rather than
+        ``spec["compose"] == "cascade"``, which was the first form of this
+        change: it told the reader the tone was "injected after stage 0" of a
+        block that has no stage order at all.
+        """
+        model = {**{key: value for key, value in BASE_MODEL.items()
+                    if key != "gain"},
+                 "gain": {"compose": "sum", "stages": [GAIN, TONE]}}
+        assert _t5_refused(preflight_document(model=model), "A8") == []
+        with pytest.raises(ConfigError, match="use compose: cascade"):
+            build_model(dict(model), BARE, switch_order=())
+
+    def test_the_single_entry_message_is_unchanged(self):
+        """§2.3: a MOVED message survives verbatim, and the entry walk this
+        commit put under A8 must not reword the leg it already had."""
+        found = only(preflight_document(
+            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A8")
+        assert found.where == "model.cw_tone"
+        assert found.message == (
+            "model.cw_tone: puts CWCalibrationOperator IN the 'gain' slot, so "
+            "this document declares no 'gain' operator for it to pass through "
+            "-- it replaced the stage it is there to track. "
+            f"{CWCalibrationOperator.must_precede_because} assemble() cannot "
+            "say this: it sees one placement, and an absent stage is "
+            "deliberately no violation there (core/fold.py:271-274), while "
+            "the document still has the key and the operator apart. Give it "
+            "its own node, 'cw_tone' (check A8).")
+
+
+class TestWhichRunsA30IsAbout:
+    """``_kinds`` filters nothing, and A30 was its only production caller."""
+
+    def test_a_run_that_expects_its_own_refusal_is_not_counted(self):
+        """``expect: refuse`` runs the executor and CAPTURES its error as the
+        run's product; a P-1 refusal makes the document unloadable, so the
+        assertion the run exists to make can never be made.
+
+        Measured with A30 bypassed: this document's fisher run captures
+        *"ParameterSpaceError: ... NoiseOperator at 'noise', which declares
+        'key' in requires"* -- A30's own subject.  And A30's advice applied to
+        it (``inference.twin.without: [noise]``) gives ``ConfigError:
+        runs['fisher']: expect: refuse, and kind: fisher SUCCEEDED``, so the
+        refusal trades itself for another one.
+
+        Kills ``sorted(_kinds(document) - _A30_NOT_FITTING)``, which is what
+        shipped.
+        """
+        assert "A30" not in preflight(_t11_fit(
+            twin=None,
+            runs=[{"kind": "fisher", "expect": "refuse"}])).checks()
+
+    def test_a_sibling_run_of_the_same_kind_that_expects_nothing_still_is(
+            self):
+        """The gate is per RUN, not per document.
+
+        Kills a stand-down written ``any(run.get("expect") == "refuse" ...)``
+        over the whole ``runs:`` list, which would lose A30 on a document
+        where one fisher run is an assertion and another is a fit.
+        """
+        assert "A30" in preflight(_t11_fit(
+            twin=None,
+            runs=[{"name": "asserted", "kind": "fisher", "expect": "refuse"},
+                  {"name": "fitted", "kind": "fisher"}])).checks()
+
+    def test_a_kind_the_run_grammar_does_not_offer_earns_nothing(self):
+        """A30's message claimed *"This document declares kind: banana, and
+        every exit but forward and mmodes closes the fit twin over ONE
+        template state"* -- a claim about the closure behaviour of a kind that
+        does not exist.
+
+        ``parse_runs`` (``runs.py:87-90``) names the real fault on the
+        ``run_document`` path and nothing names it on ``load_document``'s,
+        which makes an invented claim worse rather than harmless.
+        """
+        assert "A30" not in preflight(_t11_fit(
+            twin=None, runs=[{"kind": "banana"}])).checks()
+
+    @pytest.mark.parametrize("kind", sorted(
+        {"forward", "fisher", "optimize", "plan.estimate", "plan.sample",
+         "nuts", "npe", "conjugate.gls", "conjugate.wiener", "conjugate.gcr",
+         "identifiability", "score_directions", "predict", "mmodes",
+         "condition", "gradient"} - {"forward", "mmodes"}))
+    def test_every_fitting_kind_the_enum_declares_still_earns_it(self, kind):
+        """ANTI-VACUITY on the narrowing: intersecting with ``runs._KINDS``
+        must not drop a kind that IS declared.
+
+        The list is written out rather than imported so that a kind LEAVING
+        ``_KINDS`` is caught here as well -- ``test_every_declared_kind_is_
+        classified`` pins the other direction, and between them a change to
+        the enum cannot pass unnoticed.
+        """
+        from rheplicant.config.sections.runs import _KINDS
+
+        assert kind in _KINDS
+        assert "A30" in preflight(_t11_fit(twin=None,
+                                           runs=[{"kind": kind}])).checks()
+
+
+class TestA33ReadsOnlyDeclaredLatents:
+    """A33 gates both path HEADS against ``_lit`` and left the NAME ungated.
+
+    ``_a23_prior_free``'s docstring states the rule -- *"``names`` must
+    already be names the document DECLARES WELL"* -- and its caller filters.
+    ``_t11_bindings`` did not.
+    """
+
+    def _document(self, latents):
+        return preflight_document(
+            model=BANDPASS_MODEL,
+            inference={"parameters": {"g": {"init": 1.0,
+                                            "into": "gain.gain"}},
+                       "bindings": [{"latents": latents,
+                                     "into": "bandpass.bandpass"}],
+                       "noise": BANDPASS_AND_GAIN["noise"]})
+
+    def test_a_binding_naming_no_declared_latent_earns_nothing(self):
+        """Measured live: this document earned A33 at
+        ``inference.bindings[0].transform`` and was told to declare
+        ``transform: unit_mean_bandpass``, which cannot help -- the package's
+        own sentence is *"inference.bindings[0]: 'ghost' is not a declared
+        latent; inference.parameters declares ['g']."*
+
+        This is A33's own docstring's argument (a typo'd head must not be
+        answered with a degeneracy lecture) applied to the half it left open.
+        """
+        assert "A33" not in preflight(self._document(["ghost"])).checks()
+
+    def test_a_binding_that_also_names_a_declared_one_is_still_read(self):
+        """ANTI-VACUITY: the filter drops NAMES, not bindings.
+
+        Kills ``if any(name not in declared): continue``, which would lose
+        A33 on a binding whose real latent is there beside a typo -- a
+        document with a genuine null direction, silently cleared by a
+        second mistake.
+        """
+        document = self._document(["ghost", "b"])
+        document["inference"]["parameters"]["b"] = {
+            "init": {"ones": ["n_freq"]}}
+        assert "A33" in preflight(document).checks()
+
+    def test_the_undeclared_name_is_the_packages_own_refusal(self):
+        """The sentence A33 was displacing, quoted from the package rather
+        than described -- so this cell goes red if that refusal moves."""
+        from rheplicant.config.document import load_document
+
+        with pytest.raises(ConfigError, match="is not a declared latent"):
+            load_document(self._document(["ghost"]))

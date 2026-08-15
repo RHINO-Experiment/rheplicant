@@ -89,7 +89,7 @@ from rheplicant.config.preflight.model import (
     _nodes,
     _t4_graph,
     _t4_switch_order,
-    _t5_claims,
+    _t5_placement,
     _t5_radio_class,
 )
 from rheplicant.config.sections.model import _pick_class, operator_table
@@ -350,6 +350,36 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
     key-shaped test refuses a document that assembles.  A ``cal_loads:``
     written with the wrong SHAPE stands down too -- that is A6's sentence,
     and Task 4's ``A14.cal_loads`` leg stands down on it for the same reason.
+
+    **A FOURTH document stands down, and it was a LIVE FALSE REFUSAL until
+    the commit that added this clause.**  This check refuses on ABSENCE, and
+    :func:`~rheplicant.config.preflight.model._t5_claims` answers ``()`` both
+    for "nothing is placed" and for "the text cannot say where" -- its own
+    docstring says so.  Measured, ``bandpass: {python:
+    'rheplicant.radio.instrument.calibration:CalLoadOperator', ...}`` was read
+    as the first when it is the second: the build resolves that target through
+    ``hatch.import_target`` to the very class the exported spelling names, the
+    load IS placed at ``cal_loads``, the assembly is identical either way
+    (``twin.lit`` equal, verified with this check bypassed) -- and A14 refused
+    it.  The same commit widened ``_t5_radio_class`` so every class
+    ``rheplicant.radio`` exports resolves under any spelling of its own
+    module, which closes that document; what stands down here is what is left:
+    a genuinely FOREIGN class, whose ``graph_node`` this pass may not import
+    to read.  ``_t5_placement`` answers ``None`` for exactly that entry, and
+    one such entry anywhere in ``model:`` stands the whole check down --
+    because it is the entry that might be the calibration load, and "no load"
+    is a claim this document cannot support.
+
+    **The ``switching: {mode: none}`` alternative is CONDITIONAL, and that is
+    an advice loop closed rather than a nicety.**  Measured before the clause
+    below: a four-key document with a two-label order and a two-row
+    ``gamma_src`` earned A14, whose fix ``switching: {mode: none}`` then
+    earned A15 **twice** -- *"this run declares no observation.switching
+    order, so it has exactly one source"* -- whose own fix is ``switching:
+    {mode: cycle, order: [antenna, ...]}``, and the document that produces is
+    ``==`` the one the reader started from.  Both checks are this module's and
+    one drafter wrote them.  A14 is quoted first by ``raise_if_refused``, so a
+    reader following it never saw the finding that forbids its remedy.
     """
     findings: list[Finding] = []
     order = _t4_switch_order(document)
@@ -366,8 +396,11 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
     model = document.get("model")
     if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
         return findings
-    if any(_t5_claims(key, spec) == ("cal_loads",)
-           for key, spec in _nodes(document).items()):
+    placements = [_t5_placement(key, spec)
+                  for key, spec in _nodes(document).items()]
+    if any(placed is None for placed in placements):
+        return findings
+    if any(placed == ("cal_loads",) for placed in placements):
         return findings
     findings.append(refuse(
         "A14", "model.cal_loads",
@@ -380,9 +413,50 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
         f"nothing refuses that: measured, such a document builds and its twin "
         f"runs, with the cycle in coords.extra['receiver_input'] and no load "
         f"to switch to. Declare model.cal_loads with the keys "
-        f"{list(order[1:])} in that order, or write switching: {{mode: none}} "
-        f"(check A14)."))
+        f"{list(order[1:])} in that order"
+        f"{_a14_dropping_the_order(document)} (check A14)."))
     return findings
+
+
+def _a14_dropping_the_order(document: Mapping[str, Any]) -> str:
+    """A14's second alternative -- and what else it costs, when it costs
+    something.
+
+    ``switching: {mode: none}`` is a real fix for a document whose only fault
+    is an order with no loads behind it.  It is NOT one on a document that
+    also writes a ``gamma_src`` row count, because ``n_source`` becomes 1 and
+    A15 -- the other check in this module, by the same drafter -- refuses
+    every row count but one.  Offering it bare is what made the pair a closed
+    loop: measured, A14's fix earned A15 twice and A15's fix restored A14's
+    document exactly (``step2 == step0``).
+
+    So the coupled edit is NAMED rather than the alternative being withdrawn:
+    a reader who wants no switch cycle can still have one, and now knows what
+    else has to move.  The rows are read through A15's own
+    :func:`_a15_sites`/:func:`_a15_declared_rows`, not a second reader --
+    they answer ``None`` wherever the text does not say how many rows there
+    are, and a row count this pass cannot read cannot be coupled to anything.
+
+    **The count is read at ``n_source = 1``, the value it would HAVE**, not at
+    the one the document has now.  ``_a15_declared_rows`` resolves the symbols
+    ``n_source`` and ``n_load``, so a ``{zeros: ['n_source', 8]}`` follows the
+    order down to one row and is not coupled at all; reading it against the
+    current order would name a field that needs no edit, which is the fix
+    clause telling a reader to write the number they already wrote (Task 6's
+    own mutation finding).
+    """
+    coupled = sorted({
+        f"{site}.{half}"
+        for site, spec in _a15_sites(document)
+        for half in _A15_HALVES
+        if (rows := _a15_declared_rows(spec.get(half), 1)) is not None
+        and rows != 1})
+    if not coupled:
+        return ", or write switching: {mode: none}"
+    return (", or write switching: {mode: none} AND cut "
+            f"{coupled} to a single row each -- mode: none is one source, and "
+            "check A15 refuses any other gamma_src row count under it, so "
+            "dropping the order alone trades this refusal for that one")
 
 
 @register("A15")

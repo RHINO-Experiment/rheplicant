@@ -182,10 +182,28 @@ def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
 def _kinds(document: Mapping[str, Any]) -> frozenset[str]:
     """Every ``runs[].kind`` the document declares, as a set.
 
-    For the checks that ask "does this document run ANY exit of shape X" --
-    A20's ``plan.*`` family, A21's ``fisher``, A30's "is a fitting exit
-    declared at all".  A check that needs the run's own index or options
-    walks :func:`_runs` instead.
+    **It filters nothing, and the callers this docstring used to name do not
+    exist.**  It said "A20's ``plan.*`` family, A21's ``fisher``, A30's 'is a
+    fitting exit declared at all'"; measured, ``_prior_gates`` walks
+    :func:`_runs` for A20 and A21 -- they need the run's index for their
+    ``where`` -- so A30 was the only production caller, and it inherited two
+    holes this function is entitled to have and A30 was not:
+
+    * a kind ``sections/runs._KINDS`` does not contain is in here.  ``kind:
+      banana`` is a member of this set, and A30 read it as a declared exit
+      and made a claim about how it closes the fit twin;
+    * a run declaring ``expect: refuse`` is in here.  That run is an
+      assertion ABOUT a refusal, and a P-1 refusal cannot be captured
+      (``_blocks`` and ``_prior_gates`` argue it at length), so a check that
+      refuses on the mere PRESENCE of the kind destroys it.
+
+    Neither is a defect here: the question this answers is "which kinds does
+    the text declare", and both of those are declared.  They are defects in a
+    caller that reads the answer as "which exits will this document reach",
+    and the one caller that did now narrows it itself --
+    ``preflight/model._a30_exits``, which intersects this with the closed
+    enum and with the runs that are not expectations.  A check that needs the
+    run's own index, options or ``expect:`` walks :func:`_runs` instead.
     """
     return frozenset(run["kind"] for run in _runs(document)
                      if isinstance(run.get("kind"), str))

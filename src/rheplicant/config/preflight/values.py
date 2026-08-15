@@ -280,10 +280,12 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
     **A ``replace:`` counts only when the pass NAMED the replacement's class.**
     ``_a30_stochastic`` answers ``None`` both for "does not draw" and for "the
     text cannot say", and an earlier form of this function read either as a
-    removal.  Measured, that was a live false warning: ``_t5_radio_class``
-    resolves ``rheplicant.radio`` and nothing else, while the build resolves a
+    removal.  Measured, that was a live false warning, and the hole it exposed
+    was never A42's: ``_t5_radio_class`` resolved the spelling
+    ``rheplicant.radio`` and nothing else, while the build resolves a
     ``python:`` target through ``hatch.import_target``, which imports any
-    module.  So ``replace: {noise: {python:
+    module -- so ONE class object had two spellings and the two disagreed.
+    ``replace: {noise: {python:
     'rheplicant.radio.instrument.noise:NoiseOperator'}}`` **builds**, its fit
     twin's ``noise`` IS a ``NoiseOperator`` declaring ``key`` in ``requires``,
     and A42 told that document its data carried no noise realisation and to
@@ -293,14 +295,22 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
     false in the word *resolves*: two different resolvers, and only one of them
     is P-1's.
 
-    The un-nameable half is a DECLINE and stays one.  Resolving an arbitrary
-    module here would import a user's code during pre-flight -- a file read and
-    an unbounded cost, which is exactly why ``_t5_radio_class`` is narrow.  The
-    same decline costs the mirror-image check: measured, ``model.noise:
-    {python: '<submodule>:NoiseOperator'}`` with ``without: [noise]`` builds,
-    the fit twin genuinely loses the draw, and ``stochastic_nodes`` is empty,
-    so A42 says nothing.  Both directions are pinned by tests; the lost half is
-    §6 residue, not a bug this phase can close.
+    **That divergence is now closed at the resolver**, one commit later and
+    for five other checks at the same time: ``_t5_radio_class`` resolves any
+    module ``sys.modules`` already holds whose attribute IS the class
+    ``rheplicant.radio`` exports, importing nothing.  So both documents above
+    are decided here rather than declined, and the mirror-image check comes
+    back with them: ``model.noise: {python:
+    'rheplicant.radio.instrument.noise:NoiseOperator'}`` with ``without:
+    [noise]`` is now a node ``stochastic_nodes`` reports, and A42 warns about
+    it.  Both spellings are pinned by tests that compare the two.
+
+    **The clause below stays, because the decline does.**  A genuinely foreign
+    class -- one ``rheplicant.radio`` does not export -- is still unnameable
+    here, and resolving it would import a user's module during pre-flight, a
+    file read and an unbounded cost.  For that entry "cannot say" is still not
+    "does not draw", and reading it as a removal is still a false warning.
+    What changed is how rare it is, not what it means.
     """
     inference = document.get("inference")
     if not isinstance(inference, Mapping):
@@ -323,8 +333,10 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
         if not isinstance(replacement, Mapping):
             return False                       # nothing to name
         if "python" in replacement:
-            # `_t5_radio_class` is P-1's resolver and it is narrower than the
-            # build's.  A target it cannot reach is "cannot say", never "does
+            # `_t5_radio_class` is P-1's resolver and it is STILL narrower
+            # than the build's -- it imports nothing, so a class outside
+            # `rheplicant.radio.__all__` is unreachable here however it is
+            # spelled.  A target it cannot reach is "cannot say", never "does
             # not draw".
             return _t5_radio_class(replacement) is not None
         # UNREACHABLE TODAY, and kept because the day it stops being one it

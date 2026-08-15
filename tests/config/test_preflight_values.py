@@ -583,21 +583,23 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         assert [f.where for f in found] == ["inference.observed.primary"]
         assert "['noise']" in found[0].message
 
-    def test_a_replacement_this_pass_cannot_name_a_class_for_is_silent(self):
-        """THE LIVE DEFECT this test was written to close, in the direction
-        that produced a FALSE WARNING on a document that builds.
+    def test_a_submodule_spelled_replacement_that_still_draws_is_silent(self):
+        """THE LIVE DEFECT the previous version of this test recorded, now
+        decided rather than declined -- and asserted the same way either way.
 
-        ``_t5_radio_class`` resolves ``rheplicant.radio`` and nothing else; the
-        build resolves a ``python:`` target through ``hatch.import_target``,
-        which imports any module.  Measured: this document returns a
-        ``ConfiguredRun``, ``run.inference.fit_twin["noise"]`` IS a
-        ``NoiseOperator``, and ``RANDOMNESS in requires`` is True -- yet A42
-        told it "the data carries no realisation of ['noise']" and to write
-        ``twin: full``.
+        The old form asserted silence and its docstring said *"``_t5_radio_
+        class`` resolves ``rheplicant.radio`` and nothing else; the build
+        resolves through ``hatch.import_target``, which imports any module"*.
+        That divergence is the one the whole-branch review found in six
+        checks, and it is closed at the resolver: measured,
+        ``import_target('rheplicant.radio.instrument.noise:NoiseOperator') is
+        NoiseOperator``, so the pass now NAMES the class and finds that it
+        draws.  The document still earns no warning -- nothing left the twin
+        -- but for the right reason, and the assertion below is the same one
+        under both regimes, which is why it is the WEAK half of this pair.
 
-        Kills ``_a30_stochastic(...) is None`` read as a removal, which is what
-        shipped in ``0cc0516`` and which the whole of ``tests/config`` passed
-        with.
+        Kills ``_a30_stochastic(...) is None`` read as a removal, which is
+        what shipped in ``0cc0516``.
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
@@ -607,21 +609,46 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
                 "observed": simulated()})
         assert list(_simulated_fit_twin(doc)) == []
 
-    def test_a_submodule_spelled_model_node_is_a_declared_blind_spot(self):
-        """The MIRROR of the row above, and it is a decline rather than a fix.
+    def test_a_replacement_this_pass_cannot_name_a_class_for_is_silent(self):
+        """The STRONG half: a class ``rheplicant.radio`` does not export.
 
-        Measured: ``model.noise: {python: '<submodule>:NoiseOperator'}`` with
-        ``without: [noise]`` and ``twin: fit`` **builds**, the fit twin
+        The resolver imports nothing, so it can only name what
+        ``rheplicant.radio.__all__`` already holds -- widening the module
+        spelling did not widen that.  ``rheplicant.core.operator:
+        SnapshotOperator`` is a real class in an imported module and is not an
+        exported radio name, so this pass cannot say whether the replacement
+        draws.
+
+        ``_a30_stochastic`` answers ``None`` here for "cannot say" and A42
+        must not read that as "the draw was taken out": that reading is a
+        warning telling a document its data carries no noise when the pass
+        never established anything of the kind.  Unlike the row above, this
+        cell DISCRIMINATES -- it is red the moment the ``"python" in
+        replacement`` clause of ``took_the_draw_out`` is dropped.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"replace": {"noise": {
+                "python": "rheplicant.core.operator:SnapshotOperator"}}},
+                "observed": simulated()})
+        assert list(_simulated_fit_twin(doc)) == []
+
+    def test_a_submodule_spelled_model_node_is_no_longer_a_blind_spot(self):
+        """The MIRROR, and it was a LOST CHECK until the resolver widened.
+
+        Measured before: ``model.noise: {python: '<submodule>:NoiseOperator'}``
+        with ``without: [noise]`` and ``twin: fit`` **builds**, the fit twin
         genuinely loses the draw (``"noise" in run.inference.fit_twin.lit`` is
-        False while it is True in ``run.twin.lit``), and A42 says nothing --
-        because ``stochastic_nodes`` cannot name the class either.
+        False while it is True in ``run.twin.lit``) -- and A42 said nothing,
+        because ``stochastic_nodes`` could not name the class.  The previous
+        version of this test asserted that silence and said in its own
+        docstring that it *"goes red the day P-1 gains a wider resolver, and
+        whoever widens it should widen the sibling above at the same time"*.
+        It went red on exactly that commit; this is the widened form.
 
-        Closing it would mean importing an arbitrary module during pre-flight,
-        which is a file read and an unbounded cost and is exactly what
-        ``_t5_radio_class`` is narrow to avoid.  So it is §6 residue, and this
-        test is what makes it a recorded blind spot rather than an assumed
-        absence: it goes red the day P-1 gains a wider resolver, and whoever
-        widens it should widen the sibling above at the same time.
+        Kills a resolver widened only for the ``replace:`` leg: the two legs
+        read the same ``python:`` target through the same function, and a
+        widening that reached one of them would leave this half silent.
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": {
@@ -629,7 +656,35 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
                 "sigma": {"value": 0.5, "unit": "K"}}},
             inference={"twin": {"without": ["noise"]},
                        "observed": simulated()})
-        assert list(_simulated_fit_twin(doc)) == []
+        found = list(_simulated_fit_twin(doc))
+        assert [one.where for one in found] == ["inference.observed.primary"]
+        assert "['noise']" in found[0].message
+
+    def test_the_two_spellings_of_one_class_reach_A42_alike(self):
+        """The property the six defects were instances of, on A42's own leg.
+
+        ``rheplicant.radio:NoiseOperator`` and
+        ``rheplicant.radio.instrument.noise:NoiseOperator`` are ONE class
+        object -- measured, ``import_target`` returns the identical object for
+        both -- and the build resolves either.  A pass that answers
+        differently about them is answering about the spelling.
+
+        Kills any resolver that special-cases one module name: the two
+        documents differ in nothing else, so the comparison cannot be
+        satisfied by a rule about ``rheplicant.radio`` in particular.
+        """
+        def report(target):
+            doc = preflight_document(
+                model={**BASE_MODEL, "noise": {
+                    "python": target, "sigma": {"value": 0.5, "unit": "K"}}},
+                inference={"twin": {"without": ["noise"]},
+                           "observed": simulated()})
+            return [(one.check, one.where, one.message)
+                    for one in _simulated_fit_twin(doc)]
+
+        assert report("rheplicant.radio:NoiseOperator") == report(
+            "rheplicant.radio.instrument.noise:NoiseOperator")
+        assert report("rheplicant.radio:NoiseOperator") != []
 
     def test_a_replacement_at_a_node_that_never_drew_is_silent(self):
         """``replace: {gain: <a GainOperator>}`` beside a stochastic

@@ -33,6 +33,7 @@ the table is ``sections/model``'s and no task in this plan owns it.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -41,7 +42,7 @@ from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import register
 from rheplicant.config.preflight.document import _task3_where
-from rheplicant.config.preflight.fitting import _kinds, _latents
+from rheplicant.config.preflight.fitting import _kinds, _latents, _runs
 from rheplicant.config.sections.compose import (
     cal_load_order_problem,
     double_count_problem,
@@ -140,13 +141,27 @@ def _lit(document: Mapping[str, Any]) -> frozenset[str]:
     visible to A8's reachability question.  ``test_lit_is_what_the_assembly_
     itself_reports`` holds all six shapes against a real assembly.
 
-    An entry that places NOTHING lights nothing: a ``python:`` target this
-    layer will not import (measured, ``AssemblyError``: no ``graph_node`` and
-    no ``At(...)``), a single-node ``at:`` disagreeing with its key, an ``at:``
-    with no ``python:``, and a malformed ``at:`` are all documents the build
-    refuses, and reporting a node for them is reporting a placement nobody
-    makes.  §3.1 makes this the binding Tasks 5 and 11 start from, so a wrong
-    answer here is wrong three times.
+    An entry that places NOTHING lights nothing: a single-node ``at:``
+    disagreeing with its key, an ``at:`` with no ``python:``, and a malformed
+    ``at:`` are all documents the build refuses, and reporting a node for them
+    is reporting a placement nobody makes.  §3.1 makes this the binding Tasks
+    5 and 11 start from, so a wrong answer here is wrong three times.
+
+    **The fourth shape this paragraph used to name is NOT one of them, and
+    saying so was a false claim about the build.**  It read *"a ``python:``
+    target this layer will not import (measured, ``AssemblyError``: no
+    ``graph_node`` and no ``At(...)``)"*, which conflates two different
+    documents: a target whose CLASS declares no ``graph_node`` really is the
+    ``AssemblyError`` (nothing placed), while a target this pass merely
+    declines to NAME is placed by the build wherever its class declares.
+    Measured at the commit that widened :func:`_t5_radio_class`: the same
+    class under two spellings gave ``('cal_loads',)`` and ``()``, and
+    ``_t5_claims``' own docstring says ``()`` means "nothing placed **or**
+    text cannot say where" -- the opposite of what this said, in the same file
+    and the same commit.  This function still lights nothing for such an entry,
+    because crediting the KEY would invent a placement the build does not
+    make; :func:`_t5_placement` is where the distinction is available to a
+    caller that needs it.
     """
     graph = _t4_graph()
     lit: set[str] = set()
@@ -382,13 +397,39 @@ def _a14_cal_load_keys(document: Mapping[str, Any]) -> Iterable[Finding]:
 def _t5_radio_class(spec: Any):
     """The shipped class a spec's ``python:`` names, or ``None``.
 
-    ``rheplicant.radio`` only, and BY NAME: §2.4 puts "operator classes
-    resolved by name the way ``sections/model.py:49-54`` already does" in
-    scope for P-1 and leaves importing an arbitrary module out of it -- an
-    ``import_target`` here would run a user's module at pre-flight, which is
-    both a file read and an unbounded cost.  A target this cannot resolve is
-    not a failure: the caller treats it as an unknown placement and the
-    assembly stays the backstop.
+    **The class, not the spelling.**  Until this commit the module test was
+    ``module != "rheplicant.radio"``, and the build resolves the same target
+    through ``hatch.import_target`` (``sections/model.py:260``), which imports
+    **any** module -- so the two spellings of ONE class object diverged, and
+    six checks read the divergence.  Measured: ``import_target
+    ('rheplicant.radio.instrument.calibration:CalLoadOperator') is
+    CalLoadOperator`` is True, while the exported spelling gave
+    :func:`_t5_claims` ``('cal_loads',)`` and the submodule spelling ``()`` --
+    which A14 refuses **on absence**, so a document that BUILDS was refused,
+    and A5, A15, A31, A52 and A30's ``replace:`` gate each lost their subject
+    on the same document.  Task 12 had recorded the hole for A42 alone
+    (``preflight/values.py:283-303``: *"two different resolvers, and only one
+    of them is P-1's"*); it was never A42's.
+
+    **The widening imports NOTHING**, which is what keeps §2.4 and §0 intact.
+    A target resolves here only when its attribute is a name
+    ``rheplicant.radio`` exports AND the named module -- already in
+    ``sys.modules`` -- carries that same object.  Measured over all 58 names
+    in ``rheplicant.radio.__all__``: 55 resolve by their own defining module's
+    spelling to the identical object with **no new module imported**, and the
+    other three (``RADIO_GRAPH``, ``rhino_to_state`` and one more) are names
+    ``import_target`` also refuses at that spelling, so the two agree there
+    too.  ``rheplicant.radio`` is imported by ``import rheplicant.config``
+    already (``config/kinds/projectors.py:44``), so every module defining an
+    exported class is in ``sys.modules`` before the pass runs.
+
+    A module ``sys.modules`` does not carry is a **decline**, never a guess:
+    importing it would run a user's module at pre-flight, which is both a file
+    read and an unbounded cost.  The decline can only lose a check, never
+    invent one -- to answer at all, the object found must BE the shipped class
+    the build would construct -- and :func:`_t5_placement` is what tells a
+    caller that a decline happened, because for A14 "no placement" and "no
+    placement I can see" are opposite answers.
 
     Two clauses here are EQUIVALENT MUTANTS by construction rather than
     untested decisions, and both were measured that way:
@@ -412,13 +453,19 @@ def _t5_radio_class(spec: Any):
     if not isinstance(target, str) or target.count(":") != 1:
         return None
     module, _, attribute = target.partition(":")
-    if module != "rheplicant.radio":
-        return None
     import rheplicant.radio as radio
 
     if attribute not in radio.__all__:
         return None
-    return getattr(radio, attribute)
+    shipped = getattr(radio, attribute)
+    if module == "rheplicant.radio":
+        return shipped
+    # `sys.modules.get` and never `import_module`: this reads what the process
+    # already holds and imports nothing.  The identity test is what makes the
+    # widening exact rather than a guess -- a module that binds this name to
+    # something else, or does not bind it at all, is a decline.
+    return shipped if getattr(sys.modules.get(module), attribute,
+                              None) is shipped else None
 
 
 def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
@@ -429,7 +476,10 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
     * ``()`` -- nothing is placed, or text cannot say where.  NOT "nothing is
       wrong here": a ``python:`` target this layer will not import lands at
       its own class's node, so crediting the KEY would invent a collision on a
-      document that assembles.
+      document that assembles.  **A caller that refuses on ABSENCE must call
+      :func:`_t5_placement` instead**, which separates the two -- reading this
+      ``()`` as "nothing is placed" is what made A14 refuse a document that
+      builds.
     * one id -- a single placement.  This is what A5 counts and what A8 asks
       its reachability question about.
     * two or more -- an ``At(...)`` REGION, in the document's own order.  A5
@@ -476,6 +526,35 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
       ``graph_node`` -- measured, ``noise: {python: ...GainOperator,
       snapshot_before: tap}`` builds with the operator at ``noise``.
     """
+    return _t5_placement(key, spec) or ()
+
+
+def _t5_placement(key: Any, spec: Any) -> tuple[str, ...] | None:
+    """:func:`_t5_claims`, with "cannot say" told apart from "nothing placed".
+
+    ``None`` -- and only for a ``python:`` target :func:`_t5_radio_class`
+    declines.  Such an entry places its class wherever that class declares,
+    which the build resolves and this pass cannot: the answer is *unknown*,
+    not *empty*.  Every other ``()`` below is a placement the build itself
+    makes nowhere, and stays ``()``.
+
+    Two answers, two polarities, and collapsing them is a defect in whichever
+    direction the caller refuses:
+
+    * a check that refuses on ABSENCE (A14: *"this model places no
+      calibration load at all"*) must read ``None`` as a stand-down, or it
+      refuses a document that builds -- measured, and live until this commit;
+    * a check that refuses on PRESENCE (A5, A8, A31, A52, A15, A30's
+      ``replace:`` gate) loses its subject on a ``None`` and says nothing,
+      which is a lost check rather than a false one.  Recorded rather than
+      closed: naming the class would mean importing the module, which is out
+      of P-1 (§2.4).
+
+    :func:`_t5_radio_class`'s widening is what makes ``None`` rare -- every
+    class ``rheplicant.radio`` exports now resolves under any spelling of its
+    own module -- so what is left is a genuinely foreign class, which is the
+    one case where the two answers still have to be told apart.
+    """
     graph = _t4_graph()
     node = graph.nodes.get(key) if isinstance(key, str) else None
     if node is None:
@@ -505,7 +584,14 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
     if snapshot:
         return (key,)
     if "python" in spec:
-        home = getattr(_t5_radio_class(spec), "graph_node", None)
+        cls = _t5_radio_class(spec)
+        if cls is None:
+            # NOT `()`.  The build imports this target and places the class
+            # where it declares; this pass declines to import, so the answer
+            # is unknown.  Returning `()` here is what made A14 refuse a
+            # document that assembles.
+            return None
+        home = getattr(cls, "graph_node", None)
         return (home,) if isinstance(home, str) else ()
     return (key,)
 
@@ -544,10 +630,25 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
     One finding per intruder rather than one per node, so a node claimed three
     times names all the entries that have to move rather than costing the
     reader a round trip each.
+
+    **The remedy is CONDITIONAL on the intruder's own ordering declaration**,
+    and offering it unconditionally was the worst shape the whole-branch
+    review found.  Measured: ``cw_tone: {python: ...CWCalibrationOperator, at:
+    ['gain']}`` beside ``model.gain`` earns A5 **and** A8 on one node, with
+    opposite advice -- *"Compose them under one key"* against *"Give it its
+    own node"* -- and ``raise_if_refused`` quotes A5, the first-registered, so
+    the reader never sees the finding that forbids its fix.  Applying it
+    verbatim (``gain: {compose: cascade, stages: [<the gain>, <the tone>]}``)
+    then produced a **clean report** with the tone still inside the gain slot,
+    which is exactly A8's physical objection: advice that silences a check
+    without fixing what it was about.  A8 now reads composed stages, so that
+    document is no longer silent -- and this clause is what stops the reader
+    being sent there in the first place.
     """
     graph = _t4_graph()
+    specs = _nodes(document)
     claims: dict[str, list[str]] = {}
-    for key, spec in _nodes(document).items():
+    for key, spec in specs.items():
         placed = _t5_claims(key, spec)
         if len(placed) != 1:
             continue
@@ -566,10 +667,35 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
                 "A5", f"model.{intruder}",
                 f"model.{intruder}: puts a second operator at node {node!r}, "
                 f"which model.{occupant} already fills, and this node accepts "
-                "a single instance. Compose them under one key instead -- "
-                "compose: cascade at a transform node, compose: sum at a "
-                "source node, which is how this document spells At(...) "
-                "(check A5).")
+                "a single instance. "
+                f"{_a5_remedy(node, specs.get(intruder))} (check A5).")
+
+
+def _a5_remedy(node: str, spec: Any) -> str:
+    """A5's fix clause -- the compose one, unless check A8 forbids it.
+
+    ``compose:`` is the right answer for two operators that merely want the
+    same node.  It is the WRONG answer for an operator whose class declares
+    ``must_precede`` naming that node, because composing puts it inside the
+    stage it has to come before -- and A8 co-fires on precisely that document
+    saying so, in the opposite direction.  Measured, A5 is quoted first.
+
+    The declaration is read off the CLASS, the way A8 reads it, so this clause
+    says what the operator says rather than naming ``cw_tone`` here: the day a
+    second class ships a ``must_precede``, both checks generalise together.
+    """
+    cls = _t5_radio_class(spec)
+    required = tuple(getattr(cls, "must_precede", ()) or ())
+    home = getattr(cls, "graph_node", None)
+    if node not in required or not isinstance(home, str):
+        return ("Compose them under one key instead -- compose: cascade at a "
+                "transform node, compose: sum at a source node, which is how "
+                "this document spells At(...)")
+    return (f"Give it its own node, {home!r}: {cls.__name__} declares "
+            f"must_precede={list(required)}, so it has to come BEFORE the "
+            f"{node!r} operator and composing the two under {node!r} puts it "
+            f"inside the stage it is there to track -- check A8, which fires "
+            "on this same node, says what that costs")
 
 
 @register("A8")
@@ -606,13 +732,31 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
     pass through.  That reasoning is right and this does not touch it: what
     the document has and the assembly does not is the key, written down,
     saying the stage is there.
+
+    **A COMPOSED stage is read as well as a single one, and it was the hole
+    check A5 sent readers into.**  ``_t5_claims`` answers ``(key,)`` for a
+    ``compose:`` block and this function used to ask the composing MAPPING for
+    a ``python:``, which a composing mapping never carries -- so ``gain:
+    {compose: cascade, stages: [<the gain>, <the tone>]}`` was silent.  That
+    document is A5's own advice applied verbatim (*"Compose them under one
+    key"*), and measured, it produced a **clean report** with the tone still
+    inside the gain slot: the remedy silenced the check rather than fixing
+    what it was about.  :func:`_t4_entries` is the expansion, the one Task 4
+    already wrote for A7.
+
+    **Stage 0 of a cascade is not a violation**, and that is the rule rather
+    than a concession: ``compose: cascade`` builds ``Pipeline(*stages)``
+    (``compose.py:265``), which applies them in order at one node, so an
+    operator written first has every other stage at that node downstream of
+    it -- the node's own included.  ``check_stage_ordering``
+    (``core/pipeline.py:129-131``) enforces the same relation one phase later
+    and only between stages the document gave a ``name:`` to, which is the
+    second backstop a cascade naming none of them escapes.
     """
     graph = _t4_graph()
     lit = _lit(document)
     for key, spec in _nodes(document).items():
-        cls = _t5_radio_class(spec)
-        required = tuple(getattr(cls, "must_precede", ()) or ())
-        if not required:
+        if key not in graph.nodes:
             continue
         placed = _t5_claims(key, spec)
         # `len(placed) != 1` rather than `not placed`, and the two are the
@@ -624,30 +768,76 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
         if len(placed) != 1 or placed[0] not in graph.nodes:
             continue
         node = placed[0]
-        if node in required:
-            yield refuse(
-                "A8", f"model.{key}",
-                f"model.{key}: puts {cls.__name__} IN the {node!r} slot, so "
-                f"this document declares no {node!r} operator for it to pass "
-                f"through -- it replaced the stage it is there to track. "
-                f"{cls.must_precede_because} assemble() cannot say this: it "
-                f"sees one placement, and an absent stage is deliberately no "
-                f"violation there (core/fold.py:271-274), while the document "
-                f"still has the key and the operator apart. Give it its own "
-                f"node, {cls.graph_node!r} (check A8).")
+        # A `many` node's entries are separate operators at one node, NOT a
+        # sequence, so stage 0 excuses nothing there -- the concession below
+        # is `cascade`'s alone.
+        composing = isinstance(spec, Mapping) and "compose" in spec
+        cascade = composing and spec.get("compose") == "cascade"
+        if composing and not cascade:
+            # `compose: sum` at a transform node, and every other spelling,
+            # are `_compose`'s own refusals in their own words
+            # (``compose.py:237-252``) -- and this check's sentence in front
+            # of one would name a fix that is not the fault (Task 5's rule).
+            # A `sum` has no order for "stage 0" to mean anything about
+            # either: its branches run in parallel on the same input, which
+            # is why ``check_stage_ordering`` deliberately says nothing about
+            # a ``SumOperator`` (``core/pipeline.py:117-120``).
             continue
-        blocked = [target for target in required
-                   if target in lit
-                   and target not in _t5_downstream(graph, node)]
-        if blocked:
-            yield refuse(
-                "A8", f"model.{key}",
-                f"model.{key}: places {cls.__name__} at {node!r}, from which "
-                f"{blocked} cannot be reached -- and this document lights "
-                f"{'them' if len(blocked) > 1 else 'it'}, so nothing this "
-                f"operator contributes ever passes through. "
-                f"{cls.must_precede_because} Place it upstream: its own node "
-                f"is {cls.graph_node!r} (check A8).")
+        for index, (where, entry) in enumerate(
+                _t4_entries(key, spec, many=graph.nodes[key].many)):
+            cls = _t5_radio_class(entry)
+            required = tuple(getattr(cls, "must_precede", ()) or ())
+            if not required:
+                continue
+            if node in required:
+                if cascade and index == 0:
+                    continue
+                if cascade:
+                    yield refuse(
+                        "A8", _task3_where(f"model.{where}"),
+                        f"model.{where}: puts {cls.__name__} at node {node!r} "
+                        f"-- the node it declares it must precede -- as stage "
+                        f"{index} of a compose: cascade, which applies its "
+                        f"stages in order at ONE node, so this operator is "
+                        f"injected after stage {index - 1} rather than before "
+                        f"the {node!r} operator. {cls.must_precede_because} "
+                        f"Neither backstop sees it: assemble() sees one "
+                        f"placement at {node!r} (core/fold.py:271-274), and "
+                        f"check_stage_ordering compares only stages the "
+                        f"document gave a name: to "
+                        f"(core/pipeline.py:129-131). Make it stage 0 of the "
+                        f"cascade, or give it its own node, "
+                        f"{cls.graph_node!r} (check A8).")
+                    continue
+                yield refuse(
+                    # `_task3_where` on every leg: a FAN label is a name the
+                    # user chose, and an un-spellable `where` raises OUTSIDE
+                    # the per-check `try` and kills the whole pass.  Measured
+                    # identity on a node id, which is what the single-entry
+                    # leg passes it.
+                    "A8", _task3_where(f"model.{where}"),
+                    f"model.{where}: puts {cls.__name__} IN the {node!r} "
+                    f"slot, so this document declares no {node!r} operator "
+                    f"for it to pass through -- it replaced the stage it is "
+                    f"there to track. {cls.must_precede_because} assemble() "
+                    f"cannot say this: it sees one placement, and an absent "
+                    f"stage is deliberately no violation there "
+                    f"(core/fold.py:271-274), while the document still has "
+                    f"the key and the operator apart. Give it its own node, "
+                    f"{cls.graph_node!r} (check A8).")
+                continue
+            blocked = [target for target in required
+                       if target in lit
+                       and target not in _t5_downstream(graph, node)]
+            if blocked:
+                yield refuse(
+                    "A8", _task3_where(f"model.{where}"),
+                    f"model.{where}: places {cls.__name__} at {node!r}, from "
+                    f"which {blocked} cannot be reached -- and this document "
+                    f"lights {'them' if len(blocked) > 1 else 'it'}, so "
+                    f"nothing this operator contributes ever passes through. "
+                    f"{cls.must_precede_because} Place it upstream: its own "
+                    f"node is {cls.graph_node!r} (check A8).")
 
 
 @register("A31")
@@ -731,6 +921,54 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: non-fitting kind ships a day someone looks; its failure message is the
 #: instruction to classify the new one.
 _A30_NOT_FITTING: frozenset[str] = frozenset({"forward", "mmodes"})
+
+def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """The declared kinds whose exit A30 is actually about, sorted.
+
+    :func:`~rheplicant.config.preflight.fitting._kinds` is the set of kinds
+    the document declares and it filters **nothing** -- not a kind the run
+    grammar refuses, not a run whose refusal is the point of writing it.  A30
+    was its one production caller and inherited both holes; this narrows it
+    with the two facts ``_kinds`` deliberately does not carry, and both were
+    measured.
+
+    **A kind ``runs._KINDS`` does not contain is not an exit.**  Measured,
+    ``runs: [{kind: banana}]`` earned A30 the sentence *"This document
+    declares kind: banana, and every exit but forward and mmodes closes the
+    fit twin over ONE template state"* -- a claim about the closure behaviour
+    of a kind that does not exist.  ``parse_runs`` (``runs.py:87-90``) names
+    the real fault, and on the ``load_document`` path nothing names it at
+    all, which makes an invented claim worse rather than harmless.  §3.2 (e)
+    2's rule survives intact: a kind ADDED to ``_KINDS`` still defaults to
+    fitting, because the complement is still what classifies it, and
+    ``test_every_declared_kind_is_classified`` still dates that.
+
+    **A run declaring ``expect: refuse`` is not counted**, which is
+    ``_blocks``' and ``_prior_gates``' clause reaching the check that never
+    considered it -- ``grep -n expect preflight/model.py`` had no match before
+    this commit.  A24/A25 and A27/A28 deliberately do NOT stand down there,
+    and their reason is that no document in this repository expects their
+    refusal; A30 has both the document and something stronger.  Measured with
+    A30 bypassed: ``kind: fisher, expect: refuse`` over a fit twin that keeps
+    ``noise`` captures *"ParameterSpaceError: ... NoiseOperator at 'noise',
+    which declares 'key' in requires"* -- the very refusal A30 hoists, so the
+    assertion the run exists to make is A30's own subject.  And A30's advice
+    applied to it (``inference.twin.without: [noise]``) gives ``ConfigError:
+    runs['fisher']: expect: refuse, and kind: fisher SUCCEEDED``: the fix
+    trades one refusal for another, which is the advice-loop shape this
+    commit exists to close.
+
+    The gate is per RUN, so a ``kind: fisher`` that expects nothing still
+    earns A30 beside an ``expect: refuse`` sibling of the same kind.
+    """
+    from rheplicant.config.sections.runs import _KINDS
+
+    live = {run["kind"] for run in _runs(document)
+            if isinstance(run.get("kind"), str)
+            and run.get("expect") != "refuse"}
+    return tuple(sorted(
+        (_kinds(document) & live & frozenset(_KINDS)) - _A30_NOT_FITTING))
+
 
 #: The registry name of the identifiability convention A33 advises.
 #: ``transforms._NAMED`` holds it (``transforms.py:36``) and it resolves to
@@ -961,6 +1199,14 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     popping by it would abort the pass and discard every other finding
     (§2.3's TRAP).
 
+    **The kinds come from :func:`_a30_exits`, not from ``_kinds`` directly**,
+    and the difference is two live defects: this check used to make a claim
+    about the closure behaviour of ``kind: banana``, and to refuse a document
+    whose only fitting run declared ``expect: refuse`` -- destroying the
+    assertion that run exists to make, with advice whose own effect is
+    ``expect: refuse, and kind: fisher SUCCEEDED``.  Both measured; see that
+    function.
+
     **A document that declares no latent stands the whole check down**, and
     that is Task 5's "do not pre-empt a more specific refusal" rather than a
     convenience.  A fitting exit with no ``inference.parameters`` fits
@@ -973,7 +1219,7 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     the shipped suite" false, measured.  Repairing a twin for a fit the
     document does not declare is the wrong fix named first.
     """
-    fitting = sorted(_kinds(document) - _A30_NOT_FITTING)
+    fitting = _a30_exits(document)
     if not fitting or not _latents(document):
         return ()
     table = operator_table()
@@ -1055,10 +1301,23 @@ def _t11_bindings(
     check that compared only path heads refuses it.
 
     **A binding whose latent names cannot be read is DROPPED**, not carried
-    with a stand-in.  Its own refusal is more specific and arrives with the
-    value the user wrote -- *"inference.bindings[0]: latents: is a non-empty
-    list of latent names; got 7."* (``transforms.py:369-374``) -- and A33
-    answering first hands that reader a degeneracy lecture instead.  An
+    with a stand-in, and a name ``inference.parameters`` does not DECLARE is
+    dropped by the same rule.  Its own refusal is more specific and arrives
+    with the value the user wrote -- *"inference.bindings[0]: latents: is a
+    non-empty list of latent names; got 7."* (``transforms.py:369-374``), and
+    *"inference.bindings[0]: 'ghost' is not a declared latent;
+    inference.parameters declares ['g']."* -- and A33 answering first hands
+    that reader a degeneracy lecture instead.  The membership half was
+    measured LIVE: ``bindings: [{latents: ['ghost'], into:
+    'bandpass.bandpass'}]`` earned A33 and was told to declare ``transform:
+    unit_mean_bandpass``, which cannot help a latent that does not exist.
+    This is ``_a23_prior_free``'s rule (``fitting.py:726-732``: *"``names``
+    must already be names the document DECLARES WELL"*) applied on the side
+    A33 left open -- A33's own docstring gates both path HEADS against
+    ``_lit`` for exactly this shape and left the NAME ungated, which is 2C's
+    "closed on one route, open on its twin" inside one function.
+    ``inference.parameters.<n>`` entries need no filter: their name IS the
+    declaration.  An
     earlier draft substituted the binding's ``where`` for its latent set, on
     the reasoning that no latent name can equal it; measured at ``36b7e54``
     that is true and beside the point, because it made A33 decide *"these are
@@ -1077,10 +1336,11 @@ def _t11_bindings(
     """
     section = document.get("inference")
     section = section if isinstance(section, Mapping) else {}
+    declared = _latents(document)
     written: list[tuple[str, tuple[str, ...], Any, Any]] = [
         (f"inference.parameters.{name}", (name,), spec.get("into"),
          spec.get("transform"))
-        for name, spec in _latents(document).items()
+        for name, spec in declared.items()
         if spec.get("into") is not None
     ]
     bindings = section.get("bindings")
@@ -1090,7 +1350,8 @@ def _t11_bindings(
                 continue
             latents = entry.get("latents")
             latents = (latents,) if isinstance(latents, str) else latents
-            names = tuple(one for one in latents if isinstance(one, str)) \
+            names = tuple(one for one in latents
+                          if isinstance(one, str) and one in declared) \
                 if isinstance(latents, (list, tuple)) else ()
             if not names:
                 continue

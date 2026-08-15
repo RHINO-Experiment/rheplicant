@@ -990,3 +990,183 @@ class TestBothChecksReachThePass:
             load_document(document)
         assert "check A15" in str(caught.value)
         assert "no_such_beam" not in str(caught.value)
+
+
+#: A calibration load placed through ``python:``, spelled three ways: by the
+#: umbrella package, by the class's own module (the same object -- measured,
+#: ``import_target`` returns ``CalLoadOperator`` for both), and by a module
+#: this process does not hold, which is a class this pass cannot name at all.
+LOAD_BY_EXPORT = "rheplicant.radio:CalLoadOperator"
+LOAD_BY_MODULE = "rheplicant.radio.instrument.calibration:CalLoadOperator"
+LOAD_BY_STRANGER = "myproject.calibration:CalLoadOperator"
+
+
+def _relocated_load(target):
+    """A switching document whose only load is placed by ``python:``.
+
+    Written under ``bandpass:``, which is the shape that makes the point:
+    ``CalLoadOperator.graph_node`` is ``cal_loads``, so the operator lands
+    there whatever key it is written under, and there is no ``cal_loads:`` key
+    anywhere in the document.
+    """
+    return preflight_document(
+        observation=switching(),
+        model={**BASE_MODEL,
+               "bandpass": {"python": target,
+                            "t_load": {"value": 300.0, "unit": "K"}}})
+
+
+class TestTheLoadThePassCouldNotSee:
+    """A14 refuses on ABSENCE, so a placement it cannot see is a FALSE refusal.
+
+    Measured live before the fix: ``_t5_claims`` answered ``()`` for the
+    submodule spelling and A14 read that as "this model places no calibration
+    load at all" -- of a document that builds, whose assembly is identical to
+    the exported spelling's.  ``_t5_claims``' own docstring said ``()`` meant
+    "nothing is placed, **or** text cannot say where"; A14 read only the first
+    half.
+    """
+
+    def test_a_load_spelled_by_its_own_module_is_a_load(self):
+        """The false refusal, gone -- and the exported spelling beside it, so
+        the assertion is about agreement rather than about silence.
+
+        Kills the resolver reverting to ``module != "rheplicant.radio"``.
+        """
+        assert list(_switch_order(_relocated_load(LOAD_BY_MODULE))) == []
+        assert list(_switch_order(_relocated_load(LOAD_BY_EXPORT))) == []
+
+    def test_the_same_document_without_the_load_is_still_refused(self):
+        """ANTI-VACUITY, and the one this pair needs most: a stand-down that
+        fired unconditionally would pass the row above and lose the check.
+
+        The document differs in one field -- the class named -- and
+        ``GainOperator`` lands at ``gain``, not at ``cal_loads``.
+        """
+        found = list(_switch_order(
+            _relocated_load("rheplicant.radio.instrument.gain:GainOperator")))
+        assert [one.check for one in found] == ["A14"]
+
+    def test_a_class_this_pass_cannot_name_stands_the_check_down(self):
+        """The residue, and it is a stand-down rather than a fix.
+
+        A class ``rheplicant.radio`` does not export cannot be named without
+        importing a user's module, which P-1 may not do.  The entry might be
+        the calibration load, so "this model places no calibration load at
+        all" is a claim the document does not support -- and A14 refuses on
+        exactly that claim.
+
+        Kills a fix that widened the resolver and left A14 reading
+        ``_t5_claims``: this cell has no resolvable spelling, so only the
+        ``_t5_placement`` clause can pass it.
+        """
+        assert list(_switch_order(_relocated_load(LOAD_BY_STRANGER))) == []
+
+    def test_the_beam_is_what_refuses_the_document_that_builds(self):
+        """The phase property, run backwards -- this task's original
+        assertion says A14's words beat the beam, and this says the beam wins
+        when A14 has nothing to say.
+
+        Before the fix this document was refused by A14 with the beam
+        unread, which is the worst possible ordering: a false refusal
+        arriving in front of a real one.
+        """
+        from rheplicant.config.document import load_document
+        from rheplicant.config.errors import ConfigError
+
+        document = {**_relocated_load(LOAD_BY_MODULE),
+                    "resources": UNREADABLE_BEAM}
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert "no_such_beam" in str(caught.value)
+        assert "check A14" not in str(caught.value)
+
+
+class TestA14AndA15AreNotAClosedLoop:
+    """A14 advises ``mode: none``; A15 refuses what ``mode: none`` implies.
+
+    Measured before the fix, on one document and in three steps: A14 fired,
+    its ``switching: {mode: none}`` fix earned A15 twice, A15's fix
+    (``switching: {mode: cycle, order: [...]}``) restored the document
+    exactly, and ``step2 == step0`` was True.  Both checks are this module's,
+    written by one drafter, and ``raise_if_refused`` quotes A14 first -- so a
+    reader following the advice never saw the finding that forbids it.
+    """
+
+    #: The document at the top of the loop: an order with no loads behind it
+    #: AND a gamma_src whose row count follows that order.
+    def _document(self, order=("antenna", "ambient"), rows=2):
+        return preflight_document(
+            observation=switching(order=list(order)),
+            model={**BASE_MODEL,
+                   "noise_wave": noise_wave({"zeros": [rows, 8]},
+                                            {"zeros": [rows, 8]})})
+
+    def test_the_loop_closed_before_the_fix(self):
+        """The measurement itself, kept as a test: the two documents the two
+        remedies produce are still each other's input.
+
+        This asserts the SHAPE rather than the defect -- it is what makes the
+        message assertions below about a real trap rather than a hypothetical
+        one, and it goes red if either check's remedy stops naming the other's
+        subject.
+        """
+        step0 = self._document()
+        step1 = {**step0,
+                 "observation": {**step0["observation"],
+                                 "switching": {"mode": "none"}}}
+        step2 = {**step1, "observation": step0["observation"]}
+        assert "A14" in preflight(step0).checks()
+        assert "A15" in preflight(step1).checks()
+        assert step2 == step0
+
+    def test_A14_names_the_rows_its_own_remedy_would_break(self):
+        """The fix: the bare alternative is not offered where it is a trap.
+
+        Pinned by string equality on the WHOLE clause, not by a fragment: a
+        reword that dropped the field list would leave *"or write switching:
+        {mode: none} AND cut"* in place and satisfy any ``in`` assertion.
+        """
+        found = list(_switch_order(self._document()))
+        assert found[0].message.endswith(
+            "Declare model.cal_loads with the keys ['ambient'] in that order, "
+            "or write switching: {mode: none} AND cut "
+            "['model.noise_wave.gamma_src_im', "
+            "'model.noise_wave.gamma_src_re'] to a single row each -- mode: "
+            "none is one source, and check A15 refuses any other gamma_src "
+            "row count under it, so dropping the order alone trades this "
+            "refusal for that one (check A14).")
+
+    def test_following_the_whole_remedy_clears_both_checks(self):
+        """The loop, exited.  Kills a clause that names the coupled edit and
+        gets the target row count wrong -- one row, not ``len(order)``."""
+        step0 = self._document()
+        followed = {
+            **step0,
+            "observation": {**step0["observation"],
+                            "switching": {"mode": "none"}},
+            "model": {**BASE_MODEL,
+                      "noise_wave": noise_wave({"zeros": [1, 8]},
+                                               {"zeros": [1, 8]})},
+        }
+        assert not {"A14", "A15"} & preflight(followed).checks()
+
+    def test_a_document_with_no_coupled_rows_keeps_the_bare_alternative(self):
+        """The other direction, and the one an over-eager clause loses.
+
+        A document whose ``gamma_src`` follows the order SYMBOLICALLY --
+        ``{zeros: ['n_source', 8]}`` -- needs no second edit at all:
+        ``n_source`` becomes 1 when the order goes, and A15 reads it at that
+        value.  Reading the row count against the CURRENT order instead would
+        name a field that needs no change, which is the fix clause telling a
+        reader to write the number they already wrote.
+        """
+        document = preflight_document(
+            observation=switching(order=["antenna", "ambient"]),
+            model={**BASE_MODEL,
+                   "noise_wave": noise_wave({"zeros": ["n_source", 8]},
+                                            {"zeros": ["n_source", 8]})})
+        found = list(_switch_order(document))
+        assert found[0].message.endswith(
+            "Declare model.cal_loads with the keys ['ambient'] in that order, "
+            "or write switching: {mode: none} (check A14).")
