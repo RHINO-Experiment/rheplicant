@@ -17,7 +17,8 @@ is ask the same question of the text, through the same predicate
 earlier.
 
 The boundary is exact.  A shape spec is always literal -- ``resolve_shape``
-refuses anything that is not a list -- so what may be missing is the SCOPE.
+(``symbols.py:219``) refuses anything that is not a list or a tuple -- so what
+may be missing is the SCOPE.
 ``n_source`` is always text; ``n_time`` and ``n_freq`` are text only when the
 grids declare an integer count.  Both or neither:
 ``literal_shadowing_a_symbol`` reports the first of ``n_time, n_freq,
@@ -42,10 +43,13 @@ that changes a day someone looks.
 **Two deviations from the task body, both forced by measurement** and both
 recorded in the plan's Executor's notes:
 
-* §3.2 (f) pins the shared stochastic predicate as ``stochastic_operator``.
-  Task 11 bound it as ``_a30_stochastic(node_id, spec, table)``.  §0's rule is
-  that the repository wins, so that is what is imported here and no second
-  predicate is written -- which is the whole content of §3.2 (f).
+* ``task-11.md`` and ``task-12.md`` both write ``stochastic_operator`` for the
+  per-spec stochastic predicate.  **§3.2 (f) does not**: it pins
+  ``stochastic_nodes`` and nothing else, and Task 11 shipped that name
+  verbatim, binding the per-spec form privately as ``_a30_stochastic(node_id,
+  spec, table)``.  §3.1/§3.2 are authoritative over any task body, so the two
+  task bodies are what need correcting and the pinned section does not.  This
+  module imports Task 11's binding and writes no second predicate.
 * A52's reference leg reads the ``model:`` section as TEXT rather than through
   ``_nodes``.  Measured: ``_nodes`` is ``{}`` for a ``kind: pipeline`` model
   (it has no node registry), and a pipeline stage referencing a projector with
@@ -67,19 +71,27 @@ from rheplicant.config.preflight.model import (
     _a30_stochastic,
     _lit,
     _t4_switch_order,
+    _t5_radio_class,
     stochastic_nodes,
 )
 from rheplicant.config.sections.model import operator_table
 from rheplicant.config.symbols import ShapeScope, literal_shadowing_a_symbol
 
 #: Grid forms that declare an axis LENGTH the document writes down.
-#: ``linspace`` and ``arange`` carry it as ``num:``; ``list`` carries it as the
-#: length of the list itself.  Deliberately short: every form admitted here is
-#: a place a wrong ``n_freq`` could produce a FALSE warning, which is the only
-#: way A41 can do harm.  ``modulo`` is the one form left out that could have
-#: been in -- an integer ramp modulo a period is a degenerate frequency axis in
-#: the same way ``{zeros: [8]}`` is, and both decline.
-_A41_COUNTED_FORMS: tuple[str, ...] = ("linspace", "arange", "list")
+#: ``linspace``, ``arange`` and ``modulo`` carry it as ``num:``; ``list``
+#: carries it as the length of the list itself.  Every form admitted is a
+#: place a wrong ``n_freq`` could produce a FALSE warning, which is the only
+#: way A41 can do harm -- so a form belongs here only when ``num`` (or the
+#: list) IS the axis length with no arithmetic in between.  Measured for all
+#: four: ``jnp.linspace(..., num)``, ``start + step * jnp.arange(num)``,
+#: ``jnp.arange(num) % period`` (``arrays.py:121``) and ``jnp.asarray(list)``
+#: each produce exactly that many samples, and a ``{modulo: {num: 6, period:
+#: 3}}`` frequency grid builds ``n_freq == 6``.
+#:
+#: What stays out is the forms whose length the text does NOT state:
+#: ``{zeros: [8]}`` and its kin state a SHAPE, and reading a shape as an axis
+#: would admit an all-zero frequency axis as a measurement of the run.
+_A41_COUNTED_FORMS: tuple[str, ...] = ("linspace", "arange", "modulo", "list")
 
 #: Forms whose shape is the form's own value: ``{zeros: [16, 8]}``.
 _A41_SHAPE_FORMS: tuple[str, ...] = ("zeros", "ones")
@@ -201,6 +213,14 @@ def _a41_shapes(node: Any, where: str) -> list[tuple[str, list]]:
                                                          (list, tuple)):
                 found.append((where, list(inner["shape"])))
         for key, value in node.items():
+            # DEFENSIVE and, measured, an equivalent mutant: a non-string key
+            # would give `model.n.7`, which `parse_path` refuses -- but
+            # `_task3_where` cuts every path back to its deepest spellable
+            # prefix before it reaches `Finding.where`, so dropping this guard
+            # changes no `where` and no verdict, only the path quoted in the
+            # message.  It stays because a key nobody can type is not a place
+            # to send a reader, and it is recorded as untestable-through-the-
+            # pass rather than left looking earned.
             if isinstance(key, str):
                 found.extend(_a41_shapes(value, f"{where}.{key}"))
     elif isinstance(node, (list, tuple)):
@@ -231,16 +251,22 @@ def _a42_records(section: Any) -> tuple[tuple[str, Mapping], ...]:
                  and isinstance(spec, Mapping))
 
 
-# NO SECOND PREDICATE HERE.  §3.2 (f) binds ONE name for "does this node's
-# operator class declare `key` in requires" and Task 11 owns it in
-# `preflight/model.py` -- shipped as `_a30_stochastic(node_id, spec, table)`
-# rather than under §3.2 (f)'s proposed spelling.  A private predicate of this
-# module's own is the collision §3.2 (f) predicted, and the two would
-# measurably disagree: on `{from: ...}` at `noise` a text-shaped guess says
-# "still draws" and `_a30_stochastic` stands down.  `stochastic_nodes` answers
+# NO SECOND STOCHASTIC PREDICATE HERE.  §3.2 (f) binds ONE name for "does this
+# node's operator class declare `key` in requires" and Task 11 owns it in
+# `preflight/model.py`: `stochastic_nodes` publicly, and the per-spec form
+# privately as `_a30_stochastic(node_id, spec, table)`.  (`stochastic_operator`
+# is task-11.md's and task-12.md's spelling and appears in neither §3.1 nor
+# §3.2, which are authoritative over a task body.)  A private predicate of this
+# module's own is the collision §3.2 (f) predicted.  `stochastic_nodes` answers
 # the `without:` leg; the `replace:` leg needs the per-spec form, because a
 # `inference.twin.replace` spec is not a model node and `stochastic_nodes`
 # cannot express it -- dropping it would drop §3.2 (h)2's whole correction.
+#
+# What the nested helper below adds is NOT a second answer to that question.
+# It is a different question -- "did this pass NAME a class at all" -- which
+# `_a30_stochastic` deliberately does not distinguish from "it does not draw",
+# because in A30's polarity the two are the same answer and in A42's they are
+# opposite ones.
 
 
 def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
@@ -251,17 +277,30 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
     the model twin itself (``twin.py:37-38``), so nothing has been removed and
     there is nothing to warn about.
 
-    ``_a30_stochastic`` answers ``None`` both for "this replacement does not
-    draw" and for "the text cannot say", and this reads either as a removal.
-    Measured at ``d229d27``, that costs nothing on any document the package
-    builds: at a stochastic node the only ``replace:`` spelling that both
-    stops the draw and BUILDS is the ``python:`` hatch, which resolves to a
-    class and is decided exactly.  Every spelling that lands in the "cannot
-    say" branch is a document ``build_fit_twin`` refuses in its own words --
-    ``from:`` ("not a route this node offers"), ``compose:`` and a foreign
-    ``type:`` ("not registered at this node") -- so the warning is never the
-    only thing the reader is told, and a second predicate to separate the two
-    answers is the collision §3.2 (f) exists to prevent.
+    **A ``replace:`` counts only when the pass NAMED the replacement's class.**
+    ``_a30_stochastic`` answers ``None`` both for "does not draw" and for "the
+    text cannot say", and an earlier form of this function read either as a
+    removal.  Measured, that was a live false warning: ``_t5_radio_class``
+    resolves ``rheplicant.radio`` and nothing else, while the build resolves a
+    ``python:`` target through ``hatch.import_target``, which imports any
+    module.  So ``replace: {noise: {python:
+    'rheplicant.radio.instrument.noise:NoiseOperator'}}`` **builds**, its fit
+    twin's ``noise`` IS a ``NoiseOperator`` declaring ``key`` in ``requires``,
+    and A42 told that document its data carried no noise realisation and to
+    write ``twin: full``.  The docstring that justified the old reading -- "the
+    only ``replace:`` spelling that both stops the draw and BUILDS is the
+    ``python:`` hatch, which resolves to a class and is decided exactly" -- was
+    false in the word *resolves*: two different resolvers, and only one of them
+    is P-1's.
+
+    The un-nameable half is a DECLINE and stays one.  Resolving an arbitrary
+    module here would import a user's code during pre-flight -- a file read and
+    an unbounded cost, which is exactly why ``_t5_radio_class`` is narrow.  The
+    same decline costs the mirror-image check: measured, ``model.noise:
+    {python: '<submodule>:NoiseOperator'}`` with ``without: [noise]`` builds,
+    the fit twin genuinely loses the draw, and ``stochastic_nodes`` is empty,
+    so A42 says nothing.  Both directions are pinned by tests; the lost half is
+    §6 residue, not a bug this phase can close.
     """
     inference = document.get("inference")
     if not isinstance(inference, Mapping):
@@ -271,6 +310,33 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
         return ()
     drawing = stochastic_nodes(document)
     table = operator_table()
+
+    def took_the_draw_out(node_id: str, replacement: Any) -> bool:
+        """The pass named a class for ``replacement`` AND it does not draw.
+
+        Nested rather than module level because §3.1 closes this file's
+        module-scope names, and because it is one caller's clause rather than
+        a property of the layer.
+        """
+        if _a30_stochastic(node_id, replacement, table) is not None:
+            return False                       # it still draws
+        if not isinstance(replacement, Mapping):
+            return False                       # nothing to name
+        if "python" in replacement:
+            # `_t5_radio_class` is P-1's resolver and it is narrower than the
+            # build's.  A target it cannot reach is "cannot say", never "does
+            # not draw".
+            return _t5_radio_class(replacement) is not None
+        # UNREACHABLE TODAY, and kept because the day it stops being one it
+        # is a lost check rather than a loud one: measured, every class
+        # registered at a node that draws also draws, so a `type:` naming one
+        # of the node's own classes always answers "still draws" at the first
+        # clause above.  `test_the_type_route_of_the_replace_leg_is_
+        # unreachable_today` is what dates that, rather than this comment.
+        declared = replacement.get("type")
+        return isinstance(declared, str) and declared in {
+            cls.__name__ for cls in table.get(node_id) or ()}
+
     removed: list[str] = []
     without = spec.get("without")
     if isinstance(without, (list, tuple)):
@@ -280,7 +346,7 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
     if isinstance(replace, Mapping):
         removed.extend(node_id for node_id, replacement in replace.items()
                        if isinstance(node_id, str) and node_id in drawing
-                       and _a30_stochastic(node_id, replacement, table) is None)
+                       and took_the_draw_out(node_id, replacement))
     return tuple(dict.fromkeys(removed))
 
 
@@ -292,6 +358,7 @@ def _a52_projector_refs(node: Any, where: str) -> list[str]:
         if isinstance(target, str) and target.startswith(_A52_PREFIX):
             found.append(where)
         for key, value in node.items():
+            # Defensive and equivalent, for the reason `_a41_shapes` gives.
             if isinstance(key, str):
                 found.extend(_a52_projector_refs(value, f"{where}.{key}"))
     elif isinstance(node, (list, tuple)):
@@ -304,8 +371,20 @@ def _a52_projector_refs(node: Any, where: str) -> list[str]:
 def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A41: a literal integer in a shape that equals one of this run's extents.
 
-    A warning, not a refusal, and the reason is ``arrays.py:6-7``'s: a literal
-    8 may genuinely be 8, and what it cannot be is TIED to the grid.
+    **Not a refusal**, for ``arrays.py:6-7``'s reason: a literal 8 may
+    genuinely be 8, and what it cannot be is TIED to the grid.
+
+    ``warn`` and not ``report``, though ``arrays.py:6`` and schema §6 both call
+    A41 "a report", and the difference is worth stating because this layer has
+    three severities where the schema has one word.  ``REPORT`` is "worth
+    recording next to the run; not worth interrupting anyone over"
+    (``findings.py:74``) and **is consumed by nothing** -- it is the severity
+    ``checks.<name>.mode: report`` will read, and that gating is Plan 3C's
+    (``findings.py:53-57``).  Shipping A41 at a severity no reader has yet
+    would reproduce, at one remove, the defect A41 is about: a fact computed
+    and stored for a consumer nobody wrote.  So it interrupts, once, until 3C
+    gives the document a way to say it would rather it did not.
+
     ``variants:`` is not walked -- an unselected variant's shapes belong to a
     run this document is not describing, and unselected-variant text is Task
     3's check.

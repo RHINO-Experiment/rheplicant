@@ -92,8 +92,10 @@ def _collected() -> dict[str, int]:
     # summary's group header is bare `path/to/x.py:LINENO`, which the split
     # below read as "LINENO tests in path/to/x.py". Two headers reading
     # `tests/config/exit_helpers.py:226` credited 452 phantom tests and named a
-    # helper module as a collector, and the guard reported 6137 against a true
-    # 5685 -- a wrong number offered to a reader told to trust this message.
+    # helper module as a collector -- a wrong number offered to a reader whom
+    # every task brief tells to take the count from this message. Re-measured
+    # at Task 12's fix commit by reverting the token below: 6189 reported
+    # against a true 5737, the same delta of 452 and the same sole culprit.
     # The separator is what tells them apart: a count is `": "` and a line
     # reference is `":"`.
     per_module: dict[str, int] = {}

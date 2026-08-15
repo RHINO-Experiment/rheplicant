@@ -5,10 +5,12 @@ Every test names the wrong implementation it kills.
 **Two things measured here that the task body had wrong**, both recorded so
 the next reader inherits a decision rather than a discovery:
 
-* §3.2 (f) pins the shared stochastic predicate as ``stochastic_operator``.
-  Task 11 shipped it as ``_a30_stochastic(node_id, spec, table)``.  The
-  repository wins (§0), so this module imports THAT and defines no second
-  predicate.
+* ``task-11.md`` and ``task-12.md`` both write ``stochastic_operator``.
+  **§3.2 (f) does not** -- it pins ``stochastic_nodes`` and nothing else, and
+  Task 11 shipped that name verbatim while binding the per-spec form privately
+  as ``_a30_stochastic(node_id, spec, table)``.  §3.1/§3.2 win over any task
+  body, so the two task bodies are what need correcting.  This module imports
+  Task 11's binding and defines no second predicate.
 * A52's reference leg reads the ``model:`` section as TEXT rather than through
   ``_nodes``.  Measured: ``_nodes`` is ``{}`` for a ``kind: pipeline`` model,
   and a pipeline stage referencing a projector with no ``observation.pointing``
@@ -376,6 +378,10 @@ class TestA41ALiteralThatShadowsAGridLength:
         ("a-four-label-cycle", {"observation": switching(),
                                 "model": {**BASE_MODEL,
                                           "cal_loads": loads()}}),
+        ("a-modulo-freq-grid", {"observation": {
+            **BASE_OBSERVATION,
+            "freq": {"grid": {"modulo": {"num": 6, "period": 3},
+                              "unit": "MHz"}}}}),
     ])
     def test_the_text_scope_is_the_scope_the_resolver_builds(self, label,
                                                              patch):
@@ -440,7 +446,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
             model={**BASE_MODEL, "noise": NOISE},
             inference={"twin": {"without": ["noise"]},
                        "observed": simulated()})
-        assert "['noise']" in list(_simulated_fit_twin(doc))[0].message
+        [found] = list(_simulated_fit_twin(doc))
+        assert "['noise']" in found.message
 
     def test_twin_full_is_silent(self):
         """The default.  Kills a check that reads ``from:`` and forgets
@@ -452,9 +459,14 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_an_absent_twin_key_is_the_full_default(self):
-        """``spec.get("twin", "full")``, not ``spec.get("twin")``.  Kills a
-        check that treats a missing key as ``fit`` -- which would warn about
-        the commonest document in the repository."""
+        """Kills a check that treats a missing ``twin:`` as ``fit`` -- which
+        would warn about the commonest document in the repository.
+
+        It does NOT distinguish ``spec.get("twin", "full")`` from
+        ``spec.get("twin")``; measured, no test can, because both answer "not
+        fit".  The mirror of ``observed.py:132``'s spelling is a readability
+        choice and is claimed as one in that function's docstring, not here.
+        """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
             inference={"twin": {"without": ["noise"]},
@@ -537,7 +549,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
                 "occupancy": 0.1}},
             inference={"twin": {"without": ["rfi_field"]},
                        "observed": simulated()})
-        assert "['rfi_field']" in list(_simulated_fit_twin(doc))[0].message
+        [found] = list(_simulated_fit_twin(doc))
+        assert "['rfi_field']" in found.message
 
     def test_a_replacement_that_still_draws_is_silent(self):
         """``replace: {noise: {type: RadiometerNoiseOperator, ...}}`` swaps
@@ -556,11 +569,11 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """The TWIN of the row above, and the leg ``stochastic_nodes`` alone
         cannot answer: a ``replace:`` spec is not a model node.
 
-        Measured, this document BUILDS -- the ``python:`` hatch is the only
+        Measured, this document BUILDS.  The ``python:`` hatch is the only
         spelling of a non-drawing replacement at ``noise`` that does (``type:
-        GainOperator`` there is refused, "not registered at this node").
-        Kills a check that reads ``without:`` and stops, which is §3.2 (h)2's
-        whole correction dropped.
+        GainOperator`` there is refused, "not registered at this node") AND
+        that this pass can name a class for.  Kills a check that reads
+        ``without:`` and stops, which is §3.2 (h)2's whole correction dropped.
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
@@ -569,6 +582,86 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         found = list(_simulated_fit_twin(doc))
         assert [f.where for f in found] == ["inference.observed.primary"]
         assert "['noise']" in found[0].message
+
+    def test_a_replacement_this_pass_cannot_name_a_class_for_is_silent(self):
+        """THE LIVE DEFECT this test was written to close, in the direction
+        that produced a FALSE WARNING on a document that builds.
+
+        ``_t5_radio_class`` resolves ``rheplicant.radio`` and nothing else; the
+        build resolves a ``python:`` target through ``hatch.import_target``,
+        which imports any module.  Measured: this document returns a
+        ``ConfiguredRun``, ``run.inference.fit_twin["noise"]`` IS a
+        ``NoiseOperator``, and ``RANDOMNESS in requires`` is True -- yet A42
+        told it "the data carries no realisation of ['noise']" and to write
+        ``twin: full``.
+
+        Kills ``_a30_stochastic(...) is None`` read as a removal, which is what
+        shipped in ``0cc0516`` and which the whole of ``tests/config`` passed
+        with.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"replace": {"noise": {
+                "python": "rheplicant.radio.instrument.noise:NoiseOperator",
+                "sigma": {"value": 0.5, "unit": "K"}}}},
+                "observed": simulated()})
+        assert list(_simulated_fit_twin(doc)) == []
+
+    def test_a_submodule_spelled_model_node_is_a_declared_blind_spot(self):
+        """The MIRROR of the row above, and it is a decline rather than a fix.
+
+        Measured: ``model.noise: {python: '<submodule>:NoiseOperator'}`` with
+        ``without: [noise]`` and ``twin: fit`` **builds**, the fit twin
+        genuinely loses the draw (``"noise" in run.inference.fit_twin.lit`` is
+        False while it is True in ``run.twin.lit``), and A42 says nothing --
+        because ``stochastic_nodes`` cannot name the class either.
+
+        Closing it would mean importing an arbitrary module during pre-flight,
+        which is a file read and an unbounded cost and is exactly what
+        ``_t5_radio_class`` is narrow to avoid.  So it is §6 residue, and this
+        test is what makes it a recorded blind spot rather than an assumed
+        absence: it goes red the day P-1 gains a wider resolver, and whoever
+        widens it should widen the sibling above at the same time.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": {
+                "python": "rheplicant.radio.instrument.noise:NoiseOperator",
+                "sigma": {"value": 0.5, "unit": "K"}}},
+            inference={"twin": {"without": ["noise"]},
+                       "observed": simulated()})
+        assert list(_simulated_fit_twin(doc)) == []
+
+    def test_a_replacement_at_a_node_that_never_drew_is_silent(self):
+        """``replace: {gain: <a GainOperator>}`` beside a stochastic
+        ``model.noise``.  Nothing left the data: ``gain`` never put anything
+        in it.
+
+        The TWIN of ``test_a_non_stochastic_node_in_without_is_silent`` -- the
+        ``without:`` leg had this test and the ``replace:`` leg did not, which
+        is 2C's shape 4 inside one function.  Kills a replace leg written
+        without ``node_id in drawing``.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"replace": {"gain": GAIN_REPLACEMENT}},
+                       "observed": simulated()})
+        assert list(_simulated_fit_twin(doc)) == []
+
+    def test_a_without_written_as_a_tuple_is_read_like_a_list(self):
+        """``build_fit_twin`` accepts a tuple there -- measured, this document
+        builds and its fit twin has lost ``noise``.
+
+        The same widening this module pins for ``_a41_shapes`` and for the
+        ``list:`` grid form, on the third place it matters.  Kills
+        ``isinstance(without, list)``, which loses the check on a document the
+        package runs.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"without": ("noise",)},
+                       "observed": simulated()})
+        [found] = list(_simulated_fit_twin(doc))
+        assert "['noise']" in found.message
 
     def test_the_named_records_form_is_read(self):
         """``observed: {primary: ..., night: ...}`` -- 2C's shape 4, a hole
@@ -644,6 +737,26 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
                        "observed": {"at": simulated()}})
         assert list(_simulated_fit_twin(doc)) == []
 
+    def test_a_file_headed_section_is_one_record_not_a_mapping_of_names(self):
+        """``build_observed`` splits on ``"from" in section or "file" in
+        section`` -- BOTH keys -- and this pins the second half of that ``or``.
+
+        The discriminating document has to be one the section itself refuses,
+        because the two readings agree on every legal one: a ``file:``-headed
+        section that also carries a key named ``primary`` is ONE record under
+        the real split (so no top-level ``from:``, so silent) and a MAPPING OF
+        NAMES under a split written ``"from" in section`` (so ``primary`` is a
+        simulated record, so a warning at a ``where`` that does not exist).
+        The test's content is the SPLIT, not the document.
+        """
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"without": ["noise"]},
+                       "observed": {"file": {"path": "night1.npz",
+                                             "format": "npz", "key": "w"},
+                                    "primary": simulated()}})
+        assert list(_simulated_fit_twin(doc)) == []
+
     def test_a_new_value_form_makes_someone_look_at_the_a41_walk(self):
         """The three A41 form tuples are HAND-WRITTEN, and nothing pinned them.
 
@@ -666,16 +779,16 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
             _A41_NESTED_SHAPE_FORMS)
         assert walked <= set(VALUE_FORMS)
         assert set(VALUE_FORMS) - walked == {
-            # `modulo` is the one deliberate omission: it declares a `num:`
-            # this pass could read as an axis length, and an integer ramp
-            # modulo a period is a degenerate frequency axis in the same way
-            # `{zeros: [8]}` is.  Every form admitted is one more place a
-            # wrong n_freq can produce a FALSE warning, which is the only way
-            # A41 can do harm.  The other nine state no length in the text at
-            # all: a reference, a file, a scalar, a callable, a derived grid,
-            # a restacking, a basis fit, and the switch-order sugar.
+            # Nine forms, and none of them states a length or a shape in the
+            # text: a reference, a file, a scalar, a callable, a derived grid,
+            # a restacking, a basis fit, and the switch-order sugar.  There is
+            # no DELIBERATE omission left -- `modulo` was one until the
+            # measurement went the other way (`arrays.py:121` is
+            # `jnp.arange(num) % period`, so `num` IS the axis length, and a
+            # `{modulo: {num: 6, period: 3}}` freq grid builds `n_freq == 6`),
+            # and it is now walked.
             "basis_fit", "file", "from", "from_grid", "from_switch_order",
-            "modulo", "python", "ref", "stack", "value",
+            "python", "ref", "stack", "value",
         }
 
     def test_the_record_split_still_mirrors_the_section_that_owns_it(self):
@@ -687,6 +800,32 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         from rheplicant.config.sections.observed import _FORM_KEYS
 
         assert _A42_FORM_KEYS == _FORM_KEYS
+
+    def test_the_type_route_of_the_replace_leg_is_unreachable_today(self):
+        """The premise that makes one clause of ``took_the_draw_out`` an
+        EQUIVALENT MUTANT, asserted rather than assumed.
+
+        A ``replace:`` is only considered at a node ``stochastic_nodes``
+        reports, and measured, every class registered at such a node draws --
+        so a ``type:`` naming one of that node's own classes always answers
+        "still draws" and never reaches the removal branch.  Deleting that
+        branch is therefore green today.
+
+        It is kept anyway, because the day a non-drawing class registers at
+        ``noise`` or ``rfi_field`` its absence is a LOST check and nothing
+        would say so.  This test is what dates that day: it goes red, and
+        whoever makes it red can then write the document that kills the
+        mutant.
+        """
+        from rheplicant.config.sections.model import operator_table
+        from rheplicant.core.contract import RANDOMNESS
+
+        table = operator_table()
+        draws = {node for node, classes in table.items()
+                 if any(RANDOMNESS in cls.requires for cls in classes)}
+        assert draws == {"noise", "rfi_field"}
+        assert all(RANDOMNESS in cls.requires
+                   for node in draws for cls in table[node])
 
     def test_no_shipped_node_has_classes_that_disagree_about_randomness(self):
         """The fact Task 11's ``all(...)`` rests on, defended rather than
@@ -906,9 +1045,55 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
 
     def test_a_declared_but_unreferenced_projector_is_not_refused(self):
         """The schema says REFERENCED.  A document may declare a projector for
-        a variant that uses it.  Kills a check that walks ``resources:`` --
-        which is the easier walk and the wrong one."""
+        a variant that uses it.
+
+        This kills a check that fires on a DECLARATION.  It does not kill one
+        that walks ``resources:`` for references, and an earlier version of
+        this docstring claimed it did: measured, a ``resources:`` walk finds
+        nothing here either, because :data:`PROJECTOR` holds no ``{ref:}`` of
+        its own.  The test below is the one that pins the scope.
+        """
         doc = preflight_document(resources={"projectors": {"p": PROJECTOR}})
+        assert list(_pointing_none(doc)) == []
+
+    def test_a_projector_reference_outside_the_model_is_not_this_check(self):
+        """The scope is ``model:``, pinned with a document where the two walks
+        DISAGREE -- which the test above cannot do.
+
+        ``resources.arrays.a: {ref: resources.projectors.p}`` puts a projector
+        reference in the document and none of it in ``model:``.  A52's subject
+        is a model that turns a sky into what THIS observation saw; a resource
+        naming another resource is not that, and widening the walk would refuse
+        documents on the strength of a reference no operator reads.
+
+        Kills a walk over the whole document, and one over ``resources:``.
+        """
+        doc = preflight_document(resources={
+            "projectors": {"p": PROJECTOR},
+            "arrays": {"a": {"ref": "resources.projectors.p"}}})
+        assert list(_pointing_none(doc)) == []
+
+    def test_a_mode_this_layer_does_not_own_is_left_to_its_own_refusal(self):
+        """``pointing: {mode: null}`` is not ``mode: none``.
+
+        ``compile_pointing`` refuses it accurately -- "observation.pointing:
+        mode is one of ['none', 'drift', 'tracked', 'baked']; got None." -- and
+        that runs inside ``build_observation``, which is BEFORE
+        ``build_resources``, so it already precedes the beam.  A52 answering
+        first would tell the reader their document "says mode: none" when it
+        says no such thing: Task 5's pre-emption defect, with a false premise
+        attached.
+
+        Kills ``((spec or {}).get("mode") or "none")``, which reads a null mode
+        as the default.
+        """
+        doc = preflight_document(
+            observation={**BASE_OBSERVATION, "pointing": {"mode": None}},
+            resources={"projectors": {"p": PROJECTOR}},
+            model={**BASE_MODEL, "filters": [
+                {"type": "SkySpaceFilter",
+                 "projector": {"ref": "resources.projectors.p"},
+                 "regularization": 1e-3}]})
         assert list(_pointing_none(doc)) == []
 
     def test_a_reference_to_something_else_is_not_a_projector(self):
@@ -1069,7 +1254,16 @@ class TestAllThreeChecksReachThePass:
         raises OUTSIDE the per-check ``try``, so a ``where`` built from a name
         the path grammar cannot spell kills the pass just as thoroughly as a
         ``TypeError``, and no single-document test can find the branch that
-        builds one.
+        builds one.  Measured: ``parse_path('resources.arrays.7')`` raises, so
+        the ``isinstance(key, str)`` guards in both walks are load-bearing and
+        this is what holds them.
+
+        **The anti-vacuity assertion is PER CHECK, and that is not
+        decoration.**  The first form of this battery counted findings in
+        total and passed on A41 and A52 alone: no ``model`` cell made ``noise``
+        stochastic, so ``_a42_removed`` was empty in every one of its cells and
+        A42's record walk was never executed at all.  A total tells you the
+        battery found something; it does not tell you which walk was running.
         """
         hostile = [
             None, 3, "text", [], {}, [1, 2], {"a": None}, {3: "int-key"},
@@ -1086,7 +1280,12 @@ class TestAllThreeChecksReachThePass:
              "pointing": {"mode": None}},
             {"noise": {"type": []}, "gain": 3, "filters": [{"ref": None}],
              "sky-1": {"ref": "resources.projectors.p"},
-             "d-1": {"ones": [4, "n_freq"]}, "observed_astro_sky": {}},
+             "d-1": {"ones": [4, "n_freq"]}, "observed_astro_sky": {},
+             "n": {7: {"ones": [4]}}},
+            # A model whose `noise` really is stochastic, so `stochastic_nodes`
+            # is non-empty and A42's `_a42_records` walk RUNS.
+            {"noise": NOISE, "rfi_field": {"type": "RFIOperator"},
+             "p": {"ref": "resources.projectors.p"}},
             {"twin": {"without": [["noise"], "noise", 3],
                       "replace": {"noise": [], 3: {}, "rfi_field": {"type": 7}}},
              "observed": {"night-1": {"from": "simulation", "twin": "fit"},
@@ -1095,7 +1294,7 @@ class TestAllThreeChecksReachThePass:
         checks = {"A41": _shadowed_literals, "A42": _simulated_fit_twin,
                   "A52": _pointing_none}
         calls = 0
-        emitted = 0
+        emitted = dict.fromkeys(checks, 0)
         for observation, model, inference in itertools.product(hostile,
                                                                repeat=3):
             document = {"schema_version": 1, "runtime": {"seed": 1},
@@ -1105,9 +1304,9 @@ class TestAllThreeChecksReachThePass:
             for check_id, check in checks.items():
                 for finding in check(document):
                     _check_where(check_id, finding)
-                    emitted += 1
+                    emitted[check_id] += 1
                 calls += 1
         assert calls == len(hostile) ** 3 * len(checks)
-        # ANTI-VACUITY: a battery whose every cell returns at the first
+        # ANTI-VACUITY: a battery whose cells all return at the first
         # `isinstance` proves only that the first `isinstance` is there.
-        assert emitted > 0
+        assert all(emitted.values()), emitted
