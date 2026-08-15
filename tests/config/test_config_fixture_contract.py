@@ -401,19 +401,29 @@ def _builders() -> dict[str, dict[str, object]]:
 
 
 def _build(builder) -> object:
-    """``builder`` driven with a forward run if it takes one, then loaded.
+    """``builder`` driven with its OWN default run when it can supply one, and
+    with :data:`_FORWARD` only when it cannot; then loaded.
 
-    Two of the twelve builders take no argument at all
-    (``trio_npe_document`` and ``joint_prior_document``, both
-    ``posterior_helpers``', both deliberately parameterless), so a walk that
-    passed a run to everything would die with a ``TypeError`` on exactly the
-    module this guard was widened to reach.
+    **The order matters, and it is measured.**  Five builders take ``run=None``
+    and merge what they are given OVER their own default -- ``gcr_document``
+    is ``conjugate_document({**GCR, **(run or {})})`` (``exit_helpers.py:414``)
+    -- so ``builder(_FORWARD)`` overrides only ``kind:`` and leaves ``names:``
+    and ``seed:`` behind, producing ``kind: forward`` carrying two options a
+    forward run does not take.  That document built fine while nothing swept a
+    run's options before the executor; Plan 3A's ``A1.runs`` sweeps them at
+    pre-flight, and measured, this walk then fails with ``runs['forward']:
+    kind: forward does not take ['names', 'seed']``.
+
+    Four builders take a run POSITIONALLY and required (``diagnostic_document``,
+    ``fanned_document``, ``two_latent_document``, ``wiener_document``), and
+    they are the ones ``_FORWARD`` is for.  The property below is about the
+    document's two TWINS, which no run touches, so either run does.
     """
     try:
-        inspect.signature(builder).bind(_FORWARD)
+        inspect.signature(builder).bind()
     except TypeError:
-        return load_document(builder())
-    return load_document(builder(_FORWARD))
+        return load_document(builder(_FORWARD))
+    return load_document(builder())
 
 
 class TestOnlyOnePlaceBuildsADocument:

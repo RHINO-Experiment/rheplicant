@@ -34,7 +34,8 @@ from rheplicant.config.preflight import preflight
 from tests.config.exit_helpers import ONE_LATENT, conjugate_document
 
 #: A ``resources:`` patch whose beam file does not exist.  Loading a document
-#: carrying it reaches ``build_resources`` (``document.py:104``) and refuses
+#: carrying it reaches ``build_resources`` (``document.py:75``, measured at
+#: Task 3; ``:104`` before Task 2 put the hook above it) and refuses
 #: with ``No file at 'no_such_beam.npy'.`` -- measured, 0.115 s to that
 #: refusal.  It is what the phase guard puts in front of the pass: a document
 #: that is expensive-and-broken in a way that has nothing to do with the
@@ -104,12 +105,20 @@ def preflight_document(**patch):
     ``gain`` and ``noise``); anything else replaces it; ``None`` removes it.
 
     Takes no positional argument, which is load-bearing:
-    ``test_config_fixture_contract._build`` binds its own default run against
-    the signature first and falls back to a NO-ARGUMENT call when that raises
-    ``TypeError`` -- measured, ``bind({"kind": "forward"})`` against
-    ``(**patch)`` raises "too many positional arguments", so the property walk
-    builds the base document and holds it to the twin-repair contract rather
-    than overriding the run.
+    ``test_config_fixture_contract._build`` probes the signature for a
+    NO-ARGUMENT call first and falls back to its own ``_FORWARD`` run only
+    when that raises ``TypeError``.  ``(**patch)`` binds with no arguments, so
+    the property walk builds the base document and holds it to the twin-repair
+    contract rather than overriding the run.
+
+    The outcome for THIS builder is the same under either probe order --
+    measured, ``bind({"kind": "forward"})`` against ``(**patch)`` raises "too
+    many positional arguments" -- but the order itself is not free, and Plan
+    3A's Task 3 reversed it: five builders in ``exit_helpers`` and
+    ``posterior_helpers`` merge the run they are handed OVER their own
+    default, so driving them with a bare forward run left their default's
+    ``names:`` and ``seed:`` on a ``kind: forward``, which ``A1.runs`` now
+    sweeps.
     """
     doc = _base()
     for section, value in patch.items():

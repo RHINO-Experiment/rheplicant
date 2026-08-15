@@ -297,3 +297,7 @@ def _check_where(check: str, finding: Finding) -> None:
 # Aliased because `_structural` and `preflight` both take a parameter named
 # `document`, so a foot import binding the bare name gives F811 at both `def`
 # lines.
+#
+# `document` registers A1.runs, A1.variants, A1.horizon, A38 and A39.
+
+from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401

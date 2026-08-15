@@ -262,6 +262,31 @@ def _out_of_scope_calls(source: str) -> set[str]:
     return found
 
 
+class _GuardTripped(BaseException):
+    """The pass left P-1: it read a file, built an operator or resolved a value.
+
+    **A ``BaseException``, and that is the whole guard.**  :func:`preflight`
+    wraps a raising check in ``except Exception`` -- and so does any
+    ``except Exception`` or ``except AssertionError`` a CHECK might write.  A
+    check that catches the guard and reports a re-worded finding of its own
+    ("the beam file could not be read.") therefore evades every assertion made
+    about the findings, however that assertion is phrased: measured, with
+    these guards raising ``AssertionError``, a check reaching
+    ``Path.read_text`` through a variable -- the static call ban's own
+    documented blind spot -- and reporting it in its own words passed this
+    whole module at exit 0.
+
+    ``BaseException`` is unswallowable by any check whatever it reports, so
+    the three branch guards below need no assertion about findings at all.
+    That is what keeps them honest as Plan 3A lands: :data:`_BRANCH_DOCUMENTS`
+    lights the branches Tasks 3-12's checks read, so a branch that lights a
+    check lights its legitimate REFUSAL too -- ``a-typed-model-node`` earns
+    A39's, by design -- and an assertion that the branch documents are refusal
+    free would make every later task's correct check read as a scope violation
+    here.
+    """
+
+
 def _forbid_the_filesystem(monkeypatch) -> None:
     """Take away every Python-level filesystem API, all ten of them.
 
@@ -283,7 +308,7 @@ def _forbid_the_filesystem(monkeypatch) -> None:
     these two, and saying otherwise would be a claim no run defends.
     """
     def refuse_to_open(*args, **kwargs):
-        raise AssertionError("the pre-flight pass touched the filesystem")
+        raise _GuardTripped("the pre-flight pass touched the filesystem")
 
     monkeypatch.setattr("builtins.open", refuse_to_open)
     monkeypatch.setattr(pathlib.Path, "open", refuse_to_open)
@@ -306,7 +331,7 @@ def _forbid_operators(monkeypatch) -> None:
     and leaves ``parse_path`` untouched.
     """
     def refuse_to_build(cls, *args, **kwargs):
-        raise AssertionError(
+        raise _GuardTripped(
             f"the pre-flight pass constructed {cls.__name__}")
 
     monkeypatch.setattr(type(AbstractOperator), "__call__", refuse_to_build)
@@ -348,7 +373,7 @@ def _forbid_the_builders(monkeypatch) -> None:
     together.
     """
     def refuse_to_build(*args, **kwargs):
-        raise AssertionError("the pre-flight pass left P-1")
+        raise _GuardTripped("the pre-flight pass left P-1")
 
     for home, name in _OUT_OF_SCOPE_CALLABLES:
         real = getattr(importlib.import_module(home), name)
@@ -1214,10 +1239,12 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document(**patch)
         _forbid_the_filesystem(monkeypatch)
         try:
-            held = preflight(doc)
+            # The assertion is that this returns.  A guard fires as
+            # `_GuardTripped`, a BaseException no check can swallow and no
+            # findings assertion has to look for -- see that class.
+            preflight(doc)
         finally:
             monkeypatch.undo()
-        assert held.refusals() == ()
 
     @pytest.mark.parametrize("read", [
         lambda: open(__file__).close(),
@@ -1249,7 +1276,41 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document()
         _forbid_the_filesystem(monkeypatch)
         try:
-            with pytest.raises(ConfigError, match="RAISED AssertionError"):
+            with pytest.raises(_GuardTripped):
+                preflight(doc)
+        finally:
+            monkeypatch.undo()
+
+    def test_a_check_cannot_swallow_a_guard_and_report_it_in_its_own_words(
+            self, registry, monkeypatch):
+        """ANTI-VACUITY for :class:`_GuardTripped`'s whole reason to exist.
+
+        The route this closes is a check that CATCHES the guard rather than
+        letting it out, and reports a finding of its own -- under which the
+        pass returns normally and no assertion about findings can name what
+        went wrong, because the check chose the words.  Both halves of the
+        evasion are here: `Path.read_text` reached through a variable, which
+        is the static call ban's own documented blind spot, and an `except
+        Exception` that would have caught an `AssertionError`.
+
+        Measured: with the guards raising `AssertionError` this check passed
+        the whole module at exit 0.  A `BaseException` is not catchable by
+        `except Exception`, so it escapes the check, escapes `preflight`'s own
+        wrapper, and lands here."""
+        @register("A2")
+        def _swallower(document):
+            reader = pathlib.Path.read_text          # not a Call node
+            try:
+                reader(pathlib.Path(__file__))
+            except Exception:
+                return (refuse("A2", "model",
+                               "the beam file could not be read."),)
+            return ()
+
+        doc = preflight_document()
+        _forbid_the_filesystem(monkeypatch)
+        try:
+            with pytest.raises(_GuardTripped):
                 preflight(doc)
         finally:
             monkeypatch.undo()
@@ -1265,10 +1326,9 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document(**patch)
         _forbid_operators(monkeypatch)
         try:
-            held = preflight(doc)
+            preflight(doc)          # returns, or `_GuardTripped` escapes
         finally:
             monkeypatch.undo()
-        assert held.refusals() == ()
 
     def test_that_guard_can_still_see_an_operator_being_built(
             self, registry, monkeypatch):
@@ -1284,7 +1344,7 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document()
         _forbid_operators(monkeypatch)
         try:
-            with pytest.raises(ConfigError, match="RAISED AssertionError"):
+            with pytest.raises(_GuardTripped):
                 preflight(doc)
         finally:
             monkeypatch.undo()
@@ -1302,10 +1362,9 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document(**patch)
         _forbid_the_builders(monkeypatch)
         try:
-            held = preflight(doc)
+            preflight(doc)          # returns, or `_GuardTripped` escapes
         finally:
             monkeypatch.undo()
-        assert held.refusals() == ()
 
     @pytest.mark.parametrize("reach", [
         lambda: values_module.resolve_value(1.0, None),
@@ -1339,7 +1398,7 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document()
         _forbid_the_builders(monkeypatch)
         try:
-            with pytest.raises(ConfigError, match="RAISED AssertionError"):
+            with pytest.raises(_GuardTripped):
                 preflight(doc)
         finally:
             monkeypatch.undo()
