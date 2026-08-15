@@ -97,6 +97,12 @@ class TestTheRegistryIsComplete:
         Tasks 2-11 each register into this one table from their own module;
         a `register` that merely assigned would let the second import win in
         silence, and the surviving executor would depend on import order.
+
+        A RAISE and not an ``assert``: ``python -O`` strips asserts, and
+        measured before Plan 3A's Task 1 the second registration then won
+        silently.  The four tests in
+        ``tests/config/test_config_findings.py::TestTheExecutorRegistryNoLongerAsserts``
+        are where the ``-O`` behaviour itself is pinned, in a subprocess.
         """
 
         def probe(run, built, *, results=None):
@@ -105,7 +111,7 @@ class TestTheRegistryIsComplete:
         register("_probe_kind")(probe)
         try:
             assert EXECUTORS["_probe_kind"] is probe
-            with pytest.raises(AssertionError):
+            with pytest.raises(ConfigError):
                 register("_probe_kind")(probe)
         finally:
             EXECUTORS.pop("_probe_kind", None)

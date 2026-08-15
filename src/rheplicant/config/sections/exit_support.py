@@ -24,11 +24,37 @@ def register(kind: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Bind an executor to its ``runs[].kind``.
 
     Registering the same kind twice is a programming error, not a
-    configuration one, so it asserts rather than raising ConfigError.
+    configuration one -- and it is refused with a RAISE rather than the
+    ``assert`` this used to carry, because ``python -O`` strips asserts and
+    the shadowing is then completely silent.  Measured before the change::
+
+        $ python -O -c "...register('_probe')(one); register('_probe')(two)..."
+        under -O, second registration won: True
+
+    -- so under ``-O`` which executor a document got depended on import order,
+    with nothing said.  ``ConfigError`` and not ``RuntimeError``, following
+    ``errors.py``'s "one refusal type for the whole config layer"; the message
+    is what carries "this is wiring, not your document", and it names both
+    claimants so the second one can be found.
+
+    That rule is stated layer-wide and, measured, is not yet applied
+    layer-wide: this is the first of five registration decorators in
+    ``config/`` to refuse a double registration at all.  The other four --
+    ``files.register_reader``, ``values.register_form``,
+    ``derive.register_derivation`` and ``resources.register_kind`` -- assign
+    unconditionally, so the second registration wins in silence with no
+    ``assert`` to strip.  They are outside Plan 3A's scope and are recorded on
+    its residue ledger rather than fixed here.
     """
 
     def bind(fn: Callable[..., Any]) -> Callable[..., Any]:
-        assert kind not in EXECUTORS, f"{kind} is already registered"
+        if kind in EXECUTORS:
+            raise ConfigError(
+                f"runs[].kind: {kind!r} is registered twice, by "
+                f"{EXECUTORS[kind].__module__} and by {fn.__module__}. A kind "
+                "has one executor, and which of the two you would get depends "
+                "on import order."
+            )
         EXECUTORS[kind] = fn
         return fn
 
