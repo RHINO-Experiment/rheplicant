@@ -1573,7 +1573,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     # was ("a count nothing will read is not a fault") rested on a claim that
     # is false. `sections/inference.py:204` is `npe = parse_npe(section["npe"],
     # context) if "npe" in section else None` -- unconditional on `runs:` -- so
-    # the count IS read, at P2, and `build_inference` (`document.py:107`) runs
+    # the count IS read, at P2, and `build_inference` (`document.py:108`) runs
     # AFTER `build_resources` (`:75`). Measured: `n_simulations: 0` beside
     # `runs: [{kind: forward}]` was silent here and refused by the package, and
     # with UNREADABLE_BEAM in the same document the BEAM spoke first -- which

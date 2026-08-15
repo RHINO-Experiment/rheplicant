@@ -28,16 +28,23 @@ def _paragraphs(text: str) -> list[str]:
     return [block for block in re.split(r"\n[ \t]*\n", text) if block.strip()]
 
 
-def _page_document(heading: str) -> dict:
-    """The first ``yaml`` fence under a heading, parsed as a reader reads it."""
+def _page_document(heading: str, page: str = "config-inference.md") -> dict:
+    """The first ``yaml`` fence under a heading, parsed as a reader reads it.
+
+    ``page`` was ``config-inference.md`` written into the body until Plan 3A;
+    it is a parameter now because ``config-validation.md`` carries a document
+    too, and a second copy of this parse is the duplication §2.2 forbids. The
+    default is the page every existing caller already reads, so none of them
+    changes.
+    """
     yaml = pytest.importorskip(
         "yaml",
         reason="PyYAML rides in with myst-parser, in the docs extra",
     )
-    _, _, after = _page("config-inference.md").partition(heading)
-    assert after, f"{heading!r} is no longer a heading on the page"
+    _, _, after = _page(page).partition(heading)
+    assert after, f"{heading!r} is no longer a heading on {page}"
     fence = re.search(r"```yaml\n(.*?)```", after, re.DOTALL)
-    assert fence, f"no yaml fence under {heading!r}"
+    assert fence, f"no yaml fence under {heading!r} on {page}"
     return yaml.safe_load(fence.group(1))
 
 
@@ -68,6 +75,80 @@ class TestTheSurface:
         name in it is a modelling object. A config layer that leaked into it
         would make `from rheplicant import *` import a document parser."""
         assert not set(rheplicant.config.__all__) & set(rheplicant.__all__)
+
+    def test_plan_3a_adds_the_four_names_a_caller_touches(self):
+        """The pass, its report, its element and its warning class.
+
+        A caller CALLS preflight, RECEIVES a Report, READS a Finding and must
+        be able to NAME ConfigWarning in a filterwarnings call. Each is the
+        same footing as a name already here: load_document, ConfiguredRun,
+        ResolvedValue, ConfigError.
+        """
+        import rheplicant.config as config
+
+        for name in ("ConfigWarning", "Finding", "Report", "preflight"):
+            assert name in config.__all__, name
+            assert hasattr(config, name), name
+
+    def test_the_check_registry_stays_wiring_rather_than_surface(self):
+        """The exact argument 2C made for EXECUTORS, in the docstring above.
+
+        A check id is something the SCHEMA says. A caller that could register
+        one would be extending §6 from outside, and the id space is the
+        schema's. Pinned both ways -- not in ``__all__``, and not reachable as
+        an attribute -- because ``from ... import *`` and ``config.register``
+        are two different leaks.
+        """
+        import rheplicant.config as config
+
+        for name in ("CHECKS", "register"):
+            assert name not in config.__all__, name
+            assert not hasattr(config, name), name
+
+    def test_config_warning_is_a_userwarning_so_a_caller_can_filter_it(self):
+        """The whole reason it is exported rather than module-local.
+
+        A caller who cannot name the class cannot turn these into errors, and
+        ``category=UserWarning`` would also catch numpyro's.
+        """
+        import warnings
+
+        import rheplicant.config as config
+
+        assert issubclass(config.ConfigWarning, UserWarning)
+        assert config.ConfigWarning is not UserWarning
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", category=config.ConfigWarning)
+            with pytest.raises(config.ConfigWarning):
+                warnings.warn("x", config.ConfigWarning, stacklevel=2)
+
+    def test_exporting_preflight_shadows_the_subpackage_and_that_is_pinned(
+            self):
+        """THE side effect of binding the function in ``config/__init__.py``.
+
+        Measured: after this task both ``from rheplicant.config import
+        preflight`` and ``import rheplicant.config.preflight as x`` hand back
+        the **function** -- the getattr-first path -- and only
+        ``sys.modules[...]`` and ``importlib.import_module(...)`` return the
+        module.
+
+        Kills any later module reaching for ``config.preflight.__file__``:
+        that is an ``AttributeError`` at import, and the one place that
+        already wanted it (``test_config_preflight.py``'s ``_PREFLIGHT_DIR``)
+        goes through ``importlib.import_module`` for exactly this reason.
+        """
+        import importlib
+        import sys
+        import types
+
+        import rheplicant.config as config
+
+        assert callable(config.preflight)
+        assert not isinstance(config.preflight, types.ModuleType)
+        module = importlib.import_module("rheplicant.config.preflight")
+        assert isinstance(module, types.ModuleType)
+        assert module is sys.modules["rheplicant.config.preflight"]
+        assert module.preflight is config.preflight
 
     def test_the_registry_views_are_live_rather_than_snapshots(self):
         """FILE_FORMATS and DERIVATIONS are re-exported because a caller asking
@@ -187,14 +268,26 @@ class TestThePlan2CSurface:
         "run_forward",
     )
 
-    def test_plan_2c_adds_no_name_to_the_surface(self):
+    #: What Plan 3A adds, and the four are argued one by one in
+    #: ``config/__init__.py``'s own docstring: a caller CALLS the pass,
+    #: RECEIVES its report, READS an element of it, and NAMES the warning
+    #: class in a ``filterwarnings``. Kept as its own tuple rather than
+    #: folded into ``SURFACE`` so the whole-list assertion below still says
+    #: which plan put each name there.
+    SURFACE_3A = ("ConfigWarning", "Finding", "Report", "preflight")
+
+    def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(
+            self):
         import rheplicant.config as config
 
-        assert sorted(config.__all__) == sorted(self.SURFACE), (
+        assert sorted(config.__all__) == sorted(self.SURFACE
+                                                + self.SURFACE_3A), (
             "rheplicant.config.__all__ changed. Plan 2C's decision was that "
             "nine new run kinds are document vocabulary rather than public "
-            "API; if a later plan hands the caller a new object, add it here "
-            "and to the docstring paragraph that says what the layer does."
+            "API, and 2D's that a product received through run_document is "
+            "not one either; Plan 3A added exactly four. If a later plan "
+            "hands the caller a new object, add it here and to the docstring "
+            "paragraph that says what the layer does."
         )
 
     def test_the_exit_registry_stays_wiring_rather_than_surface(self):
@@ -259,8 +352,9 @@ class TestThePlan2CSurface:
         ``rheplicant.inference.__all__`` (asserted below), so the type the
         caller needs is exported by the layer that owns it.
 
-        Whole-list, like ``test_plan_2c_adds_no_name_to_the_surface``: this
-        asserts that neither name reached the package, which a sampled check
+        Whole-list, like
+        ``test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added``:
+        this asserts that neither name reached the package, which a sampled check
         of ``__all__`` alone would miss if one were bound to the module and
         left out of the list.
         """
@@ -589,6 +683,454 @@ class TestThePagesSayWhatTheLayerDoes:
                     ConfigError, match="weighs residuals with inference.noise"
                 ):
                     run_document(noiseless)
+
+    #: Number words the pages use to count kinds. Not a general table -- these
+    #: are the sizes the ``## Runs`` subsections actually come in, and a word
+    #: outside it means a subsection was resized past what this guard knows.
+    _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                     "eleven": 11, "twelve": 12, "thirteen": 13,
+                     "fourteen": 14, "fifteen": 15, "sixteen": 16}
+
+    #: A kind's own bullet under a ``### `` subsection: ``- `forward` — ``.
+    #: The BULLET HEADS, never the body -- measured, the ``predict`` bullet
+    #: names fisher/plan.sample/nuts/npe in its prose and the ``conjugate.gls``
+    #: bullet names its two siblings, so a body-wide scan is not a partition
+    #: and would have made every assertion below pass while measuring nothing.
+    _KIND_BULLET = re.compile(r"^- `([a-z][a-z._]*)` — ", re.MULTILINE)
+
+    def _runs_subsections(self):
+        """``[(heading, [kinds bulleted])]`` for ``## Runs``."""
+        runs = _section(_page("config-inference.md"), "## Runs")
+        out = []
+        for chunk in runs.split("\n### ")[1:]:
+            heading, _, body = chunk.partition("\n")
+            out.append((heading.strip(), self._KIND_BULLET.findall(body)))
+        return out
+
+    def test_the_runs_subsections_partition_every_declared_kind(self):
+        """The page's own division of ``runs:``, against ``_KINDS``.
+
+        A kind that ships and is bulleted nowhere is undiscoverable -- the
+        reader has to be refused to find out it exists. A bullet naming no
+        declared kind sends a reader to write a word ``parse_runs`` rejects.
+        And a kind bulleted TWICE would let both halves of the count check
+        below pass while the page said sixteen and listed seventeen.
+        """
+        from rheplicant.config.sections.runs import _KINDS
+
+        sections = self._runs_subsections()
+        assert len(sections) >= 4, (
+            f"## Runs parsed into {len(sections)} subsections; the '### ' "
+            "split or the bullet pattern has stopped matching."
+        )
+        bulleted = [kind for _, kinds in sections for kind in kinds]
+        assert len(bulleted) == len(set(bulleted)), (
+            f"a kind is bulleted twice: {sorted(bulleted)}"
+        )
+        assert set(bulleted) == set(_KINDS), (
+            f"bulleted but not declared: {sorted(set(bulleted) - set(_KINDS))}; "
+            f"declared but not bulleted: {sorted(set(_KINDS) - set(bulleted))}"
+        )
+
+    def test_every_subsection_heading_that_counts_counts_right(self):
+        """"The five that fit" is a claim, and nothing was checking it.
+
+        Not every heading carries a number -- "The conjugate family" does not,
+        and is covered by the partition above -- so the scan is over the ones
+        that do, with a floor so a rewording that dropped every number word
+        cannot leave this passing.
+        """
+        counted = 0
+        for heading, kinds in self._runs_subsections():
+            words = [word for word in self._NUMBER_WORDS
+                     if re.search(rf"\b{word}\b", heading, re.IGNORECASE)]
+            if not words:
+                continue
+            counted += 1
+            assert len(words) == 1, f"{heading!r} carries {words}"
+            assert self._NUMBER_WORDS[words[0]] == len(kinds), (
+                f"{heading!r} says {words[0]} and bullets {len(kinds)}: "
+                f"{kinds}"
+            )
+        assert counted >= 3, (
+            f"only {counted} '### ' headings under ## Runs carry a number "
+            "word; either they were reworded or the scan has drifted."
+        )
+
+    def test_config_sections_states_how_many_kinds_runs_holds(self):
+        """``config-sections.md`` counts them in words and nothing read it.
+
+        It is right today -- 2D updated it from fourteen to sixteen -- and it
+        was right by hand, which is the condition this repo has twice paid for
+        (README's test count drifted by 759; the D range by three).
+        """
+        from rheplicant.config.sections.runs import _KINDS
+
+        stated = re.search(r"\[the (\w+) kinds it runs\]",
+                           _page("config-sections.md"))
+        assert stated, (
+            "config-sections.md no longer states how many kinds `runs:` holds "
+            "in the '[the N kinds it runs](...)' form this guard reads."
+        )
+        word = stated.group(1).lower()
+        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
+        assert self._NUMBER_WORDS[word] == len(_KINDS), (
+            f"config-sections.md says {word} kinds; runs.py declares "
+            f"{len(_KINDS)}."
+        )
+
+    def test_the_validation_page_names_the_sections_structurally_refused(self):
+        """``config-validation.md`` lists them; ``_structural`` decides them.
+
+        The sentence is *"``outputs:``, ``defaults:`` and ``plugins:``, which
+        arrive with Plan 4, and ``campaign:``, which is reserved with
+        capability 4"*, and the two halves are two different tables:
+        ``_NOT_YET`` carries the first three with the plan each arrives with,
+        while ``campaign`` has a clause of its own naming §8.2. A page that
+        called all four "deferred" would be describing one table where there
+        are two, and a section added to either and left off the page is one a
+        reader discovers by being refused.
+        """
+        from rheplicant.config.preflight import _NOT_YET, _SECTIONS
+
+        body = _section(_page("config-validation.md"), "## The pre-flight pass")
+        # ``\s+`` and not a space: the sentence wraps between "is" and
+        # "structural", and a literal partition reads nothing and asserts
+        # nothing -- which is how this guard would go green while the page
+        # said anything at all.
+        opens = re.search(r"The exception is\s+structural", body)
+        assert opens, (
+            "config-validation.md no longer explains the structural exception "
+            "in the sentence this guard reads."
+        )
+        tail = body[opens.end():]
+        named = {token.rstrip(":")
+                 for token in re.findall(r"`([a-z_]+):`", tail)}
+        assert named == set(_NOT_YET) | {"campaign"}, (
+            f"the page names {sorted(named)} as refused before any check "
+            f"runs; _structural refuses {sorted(set(_NOT_YET) | {'campaign'})}."
+        )
+        assert named <= set(_SECTIONS), sorted(named - set(_SECTIONS))
+        # And the sentence COUNTS them in words, which the set comparison
+        # above cannot see: a section added to either table would be added to
+        # the list and leave "four" behind.
+        counted = re.search(r"(\w+) whole sections this layer does not read",
+                            tail)
+        assert counted, (
+            "the page no longer counts the sections it names in the "
+            "'N whole sections this layer does not read' form."
+        )
+        word = counted.group(1).lower()
+        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
+        assert self._NUMBER_WORDS[word] == len(named), (
+            f"config-validation.md says {word} sections and names "
+            f"{len(named)}: {sorted(named)}."
+        )
+
+
+class TestTheCountsProseStatesAboutThisLayer:
+    """A count in prose that no run checks is this project's own failure mode.
+
+    ``tests/test_readme_counts.py`` closed it for the README's test count and
+    ``tests/test_docs_links.py`` for the D range; the two counts below are the
+    ones Plan 3A wrote and nothing else reads. The changelog's number is the
+    interesting one: it is neither ``len(CHECKS)`` (34 slots, high by the
+    dotted ``A1.*`` keys) nor anything else the registry hands back directly,
+    so the plan's own body warned that "this one has no guard".
+    """
+
+    #: The schema §6 rows Plan 3A decides, from its scope table -- A1, A38,
+    #: A39; A2, A3, A4, A6, A7, A32; A5, A8, A31; A14, A15; A16-A19; A20,
+    #: A21, A23, A29; A24, A25; A27, A28; A30, A33; A41, A42, A52. Written
+    #: out because it is a historical fact about one plan rather than a live
+    #: property of the registry: Plan 3B registers into the same ``CHECKS``,
+    #: so an equality against the registry would go red on work that is not
+    #: wrong. What IS asserted against the registry is that every one of them
+    #: is still there.
+    PLAN_3A = frozenset({
+        "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A14", "A15", "A16",
+        "A17", "A18", "A19", "A20", "A21", "A23", "A24", "A25", "A27", "A28",
+        "A29", "A30", "A31", "A32", "A33", "A38", "A39", "A41", "A42", "A52",
+    })
+
+    def test_every_check_plan_3a_claims_is_registered(self):
+        """The direction that goes silently wrong: a check quietly dropped.
+
+        ``Finding.check`` is the bare id and a registry SLOT may be dotted
+        (``A1.runs``), so the comparison is over the bare ids. Measured at
+        this commit the two are EQUAL -- 31 each, 34 slots -- but only the
+        subset is asserted, because 3B adds to the same table.
+        """
+        from rheplicant.config.preflight import CHECKS
+
+        bare = {slot.split(".")[0] for slot in CHECKS}
+        assert self.PLAN_3A <= bare, (
+            f"these schema ids are in Plan 3A's scope and no function "
+            f"registers them: {sorted(self.PLAN_3A - bare)}"
+        )
+
+    #: ``TestThePagesSayWhatTheLayerDoes``' table, plus the neighbourhood the
+    #: changelog's own number sits in. Extended rather than replaced: a
+    #: reworded "thirty-two" must fail as a WRONG COUNT (32 != 31), where an
+    #: unknown word would fail as a broken scan and read as this guard's bug.
+    _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
+              "twenty-nine": 29, "thirty": 30, "thirty-one": 31,
+              "thirty-two": 32, "thirty-three": 33}
+
+    def test_the_changelog_counts_the_checks_plan_3a_decided(self):
+        """"Thirty-one schema §6 checks" was prose with no reader.
+
+        Neither registry number is it: 34 SLOTS is high by the three dotted
+        ``A1.*`` keys and by ``A14.cal_loads``. The number is the count of
+        schema ROWS, which is what ``PLAN_3A`` holds -- so this asserts the
+        word against that, and the test above asserts that against the
+        registry. ``\\s+`` and not a space: the sentence wraps between the
+        number and the word it counts, and a line-anchored scan would read
+        nothing and stay green.
+        """
+        stated = re.search(r"([A-Za-z-]+)\s+schema §6 checks now decide",
+                           (_DOCS.parent / "CHANGELOG.md").read_text())
+        assert stated, (
+            "CHANGELOG.md no longer states how many schema §6 checks Plan 3A "
+            "decides in the 'N schema §6 checks now decide' form this guard "
+            "reads."
+        )
+        word = stated.group(1).lower()
+        assert word in self._WORDS, f"unknown number word {word!r}"
+        assert self._WORDS[word] == len(self.PLAN_3A), (
+            f"CHANGELOG.md says {word} checks; Plan 3A's scope table has "
+            f"{len(self.PLAN_3A)}."
+        )
+
+
+#: ``docs/config-validation.md``'s check id -> [(every phrase the page's own
+#: bullet must carry for this way out, the patch applying it)]. Both halves
+#: are load-bearing: the phrases alone would let the patch drift from the
+#: advice, and the patch alone would let the advice be reworded into
+#: something that does not work. Two entries for A27 because the bullet
+#: offers two ways out.
+#:
+#: The phrases are a TUPLE and not one string, and that is measured rather
+#: than tidy: with only ``"kind: conjugate.gls"`` pinned, deleting the page's
+#: "drop ``width:`` with it" clause SURVIVED, because the patch went on
+#: dropping the key the page no longer mentioned.
+#:
+#: Module scope rather than a class attribute: a ``parametrize`` expression
+#: in a class body cannot see the class namespace from inside a nested
+#: comprehension, and the failure is a collection-time ``NameError`` that
+#: takes the whole module down.
+_PAGE_FIXES = {
+    "A27": [
+        # `width:` goes with it: measured, changing the kind alone swaps A27
+        # for A1 -- `width` is not a `conjugate.gls` option and Task 3's run
+        # sweep says so. The page names that, so the patch does it.
+        (("kind: conjugate.gls", "drop `width:`"),
+         lambda doc: {**doc, "runs": [{k: v for k, v in doc["runs"][0].items()
+                                       if k != "width"}
+                                      | {"kind": "conjugate.gls"}]}),
+        (("inference.noise.kind: radiometer_frozen",
+          "keeps the run as written"),
+         lambda doc: {**doc, "inference": {
+             **doc["inference"],
+             "noise": {**doc["inference"]["noise"],
+                       "kind": "radiometer_frozen"}}}),
+    ],
+    "A30": [
+        (("inference.twin: {without: [noise]}",),
+         lambda doc: {**doc, "inference": {**doc["inference"],
+                                           "twin": {"without": ["noise"]}}}),
+    ],
+    "A33": [
+        (("transform: unit_mean_bandpass", "on\n  `b`"),
+         lambda doc: {**doc, "inference": {
+             **doc["inference"],
+             "parameters": {
+                 **doc["inference"]["parameters"],
+                 "b": {**doc["inference"]["parameters"]["b"],
+                       "transform": "unit_mean_bandpass"}}}}),
+    ],
+}
+
+
+class TestTheValidationPageDocument:
+    """``docs/config-validation.md``'s document is REFUSED here, by the pass.
+
+    The 2B precedent (``TestTheWorkedDocumentOnThePage``) executes a page's
+    document because a page that carries one is making a promise. This page's
+    promise is the opposite shape -- that the document is wrong three ways,
+    that all three come back from one call, and that each fix it offers really
+    clears the finding it is offered for -- so the test is the same idea with
+    the assertion inverted.
+
+    It costs milliseconds, which is itself the claim: nothing is built. That
+    is asserted below rather than left in this docstring, because a sentence
+    about cost that no run checks is the class of defect this whole plan is
+    about.
+    """
+
+    HEADING = "## A document that is wrong three ways"
+
+    def _document(self):
+        return _page_document(self.HEADING, "config-validation.md")
+
+    def _body(self):
+        return _section(_page("config-validation.md"), self.HEADING)
+
+    def _ids_on_the_page(self):
+        """The check ids the page's own bullet list names, read OFF THE PAGE.
+
+        Derived rather than written, so the page and the assertion cannot
+        disagree: a bullet added or removed moves this set.
+        """
+        return set(self._ordered_ids_on_the_page())
+
+    def _ordered_ids_on_the_page(self):
+        """The same ids IN THE ORDER THE PAGE WRITES THEM.
+
+        The set-valued assertions below cannot see an order, and the page
+        claims one ("in registry order") -- a claim nothing checked.
+        """
+        return re.findall(r"^- \*\*(A\d+)\*\*", self._body(), re.MULTILINE)
+
+    def test_the_page_lists_ids_at_all(self):
+        """A regex that stopped matching would make the tests below vacuous."""
+        assert len(self._ids_on_the_page()) >= 3
+
+    def test_the_page_s_document_earns_exactly_the_findings_it_lists(self):
+        """Both directions, and the second is the one that goes stale.
+
+        A finding the page omits is a document the page half-explains; a
+        finding the page claims and the document does not earn is advice about
+        a document nobody has. Equality is deliberate: if a check landing in a
+        later plan starts firing on this document, THE PAGE is what is wrong
+        -- add the bullet, do not loosen this.
+        """
+        from rheplicant.config import preflight
+
+        assert preflight(self._document()).checks() == self._ids_on_the_page()
+
+    def test_the_page_lists_them_in_the_order_the_pass_produces(self):
+        """The page says "in registry order" and nothing checked it.
+
+        ``checks()`` is a frozenset and ``_ids_on_the_page`` is a set, so both
+        assertions around this one pass with the bullets in any order at all
+        -- and the order is a real claim: it is what a reader meets, and it is
+        decided by ``preflight/__init__.py``'s ALPHABETICAL foot import, where
+        ``fitting`` sorts before ``model`` and A27 therefore precedes A30 and
+        A33.
+
+        Kills a bullet list re-sorted for readability, and kills a foot import
+        reordered without moving the page.
+        """
+        from rheplicant.config import preflight
+
+        report = preflight(self._document())
+        produced = list(dict.fromkeys(f.check for f in report.findings))
+        assert produced == self._ordered_ids_on_the_page()
+
+    def test_the_first_refusal_is_the_one_raise_if_refused_hands_back(self):
+        """The collect-then-raise contract, on the page's own document.
+
+        A Report that raised on the first finding would return one; this
+        asserts that it collected several AND that the ConfigError a caller
+        sees is the first of them verbatim, which is what keeps every existing
+        ``pytest.raises(ConfigError, match=...)`` green. Index 0 is legitimate
+        here precisely because the ORDERING is what is under test.
+        """
+        from rheplicant.config import ConfigError, preflight
+
+        report = preflight(self._document())
+        assert len(report.refusals()) >= 3
+        with pytest.raises(ConfigError) as caught:
+            report.raise_if_refused()
+        assert report.refusals()[0].message in str(caught.value)
+
+    def test_every_where_on_it_is_a_path_into_the_document(self):
+        """``where`` is the line to EDIT. A ``src/`` path there is unactionable."""
+        from rheplicant.config import preflight
+
+        for finding in preflight(self._document()).findings:
+            assert finding.where.split(".")[0].split("[")[0] in {
+                "runtime", "observation", "resources", "model", "inference",
+                "runs", "variants",
+            }, finding.where
+
+    @pytest.mark.parametrize("check", sorted(_PAGE_FIXES))
+    def test_the_page_still_offers_the_fix_this_test_applies(self, check):
+        """Half of the pair, and the half a patched-document test cannot see.
+
+        Applying a patch that works proves nothing about the SENTENCE the
+        reader is given. Task 6's mutation round put eight of nine survivors
+        in refusal text; a documentation page is refusal text with a wider
+        audience. This kills a bullet reworded to advise something else while
+        the test below goes on applying the advice that used to be there.
+        """
+        bullet = re.search(rf"^- \*\*{check}\*\*.*?(?=^- \*\*|\Z)",
+                           self._body(), re.MULTILINE | re.DOTALL)
+        assert bullet, f"the page no longer carries a bullet for {check}"
+        for phrases, _ in _PAGE_FIXES[check]:
+            for phrase in phrases:
+                assert phrase in bullet.group(0), (
+                    f"{check}'s bullet no longer offers {phrase!r}"
+                )
+
+    @pytest.mark.parametrize(
+        ("check", "index"),
+        [(check, index)
+         for check in sorted(_PAGE_FIXES)
+         for index in range(len(_PAGE_FIXES[check]))],
+    )
+    def test_the_fix_the_page_names_clears_the_finding_and_only_it(self, check,
+                                                                   index):
+        """The other half: advice that does not work is worse than none.
+
+        Each patch applies exactly what the bullet tells the reader to write,
+        and the assertion is an EQUALITY against the page's other ids rather
+        than ``check not in ...``. The weaker form would pass for advice that
+        clears its own finding and silently earns a different one -- which is
+        not hypothetical here: measured, changing `kind:` to `conjugate.gls`
+        and leaving `width:` behind swaps A27 for A1, because `width` is
+        `conjugate.wiener`'s key. The page names dropping it for exactly that
+        reason, and this is what keeps the two in step.
+
+        Kills a bullet that names the wrong key, the wrong value or the wrong
+        latent: measured, ``transform: unit_mean_bandpass`` on ``g`` instead
+        of ``b`` leaves A33 firing.
+        """
+        from rheplicant.config import preflight
+
+        phrases, patch = _PAGE_FIXES[check][index]
+        document = self._document()
+        listed = self._ids_on_the_page()
+        assert check in preflight(document).checks(), (
+            f"{check} does not fire on the page's document at all, so this "
+            "test cannot see whether the fix clears it"
+        )
+        assert preflight(patch(document)).checks() == listed - {check}, (
+            f"the page tells a reader to write {phrases!r} to clear {check}; "
+            f"what that leaves is "
+            f"{sorted(preflight(patch(document)).checks())} and the page's "
+            f"other faults are {sorted(listed - {check})}"
+        )
+
+    def test_the_pass_on_the_pages_document_is_free(self):
+        """The page says the pass costs under 0.05 s. This is that sentence.
+
+        ``test_config_preflight.py`` asserts the budget on the fixture
+        document; this asserts it on the one the page shows a reader, which is
+        the document the claim is made beside. Measured here: about 2 ms, so
+        the margin is a factor of twenty-five and this is a guard against
+        something being BUILT, not a benchmark.
+        """
+        import time
+
+        from rheplicant.config import preflight
+
+        document = self._document()
+        start = time.perf_counter()
+        preflight(document)
+        assert time.perf_counter() - start < 0.05
 
 
 class TestTheWorkedDocumentOnThePage:

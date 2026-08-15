@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Everything a document can be refused for before it costs anything
+
+Plan 3A: a pre-flight pass over the document's own text, run before
+`load_document` reads a beam. It matters because of where the money was:
+`build_resources` is 90.9 % of a load on a toy nside-16 beam, and until now
+only the section-name sweep ran in front of it — measured, a missing beam file
+beat `checks.mode: skip`, `type: NeuralOperator`, `scope: per_epoch` and a
+radiometer with no `include_logdet` to the refusal, every time. Thirty-one
+schema §6 checks now decide from three sources and no fourth: the document's
+mapping, `RADIO_GRAPH`, and operator classes resolved by name. Nothing is
+constructed, nothing is read from disk, and the whole pass costs under 0.05 s
+against a 1.5 s build.
+
+It **collects**. A document wrong four ways is refused once, with all four
+named; `Report.raise_if_refused()` turns the first back into the `ConfigError`
+this layer has always raised, so every pinned refusal still reads the same to
+a caller and to a test. `ConfigWarning` is the non-fatal sibling
+`inference.checks.<name>.mode: warn` has parsed since 2B with nothing to
+consume it, and `preflight`, `Report` and `Finding` join the package's
+surface: `Finding.where` is a path into *your document*, the line to edit.
+
+Two of the checks it moves were live defects rather than gaps, and neither
+would appear in a feature audit. `_decided_model`'s refusal told a `kind: npe`
+run that it "solves for the covariance a PREDICTION-DEPENDENT sigma implies"
+and offered it `kind: conjugate.wiener`: both false of `npe`, which simulates
+a bank and has no conjugate alternative — the sentence was written for
+`conjugate.gls` and the accessor was reused without re-wording it. Each caller
+now supplies its own clause, and the argument is required, so a third caller
+cannot inherit prose about an exit it is not. And the literal-integer-shadowing
+-a-shape-symbol fact had been computed and stored on every resolved value since
+`7a86c91` with **no reader anywhere** under `src/`; it is check A41 and its
+CONDITION now reaches the user as a warning. (The stored modifier itself still
+has no consumer — the check reads the document's text.)
+
+`docs/config-validation.md` carries a document that is wrong three ways —
+a stochastic stage a fit cannot close over, a bandpass free beside a gain, and
+a conjugate exit asked for a sigma that depends on the prediction — and the
+suite executes it and asserts that those are exactly the three checks it earns.
+
 ### The posterior, sampled exactly and sampled amortized
 
 Plan 2D: the two exits the config layer had been refusing by name. `nuts` runs

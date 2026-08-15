@@ -27,6 +27,26 @@ reusing an earlier run can refuse to mix two builds. It adds no name here
 either, and for the same reason: a caller receives a product through
 ``run_document``, never constructs one, so the product types stay module-local
 and free to grow the ``report:``/``timings:`` fields Plan 4 will want.
+
+Plan 3A adds the pre-flight pass: ``preflight`` takes a variant-applied
+document and returns a ``Report`` of ``Finding``s -- every check decidable
+from the document's text plus static class and graph introspection, run
+BEFORE ``load_document`` reads a beam. It COLLECTS rather than raising, so a
+document wrong four ways is refused once; ``Report.raise_if_refused`` turns
+the first refusal back into the ``ConfigError`` this layer has always
+raised. ``ConfigWarning`` is the non-fatal sibling ``sections/inference.py``'s
+``_MODES`` has parsed since 2B with nothing to consume it. Four names, and
+they are the four a CALLER touches: the registry (``CHECKS``, ``register``)
+stays module-local for the reason ``EXECUTORS`` does -- a check id is
+something the schema says, not something a caller registers.
+
+Binding ``preflight`` here SHADOWS the ``rheplicant.config.preflight``
+subpackage attribute: after this module runs, ``config.preflight`` is the
+function, and the module is reached through ``sys.modules`` or
+``importlib.import_module``. That is pinned by
+``test_exporting_preflight_shadows_the_subpackage_and_that_is_pinned`` rather
+than left as a surprise, because a reader of ``config.preflight.model`` gets
+an ``AttributeError`` and no explanation.
 """
 
 from rheplicant.config.context import ResolutionContext
@@ -35,6 +55,7 @@ from rheplicant.config.derive import DERIVATIONS
 from rheplicant.config.document import ConfiguredRun, load_document, run_forward
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import FILE_FORMATS
+from rheplicant.config.findings import ConfigWarning, Finding, Report
 from rheplicant.config.layering import apply_variant, recursive_update
 from rheplicant.config.paths import (
     ResolvedPath,
@@ -42,6 +63,7 @@ from rheplicant.config.paths import (
     parse_path,
     resolve_path_on,
 )
+from rheplicant.config.preflight import preflight
 from rheplicant.config.resources import RESOURCE_KINDS, BuiltResources, build_resources
 from rheplicant.config.sections import ingest as _ingest  # noqa: F401  (registers rhino_hdf5)
 from rheplicant.config.sections.inference import InferenceBuild
@@ -70,9 +92,12 @@ __all__ = [
     "VALUE_MODIFIERS",
     "BuiltResources",
     "ConfigError",
+    "ConfigWarning",
     "ConfiguredRun",
     "FieldSpec",
+    "Finding",
     "InferenceBuild",
+    "Report",
     "ResolutionContext",
     "ResolvedPath",
     "ResolvedValue",
@@ -88,6 +113,7 @@ __all__ = [
     "field_specs",
     "load_document",
     "parse_path",
+    "preflight",
     "recursive_update",
     "resolve_extent",
     "resolve_path_on",

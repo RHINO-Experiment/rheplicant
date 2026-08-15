@@ -1589,7 +1589,7 @@ class TestPriorGates:
 
     def test_the_warm_start_of_a_plan_sample_needs_no_prior_either(self):
         # THE TWIN, measured and standing DOWN rather than guarded.  Task 7's
-        # A16-A19 read `warm_start.blocks` because `exits.py:269` hands them
+        # A16-A19 read `warm_start.blocks` because `exits.py:288` hands them
         # to the same `SamplingPlan`; A23 must not, because that plan is
         # `.estimate()`d and `require_priors` is called from `.sample()`
         # alone (`plan.py:1064-1066`) -- and `_WARM_KEYS` (`exits.py:172`)
@@ -1977,7 +1977,7 @@ class TestA23AgreesWithTheGATEItRunsInFrontOf:
 
     ``posterior_support._sampled_space`` decides the same question from a
     BUILT space, and A23 may not call it -- its first line is ``space =
-    _space(run, built)`` (``:76``), which P-1 has nothing to build from.  So
+    _space(run, built)`` (``:77``), which P-1 has nothing to build from.  So
     the rule is re-derived from text, and this task therefore ships the shape
     the plan warns about: two functions deciding one property, in two
     voices.  ``_sampled_space`` is not dead -- a run declaring ``expect:
@@ -2231,7 +2231,7 @@ class TestSeeds:
 
     def test_a_missing_npe_subsection_is_left_to_the_section_that_owns_it(
             self):
-        # Stand down: `npe._subsection` (`:199-204`) already refuses an absent
+        # Stand down: `npe._subsection` (`:230-243`) already refuses an absent
         # subsection, and its sentence is about the SUBSECTION being required
         # rather than about the seed -- "there is no subsection this section
         # can do without".  A29 emitted here would answer a question the user
@@ -3255,7 +3255,7 @@ class TestCounts:
         # rested on a claim that is false.  `sections/inference.py:204` is
         # `npe = parse_npe(section["npe"], context) if "npe" in section else
         # None` -- unconditional on `runs:` -- so the count IS read, at P2,
-        # and `build_inference` (`document.py:107`) runs AFTER
+        # and `build_inference` (`document.py:108`) runs AFTER
         # `build_resources` (`:75`).  Kills restoring the gate.
         found = _counted(preflight_document(
             inference={"parameters": PRIORED,

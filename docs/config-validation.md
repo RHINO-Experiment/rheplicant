@@ -1,0 +1,167 @@
+# Config validation: the pre-flight pass, and what it decides from text
+
+Plan 3A of the config layer: everything a document can be refused for
+**before** a file is read or a beam is analysed. On a toy nside-16 beam,
+`build_resources` is 1.397 s of `load_document`'s 1.536 s — 90.9 % — and on a
+real CST directory the share goes up. A refusal that arrives after that has
+been paid for is a refusal that cost what it was meant to save.
+
+```python
+from rheplicant.config import preflight
+
+report = preflight(document)      # a Report; nothing is built, no file is read
+report.raise_if_refused()         # ConfigError, the first refusal verbatim
+```
+
+## The pre-flight pass
+
+`preflight` reads three things and no fourth: the document's own mapping,
+`RADIO_GRAPH`, and operator classes resolved by name. It never constructs an
+operator, never resolves a value node, never opens a file, and never runs the
+model forward. That is not a policy — it is what makes the pass free, and it
+is asserted: the whole pass on a realistic document costs under 0.05 s.
+
+It **collects**. `load_document`'s own section sweep raises on the first
+problem, which makes a user with four errors pay four round trips; `preflight`
+runs every registered check and hands back all of them. The exception is
+structural: unknown section names, `schema_version`, the required sections and
+four whole sections this layer does not read — `outputs:`, `defaults:` and
+`plugins:`, which arrive with Plan 4, and `campaign:`, which is reserved with
+capability 4 — are refused immediately, because every other check assumes the
+document's top level is well formed.
+
+## What a Report carries
+
+A `Finding` is four fields: `check` (the schema §6 id, or `""`), `severity`,
+`where` — **a path into your document**, the line to edit, never a path into
+the package — and `message`, one sentence carrying the fix.
+
+| method | what it gives |
+|---|---|
+| `report.refusals()` | the findings that stop the document running |
+| `report.warnings()` | the findings that do not |
+| `report.checks()` | the set of ids that fired |
+| `report.raise_if_refused()` | `ConfigError` with the first refusal verbatim, and a tail naming how many others there are |
+| `report.emit_warnings()` | each warning through `warnings.warn(..., ConfigWarning)` |
+
+`ConfigWarning` is a `UserWarning`, so `warnings.filterwarnings("error",
+category=ConfigWarning)` turns a document this package *will* run but probably
+should not into a failure of your own choosing.
+
+## What it decides, and from what
+
+Three sources, and the third is the interesting one.
+
+- **The document's text.** Section and key names, the `kind:` words, the
+  numbers a document writes literally. `runs[].kind` beside
+  `inference.noise.kind` is a two-word table that decides checks A27 and A28,
+  which until now fired inside an executor.
+- **`RADIO_GRAPH`.** Node ids, node kinds, the edge list and `must_precede`.
+  Static and free.
+- **Operator classes, resolved by name and introspected.** `model.noise:
+  {type: NoiseOperator}` names a class; that class declares `"key"` in
+  `requires`, which is this package's contract for *draws its own randomness*.
+  So check A30 asks the operator rather than consulting a list of node names —
+  it catches any operator that declares it, including one that has not shipped
+  yet. Resolving a class is an attribute lookup. **Constructing** one is not
+  in scope, so a node spelled `python: mod:factory` is left to the build.
+
+## What it cannot decide
+
+Anything that needs a value. `observation.freq.grid` may be `{value: [...]}`,
+`{file: ...}` or `{ref: ...}`, and only the first is text; a check that wants
+the grid's length wants a resolved value node. The same is true of every shape
+comparison, every unit identity over a derived scalar, and every rank or
+Jacobian question. Those refusals still exist — they arrive from
+[`load_document`](config-sections.md#the-build-order) and from the exits
+themselves — and this pass is what stops you paying for a beam analysis to
+reach one that two words already ruled out.
+
+`inference.twin` is the clearest boundary. Whether a *repaired* twin still
+contains a stochastic stage is decided here from `model:` plus
+`twin.without:`/`twin.replace:`, all three of which are text. Whether that
+twin's Jacobian has a null direction is not.
+
+## A document that is wrong three ways
+
+Every error below is decided from text, and all three come back from one call.
+
+```yaml
+schema_version: 1
+runtime: {seed: 20260814}
+observation:
+  meta: {telescope: RHINO}
+  freq: {grid: {linspace: {start: 60.0, stop: 85.0, num: 8, endpoint: true},
+                unit: MHz}}
+  time: {grid: {arange: {start: 0.0, step: 2.0, num: 16}, unit: s}}
+  environment: {temperature: {value: 280.0, unit: K}}
+model:
+  global_signal: {depth: {value: 0.5, unit: K},
+                  centre: {value: 75.0, unit: MHz},
+                  width: {value: 5.0, unit: MHz}}
+  bandpass: {bandpass: {ones: [n_freq]}}
+  gain: {gain: {value: 1.1, unit: dimensionless}}
+  noise: {type: NoiseOperator, sigma: {value: 0.5, unit: K}}
+inference:
+  parameters:
+    b: {init: {ones: [n_freq]}, into: bandpass.bandpass}
+    g: {init: 1.0, linear: true, into: gain.gain}
+  noise:
+    kind: radiometer
+    include_logdet: true
+    channel_width: {value: 1.0, unit: MHz}
+    integration_time: {value: 2.0, unit: s}
+  observed: {from: simulation, at: {g: 1.5}}
+runs:
+  - {kind: conjugate.wiener, width: none, names: [g]}
+```
+
+**`{value: 1.0, unit: MHz}`, not `{value: 1.0e6, unit: Hz}`.** Measured:
+`yaml.safe_load("v: 1.0e6")["v"]` is the **string** `'1.0e6'` — YAML 1.1
+requires a sign in the exponent, so `1.0e+6` is a float and `1.0e6` is not.
+The page's document is parsed by the suite, so the exponent form would reach
+the value grammar as a string and refuse for a reason the page is not about.
+
+Three findings, **in registry order — which is the order a reader meets them,
+and A27 is first**. The foot import of `preflight/__init__.py` is alphabetical,
+so `fitting` registers before `model`: A27 and A28 are bound before A30 and
+A33. Write the bullets in that order and keep them in it;
+`_ordered_ids_on_the_page` is what makes a silent re-sort a red test.
+
+- **A27** — `kind: conjugate.wiener` takes a sigma already decided into an
+  array, and `inference.noise.kind: radiometer` makes sigma a function of the
+  prediction, which a conjugate solve has not got. Fix: `kind: conjugate.gls`,
+  which iterates the covariance it implies — and drop `width:` with it, which
+  is `conjugate.wiener`'s key and not that exit's — or
+  `inference.noise.kind: radiometer_frozen`, which decides one sigma up front
+  and keeps the run as written. See
+  [the noise section](config-inference.md#noise).
+- **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
+  does not drop it. A `conjugate.wiener` run closes the twin over one template
+  state, so that draw would be the same realisation added to every prediction
+  alike. `kind: forward` keeps the node; a fit cannot. Fix:
+  `inference.twin: {without: [noise]}`.
+- **A33** — `b` is free into `bandpass` and `g` is free into `gain`. The two
+  multiply the same prediction, so only their product is constrained and the
+  fit has one exactly null direction. Fix: `transform: unit_mean_bandpass` on
+  `b`.
+
+Each has been read off the real `Report` rather than described: this document
+is executed by the test suite, which asserts that these are exactly the checks
+it earns, **in this order**, and that each fix named above really does clear
+the finding it is offered for.
+
+## Reading the report in code
+
+```python
+report = preflight(document)
+for finding in report.refusals():
+    print(f"{finding.where}: {finding.message}")
+report.emit_warnings()
+report.raise_if_refused()
+```
+
+`load_document` and `run_document` call the pass for you, so a document that
+reaches either has already been through it — the explicit call is for a
+front-end that wants the whole list rather than the first refusal, which is
+what schema §10's "Validate" button is.
