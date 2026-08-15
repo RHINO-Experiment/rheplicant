@@ -34,7 +34,7 @@ from rheplicant.config.refs import resolve_reference
 from rheplicant.config.units import check_field_name_unit
 from rheplicant.config.values import ResolvedValue, resolve_value
 
-__all__ = ["build_node_operator", "operator_table"]
+__all__ = ["ambiguous_class_problem", "build_node_operator", "operator_table"]
 
 _NODE_KEYS = frozenset({"type", "python", "from", "eqx_leaves"})
 
@@ -70,16 +70,41 @@ def _object_fields(cls: type) -> frozenset[str]:
     return frozenset()
 
 
+def ambiguous_class_problem(node_id: str, classes: tuple[type, ...],
+                            spec: Mapping) -> str | None:
+    """Check A7: the node registers more than one class and the spec picks none.
+
+    One binding, two callers: :func:`_pick_class` below, and
+    ``config.preflight.model._graph_shape``, which asks the same question of
+    the raw text one phase earlier.
+
+    Measured off :func:`operator_table` at ``f303af8``, the nodes with a
+    choice are exactly three -- ``noise`` (NoiseOperator,
+    RadiometerNoiseOperator), ``flagging`` (FlaggingOperator,
+    MomentRFIFlaggingOperator) and ``filters`` (FourierBandFilter,
+    SiderealFilter, SkySpaceFilter) -- and the table is discovered live off
+    ``rheplicant.radio.__all__``, so a fourth needs no edit here.
+
+    ``len(classes) == 1`` rather than ``< 2`` keeps the empty case answering
+    exactly what :func:`_pick_class` answered before this function existed.
+    It is defensive only, and no test can tell the two spellings apart: both
+    callers refuse an empty tuple first -- :func:`build_node_operator`'s ``if
+    not classes``, and ``preflight.model._graph_shape``'s.
+    """
+    if len(classes) == 1 or spec.get("type") is not None:
+        return None
+    names = [cls.__name__ for cls in classes]
+    return (f"model.{node_id}: {len(classes)} classes register at this node "
+            f"({names}); type: is required.")
+
+
 def _pick_class(node_id: str, classes: tuple[type, ...], spec: Mapping) -> type:
     declared = spec.get("type")
     if declared is None:
-        if len(classes) == 1:
-            return classes[0]
-        names = [cls.__name__ for cls in classes]
-        raise ConfigError(
-            f"model.{node_id}: {len(classes)} classes register at this node "
-            f"({names}); type: is required."
-        )
+        problem = ambiguous_class_problem(node_id, classes, spec)
+        if problem is not None:
+            raise ConfigError(problem)
+        return classes[0]
     if declared == "NeuralOperator":
         raise ConfigError(
             f"model.{node_id}: type: NeuralOperator is deferred with "
