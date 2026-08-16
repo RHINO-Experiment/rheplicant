@@ -168,6 +168,37 @@ def register_built(*checks: str) -> Callable[[Check], Check]:
                   decorator="register_built")
 
 
+# Importing the check modules is what registers their ids, exactly as
+# `preflight/__init__.py`'s foot does -- and unlike that one, this import CANNOT
+# sit at the foot.  **Measured, and it is silent both ways.**  This package
+# defines `axes` as its entry point AND holds a module called `axes.py`:
+#
+# * `from rheplicant.config.inflight import axes as _axis_checks` placed BELOW
+#   `def axes` binds the FUNCTION and never imports the submodule at all --
+#   `_handle_fromlist` finds the attribute already there and stops -- so
+#   `inflight/axes.py` would never run and its checks would never register,
+#   with nothing going red.
+# * `import rheplicant.config.inflight.axes` placed below it imports the
+#   submodule and then SETS IT as the package's `axes` attribute, shadowing
+#   the entry point -- after which `document.py`'s
+#   `from rheplicant.config.inflight import ... axes ...` binds a module and
+#   the axes hook raises "'module' object is not callable".
+#
+# Placed HERE, above the two `def`s, the attribute does not exist yet, so the
+# submodule really is imported and really is registered; the `def axes` below
+# then rebinds the package attribute to the entry point, while
+# `sys.modules['rheplicant.config.inflight.axes']` keeps the module for anyone
+# who imports it by path.  A later `import rheplicant.config.inflight.axes`
+# does NOT re-set the attribute (measured: the parent attribute is written
+# once, at first load), so the entry point stays callable.
+#
+# A task adding a module here inserts ONE alphabetically-placed line and
+# nothing else.  WHICH MODULE CLAIMS WHICH SLOT IS NOT WRITTEN HERE:
+# `sorted(AXIS_CHECKS)` is the answer and it cannot go stale.
+from rheplicant.config.inflight import axes as _axis_checks  # noqa: E402,F401
+from rheplicant.config.inflight import grids as _grid_checks  # noqa: E402,F401
+
+
 def axes(facts: Axes) -> Report:
     """Every check decidable from the resolved grids and nothing built.
 

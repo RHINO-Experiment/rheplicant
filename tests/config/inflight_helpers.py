@@ -27,6 +27,8 @@ refusal really does stop the load -- calls ``load_document`` under
 ``pytest.raises`` instead, and ``test_config_inflight.py`` ships that pair.
 """
 
+import time
+
 import numpy as np
 
 from rheplicant.config.document import _assemble
@@ -34,6 +36,30 @@ from rheplicant.config.findings import Finding
 from rheplicant.config.inflight import Axes, Built, axes, built
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
+
+
+def best_ms(call, repeats: int = 100) -> float:
+    """The FASTEST of ``repeats`` runs of ``call``, in milliseconds.
+
+    **The minimum and not the median**, and that is what makes a bound set
+    NEAR the measurement safe: contention from fifteen sibling ``-n 16``
+    workers can only ADD time, so it moves the median and the maximum and
+    leaves the best case alone.  Measured on an idle machine the two agree to
+    3 % (``axes`` on the worked document: 0.0132 ms best, 0.0135 ms median),
+    so nothing is given up by taking it.
+
+    It lives here rather than in one test module because three of them time
+    these passes, and a review of Task 1a found every cost bound in the first
+    of them unable to fail -- a *thousandfold* slowdown of the shared
+    ``sweep`` left the suite at exit 0, at margins up to x30077.  One helper
+    is what lets the three agree on how the number is taken.
+    """
+    samples = []
+    for _ in range(repeats):
+        started = time.perf_counter()
+        call()
+        samples.append((time.perf_counter() - started) * 1e3)
+    return min(samples)
 
 
 def axis_facts(document, *, base_dir=None) -> Axes:

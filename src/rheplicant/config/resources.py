@@ -256,10 +256,20 @@ def resolved_specs(section: Mapping[str, Any] | None) -> dict[str, dict]:
     stack-trace-shaped user message is the worst of the two failures available
     here.
 
-    So each malformed entry is **DROPPED** from the mapping and
-    :func:`build_resources` stays the backstop, saying the right sentence at
-    the right phase.  A check that finds an entry missing **stands down** on
-    it: refusing on "I could not tell" refuses documents that build.
+    So each malformed entry is **DROPPED** from the mapping.  A check that
+    finds an entry missing **stands down** on it: refusing on "I could not
+    tell" refuses documents that build.
+
+    **What the backstop is, stated narrowly.**  For the six shapes above,
+    :func:`build_resources` says the right sentence at the right phase -- each
+    is a ``ConfigError`` naming the entry.  For a shape it does not model, the
+    backstop is only *the builder's own exception*, and that may not be this
+    layer's voice at all: measured, ``{arrays: {a: {1: 'x'}}}`` -- a spec whose
+    KEY is not a string -- passes through here untouched and dies inside
+    ``build_resources`` as a bare ``TypeError: 'int' object is not
+    subscriptable``.  What this function guarantees is narrower than "the
+    right sentence": it is that **the PASS is not aborted**, so every other
+    finding on the document still reaches the user.
 
     **It reads ONE LAYER.**  A check must not call it once on
     ``document["resources"]`` and stop -- that closes the base route and leaves
@@ -269,12 +279,14 @@ def resolved_specs(section: Mapping[str, Any] | None) -> dict[str, dict]:
         return _task3_over_layers(document, lambda layer: _per_layer(
             resolved_specs(layer.get("resources"))))
 
-    The walk is not done HERE because it cannot be: ``_task3_over_layers``
-    lives under ``preflight/``, and ``preflight/`` already imports this module
-    (measured: importing ``rheplicant.config.preflight`` puts
-    ``rheplicant.config.resources`` in ``sys.modules``), so importing it back
-    closes a cycle.  This module sits BELOW both passes precisely so that both
-    can read it without either importing the other.
+    **The walk belongs to the CALLER, and the reason is not an import cycle.**
+    An earlier draft of this docstring said a head import of
+    ``_task3_over_layers`` here would close one; a reviewer tried it and it
+    imports cleanly from all four entry points, ruff green.  The real reason
+    is placement: this module sits BELOW both passes so that both can read it
+    without either importing the other, and layering is a ``preflight/``
+    concept -- the axes pass is handed a document that has already had its
+    variant applied and has no layers to walk at all.
 
     Args:
         section: a layer's ``resources:`` block, or ``None``/anything else --
@@ -307,13 +319,14 @@ def resolved_specs(section: Mapping[str, Any] | None) -> dict[str, dict]:
         try:
             out[dotted] = _resolved_spec(dotted, specs, kind_of, done, [])
         except Exception:  # noqa: BLE001 -- see below
-            # `except Exception` and not `except ConfigError`, deliberately.
-            # The six measured shapes all raise ConfigError, but this function
-            # promises TOTALITY to callers that run inside a pass, and a
-            # seventh shape arriving as a TypeError from a spec whose keys are
-            # not strings would turn that promise into the aborted-pass
-            # failure above. The entry is dropped and `build_resources` says
-            # the sentence.
+            # `except Exception` and not `except ConfigError`, deliberately,
+            # and there is a MEASURED seventh shape rather than a hypothetical
+            # one: an `extends:` chain 4000 entries long raises RecursionError
+            # out of `_resolved_spec` -- a RuntimeError, not a ConfigError, and
+            # not one an enumeration of expected types would have listed. Under
+            # `except ConfigError` that aborts the whole pass and hides every
+            # finding on the document. Here the unresolvable entries are
+            # dropped -- 992 of 4001 resolve -- and the pass runs on.
             continue
     return out
 

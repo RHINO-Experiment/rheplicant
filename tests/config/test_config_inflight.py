@@ -56,6 +56,7 @@ from tests.config.inflight_helpers import (
     axis_facts,
     axis_findings,
     axis_only,
+    best_ms,
     built_findings,
     built_only,
     built_run,
@@ -398,14 +399,26 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         )
 
     def test_an_id_a_second_function_claims(self, axis_registry):
-        register_axes("C1")(lambda facts: ())
+        """**The two modules are made DIFFERENT on purpose.**  Both functions
+        are defined here, so both interpolations read ``test_config_inflight``
+        and the sentence cannot tell them apart -- measured, naming the
+        NEWCOMER twice (``fn.__module__`` in both holes) leaves this test
+        green, and the refusal would then never name the incumbent at all.
+        Which is the half a reader needs: "registered twice" is only
+        actionable if it says where the first one is.
+        """
+        def _incumbent(facts):
+            return ()
+
+        _incumbent.__module__ = "rheplicant.config.inflight.axes"
+        register_axes("C1")(_incumbent)
         with pytest.raises(ConfigError) as caught:
             register_axes("C1")(lambda facts: ())
         assert str(caught.value) == (
             "in-flight check 'C1' is registered twice, by "
-            "test_config_inflight and by test_config_inflight. A check id has "
-            "one function, and which of the two would run depends on import "
-            "order."
+            "rheplicant.config.inflight.axes and by test_config_inflight. A "
+            "check id has one function, and which of the two would run "
+            "depends on import order."
         )
 
     def test_a_check_that_raises_names_its_own_slot(self, axis_registry):
@@ -457,6 +470,25 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         assert str(caught.value) == (
             "in-flight check 'C2' emitted where='beam', whose first segment "
             "'beam' is not a document section. The sections are "
+            "['schema_version', 'defaults', 'plugins', 'runtime', "
+            "'observation', 'resources', 'model', 'variants', 'inference', "
+            "'runs', 'outputs', 'campaign']."
+        )
+
+    def test_the_BUILT_pass_quotes_the_same_section_list(self, built_registry):
+        """The sibling pin, and it is the one that was missing: measured,
+        widening ``built()``'s ``sections`` with ``('beam', 'twin')`` left the
+        suite at exit 0, because the built pass had only the not-a-path
+        variant pinned.  A built check may say ``model.averaging`` and may not
+        say ``twin`` -- the payload carries ``document`` precisely so that the
+        reader is sent somewhere they can type."""
+        register_built("C9")(
+            lambda run: (refuse("C9", "twin", "reserved."),))
+        with pytest.raises(ConfigError) as caught:
+            built(built_run(preflight_document()))
+        assert str(caught.value) == (
+            "in-flight check 'C9' emitted where='twin', whose first segment "
+            "'twin' is not a document section. The sections are "
             "['schema_version', 'defaults', 'plugins', 'runtime', "
             "'observation', 'resources', 'model', 'variants', 'inference', "
             "'runs', 'outputs', 'campaign']."
@@ -712,6 +744,31 @@ class TestTheHooksArePositioned:
         assert str(caught.value) == "the time axis is wrong."
         assert "no_such_beam" not in str(caught.value)
 
+    def test_both_payloads_carry_the_VARIANT_APPLIED_document(
+            self, axis_registry, built_registry):
+        """§0.3 C.3 pins ``Axes.document`` / ``Built.document`` as the
+        variant-applied mapping BY NAME, and measured, passing the raw
+        ``document`` to either hook left the suite at exit 0.
+
+        This is the first thing that matters about it: every check Task 1b
+        registers reads ``facts.document``, so under the raw mapping a
+        selected variant's ``resources:``, ``model:`` or ``inference:`` would
+        be decided against the base's text -- a check firing on a line the
+        user is not running, or silent on the line they are, in either case
+        with nothing saying so.
+        """
+        seen = {}
+        register_axes("C1")(
+            lambda facts: (seen.__setitem__("axes", facts.document), ())[1])
+        register_built("C9")(
+            lambda run: (seen.__setitem__("built", run.document), ())[1])
+        base = preflight_document()
+        assert base["model"]["gain"]["gain"]["value"] != 1.0
+        load_document(base, variant="unity_gain")
+        for slot in ("axes", "built"):
+            assert seen[slot]["model"]["gain"]["gain"]["value"] == 1.0, slot
+        assert base["model"]["gain"]["gain"]["value"] != 1.0
+
     def test_the_built_hook_runs_and_the_beam_wins_against_it(
             self, built_registry):
         """**The ANTI-property, stated rather than implied.**  The built slot
@@ -827,14 +884,59 @@ class TestResolvedSpecsIsTotal:
 
     @pytest.mark.parametrize("case", sorted(_MALFORMED), ids=sorted(_MALFORMED))
     def test_build_resources_still_refuses_it_with_its_own_literal(self, case):
-        """The other half, and the reason dropping is safe: ``build_resources``
-        stays the backstop, saying the right sentence at the right phase.  A
-        check that finds an entry missing STANDS DOWN on it -- refusing on "I
-        could not tell" refuses documents that build."""
+        """The other half, and the reason dropping is safe **for these six**:
+        ``build_resources`` stays the backstop, saying the right sentence at
+        the right phase.  A check that finds an entry missing STANDS DOWN on
+        it -- refusing on "I could not tell" refuses documents that build.
+
+        The claim is exactly this list and no wider; see
+        :meth:`test_a_shape_the_BUILDER_cannot_name_either_is_recorded_not_claimed`
+        for a shape where the backstop is a bare ``TypeError``."""
         section, literal = _MALFORMED[case]
         with pytest.raises(ConfigError) as caught:
             load_document(preflight_document(resources=section))
         assert literal in str(caught.value)
+
+    def test_a_shape_that_is_not_a_ConfigError_at_all_is_still_survived(self):
+        """The reason the catch is ``except Exception`` and not ``except
+        ConfigError``, as a MEASURED shape rather than a hypothetical one.
+
+        An ``extends:`` chain longer than the interpreter's recursion limit
+        raises ``RecursionError`` out of ``_resolved_spec`` -- a
+        ``RuntimeError``, not this layer's refusal type.  Under a narrower
+        catch that escapes into the pass, which wraps it as *"check 'A11'
+        RAISED RecursionError"* and hides every other finding on the document.
+
+        1100 and not 4000: the work is quadratic in the chain length (every
+        entry above the limit retries the whole descent), and measured, 4000
+        costs 11.7 s against 0.44 s here for the same verdict.
+        """
+        depth = 1100
+        arrays = {f"a{index}": {"extends": f"a{index + 1}"}
+                  for index in range(depth)}
+        arrays[f"a{depth}"] = {"value": [1.0]}
+        got = resolved_specs({"arrays": arrays})       # must not raise
+        assert isinstance(got, dict)
+        assert got[f"resources.arrays.a{depth}"] == {"value": [1.0]}
+        assert len(got) < len(arrays), (
+            "nothing was dropped, so this document no longer reaches the "
+            "recursion limit and the case has stopped testing its subject"
+        )
+
+    def test_a_shape_the_BUILDER_cannot_name_either_is_recorded_not_claimed(self):
+        """The docstring's backstop claim, held to what is true.
+
+        A spec whose KEY is not a string resolves here untouched -- there is
+        no ``extends:`` to fail on -- and then dies inside ``build_resources``
+        as a bare ``TypeError``, not a ``ConfigError``.  So "build_resources
+        says the right sentence" is true of the six modelled shapes and NOT of
+        every shape, and what this function guarantees is the narrower thing:
+        the pass is not aborted.
+        """
+        section = {"arrays": {"a": {1: "x"}}}
+        assert resolved_specs(section) == {"resources.arrays.a": {1: "x"}}
+        with pytest.raises(TypeError):
+            load_document(preflight_document(resources=section))
 
     def test_a_well_formed_sibling_survives_a_malformed_entry(self):
         """Only the malformed ENTRY is dropped, not the whole kind and not the
@@ -923,9 +1025,19 @@ class TestTheMessageBindingWalker:
         not apply to it.  That is deliberate on both counts: it proves the
         walker can say no, AND it proves the exemption is a narrow key rather
         than a blanket pardon for anything resembling it.
+
+        **The count is READ, not written down.**  This literal is exactly the
+        one whichever task hoists C1 is deciding, so a hardcoded ``== 2``
+        would go red on a correct hoist and the failure would read as the
+        walker being wrong.  What is being tested is that the walker reports
+        the number it finds and refuses anything above one.
         """
-        assert len(modules_carrying("time is stored as")) == 2
-        with pytest.raises(AssertionError, match="bound 2 times"):
+        found = len(modules_carrying("time is stored as"))
+        assert found >= 2, (
+            "the walker's anti-vacuity case needs a literal that really is "
+            "bound more than once; this one no longer is."
+        )
+        with pytest.raises(AssertionError, match=rf"bound {found} times"):
             assert_bound_once("time is stored as")
 
     def test_a_message_bound_nowhere_fails(self):
@@ -1025,7 +1137,7 @@ def _out_of_bounds_calls(source: str) -> set[str]:
     return found
 
 
-def _inflight_sources() -> list[pathlib.Path]:
+def _inflight_sources(root: pathlib.Path = _INFLIGHT_DIR) -> list[pathlib.Path]:
     """Every module the two in-flight passes run out of.
 
     **A GLOB over both paths, never a module list.**  A list is shortened by
@@ -1033,8 +1145,21 @@ def _inflight_sources() -> list[pathlib.Path]:
     exactly how the pre-flight guards stopped covering ``sweep`` when it moved
     into ``passes.py``.  ``passes.py`` is in both walks because it is the
     runner for all three passes.
+
+    ``root`` is INJECTABLE, and that is a defect fix rather than a
+    generalisation.  The discovery anti-vacuity case below used to write a
+    probe module into ``src/rheplicant/config/inflight/`` and unlink it;
+    measured under ``-n 16``, and even on this module alone, that raced every
+    other walk of the same directory -- **1 red in 8 runs**, a
+    ``FileNotFoundError`` from a sibling test globbing the directory between
+    the write and the unlink, and widened it also took down
+    ``tests/config/message_binding.py``, which every branch imports.  Nothing
+    in this repository writes into ``src/`` from a test; the probe now writes
+    into ``tmp_path`` and the walk is pointed at it, which kills the
+    maintained-list mutant exactly as before because a hardcoded list ignores
+    the argument.
     """
-    return sorted(_INFLIGHT_DIR.glob("*.py")) + [_PASSES_PY]
+    return sorted(root.glob("*.py")) + [_PASSES_PY]
 
 
 class TestTheInFlightBoundary:
@@ -1091,37 +1216,34 @@ class TestTheInFlightBoundary:
         assert _out_of_bounds_calls(discovered[0].read_text()) == {"open"}
 
     def test_the_walk_itself_discovers_a_module_added_after_it_was_written(
-            self):
+            self, tmp_path):
         """ANTI-VACUITY for the **DISCOVERY**, and it is the one a mutation
         campaign proved was missing.
 
-        ``inflight/`` holds exactly ONE module as this lands, so every
-        subset-shaped assertion about the walk is satisfied by the maintained
+        ``inflight/`` held exactly ONE module when this was written, so every
+        subset-shaped assertion about the walk was satisfied by the maintained
         list ``[_INFLIGHT_DIR / "__init__.py", _PASSES_PY]`` -- measured, that
         substitution **survived every other test in this file**.  The property
-        only bites once Task 1b adds a second module, which is precisely when
-        nobody is looking.
+        only bites once a second module lands, which is precisely when nobody
+        is looking.
 
-        So this writes a real module into ``inflight/`` and asserts the walk
-        picks it up.  **The probe is deliberately EMPTY of code**: another
-        xdist worker running the boundary test at the same moment may see it,
-        and a clean module keeps that harmless.  ``finally`` removes it, and
-        the last assertion says it is gone.
+        So this writes a real module and asserts the walk picks it up.  **It
+        writes into ``tmp_path`` and points the walk there**, rather than into
+        ``src/``: the first version created and unlinked a file inside the
+        package, which raced every other glob of that directory -- 1 red in 8
+        runs of this module ALONE, before any ``-n 16``.  A hardcoded list
+        ignores ``root`` entirely, so it fails this exactly as it did before.
         """
-        probe = _INFLIGHT_DIR / "_probe_discovered_by_the_walk.py"
-        probe.write_text(
-            '"""Written by a test to prove the walk is a discovery.\n\n'
-            'Deliberately empty of code: a concurrent boundary check may see\n'
-            'it, and nothing here is out of bounds.\n"""\n')
-        try:
-            assert probe in _inflight_sources(), (
-                "a module added under inflight/ is not in the walk, so the "
-                "boundary guard is a maintained list and Task 1b's and Task "
-                "7's modules will not be covered on the day they land."
-            )
-        finally:
-            probe.unlink()
-        assert probe not in _inflight_sources()
+        probe = tmp_path / "_probe_discovered_by_the_walk.py"
+        probe.write_text('"""Written by a test to prove the walk is a '
+                         'discovery."""\n')
+        assert probe in _inflight_sources(root=tmp_path), (
+            "a module added beside the in-flight package is not in the walk, "
+            "so the boundary guard is a maintained list and a later task's "
+            "modules will not be covered on the day they land."
+        )
+        probe.unlink()
+        assert probe not in _inflight_sources(root=tmp_path)
 
     def test_both_paths_are_in_the_walk_and_it_is_still_a_glob(self):
         """ANTI-VACUITY for the walk's REACH, and it is a **measured** gap.
@@ -1135,7 +1257,12 @@ class TestTheInFlightBoundary:
         paths really are in that list.  A list is shortened by deleting a
         line, and the module dropped from it is invisible -- which is exactly
         how the pre-flight guards stopped covering ``sweep`` when it moved.
-        So the walk must CONTAIN the glob, not merely agree with it today.
+        So the walk must CONTAIN the directory listing, not merely agree with
+        it today.
+
+        The two listings below are taken independently, which is only safe
+        because **no test writes into ``src/`` any more** -- see
+        :func:`_inflight_sources`.  While one did, this was a second race.
         """
         walked = _inflight_sources()
         assert _PASSES_PY in walked
@@ -1213,6 +1340,8 @@ def _median_ms(call, repeats=200) -> float:
     return statistics.median(samples)
 
 
+
+
 class TestTheCostOfTheTwoSlots:
     """**Measured in isolation, not as a fraction of a load, and the reason is
     a measurement.**
@@ -1225,41 +1354,53 @@ class TestTheCostOfTheTwoSlots:
     tells nobody anything.  A test that cannot fail for the reason it names is
     worse than no test.
 
-    So both bounds below are on the PASS ITSELF, which is measurable:
-    ``axes(facts)`` and ``built(run)`` are each **0.0003 ms median** with the
-    registries empty.
+    So both bounds below are on the PASS ITSELF, which is measurable.
+
+    **The bounds are set near the measurement, and that is a correction.**  As
+    first written they were 1 ms against a 0.0003 ms median -- a margin of
+    **x3008**, under which a *thousandfold* slowdown of the shared ``sweep``
+    left the suite at exit 0.  A bound that cannot fail for the reason it
+    names is not a test.  Every bound below is now within about ten times its
+    own measured best case, taken with :func:`best_ms`, and the measurement
+    is written beside it so the next task can see what it is keeping.
 
     **What these bounds cannot see:**
 
     * the cost of BUILDING the payload.  ``axis_facts`` is 0.137 ms and
       ``built_run`` is 2.8 ms; those are the builders' costs, not the passes',
       and they are what the slot positions are chosen around.
-    * a check that is slow.  These run the registries as they stand, so until
-      Tasks 1b and 7 land they measure the sweep's own overhead and nothing
-      else.  That is stated rather than implied: the number will move when
-      real checks arrive, and the bound is set with room for them.
-    * a cold first call.  Everything here is warm by construction.
+    * a check that is slow on a document none of these are.  These run the
+      registries as they stand over the worked document; a per-document cost
+      belongs beside the check that has it, which is where
+      ``test_inflight_grids.py`` puts its own.
+    * a cold first call.  Everything here is warm by construction, and the
+      first call of a session is measurably not: ``operator_table()`` alone is
+      1.7e-04 s the first time.
     """
 
     def test_the_axes_pass_costs_a_small_fraction_of_a_millisecond(self):
-        """One millisecond is ~3400x the measured median, and it is the bound
-        this test can DEFEND: it catches the failures that actually threaten
-        this slot -- a payload deep-copied per check, a module re-imported per
-        call, a file opened, a beam built -- every one of which costs
-        milliseconds, while sitting far enough above the noise that it does
-        not flake."""
+        """**0.15 ms against a measured 0.0132 ms best case** -- about x11.
+        That catches the failures which actually threaten this slot (a payload
+        deep-copied per check, a module re-imported per call, a file opened, a
+        beam built: all of them milliseconds) AND catches a mere twentyfold
+        regression of the runner, which the old x3008 margin did not."""
         facts = axis_facts(preflight_document())
         axes(facts)                                    # warm
-        assert _median_ms(lambda: axes(facts)) < 1.0
+        assert best_ms(lambda: axes(facts)) < 0.15
 
     def test_the_built_pass_costs_a_small_fraction_of_a_millisecond(self):
+        """**0.005 ms against a measured 0.00029 ms best case** -- about x17.
+        The built registry is empty until Task 7, so this is the runner's own
+        overhead and nothing else; Task 7 re-takes it."""
         run = built_run(preflight_document())
         built(run)                                     # warm
-        assert _median_ms(lambda: built(run)) < 1.0
+        assert best_ms(lambda: built(run)) < 0.005
 
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
         """The plan's own §0.1 bound for this slot, on the worked document,
-        stated so that a later task can see which number it must keep."""
+        kept verbatim so that a later task can see which number it must
+        keep -- and kept KNOWING it is x750 the measurement.  It is the
+        contract; the test above is the one that can fail."""
         facts = axis_facts(preflight_document())
         started = time.perf_counter()
         axes(facts)
