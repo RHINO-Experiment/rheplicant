@@ -29,7 +29,7 @@ from rheplicant.config.sections.noise import (
 from rheplicant.config.sections.npe import NpeSpec, parse_npe
 from rheplicant.config.sections.observed import ObservedBuild, build_observed
 from rheplicant.config.sections.parameters import parse_latents
-from rheplicant.config.sections.transforms import build_space
+from rheplicant.config.sections.transforms import _c17_validate_space, build_space
 from rheplicant.config.sections.twin import build_fit_twin
 from rheplicant.config.values import resolve_value
 
@@ -215,6 +215,12 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
     space = build_space(parsed, bindings,
                         section.get("joint_prior"), fit_twin=fit_twin,
                         replaced=replaced, context=context)
+    # The first moment both the space and the fit twin exist, and BEFORE the
+    # two builders below that run a real forward pass (`build_noise`'s
+    # `source: prediction_at_init` and `build_observed`'s simulation branch).
+    # A space that does not fit its twin is refused here rather than after
+    # the layer has paid for a prediction it is about to throw away.
+    _c17_validate_space(space, fit_twin, parsed, bindings)
     noise = build_noise(section.get("noise"), observation=observation,
                         context=context)
     observed = build_observed(section.get("observed"), twin=twin,

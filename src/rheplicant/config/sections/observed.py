@@ -45,6 +45,59 @@ def _shape(context: ResolutionContext) -> tuple[int, int]:
     return (int(context.time.shape[0]), int(context.freq.shape[0]))
 
 
+def _predicted_shape(fit_twin: Any, space: Any, state: Any) -> tuple[int, ...]:
+    """The shape the fit twin's prediction will have (check C11).
+
+    The reference a file's contents must match is what the model PRODUCES,
+    not the grids it starts from.  Measured with ``averaging: {n_chunk: 4}``
+    on ``(16, 8)`` grids: the prediction is ``(4, 8)``, and comparing against
+    the grids accepts the ``(16, 8)`` file and refuses the ``(4, 8)`` one --
+    the exact inverse of the rule its own message states.  At ``n_chunk: 16``
+    the prediction is ``(1, 8)`` and a ``(16, 8)`` file is accepted and then
+    broadcast, which is the case the message says is the dangerous one.
+
+    The **FIT** twin, not the full one: ``inference.twin.replace`` reaches
+    ``build_node_operator`` and can change ``averaging``'s ``n_chunk``, and
+    the ``file:`` form has no ``twin:`` key to disambiguate with -- so this
+    check DOES walk ``inference.twin.replace`` (0.3 E.10), by construction
+    rather than by a second traversal, because the fit twin is what
+    ``build_fit_twin`` already applied it to.
+
+    ``jax.eval_shape`` only, and no array is computed.  Measured on the 16x8
+    fixture on a loaded box: **3.7 ms on the first call** -- which is the one
+    abstract trace -- and **0.8 ms warm**, a ratio of about 4.7x.  (An earlier
+    revision of this docstring said "1.03 ms cold, 1.21 ms warm", i.e. cold
+    CHEAPER than warm, which cannot be true of a function whose first call is
+    a JAX trace; it was a mis-transcription and is recorded here because a
+    sentence that reads as a measurement and is not one is the defect class
+    this plan exists to remove.)
+
+    The bind happens inside the trace, so a derived ``fn`` costs one abstract
+    trace and no allocation.  By the time ``build_observed`` runs,
+    ``build_inference`` has already put the pair through
+    ``ParameterSpace.validate`` (check C17), so a bind that would raise here
+    has been refused with a better sentence already.
+
+    **Dropping the bind is an EQUIVALENT MUTANT, and deliberately left as
+    one.**  Replacing ``base`` with ``twin_`` cannot change the answer:
+    ``validate`` has already refused, one call earlier, any binding that
+    changes a leaf's shape, dtype or the twin's treedef, so by construction a
+    bound twin and an unbound one predict the same shape.  The line is still
+    executed (``TestFileForm`` passes a non-``None`` space) -- it is simply
+    not shape-discriminating, and no test can make it so without first
+    disabling C17.  It is kept because it makes this branch read as the
+    literal sibling of the simulation branch's ``bound(state).data`` two
+    functions below, and 0.3 F.5(10)'s precedent is that an equivalent mutant
+    is recorded rather than defended by a test that cannot exist.
+    """
+    def predict(twin_: Any, state_: Any):
+        base = (space.bind(twin_, dict(space.initial_values()))
+                if space is not None else twin_)
+        return base(state_).data
+
+    return tuple(jax.eval_shape(predict, fit_twin, state).shape)
+
+
 def _realise(name: str, spec: Any, prediction: Any, *, noise: Any,
              observation: Any, context: ResolutionContext):
     where = f"inference.observed.{name}.realise"
@@ -114,12 +167,19 @@ def _one(name: str, spec: Mapping, *, twin: Any, fit_twin: Any, space: Any,
                            label="the file form")
         data = jnp.asarray(resolve_value({"file": dict(spec["file"])},
                                          context).value)
-        wanted = _shape(context)
+        wanted = _predicted_shape(fit_twin, space, state)
         if tuple(data.shape) != wanted:
+            grids = _shape(context)
+            aside = "" if wanted == grids else (
+                f" The time and frequency grids are {grids}: the model "
+                "reshapes the prediction before the data is compared, so the "
+                "grids are not the shape to match."
+            )
             raise ConfigError(
                 f"{where}: the file holds shape {tuple(data.shape)}; this "
-                f"run's grids say {wanted}. Exactly -- broadcast-compatible "
-                "is the dangerous case (check C11)."
+                f"run's fit twin predicts {wanted}. Exactly -- "
+                "broadcast-compatible is the dangerous case (check C11)."
+                f"{aside}"
             )
         return data, {}, {"from": "file", "twin": None, "realise": None,
                           "seed": None}

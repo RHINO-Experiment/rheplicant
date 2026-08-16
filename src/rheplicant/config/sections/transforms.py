@@ -30,6 +30,7 @@ from rheplicant.config.paths import (
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
+from rheplicant.core.errors import ParameterSpaceError
 
 __all__ = ["build_space", "parse_transform"]
 
@@ -320,6 +321,177 @@ def _joint_prior(section: Any, names: tuple[str, ...]) -> Any:
     return JeffreysPrior(over=tuple(body["over"]), **kwargs)
 
 
+def _b4_refuse_unbound_latents(parsed: Any, binds: list, bindings: Any) -> None:
+    """A latent declared and bound to nothing, named by its key (check B4).
+
+    ``ParameterSpace.__check_init__`` already refuses this, in two sentences
+    that are right about the physics and unusable as advice from a document:
+    the first names the LATENT ("the posterior would just return the prior")
+    and not the key that declared it, and the second -- the one reached when
+    NO latent is bound -- advises ``ParameterSpace.raw(...)``, a Python API no
+    YAML author can reach.  Both arrive as ``ParameterSpaceError``, a sibling
+    of :class:`~rheplicant.config.errors.ConfigError` rather than a subclass
+    (0.2 C-12), so a caller catching config refusals by name misses them.
+
+    So the same set difference is taken HERE, one call earlier, and said with
+    the two things the document can act on: the key, and whether
+    ``inference.bindings`` is the other place to write the binding.  This is a
+    re-voicing and not a second opinion -- the package's own refusal still
+    stands behind it for every caller that builds a ``ParameterSpace``
+    directly.
+
+    It runs AFTER :func:`refuse_duplicate_targets` deliberately: a document
+    wrong in both ways hears about the two bindings fighting over one leaf
+    first, which is the more specific fault of the two.
+    """
+    bound = {name for bind in binds for name in bind.latents}
+    dead = sorted(set(parsed) - bound)
+    if not dead:
+        return
+    keys = ", ".join(f"inference.parameters.{name}" for name in dead)
+    where = ("an inference.bindings entry -- this document declares "
+             "bindings, and none of them names it"
+             if bindings else
+             "an inference.bindings entry -- this document declares none yet")
+    raise ConfigError(
+        f"{keys}: declared and bound to nothing, so the fit would sample it "
+        "without it ever reaching the model and its posterior would just "
+        f"return its prior. Give it into: on its own entry, or name it in "
+        f"{where} (check B4)."
+    )
+
+
+def _c17_stochastic_nodes(fit_twin: Any) -> tuple[str, ...]:
+    """The fit twin's stages that draw their own randomness, by node id.
+
+    The same detector ``refuse_stochastic_stages`` uses -- the operators' own
+    ``requires`` declaration -- asked directly, so the leg that fired is
+    decided by a FACT ABOUT THE TWIN rather than by matching words in the
+    exception's text.  A message match would rot the first time the package
+    rewords a sentence, and silently: the wrong leg's wording would simply
+    start appearing.
+
+    Returns the node ids because that is exactly what
+    ``inference.twin.without:`` takes, which is the whole point of naming
+    them.  ``core.contract`` and not ``inference.parameters``: the detector
+    lives in core, and importing the inference layer here would put numpyro
+    in ``sys.modules`` at config-import time.
+    """
+    from rheplicant.core.contract import RANDOMNESS, stages_requiring
+
+    return tuple(node_id for node_id, _ in stages_requiring(fit_twin,
+                                                            RANDOMNESS))
+
+
+def _c17_bound_paths(parsed: Any, bindings: Any,
+                     fit_twin: Any) -> tuple[str, ...]:
+    """``(document key, path as written, path as the twin spells it)`` rows.
+
+    Both spellings, because ``config/paths.py`` already argues that naming
+    only one of them reuses wording at the reader's expense -- and here the
+    package's own sentence names NEITHER: its headline refusal is *"Bind for
+    ('g',) produces shape () for `into` selector 0"*, which quotes a latent
+    tuple and a selector index.  :func:`resolve_path_on` is the one reader
+    that holds the two spellings side by side, so it supplies them.
+    """
+    rows: list[tuple[str, str]] = []
+    for name, entry in (parsed or {}).items():
+        for path in entry.into or ():
+            rows.append((f"inference.parameters.{name}", path))
+    for index, entry in enumerate(bindings or []):
+        if not isinstance(entry, Mapping):
+            continue
+        into = entry.get("into")
+        if isinstance(into, str):
+            into = [into]
+        for path in into or ():
+            rows.append((f"inference.bindings[{index}]", path))
+    spelled = []
+    for where, path in rows:
+        try:
+            keystr = resolve_path_on(path, fit_twin).keystr
+        except ConfigError:
+            # Unreachable through `build_space`, which resolved every one of
+            # these a moment ago -- but this function's whole job is to
+            # improve a refusal, so it may not raise a second one on the way.
+            keystr = "?"
+        spelled.append(f"{where} -> {path!r}, which the twin spells {keystr!r}")
+    return tuple(spelled)
+
+
+def _c17_validate_space(space: Any, fit_twin: Any, parsed: Any,
+                        bindings: Any) -> None:
+    """``ParameterSpace.validate`` at load time, in this layer's voice (C17).
+
+    Measured: the package ships this check, four call sites call it, and
+    **all four are at exit time** -- so a document whose bindings do not fit
+    its twin loads clean and fails at the fit, past every resource the layer
+    built.  It reads shapes only (``jax.eval_shape``; measured 0.77-1.11 ms,
+    live device arrays 15 before and 15 after), so running it at load costs
+    the document nothing it will not pay anyway.
+
+    What it adds here, stated exactly, because the plan's list is wider than
+    the measurement: :func:`refuse_stochastic_stages`, and the per-binding and
+    per-leaf shape/dtype comparisons.  It does **not** add B1, B2 or B3
+    through a config document: ``config/paths.py`` refuses an unreachable or
+    duplicated target before a ``Bind`` is ever constructed, and
+    ``_aliased_leaf_paths`` is measured ``{}`` on a config-built twin, so
+    those three legs are unreachable from here and are not claimed.
+
+    **Those two legs get two different sentences, because they are two
+    different faults and one wording cannot be true of both.**  The
+    shape/dtype legs are a mismatch between the space and the twin, and the
+    package names latents and selector positions there.  The stochastic leg
+    is a fault in the TWIN ALONE -- the space fits perfectly -- and the
+    package names a NODE.  A single wording that says "the space does not fit
+    the twin" and "that sentence names latents and selector positions" is
+    false on the stochastic leg in both halves, and pastes an innocent
+    binding table underneath as though it were evidence.  Worse, the only
+    advice surviving from the package there is ``Assembly.without(node_id)``
+    -- a Python API no YAML author can reach -- so a re-voicing that adds
+    nothing leaves an R4 advice loop where a document remedy exists.
+
+    The twin handed over is the **FIT** twin.  Measured: the full twin raises
+    on every document that writes ``inference.twin.without:``, because the
+    bindings were resolved against the repaired twin and the dropped node's
+    leaves are gone.
+
+    ``space`` may be ``None`` -- a document with no ``inference.parameters``
+    has nothing to validate, and ``build_space`` returns ``None`` for it.
+    """
+    if space is None:
+        return
+    try:
+        space.validate(fit_twin)
+    except ParameterSpaceError as exc:
+        drawing = _c17_stochastic_nodes(fit_twin)
+        if drawing:
+            # `validate` runs `refuse_stochastic_stages` FIRST, so a twin with
+            # a drawing stage always earns that sentence and never one of the
+            # shape ones -- which is what makes this branch exact.
+            raise ConfigError(
+                "inference: the twin this document fits with still draws its "
+                "own randomness, so it is the twin at fault here and not the "
+                "parameter space. The package refuses it in its own words: "
+                f"{exc} From a document the repair is "
+                f"inference.twin.without: {list(drawing)} -- that drops the "
+                "stage from the twin the FIT uses while inference.observed's "
+                "simulation still defaults to the full twin, so the scatter "
+                "goes on entering the data it was written for (check C17)."
+            ) from exc
+        spelled = "; ".join(_c17_bound_paths(parsed, bindings, fit_twin))
+        raise ConfigError(
+            "inference: the parameter space this document declares does not "
+            "fit the twin it binds into, and the fit would be the first "
+            f"thing to say so. The package refuses it in its own words: {exc} "
+            "That sentence names latents and selector positions rather than "
+            f"document keys, so here is what this document bound: {spelled}. "
+            "Each path is written twice -- as the document wrote it, then as "
+            "jax.tree_util.keystr spells it, which is the form the package's "
+            "other refusals quote (check C17)."
+        ) from exc
+
+
 def build_space(parsed: Any, bindings: Any, joint_prior: Any, *,
                 fit_twin: Any, replaced: tuple[str, ...],
                 context: ResolutionContext) -> Any:
@@ -398,6 +570,7 @@ def build_space(parsed: Any, bindings: Any, joint_prior: Any, *,
                                           replaced, seen_paths),
                           fn=fn, fan=fan))
     refuse_duplicate_targets(seen_paths, fit_twin)
+    _b4_refuse_unbound_latents(parsed, binds, bindings)
     return ParameterSpace(
         latents=[entry.latent for entry in parsed.values()],
         bindings=binds,
