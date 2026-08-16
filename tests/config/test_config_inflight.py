@@ -1394,13 +1394,26 @@ class TestTheCostOfTheTwoSlots:
         assert best_ms(lambda: axes(facts)) < 0.09
 
     def test_the_built_pass_costs_a_small_fraction_of_a_millisecond(self):
-        """**0.002 ms against a measured 0.00029 ms best case** -- about x7.
-        The built registry is empty until Task 7, so this is the runner's own
-        overhead and nothing else; Task 7 re-takes it.  0.005 ms was the first
-        number here and a clean ``x10`` slowdown survived it."""
+        """**0.02 ms against a measured 0.0032 ms best case** -- about x6.
+
+        **RE-TAKEN at Task 7**, as the previous version of this docstring said
+        it would be.  Until then the built registry was empty and 0.002 ms was
+        the runner's own overhead and nothing else; Task 7 registers B5, C9,
+        A43 and B9, and on the worked document all four reach their stand-down
+        in the first few lines -- no tone, no cal load, no second projector --
+        so 0.0032 ms is what four early returns and the runner cost together.
+        The old bound would fail here for the right reason and the wrong one:
+        the pass really is ten times what it was, and it is doing ten times as
+        much.
+
+        Six and not ten, for the reason this class's docstring gives: six is
+        the largest margin that still dies under a clean ``x10`` slowdown of
+        the pass, and a review of Task 1b found the ``x10``/``x20`` bounds
+        surviving exactly that mutation.
+        """
         run = built_run(preflight_document())
         built(run)                                     # warm
-        assert best_ms(lambda: built(run)) < 0.002
+        assert best_ms(lambda: built(run)) < 0.02
 
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
         """The plan's own §0.1 bound for this slot, on the worked document,
