@@ -458,27 +458,55 @@ class TestTheDecidedModel:
         "kind: conjugate.wiener" from the interpolation alone, and this match
         would pin nothing: gls is the kind that actually calls this.
 
-        **The whole sentence, since Plan 3A's Task 10.**  Its two variable
-        clauses are `conjugate.py`'s own `_A28_GLS_CLAUSES`, spread into this
-        call exactly as `_gls_result` spreads them, and `conjugate.gls` is
-        the only caller whose raise a user can no longer reach -- the
-        pre-flight pass refuses that document first.  A `match=` on one
-        fragment would leave every other clause free to be wrong, which is
-        the defect class this task exists to close.
+        **These three assertions are `be2027b`'s, restored.**  Plan 3A's Task
+        10 replaced them with an equality on a REWORDED sentence -- *"as a
+        RULE"* and *"is not a rule"* where this message has always said *"as
+        a model"* and *"has no fixed point to iterate"* -- which is a fifth
+        message changed where plan §2.3 designates four, and a test rewritten
+        to agree with the change is a test that has stopped being evidence.
+        The equality pin that belongs beside them is
+        `test_the_gls_refusal_is_be2027b_verbatim`, below, and it is written
+        against the pre-move text rather than against whatever the code says
+        today.
         """
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(ConfigError, match="conjugate.wiener") as caught:
             _decided_model(spec(kind="conjugate.gls"), built,
                            **_A28_GLS_CLAUSES)
+        assert "check A28" in str(caught.value)
+        assert "radiometer_frozen" in str(caught.value)
+
+    def test_the_gls_refusal_is_be2027b_verbatim(self):
+        """A28's gls sentence, to the character, against the PRE-MOVE text.
+
+        This is the pin `test_config_preflight.py::TestNoMovedMessageWasReworded`
+        forgives the three vanished `be2027b` literals for: the sentence is
+        assembled from `conjugate._A28_GLS_CLAUSES` and
+        `exit_support._decided_model`'s template now, rather than written out
+        in one place, so a source-literal guard cannot see it and something
+        has to.
+
+        Four clauses are the caller's -- `wants`, `reads`, `because`,
+        `instead` -- and this string is what they have to add up to.  Kills
+        any of the four being reworded, the template between them being
+        reworded, and a fifth caller's words leaking into this one.
+
+        The expected text was read off `git show be2027b:src/rheplicant/
+        config/sections/exit_support.py`, not off the code beside it.
+        """
+        built = conjugate_built(noise=FROZEN)
+        with pytest.raises(ConfigError) as caught:
+            _decided_model(spec(kind="conjugate.gls"), built,
+                           **_A28_GLS_CLAUSES)
         assert str(caught.value) == (
             "runs['conjugate.gls']: kind: conjugate.gls solves for the "
             "covariance a PREDICTION-DEPENDENT sigma implies, so it reads "
-            "inference.noise as a RULE; inference.noise.kind: "
+            "inference.noise as a model; inference.noise.kind: "
             "radiometer_frozen decides its sigma into an array before any "
-            "run sees it, and a decided array is not a rule (check A28). "
-            "Declare inference.noise.kind: radiometer to iterate the rule, "
-            "or run kind: conjugate.wiener, which is what a decided sigma "
-            "wants.")
+            "run sees it, and a decided array has no fixed point to iterate "
+            "(check A28). Declare inference.noise.kind: radiometer to "
+            "iterate the rule, or run kind: conjugate.wiener, which is what "
+            "a decided sigma wants.")
 
     def test_noise_kind_none_keeps_the_shared_refusal(self):
         """The mirror of the sigma route's own kind: none test.

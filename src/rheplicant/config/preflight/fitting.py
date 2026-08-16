@@ -138,11 +138,25 @@ def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
     * a single mapping is wrapped in a list, the way ``parse_runs``
       (``runs.py:122-123``) does, so ``runs: {kind: forward}`` is one run here
       too;
-    * a malformed entry becomes ``{}`` rather than being dropped, so
-      ``_runs(document)[i]`` is always ``runs[i]`` of the document and a
-      ``Finding.where`` of ``runs[2]`` points where the user must type.  Such
-      an entry carries NO ``name`` -- read it with ``.get`` or behind a test
-      on ``kind``;
+    * a malformed entry becomes ``{}`` rather than being dropped, so on the
+      LIST form ``_runs(document)[i]`` is always ``runs[i]`` of the document
+      and a ``Finding.where`` of ``runs[2]`` points where the user must type.
+      Such an entry carries NO ``name`` -- read it with ``.get`` or behind a
+      test on ``kind``;
+
+      **On the single-mapping form the index is this function's, not the
+      document's**, and the contract said otherwise until a reviewer read the
+      two clauses together: ``runs: {kind: plan.sample, ...}`` yields findings
+      at ``runs[0]``, which is not a path that document contains at all.  The
+      READER is right and the sentence was wrong, so the sentence is what
+      changed: dropping the wrap would take every fitting check off a document
+      the package runs -- ``parse_runs`` wraps the same way -- to buy a
+      ``where`` that is one index more literal.  ``runs[0]`` still names the
+      only run there is, and the message itself opens ``runs['<name>']:``,
+      which is what a reader actually navigates by.
+      ``test_a_single_mapping_run_is_found_at_index_zero`` pins the shipped
+      behaviour so the next reader inherits a decision rather than a
+      discovery;
     * ``name`` is filled in by ``parse_runs``' own rule -- the entry's
       ``name`` when it has one, else the kind (``runs.py:115``) -- because
       every refusal in this layer is prefixed ``runs['<name>']:`` and three
@@ -754,8 +768,48 @@ def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
             and name not in covered]
 
 
+#: What ``kind: optimize`` and ``kind: plan.estimate`` -- the two exits A23's
+#: bare fix clause offers -- accept between them.  IMPORTED rather than
+#: restated, for §2.2's one-name-one-binding reason and for a sharper one: a
+#: key added to either executor and not here would put a key in A23's "drop
+#: these" list that the exit takes, which is the same defect as leaving one
+#: out, in the other direction.
+def _t8_calibrator_keys() -> frozenset[str]:
+    """``_OPTIMIZE_KEYS | _ESTIMATE_KEYS``, deferred the way ``_ENGINES`` is."""
+    from rheplicant.config.sections.exits import _ESTIMATE_KEYS, _OPTIMIZE_KEYS
+
+    return frozenset(_OPTIMIZE_KEYS) | frozenset(_ESTIMATE_KEYS)
+
+
+def _t8_traded_keys(run: Mapping[str, Any]) -> list[str]:
+    """The run's own option keys that NEITHER calibrator exit takes.
+
+    A23's bare *"or run one of those"* is an instruction to change ``kind:``
+    and nothing else, and on a ``kind: plan.sample`` run that carries
+    ``seed:``, ``n_sweeps:`` and ``warmup:`` the result is a document check
+    A29 or check A1 refuses -- whose own remedy is to change ``kind:`` back.
+    Measured before the fix, in three steps: A23 fired, its ``kind:
+    plan.estimate`` fix earned A29's *"Drop it, or make this run
+    plan.sample"*, that fix restored the document exactly, and ``step2 ==
+    step0`` was True.
+
+    ``_RUN_KEYS`` is what ``RunSpec.options`` excludes (``runs.py:113-114``),
+    imported for the reason :func:`_seeds` imports it: a sixth key added
+    there would otherwise read as an option here.
+    """
+    from rheplicant.config.sections.runs import _RUN_KEYS
+
+    # Both sets are read ONCE, not once per key: the comprehension runs over
+    # a user's mapping and a call inside it would be one import lookup per
+    # key on every A23 refusal.
+    calibrator = _t8_calibrator_keys()
+    return sorted(key for key in run
+                  if isinstance(key, str) and key not in _RUN_KEYS
+                  and key not in calibrator)
+
+
 def _a23_message(named: str, kind: str, missing: list[str], because: str,
-                 covered: tuple[str, ...]) -> str:
+                 covered: tuple[str, ...], traded: list[str]) -> str:
     """A23's refusal: one shape, and three clauses the document decides.
 
     **The verb is per route.**  ``kind: fisher`` with ``space: true`` does not
@@ -772,11 +826,38 @@ def _a23_message(named: str, kind: str, missing: list[str], because: str,
     ``kind: npe`` reaches that, because it ignores coverage by design)
     *"declare a prior:"* is refused by A22, so that branch says so and offers
     the exit that does read coverage as a prior.
+
+    **``traded`` closes the third loop, and it is the live one.**  The two
+    joint-prior branches above name what they must not be followed with;
+    the bare branch did not, and its own exits refuse the KEYS the run is
+    carrying.  Only the first-listed remedy -- *"give each one a prior:"* --
+    terminated.  So where the run carries keys neither calibrator exit takes,
+    the alternative names them; where it carries none, the bare sentence
+    stands, because an edit list nobody needs is noise in a refusal that is
+    already four clauses long.
     """
     verb = ("computes a POSTERIOR precision" if kind == "fisher"
             else "draws a POSTERIOR")
     overlap = [name for name in missing if name in covered]
-    if not covered:
+    if not covered and traded:
+        # `seed:` is called out separately because it is the one key whose
+        # refusal is NOT A1's: `document._TASK3_SPOKEN_FOR` hands
+        # `plan.estimate` + `seed` to A29, so a clause naming A1 alone would
+        # send the reader to a check that stays silent on exactly the key
+        # this loop turned on.
+        if traded == ["seed"]:
+            instead = "check A29's"
+        elif "seed" in traded:
+            instead = "check A1's, and check A29's on seed:"
+        else:
+            instead = "check A1's"
+        fix = ("A prior-free latent is a free parameter, which the calibrator "
+               "exits (kind: optimize, kind: plan.estimate) fit and a "
+               "posterior cannot. Give each one a prior:, or run one of those "
+               f"AND drop {traded} with the kind -- neither exit takes "
+               f"{'them' if len(traded) > 1 else 'it'}, so changing kind: "
+               f"alone trades this refusal for {instead}")
+    elif not covered:
         fix = ("A prior-free latent is a free parameter, which the calibrator "
                "exits (kind: optimize, kind: plan.estimate) fit and a "
                "posterior cannot. Give each one a prior:, or run one of those")
@@ -948,7 +1029,8 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
 
         if missing:
             yield refuse("A23", where,
-                         _a23_message(named, kind, missing, because, covered))
+                         _a23_message(named, kind, missing, because, covered,
+                                      _t8_traded_keys(run)))
 
 
 #: Which ``runs[].kind`` needs a seed on the RUN.  ``npe`` is absent on
@@ -1111,10 +1193,7 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: ``CHECK_ONCE`` (``plan.py:148``) and ``CHECK_EACH_SWEEP`` (``:151``),
 #: written out for the reason :data:`_ENGINES` is: this module may not import
 #: ``rheplicant.inference`` at scope, and a module-level constant cannot defer
-#: an import the way a function body can.  ``MIN_DRAWS`` is the one name that
-#: is IMPORTED rather than written -- plan §2.5 requires it by name -- and it
-#: can be, because it is wanted inside :func:`_counts`, where a deferred
-#: import costs one ``sys.modules`` lookup.
+#: an import the way a function body can.
 #: ``test_check_identifiability_is_a_closed_enum_read_from_the_package``
 #: imports both names in the TEST, and
 #: ``test_the_package_guard_this_enum_mirrors_is_still_that_guard`` reads
@@ -1122,6 +1201,32 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: red rather than leaving this pass refusing a document the package runs.
 _T9_CHECK_ONCE: str = "once"
 _T9_CHECK_EACH_SWEEP: str = "each_sweep"
+
+#: ``MIN_DRAWS`` (``plan.py:186``), ``MIN_SWEEPS`` and ``DEFAULT_MAX_ITER``,
+#: written out for the same reason and against plan §2.5's *"do not write the
+#: literal"* -- **which is a COST decision, measured, not a style one.**
+#:
+#: §2.5 has this pass import ``MIN_DRAWS`` from ``rheplicant.inference`` on the
+#: grounds that a deferred import costs one ``sys.modules`` lookup.  It does
+#: not.  Measured, cold, one ``preflight()`` per fresh process: the worked
+#: document is **1.6 ms** and a document whose only difference is a ``kind:
+#: plan.sample`` run is **23 ms**, because ``rheplicant/inference/__init__.py``
+#: re-exports the layer eagerly and the first call drags **43 modules** in --
+#: 37 more than the worked document needs -- against §5's whole budget of
+#: 50 ms.  ``rheplicant.inference.plan`` is not cheaper: importing the
+#: SUBMODULE runs the package ``__init__`` first, so ``MIN_SWEEPS`` and
+#: ``DEFAULT_MAX_ITER`` cost exactly the same 43.  Three integers are not worth
+#: a factor of fourteen on the one path §5's number is thinnest on, and a
+#: pre-flight pass that pays a tenth of what it saves is not one (§0.1).
+#:
+#: What replaces the import is the same thing that stands behind
+#: :data:`_ENGINES` and the two modes above: a test that imports the REAL name
+#: and asserts equality (``test_the_three_plan_counts_are_the_packages_own``).
+#: A drift in the package turns that red here rather than leaving this pass
+#: refusing a document the package runs.
+_T9_MIN_DRAWS: int = 4
+_T9_MIN_SWEEPS: int = 3
+_T9_DEFAULT_MAX_ITER: int = 100
 
 #: What ``check_identifiability:`` takes, in the package's own order.
 #:
@@ -1548,22 +1653,20 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # start the two `tol`s genuinely differ, because `tol` is not
                 # a `_SAMPLE_KEYS` member (`exits.py:169-171`).
                 #
-                # THE DEFAULTS ARE THE PACKAGE'S AND ARE IMPORTED.  An earlier
-                # form read `spec.get("min_sweeps")` and `spec.get("max_iter")`
-                # and so fired only when BOTH keys were written -- which skips
+                # THE DEFAULTS ARE THE PACKAGE'S.  An earlier form read
+                # `spec.get("min_sweeps")` and `spec.get("max_iter")` and so
+                # fired only when BOTH keys were written -- which skips
                 # `max_iter: 1` and `max_iter: 2`, ordinary documents that
                 # `plan.py:909-910` refuses against MIN_SWEEPS = 3, and
                 # `min_sweeps: 101` against DEFAULT_MAX_ITER = 100.  That is
-                # one of the four clauses A25's own schema row names.  The
-                # deferred import is `MIN_DRAWS`' precedent, twelve lines
-                # below and for the same reason.
-                from rheplicant.inference.plan import (
-                    DEFAULT_MAX_ITER,
-                    MIN_SWEEPS,
-                )
-
-                floor = spec.get("min_sweeps", MIN_SWEEPS)
-                cap = spec.get("max_iter", DEFAULT_MAX_ITER)
+                # one of the four clauses A25's own schema row names.  They
+                # are WRITTEN OUT rather than deferred-imported: measured, a
+                # deferred `from rheplicant.inference.plan import ...` drags
+                # 43 modules into the first call and takes this pass from
+                # 1.6 ms to 23 ms -- see `_T9_MIN_DRAWS`, which carries the
+                # measurement and the test that keeps the three honest.
+                floor = spec.get("min_sweeps", _T9_MIN_SWEEPS)
+                cap = spec.get("max_iter", _T9_DEFAULT_MAX_ITER)
                 if (spec.get("tol", 1) is not None
                         and _t9_whole_number(floor)
                         and _t9_whole_number(cap)
@@ -1575,18 +1678,15 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
         if run["kind"] == "plan.sample" and not refused_counts:
             kept = _a24_kept_draws(run)
             if kept is not None:
-                # Imported HERE and not at the module head.
-                # ``rheplicant/inference/__init__.py`` re-exports the layer
-                # eagerly, so a head import puts ``rheplicant.inference`` in
-                # ``sys.modules`` on every ``import rheplicant.config`` --
-                # which ``test_config_exits_predict.py:1046-1073`` forbids by
-                # name, in a fresh interpreter.  ``sections/exits.py`` defers
-                # ``from rheplicant.inference import Block`` for the same
-                # reason.  Deferred rather than written out because plan §2.5
-                # names this one constant: "do not write the literal".
-                from rheplicant.inference import MIN_DRAWS
-
-                if kept[0] < MIN_DRAWS:
+                # `_T9_MIN_DRAWS`, not `from rheplicant.inference import
+                # MIN_DRAWS`.  A head import is forbidden outright --
+                # `rheplicant/inference/__init__.py` re-exports the layer
+                # eagerly and `test_config_exits_predict.py:1046-1073` refuses
+                # it by name in a fresh interpreter -- and the DEFERRED import
+                # plan §2.5 called for is what made this the one path §5's
+                # 0.05 s could not hold: 43 modules and 21 ms, on the first
+                # call, for one integer.  The constant carries the numbers.
+                if kept[0] < _T9_MIN_DRAWS:
                     default = ("" if run.get("warmup") is not None
                                else ", the default n_sweeps // 2")
                     yield refuse(
@@ -1594,7 +1694,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                         f"{named}: this run would keep {kept[0]} draw(s) "
                         f"({run['n_sweeps']} sweeps minus {kept[1]} warmup"
                         f"{default}), and a split-r_hat needs at least "
-                        f"{MIN_DRAWS} -- two halves of two. Below that the "
+                        f"{_T9_MIN_DRAWS} -- two halves of two. Below that the "
                         "mixing diagnostic is not weak, it is undefined, and "
                         "a run whose only convergence evidence is undefined "
                         "is the silent answer this exit exists to refuse. "
@@ -1848,12 +1948,19 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
         # source for `exit_kind == "<kind>"` per member.
         elif shape == "array" and exit_kind in _T10_ITERATES:
             if exit_kind == "conjugate.gls":
+                # A MOVE, so the words are `be2027b`'s: *"as a model"* and
+                # *"has no fixed point to iterate"*, not *"as a RULE"* and
+                # *"is not a rule"*. Plan §2.3 designates FOUR corrected
+                # messages (A39's) and this is not one of them -- the false
+                # A28 sentence §1 licenses is the `npe` leg below, which is
+                # the only one whose words this task chose.
                 findings.append(refuse("A28", where, (
                     f"runs[{name!r}]: kind: conjugate.gls solves for the "
                     "covariance a PREDICTION-DEPENDENT sigma implies, so it "
-                    "reads inference.noise as a RULE; inference.noise.kind: "
+                    "reads inference.noise as a model; inference.noise.kind: "
                     f"{kind} decides its sigma into an array before any run "
-                    "sees it, and a decided array is not a rule. Declare "
+                    "sees it, and a decided array has no fixed point to "
+                    "iterate. Declare "
                     "inference.noise.kind: radiometer to iterate the rule, or "
                     "run kind: conjugate.wiener, which is what a decided "
                     "sigma wants (check A28).")))
@@ -1879,10 +1986,11 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
                 findings.append(refuse("A28", where, (
                     f"runs[{name!r}]: kind: conjugate.gcr under noise_from: "
                     "gls runs iterative_gls first and draws at the covariance "
-                    "it converges to, so it reads inference.noise as a RULE; "
+                    "it converges to, so it reads inference.noise as a model; "
                     f"inference.noise.kind: {kind} decides its sigma into an "
-                    "array before any run sees it, and a decided array is not "
-                    "a rule. Drop noise_from: gls: the declared route draws "
+                    "array before any run sees it, and a decided array has no "
+                    "fixed point to iterate. Drop noise_from: gls: the "
+                    "declared route draws "
                     "at that array directly, which is what a frozen sigma is "
                     "for -- and noise_from: gls is check A27's answer for "
                     "inference.noise.kind: radiometer, so declaring both asks "

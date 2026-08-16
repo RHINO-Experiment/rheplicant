@@ -1112,6 +1112,32 @@ class TestTheReadersTasksEightToElevenImport:
 
         assert _T7_BLOCK_KEYS == _BLOCK_KEYS
 
+    def test_a_single_mapping_run_is_found_at_index_zero(self):
+        """The index contract, on the form where it is the READER's index.
+
+        ``_runs``' docstring promised *"``_runs(document)[i]`` is always
+        ``runs[i]`` of the document"* while the line above it wraps a bare
+        mapping in a list -- so ``runs: {kind: plan.sample}`` yields findings
+        at ``runs[0]``, which is not a path that document contains.  A
+        reviewer read the two clauses together; the SENTENCE was what changed,
+        because dropping the wrap would take every fitting check off a
+        document ``parse_runs`` (``runs.py:122-123``) wraps the same way.
+
+        Kills the wrap being removed (the mapping form would then find
+        nothing at all) and the contract being restated as index-preserving
+        on this form.
+        """
+        from rheplicant.config.preflight.fitting import _runs
+
+        mapping = {"runs": {"kind": "plan.sample", "n_sweeps": 2}}
+        assert _runs(mapping) == ({"kind": "plan.sample", "n_sweeps": 2,
+                                   "name": "plan.sample"},)
+        # ...and the LIST form is index-preserving, which is the half of the
+        # sentence that was always true.
+        listed = {"runs": [7, {"kind": "forward"}, {"kind": "npe"}]}
+        assert _runs(listed)[0] == {}
+        assert _runs(listed)[2]["kind"] == "npe"
+
 
 #: Every message shape this task ships, pinned WHOLE.
 #:
@@ -1906,7 +1932,9 @@ _T8_MESSAGES = [
      "same matrix without the priors in it. A prior-free latent is a free "
      "parameter, which the calibrator exits (kind: optimize, kind: "
      "plan.estimate) fit and a posterior cannot. Give each one a prior:, or "
-     "run one of those (check A23)."),
+     "run one of those AND drop ['space'] with the kind -- neither exit takes "
+     "it, so changing kind: alone trades this refusal for check A1's "
+     "(check A23)."),
     ("A23-plan-sample-gradient-block",
      dict(inference={"parameters": ONLY_W},
           runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
@@ -1918,8 +1946,10 @@ _T8_MESSAGES = [
      "is flat in a prior-free latent and the chain wanders without any "
      "diagnostic saying so. A prior-free latent is a free parameter, which "
      "the calibrator exits (kind: optimize, kind: plan.estimate) fit and a "
-     "posterior cannot. Give each one a prior:, or run one of those "
-     "(check A23)."),
+     "posterior cannot. Give each one a prior:, or run one of those AND drop "
+     "['n_sweeps', 'seed'] with the kind -- neither exit takes them, so "
+     "changing kind: alone trades this refusal for check A1's, and check "
+     "A29's on seed: (check A23)."),
 ]
 
 
@@ -1970,6 +2000,140 @@ class TestThePriorGateMessagesAreExactlyThese:
             runs=[{"name": "amortized", "kind": "npe"}]))
         assert "(kind: optimize, kind: plan.estimate)" in bare.message
         assert "or run one of those" in bare.message
+
+
+class TestA23AndA29AreNotAClosedLoop:
+    """A23 advises the calibrator exits; A29 refuses what those exits refuse.
+
+    Measured before the fix, on one document and in three steps: A23 fired on
+    a ``kind: plan.sample`` run carrying ``seed:``, ``n_sweeps:`` and
+    ``warmup:``; its *"or run one of those"* fix, applied as ``kind:
+    plan.estimate``, earned A29's *"Drop it, or make this run plan.sample"*;
+    THAT fix restored the document exactly, and ``step2 == step0`` was True.
+    Only A23's FIRST-listed remedy -- give the latent a prior -- terminated.
+
+    The sibling loops A14/A15 and A5/A8 were closed in ``e247b38``; this is
+    the third, and it closes the same way: the alternative names the coupled
+    edit, and only where the coupled edit exists.
+    """
+
+    #: The run at the top of the loop: a gradient block over a prior-free
+    #: latent, carrying every ``plan.sample`` key that traps the advice.
+    _SAMPLE = {"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
+               "warmup": 2, "seed": {"from": "runtime.seeds.s"},
+               "blocks": [{"names": ["w"]}]}
+
+    def _document(self, run=None):
+        return preflight_document(inference={"parameters": ONLY_W},
+                                  runs=[dict(run or self._SAMPLE)])
+
+    def test_the_loop_closed_before_the_fix(self):
+        """The measurement itself, kept as a test: the two documents the two
+        remedies produce are still each other's input.
+
+        This asserts the SHAPE rather than the defect -- it is what makes the
+        message assertion below about a real trap rather than a hypothetical
+        one, and it goes red if either check's subject stops being the
+        other's remedy.
+        """
+        step0 = self._document()
+        estimate = {key: value for key, value in self._SAMPLE.items()
+                    if key not in ("n_sweeps", "warmup")}
+        step1 = {**step0, "runs": [{**estimate, "kind": "plan.estimate"}]}
+        step2 = {**step1, "runs": [dict(self._SAMPLE)]}
+        assert "A23" in preflight(step0).checks()
+        assert "A29" in preflight(step1).checks()
+        assert step2 == step0
+
+    def test_A23_names_the_keys_its_own_remedy_would_break(self):
+        """The fix: the bare alternative is not offered where it is a trap.
+
+        Pinned by string equality on the WHOLE clause, not by a fragment: a
+        reword that dropped the key list would leave *"or run one of those
+        AND drop"* in place and satisfy any ``in`` assertion.
+        """
+        [found] = _gates(self._document())
+        assert found.message.endswith(
+            "Give each one a prior:, or run one of those AND drop "
+            "['n_sweeps', 'seed', 'warmup'] with the kind -- neither exit "
+            "takes them, so changing kind: alone trades this refusal for "
+            "check A1's, and check A29's on seed: (check A23).")
+
+    def test_following_the_whole_remedy_clears_every_check(self):
+        """The loop, exited.  Kills a clause that names the coupled edit and
+        gets the key list wrong -- ``blocks:`` is an ``_ESTIMATE_KEYS`` member
+        and must NOT be in it, and a list that named it would leave the reader
+        deleting the partition."""
+        followed = {key: value for key, value in self._SAMPLE.items()
+                    if key not in ("n_sweeps", "warmup", "seed")}
+        followed["kind"] = "plan.estimate"
+        assert preflight(self._document(followed)).checks() == frozenset()
+
+    def test_the_first_listed_remedy_still_terminates_too(self):
+        """The one that always worked, kept as the anti-vacuity partner: a
+        fix clause that named the keys and broke the prior route would pass
+        every assertion above."""
+        priored = preflight_document(
+            inference={"parameters": {"w": {**NONLINEAR_W, "prior": PRIOR}}},
+            runs=[dict(self._SAMPLE)])
+        assert "A23" not in preflight(priored).checks()
+
+    def test_a_run_carrying_no_trapped_key_keeps_the_bare_alternative(self):
+        """The other direction, and the one an over-eager clause loses.
+
+        ``kind: npe`` with no options at all can follow *"run one of those"*
+        with a one-word edit, so naming an empty key list there would be a
+        refusal telling a reader to delete nothing.
+        """
+        [found] = _gates(preflight_document(
+            inference={"parameters": ONLY_W},
+            runs=[{"name": "amortized", "kind": "npe"}]))
+        assert found.message.endswith(
+            "Give each one a prior:, or run one of those (check A23).")
+        assert "AND drop" not in found.message
+
+    def test_a_run_whose_only_trapped_key_is_the_seed_names_A29_alone(self):
+        """The third branch of the clause, and the reason it has one.
+
+        ``check A1`` is silent on ``plan.estimate`` + ``seed:``:
+        ``document._TASK3_SPOKEN_FOR`` hands that pair to A29 by name.  A
+        clause naming A1 alone would send the reader to a check that says
+        nothing about the only key they carry.
+        """
+        [found] = _gates(preflight_document(
+            inference={"parameters": ONLY_W},
+            runs=[{"name": "chain", "kind": "nuts",
+                   "seed": {"from": "runtime.seeds.s"}}]))
+        assert found.message.endswith(
+            "Give each one a prior:, or run one of those AND drop ['seed'] "
+            "with the kind -- neither exit takes it, so changing kind: alone "
+            "trades this refusal for check A29's (check A23).")
+
+    def test_the_traded_keys_are_read_off_the_executors_own_sets(self):
+        """Kills a hand-written list of ``plan.sample`` keys.
+
+        The clause must name what the OFFERED exits do not take, so a key
+        added to ``_ESTIMATE_KEYS`` or ``_OPTIMIZE_KEYS`` leaves the list at
+        once.  Measured: with the sets read, ``blocks:`` and
+        ``check_identifiability:`` are absent from the list on a document
+        that carries both.
+        """
+        from rheplicant.config.preflight.fitting import _t8_traded_keys
+        from rheplicant.config.sections.exits import (
+            _ESTIMATE_KEYS,
+            _OPTIMIZE_KEYS,
+        )
+
+        run = {"name": "fit", "kind": "plan.sample", "blocks": [],
+               "check_identifiability": "once", "learning_rate": 0.1,
+               "n_sweeps": 8, "seed": {"from": "runtime.seeds.s"}}
+        assert _t8_traded_keys(run) == ["n_sweeps", "seed"]
+        assert not (set(_t8_traded_keys(run))
+                    & (_ESTIMATE_KEYS | _OPTIMIZE_KEYS))
+        # ...and a RUN key is never traded: `name:` and `kind:` travel on
+        # every run and are not options at all.
+        assert _t8_traded_keys({"name": "x", "kind": "npe",
+                                "expect": "refuse"}) == []
 
 
 class TestA23AgreesWithTheGATEItRunsInFrontOf:
@@ -2969,36 +3133,70 @@ class TestCounts:
         assert _a24_kept_draws({"n_sweeps": "six"}) is None
         assert _a24_kept_draws({}) is None
 
-    def test_MIN_DRAWS_is_imported_and_not_written(self):
-        # §2.5 says so and nothing else checks it.  Kills the literal 4: a
-        # hard-coded floor stops tracking the package the day split-r_hat
-        # needs six.
-        #
-        # NEITHER `==` NOR `is` CAN SEE IT.  CPython interns small ints, so
-        # `MIN_DRAWS = 4` written out in `fitting.py` would satisfy
-        # `fitting.MIN_DRAWS is MIN_DRAWS`.  The IMPORT is what is asserted:
-        # `MIN_DRAWS` must appear in an import statement of this module and
-        # in no assignment of its own.  `ast.walk` reaches a DEFERRED import
-        # inside a function body, which is where this one has to live -- see
-        # `test_the_pass_still_does_not_import_the_inference_layer`.
+    def test_the_three_plan_counts_are_the_packages_own(self):
+        """``_T9_MIN_DRAWS``, ``_T9_MIN_SWEEPS`` and ``_T9_DEFAULT_MAX_ITER``
+        against the real names, imported HERE.
+
+        **This replaces an import assertion, and the reason is a measurement
+        rather than a preference.**  §2.5 says ``MIN_DRAWS`` must be imported
+        and not written, on the grounds that a deferred import costs one
+        ``sys.modules`` lookup.  Measured, cold, one ``preflight()`` per fresh
+        process: the worked document is 1.6 ms and a document whose only
+        difference is a ``kind: plan.sample`` run is **23 ms**, because
+        ``rheplicant/inference/__init__.py`` re-exports the layer eagerly and
+        the first call drags **43 modules** in -- against §5's whole 50 ms
+        budget, on the one path that budget was thinnest on.
+        ``rheplicant.inference.plan`` is not cheaper: importing the submodule
+        runs the package ``__init__`` first, so ``MIN_SWEEPS`` and
+        ``DEFAULT_MAX_ITER`` cost the same 43.
+
+        What the import bought was that the pass tracks the package.  This
+        buys the same thing at no runtime cost at all: the day split-r_hat
+        needs six, this goes red naming the constant, rather than the pass
+        refusing a document the package runs.  It is the shape ``_ENGINES``
+        and ``_A25_CHECK_MODES`` already use in this module.
+        """
+        from rheplicant.config.preflight.fitting import (
+            _T9_DEFAULT_MAX_ITER,
+            _T9_MIN_DRAWS,
+            _T9_MIN_SWEEPS,
+        )
+        from rheplicant.inference import MIN_DRAWS
+        from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
+
+        assert _T9_MIN_DRAWS == MIN_DRAWS
+        assert _T9_MIN_SWEEPS == MIN_SWEEPS
+        assert _T9_DEFAULT_MAX_ITER == DEFAULT_MAX_ITER
+
+    def test_no_name_from_the_inference_layer_is_imported_at_all(self):
+        """The other half, and the one an equality cannot be.
+
+        Three constants are written out above; a fourth arriving as a
+        deferred import would put the 43 modules back and no equality would
+        notice.  ``ast.walk`` reaches an import inside a function body, which
+        is exactly where the expensive one lived.
+
+        ``rheplicant.inference.NoiseModel`` and friends are the SECTIONS'
+        deferred imports and are not under ``preflight/``; this reads this
+        module alone.
+        """
         import ast
         import inspect
 
         from rheplicant.config.preflight import fitting
 
         tree = ast.parse(inspect.getsource(fitting))
-        imported = {alias.name for node in ast.walk(tree)
-                    if isinstance(node, ast.ImportFrom)
-                    for alias in node.names}
-        assigned = {target.id for node in ast.walk(tree)
-                    if isinstance(node, ast.Assign)
-                    for target in node.targets
-                    if isinstance(target, ast.Name)}
-        annotated = {node.target.id for node in ast.walk(tree)
-                     if isinstance(node, ast.AnnAssign)
-                     and isinstance(node.target, ast.Name)}
-        assert "MIN_DRAWS" in imported
-        assert "MIN_DRAWS" not in assigned | annotated
+        offenders = sorted(
+            node.module for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").startswith("rheplicant.inference")
+        )
+        assert offenders == [], (
+            f"{offenders} are imported by preflight/fitting.py. Measured: the "
+            "first such import in a pass costs 43 modules and 21 ms, which is "
+            "most of §5's 0.05 s. Write the constant out and pin it against "
+            "the real name in a test, as _T9_MIN_DRAWS does."
+        )
 
     def test_the_pass_still_does_not_import_the_inference_layer(self):
         # Why the MIN_DRAWS import is DEFERRED rather than at the head.
@@ -4350,21 +4548,31 @@ _DECIDED_VERBATIM = [
      "which decides one sigma array up front (check A27)."),
     ('a28-gls',
      FROZEN, _T10_RUN["conjugate.gls"], 'A28', 'runs[0].kind',
+     # `be2027b`'s words: *"as a model"* and *"has no fixed point to
+     # iterate"*.  A MOVED check keeps its message (plan §2.3) and this is
+     # not one of A39's four designated corrections; the `npe` row below is
+     # the one §1 licenses, and it is the only A28 row whose words changed.
      "runs['gls']: kind: conjugate.gls solves for the covariance a "
      "PREDICTION-DEPENDENT sigma implies, so it reads inference.noise as a "
-     "RULE; inference.noise.kind: radiometer_frozen decides its sigma into an "
-     "array before any run sees it, and a decided array is not a rule. "
+     "model; inference.noise.kind: radiometer_frozen decides its sigma into "
+     "an array before any run sees it, and a decided array has no fixed "
+     "point to iterate. "
      "Declare inference.noise.kind: radiometer to iterate the rule, or run "
      "kind: conjugate.wiener, which is what a decided sigma wants "
      "(check A28)."),
     ('a28-gcr-on-the-gls-route',
      FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"},
      'A28', 'runs[0].kind',
+     # The same two fragments as the gls row, and for the same reason: this
+     # route INHERITED that whole sentence at `be2027b`, so its shared middle
+     # is a move.  What Task 10 changed here is the two advice clauses, which
+     # is the sibling-loop fix `e247b38` sanctions.
      "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: gls runs "
      "iterative_gls first and draws at the covariance it converges to, so it "
-     "reads inference.noise as a RULE; inference.noise.kind: "
+     "reads inference.noise as a model; inference.noise.kind: "
      "radiometer_frozen decides its sigma into an array before any run sees "
-     "it, and a decided array is not a rule. Drop noise_from: gls: the "
+     "it, and a decided array has no fixed point to iterate. Drop "
+     "noise_from: gls: the "
      "declared route draws at that array directly, which is what a frozen "
      "sigma is for -- and noise_from: gls is check A27's answer for "
      "inference.noise.kind: radiometer, so declaring both asks a reweighting "
@@ -4728,10 +4936,11 @@ class TestTheDecidedModelAccessor:
         assert str(caught.value) == (
             "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: "
             "gls runs iterative_gls first and draws at the covariance it "
-            "converges to, so it reads inference.noise as a RULE; "
+            "converges to, so it reads inference.noise as a model; "
             "inference.noise.kind: radiometer_frozen decides its sigma into "
-            "an array before any run sees it, and a decided array is not a "
-            "rule (check A28). Drop noise_from: gls: the declared route "
+            "an array before any run sees it, and a decided array has no "
+            "fixed point to iterate (check A28). Drop noise_from: gls: the "
+            "declared route "
             "draws at that array directly, which is what a frozen sigma is "
             "for -- and noise_from: gls is check A27's answer for "
             "inference.noise.kind: radiometer, so declaring both asks a "
@@ -4753,13 +4962,19 @@ class TestTheDecidedModelAccessor:
                         observed=None, prior={}, solve={},
                         where="runs['conjugate.gcr']")
 
-    def test_no_two_of_the_three_callers_share_a_clause(self):
+    def test_every_clause_of_the_sentence_belongs_to_its_caller(self):
         # Kills: two call sites passing the same strings, which compiles,
         # passes every literal assertion above, and reproduces the defect
         # this task exists to fix -- twice, since `_gls_result` handed the
         # gls clauses to `conjugate.gcr` as well until this task.  Read off
         # the three CONSTANTS the call sites spread, so a reword of any of
         # them is a red test here as well as at its own call site.
+        #
+        # FOUR keys, not two, and the two that were added are the point: a
+        # two-clause form templated *"as a RULE"* and *"is not a rule"* as
+        # FIXED text, which silently reworded `conjugate.gls`'s `be2027b`
+        # sentence -- a fifth message changed where plan §2.3 designates
+        # four.  Whatever the callers do not share belongs to the callers.
         from rheplicant.config.sections.conjugate import (
             _A28_GCR_CLAUSES,
             _A28_GLS_CLAUSES,
@@ -4768,10 +4983,19 @@ class TestTheDecidedModelAccessor:
 
         every = [_A28_GLS_CLAUSES, _A28_GCR_CLAUSES, _A28_NPE_CLAUSES]
         for clauses in every:
-            assert set(clauses) == {"wants", "instead"}
+            assert set(clauses) == {"wants", "reads", "because", "instead"}
             assert clauses["instead"].endswith(".")
         for key in ("wants", "instead"):
             assert len({clauses[key] for clauses in every}) == 3, key
+        # `reads` and `because` are shared by the two CONJUGATE routes and
+        # differ on npe, which is the whole shape of the defect: the two
+        # fragments are conjugate prose, gcr inherited the sentence they came
+        # from, and npe iterates nothing.
+        assert _A28_GLS_CLAUSES["reads"] == _A28_GCR_CLAUSES["reads"] == "a model"
+        assert (_A28_GLS_CLAUSES["because"] == _A28_GCR_CLAUSES["because"]
+                == "has no fixed point to iterate")
+        assert _A28_NPE_CLAUSES["reads"] != _A28_GLS_CLAUSES["reads"]
+        assert _A28_NPE_CLAUSES["because"] != _A28_GLS_CLAUSES["because"]
         # ...and the one clause that was false on two routes out of three is
         # now on exactly the one it is true of.
         assert "conjugate.wiener" in _A28_GLS_CLAUSES["instead"]

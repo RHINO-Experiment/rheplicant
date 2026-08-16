@@ -18,8 +18,18 @@ report.raise_if_refused()         # ConfigError, the first refusal verbatim
 `preflight` reads three things and no fourth: the document's own mapping,
 `RADIO_GRAPH`, and operator classes resolved by name. It never constructs an
 operator, never resolves a value node, never opens a file, and never runs the
-model forward. That is not a policy — it is what makes the pass free, and it
-is asserted: the whole pass on a realistic document costs under 0.05 s.
+model forward. That is not a policy — it is what makes the pass free.
+
+**What "free" is, measured rather than claimed.** The pass runs once per
+document and once more per declared **variant**, because a variant *is* a
+different document and is checked as one. Cold — one call in a fresh process —
+the worked document below is **1.6 ms**, and a document with forty
+`plan.sample` runs and twenty variants is **26 ms**, against a budget of
+0.05 s. It is linear in the number of variants from there, so a document with
+several dozen of them costs several dozen passes; if you write one, time it.
+Nothing in the pass grows with the size of a *beam*, which is the comparison
+that matters: `build_resources` is 1.397 s of `load_document`'s 1.536 s on a
+toy nside-16 beam, and worse on a real CST directory.
 
 It **collects**. `load_document`'s own section sweep raises on the first
 problem, which makes a user with four errors pay four round trips; `preflight`

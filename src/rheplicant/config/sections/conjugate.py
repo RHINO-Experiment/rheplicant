@@ -210,8 +210,17 @@ def _gaussian_width(built: Any, space: Any, sigma: Any,
 #: ``_decided_model`` calls spread THIS mapping, and
 #: ``test_the_pass_writes_the_clause_its_caller_supplies``
 #: (``test_preflight_fitting.py``) holds the pass's own A28 sentence to it.
+#:
+#: ``reads`` and ``because`` are ``be2027b``'s own words, to the character.
+#: A two-clause form of :func:`~rheplicant.config.sections.exit_support.
+#: _decided_model` templated *"as a RULE"* and *"is not a rule"* as fixed
+#: text and so reworded this sentence -- which plan §2.3 does not license: the
+#: four A39 messages are the only CORRECTED ones and every other check this
+#: plan touches is a MOVE that keeps its words.
 _A28_GLS_CLAUSES: dict[str, str] = {
     "wants": "solves for the covariance a PREDICTION-DEPENDENT sigma implies",
+    "reads": "a model",
+    "because": "has no fixed point to iterate",
     "instead": ("Declare inference.noise.kind: radiometer to iterate the "
                 "rule, or run kind: conjugate.wiener, which is what a "
                 "decided sigma wants."),
@@ -233,9 +242,15 @@ _A28_GLS_CLAUSES: dict[str, str] = {
 #: ``noise_from: gls`` OR ``inference.noise.kind: radiometer_frozen``, so a
 #: user who takes both lands precisely here, and a refusal that did not say
 #: so would be a fix clause pointing at what its sibling check refuses.
+#:
+#: ``reads`` and ``because`` are ``_A28_GLS_CLAUSES``' -- this route INHERITED
+#: that whole sentence at ``be2027b``, so its two shared fragments are a move
+#: and only the two clauses above are the fix.
 _A28_GCR_CLAUSES: dict[str, str] = {
     "wants": ("under noise_from: gls runs iterative_gls first and draws at "
               "the covariance it converges to"),
+    "reads": "a model",
+    "because": "has no fixed point to iterate",
     "instead": ("Drop noise_from: gls: the declared route draws at that "
                 "array directly, which is what a frozen sigma is for -- and "
                 "noise_from: gls is check A27's answer for "

@@ -119,9 +119,17 @@ _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
 #: ``_decided_model`` takes both keyword-only and REQUIRED, so a third caller
 #: has no default left to inherit -- which is exactly how this defect
 #: arrived.
+#:
+#: ``reads`` and ``because`` are this exit's OWN and differ from
+#: ``conjugate._A28_GLS_CLAUSES``', which is the whole reason they are clauses:
+#: ``npe`` iterates nothing, so *"a decided array has no fixed point to
+#: iterate"* is a conjugate sentence reaching a third caller -- the same defect
+#: as the two clauses below, one fragment further along.
 _A28_NPE_CLAUSES: dict[str, str] = {
     "wants": ("SIMULATES a bank of (theta, data) pairs and draws the noise "
               "for each one"),
+    "reads": "a RULE",
+    "because": "is not a rule",
     "instead": ("Declare inference.noise.kind: radiometer or homoscedastic "
                 "-- either is a rule simulate_pairs can draw from. There is "
                 "no amortized-posterior exit that takes a decided array, so "

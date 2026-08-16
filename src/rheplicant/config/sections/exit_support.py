@@ -270,8 +270,9 @@ def _decided_sigma(run: Any, built: Any) -> Any:
     return decided.std(jnp.zeros(shape))
 
 
-def _decided_model(run: Any, built: Any, *, wants: str, instead: str) -> Any:
-    """The noise MODEL an exit that reads the noise as a RULE needs (A28).
+def _decided_model(run: Any, built: Any, *, wants: str, reads: str,
+                   because: str, instead: str) -> Any:
+    """The noise MODEL an exit that reads the noise as a rule needs (A28).
 
     The mirror of :func:`_decided_sigma`.  ``decided_noise`` returns either a
     NoiseModel or a frozen sigma array, and the two are not interchangeable
@@ -280,10 +281,10 @@ def _decided_model(run: Any, built: Any, *, wants: str, instead: str) -> Any:
     (a decided array), and passing either one where the other belongs is a
     hard ParameterSpaceError in both directions.
 
-    ``wants`` and ``instead`` are REQUIRED and keyword-only, and that is the
-    fix rather than an ergonomic choice.  Until Plan 3A this function wrote
-    ONE sentence for BOTH callers -- ``conjugate.gls``'s -- so ``npe.py:477``
-    told a ``kind: npe`` run that it "solves for the covariance a
+    **All FOUR clauses are REQUIRED and keyword-only, and that is the fix
+    rather than an ergonomic choice.**  Until Plan 3A this function wrote ONE
+    sentence for BOTH callers -- ``conjugate.gls``'s -- so ``npe.py:477`` told
+    a ``kind: npe`` run that it "solves for the covariance a
     PREDICTION-DEPENDENT sigma implies" and offered it ``kind:
     conjugate.wiener``.  Measured on
     ``posterior_helpers.npe_document(noise=FROZEN)``, both clauses were
@@ -293,13 +294,28 @@ def _decided_model(run: Any, built: Any, *, wants: str, instead: str) -> Any:
     same defect a third time, and a REQUIRED argument is what stops it --
     there is no default left to inherit.
 
-    ``wants`` completes ``kind: X <wants>, so it reads inference.noise as a
-    RULE``; ``instead`` is a whole sentence of advice, ending in its own full
-    stop.  Both are supplied by the caller, which is the only place that
-    knows what it does with the rule, and each caller binds its pair ONCE at
-    its own module scope (``conjugate._A28_GLS_CLAUSES``,
-    ``npe._A28_NPE_CLAUSES``) so that the clause a reader is pinned against
-    is the clause the call site spreads.
+    **``reads`` and ``because`` are required for a second reason, and it is a
+    defect this plan shipped and then had to take back.**  A two-clause form
+    of this function templated *"so it reads inference.noise as a RULE"* and
+    *"a decided array is not a rule"* as FIXED text -- which silently reworded
+    ``conjugate.gls``'s sentence, whose ``be2027b`` text is *"so it reads
+    inference.noise as a model"* and *"a decided array has no fixed point to
+    iterate"*.  Plan §2.3 designates exactly four messages CORRECTED (A39's)
+    and makes every other one a MOVE that keeps its words; A28's gls sentence
+    was never the false one.  Whatever a caller and its sibling do not share
+    belongs to the caller, so both fragments are clauses now and neither has a
+    default a fifth caller could inherit.
+
+    The sentence is
+    ``kind: X <wants>, so it reads inference.noise as <reads>;
+    inference.noise.kind: <k> decides its sigma into an array before any run
+    sees it, and a decided array <because> (check A28). <instead>``.
+    ``instead`` is a whole sentence of advice, ending in its own full stop.
+    All four are supplied by the caller, which is the only place that knows
+    what it does with the rule, and each caller binds its set ONCE at its own
+    module scope (``conjugate._A28_GLS_CLAUSES``,
+    ``conjugate._A28_GCR_CLAUSES``, ``npe._A28_NPE_CLAUSES``) so that the
+    clause a reader is pinned against is the clause the call site spreads.
     """
     from rheplicant.inference import NoiseModel
 
@@ -308,9 +324,9 @@ def _decided_model(run: Any, built: Any, *, wants: str, instead: str) -> Any:
         return noise
     raise ConfigError(
         f"runs[{run.name!r}]: kind: {run.kind} {wants}, so it reads "
-        "inference.noise as a RULE; inference.noise.kind: "
+        f"inference.noise as {reads}; inference.noise.kind: "
         f"{built.inference.noise.kind} decides its sigma into an array "
-        "before any run sees it, and a decided array is not a rule "
+        f"before any run sees it, and a decided array {because} "
         f"(check A28). {instead}"
     )
 
