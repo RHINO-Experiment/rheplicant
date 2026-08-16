@@ -175,8 +175,21 @@ def _schema_ids_from_the_spec() -> list[str] | None:
     return re.findall(r"^\|\s*([ABC]\d+)\s*\|", body, re.M)
 
 
-def _foot_imports(source: str) -> set[str]:
+def _foot_imports(source: str,
+                  package: str = "rheplicant.config.preflight") -> set[str]:
     """The modules ``preflight/__init__.py``'s foot import names.
+
+    **``package`` is a parameter because ``inflight/`` needs the same answer
+    about its own block, and two copies of this matcher would be two
+    validators for one property.**  That is the ``_number``-vs-``_whole``
+    divergence the layer's one-binding rule exists to prevent, one level up
+    from a message: the correction below -- ``tree.body`` rather than
+    ``ast.walk`` -- was measured and applied *here*, and a second copy written
+    from memory in ``test_config_inflight.py`` would have been the pre-
+    correction version, guarding nothing while reading as though it did.
+    ``tests/config/test_config_inflight.py::TestTheImportBlockCannotRot``
+    calls this with ``"rheplicant.config.inflight"`` and keeps its own
+    anti-vacuity cases for the spellings only that package can produce.
 
     Read with ``ast`` rather than ``grep``: ``from ... import document`` and
     ``from ... import document, model`` and an aliased ``as _document_checks``
@@ -208,12 +221,12 @@ def _foot_imports(source: str) -> set[str]:
     found = set()
     for node in ast.parse(source).body:
         if isinstance(node, ast.ImportFrom) and (
-                (node.module or "").startswith("rheplicant.config.preflight")
+                (node.module or "").startswith(package)
                 or (node.level == 1 and node.module is None)):
             found.update(entry.name for entry in node.names)
         elif isinstance(node, ast.Import):
             for entry in node.names:
-                if entry.name.startswith("rheplicant.config.preflight."):
+                if entry.name.startswith(package + "."):
                     found.add(entry.name.rsplit(".", 1)[-1])
     return found
 

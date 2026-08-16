@@ -54,12 +54,39 @@ same blind spot as the code is this project's recorded failure mode:
   sentence from two branches, so this stays a module count and the call-site
   test is the partner it needs.
 * **two DIFFERENT sentences for one rule.**  Where a hoist could not import
-  the shipped literal, the pre-flight row writes its own -- and two sentences
-  that differ are two literals, each "bound once", so this walker is green by
-  construction.  Plan 3B ships one such pair knowingly (A13's presence leg
-  against ``sections/model.py::_construct``'s, which hardcodes the wrong
-  section on the ``inference.twin.replace`` route); it is recorded in that
-  plan's §7 rather than defended here.
+  the shipped literal, the row writes its own -- and two sentences that differ
+  are two literals, each "bound once", so this walker is green by
+  construction.  **Plan 3B ships at least THREE such pairs knowingly, and this
+  bullet said "one".**  The count was corrected after a reviewer re-took it;
+  the two it omitted were recorded in their own modules' docstrings and never
+  reached this list, which is the failure mode a "what this cannot see" list
+  has -- it goes stale silently, because nothing reads it.  Named, so that a
+  reader can go and look at each:
+
+  1. **A13's presence leg**, against ``sections/model.py::_construct``'s,
+     which hardcodes ``f"model.{node_id}: "`` and so names the wrong section
+     on the ``inference.twin.replace`` route.  Recorded in
+     ``preflight/instrument.py``'s module docstring.
+  2. **A13's three text value bounds** (``line_width <= 0``,
+     ``protect_floor``, ``lineshape``), against
+     ``CWCalibrationOperator.__check_init__``'s in
+     ``radio/instrument/calibration.py`` -- a method on a constructed
+     operator, with no name to import and outside that task's Files list.
+     Recorded in the same docstring.
+  3. **A13.grid's two width legs**, against the same
+     ``radio/instrument/calibration.py`` arithmetic.  The CONSTANTS are
+     imported, so the numbers have one binding; the comparison is written
+     twice.  Recorded in ``inflight/grids.py``'s module docstring, together
+     with the divergence to watch (the ceiling is
+     ``max(MAX_WIDTH_IN_BAND_FRACTION * band, MIN_CEILING_IN_CHANNELS *
+     spacing)`` in the code and ``0.25 * band`` in schema §6).
+
+  All three are A13, which is not a coincidence: A13 is the one row whose
+  shipped enforcement lives on a constructed operator rather than in a
+  section builder, so there is nothing there a hoist could have called.
+  ``preflight/beam_spill.py``'s A50 is deliberately NOT counted -- its
+  backstop is a ``StateValidationError`` from ``build_model``, a different
+  kind of failure rather than a second sentence for the same rule.
 """
 
 import ast

@@ -31,6 +31,8 @@ import ast
 import dataclasses
 import pathlib
 import statistics
+import subprocess
+import sys
 import time
 import warnings
 
@@ -67,6 +69,7 @@ from tests.config.message_binding import (
     modules_carrying,
 )
 from tests.config.preflight_helpers import UNREADABLE_BEAM, preflight_document
+from tests.config.test_config_preflight import _foot_imports
 
 #: ``tests/config/`` -> the repository root.
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -1090,6 +1093,259 @@ class TestTheMessageBindingWalker:
             "depends on import order.",
         ):
             assert modules_carrying(literal) == ("config/passes.py",), literal
+
+
+# ---------------------------------------------------------------------------
+# Wiring -- the import block that makes a decorated check a registered one
+# ---------------------------------------------------------------------------
+
+#: The package prefix :func:`_foot_imports` is asked about here.  ``preflight``
+#: is that function's default; this package has to say its own name.
+_INFLIGHT_PACKAGE = "rheplicant.config.inflight"
+
+
+def _modules_under(directory: pathlib.Path) -> set[str]:
+    """Every check module living in ``directory``, by stem.
+
+    A GLOB, never a maintained list, and that is the whole load-bearing
+    property of the guard below: a module added under ``inflight/`` after this
+    test was written is in this set the moment the file exists, with nobody
+    having remembered anything.
+    ``test_a_module_added_after_this_test_was_written_is_seen`` drives it on a
+    directory this file creates, so the claim is measured rather than asserted
+    about the four modules that happen to be here today.
+    """
+    return {path.stem for path in directory.glob("*.py")
+            if path.stem != "__init__"}
+
+
+def _unwired(directory: pathlib.Path, source: str) -> set[str]:
+    """Modules in ``directory`` that ``source``'s import block does not name.
+
+    Both halves of the comparison are derived -- one by glob, one by ``ast``
+    -- so neither side is a list that can go stale.  Empty is the only
+    acceptable answer for the real package.
+    """
+    return _modules_under(directory) - _foot_imports(source, _INFLIGHT_PACKAGE)
+
+
+#: Run in a CHILD process: which modules under ``inflight/`` own a live slot
+#: when the package is imported and nothing else has been.
+#:
+#: **In-process this question cannot be asked at all**, and that is the defect
+#: this probe exists to close.  ``test_inflight_grids.py`` imports
+#: ``inflight.grids`` to reach its check functions; that import runs the
+#: ``@register_axes`` decorators; so by the time any test in a full session
+#: reads ``AXIS_CHECKS`` the slots are there whether or not
+#: ``inflight/__init__.py`` ever imported the module.  Measured on this branch
+#: before the fix: deleting ``grids``' line left the **whole** suite at exit 0
+#: with C3, A13.grid and C8 registered nowhere for a user.
+#:
+#: ``sys.argv[1:]`` is folded into ``present`` so the anti-vacuity case can
+#: give the child a module it cannot possibly find a slot for and watch it
+#: die -- which is what says the ``assert``s in here are live at all (a child
+#: run under ``-O``, or one whose import quietly failed upward, would exit 0
+#: with no assertion having been evaluated).
+_WIRING_PROBE = """
+import importlib
+import pathlib
+import sys
+
+from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
+
+here = pathlib.Path(importlib.import_module(
+    "rheplicant.config.inflight").__file__).resolve().parent
+present = {p.stem for p in here.glob("*.py") if p.stem != "__init__"}
+present |= set(sys.argv[1:])
+contributing = {fn.__module__.rsplit(".", 1)[-1]
+                for fn in (*AXIS_CHECKS.values(), *BUILT_CHECKS.values())}
+assert not present - contributing, (
+    "live under inflight/ and own no slot in a fresh process: "
+    + repr(sorted(present - contributing)))
+assert not contributing - present, (
+    "own a slot and are not modules under inflight/: "
+    + repr(sorted(contributing - present)))
+"""
+
+
+class TestTheImportBlockCannotRot:
+    """A module under ``inflight/`` that the package does not import registers
+    nothing, refuses nothing, and stays green.
+
+    **This is the plan's own headline method finding, and it shipped inside
+    the plan.**  ``inflight/__init__.py``'s import block is what turns a
+    decorated function into a registered check; delete one line of it and the
+    module's checks are absent for every user, while every test in that
+    module goes on passing, because the test module's own import ran the
+    decorators.  Measured on this branch: with ``grids``' line removed,
+    ``pytest -n 16`` over the WHOLE suite exited 0 and ``AXIS_CHECKS`` was
+    ``['C1', 'C2.time', 'C2.pointing']`` -- C3, A13.grid and C8 registered
+    nowhere in production, 7264 tests silent.
+
+    **Structural, not per-module, and that distinction is the fix.**  Two of
+    the four modules already carried a hand-written
+    ``test_the_module_is_WIRED_and_not_merely_decorated``; the two that did
+    not are exactly the two that rotted, and a guard somebody has to remember
+    to copy is the thing that failed.  Both tests here derive BOTH sides of
+    their comparison -- one side by glob, one by ``ast`` or by
+    ``fn.__module__`` -- so a fifth module is covered the moment its file
+    exists.
+
+    ``preflight/`` has had this shape since 3A
+    (``test_config_preflight.py::TestTheFootImportCannotRot``); this is the
+    counterpart it was missing, and it shares that guard's matcher rather
+    than restating it.
+    """
+
+    def test_every_module_under_inflight_is_named_in_the_import_block(self):
+        """PRESENCE IN THE PACKAGE, read off the ``__init__``'s own TEXT.
+
+        Text rather than the live registries on purpose: this is the half no
+        sibling's import can fake.  A test that asked the imported package
+        would already have the decorators run and would answer "wired" for a
+        module the package never imports -- which is precisely how the guard
+        that did notice
+        (``test_config_surface.py::test_every_check_plan_3b_claims_is_registered``)
+        was disarmed in a full session and went red only when run alone.
+        """
+        unwired = _unwired(
+            _INFLIGHT_DIR, (_INFLIGHT_DIR / "__init__.py").read_text())
+        assert unwired == set(), (
+            f"{sorted(unwired)} live under inflight/ and are imported by "
+            "nothing, so their @register_axes / @register_built decorators "
+            "never run and their checks are silently absent for every user. "
+            "Add an alphabetically-placed line to the import block in "
+            "inflight/__init__.py -- ABOVE `def axes`, for the reason that "
+            "block's own comment gives."
+        )
+
+    def test_the_block_names_no_module_that_is_gone(self):
+        """The other direction, which no deletion sweep reaches: a line left
+        behind for a module somebody removed.  It would raise ``ImportError``
+        at package import -- loudly -- so this is a guard against the *typo*,
+        not against silence."""
+        declared = _foot_imports(
+            (_INFLIGHT_DIR / "__init__.py").read_text(), _INFLIGHT_PACKAGE)
+        present = _modules_under(_INFLIGHT_DIR)
+        assert declared <= present, (
+            f"{sorted(declared - present)} are imported by "
+            "inflight/__init__.py and do not exist."
+        )
+
+    def test_every_module_under_inflight_contributes_a_slot(self):
+        """PRESENCE IS NOT CONTRIBUTION, and it is asked IN A SUBPROCESS.
+
+        The test above reads text, so it cannot tell an import that runs from
+        an import that runs and registers nothing -- a module named in the
+        block whose ``@register_axes`` calls were commented out passes it.
+        ``fn.__module__`` over the live registries answers that, but only in a
+        process where nothing else has imported the modules, which is never
+        true inside this suite.  Hence the child.
+
+        Both sides are derived there too: the child globs ``inflight/*.py``
+        itself rather than carrying a list of the four names, so this test
+        needs no edit when a fifth module lands and no edit is what stops it
+        rotting.
+
+        A later plan that genuinely wants a helper module under ``inflight/``
+        with no check of its own must say so by editing this test -- which is
+        the point; the alternative is a silent hole shaped exactly like the
+        one that shipped.
+        """
+        done = subprocess.run(
+            [sys.executable, "-c", _WIRING_PROBE],
+            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+        assert done.returncode == 0, (
+            "importing rheplicant.config.inflight does not leave every module "
+            "under inflight/ owning a slot. In THIS process the same question "
+            "answers 'fine', because the test modules import them "
+            "directly.\n" + done.stdout + done.stderr)
+
+    def test_the_subprocess_probe_can_fail(self):
+        """ANTI-VACUITY for the child, and it is not ceremony.
+
+        A subprocess guard has two silent failure modes an in-process one does
+        not: the child exiting 0 without evaluating anything (``-O`` strips
+        ``assert``), and the comparison being trivially true because both
+        sides came out empty (an import that failed upward, a glob that
+        matched nothing). Handing the child a module name that owns no slot
+        must kill it; if this passes, the test above is decoration.
+        """
+        done = subprocess.run(
+            [sys.executable, "-c", _WIRING_PROBE, "no_such_inflight_module"],
+            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+        assert done.returncode != 0, (
+            "the child accepted a module that owns no slot, so its assertions "
+            "are not running and the wiring test above proves nothing.\n"
+            + done.stdout + done.stderr)
+        assert "no_such_inflight_module" in done.stderr, done.stderr
+
+    def test_a_module_added_after_this_test_was_written_is_seen(self, tmp_path):
+        """The anti-vacuity that matters for the STATIC half.
+
+        ``_unwired`` returning ``set()`` for the real package is exactly what
+        a matcher that found nothing at all would also return, and that is the
+        shape 2C shipped -- a discovery-by-prefix guard that matched nothing
+        and passed forever.  So the comparison is driven here on a package
+        this test builds, with a module the block does not name, and the
+        newcomer must be reported.
+
+        Written into ``tmp_path``, never into ``src/`` (R11): a probe module
+        created and deleted inside a globbed package went red 1 run in 8 under
+        ``-n 16`` and would have flaked every branch at once.
+        """
+        package = tmp_path / "inflight"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            "from rheplicant.config.inflight import axes as _axis_checks\n"
+            "from rheplicant.config.inflight import grids as _grid_checks\n")
+        for stem in ("__init__", "axes", "grids", "newcomer"):
+            (package / f"{stem}.py").touch()
+
+        assert _modules_under(package) == {"axes", "grids", "newcomer"}
+        assert _unwired(
+            package, (package / "__init__.py").read_text()) == {"newcomer"}
+
+    @pytest.mark.parametrize(("source", "expected"), [
+        ("from rheplicant.config.inflight import grids as _grid_checks",
+         {"grids"}),
+        ("from rheplicant.config.inflight import axes as _axis_checks",
+         {"axes"}),
+        ("from rheplicant.config.inflight import grids, twin",
+         {"grids", "twin"}),
+        ("from . import grids", {"grids"}),
+        ("import rheplicant.config.inflight.grids", {"grids"}),
+        ("# from rheplicant.config.inflight import grids as _grid_checks",
+         set()),
+        ('"""from rheplicant.config.inflight import grids."""', set()),
+        ("from rheplicant.config.preflight import document as _d", set()),
+        ("from rheplicant.config.passes import binder, sweep", set()),
+        ("def axes(facts):\n"
+         "    from rheplicant.config.inflight import grids as _g\n", set()),
+        ("if True:\n"
+         "    from rheplicant.config.inflight import grids\n", set()),
+    ], ids=["the-shipped-alias", "the-colliding-name", "several", "relative",
+            "import-form", "commented", "in-a-docstring", "the-other-package",
+            "the-runner", "in-a-function", "in-a-branch"])
+    def test_the_matcher_reads_this_package_and_not_its_neighbours(
+            self, source, expected):
+        """The matcher is ``test_config_preflight.py``'s, called with this
+        package's name -- so what needs checking here is the spellings only
+        THIS package produces.
+
+        ``the-colliding-name`` is the one that is specific to ``inflight/``:
+        ``axes`` is both a module here and the package's entry point (R13),
+        the block's own comment records that two of the three spellings for it
+        are silently wrong, and a matcher that resolved the BOUND name rather
+        than ``alias.name`` would report ``_axis_checks`` and call the module
+        unimported.  ``the-other-package`` and ``the-runner`` are what say the
+        prefix argument is doing work: ``preflight/``'s modules and
+        ``passes.py`` are head-imported by this ``__init__`` and must not
+        count as ``inflight/`` modules -- with the default prefix, the
+        ``preflight`` line alone would put ``document`` in the answer and the
+        second direction above would go red.
+        """
+        assert _foot_imports(source, _INFLIGHT_PACKAGE) == expected
 
 
 # ---------------------------------------------------------------------------
