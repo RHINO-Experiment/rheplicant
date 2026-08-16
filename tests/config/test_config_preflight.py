@@ -2297,6 +2297,31 @@ _ASSEMBLED_ELSEWHERE: dict[str, str] = {
     )
 }
 
+#: Base messages CORRECTED by a plan that names them, and the equality pin on
+#: the sentence that replaced each.  **Separate from
+#: :data:`_ASSEMBLED_ELSEWHERE` on purpose**: "this sentence is assembled from
+#: clauses now" and "this sentence was deliberately reworded" are different
+#: claims, and only the first is what that list's docstring describes.  Routing
+#: a correction through the assembly list would make the guard's own words
+#: false about its own contents, which is the shape of defect this whole class
+#: exists to catch.
+#:
+#: One entry, and its authority is written down rather than assumed: Plan 3B
+#: §0.2 C-10 rules that ``sections/observed.py`` compared a file's shape
+#: against the GRIDS while citing "check C11", and names Task 8 as the fixer.
+#: Measured with ``averaging: {n_chunk: 4}`` on (16, 8) grids -- prediction
+#: (4, 8) -- the shipped code accepted the (16, 8) file and refused the (4, 8)
+#: one, the exact inverse of the rule its own sentence states.  The clause that
+#: was right is kept character for character; "this run's grids say" becomes
+#: "this run's fit twin predicts".
+_CORRECTED_BY_PLAN: dict[str, str] = {
+    _HOLE + ": the file holds shape " + _HOLE + "; this run's grids say "
+    + _HOLE
+    + ". Exactly -- broadcast-compatible is the dangerous case (check C11).":
+        "test_config_section_observed.py::"
+        "test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right",
+}
+
 
 class TestNoMovedMessageWasReworded:
     """§5's *"every check moved rather than written keeps its message
@@ -2310,8 +2335,16 @@ class TestNoMovedMessageWasReworded:
     inference.noise as a model"* to *"as a RULE"* and from *"a decided array
     has no fixed point to iterate"* to *"is not a rule"*, its own test was
     rewritten from substrings to full equality on the NEW words, and the
-    whole suite stayed green.  §2.3 designates exactly four messages
-    CORRECTED (A39's) and calls a fifth a stop-and-ask.
+    whole suite stayed green.  3A's §2.3 designated exactly four messages
+    CORRECTED (A39's) and called a fifth a stop-and-ask; Plan 3B §0.2 C-10
+    designates a **fifth**, C11's, naming Task 8 as its fixer and the defect
+    it repairs (a shape compared against the grids while the sentence claims
+    to be about the prediction).  So the standing count is **A39's four plus
+    C11, and a SIXTH is a stop-and-ask.**  The five are not interchangeable
+    and are not in one list: A28's three live in
+    :data:`_ASSEMBLED_ELSEWHERE` because they became clauses, C11's lives in
+    :data:`_CORRECTED_BY_PLAN` because it was reworded on purpose, and each
+    entry names the equality pin on the sentence that replaced it.
 
     **The guard.**  Harvest every message-shaped string literal from
     ``src/rheplicant/config/`` at :data:`_BASE_COMMIT` and from the tree as it
@@ -2402,25 +2435,41 @@ class TestNoMovedMessageWasReworded:
                 (_ROOT / "src" / "rheplicant" / "config").rglob("*.py")):
             head |= _message_texts(path.read_text())
 
-        missing = base - head - set(_ASSEMBLED_ELSEWHERE)
+        missing = (base - head - set(_ASSEMBLED_ELSEWHERE)
+                   - set(_CORRECTED_BY_PLAN))
         assert missing == set(), (
             f"{len(missing)} message(s) this layer shipped at {_BASE_COMMIT} "
-            "are gone. Plan §2.3: a MOVED check keeps its message verbatim "
-            "and only A39's four are designated CORRECTED, so a fifth is a "
-            "stop-and-ask. If the sentence is now assembled from clauses "
-            "rather than written out, add it to _ASSEMBLED_ELSEWHERE with "
-            "the test that pins the assembled text by EQUALITY.\n\n"
+            "are gone. A MOVED check keeps its message verbatim. Five are "
+            "designated CORRECTED so far -- A39's four (3A §2.3) and C11's "
+            "(3B §0.2 C-10) -- so a SIXTH is a stop-and-ask. If a plan names "
+            "yours, add it to _CORRECTED_BY_PLAN with the test that pins the "
+            "replacement by EQUALITY; if the sentence is merely assembled "
+            "from clauses now rather than written out, add it to "
+            "_ASSEMBLED_ELSEWHERE the same way. The two are different claims "
+            "and are deliberately not one list.\n\n"
             + "\n\n".join(sorted(missing))
         )
 
     def test_every_forgiven_message_names_a_pin_that_exists(self):
-        """:data:`_ASSEMBLED_ELSEWHERE` is only as good as the tests it names.
+        """Both forgiveness lists are only as good as the tests they name.
 
         A forgiveness list whose pins have been deleted is a list of
         rewordings nobody is checking -- which is the state this class was
         written to end, one indirection along.
+
+        It walks :data:`_ASSEMBLED_ELSEWHERE` **and**
+        :data:`_CORRECTED_BY_PLAN`: splitting the lists to keep their two
+        claims apart would be a loosening rather than a tightening if only
+        one of them were still checked here.
         """
-        for literal, pin in _ASSEMBLED_ELSEWHERE.items():
+        forgiven = {**_ASSEMBLED_ELSEWHERE, **_CORRECTED_BY_PLAN}
+        assert len(forgiven) == (len(_ASSEMBLED_ELSEWHERE)
+                                 + len(_CORRECTED_BY_PLAN)), (
+            "a literal is forgiven by BOTH lists, so one of the two claims "
+            "about it -- 'assembled from clauses' and 'reworded on purpose' "
+            "-- is untrue and nothing here says which."
+        )
+        for literal, pin in forgiven.items():
             module, _, name = pin.partition("::")
             path = _HERE / module
             assert path.is_file(), f"{pin} names no module ({literal[:60]}...)"

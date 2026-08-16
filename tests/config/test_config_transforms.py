@@ -676,6 +676,148 @@ class TestBuildSpace:
                         context=context())
 
 
+class TestAnUnboundLatentIsRefusedByItsKey:
+    """Check B4: *"the posterior would just return the prior"*, in this
+    layer's voice.
+
+    ``ParameterSpace.__check_init__`` already refuses this and gets the
+    physics right.  What it cannot do is say it usefully to someone holding a
+    YAML file: it names the LATENT and not the key that declared it, it does
+    not mention that ``inference.bindings`` is the other place to bind one,
+    and it arrives as a ``ParameterSpaceError`` -- a SIBLING of
+    ``ConfigError`` (0.2 C-12), so the layer's own callers do not catch it.
+
+    Two messages live behind that class and only one of them is the good one.
+    Measured, a document that binds NO latent at all reaches the second:
+    *"A ParameterSpace needs bindings ... Use ParameterSpace.raw(...) to
+    supply a bind function instead"* -- advice naming a Python classmethod no
+    document can reach, which is an R4 advice loop and is recorded in the
+    task report rather than repaired here.  Both are pre-empted by one set
+    difference taken a call earlier.
+    """
+
+    def test_a_latent_with_no_into_and_no_binding_names_its_own_key(self):
+        with pytest.raises(ConfigError) as caught:
+            space_for({"g": {"init": 1.0, "into": "gain.gain"},
+                       "lonely": {"init": 1.0}})
+        assert str(caught.value) == (
+            "inference.parameters.lonely: declared and bound to nothing, so "
+            "the fit would sample it without it ever reaching the model and "
+            "its posterior would just return its prior. Give it into: on its "
+            "own entry, or name it in an inference.bindings entry -- this "
+            "document declares none yet (check B4)."
+        )
+
+    def test_the_tail_says_whether_inference_bindings_exists(self):
+        """S3's named twin: the ``bindings:`` route beside ``parameters.into:``.
+
+        A document that HAS ``inference.bindings`` and simply forgot to name
+        this latent in it needs different advice from one that has no
+        bindings block at all, and the difference is the only thing the
+        reader can act on.
+        """
+        with pytest.raises(ConfigError) as caught:
+            space_for({"g": {"init": 1.0}, "lonely": {"init": 1.0}},
+                      bindings=[{"latents": ["g"], "into": "gain.gain"}])
+        assert str(caught.value) == (
+            "inference.parameters.lonely: declared and bound to nothing, so "
+            "the fit would sample it without it ever reaching the model and "
+            "its posterior would just return its prior. Give it into: on its "
+            "own entry, or name it in an inference.bindings entry -- this "
+            "document declares bindings, and none of them names it "
+            "(check B4)."
+        )
+
+    def test_an_empty_bindings_list_counts_as_declaring_none(self):
+        """``bindings: []`` is not ``bindings:`` present.
+
+        The tail is B4's whole added value over the package's sentence -- it
+        says which of the two remedies the document is closer to. An empty
+        list is closer to "you have not written one yet", and a truthiness
+        test says so while ``is not None`` says the opposite. ``build_inference``
+        accepts ``bindings: []`` (it only rejects a non-list), so this
+        document is reachable.
+        """
+        with pytest.raises(ConfigError) as caught:
+            space_for({"g": {"init": 1.0, "into": "gain.gain"},
+                       "lonely": {"init": 1.0}},
+                      bindings=[])
+        assert str(caught.value).endswith(
+            "or name it in an inference.bindings entry -- this document "
+            "declares none yet (check B4)."
+        )
+
+    def test_a_latent_bound_only_through_bindings_is_not_refused(self):
+        """The anti-vacuity half: ``bindings:`` alone is a legal way to bind.
+
+        A check computing ``declared - {sugared}`` rather than
+        ``declared - {every bind's latents}`` refuses this document, and it
+        is the naive implementation to make that mistake.
+        """
+        space, _ = space_for({"g": {"init": 1.0}},
+                             bindings=[{"latents": ["g"], "into": "gain.gain"}])
+        assert space.names == ("g",)
+
+    def test_every_dead_latent_is_named_not_only_the_first(self):
+        with pytest.raises(ConfigError) as caught:
+            space_for({"g": {"init": 1.0, "into": "gain.gain"},
+                       "b": {"init": 1.0}, "a": {"init": 1.0}})
+        assert str(caught.value).startswith(
+            "inference.parameters.a, inference.parameters.b: declared and "
+            "bound to nothing,")
+
+    def test_a_document_wrong_more_specifically_hears_that_instead(self):
+        """S4's stand-down: B4 runs AFTER ``refuse_duplicate_targets``.
+
+        This document has a dead latent AND two bindings fighting over one
+        leaf. The second is the more specific fault -- it names the leaf and
+        the two latents -- so it is the sentence that wins, and the shipped
+        order is what makes that true rather than a second rule inside B4.
+        """
+        with pytest.raises(ConfigError) as caught:
+            space_for({"a": {"init": 1.0, "into": "gain.gain"},
+                       "b": {"init": 1.0, "into": "gain.gain"},
+                       "lonely": {"init": 1.0}})
+        assert "check B4" not in str(caught.value)
+        assert "gain" in str(caught.value)
+
+    def test_applying_the_refusals_own_advice_makes_the_document_build(self):
+        """S4: take the remedy the sentence names and the document passes.
+
+        Both remedies, because the message offers two and an advice loop
+        hides in whichever one is untested.
+        """
+        with_into, _ = space_for({"g": {"init": 1.0, "into": "gain.gain"},
+                                  "lonely": {"init": 1.0,
+                                             "into": "global_signal.depth"}})
+        assert set(with_into.names) == {"g", "lonely"}
+
+        with_binding, _ = space_for(
+            {"g": {"init": 1.0, "into": "gain.gain"},
+             "lonely": {"init": 1.0}},
+            bindings=[{"latents": ["lonely"], "into": "global_signal.depth"}])
+        assert set(with_binding.names) == {"g", "lonely"}
+
+    def test_the_package_still_refuses_it_for_a_caller_that_skips_this_layer(
+            self):
+        """The re-voicing is a re-voicing, not a replacement.
+
+        ``build_space`` is the only route this sentence guards; a caller that
+        constructs a ``ParameterSpace`` directly must still be refused, and
+        by the package's own class. 2.2's one-binding rule is about the
+        config layer not owning two copies of a message -- and this message
+        is the package's, called earlier, not copied.
+        """
+        from rheplicant.core.errors import ParameterSpaceError
+        from rheplicant.inference import Bind, Latent, ParameterSpace
+
+        with pytest.raises(ParameterSpaceError,
+                           match="the posterior would just return the prior"):
+            ParameterSpace(
+                latents=[Latent("g", init=1.0), Latent("lonely", init=1.0)],
+                bindings=[Bind("g", into=lambda p: p["gain"].gain)])
+
+
 class TestJointPrior:
     def test_jeffreys_lands_on_the_space(self):
         from rheplicant.inference import JeffreysPrior
