@@ -29,6 +29,7 @@ passed it raises ``TypeError: got multiple values for keyword argument
 'nside'``.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 import jax.numpy as jnp
@@ -72,6 +73,111 @@ _ENGINE_KEYS: dict[str, frozenset[str]] = {
     }),
     "matrix": frozenset({"engine", "matrix", "provenance"}),
 }
+
+
+def _a12_normalize_beam(name: str, spec: Mapping[str, Any]) -> str | None:
+    """Check A12, the projector half: ``normalize_beam`` is written.
+
+    A presence test and nothing more -- ``bool(spec["normalize_beam"])`` takes
+    any value, and what has no default is the DECISION, not a particular
+    spelling of it.
+
+    Extracted so :mod:`rheplicant.config.preflight.resources` can ask it of
+    the document's text before ``build_resources`` reads the beam this
+    projector references (§2.2's one-binding rule: the sentence lives here,
+    the pass calls this and wraps the answer in a ``Finding``).  The saving is
+    real for this row in particular: measured, a projector's missing
+    ``normalize_beam`` is noticed only after its beam has been read,
+    normalised and truncated.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    if "normalize_beam" in spec:
+        return None
+    return (
+        f"{name}: normalize_beam is required and has no default. false returns "
+        "the integral of B.T over the sphere, which is not a temperature: 32838 K "
+        "against 200 K on a uniform 200 K sky. The output's unit is decided by "
+        "this key together with the beam's own normalize:, so neither can be "
+        "inferred from the other."
+    )
+
+
+def _a44_float32_sky(name: str, spec: Mapping[str, Any],
+                     dtype: str) -> str | None:
+    """Check A44: a real sky engine in float32, unacknowledged.
+
+    **The dtype is an ARGUMENT, not a key of ``spec``.**  A44 reads like a
+    conditional key-presence test and is not one: its condition is
+    ``runtime.jax_enable_x64``, which lives in another section entirely, and
+    an absent ``jax_enable_x64`` means float32 -- so A44 fires **by default**
+    on any driftscan or general_pointing entry that does not say
+    ``acknowledge_float32_sky: true``.  Taking the dtype in is what lets the
+    builder pass ``context.dtype`` and the pre-flight pass pass
+    ``RuntimeFacts(...).dtype`` off the document's own ``runtime:`` block,
+    without either of them re-deriving the other's.
+
+    Callers must apply the ``engine: matrix`` exemption themselves: this
+    function is called from ``build_projector`` AFTER the matrix branch has
+    already returned, and a ``MatrixProjector`` reads no beam and does no
+    map/alm work, so the O(10%) error the gate is about does not apply to it.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    if dtype == "float64" or spec.get("acknowledge_float32_sky", False):
+        return None
+    return (
+        f"{name}: engine {spec.get('engine')!r} is a real sky engine and this run is in "
+        f"{dtype}. radio/sky/general_pointing.py:28-32 states that the "
+        "map/alm steps carry O(10%) errors in float32 -- larger than every effect "
+        "normalize_beam, phi0_deg and phi_sense are required keys for, and "
+        "invisible: the maps come back finite, correctly shaped and plausibly "
+        "structured. Set runtime.jax_enable_x64: true, or write "
+        "acknowledge_float32_sky: true on this entry to say the error is "
+        "understood. x64 is process-global and part of the hashed config."
+    )
+
+
+def _a48_lst_ref(name: str, spec: Mapping[str, Any]) -> str | None:
+    """Check A48: ``cache_beam_rotation`` without the ``lst_ref_deg`` it needs.
+
+    Reads ``optimizations`` exactly as :func:`build_projector` does, so that
+    the two cannot answer differently on a spelling neither of them models.
+
+    **Its two neighbours run first and this function does not know that.**
+    In ``build_projector`` the ``read_horizon_fraction`` redirect and the
+    unknown-optimisation refusal are both ahead of this call, so a document
+    writing ``optimizations: [cache_beam_rotation, bogus]`` hears about
+    ``bogus``.  A caller at another phase that wants the same ordering has to
+    arrange it; ``preflight/resources.py`` does, and says so.
+
+    **On ``engine: general_pointing`` this advice is refused two gates later,
+    and that loop is left standing.**  Measured: a general_pointing entry
+    writing ``optimizations: [cache_beam_rotation]`` earns this sentence, and
+    a reader who follows it by adding ``lst_ref_deg`` then earns
+    ``engine: general_pointing does not take ['lst_ref_deg',
+    'optimizations']`` from :data:`_ENGINE_KEYS`.  That engine takes neither
+    key, so there is no edit this sentence could name that would work there.
+    The pre-flight row (``preflight/resources.py::_projector_keys``) therefore
+    gates on ``driftscan`` and stays silent; closing the loop HERE would
+    change a shipped message, which is a decision this task was not given.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    if "cache_beam_rotation" not in list(spec.get("optimizations") or []):
+        return None
+    if "lst_ref_deg" in spec:
+        return None
+    return (
+        f"{name}: optimizations contains 'cache_beam_rotation', which requires "
+        "lst_ref_deg. to_reference_frame() raises without one -- after the beam "
+        "file has been read and analysed, which is the whole class of failure "
+        "these checks run before. There is no silent default: defaulting it to "
+        "lst0_deg would re-anchor the m-mode phases."
+    )
 
 
 def _require(name: str, spec: dict, key: str, engine: str, what: str) -> None:
@@ -142,25 +248,17 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
         return MatrixProjector(matrix=jnp.asarray(resolve_value(spec["matrix"], context).value,
                                                   dtype=context.dtype))
 
-    if "normalize_beam" not in spec:
-        raise ConfigError(
-            f"{name}: normalize_beam is required and has no default. false returns "
-            "the integral of B.T over the sphere, which is not a temperature: 32838 K "
-            "against 200 K on a uniform 200 K sky. The output's unit is decided by "
-            "this key together with the beam's own normalize:, so neither can be "
-            "inferred from the other."
-        )
-    if context.dtype != "float64" and not spec.get("acknowledge_float32_sky", False):
-        raise ConfigError(
-            f"{name}: engine {engine!r} is a real sky engine and this run is in "
-            f"{context.dtype}. radio/sky/general_pointing.py:28-32 states that the "
-            "map/alm steps carry O(10%) errors in float32 -- larger than every effect "
-            "normalize_beam, phi0_deg and phi_sense are required keys for, and "
-            "invisible: the maps come back finite, correctly shaped and plausibly "
-            "structured. Set runtime.jax_enable_x64: true, or write "
-            "acknowledge_float32_sky: true on this entry to say the error is "
-            "understood. x64 is process-global and part of the hashed config."
-        )
+    # A12's projector half and A44, in the order they were written in. Both
+    # are the pre-flight pass's rows now (preflight/resources.py) and both are
+    # still asked here, as the section's own second opinion (§2.2) -- the
+    # messages live in the three functions at the head of this module and
+    # nowhere else.
+    problem = _a12_normalize_beam(name, spec)
+    if problem is not None:
+        raise ConfigError(problem)
+    problem = _a44_float32_sky(name, spec, context.dtype)
+    if problem is not None:
+        raise ConfigError(problem)
     optimizations = list(spec.get("optimizations") or [])
     for entry in optimizations:
         if entry == "read_horizon_fraction":
@@ -175,14 +273,12 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
             raise ConfigError(
                 f"{name}: unknown optimisation {entry!r}; they are {list(OPTIMIZATIONS)}."
             )
-    if "cache_beam_rotation" in optimizations and "lst_ref_deg" not in spec:
-        raise ConfigError(
-            f"{name}: optimizations contains 'cache_beam_rotation', which requires "
-            "lst_ref_deg. to_reference_frame() raises without one -- after the beam "
-            "file has been read and analysed, which is the whole class of failure "
-            "these checks run before. There is no silent default: defaulting it to "
-            "lst0_deg would re-anchor the m-mode phases."
-        )
+    # A48, after its two neighbours above, deliberately: a document writing
+    # both an unknown optimisation and cache_beam_rotation hears about the
+    # unknown one, which is the fault it can act on first.
+    problem = _a48_lst_ref(name, spec)
+    if problem is not None:
+        raise ConfigError(problem)
 
     beam_alms = None
     if "beam_alms" in spec:
