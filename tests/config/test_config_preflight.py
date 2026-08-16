@@ -155,7 +155,7 @@ def registry():
 _SCHEMA_IDS: tuple[str, ...] = (
     tuple(f"A{n}" for n in range(1, 53))
     + tuple(f"B{n}" for n in range(1, 10))
-    + tuple(f"C{n}" for n in range(1, 18))
+    + tuple(f"C{n}" for n in range(1, 20))
 )
 
 
@@ -1000,7 +1000,7 @@ class TestTheRegistry:
         Where the spec is absent the literal below is all that runs; where it
         is present, this test holds the two to each other."""
         found = _schema_ids()
-        assert len(found) == 78, found[:5]
+        assert len(found) == 80, found[:5]
         assert len(set(found)) == len(found), "an id is declared twice"
         assert found[0] == "A1" and "A52" in found and "C17" in found
         from_spec = _schema_ids_from_the_spec()
@@ -1063,7 +1063,7 @@ class TestEveryRefusalOfThisPassIsPinnedWHOLE:
             register("_mine")(lambda document: ())
         assert str(caught.value) == (
             "pre-flight check id '_mine' is not a schema §6 id (A1..A52, "
-            "B1..B9, C1..C17), optionally with a dotted suffix such as "
+            "B1..B9, C1..C19), optionally with a dotted suffix such as "
             "'A1.runs' when several functions each decide part of one check. "
             "The id is what a Finding carries and what a reader looks up; a "
             "private name here reaches the user as '(check _mine).'"

@@ -130,7 +130,7 @@ def binder(registry: Registry, *checks: str, label: str,
         if not SLOT.fullmatch(check):
             raise ConfigError(
                 f"{label} check id {check!r} is not a schema §6 id "
-                "(A1..A52, B1..B9, C1..C17), optionally with a dotted "
+                "(A1..A52, B1..B9, C1..C19), optionally with a dotted "
                 "suffix such as 'A1.runs' when several functions each "
                 "decide part of one check. The id is what a Finding "
                 "carries and what a reader looks up; a private name here "
