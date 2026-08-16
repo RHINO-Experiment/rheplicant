@@ -85,13 +85,29 @@ class TestRunDocument:
         with pytest.raises(ConfigError, match="n_steps"):
             run_document(document({"kind": "forward", "n_steps": 3}))
 
-    def test_expect_refuse_captures_the_refusal_as_the_product(self):
+    def test_a_text_decidable_refusal_is_not_a_runs_to_expect(self):
+        """``expect: refuse`` captures what ``execute_run`` raises, and P-1
+        does not raise there.
+
+        ``configured()`` (``runs.py:154``) calls ``load_document`` OUTSIDE
+        ``execute_run``'s capture (``exits.py:292-297``), so a refusal the
+        pre-flight pass reaches -- here A31, ``observation.data`` under a
+        source model -- comes out of ``run_document`` as a ``ConfigError``
+        rather than as ``results[...].error``.  That is the correct shape:
+        ``expect: refuse`` is for a run that fails when it RUNS, and a
+        document refused before anything runs has no run to expect anything
+        of.
+
+        This replaces ``test_expect_refuse_captures_the_refusal_as_the_
+        product``, which drove exactly this document and asserted the capture.
+        It kills a later hoist that silently turned some other captured
+        refusal into a raise: the test names the PHASE, not the check.
+        """
         doc = document({"kind": "forward", "expect": "refuse"})
         doc["observation"] = {**doc["observation"],
                               "data": {"ones": ["n_time", "n_freq"]}}
-        results = run_document(doc)
-        assert results["forward"].product is None
-        assert "data" in str(results["forward"].error)
+        with pytest.raises(ConfigError, match="observation.data"):
+            run_document(doc)
 
     def test_expect_refuse_that_succeeds_is_the_failure(self):
         with pytest.raises(ConfigError, match="SUCCEEDED"):

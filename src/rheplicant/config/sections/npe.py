@@ -57,14 +57,23 @@ bound ``NpeProduct`` and ``_run_npe`` and nothing else**, plus the
 ``_observed``/``_sweep``/``register`` imports it added to the
 ``exit_support`` list and the ``_unravel`` import it added from
 ``posterior_support``; it also EXTENDED ``__all__``, which is the one
-module-level name a later task may touch.  It was the last task to write this
-file: the draw is ``_run_npe``'s own business and never ``_sample``.  That is
-the whole inventory -- twenty-four names
-from Task 3, three from Task 7, two from Task 8 -- and the reason it is kept
-here rather than left to plan §3.1 is that §3.1 lists seven of the
-twenty-four, and a drafter who reads an authoritative list and does not find
-the name they need concludes the name is free.  That is how three names in
-this file came to be bound twice before the plan was executed at all.
+module-level name a later task may touch.  It was the last task of Plan 2D to
+write this file: the draw is ``_run_npe``'s own business and never
+``_sample``.  Twenty-four names from Task 3, three from Task 7, two from Task
+8 -- and the reason the inventory is kept here rather than left to plan §3.1
+is that §3.1 lists seven of the twenty-four, and a drafter who reads an
+authoritative list and does not find the name they need concludes the name is
+free.  That is how three names in this file came to be bound twice before the
+plan was executed at all.
+
+*Plan 3A's Task 8 binds one more*, and it is a SPLIT rather than a new
+feature: :func:`_a29_npe_takes_no_run_seed` is the refusal that used to sit
+inline at the head of :func:`_run_npe`, lifted to module level so that
+``config/preflight/fitting.py`` can call the same object from the raw
+document before any beam is read (plan §2.2: one name, one binding, two call
+sites).  The three counts above are Plan 2D's and are left as they were --
+they are the per-task lists a later drafter actually needs, and re-totalling
+them here would put a number in this docstring that no test defends.
 """
 
 from __future__ import annotations
@@ -97,6 +106,35 @@ from rheplicant.config.sections.transforms import _whole
 __all__ = ["NpeProduct", "NpeSpec", "parse_npe"]
 
 _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
+
+#: What ``kind: npe`` tells ``_decided_model`` it wants the noise RULE for,
+#: and what it offers a document that decided its sigma into an array
+#: (check A28).  **Neither clause existed until Plan 3A**: the accessor wrote
+#: ONE sentence for both its callers, ``conjugate.gls``'s, so a ``kind: npe``
+#: run was told it "solves for the covariance a PREDICTION-DEPENDENT sigma
+#: implies" and was offered ``kind: conjugate.wiener``.  Measured on
+#: ``posterior_helpers.npe_document(noise=FROZEN)``, both were false: this
+#: exit hands ``noise=`` to ``simulate_pairs``, which DRAWS from the rule
+#: (``:475-480``), and no conjugate exit produces an amortized posterior.
+#: ``_decided_model`` takes both keyword-only and REQUIRED, so a third caller
+#: has no default left to inherit -- which is exactly how this defect
+#: arrived.
+#:
+#: ``reads`` and ``because`` are this exit's OWN and differ from
+#: ``conjugate._A28_GLS_CLAUSES``', which is the whole reason they are clauses:
+#: ``npe`` iterates nothing, so *"a decided array has no fixed point to
+#: iterate"* is a conjugate sentence reaching a third caller -- the same defect
+#: as the two clauses below, one fragment further along.
+_A28_NPE_CLAUSES: dict[str, str] = {
+    "wants": ("SIMULATES a bank of (theta, data) pairs and draws the noise "
+              "for each one"),
+    "reads": "a RULE",
+    "because": "is not a rule",
+    "instead": ("Declare inference.noise.kind: radiometer or homoscedastic "
+                "-- either is a rule simulate_pairs can draw from. There is "
+                "no amortized-posterior exit that takes a decided array, so "
+                "the sigma is what has to change."),
+}
 
 #: The optional knobs of each call, IN THE PACKAGE'S OWN PARAMETER NAMES and
 #: as tuples, because that is what ``_passthrough(options, keys)`` takes and
@@ -444,7 +482,7 @@ def _simulate_bank(run: Any, built: Any, spec: Any) -> tuple:
     space = _sampled_space(run, built, route="npe")
     thetas, data = simulate_pairs(
         built.inference.fit_twin, built.state, space,
-        noise=_decided_model(run, built),
+        noise=_decided_model(run, built, **_A28_NPE_CLAUSES),
         key=_draw_key(run, "inference.npe.bank", built, spec.bank),
         n_simulations=spec.bank["n_simulations"],
     )
@@ -538,13 +576,15 @@ class NpeProduct(NamedTuple):
     validation_loss: Any
 
 
-@register("npe")
-def _run_npe(run: Any, built: Any, *, results: Any = None) -> Any:
-    """One ``kind: npe`` run -> an :class:`NpeProduct`."""
-    from rheplicant.inference import train_posterior
+def _a29_npe_takes_no_run_seed(where: str, options: Mapping[str, Any]) -> None:
+    """``kind: npe`` draws four times, so its seeds are per subsection.
 
-    where = f"runs[{run.name!r}]"
-    if "seed" in run.options:
+    Module-level and taking plain data for plan §2.2's reason: the pre-flight
+    pass calls this same object from the raw document, so the refusal before
+    the beam and the one the executor raises cannot drift apart.  The four
+    subsections' own seeds are :func:`_seeded`'s, through ``_seed_name``.
+    """
+    if "seed" in options:
         raise ConfigError(
             f"{where}: kind: npe needs FOUR seeds -- the bank draws theta "
             "from the priors, create initialises the network's weights, "
@@ -554,6 +594,15 @@ def _run_npe(run: Any, built: Any, *, results: Any = None) -> Any:
             "(check A29). A run carries one seed and this exit draws four "
             "times."
         )
+
+
+@register("npe")
+def _run_npe(run: Any, built: Any, *, results: Any = None) -> Any:
+    """One ``kind: npe`` run -> an :class:`NpeProduct`."""
+    from rheplicant.inference import train_posterior
+
+    where = f"runs[{run.name!r}]"
+    _a29_npe_takes_no_run_seed(where, run.options)
     # Everything else this exit could take lives in inference.npe:, so the
     # allowed set is empty -- the same shape `kind: forward` has.
     _sweep(run, frozenset())

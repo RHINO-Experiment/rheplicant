@@ -7,6 +7,14 @@ resolve against that context; the model resolves against the context plus the
 resources; and only then can an ingested State be finished, because
 ``to_state``'s ``source_order`` is read off the assembled twin's own switch
 order (``rhino.py:607-611``).
+
+Before any of it, the pre-flight pass: every check decidable from the
+document's text, run on the variant-applied mapping and before
+``build_runtime``.  That position is the whole point -- ``build_resources`` is
+where a CST directory is read and a spherical harmonic transform runs, and
+measured at ``be2027b`` a missing beam file out-ranked an unknown ``model:``
+node, a junction given an operator, a ``flagging`` with no ``type:`` and two
+capability-reserved keys, five for five.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from typing import Any, NamedTuple
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.layering import apply_variant
+from rheplicant.config.preflight import preflight
 from rheplicant.config.resources import BuiltResources, build_resources
 from rheplicant.config.sections.compose import build_model
 from rheplicant.config.sections.inference import build_inference
@@ -27,17 +36,6 @@ from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.state import State
 
 __all__ = ["ConfiguredRun", "load_document", "run_forward"]
-
-_SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
-             "resources", "model", "variants", "inference", "runs", "outputs",
-             "campaign")
-_NOT_YET = {
-    "outputs": "Plan 4 (outputs, provenance, the CLI)",
-    "defaults": "Plan 4 (presets are YAML files, and the CLI is where YAML "
-                "first comes off disk)",
-    "plugins": "Plan 4 (plugin import belongs to the process entry point)",
-}
-_REQUIRED = ("runtime", "observation", "model", "runs")
 
 
 class ConfiguredRun(NamedTuple):
@@ -52,39 +50,6 @@ class ConfiguredRun(NamedTuple):
     context: ResolutionContext
 
 
-def _sweep(document: Mapping) -> None:
-    unknown = sorted(set(document) - set(_SECTIONS))
-    if unknown:
-        raise ConfigError(
-            f"This document declares {unknown}; the sections are "
-            f"{list(_SECTIONS)}."
-        )
-    if "campaign" in document:
-        raise ConfigError(
-            "campaign: is reserved with capability 4 (streaming evidence, "
-            "schema §8.2) and refused in v1."
-        )
-    for section, route in _NOT_YET.items():
-        if section in document:
-            raise ConfigError(
-                f"{section}: is not read by this layer yet -- it arrives with "
-                f"{route}."
-            )
-    version = document.get("schema_version")
-    if version != 1 or isinstance(version, bool):
-        raise ConfigError(
-            f"schema_version: 1 is required (got {version!r}); it is what "
-            "lets a later loader read an older document on purpose rather "
-            "than by luck."
-        )
-    missing = [section for section in _REQUIRED if section not in document]
-    if missing:
-        raise ConfigError(
-            f"This document is missing {missing}; schema_version, runtime, "
-            "observation, model and runs are required."
-        )
-
-
 def load_document(document: Mapping, *, variant: str | None = None,
                   base_dir: str | None = None) -> ConfiguredRun:
     """Build the objects a document declares, in the order they feed each other."""
@@ -96,7 +61,13 @@ def load_document(document: Mapping, *, variant: str | None = None,
     doc = dict(document)
     if variant is not None:
         doc = apply_variant(doc, variant)
-    _sweep(doc)
+    # P-1, and its position is the point: `build_resources` below is where a
+    # CST directory is read and a spherical harmonic transform runs.  Refuse
+    # before you warn -- a document that is about to be refused should not
+    # also spray warnings about lines the user is on their way to change.
+    report = preflight(doc)
+    report.raise_if_refused()
+    report.emit_warnings()
     runtime = build_runtime(doc["runtime"])
     observation, context = build_observation(doc["observation"],
                                              runtime=runtime,

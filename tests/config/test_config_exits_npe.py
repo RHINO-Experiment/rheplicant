@@ -144,15 +144,30 @@ class TestTheBank:
         # known statically` (measured), naming no run, no key and no exit.
         #
         # The match is on `radiometer_frozen`, which is the part of
-        # _decided_model's message true for every caller.  The rest of it is
-        # conjugate prose -- measured here, it offers kind: conjugate.wiener
-        # to a document that asked for a neural posterior -- and that drift is
-        # recorded to the plan's §6 rather than fixed here, because
-        # exit_support.py is Task 2's alone.
-        built = npe_built(noise=FROZEN)
+        # _decided_model's message true for every caller.  Plan 3A's Task 10
+        # gave the rest of it a caller-supplied clause: this run is now told
+        # that npe SIMULATES a bank, and is no longer offered
+        # kind: conjugate.wiener, which is not an alternative to an amortized
+        # posterior.  The positive assertion for that wording is
+        # TestTheDecidedModelAccessor in tests/config/test_preflight_fitting.py;
+        # what is pinned here is that the executor's own route still reaches
+        # the accessor and still names this run.
+        #
+        # THE DOCUMENT'S RUN IS `forward` AND THE SPEC IS STILL `npe`.  Task
+        # 10's pass refuses `kind: npe` beside a decided sigma at P-1, so
+        # `npe_built(noise=FROZEN)` -- which is a `load_document` -- now
+        # raises on the line that BUILDS the fixture rather than inside the
+        # `raises` below, and this test would error instead of asserting.
+        # `npe_spec()` fabricates the RunSpec independently of the document's
+        # `runs:` (that is what it is for), so swapping the document's run
+        # kind leaves the subject exactly what it was: `_simulate_bank`
+        # reaching `_decided_model` and not `_decided_sigma`.
+        built = npe_built({"kind": "forward"}, noise=FROZEN)
         with pytest.raises(ConfigError, match="radiometer_frozen") as caught:
             _simulate_bank(npe_spec(), built, built.inference.npe)
         assert str(caught.value).startswith("runs['amortized']: ")
+        assert "SIMULATES a bank" in str(caught.value)
+        assert "conjugate.wiener" not in str(caught.value)
 
     def test_a_prior_free_latent_is_refused_naming_the_sibling_exit(self):
         # _sampled_space(route="npe") is Task 4's, and this is the FIRST
@@ -164,7 +179,17 @@ class TestTheBank:
         # refusal cannot satisfy it -- which is what makes this test able to
         # tell route="npe" from route="nuts" rather than merely observing
         # that something was refused.
-        built = npe_built(parameters={"g": {"init": 1.0, "linear": True,
+        #
+        # `expect: refuse` is what keeps this document LOADABLE.  Plan 3A's
+        # Task 8 hoists the same property to P-1 as check A23, so
+        # `load_document` on a prior-free npe run now refuses before
+        # `npe_built` can return -- and `expect: refuse` is the run's own way
+        # of saying the refusal is the point (`exits.py:293-303` captures it;
+        # `_prior_gates` stands down on it for that reason).  The subject of
+        # this test is unchanged: `_simulate_bank`'s route to
+        # `_sampled_space`, driven directly.
+        built = npe_built({"expect": "refuse"},
+                          parameters={"g": {"init": 1.0, "linear": True,
                                             "into": "gain.gain"}})
         with pytest.raises(ConfigError, match="SIMULATES a bank") as caught:
             _simulate_bank(npe_spec(), built, built.inference.npe)
@@ -681,10 +706,20 @@ class TestThePriorGate:
         #
         # It is also the route a user takes, which is where the run's own name
         # reaches the message.
+        #
+        # BOTH documents now declare `expect: refuse` -- the joint one always
+        # did.  Plan 3A's Task 8 hoists this property to P-1 as check A23, so
+        # a prior-free npe run makes the whole document unloadable unless the
+        # run says the refusal is what it is for, and `run_document` would
+        # otherwise raise A23's sentence rather than capture this gate's.  The
+        # test is unchanged in what it reads: two messages from this gate, in
+        # one test, so a clause appended to the covered branch as well is
+        # still the mutation only this test catches.
         joint = str(joint_results()["amortized"].error)
-        with pytest.raises(ConfigError, match="SIMULATES a bank") as caught:
-            run_document(npe_document(parameters=PRIOR_FREE))
-        bare = str(caught.value)
+        bare = str(run_document(npe_document({"expect": "refuse"},
+                                             parameters=PRIOR_FREE))
+                   ["amortized"].error)
+        assert "SIMULATES a bank" in bare
         assert "which is why kind: nuts accepts this space" in joint
         assert "or run kind: nuts" in joint
         assert "kind: nuts refuses this document too" not in joint

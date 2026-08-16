@@ -229,13 +229,23 @@ rather than failing.
   posterior, and every posterior width in this project's own scripts comes
   from a stack of hundreds. `noise_from: gls` runs `iterative_gls` first and
   draws at the covariance it converges to, instead of at the declared sigma —
-  the same solve `kind: conjugate.gls` reports, run inline. It reads no
+  the same solve `kind: conjugate.gls` reports, run inline. That route reads
+  the noise as a *rule*, so `noise_from: gls` beside
+  `noise.kind: radiometer_frozen` is refused: the sigma is already fixed and
+  there is no fixed point left to find — and `noise_from: gls` is check A27's
+  own answer for `noise.kind: radiometer`, so a user who takes both arrives
+  exactly there (check A28). It reads no
   earlier run and has nothing to do with `reuse:`.
 - `conjugate.gls` — iteratively reweighted least squares, and **the route for
   radiometer noise**. `conjugate.wiener` and `conjugate.gcr` need a decided
   sigma array; `noise.kind: radiometer` is a model whose sigma depends on the
   prediction, so pairing the two is refused naming both ways out — this kind,
-  or `noise.kind: radiometer_frozen` (check A27). A run that did not converge
+  or `noise.kind: radiometer_frozen` (check A27). **The inverse pairing is
+  refused too.** This kind reads `inference.noise` as a *rule* it iterates, so
+  `noise.kind: radiometer_frozen` hands it an array that was decided before
+  any run saw it, and a decided array is not a rule: declare
+  `noise.kind: radiometer` to iterate, or run `conjugate.wiener`, which is
+  what a decided sigma wants (check A28). A run that did not converge
   refuses to hand its covariance on without
   `acknowledge_unconverged_covariance: true`.
 
@@ -335,6 +345,12 @@ rather than failing.
   [`inference.npe:`](#the-npe-section). It needs a prior on **every** latent —
   `simulate_pairs` samples from them and consults `joint_prior:` not at all,
   which is where it differs from `nuts`, and the refusal names both ways out.
+  It reads `inference.noise` as a *rule* — `simulate_pairs` draws the scatter
+  for every pair it makes — so `noise.kind: radiometer_frozen`, which decides
+  one array before any run sees it, is refused: declare `radiometer` or
+  `homoscedastic`, either of which is a rule to draw from. There is no
+  amortized-posterior exit that takes a decided array, so on this kind it is
+  the sigma that has to change (check A28).
 
 Either product can be reused by `predict`, which thins with `n_draw:` from the
 tail — with the multi-chain caveat the `predict` bullet above spells out. It is

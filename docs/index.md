@@ -205,6 +205,7 @@ config-values
 config-resources
 config-sections
 config-inference
+config-validation
 ```
 
 ```{toctree}

@@ -11,7 +11,7 @@ those messages already name their remedy.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Container, Mapping
 from typing import Any
 
 from rheplicant.config.context import ResolutionContext
@@ -19,7 +19,8 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.paths import refuse_misaddressed_region
 from rheplicant.config.sections.model import build_node_operator
 
-__all__ = ["build_model"]
+__all__ = ["build_model", "cal_load_order_problem", "double_count_problem",
+           "many_shape_problem", "node_placement_problems", "node_specs"]
 
 _SECTION_KEYS = frozenset({"kind", "acknowledge_double_count"})
 _COMPOSE_KEYS = frozenset({"compose", "stages"})
@@ -29,6 +30,159 @@ def _graph():
     from rheplicant.radio.graph import RADIO_GRAPH
 
     return RADIO_GRAPH
+
+
+def node_specs(section: Mapping) -> dict[str, Any]:
+    """The node keys of a ``model:`` section; everything else is section level.
+
+    One binding, two callers: :func:`build_model` below, and
+    ``config.preflight.model._nodes``.  The rule here is which keys are NOT
+    nodes, and a second copy of it means that the day a third section-level
+    key is added the pre-flight pass refuses it as an unknown node id while
+    the build accepts it -- the two-validators-for-one-property shape this
+    layer has paid for before.
+    """
+    return {key: value for key, value in section.items()
+            if key not in _SECTION_KEYS}
+
+
+def node_placement_problems(specs: Mapping[str, Any],
+                            graph) -> list[tuple[str, str, str]]:
+    """Checks A2, A3 and A4 over a ``model:`` mapping -- text and graph only.
+
+    ``(check id, the document path to edit, the message)`` per problem, in the
+    document's own key order and **at most one per node**: an id that is not a
+    node of the graph has no ``NodeSpec`` to ask about its kind, so the walk
+    stops at the first thing wrong with each key.  :func:`build_model` raises
+    the first; ``preflight.model._graph_shape`` turns every one into a
+    ``Finding``.
+
+    A4 asks ``isinstance(spec, Mapping)`` before ``"type" in spec``, and that
+    is a correction rather than a move.  Measured on the loop this function
+    replaces: ``model: {beam: 3}`` left :func:`build_model` as a bare
+    ``TypeError: argument of type 'int' is not iterable``, and ``model: {beam:
+    'type'}`` earned A4 because ``'type' in 'type'`` is True -- an accident of
+    Python, not a rule.  Both now reach the refusal that was always right for
+    them (``build_node_operator``'s "a node spec is a mapping", and A6's
+    "holds a single instance" for a list); in the pre-flight pass the
+    ``TypeError`` was worse than a wrong message, because a check that raises
+    aborts the whole pass and loses every other finding on the document.
+
+    Nothing here resolves a value, constructs an operator or reads a file --
+    which is precisely what lets the pre-flight pass ask these questions
+    before ``build_resources`` reads a beam.
+    """
+    problems: list[tuple[str, str, str]] = []
+    for node_id, spec in specs.items():
+        if node_id not in graph.nodes:
+            problems.append((
+                "A2", "model",
+                f"model: {node_id!r} is not a node of graph "
+                f"{graph.name!r}; known nodes: {list(graph.nodes)}."))
+            continue
+        node = graph.nodes[node_id]
+        if node.kind in ("junction", "selector"):
+            problems.append((
+                "A3", f"model.{node_id}",
+                f"model.{node_id}: is a {node.kind} -- never an operator "
+                "slot; it materializes automatically. The switch cycle is "
+                "observation.switching."))
+            continue
+        if node.reserved and isinstance(spec, Mapping) and "type" in spec:
+            problems.append((
+                "A4", f"model.{node_id}",
+                f"model.{node_id}: is reserved -- no shipped operator "
+                "registers there; python: is the route."))
+    return problems
+
+
+def many_shape_problem(node_id: str, spec: Any, *, many: bool) -> str | None:
+    """Check A6: the shape one node's spec must have, or None if it has it.
+
+    A ``many`` node takes a non-empty list (SUM at ``foregrounds`` and
+    ``t_sys_extra``, CHAIN at ``filters``) or, at ``cal_loads``, a label-keyed
+    FAN mapping; a single node takes anything that is not a list.
+    :func:`_single` and :func:`_many` raise this where they used to write it,
+    and the pre-flight pass asks the same question of the raw text.
+
+    **The FAN branch does not ask for non-emptiness and the list branch does**,
+    which is deliberate rather than an oversight: an empty ``cal_loads: {}``
+    is already refused by :func:`cal_load_order_problem` against
+    ``switching.order[1:]``, with a message that names the labels it wanted,
+    and a second "non-empty" sentence would be the vaguer of the two.  A list
+    node has no such second reader.
+
+    ``cal_loads``' key ORDER is that separate question, with a separate
+    answer, and both callers ask this one first.
+    """
+    if not many:
+        if isinstance(spec, list):
+            return (f"model.{node_id}: this node holds a single instance; a "
+                    "list is the shape of a many node (foregrounds, "
+                    "t_sys_extra, cal_loads, filters).")
+        return None
+    if node_id == "cal_loads":
+        if not isinstance(spec, Mapping):
+            return ("model.cal_loads: is a label-keyed mapping (FAN) -- the "
+                    "keys ARE observation.switching.order[1:], in that "
+                    f"order; got {type(spec).__name__}.")
+        return None
+    if not isinstance(spec, list) or not spec:
+        shape = "SUM" if node_id in ("foregrounds", "t_sys_extra") else "CHAIN"
+        return (f"model.{node_id}: is a non-empty list ({shape}); got "
+                f"{type(spec).__name__} ({spec!r}).")
+    return None
+
+
+def cal_load_order_problem(spec: Mapping,
+                           switch_order: tuple[str, ...]) -> str | None:
+    """Check A14's late leg: the FAN labels ARE ``switching.order[1:]``.
+
+    One binding, two callers: :func:`_many` below, and
+    ``config.preflight.model._a14_cal_load_keys``.  A14's other two legs --
+    ``order[0]`` being the reserved literal ``antenna`` and a repeated label
+    -- are ``switching.declared_order``'s, and measured they already precede
+    the beam: ``document.py`` builds the observation before the resources.
+    This one did not, because it runs inside ``build_model``, one call after
+    a CST directory has been read.
+
+    The spec's SHAPE is :func:`many_shape_problem`'s question and is asked
+    first by both callers; this one assumes a mapping.
+    """
+    if not switch_order:
+        return ("model.cal_loads: declared without an observation.switching "
+                "order. The switch cycle is what gives each load its index -- "
+                "declare switching: {mode: cycle, order: [antenna, ...]} "
+                "(schema §4.1.5: mode: none means no loads at all).")
+    expected = list(switch_order[1:])
+    got = list(spec)
+    if got != expected:
+        return (f"model.cal_loads: the keys are switching.order[1:] in that "
+                f"order -- expected {expected}, got {got}. One list fixes the "
+                "switch indices, the load order and the gamma_src rows.")
+    return None
+
+
+def double_count_problem(node_ids: Container[str],
+                         acknowledgement: Any) -> str | None:
+    """Check A32, decided as D-C13: both ground terms lit, unacknowledged.
+
+    ``is True`` rather than truthiness on purpose:
+    ``tests/config/test_config_section_compose.py`` pins that the string
+    ``'yes'`` is refused, and an acknowledgement that reads as true by
+    accident is the one thing this key exists to prevent.
+
+    The returned message already ends ``(check A32, decided as D-C13).``, so
+    the ``Finding`` built from it appends no second citation.
+    """
+    if not ("beam_spill" in node_ids and "ground_pickup" in node_ids):
+        return None
+    if acknowledgement is True:
+        return None
+    return ("model: beam_spill and ground_pickup both lit describe the "
+            "ground twice (the spill term and the pickup term overlap); if "
+            "that is deliberate, say so: acknowledge_double_count: true "
+            "(check A32, decided as D-C13).")
 
 
 def _stage_operator(label: str, spec: Any, context: ResolutionContext,
@@ -119,12 +273,9 @@ def _single(node_id: str, spec: Any, context: ResolutionContext,
     from rheplicant.core.operator import SnapshotOperator
     from rheplicant.core.pipeline import Pipeline
 
-    if isinstance(spec, list):
-        raise ConfigError(
-            f"model.{node_id}: this node holds a single instance; a list is "
-            "the shape of a many node (foregrounds, t_sys_extra, cal_loads, "
-            "filters)."
-        )
+    problem = many_shape_problem(node_id, spec, many=False)
+    if problem is not None:
+        raise ConfigError(problem)
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"model.{node_id}: a node spec is a mapping; got "
@@ -178,37 +329,19 @@ def _single(node_id: str, spec: Any, context: ResolutionContext,
 
 def _many(node_id: str, spec: Any, context: ResolutionContext,
           switch_order: tuple[str, ...]):
+    # The shape first and the order second, in both branches and at both call
+    # sites: a `cal_loads: []` reports the FAN shape rather than a key order
+    # in a value that has no keys.
+    problem = many_shape_problem(node_id, spec, many=True)
+    if problem is not None:
+        raise ConfigError(problem)
     if node_id == "cal_loads":
-        if not isinstance(spec, Mapping):
-            raise ConfigError(
-                "model.cal_loads: is a label-keyed mapping (FAN) -- the keys "
-                "ARE observation.switching.order[1:], in that order; got "
-                f"{type(spec).__name__}."
-            )
-        if not switch_order:
-            raise ConfigError(
-                "model.cal_loads: declared without an observation.switching "
-                "order. The switch cycle is what gives each load its index -- "
-                "declare switching: {mode: cycle, order: [antenna, ...]} "
-                "(schema §4.1.5: mode: none means no loads at all)."
-            )
-        expected = list(switch_order[1:])
-        got = list(spec)
-        if got != expected:
-            raise ConfigError(
-                f"model.cal_loads: the keys are switching.order[1:] in that "
-                f"order -- expected {expected}, got {got}. One list fixes the "
-                "switch indices, the load order and the gamma_src rows."
-            )
+        problem = cal_load_order_problem(spec, switch_order)
+        if problem is not None:
+            raise ConfigError(problem)
         return [build_node_operator("cal_loads", entry, context)
                 for entry in spec.values()]
     # foregrounds / t_sys_extra (SUM) and filters (CHAIN): a list.
-    if not isinstance(spec, list) or not spec:
-        shape = "SUM" if node_id in ("foregrounds", "t_sys_extra") else "CHAIN"
-        raise ConfigError(
-            f"model.{node_id}: is a non-empty list ({shape}); got "
-            f"{type(spec).__name__} ({spec!r})."
-        )
     return [build_node_operator(node_id, entry, context) for entry in spec]
 
 
@@ -252,41 +385,24 @@ def build_model(section: Any, context: ResolutionContext, *,
             f"{kind!r}."
         )
     graph = _graph()
-    node_specs = {key: value for key, value in section.items()
-                  if key not in _SECTION_KEYS}
-    if not node_specs:
+    # The local is `specs`, not `node_specs`: the shared function's name is
+    # `node_specs`, and a local shadowing it here would still import, run and
+    # pass -- there is no second call in this body to raise on.
+    specs = node_specs(section)
+    if not specs:
         raise ConfigError(
             "model: declares no nodes. A model lights at least one node of "
             "the signal path."
         )
-    for node_id in node_specs:
-        if node_id not in graph.nodes:
-            raise ConfigError(
-                f"model: {node_id!r} is not a node of graph "
-                f"{graph.name!r}; known nodes: {list(graph.nodes)}."
-            )
-        node = graph.nodes[node_id]
-        if node.kind in ("junction", "selector"):
-            raise ConfigError(
-                f"model.{node_id}: is a {node.kind} -- never an operator "
-                "slot; it materializes automatically. The switch cycle is "
-                "observation.switching."
-            )
-        if node.reserved and "type" in node_specs[node_id]:
-            raise ConfigError(
-                f"model.{node_id}: is reserved -- no shipped operator "
-                "registers there; python: is the route."
-            )
-    if ("beam_spill" in node_specs and "ground_pickup" in node_specs
-            and section.get("acknowledge_double_count") is not True):
-        raise ConfigError(
-            "model: beam_spill and ground_pickup both lit describe the "
-            "ground twice (the spill term and the pickup term overlap); if "
-            "that is deliberate, say so: acknowledge_double_count: true "
-            "(check A32, decided as D-C13)."
-        )
+    problems = node_placement_problems(specs, graph)
+    if problems:
+        raise ConfigError(problems[0][2])
+    problem = double_count_problem(
+        specs, section.get("acknowledge_double_count"))
+    if problem is not None:
+        raise ConfigError(problem)
     operators: list[Any] = []
-    for node_id, spec in node_specs.items():
+    for node_id, spec in specs.items():
         if graph.nodes[node_id].many:
             operators.extend(_many(node_id, spec, context, switch_order))
         else:
