@@ -215,6 +215,7 @@ def _check_where(check: str, finding: Finding) -> None:
 
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401
+from rheplicant.config.preflight import ingest as _ingest_checks  # noqa: E402,F401
 from rheplicant.config.preflight import model as _model_checks  # noqa: E402,F401
 from rheplicant.config.preflight import observing as _observing_checks  # noqa: E402,F401
 from rheplicant.config.preflight import values as _values_checks  # noqa: E402,F401
