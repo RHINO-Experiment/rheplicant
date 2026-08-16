@@ -79,6 +79,33 @@ _PREFLIGHT_DIR = pathlib.Path(
     importlib.import_module("rheplicant.config.preflight").__file__
 ).resolve().parent
 
+#: ``config/passes.py`` -- the runner Plan 3B extracted out of this package's
+#: ``__init__``, so that the three passes this layer now has share one
+#: de-duplication, one raise-guard and one ``where`` guard.
+_PASSES = pathlib.Path(
+    importlib.import_module("rheplicant.config.passes").__file__
+).resolve()
+
+
+def _preflight_sources() -> list[pathlib.Path]:
+    """Every module the pre-flight pass's own code lives in.
+
+    **The two static guards below walked ``_PREFLIGHT_DIR.glob("*.py")``, and
+    that walk stopped covering the code they were written for the moment
+    ``sweep`` and ``_check_where`` moved into ``config/passes.py``.**  The
+    extraction is the kind of edit that makes a guard vacuous without making
+    it red: every module still under ``preflight/`` still passes, and the file
+    that now runs every check is simply not looked at.
+
+    ``passes.py`` is held to P-1's boundary rather than to a weaker one on
+    purpose.  It is the runner for the two IN-FLIGHT passes as well, and those
+    may hold a built object -- but ``passes.py`` itself only reads a registry
+    and calls functions, so the strictest of the three boundaries is the one
+    it can meet, and meeting it is what keeps the pre-flight pass's guarantee
+    true after the move.
+    """
+    return sorted(_PREFLIGHT_DIR.glob("*.py")) + [_PASSES]
+
 
 @pytest.fixture
 def registry():
@@ -950,6 +977,138 @@ class TestTheRegistry:
         assert from_spec == found
 
 
+class TestEveryRefusalOfThisPassIsPinnedWHOLE:
+    """The eight sentences this pass says about a CHECK rather than about a
+    document, pinned by equality on their whole text.
+
+    **Why this class exists, measured.**  Plan 3B's Task 1 turns this pass's
+    machinery into ``config/passes.py``, parameterised by the phase word
+    (``"pre-flight"``) and by the decorator's name (``"register"``), so that
+    the in-flight passes share one implementation instead of forking a second
+    one.  Every pin that stood between that extraction and a wrong word was a
+    SUBSTRING beginning AFTER the word: ``assert "'A3' RAISED KeyError" in
+    str(...)``, ``match="is not a document section"``, ``match="takes one or
+    more check ids"``, ``match="names 'A20' twice"``.  Measured before this
+    class was written: rewriting all six occurrences of ``pre-flight`` to
+    ``in-flight`` in ``preflight/__init__.py`` left ``tests/config`` at
+    **exit 0**.  So did rewriting ``@register`` to ``@register_axes`` in the
+    two sentences that advise it.  A pass whose every refusal opened with the
+    wrong word satisfied the whole suite.
+
+    Eight and not six: the two that never carried the phase word carry the
+    DECORATOR's name instead, and a reader told to write ``@register_axes``
+    into a pre-flight module is misdirected exactly as badly.
+
+    **What this class cannot see.**  It pins the text of a refusal, not that
+    the refusal is REACHED -- the surrounding classes are what drive each
+    branch -- and it says nothing about the in-flight passes' own wording,
+    which is ``test_config_inflight.py``'s to pin.
+    """
+
+    def test_a_registration_with_no_id_at_all(self, registry):
+        with pytest.raises(ConfigError) as caught:
+            register()(lambda document: ())
+        assert str(caught.value) == (
+            "register() takes one or more check ids -- @register('A30'), or "
+            "@register('A16', 'A17') when one function decides several. A "
+            "registration with no id binds nothing, so the check it decorates "
+            "never runs and nothing says so."
+        )
+
+    def test_an_id_that_is_not_a_string(self, registry):
+        """``7`` rather than the bare ``@register``'s function, whose ``repr``
+        carries an address and cannot be pinned by equality at all."""
+        with pytest.raises(ConfigError) as caught:
+            register(7)(lambda document: ())
+        assert str(caught.value) == (
+            "pre-flight check id 7 is not a string. @register is called with "
+            "its ids -- @register('A30') -- and a bare @register hands the "
+            "decorated function in as an id."
+        )
+
+    def test_an_id_that_is_not_a_slot(self, registry):
+        with pytest.raises(ConfigError) as caught:
+            register("_mine")(lambda document: ())
+        assert str(caught.value) == (
+            "pre-flight check id '_mine' is not a schema §6 id (A1..A52, "
+            "B1..B9, C1..C17), optionally with a dotted suffix such as "
+            "'A1.runs' when several functions each decide part of one check. "
+            "The id is what a Finding carries and what a reader looks up; a "
+            "private name here reaches the user as '(check _mine).'"
+        )
+
+    def test_one_id_named_twice_in_one_registration(self, registry):
+        with pytest.raises(ConfigError) as caught:
+            register("A20", "A20")(lambda document: ())
+        assert str(caught.value) == (
+            "this registration names 'A20' twice. The variadic form binds one "
+            "function to several DIFFERENT ids -- @register('A16', 'A17') -- "
+            "and a repeated id is a typo for one that is now claimed by "
+            "nobody."
+        )
+
+    def test_an_id_a_second_function_claims(self, registry):
+        """The two module names are this module's, twice, because both lambdas
+        are defined here.  They are an interpolation rather than wording, and
+        they are written out anyway: the sentence is only useful if it names
+        the two modules truthfully, and an equality pin is what says it does.
+
+        ``test_config_preflight`` and not ``tests.config.test_config_preflight``
+        -- measured: pytest imports this file under its bare stem, so a literal
+        written from the import path in the test header is wrong."""
+        register("A2")(lambda document: ())
+        with pytest.raises(ConfigError) as caught:
+            register("A2")(lambda document: ())
+        assert str(caught.value) == (
+            "pre-flight check 'A2' is registered twice, by "
+            "test_config_preflight and by test_config_preflight. A check id "
+            "has one function, and which of the two would run depends on "
+            "import order."
+        )
+
+    def test_a_check_that_raises(self, registry):
+        @register("A3")
+        def _bad(document):
+            raise KeyError("noise")
+
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document())
+        assert str(caught.value) == (
+            "pre-flight check 'A3' RAISED KeyError: 'noise'. A check returns "
+            "findings and raises nothing -- one that raises aborts the pass "
+            "and hides every finding after it, which is the failure the "
+            "collect-rather-than-raise design exists to prevent."
+        )
+
+    def test_a_where_that_is_not_a_document_path(self, registry):
+        """``parse_path``'s own sentence is quoted INSIDE this one, so the pin
+        holds the nesting too: a version that dropped the parenthesised cause
+        would tell a reader their ``where`` is wrong and not why."""
+        register("A2")(lambda document: (refuse("A2", "", "a sentence."),))
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document())
+        assert str(caught.value) == (
+            "pre-flight check 'A2' emitted where='', which is not a document "
+            "path (Path '' is empty or padded with whitespace. A path is "
+            "'head' or 'head.step.step', where head names a graph node and "
+            "each step is an attribute, optionally with a non-negative "
+            "index.). `where` is where the USER types, not where the code "
+            "lives."
+        )
+
+    def test_a_where_whose_head_is_not_a_section(self, registry):
+        register("A4")(lambda document: (refuse("A4", "beam", "reserved."),))
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document())
+        assert str(caught.value) == (
+            "pre-flight check 'A4' emitted where='beam', whose first segment "
+            "'beam' is not a document section. The sections are "
+            "['schema_version', 'defaults', 'plugins', 'runtime', "
+            "'observation', 'resources', 'model', 'variants', 'inference', "
+            "'runs', 'outputs', 'campaign']."
+        )
+
+
 class TestThePassCollects:
     """Kills: raising on the first finding; a check that raises truncating the
     pass in silence; a check whose return type is a generator being consumed
@@ -1659,6 +1818,35 @@ class TestTheCostAndTheBoundary:
         finally:
             monkeypatch.undo()
 
+    def test_the_two_static_guards_still_walk_the_runner_they_were_written_for(
+            self):
+        """ANTI-VACUITY for the walk itself, and it is a measured hole.
+
+        Both static guards below iterate :func:`_preflight_sources`.  Before
+        Plan 3B they iterated ``_PREFLIGHT_DIR.glob("*.py")`` directly, and
+        ``sweep`` and ``_check_where`` -- the two functions that run every
+        check and validate every ``where`` -- then moved into
+        ``config/passes.py``, which that glob does not reach.  Neither guard
+        would have gone red; they would simply have stopped looking at the
+        code they exist to look at.
+
+        So this asserts the two things a shrinking walk breaks: the runner is
+        IN the walk, and the walk is still a GLOB over ``preflight/`` rather
+        than a list somebody maintains -- a list is shortened by deleting a
+        line, and a module dropped from it is invisible.
+        """
+        walked = _preflight_sources()
+        assert _PASSES in walked, (
+            "config/passes.py is not in the walk, so the two static guards "
+            "below no longer cover sweep() or check_where() -- the functions "
+            "that call every check and validate every `where`."
+        )
+        assert set(_PREFLIGHT_DIR.glob("*.py")) <= set(walked), (
+            "a module under preflight/ is missing from the walk, so the guards "
+            "have become a maintained list rather than a discovery."
+        )
+        assert (_PREFLIGHT_DIR / "__init__.py") in walked
+
     def test_no_module_here_imports_its_way_out_of_the_phase(self):
         """The static half, which the monkeypatches cannot reach: a module that
         writes ``from rheplicant.config.values import resolve_value`` at its
@@ -1667,7 +1855,7 @@ class TestTheCostAndTheBoundary:
         this package for the hook, so importing it back closes a cycle."""
         offenders = {
             path.name: sorted(found)
-            for path in sorted(_PREFLIGHT_DIR.glob("*.py"))
+            for path in _preflight_sources()
             if (found := _out_of_scope_imports(path.read_text()))
         }
         assert offenders == {}, (
@@ -1738,7 +1926,7 @@ class TestTheCostAndTheBoundary:
         """
         offenders = {
             path.name: sorted(found)
-            for path in sorted(_PREFLIGHT_DIR.glob("*.py"))
+            for path in _preflight_sources()
             if (found := _out_of_scope_calls(path.read_text()))
         }
         assert offenders == {}, (

@@ -236,6 +236,88 @@ def _resolved_spec(
     return merged
 
 
+def resolved_specs(section: Mapping[str, Any] | None) -> dict[str, dict]:
+    """``resources:`` -> ``{"resources.<kind>.<name>": spec-after-``extends:``}``.
+
+    **THE KEY IS THE DOTTED STRING**, exactly :func:`build_resources`' own and
+    exactly :attr:`BuiltResources.resources`' -- never the bare name, never a
+    tuple.  Callers select a kind with
+    ``k.startswith("resources.projectors.")``.
+
+    **TOTAL: IT NEVER RAISES**, and that is the whole reason this function
+    exists rather than each reader calling ``_resolved_spec`` itself.
+    Measured, ``_resolved_spec`` raises by name on six malformed shapes: an
+    ``extends:`` cycle, a self-extend, a dangling parent, a cross-kind parent,
+    a non-string ``extends:``, and ``{append: ...}`` beside a sibling key.  A
+    pre-flight check that let one escape would be wrapped by the pass as
+    *"pre-flight check 'A11' RAISED ConfigError: ..."* -- which **aborts the
+    pass and hides every finding after it**, while every existing ``match=``
+    pin still passes, because ``match=`` searches.  A green suite and a
+    stack-trace-shaped user message is the worst of the two failures available
+    here.
+
+    So each malformed entry is **DROPPED** from the mapping and
+    :func:`build_resources` stays the backstop, saying the right sentence at
+    the right phase.  A check that finds an entry missing **stands down** on
+    it: refusing on "I could not tell" refuses documents that build.
+
+    **It reads ONE LAYER.**  A check must not call it once on
+    ``document["resources"]`` and stop -- that closes the base route and leaves
+    the ``variants:`` twin open.  Walk the layers with
+    ``preflight/document.py::_task3_over_layers`` and call this per layer::
+
+        return _task3_over_layers(document, lambda layer: _per_layer(
+            resolved_specs(layer.get("resources"))))
+
+    The walk is not done HERE because it cannot be: ``_task3_over_layers``
+    lives under ``preflight/``, and ``preflight/`` already imports this module
+    (measured: importing ``rheplicant.config.preflight`` puts
+    ``rheplicant.config.resources`` in ``sys.modules``), so importing it back
+    closes a cycle.  This module sits BELOW both passes precisely so that both
+    can read it without either importing the other.
+
+    Args:
+        section: a layer's ``resources:`` block, or ``None``/anything else --
+            a non-mapping is a shape :func:`build_resources` refuses, and a
+            reader that has not built yet must not pre-empt that sentence.
+
+    Returns:
+        Dotted name -> the resolved spec, for every entry that resolves.  A
+        SHALLOW copy per entry, so a caller cannot edit the user's document
+        through it; nested values are still shared, as they are with
+        :func:`build_resources`.
+    """
+    if not isinstance(section, Mapping):
+        return {}
+    specs: dict[str, dict] = {}
+    kind_of: dict[str, str] = {}
+    for kind, entries in section.items():
+        if not isinstance(kind, str) or not isinstance(entries, Mapping):
+            continue
+        for name, spec in entries.items():
+            if not isinstance(name, str) or not isinstance(spec, Mapping):
+                continue
+            dotted = f"resources.{kind}.{name}"
+            specs[dotted] = dict(spec)
+            kind_of[dotted] = kind
+
+    done: dict[str, dict] = {}
+    out: dict[str, dict] = {}
+    for dotted in specs:
+        try:
+            out[dotted] = _resolved_spec(dotted, specs, kind_of, done, [])
+        except Exception:  # noqa: BLE001 -- see below
+            # `except Exception` and not `except ConfigError`, deliberately.
+            # The six measured shapes all raise ConfigError, but this function
+            # promises TOTALITY to callers that run inside a pass, and a
+            # seventh shape arriving as a TypeError from a spec whose keys are
+            # not strings would turn that promise into the aborted-pass
+            # failure above. The entry is dropped and `build_resources` says
+            # the sentence.
+            continue
+    return out
+
+
 def build_resources(section: dict, context: ResolutionContext) -> BuiltResources:
     """Build every entry of a ``resources:`` section, once each, in dependency order.
 

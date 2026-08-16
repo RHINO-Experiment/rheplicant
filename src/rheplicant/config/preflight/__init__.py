@@ -52,24 +52,28 @@ a cycle, since ``document`` imports this package's ``preflight`` at its head.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, Report
-from rheplicant.config.paths import parse_path
+from rheplicant.config.passes import binder, check_where, sweep
 
 __all__ = ["CHECKS", "preflight", "register"]
 
 #: One check: a document in, findings out, nothing raised.
 Check = Callable[[Mapping[str, Any]], Iterable[Finding]]
 
-#: A registry SLOT: a schema §6 id, optionally with a dotted suffix.  Named
-#: for this task rather than for a check, per §3.1's rule about a private
-#: helper that is not check-shaped: no later task writes this file, so the
-#: prefix costs nothing and keeps the convention unbroken.
-_T2_SLOT = re.compile(r"[ABC][1-9][0-9]*(\.[a-z_]+)?")
+#: The phase word every refusal ABOUT A CHECK opens with, and the name a
+#: reader is told to write.  Both are arguments to ``passes.py``'s runner now
+#: rather than constants inside it, because three passes share that runner and
+#: differ in exactly these two words.  **They are pinned by equality on whole
+#: messages** in ``test_config_preflight.py::
+#: TestEveryRefusalOfThisPassIsPinnedWHOLE`` -- measured, every pin that
+#: existed before was a substring beginning after the word, and rewriting all
+#: six occurrences left ``tests/config`` at exit 0.
+_LABEL = "pre-flight"
+_DECORATOR = "register"
 
 # --- what `document._sweep` knew, moved with it -----------------------------
 # These three were `config/document.py:31-40` and are read by `_structural`
@@ -95,79 +99,16 @@ CHECKS: dict[str, Check] = {}
 
 
 def register(*checks: str) -> Callable[[Check], Check]:
-    """Bind one or more check ids to one function.
+    """Bind one or more check ids to one function, in :data:`CHECKS`.
 
-    Raises ``ConfigError`` -- never an ``assert``, which ``python -O`` strips.
-    That is the ledger item Task 1 closed at ``sections/exit_support.py:31``,
-    where the strip was measured to let the second registration win in
-    silence; this registry is written the same way from the start.
-
-    A SLOT is a schema §6 id, optionally with a dotted suffix (``"A1.runs"``)
-    when several functions each decide part of one check (§3.2 (a)).
-    ``Finding.check`` stays the bare id.
-
-    VARIADIC, not stacked.  ``@register("A20") @register("A21")`` applies
-    BOTTOM-UP, so the stacked form inserts A23 first and ``CHECKS`` insertion
-    order -- which IS run order, and which §2.6 item 4's "A20 and A21 before
-    A23" rests on -- comes out reversed.
-
-    Every id is validated before any is bound, and every id is checked for a
-    clash before any is bound: a registration that failed half way through
-    would leave a module's ids partly claimed, after which the next import of
-    that module reports "registered twice" about a module that never finished.
-
-    Raises:
-        ConfigError: no id at all; an id that is not a string (the
-            ``@register`` written without its parentheses); an id that is not
-            a schema §6 slot; one id named twice in one call; or an id another
-            function already claims.
+    The body is :func:`~rheplicant.config.passes.binder`, which is this
+    function as Plan 3A wrote it with the registry and the two words passed
+    in.  Its five refusals, its validate-all-before-binding-any order and its
+    variadic-not-stacked contract are unchanged and documented there; what
+    stays here is the binding of THIS pass's registry and THIS pass's words,
+    so that every message it says is byte-identical to 3A's.
     """
-    if not checks:
-        raise ConfigError(
-            "register() takes one or more check ids -- @register('A30'), or "
-            "@register('A16', 'A17') when one function decides several. A "
-            "registration with no id binds nothing, so the check it decorates "
-            "never runs and nothing says so."
-        )
-    for check in checks:
-        if not isinstance(check, str):
-            raise ConfigError(
-                f"pre-flight check id {check!r} is not a string. @register is "
-                "called with its ids -- @register('A30') -- and a bare "
-                "@register hands the decorated function in as an id."
-            )
-        if not _T2_SLOT.fullmatch(check):
-            raise ConfigError(
-                f"pre-flight check id {check!r} is not a schema §6 id "
-                "(A1..A52, B1..B9, C1..C17), optionally with a dotted "
-                "suffix such as 'A1.runs' when several functions each "
-                "decide part of one check. The id is what a Finding "
-                "carries and what a reader looks up; a private name here "
-                "reaches the user as '(check _mine).'"
-            )
-    for check in checks:
-        if checks.count(check) > 1:
-            raise ConfigError(
-                f"this registration names {check!r} twice. The variadic form "
-                "binds one function to several DIFFERENT ids -- "
-                "@register('A16', 'A17') -- and a repeated id is a typo for "
-                "one that is now claimed by nobody."
-            )
-
-    def bind(fn: Check) -> Check:
-        for check in checks:
-            if check in CHECKS:
-                raise ConfigError(
-                    f"pre-flight check {check!r} is registered twice, by "
-                    f"{CHECKS[check].__module__} and by {fn.__module__}. A "
-                    "check id has one function, and which of the two would "
-                    "run depends on import order."
-                )
-        for check in checks:
-            CHECKS[check] = fn
-        return fn
-
-    return bind
+    return binder(CHECKS, *checks, label=_LABEL, decorator=_DECORATOR)
 
 
 def _structural(document: Mapping[str, Any]) -> None:
@@ -220,67 +161,27 @@ def preflight(document: Mapping[str, Any]) -> Report:
     order, and handed back for the caller to raise or emit.
     """
     _structural(document)
-    findings: list[Finding] = []
-    seen: set[int] = set()
-    for check, fn in CHECKS.items():
-        # ONE FUNCTION CARRIES SEVERAL IDS (§3.1) and five tasks do it:
-        # `_blocks` is A16-A19, `_prior_gates` is A20/A21/A23, `_counts` is
-        # A24+A25, `_decided` is A27+A28.  Iterating `CHECKS` naively calls
-        # `_blocks` FOUR times and emits every finding four times.
-        #
-        # By `id`, not by name: two module-level checks can share a
-        # `__name__` (every lambda is `<lambda>`), and a walk keyed on the
-        # name would drop the second in silence.  `id` cannot be recycled
-        # here because `CHECKS` holds a reference to every function for the
-        # whole loop.
-        if id(fn) in seen:
-            continue
-        seen.add(id(fn))
-        try:
-            found = tuple(fn(document))
-        except Exception as error:
-            raise ConfigError(
-                f"pre-flight check {check!r} RAISED "
-                f"{type(error).__name__}: {error}. A check returns findings "
-                "and raises nothing -- one that raises aborts the pass and "
-                "hides every finding after it, which is the failure the "
-                "collect-rather-than-raise design exists to prevent."
-            ) from error
-        for finding in found:
-            _check_where(check, finding)
-            findings.append(finding)
-    return Report(findings=tuple(findings))
+    return sweep(CHECKS, document, label=_LABEL, sections=_SECTIONS)
 
 
 def _check_where(check: str, finding: Finding) -> None:
-    """``Finding.where`` is a path into the USER'S document, never into ``src/``.
+    """This pass's ``where`` guard: :func:`~rheplicant.config.passes.check_where`
+    with this pass's label and section names already bound.
 
-    Not a test, because a ``where`` is often computed from the document and a
-    test on a fixed set of documents cannot see the branch that builds a bad
-    one.  ``parse_path`` (``config/paths.py:38``) is the layer's own path
-    grammar and already refuses a source path: measured,
-    ``parse_path('src/rheplicant/config/model.py')`` raises and
-    ``parse_path('runs[2].blocks[0]')`` returns ``('runs', 2, 'blocks', 0)``,
-    which is the head this needs.
+    **Kept as a name, with its Plan 3A two-argument signature**, for the same
+    reason :func:`register` is: the IMPLEMENTATION moved to ``passes.py`` and
+    lives in exactly one place, while the spelling a caller uses stays put.
+    It is not a second copy -- there is no message here, only a binding of the
+    two words this pass says.
 
-    Takes the registry SLOT rather than ``finding.check``: the slot is what
-    names the culprit, and ``finding.check`` is empty for a finding that
-    carries no id at all.
+    Measured when the extraction landed: ``tests/config/test_preflight_values.py``
+    calls this directly, in a 3-way hostile-document product that drives every
+    check's ``where`` through the guard OUTSIDE the pass.  Deleting the name
+    took that module to a collection ``ImportError`` -- pytest exit **2**, not
+    1 -- which is the shape that reads as "the suite is broken" rather than as
+    "a test failed".
     """
-    try:
-        head = parse_path(finding.where)[0]
-    except ConfigError as error:
-        raise ConfigError(
-            f"pre-flight check {check!r} emitted where={finding.where!r}, "
-            f"which is not a document path ({error}). `where` is where the "
-            "USER types, not where the code lives."
-        ) from error
-    if head not in _SECTIONS:
-        raise ConfigError(
-            f"pre-flight check {check!r} emitted where={finding.where!r}, "
-            f"whose first segment {head!r} is not a document section. The "
-            f"sections are {list(_SECTIONS)}."
-        )
+    check_where(_LABEL, check, finding, _SECTIONS)
 
 
 # Importing the check modules is what registers their ids.  The import sits at
