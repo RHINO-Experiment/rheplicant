@@ -18,6 +18,7 @@ shape 2C shipped without and paid for.
 """
 
 import ast
+import gc
 import importlib
 import io
 import os
@@ -29,7 +30,9 @@ import sys
 import tarfile
 import time
 import warnings
+import weakref
 from collections.abc import Callable
+from typing import NamedTuple
 
 import pytest
 
@@ -46,6 +49,10 @@ from rheplicant.config.preflight import (
     _structural,
     preflight,
     register,
+)
+from rheplicant.config.preflight.document import (
+    _task3_build_layers,
+    _task3_layers,
 )
 from rheplicant.config.sections.runs import run_document
 from rheplicant.core.operator import AbstractOperator
@@ -185,9 +192,21 @@ def _foot_imports(source: str) -> set[str]:
 
     ``node.level == 1`` is accepted as well as ``node.module``, so the
     relative spelling ``from . import document`` resolves too.
+
+    **MODULE-LEVEL statements only, and that is a correction measured after it
+    bit.**  This walked the whole tree, so an import inside ANY function body
+    answered for the foot: a one-line ``from rheplicant.config.preflight import
+    document`` inside ``preflight()`` -- added to drop the layer memo -- made
+    deleting ``document``'s own foot import green across the whole of
+    ``tests/config``, in the very file whose job is to notice that.  A foot
+    import is a module-level statement by definition; anything else is a call-
+    time import that does not run at package import and therefore registers
+    nothing at the moment this guard is about.  ``tree.body`` is the whole fix,
+    and ``test_the_matcher_reads_the_import_and_not_a_mention_of_one``'s
+    ``in-a-function`` case is what keeps it.
     """
     found = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.parse(source).body:
         if isinstance(node, ast.ImportFrom) and (
                 (node.module or "").startswith("rheplicant.config.preflight")
                 or (node.level == 1 and node.module is None)):
@@ -1866,6 +1885,54 @@ class TestTheCostAndTheBoundary:
             "cycle)."
         )
 
+    def test_no_module_here_head_imports_apply_variant(self):
+        """The precondition :data:`_COLD_COST_CHILD`'s merge counter rests on,
+        which was an unasserted claim in a docstring until a review walked
+        through it.
+
+        The counter patches ``rheplicant.config.layering``'s ATTRIBUTE, so a
+        caller that writes ``from rheplicant.config.layering import
+        apply_variant`` at its head holds the function by value and every merge
+        it makes is invisible.  Measured: an eleventh merge site spelled that
+        way adds 21 real deep merges to the guard's own document and leaves
+        ``test_the_layers_are_built_once_per_declared_variant`` reading 21, with
+        the whole module green.  That is the same hole as a check merging the
+        variants itself -- which the count DOES catch -- arriving through the
+        one door it cannot see.
+
+        Module-level statements only: the two legitimate callers
+        (``_task3_layers`` and ``_variant_text``) import it inside the function,
+        which is what makes the attribute read at call time.
+
+        **What this sees, and what it does not -- because it reads like a twin
+        of ``_foot_imports`` and is not one.**  It catches
+        ``from rheplicant.config.layering import apply_variant`` written as a
+        bare module-level statement, which is how anyone would actually write
+        it.  It does NOT catch that import wrapped in ``try:``/``if``, nor
+        ``import rheplicant.config.layering`` followed by attribute access at
+        call time (which is fine anyway -- the attribute is read late, so the
+        counter sees it).  The wrapped form is contrived, and the asymmetry is
+        recorded rather than closed because the two guards FAIL IN OPPOSITE
+        DIRECTIONS: a spelling ``_foot_imports`` cannot see makes a module read
+        as un-imported and turns that guard RED, while a spelling this one
+        cannot see reads as no offender and leaves it GREEN.  Fail-safe there,
+        fail-open here.  A reader who assumes both are exhaustive because they
+        share a shape would be wrong about this one.
+        """
+        offenders = sorted(
+            path.name for path in _preflight_sources()
+            for node in ast.parse(path.read_text()).body
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "rheplicant.config.layering"
+        )
+        assert offenders == [], (
+            f"{offenders} import from rheplicant.config.layering at module "
+            "scope. apply_variant must be imported INSIDE the function that "
+            "calls it, or the merge count in _COLD_COST_CHILD -- the "
+            "instrument that says the layer walk has not regressed -- cannot "
+            "see the merges it makes."
+        )
+
     @pytest.mark.parametrize(("source", "expected"), [
         ("from rheplicant.config.sections.compose import build_model",
          {"build_model"}),
@@ -2089,8 +2156,31 @@ class TestTheCostAndTheBoundary:
 #: The child of :class:`TestTheColdCostOnARealDocument`.  A fresh process and
 #: ONE ``preflight()`` call, because the cost this is about is a deferred
 #: import and a second call cannot see one.
+#:
+#: **``apply_variant`` is counted here, and the count -- not the clock -- is
+#: what the class asserts on.**  The patch goes in before ``preflight`` is
+#: imported, but that is belt and braces: every caller of ``apply_variant``
+#: under ``preflight/`` imports it INSIDE the function, so the module attribute
+#: is read at call time and a patch installed at any point before the pass is
+#: seen.  Its cost is one Python frame per call -- twenty-one of them on this
+#: document -- which is microseconds against a pass measured in milliseconds,
+#: so the same child can carry the clock and the counter without the counter
+#: moving the clock.
 _COLD_COST_CHILD = '''
 import sys, time
+
+import rheplicant.config.layering as _layering
+
+_MERGES = []
+_real_apply_variant = _layering.apply_variant
+
+
+def _counting_apply_variant(document, name):
+    _MERGES.append(name)
+    return _real_apply_variant(document, name)
+
+
+_layering.apply_variant = _counting_apply_variant
 
 from rheplicant.config.preflight import preflight
 from tests.config.preflight_helpers import BASE_MODEL, preflight_document
@@ -2113,7 +2203,37 @@ print(" ".join(sorted(name for name in sys.modules
                       if name == "rheplicant.inference"
                       or name.startswith("rheplicant.inference.")
                       or name in ("numpyro", "healpy", "h5py"))))
+print(len(_MERGES))
+print(len(document.get("variants") or {}))
 '''
+
+
+#: How many fresh processes the wall-clock backstop takes its minimum over.
+#: Three, because a review measured one child in twenty stalling to 55.48 ms on
+#: a 14 ms pass under ``-n 16`` plus eight CPU hogs: at that rate three
+#: independent children all stalling is about one run in eight thousand, and
+#: each child costs ~0.43 s.  It is not five because this is a backstop and the
+#: instrument beside it is exact.
+_COLD_CHILDREN = 3
+
+
+class _ColdRun(NamedTuple):
+    """One child process's five prints, named rather than positional.
+
+    The child grew two prints when the count became the instrument, and a
+    caller unpacking a bare tuple would have taken the wrong one silently.
+    """
+
+    #: Seconds for ONE ``preflight()`` call in a fresh process.
+    cold: float
+    #: How many findings that call produced -- the anti-vacuity read.
+    findings: int
+    #: Modules from the inference layer that reached ``sys.modules``.
+    dragged: list[str]
+    #: How many times ``apply_variant`` ran during the pass.
+    merges: int
+    #: How many variants the child's document declares.
+    variants: int
 
 
 class TestTheColdCostOnARealDocument:
@@ -2136,44 +2256,152 @@ class TestTheColdCostOnARealDocument:
     3.4 ms, 12 ms and **26 ms**, and ``sys.modules`` gains six config modules
     and nothing from ``rheplicant.inference`` at all.
 
-    **What is still linear, and why the page now says so rather than
-    promising a number for every document.**  ``document._task3_over_layers``
-    runs the pass once per DECLARED VARIANT, which §2.1 says is the right
-    granularity -- a variant IS a different document -- and measured on the
-    last row, 94 % of what remains is ``apply_variant``'s ``deepcopy``,
-    called once per variant per check that layers (five of them).  So 40
-    variants at 40 runs is ~60 ms and over budget.  The page states the shape
-    it holds for; this class pins the row the page names.
+    **What WAS still linear in the number of checks, and what fixed it.**
+    ``document._task3_over_layers`` runs the pass once per DECLARED VARIANT,
+    which §2.1 says is the right granularity -- a variant IS a different
+    document -- and 88-94 % of what remained after the ``MIN_DRAWS`` fix was
+    ``apply_variant``'s deep merge.  It was called once per declared variant
+    **per check that layers**, and the number of such checks grew: four at
+    ``ea4839b``, ELEVEN at the wave-1 tip -- ten ``_task3_over_layers`` call
+    sites plus ``_variant_text``, which merged every variant a second time to
+    run ``_structural`` over it.  TEN of the eleven run on this child's
+    document, because ``noise``'s walk is gated off on it.
+    Measured on that document, which declares twenty-one variants:
+    210 merges and a 45 ms pass, against a 50 ms budget it then breached 3
+    runs in 5 under ``pytest tests/config -n 16`` (52.4, 71.7, 60.4 ms).
+
+    ``_task3_layers`` now builds a document's layers once per pass and hands
+    the same tuple to every caller: **21 merges, 13 ms**, and neither number
+    moves when an eleventh layering check is added.  That is a win against
+    ``ea4839b``'s 105 merges and 21-23 ms as well as against wave 1.
+
+    **So the instrument here is the merge COUNT, not the clock.**
+    ``test_the_layers_are_built_once_per_declared_variant`` is the assertion
+    that can see the thing this class is about; the wall clock below is a
+    backstop, and says so.
     """
 
-    def _run(self, runs: int, variants: int):
+    def _run(self, runs: int, variants: int) -> _ColdRun:
         source = (_COLD_COST_CHILD.replace("__RUNS__", str(runs))
                   .replace("__VARIANTS__", str(variants)))
         done = subprocess.run([sys.executable, "-c", source],
                               capture_output=True, text=True, cwd=str(_ROOT))
         assert done.returncode == 0, done.stdout + done.stderr
-        cold, found, dragged = done.stdout.split("\n")[:3]
-        return float(cold), int(found), dragged.split()
+        cold, found, dragged, merges, declared = done.stdout.split("\n")[:5]
+        return _ColdRun(float(cold), int(found), dragged.split(),
+                        int(merges), int(declared))
+
+    def test_the_layers_are_built_once_per_declared_variant(self):
+        """THE instrument: a call count, which no load on this box can move.
+
+        The property is that one pass merges each declared variant ONCE --
+        not once per variant per check that walks layers.  It is exact, it is
+        the thing that regressed, and unlike the wall clock below it cannot be
+        made to pass by a quiet machine or to fail by a loud one.
+
+        **R9, both halves, run rather than asserted.**  Reverting
+        ``_task3_layers`` to the eager walk takes this to 210 and the assertion
+        red.  Adding an eleventh check that walks layers THROUGH
+        ``_task3_over_layers`` leaves it at 21 and green -- which is the
+        property, not a hole: the count is meant to be independent of how many
+        checks layer.  Adding one that calls ``apply_variant`` itself, the way
+        ``_variant_text`` used to, takes it to 42 and red, which is the
+        regression a reader of this test most needs caught.
+
+        Both anti-vacuity reads are here because either one alone is passable
+        by an empty document: a child whose document declared no variants
+        would assert ``0 == 0``, and one that earned no findings would be
+        counting merges nothing looked at.
+        """
+        result = self._run(runs=40, variants=20)
+        assert result.variants == 21, (
+            f"the child's document declares {result.variants} variants, not "
+            "the base fixture's one plus this child's twenty -- the count "
+            "below would be asserting about a document nobody wrote"
+        )
+        assert result.findings >= 40, (
+            f"the child's document earned {result.findings} findings, fewer "
+            "than one per run -- it is not exercising the checks whose cost "
+            "this measures"
+        )
+        assert result.merges == result.variants, (
+            f"one pass merged {result.merges} variants for "
+            f"{result.variants} declared. apply_variant is a deep merge of "
+            "the whole document; it belongs to the pass, not to each check "
+            "that walks layers. Measured before preflight/document.py's "
+            "layer memo: 210, at the ten merge sites this document reaches."
+        )
 
     def test_a_cold_pass_on_forty_runs_and_twenty_variants_is_under_the_budget(
             self):
-        """The row that breached, pinned.
+        """§5's 50 ms, as a BACKSTOP -- not as this class's instrument.
 
-        ANTI-VACUITY is the finding count: a document that earns nothing has
-        not run the checks whose cost is the subject, and this one earns one
-        A24 per ``plan.sample`` run.  Without it a typo in the child's patch
-        would leave a valid document being timed and the number would mean
-        nothing.
+        A one-shot wall clock, in a subprocess spawned from an xdist worker,
+        on a box running its own suite at ``-n 16``, measures the box as much
+        as the pass.  Measured: at ``ea4839b`` -- with nothing this plan wrote
+        present -- it went red 2 runs in 5 under ``-n 16`` and 1 in 9 running
+        serially, at 52.2 ms against a 21-23 ms pass; at the wave-1 tip, 3 in
+        5.  Four reviewers hit it independently.  So the number that decides
+        whether the layer walk regressed is
+        ``test_the_layers_are_built_once_per_declared_variant``'s count, and
+        this one is here to catch a cost that arrives from somewhere the count
+        cannot see -- another 43-module deferred import, a check that reads a
+        file -- rather than to police a few milliseconds.
+
+        The bound is left at §5's 50 ms rather than loosened, because the memo
+        bought the margin that makes it safe: 13.1-14.5 ms in a quiet process,
+        against 45.3 ms quiet before it.
+
+        **The number is the MINIMUM over :data:`_COLD_CHILDREN` fresh
+        processes, and one reading is not enough -- measured, not assumed.**  A
+        review spawned twenty cold children under ``-n 16`` plus eight CPU-bound
+        processes and read ``min 13.77, median 14.22, max 55.48 ms``: one child
+        in twenty stalled past the bound on a 14 ms measurement.  A single
+        reading would still be deciding this verdict on scheduler noise, which
+        is the defect this whole commit exists to remove.  Contention can only
+        ADD time, so the minimum is the least-noise estimator -- the argument
+        ``inflight_helpers.best_ms`` makes, and the correction
+        ``test_preflight_depends_cost.py::_COST_CHILD`` already shipped for the
+        identical shape.
+
+        **Across CHILDREN and not across passes inside one child, which is not
+        interchangeable here.**  ``_COST_CHILD`` can take its minimum over five
+        calls because what it times is a per-layer walk.  This class times a
+        COLD pass: the regression it was built for was a deferred
+        ``from rheplicant.inference import MIN_DRAWS`` costing 43 modules on the
+        FIRST call and nothing after, so a minimum over passes in one process
+        would report the warm number and never see it again.  Every sample here
+        is a first call in its own interpreter.
+
+        **Its measured sensitivity, so that nobody reads it as more than it
+        is:** making ``apply_variant`` ten times slower while leaving the call
+        count alone lands this at 43-46 ms and it stays GREEN.  A cost that
+        arrives per merge is the count's blind spot AND nearly this one's; what
+        this catches is a cost that arrives in bulk, which is the shape every
+        regression this class has actually seen has had.
+
+        ANTI-VACUITY is the finding count, on EVERY child: a document that
+        earns nothing has not run the checks whose cost is the subject, and
+        this one earns one A24 per ``plan.sample`` run.  ``>=`` and not ``==``
+        because the child's document is ``preflight_document()``, the shared
+        base fixture, and a sibling task registering a check that fires on 40
+        ``plan.sample`` runs would take an exact count red in a file it never
+        opened (R8).
         """
-        cold, found, _ = self._run(runs=40, variants=20)
-        assert found == 40, (
-            f"the child's document earned {found} findings, not one per run "
-            "-- it is not exercising the checks whose cost this measures"
-        )
-        assert cold < 0.05, (
-            f"a cold pass on 40 plan.sample runs and 20 variants took "
-            f"{cold * 1000:.1f} ms against §5's 50 ms. Measured after the "
-            "MIN_DRAWS fix: 26 ms."
+        results = [self._run(runs=40, variants=20)
+                   for _ in range(_COLD_CHILDREN)]
+        for result in results:
+            assert result.findings >= 40, (
+                f"a child's document earned {result.findings} findings, fewer "
+                "than one per run -- it is not exercising the checks whose "
+                "cost this measures"
+            )
+        best = min(result.cold for result in results)
+        assert best < 0.05, (
+            f"the fastest of {_COLD_CHILDREN} cold passes on 40 plan.sample "
+            f"runs and 20 variants took {best * 1000:.1f} ms against §5's "
+            "50 ms. This is the backstop, so read the merge count first: "
+            "measured after the layer memo, 13.1-14.5 ms in a quiet process."
         )
 
     def test_the_cold_pass_drags_in_no_part_of_the_inference_layer(self):
@@ -2186,11 +2414,145 @@ class TestTheColdCostOnARealDocument:
         draft reached for instead, costs exactly the same 43 because
         importing the submodule runs the package ``__init__`` first.
         """
-        _, _, dragged = self._run(runs=40, variants=20)
-        assert dragged == [], (
-            f"{dragged} reached sys.modules during one pre-flight pass. The "
-            "pass reads text; nothing under rheplicant.inference is text."
+        result = self._run(runs=40, variants=20)
+        assert result.dragged == [], (
+            f"{result.dragged} reached sys.modules during one pre-flight "
+            "pass. The pass reads text; nothing under rheplicant.inference "
+            "is text."
         )
+
+
+class _WeakDocument(dict):
+    """A document that can be weak-referenced, which a bare ``dict`` cannot.
+
+    Only :class:`TestTheLayerMemo` needs it, and only to ask what the memo
+    keeps alive.
+    """
+
+
+def _prefixes(document) -> list[str]:
+    """The layer prefixes ``_task3_layers`` answers for ``document``."""
+    return [prefix for prefix, _ in _task3_layers(document)]
+
+
+class TestTheLayerMemo:
+    """``_task3_layers`` builds one document's layers once, and no more.
+
+    The cost this buys is :class:`TestTheColdCostOnARealDocument`'s subject --
+    210 deep merges down to 21.  What lives here is the memo's own contract:
+    which documents it answers for, what it keeps alive, and the one thing it
+    deliberately cannot see.
+
+    **These tests are here rather than in ``test_preflight_document.py``
+    because they belong to the cold guard above**, whose flake they exist to
+    have fixed; the memo has no reader other than that guard's number.
+    """
+
+    def _document(self, **variants):
+        return preflight_document(
+            variants={name: {"runtime": {"seed": seed}}
+                      for name, seed in variants.items()})
+
+    def test_one_document_is_walked_once(self):
+        """The hit path, at its narrowest: the SAME tuple, not an equal one.
+
+        An equal tuple would mean the merge ran again, which is the whole
+        cost this exists to remove -- so identity is the assertion and
+        equality would pass under the bug.
+        """
+        document = self._document(a=1, b=2)
+        assert _task3_layers(document) is _task3_layers(document)
+
+    def test_a_second_document_gets_its_own_layers(self):
+        """One entry, and it is replaced rather than shared.
+
+        Kills a memo that answers the first document it ever saw for every
+        document after it -- which passes the test above and every cost
+        assertion in this file.
+        """
+        first = self._document(a=1)
+        second = self._document(b=2, c=3)
+        assert "variants.a" in _prefixes(first)
+        assert "variants.a" not in _prefixes(second)
+        assert {"variants.b", "variants.c"} <= set(_prefixes(second))
+        assert "variants.a" in _prefixes(first)
+
+    def test_the_memo_keeps_its_document_alive(self):
+        """What the reference buys, stated as the property it actually has.
+
+        ``id()`` is an address, and an address is reused as soon as its object
+        is freed -- so a memo that kept the bare integer could answer a hit for
+        a document that merely landed where the first one used to be.  The
+        entry holds the document itself and the hit path asserts ``is``, so
+        that cannot happen.
+
+        **This test cannot fail if the reference is dropped, and that is worth
+        saying plainly rather than dressing up.**  Layer 0 is ``("", document)``
+        -- the layers hold the document too -- and the memo has ONE entry, so
+        today the address of a cached document is un-recyclable either way.
+        The reference is written down so the guarantee survives a walk that
+        hands out a copy as layer 0, or a memo that ever holds two entries;
+        what this test pins is the reachability the source claims, not a bug
+        it can currently reproduce.
+        """
+        document = _WeakDocument(self._document(a=1))
+        _task3_layers(document)
+        witness = weakref.ref(document)
+        del document
+        gc.collect()
+        assert witness() is not None, (
+            "the layer memo does not keep its document reachable, so its "
+            "id() can be handed to another object while the entry is live"
+        )
+
+    def test_a_mutation_inside_one_pass_is_not_seen_by_the_memo(self):
+        """The limit, pinned so that it is documented rather than discovered.
+
+        The assumption the memo rests on is the one the walk already rested
+        on: a document does not change between two checks of one pass.  Every
+        check reads text, and layer 0 has always been the caller's own object
+        shared by all of them.  Between two calls WITHIN a pass, a mutation is
+        invisible -- and the uncached walk beside it is what makes this a
+        statement about the memo rather than about the walk.
+        """
+        document = self._document(a=1)
+        before = _task3_layers(document)
+        document["variants"]["b"] = {"runtime": {"seed": 2}}
+        assert _task3_layers(document) is before
+        assert "variants.b" not in _prefixes(document)
+        assert "variants.b" in [prefix for prefix, _
+                                in _task3_build_layers(document)]
+
+    def test_a_document_edited_between_two_passes_is_read_afresh(self):
+        """And the limit stops at the pass boundary, which is not optional.
+
+        R4's shape -- earn a refusal, write the remedy the message advises
+        into the document, ask again -- edits a document in place between two
+        ``preflight`` calls, and the suite is full of it;
+        ``test_preflight_instrument.py:970`` is one and went red against a memo
+        that outlived the pass.  ``preflight`` drops the entry at the head of
+        every pass, so the second read is of the document as it is now.
+
+        Asserted on the finding's own ``where`` rather than on the id set:
+        ``A1`` is on the shared base document already (§0.3 E.11), so
+        ``"A1" not in ids(doc)`` would be false for reasons that have nothing
+        to do with this variant.
+        """
+        document = preflight_document(variants={"v": {"campaign": {"of": 1}}})
+        assert any(finding.where == "variants.v"
+                   for finding in findings(document)), (
+            "the variant this test edits earns nothing, so the second read "
+            "below could not tell a fresh walk from a stale one"
+        )
+        del document["variants"]["v"]["campaign"]
+        assert not any(finding.where == "variants.v"
+                       for finding in findings(document)), (
+            "a second pass answered from the first pass's layers: the "
+            "document was edited between them and preflight() is supposed to "
+            "drop the layer memo at the head of every pass"
+        )
+        assert _prefixes(document) == [""] + [
+            f"variants.{name}" for name in document["variants"]]
 
 
 #: A placeholder inside a harvested message: where an f-string interpolated
@@ -2501,6 +2863,13 @@ class TestTheFootImportCannotRot:
             f"{sorted(declared - present)} are imported at the foot and do "
             "not exist."
         )
+        # This second direction lost one case when `_foot_imports` narrowed to
+        # module-level statements: a name imported only inside a function, for
+        # a module that does not exist, is no longer in `declared` and is no
+        # longer reported here.  Immaterial -- a module that does not exist
+        # registers no checks, and the import raises `ImportError` the first
+        # time the function runs -- but it is a real change in what this line
+        # covers, and it belongs here rather than in a later bug report.
 
     def test_every_module_under_preflight_contributes_a_slot(self):
         """PRESENCE IS NOT CONTRIBUTION, and the test above only reads
@@ -2551,8 +2920,13 @@ class TestTheFootImportCannotRot:
         ("# from rheplicant.config.preflight import document", set()),
         ('"""from rheplicant.config.preflight import document."""', set()),
         ("from rheplicant.config.findings import Finding", set()),
+        ("def preflight(document):\n"
+         "    from rheplicant.config.preflight import document as _d\n", set()),
+        ("if True:\n"
+         "    from rheplicant.config.preflight import document\n", set()),
     ], ids=["plain", "several", "aliased", "the-shipped-alias", "relative",
-            "import-form", "commented", "in-a-docstring", "another-package"])
+            "import-form", "commented", "in-a-docstring", "another-package",
+            "in-a-function", "in-a-branch"])
     def test_the_matcher_reads_the_import_and_not_a_mention_of_one(
             self, source, expected):
         """ANTI-VACUITY, and the reason this is ``ast`` and not ``grep``.
@@ -2561,5 +2935,13 @@ class TestTheFootImportCannotRot:
         with -- the commented and docstring forms make a missing import read
         as present, and the last one makes an unrelated import read as a check
         module.
+
+        **``in-a-function`` is the one that shipped broken.**  A call-time
+        import inside ``preflight()`` satisfied this matcher and made deleting
+        a real foot import green across the whole suite; it is spelled here
+        exactly as it was written.  ``in-a-branch`` is its sibling: a
+        conditional import is module-level in the AST but not unconditional at
+        package import, and a guard that counted it would answer "imported" for
+        a module that may not be.
         """
         assert _foot_imports(source) == expected

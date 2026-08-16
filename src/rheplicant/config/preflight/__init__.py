@@ -159,9 +159,36 @@ def preflight(document: Mapping[str, Any]) -> Report:
     Never reads a file, never builds an operator, never resolves a value node.
     Structural problems raise; everything else is collected, in registration
     order, and handed back for the caller to raise or emit.
+
+    The bookkeeping is ``document.py``'s layer memo, whose lifetime is exactly
+    one pass: the ELEVEN places that walk ``variants:`` -- ten
+    ``_task3_over_layers`` call sites across six of this package's eleven
+    modules, plus ``_variant_text``'s own merge -- share one merge instead of
+    paying for their own.  The entry is dropped on the way IN so that a document
+    edited between two passes -- R4's "apply the message's own advice" shape --
+    is read as it is now, and on the way OUT so that a process which loads one
+    config does not hold the document plus one deep merge of it per declared
+    variant for the rest of its life (777 kB on the cold guard's own document,
+    measured).  ``finally``, so a refusal from ``_structural`` or a check does
+    not leak the entry either.
+
+    **It goes through the FOOT ALIAS, and that is not a style choice.**  A
+    function-local ``from rheplicant.config.preflight import document`` also
+    works, and it silently disarms the completeness guard this module's head
+    docstring points at: ``_foot_imports`` is what decides whether every module
+    under ``preflight/`` is imported, and an import anywhere in this file
+    answers for one anywhere else.  Measured -- with the function-local
+    spelling, deleting ``document``'s own foot import left the whole of
+    ``tests/config`` green, where at ``4d2f404`` it was red.
+    ``_document_checks`` is bound by that foot import and resolved at call
+    time, so using it keeps the guard's only evidence the foot import itself.
     """
-    _structural(document)
-    return sweep(CHECKS, document, label=_LABEL, sections=_SECTIONS)
+    _document_checks._task3_forget_layers()
+    try:
+        _structural(document)
+        return sweep(CHECKS, document, label=_LABEL, sections=_SECTIONS)
+    finally:
+        _document_checks._task3_forget_layers()
 
 
 def _check_where(check: str, finding: Finding) -> None:

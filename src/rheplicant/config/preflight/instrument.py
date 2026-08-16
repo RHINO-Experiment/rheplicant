@@ -645,30 +645,38 @@ _RULES = (_tone_text, _static_fields, _region_key)
 def _instrument_text(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A13's text legs, A40 and A47 -- three rules, one walk over the layers.
 
-    **One function for three slots, and the reason is measured cost rather
-    than taste.**  ``sweep`` de-duplicates by function identity precisely so
-    that a function may carry several ids, and every pass already does it --
-    ``preflight/fitting.py``'s ``_blocks`` is A16-A19 and ``_prior_gates`` is
-    A20/A21/A23.  Here the saving is ``_task3_over_layers``, which calls
-    ``apply_variant`` -- a ``deepcopy`` -- once per declared variant PER
-    REGISTERED CHECK THAT LAYERS.  Measured with the shipped cold-cost child
-    (``test_config_preflight.py::TestTheColdCostOnARealDocument``) on its
-    guard's own row -- forty runs, twenty variants -- against its **50 ms**
-    budget, in fresh processes:
+    **One function for three slots.**  ``sweep`` de-duplicates by function
+    identity precisely so that a function may carry several ids, and every pass
+    already does it -- ``preflight/fitting.py``'s ``_blocks`` is A16-A19 and
+    ``_prior_gates`` is A20/A21/A23.
 
-    ====================================  =========  ===========
-    registration                          best       median
-    ====================================  =========  ===========
-    without this module                   22.6 ms    23.4 ms
-    these three ids on ONE function       31.0 ms    32.1 ms
-    the same three registered separately  42.7 ms    **78.3 ms**
-    ====================================  =========  ===========
+    **The cost argument that used to be written here is DEAD, and the table it
+    carried was falsified rather than merely aged.**  It said the saving was
+    ``_task3_over_layers`` calling ``apply_variant`` -- a ``deepcopy`` -- "once
+    per declared variant PER REGISTERED CHECK THAT LAYERS", and tabulated
+    22.6 / 31.0 / **42.7 best, 78.3 median** ms for none / one / three
+    registrations, concluding that three registrations were already over the
+    50 ms budget on a quiet box.  The wave-boundary fix memoised
+    ``_task3_layers``: the layers are built once per PASS and shared, so the
+    stated mechanism no longer exists.  Re-measured on the same guard's own row
+    -- forty runs, twenty variants, fresh processes, these three rules split
+    onto three separately registered functions:
 
-    So this is not an optimisation: with three registrations the MEDIAN is
-    already over budget on a quiet box, before any of the five sibling tasks
-    landing in the same wave adds a check to the same pass.  (An earlier
-    reading of these numbers put the marginal cost at +6.7 ms; measured
-    best-of-7 back to back it is **+8.4 ms**, and that is the figure to carry.)
+    ====================================  ==================  ========
+    registration                          cold                merges
+    ====================================  ==================  ========
+    these three ids on ONE function       12.83-13.54 ms      21
+    the same three registered separately  12.74-13.97 ms      21
+    ====================================  ==================  ========
+
+    Ten layer walks become twelve and the findings are identical; the
+    difference in time is inside the run-to-run spread, and **neither shape
+    changes the merge count**.  So the one-function form is no longer load
+    bearing for cost.  It is kept because it is still the honest shape -- three
+    rules that share one walk, each keeping the name §3.1 pins for it -- and
+    because splitting it would be churn in a merged task's checks for no
+    measured gain.  A future task that wants them apart may do it; it should
+    re-take these numbers rather than trust them.
 
     The three rules keep the three names plan §3.1 pins for them and each
     still decides one check; what is shared is the walk, not the rule.
