@@ -385,7 +385,7 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
             register_built("_mine")(lambda run: ())
         assert str(caught.value) == (
             "in-flight check id '_mine' is not a schema §6 id (A1..A52, "
-            "B1..B9, C1..C17), optionally with a dotted suffix such as "
+            "B1..B9, C1..C19), optionally with a dotted suffix such as "
             "'A1.runs' when several functions each decide part of one check. "
             "The id is what a Finding carries and what a reader looks up; a "
             "private name here reaches the user as '(check _mine).'"
