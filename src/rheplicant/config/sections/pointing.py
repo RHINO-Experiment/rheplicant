@@ -26,7 +26,7 @@ from rheplicant.config.sections.observation import SiteFacts, _dimensioned
 from rheplicant.config.symbols import resolve_extent
 from rheplicant.config.values import resolve_value
 
-__all__ = ["PointingBuild", "compile_pointing"]
+__all__ = ["PointingBuild", "compile_pointing", "pointing_extra_keys"]
 
 _MODES = ("none", "drift", "tracked", "baked")
 _KEYS = {
@@ -51,6 +51,48 @@ class PointingBuild(NamedTuple):
     pointing: Any
     extra: dict[str, Any]
     provenance: dict[str, Any]
+
+
+def pointing_extra_keys(spec: Any) -> frozenset[str]:
+    """The ``coords.extra`` keys :func:`compile_pointing` writes for ``spec``.
+
+    **One binding, two callers** (§2.2): :func:`compile_pointing` below reads
+    it to decide what to materialise, and ``config.preflight.ingest`` reads it
+    to know which keys a run will carry before anything is built.  The set is
+    a four-branch function of ``mode``, ``materialise:``, ``lst:`` and
+    ``selfrot:``, and a pre-flight pass that re-derived those four branches
+    inline would be a second validator for one property -- the divergence
+    §2.2 exists to stop, and the one this layer has already paid for once.
+
+    **``frozenset()`` for a spec this function cannot parse**, and that is a
+    stand-down rather than an answer: a non-mapping, an unknown ``mode``, a
+    ``materialise:`` that is not a list of the two legal entries are each
+    :func:`compile_pointing`'s own refusal, said with the shape it got.  A
+    reader that guessed a key set for one of them would be answering about a
+    document nobody can run.
+
+    ``mode: none`` and ``mode: baked`` write nothing: the first has no
+    geometry and the second has it inside the matrix, where the only record
+    is ``provenance:`` and that lands in ``meta``, not in ``coords.extra``.
+    """
+    if spec is None:
+        spec = {"mode": "none"}
+    if not isinstance(spec, Mapping):
+        return frozenset()
+    mode = spec.get("mode", "none")
+    keys: set[str] = set()
+    if mode == "drift":
+        materialise = spec.get("materialise")
+        if isinstance(materialise, list) and "selfrot_deg" in materialise:
+            keys.add("selfrot_deg")
+        if "lst" in spec:
+            keys.add("lst_deg")
+    elif mode == "tracked":
+        if "lst" in spec:
+            keys.add("lst_deg")
+        if "selfrot" in spec:
+            keys.add("selfrot_deg")
+    return frozenset(keys)
 
 
 def _angle(where: str, node: Any, context: ResolutionContext) -> float:
@@ -162,6 +204,11 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
                         for key, value in provenance.items()})
 
     extra: dict[str, Any] = {}
+    # The single binding: which keys get written is :func:`pointing_extra_keys`'
+    # answer here and in the pre-flight pass alike, so the two cannot drift.
+    # Read AFTER the grammar refusals above, which is what makes the
+    # "cannot parse" stand-down unreachable from this call site.
+    keys = pointing_extra_keys(spec)
     if mode == "drift":
         if "materialise" not in spec:
             raise ConfigError(
@@ -187,14 +234,14 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
         if "pointing" in materialise:
             pointing = jnp.broadcast_to(
                 jnp.asarray([az, el], dtype=context.dtype), (n_time, 2))
-        if "selfrot_deg" in materialise:
+        if "selfrot_deg" in keys:
             selfrot = 0.0
             if "selfrot_deg" in spec:
                 selfrot = _angle("pointing.selfrot_deg", spec["selfrot_deg"],
                                  context)
             extra["selfrot_deg"] = jnp.broadcast_to(
                 jnp.asarray(selfrot, dtype=context.dtype), (n_time,))
-        if "lst" in spec:
+        if "lst_deg" in keys:
             extra["lst_deg"] = _lst(spec["lst"], context, time_s=time_s,
                                     epoch_unix_s=epoch_unix_s, site=site)
         return PointingBuild(pointing=pointing, extra=extra, provenance={})
@@ -219,9 +266,13 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
             "sky engines read coords.extra['lst_deg'] and nothing else in "
             "the package produces it for a tracked scan."
         )
-    extra["lst_deg"] = _lst(spec["lst"], context, time_s=time_s,
-                            epoch_unix_s=epoch_unix_s, site=site)
-    if "selfrot" in spec:
+    # `keys` carries lst_deg here by construction -- the refusal above is what
+    # makes it certain -- and it is read rather than assumed so that this
+    # branch has one source of truth like the drift branch does.
+    if "lst_deg" in keys:
+        extra["lst_deg"] = _lst(spec["lst"], context, time_s=time_s,
+                                epoch_unix_s=epoch_unix_s, site=site)
+    if "selfrot_deg" in keys:
         selfrot = jnp.asarray(
             _dimensioned("pointing.selfrot", spec["selfrot"], context,
                          dimension="angle", what="the self-rotation track"
