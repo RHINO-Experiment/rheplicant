@@ -313,6 +313,15 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
     everywhere in this package and its diffs are all negative, so the unsigned
     version returns a negative spacing that compares below every floor and
     reads as comfortably fine.
+
+    **A descending grid is legal on the TIME axis too**, and the drifted
+    centre reads it with the operator's own arithmetic -- ``times - times[0]``
+    rather than an extent -- for the same reason from the other side: an
+    always-positive extent drifts the tone the wrong way on a descending axis
+    and the two disagree on a VERDICT, not on a message.  Both twins are
+    tested (``test_a_descending_grid_is_not_waved_through`` for frequency,
+    ``test_a_descending_TIME_grid_drifts_the_tone_the_way_the_operator_does``
+    for time).
     """
     from rheplicant.config.derive import _median_gap
     from rheplicant.radio.instrument.calibration import (
@@ -335,7 +344,16 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         return  # a single-channel band has no spacing; nothing to measure
     low, high = float(freq.min()), float(freq.max())
     times = facts.context.time
-    elapsed = float(times.max()) - float(times.min())
+    # `times - times[0]` and NOT `times.max() - times.min()`, which is a
+    # MEASURED false negative rather than a stylistic difference. The shipped
+    # rule this restates is `_validate_over_the_run`'s `elapsed = times -
+    # times[0]; first, last = elapsed.min(), elapsed.max()`, and a descending
+    # time grid -- legal everywhere in this package -- makes `first` NEGATIVE.
+    # An always-positive extent drifts the tone the other way: measured, a
+    # 30 -> 0 s grid with `tone_freq: 62 MHz` and `drift_rate: 5e5` over a
+    # 60-85 MHz band passed this check CLEAN while the operator refused it.
+    offsets = times - times[0]
+    first, last = float(offsets.min()), float(offsets.max())
 
     for where, entry in entries:
         lineshape = entry.get("lineshape", _tone_default("lineshape"))
@@ -374,11 +392,17 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         if centre is None:
             continue
         drift = 0.0 if drift is None else drift
-        centres = (centre, centre + drift * elapsed)
+        centres = (centre + drift * first, centre + drift * last)
+        # `low <= min(centres)` and not `<`: the shipped comparison is
+        # `not low <= min(centres) or not max(centres) <= high`, so a centre
+        # sitting exactly ON the first or last channel is IN band for the
+        # operator, and a strict reading here would refuse a document the
+        # thing it restates accepts.
         if low <= min(centres) and max(centres) <= high:
             continue
-        moving = ("" if drift == 0.0 else
-                  f", drifting at {drift:.6g} Hz/s over the run's {elapsed:.6g} s")
+        moving = (
+            "" if drift == 0.0 else
+            f", drifting at {drift:.6g} Hz/s over the run's {last - first:.6g} s")
         yield refuse(
             "A13", where,
             f"{where}.tone_freq: the tone centre spans [{min(centres):.6g}, "
@@ -404,6 +428,16 @@ def _static_int(spec: Any, key: str) -> int | None:
     "Python's isinstance(True, int) is True, so this passes the operator's own
     guard and gives n_chunk = 1". This declines a bool for the same reason and
     leaves the sentence to the module that owns it.
+
+    **The ``< 1`` clause is not about nonsense counts; it keeps ``%`` away
+    from a division by zero.**  ``n_chunk: 0`` and ``n_days: 0`` are both
+    documents a user can write, and the two callers below do ``n_time %
+    n_chunk`` and ``after % n_days`` unguarded.  Measured with the clause
+    weakened to ``value < 0``: ``model.averaging: {n_chunk: 0}`` makes the
+    whole pass raise *"in-flight check 'C8' RAISED ZeroDivisionError: integer
+    modulo by zero"*, which is not a wrong finding but the loss of **every**
+    finding on that document.  Pinned by
+    ``test_a_zero_count_is_declined_rather_than_divided_by``.
 
     **The bool clause is a MEASURED EQUIVALENT MUTANT and is kept anyway**,
     which is worth a sentence rather than a silent line.  Deleting it changes

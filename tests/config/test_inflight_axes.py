@@ -5,10 +5,15 @@ literal written out in this file.  A ``match=`` is a search: it pins one
 fragment and leaves every other clause free to be wrong, and Plan 3A's record
 is that its surviving mutants lived almost entirely inside refusal text.
 
-**Registry assertions are subset-shaped only** (``AXIS_CHECKS["C1"] is
-_time_axis``, ``{"C1", "C2"} <= report.checks()``).  A length, an exact set or
+**Registry and FINDINGS assertions are subset-shaped only** (``AXIS_CHECKS["C1"]
+is _time_axis``, ``{"C1", "C2"} <= report.checks()``).  A length, an exact set or
 an insertion index would go red the day Task 7 registers into the other slot,
-which is a merge hazard rather than a property.
+which is a merge hazard rather than a property.  The same applies to "this
+document earns nothing": six of the wave-1 branches land checks that run on the
+same documents, so an ``== ()`` here would go red on a correct merge.  Every
+such assertion is scoped to :data:`MINE` -- the ids THIS module is about --
+through :func:`silent_here`, and the property each test actually carries is the
+whole-message pin beside it.
 """
 
 import sys
@@ -56,8 +61,22 @@ _LST = [float(i) * 10.0 for i in range(16)]
 LST_WITH_NAN = [*_LST[:5], NAN, *_LST[6:]]
 
 
+#: The bare ids this module is about.  Every "earns nothing" assertion is
+#: scoped to these; see the module docstring.
+MINE = frozenset({"C1", "C2"})
+
+
 def _extra(key, values):
     return {"extra": {key: {"value": values, "unit": "deg"}}}
+
+
+def ids_of(document):
+    return {one.check for one in axis_findings(document)}
+
+
+def silent_here(document):
+    """Did this document earn nothing from THIS module's own checks?"""
+    return ids_of(document).isdisjoint(MINE)
 
 
 # --- the messages, whole ---------------------------------------------------
@@ -142,11 +161,17 @@ class TestTheRegistry:
         Two functions decide parts of C2, which is exactly what a dotted slot
         is for (3A's ``A1.runs``/``A1.variants`` precedent), and both must
         report the same id or a document breaking both looks like two rules.
+
+        Subset-shaped, and the SLOT name is asserted absent rather than the
+        set asserted equal: ``== {"C2"}`` carries the same property today and
+        goes red the day any wave-1 check fires on a NaN axis.
         """
-        assert {one.check for one in axis_findings(
-            preflight_document(observation=C2_TIME))} == {"C2"}
-        assert {one.check for one in axis_findings(preflight_document(
-            observation=_extra("lst_deg", LST_WITH_NAN)))} == {"C2"}
+        for document in (preflight_document(observation=C2_TIME),
+                         preflight_document(
+                             observation=_extra("lst_deg", LST_WITH_NAN))):
+            found = ids_of(document)
+            assert "C2" in found
+            assert "C2.time" not in found and "C2.pointing" not in found
 
 
 class TestTheModuleIsImportedAtAllAndTheEntryPointSurvivesIt:
@@ -251,8 +276,8 @@ class TestC2sTimeLeg:
         5.7e-14 -- the same dtype blindness from the other side.  The hoisted
         guard checks INEXACT dtypes only, and this is the test that the hoist
         did not lose that."""
-        assert axis_findings(preflight_document(observation={
-            "time": {"grid": {"list": [0, 100, 200, 300], "unit": "s"}}})) == ()
+        assert silent_here(preflight_document(observation={
+            "time": {"grid": {"list": [0, 100, 200, 300], "unit": "s"}}}))
 
 
 class TestC2sOtherThreeLegs:
@@ -306,7 +331,7 @@ class TestC2sOtherThreeLegs:
             observation={"extra": {
                 "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"},
                 "selfrot_deg": {"value": LST_WITH_NAN, "unit": "deg"}}}))
-        assert [one.where for one in found] == [
+        assert [one.where for one in found if one.check == "C2"] == [
             "observation.extra.lst_deg", "observation.extra.selfrot_deg"]
 
     def test_an_extra_key_C2_does_not_name_is_left_alone(self):
@@ -320,11 +345,11 @@ class TestC2sOtherThreeLegs:
         Measured: with the walk over ``extra`` itself, this document earns a
         C2 finding at ``observation.extra.my_weights``.
         """
-        assert axis_findings(preflight_document(
-            observation=_extra("my_weights", LST_WITH_NAN))) == ()
-        assert axis_findings(preflight_document(observation={"extra": {
+        assert silent_here(preflight_document(
+            observation=_extra("my_weights", LST_WITH_NAN)))
+        assert "C2" in ids_of(preflight_document(observation={"extra": {
             "my_weights": {"value": LST_WITH_NAN, "unit": "deg"},
-            "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"}}})) != (), (
+            "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"}}})), (
             "the named key beside it must still be decided, or this test "
             "passes because the walk found nothing at all"
         )
@@ -338,7 +363,7 @@ class TestC2sOtherThreeLegs:
             "switching": {"mode": "cycle", "order": ["antenna", "load"],
                           "dwell": 4}}))
         assert "receiver_input" in facts.observation.extra
-        assert axes(facts).findings == ()
+        assert {one.check for one in axes(facts).findings}.isdisjoint(MINE)
 
 
 class TestTheyDoNotPreEmptABetterSentence:
@@ -455,17 +480,30 @@ class TestTheCost:
 
     **And measured NEAR the number.**  A review of Task 1a found all three of
     its cost bounds unable to fail -- a *thousandfold* slowdown of the shared
-    ``sweep`` left the suite at exit 0, at margins of x3008 and x30077.  The
-    bounds below are about ten times their own measured best case, and the
-    measurement is written beside each one so that the next task can see what
-    it is keeping:
+    ``sweep`` left the suite at exit 0, at margins of x3008 and x30077.  A
+    review of Task 1b then found two of the replacements surviving a clean
+    ``x10``, so every bound below is now about **six** times its own measured
+    best case, which is the largest margin that still dies at ``x10``.  Each
+    measurement is written beside its bound so the next task can see what it
+    is keeping:
 
-    ============================  ==========  =====
-    call                          best        bound
-    ============================  ==========  =====
-    ``axes`` on the 16-sample doc  0.0132 ms  0.15 ms
-    ``axes`` on 262144 samples     0.309 ms   3.0 ms
-    ============================  ==========  =====
+    ==============================  =========  =======
+    call                            best       bound
+    ==============================  =========  =======
+    ``axes`` on the 16-sample doc    0.0138 ms  0.09 ms
+    ``axes`` on 262144 samples       0.291 ms   1.8 ms
+    ``axes`` on the REFUSING 262144  0.257 ms   1.6 ms
+    ==============================  =========  =======
+
+    **Every timing is taken with** :func:`~tests.config.inflight_helpers.best_ms`
+    **on an already-built payload**, and that is a correction rather than a
+    style.  A single ``perf_counter`` around ``axis_findings`` times the COLD
+    payload build as well: measured in one process, 12 repeats of that call are
+    ``best 0.0005 s / median 0.0007 s / max 0.107 s`` -- the maximum being the
+    FIRST call.  A 0.1 s bound around it therefore passes only when earlier
+    tests in the module have warmed the process, and goes red the moment the
+    module is run alone, run first, or distributed by ``xdist``: 13 runs out of
+    13 in a fresh process.
 
     **What these bounds cannot see:**
 
@@ -480,7 +518,7 @@ class TestTheCost:
       in front of and is 90.9 % of a load's wall time.
     """
 
-    @pytest.mark.parametrize(("num", "bound"), [(16, 0.15), (262144, 3.0)],
+    @pytest.mark.parametrize(("num", "bound"), [(16, 0.09), (262144, 1.8)],
                              ids=["worked", "big"])
     def test_the_axes_pass_stays_near_its_measured_cost(self, num, bound):
         document = preflight_document(observation={
@@ -501,17 +539,34 @@ class TestTheCost:
         axes(facts)
         assert time.perf_counter() - started < 0.01
 
-    def test_the_pass_refuses_the_big_axis_without_building_anything(self):
-        """The claim the slot exists for, as a command.  Building the payload
-        for a 262144-sample float32 axis and refusing it costs a fraction of
-        the 0.151 s the same document takes to reach the refusal today -- and
-        that 0.151 s is a load that has already read a beam and run a
-        spherical harmonic transform."""
-        document = preflight_document(observation={
+    def test_the_pass_refuses_the_big_axis(self):
+        """The claim the slot exists for: the 262144-sample float32 axis
+        anchored at unix 1.75e9 is refused HERE, by C1, and not two phases and
+        one beam read later.  The property only; the cost of refusing it is
+        the test below, because a single ``perf_counter`` around
+        ``axis_findings`` also times the cold payload build and then fails for
+        a reason it does not name."""
+        assert "C1" in ids_of(preflight_document(observation={
             "time": {"grid": {"arange": {"start": 1.75e9, "step": 1.0,
-                                         "num": 262144}, "unit": "s"}}})
-        started = time.perf_counter()
-        found = axis_findings(document)
-        elapsed = time.perf_counter() - started
-        assert [one.check for one in found] == ["C1"]
-        assert elapsed < 0.1
+                                         "num": 262144}, "unit": "s"}}}))
+
+    def test_refusing_the_big_axis_costs_a_fraction_of_the_load_it_replaces(self):
+        """**1.6 ms against a measured 0.257 ms best case.**  The REFUSING
+        262144-sample axis and not the clean one parametrized above: the
+        refusal path interpolates a 1200-character message, which the clean
+        path never pays for, and it is the path this slot exists for.
+
+        Against the **0.151 s** the same document takes to reach the same
+        arithmetic today -- a load that has already read a beam and run a
+        spherical harmonic transform -- that is two orders of magnitude, and
+        the payload build (~2 ms at this size) is outside the timed region
+        because it is ``build_observation``'s cost and not this pass's.
+        """
+        facts = axis_facts(preflight_document(observation={
+            "time": {"grid": {"arange": {"start": 1.75e9, "step": 1.0,
+                                         "num": 262144}, "unit": "s"}}}))
+        assert "C1" in {one.check for one in axes(facts).findings}, (
+            "the timed call must be the REFUSING one, or this measures the "
+            "clean path the test above already covers"
+        )
+        assert best_ms(lambda: axes(facts), repeats=30) < 1.6

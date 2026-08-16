@@ -1,8 +1,12 @@
 """C3, A13's grid legs and C8 -- ``inflight/grids.py``.
 
 Same two rules as ``test_inflight_axes.py``: **every message is pinned by
-equality on its whole text**, and **every registry assertion is subset
-shaped**.
+equality on its whole text**, and **every registry and FINDINGS assertion is
+subset shaped** -- including "this document earns nothing", which is scoped to
+:data:`MINE` through :func:`silent_here` rather than written ``== ()``.  Six of
+the wave-1 branches register checks that run on these same documents, so an
+exact set is a merge hazard and not a property; the property each test carries
+is the whole-message pin beside it.
 
 The discriminating documents in this module are narrow ones, and that is
 measured rather than stylistic.  On RHINO's own 60-85 MHz band schema §6's
@@ -25,6 +29,7 @@ from rheplicant.config.inflight import AXIS_CHECKS, axes
 from rheplicant.config.inflight.grids import (
     _divisible,
     _nyquist,
+    _tone_default,
     _tone_on_the_grid,
 )
 from rheplicant.config.kinds.projectors import build_projector
@@ -32,6 +37,7 @@ from rheplicant.radio.instrument.calibration import (
     MAX_WIDTH_IN_BAND_FRACTION,
     MIN_CEILING_IN_CHANNELS,
     MIN_WIDTH_IN_CHANNELS,
+    WIDTH_FLOOR_RTOL,
 )
 from tests.config.inflight_helpers import (
     axis_facts,
@@ -88,6 +94,20 @@ def narrow(width_hz, lineshape=None):
                               model={**BASE_MODEL, "cw_tone": node})
 
 
+#: A DESCENDING time grid carrying a tone that drifts.  ``linspace 30 -> 0 s``
+#: is legal and builds; the operator's ``times - times[0]`` makes the run's
+#: first offset -30 s, so the tone was 15 MHz lower when the run started.
+DESCENDING_TIME_TONE = preflight_document(
+    observation={"time": {"grid": {"linspace": {
+        "start": 30.0, "stop": 0.0, "num": 16, "endpoint": True},
+        "unit": "s"}}},
+    model={**BASE_MODEL, "cw_tone": {
+        "amplitude": {"value": 5000.0, "unit": "K"},
+        "tone_freq": {"value": 62.0, "unit": "MHz"},
+        "drift_rate": 5.0e5,
+        "line_width": {"value": 3.6, "unit": "MHz"}}})
+
+
 def replacing(replace, **patch):
     """The base document with ``inference.twin.replace`` set, BUILT BY THE
     HELPER rather than assigned here.
@@ -110,8 +130,18 @@ def sidereal(n_days, **over):
             **over}
 
 
+#: The bare ids this module is about.  Every "earns nothing" assertion is
+#: scoped to these; see the module docstring.
+MINE = frozenset({"C3", "A13", "C8"})
+
+
 def ids_of(document):
     return {one.check for one in axis_findings(document)}
+
+
+def silent_here(document):
+    """Did this document earn nothing from THIS module's own checks?"""
+    return ids_of(document).isdisjoint(MINE)
 
 
 # --- the messages, whole ---------------------------------------------------
@@ -182,6 +212,45 @@ A13_DRIFT_MESSAGE = (
     "spread over channels the tone is nowhere near." + _A13_TAIL
 )
 
+#: The same drift on a DESCENDING time grid.  ``times - times[0]`` makes the
+#: first offset -30 s and the last 0 s, so a tone at 62 MHz drifting UP at
+#: 5e5 Hz/s was at 47 MHz when the run started -- below the band.  An extent
+#: (``times.max() - times.min()``, always positive) drifts it to 77 MHz
+#: instead and reports the document CLEAN, which is a false negative against
+#: the operator this restates.
+A13_DESCENDING_TIME_MESSAGE = (
+    "model.cw_tone.tone_freq: the tone centre spans [4.7e+07, 6.2e+07] Hz, "
+    "drifting at 500000 Hz/s over the run's 30 s, outside this run's observed "
+    "band [6e+07, 8.5e+07] Hz. A centre that starts in band and DRIFTS out of "
+    "it is the case a check at the first sample alone passes, which is why the "
+    "run's extent is read here rather than t_0. The lineshape is still "
+    "evaluated and still normalised, so the run models a bright feature "
+    "spread over channels the tone is nowhere near." + _A13_TAIL
+)
+
+#: A width just BELOW ``floor * (1 - WIDTH_FLOOR_RTOL)`` on the narrow band:
+#: 336 Hz floor, so 335.99328 Hz.  The cell one tolerance up from it is
+#: accepted, which is what says the tolerance is read.
+A13_JUST_UNDER_THE_FLOOR_MESSAGE = (
+    "model.cw_tone.line_width: 335.993 Hz is narrower than the channel "
+    "response this 'sinc2' grid can carry (1 x the 336 Hz median channel "
+    "spacing = 336 Hz). The sampled channels land on the lineshape's own "
+    "nulls, or overflow its exponent, and the normalisation then divides by "
+    "float noise." + _A13_TAIL
+)
+
+#: A centre 0.1 MHz BELOW the band's first channel.  Its companion -- a centre
+#: exactly ON that channel -- is silent, because the comparison is ``<=``.
+A13_BELOW_THE_BAND_MESSAGE = (
+    "model.cw_tone.tone_freq: the tone centre spans [5.99e+07, 5.99e+07] Hz, "
+    "outside this run's observed band [6e+07, 8.5e+07] Hz. A centre that "
+    "starts in band and DRIFTS out of it is the case a check at the first "
+    "sample alone passes, which is why the run's extent is read here rather "
+    "than t_0. The lineshape is still evaluated and still normalised, so the "
+    "run models a bright feature spread over channels the tone is nowhere "
+    "near." + _A13_TAIL
+)
+
 _C8_TAIL = (
     " Both counts are static ints and n_time is len(context.time), so this is "
     "decided here, before build_resources reads the beam. Today it is decided "
@@ -235,10 +304,16 @@ class TestTheRegistry:
         assert "rheplicant.config.inflight.grids" in sys.modules
 
     def test_A13s_findings_carry_the_bare_id(self):
-        assert ids_of(narrow(300.0)) == {"A13"}
+        """``"A13.grid"`` is a registry SLOT and ``"A13"`` is what a reader
+        looks up.  Subset-shaped, with the slot name asserted ABSENT: an
+        ``== {"A13"}`` carries the same property today and goes red the day
+        any wave-1 check fires on a too-narrow line."""
+        found = ids_of(narrow(300.0))
+        assert "A13" in found
+        assert "A13.grid" not in found
 
     def test_the_base_document_earns_nothing_here(self):
-        assert axis_findings(preflight_document()) == ()
+        assert silent_here(preflight_document())
 
 
 class TestC3:
@@ -264,9 +339,41 @@ class TestC3:
             resources={"beams": BEAM, "projectors": {"drift": absent}}))
 
     def test_it_stands_down_on_general_pointing(self):
-        """The named twin.  ``_ENGINE_KEYS['general_pointing']`` does not
-        carry ``uniform_sampling`` at all -- that engine has no FFT path -- so
-        this is a stand-down rather than a hole."""
+        """The named twin, **and the document WRITES ``uniform_sampling``.**
+
+        That is the whole test and it was missing.  Without the key, a
+        ``general_pointing`` spec is stood down by the ``uniform_sampling``
+        half of the gate alone and the ``engine != "driftscan"`` half can be
+        deleted with nothing going red -- measured, that mutant survived the
+        entire suite.  With the key written, deleting the engine half makes
+        this pass fire C3 on a document whose real fault ``build_projector``
+        says better, which is S4's rule exactly: the arithmetic pre-empts the
+        specific refusal below.
+
+        ``_ENGINE_KEYS['general_pointing']`` does not carry
+        ``uniform_sampling`` at all -- that engine has no FFT path and no
+        Nyquist bin -- so the key is a fault of a different kind, and the
+        sentence the reader must get is the builder's.
+        """
+        spec = {"engine": "general_pointing", "lmax": 8, "nside": 4,
+                "uniform_sampling": True,
+                "beam": {"ref": "resources.beams.horn"},
+                "lat_deg": {"value": 53.2, "unit": "deg"},
+                "normalize_beam": True, "acknowledge_float32_sky": True}
+        assert "C3" not in ids_of(preflight_document(resources={
+            "beams": BEAM, "projectors": {"drift": spec}}))
+        with pytest.raises(ConfigError) as raised:
+            build_projector("drift", spec,
+                            axis_facts(preflight_document()).context)
+        assert str(raised.value) == (
+            "drift: engine: general_pointing does not take "
+            "['uniform_sampling']; it takes ['acknowledge_float32_sky', "
+            "'beam', 'beam_alms', 'beam_iterations', 'engine', 'lat_deg', "
+            "'lmax', 'normalize_beam', 'nside'].")
+
+    def test_it_stands_down_on_general_pointing_without_the_key_too(self):
+        """The other cell: the same engine with no ``uniform_sampling`` at
+        all, which is what a correct document looks like."""
         assert "C3" not in ids_of(preflight_document(resources={
             "beams": BEAM,
             "projectors": {"drift": {
@@ -411,6 +518,54 @@ class TestA13sWidthLegs:
         assert axis_only(narrow(300.0, "sinc2"), "A13").message \
             == axis_only(narrow(300.0), "A13").message == A13_NARROW_MESSAGE
 
+    def test_the_default_is_READ_from_the_class_and_not_spelled_sinc2(self,
+                                                                     monkeypatch):
+        """The test above cannot tell ``_tone_default("lineshape")`` from a
+        literal ``"sinc2"``, because the class's default IS ``sinc2`` --
+        measured, that mutant survived the whole suite.  Nothing about a
+        document can discriminate them, so the DEFAULT ITSELF is moved and the
+        pass is asked to follow: with the hardcoded spelling the floor stays
+        sinc2's and the finding stays.
+
+        The direct assertion beside it is the other half -- it says
+        ``_tone_default`` reads the class rather than restating it -- and the
+        pair pins the whole chain.
+        """
+        from rheplicant.config.inflight import grids
+        from rheplicant.radio.instrument.calibration import CWCalibrationOperator
+
+        assert _tone_default("lineshape") == CWCalibrationOperator.lineshape
+
+        spacing = float(_median_gap(axis_facts(narrow(400.0)).context.freq,
+                                    name="channel_spacing",
+                                    axis_name="frequency"))
+        half = 0.5 * spacing            # under sinc2's floor, over gaussian's
+        assert "A13" in ids_of(narrow(half)), "the sinc2 default refuses this"
+        monkeypatch.setattr(grids, "_tone_default", lambda field: "gaussian")
+        assert silent_here(narrow(half)), (
+            "the floor is the lineshape's, and which lineshape is the CLASS's "
+            "default -- a literal 'sinc2' here ignores the class and refuses a "
+            "line that is four times wider than the gaussian floor"
+        )
+
+    def test_the_floors_relative_tolerance_is_read_and_not_dropped(self):
+        """``WIDTH_FLOOR_RTOL`` is imported for one-binding and nothing
+        exercised it: dropping ``* (1.0 - WIDTH_FLOOR_RTOL)`` survived the
+        whole suite, because a width AT the floor is refused by neither
+        implementation.  The cell that discriminates them is a width just
+        INSIDE the tolerance -- below the floor, and accepted by
+        ``calibration.py``'s own comparison, which is the one this restates.
+        """
+        spacing = float(_median_gap(axis_facts(narrow(400.0)).context.freq,
+                                    name="channel_spacing",
+                                    axis_name="frequency"))
+        floor = MIN_WIDTH_IN_CHANNELS["sinc2"] * spacing
+        assert WIDTH_FLOOR_RTOL > 0.0, "nothing to discriminate if it is zero"
+        assert silent_here(narrow(floor * (1.0 - 0.5 * WIDTH_FLOOR_RTOL)))
+        assert silent_here(narrow(floor)), "and a width AT the floor, likewise"
+        assert axis_only(narrow(floor * (1.0 - 2.0 * WIDTH_FLOOR_RTOL)),
+                         "A13").message == A13_JUST_UNDER_THE_FLOOR_MESSAGE
+
     def test_a_descending_grid_is_not_waved_through(self):
         """``_median_gap`` takes ``abs`` BEFORE the median.  Unsigned, a
         descending grid's diffs are all negative and the spacing comes back
@@ -427,7 +582,7 @@ class TestA13sWidthLegs:
         assert "A13" in ids_of(descending)
 
     def test_the_worked_bands_own_width_is_accepted(self):
-        assert axis_findings(tone()) == ()
+        assert silent_here(tone())
 
 
 class TestA13sBandLegs:
@@ -443,6 +598,45 @@ class TestA13sBandLegs:
         assert axis_only(tone(drift_rate=1.0e6), "A13").message \
             == A13_DRIFT_MESSAGE
         assert "A13" not in ids_of(tone())
+
+    def test_a_descending_TIME_grid_drifts_the_tone_the_way_the_operator_does(self):
+        """**The twin of ``test_a_descending_grid_is_not_waved_through``, on
+        the other axis, and it was a live false negative.**
+
+        A descending time grid is legal -- ``linspace 30 -> 0 s`` builds --
+        and ``CWCalibrationOperator._validate_over_the_run`` reads it as
+        ``elapsed = times - times[0]``, so the first offset is **-30 s** and
+        the last is 0.  A tone at 62 MHz drifting UP at 5e5 Hz/s was therefore
+        at 47 MHz when the run started, which is below this 60-85 MHz band.
+
+        Measured against an extent (``times.max() - times.min()``, always
+        positive): this pass reported the document **CLEAN** while the shipped
+        operator refused it -- a disagreement on a verdict, not on a message.
+        """
+        found = axis_only(DESCENDING_TIME_TONE, "A13")
+        assert found.where == "model.cw_tone"
+        assert found.message == A13_DESCENDING_TIME_MESSAGE
+
+    def test_the_same_tone_on_the_ASCENDING_grid_is_clean(self):
+        """The anti-vacuity half: 62 MHz drifting to 77 MHz over an ascending
+        30 s run stays inside the band, so the test above is about the
+        DIRECTION of the axis and not about the tone."""
+        assert silent_here(tone(tone_freq={"value": 62.0, "unit": "MHz"},
+                                drift_rate=5.0e5))
+
+    def test_a_centre_ON_the_bands_first_channel_is_in_band(self):
+        """``low <= min(centres)`` and not ``<``.  The shipped comparison is
+        ``not low <= min(centres)``, so a centre sitting exactly on the first
+        or the last channel is IN band for the operator -- and a strict
+        reading here would refuse a document the thing it restates accepts.
+        Measured, that mutant survived the whole suite."""
+        assert silent_here(tone(tone_freq={"value": 60.0, "unit": "MHz"}))
+        assert silent_here(tone(tone_freq={"value": 85.0, "unit": "MHz"}))
+
+    def test_a_centre_just_OUTSIDE_the_first_channel_is_not(self):
+        """The anti-vacuity half of the cell above."""
+        assert axis_only(tone(tone_freq={"value": 59.9, "unit": "MHz"}),
+                         "A13").message == A13_BELOW_THE_BAND_MESSAGE
 
 
 class TestA13WalksBothRoutesToTheSameOperator:
@@ -475,6 +669,25 @@ class TestA13WalksBothRoutesToTheSameOperator:
             "tone_freq": {"value": 70.0, "unit": "MHz"},
             "line_width": 1.0}}
         assert axis_only(document, "A13").where == "model.cw_tone"
+
+    def test_a_DIFFERENT_class_under_the_same_node_is_not_a_tone(self):
+        """The negative half of "the class, not the token", and it was
+        missing: ``_is_tone`` returning True for every Mapping survived the
+        whole suite, because only the positive half was tested.
+
+        ``cw_tone`` is a NODE name and the class under it is the document's
+        choice.  Measured, a ``python:`` spelling naming
+        ``ApplyCalibrationOperator`` is correctly ignored here today, and
+        under the mutant the same document earns an A13 ``line_width``
+        refusal about a field that class does not have.  Whether that
+        document builds is A5's business and not this check's.
+        """
+        for name in ("ApplyCalibrationOperator", "CalLoadOperator"):
+            document = tone()
+            document["model"] = {**document["model"], "cw_tone": {
+                "python": f"rheplicant.radio.instrument.calibration:{name}",
+                "line_width": 1.0}}
+            assert silent_here(document), name
 
 
 class TestA13DoesNotPreEmptTheDeliveryLayer:
@@ -539,7 +752,7 @@ class TestA13DoesNotPreEmptTheDeliveryLayer:
         monkeypatch.setattr(builtins, "open", _spy)
         found = axes(facts).findings
         monkeypatch.undo()
-        assert found == ()
+        assert {one.check for one in found}.isdisjoint(MINE)
         assert [one for one in opened if one.startswith(str(tmp_path))] == [], (
             "the axes pass opened a file to decide A13. A value node this "
             "slot cannot read without leaving its own boundary is one it "
@@ -601,16 +814,33 @@ class TestC8:
         implementation refuses it, because 16 % 4 == 0 is also true.  Both
         cells are needed; either alone is passed by one of the two
         implementations."""
-        assert axis_findings(preflight_document(model={
+        assert silent_here(preflight_document(model={
             **BASE_MODEL, "averaging": {"n_chunk": 4},
-            "filters": [sidereal(4)]})) == ()
+            "filters": [sidereal(4)]}))
 
     def test_n_chunk_of_one_is_legal_and_says_nothing(self):
         """``BackendOperator`` leaves the time axis alone at ``n_chunk: 1``,
         and 1 divides everything, so there is no message to fold it into."""
-        assert axis_findings(preflight_document(model={
+        assert silent_here(preflight_document(model={
             **BASE_MODEL, "averaging": {"n_chunk": 1},
-            "filters": [sidereal(8)]})) == ()
+            "filters": [sidereal(8)]}))
+
+    def test_a_zero_count_is_declined_rather_than_divided_by(self):
+        """``_static_int``'s ``value < 1`` clause is not about nonsense
+        counts; it keeps ``%`` away from a division by zero, and nothing said
+        so: weakening it to ``value < 0`` survived the whole suite.
+
+        Measured under that weakening, ``model.averaging: {n_chunk: 0}``
+        makes the runner report *"in-flight check 'C8' RAISED
+        ZeroDivisionError: integer modulo by zero"* -- so the failure is not a
+        wrong finding but the loss of **every** finding on the document, this
+        module's and every other branch's alike.  Both callers are covered
+        because both divide.
+        """
+        for node in ({"averaging": {"n_chunk": 0}},
+                     {"filters": [sidereal(0)]}):
+            assert silent_here(preflight_document(
+                model={**BASE_MODEL, **node})), node
 
     def test_the_chain_is_walked_and_the_index_is_reported(self):
         """``model.filters`` is a CHAIN.  A check that read the first entry
@@ -628,7 +858,8 @@ class TestC8:
         found = axis_findings(preflight_document(model={
             **BASE_MODEL, "averaging": {"n_chunk": 5},
             "filters": [sidereal(8)]}))
-        assert [one.where for one in found] == ["model.averaging"]
+        assert [one.where for one in found
+                if one.check == "C8"] == ["model.averaging"]
 
     def test_the_replace_route_is_decided_too(self):
         document = replacing({"averaging": {"n_chunk": 5}},
@@ -719,12 +950,16 @@ class TestTheCost:
     """Measured on the pass in isolation, and NEAR the number -- see
     ``test_inflight_axes.py`` for why both halves of that matter.
 
-    ==================================  =========  =====
+    Both bounds are about **six** times their own measured best case, which a
+    review of Task 1b established as the largest margin that still dies at a
+    clean ``x10`` slowdown of the pass.
+
+    ==================================  =========  =======
     call                                best       bound
-    ==================================  =========  =====
-    ``axes`` on a projector+tone+chain   0.098 ms  1.0 ms
-    ``axes`` on the worked document      0.0132 ms 0.15 ms
-    ==================================  =========  =====
+    ==================================  =========  =======
+    ``axes`` on a projector+tone+chain   0.146 ms  0.9 ms
+    ``axes`` on the worked document      0.0138 ms 0.09 ms
+    ==================================  =========  =======
 
     **What these bounds cannot see:** a document carrying MANY projectors or a
     long filter chain (these carry one each); the first call of a process,
@@ -741,8 +976,9 @@ class TestTheCost:
                                "tone_freq": {"value": 70.0, "unit": "MHz"},
                                "line_width": {"value": 3.6, "unit": "MHz"}}})
         facts = axis_facts(document)
-        assert axes(facts).findings == (), "the cost of a CLEAN document"
-        assert best_ms(lambda: axes(facts), repeats=30) < 1.0
+        assert {one.check for one in axes(facts).findings}.isdisjoint(MINE), (
+            "the cost of a CLEAN document")
+        assert best_ms(lambda: axes(facts), repeats=30) < 0.9
 
     def test_the_plans_own_hundredth_of_a_second_box(self):
         """§0.1's contract, on the document that lights every check here."""
@@ -759,9 +995,9 @@ class TestTheCost:
     def test_a_document_with_no_tone_pays_for_no_tone_arithmetic(self):
         """``_tone_on_the_grid`` collects its entries BEFORE it measures the
         grid, so almost every document skips both the median and
-        ``operator_table()``.  0.15 ms against a 0.0132 ms best case: a
+        ``operator_table()``.  0.09 ms against a 0.0138 ms best case: a
         version that measured the grid first costs the median on every
         document in the repository, and that is what this bound is for."""
         facts = axis_facts(preflight_document())
         axes(facts)  # warm
-        assert best_ms(lambda: axes(facts)) < 0.15
+        assert best_ms(lambda: axes(facts)) < 0.09

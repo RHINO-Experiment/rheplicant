@@ -1360,9 +1360,13 @@ class TestTheCostOfTheTwoSlots:
     first written they were 1 ms against a 0.0003 ms median -- a margin of
     **x3008**, under which a *thousandfold* slowdown of the shared ``sweep``
     left the suite at exit 0.  A bound that cannot fail for the reason it
-    names is not a test.  Every bound below is now within about ten times its
-    own measured best case, taken with :func:`best_ms`, and the measurement
-    is written beside it so the next task can see what it is keeping.
+    names is not a test.  Every bound below is now within about **six** times
+    its own measured best case, taken with :func:`best_ms`, and the
+    measurement is written beside it so the next task can see what it is
+    keeping.  Six and not ten, and that too is a correction: a review of Task
+    1b applied a clean ``x10`` slowdown of the pass and found both of these
+    bounds SURVIVING it, at margins of x11 and x20.  Six is the largest margin
+    that still dies at ``x10``.
 
     **What these bounds cannot see:**
 
@@ -1379,22 +1383,24 @@ class TestTheCostOfTheTwoSlots:
     """
 
     def test_the_axes_pass_costs_a_small_fraction_of_a_millisecond(self):
-        """**0.15 ms against a measured 0.0132 ms best case** -- about x11.
+        """**0.09 ms against a measured 0.0138 ms best case** -- about x6.
         That catches the failures which actually threaten this slot (a payload
         deep-copied per check, a module re-imported per call, a file opened, a
-        beam built: all of them milliseconds) AND catches a mere twentyfold
-        regression of the runner, which the old x3008 margin did not."""
+        beam built: all of them milliseconds) AND catches a tenfold regression
+        of the runner, which neither the old x3008 margin nor the x11 that
+        replaced it did."""
         facts = axis_facts(preflight_document())
         axes(facts)                                    # warm
-        assert best_ms(lambda: axes(facts)) < 0.15
+        assert best_ms(lambda: axes(facts)) < 0.09
 
     def test_the_built_pass_costs_a_small_fraction_of_a_millisecond(self):
-        """**0.005 ms against a measured 0.00029 ms best case** -- about x17.
+        """**0.002 ms against a measured 0.00029 ms best case** -- about x7.
         The built registry is empty until Task 7, so this is the runner's own
-        overhead and nothing else; Task 7 re-takes it."""
+        overhead and nothing else; Task 7 re-takes it.  0.005 ms was the first
+        number here and a clean ``x10`` slowdown survived it."""
         run = built_run(preflight_document())
         built(run)                                     # warm
-        assert best_ms(lambda: built(run)) < 0.005
+        assert best_ms(lambda: built(run)) < 0.002
 
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
         """The plan's own §0.1 bound for this slot, on the worked document,

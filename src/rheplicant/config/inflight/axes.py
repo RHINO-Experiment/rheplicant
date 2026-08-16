@@ -108,6 +108,21 @@ def _values(axis: Any):
     not the axis.  Nothing reaches this slot traced today -- every axis here
     was resolved from the document's text -- and the branch is kept because
     the guard it stands in for keeps its own.
+
+    **MEASURED EQUIVALENT MUTANT, kept anyway and said so rather than left to
+    be re-discovered.**  Making the ``except`` re-raise instead of standing
+    down survives the whole suite.  Measured with ``coverage`` over all of
+    ``tests/config``: the ``except`` line and its ``return None`` are never
+    executed at all, and neither is the ``values is None`` arm the two check
+    functions take when it fires -- they are the only unreached lines on
+    either check's path.  So there is no document that can tell the two
+    implementations apart, and there will not be one until something hands
+    this slot a traced axis.  The branch stays because ``Axes.context`` is a
+    public payload, because the guard this restates keeps its own, and
+    because a re-raise would turn a future traced axis into a
+    ``TracerArrayConversionError`` escaping a check -- which the runner
+    reports as *"in-flight check 'C1' RAISED"* and which loses every other
+    finding on the document.
     """
     if axis is None:
         return None
