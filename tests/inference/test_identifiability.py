@@ -39,6 +39,7 @@ from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.inference.identifiability import (
     DEFAULT_RANK_RTOL,
+    _in_float64,
     identifiability,
 )
 from rheplicant.radio import GainOperator
@@ -1044,3 +1045,113 @@ class TestGuards:
         report = identifiability(space, pipeline, state, names=("gain",))
         assert report.n_par == N_TIME
         assert report.nullity == 0
+
+
+# ------------------------------------------------- what the SVD is asked for --
+
+
+class TestTheSVDAsksForWhatItUses:
+    """``U`` is discarded and ``right`` is used only as ``right[rank:]``.
+
+    ``full_matrices=True`` therefore materialises an ``(n_data, n_data)`` left
+    factor that nothing reads. On a realistic grid that is the dominant cost of
+    the whole diagnostic and the memory is the real hazard: measured at
+    ``(32768, n_par)`` in float64, ``U`` alone is 8.59 GB and the call goes
+    **2.43 s -> 0.002 s** at ``n_par = 8`` and **20.27 s -> 0.22 s`` at 128.
+
+    The flag is load-bearing in exactly one regime -- ``n_data < n_par``, the
+    free-per-cell case ``test_the_null_space_is_whole_when_there_are_fewer_data
+    _than_parameters`` pins -- and the comment beside the call has always said
+    so. These tests pin that the call now asks for it *there and only there*.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch):
+        """Record the ``full_matrices`` every ``jnp.linalg.svd`` call receives.
+
+        Patches the shared ``jax.numpy.linalg`` attribute, which is how
+        ``identifiability`` resolves the name at call time; ``monkeypatch``
+        restores it. The spy delegates, so the report is the real one.
+        """
+        seen: list[bool] = []
+        real = jnp.linalg.svd
+
+        def spy(a, *args, **kwargs):
+            if "full_matrices" in kwargs:
+                seen.append(bool(kwargs["full_matrices"]))
+            elif args:
+                seen.append(bool(args[0]))
+            else:  # the jnp default
+                seen.append(True)
+            return real(a, *args, **kwargs)
+
+        monkeypatch.setattr(jnp.linalg, "svd", spy)
+        return seen
+
+    def test_the_full_left_factor_is_not_asked_for_when_the_jacobian_is_not_wide(
+        self, state, monkeypatch
+    ):
+        """Kills the unconditional ``full_matrices=True``.
+
+        ``basis_space`` is over-determined -- 64 data against 17 parameters --
+        so ``Vh`` is ``(n_par, n_par)`` under either spelling and the full
+        ``U`` is 64x64 of pure waste. Every other test in this file passes
+        under either spelling, which is why this one reads the ARGUMENT rather
+        than the result: there is no output to compare.
+        """
+        seen = self._spy(monkeypatch)
+        report = identifiability(basis_space(), make_pipeline(0.0), state)
+        assert report.n_data >= report.n_par, (report.n_data, report.n_par)
+        assert seen == [False], seen
+
+    def test_the_full_left_factor_is_still_asked_for_when_there_are_fewer_data(
+        self, state, monkeypatch
+    ):
+        """The anti-vacuity partner, and the regime the flag exists for.
+
+        Kills a conditional written the wrong way round, and kills dropping the
+        flag altogether -- either of which empties the null space the whole
+        report is about. It also proves the spy above can observe a ``True``,
+        so its ``[False]`` is a measurement and not a silent no-op.
+        """
+        seen = self._spy(monkeypatch)
+        report = identifiability(free_space(), make_pipeline(TONE_KELVIN), state)
+        assert report.n_data < report.n_par, (report.n_data, report.n_par)
+        assert seen == [True], seen
+        # and the null space really did survive
+        assert report.null_space.shape == (report.nullity, report.n_par)
+
+    def test_the_two_spellings_agree_when_the_jacobian_is_not_wide(self):
+        """Why the conditional is safe, as arithmetic rather than as a claim.
+
+        For ``n_data >= n_par`` both spellings return the same ``(n_par,)``
+        spectrum and the same ``(n_par, n_par)`` ``Vh``, so ``right[rank:]`` --
+        the only slice the report keeps -- is bitwise identical. Pinned with a
+        matrix that HAS a null space (rank 56 of 64): an equality that only
+        held at full rank would say nothing about the branch that matters.
+
+        Taken inside ``_in_float64`` because that is where the production call
+        runs. In the package's default float32 the eight dependent columns sit
+        at ~1e-7, above ``DEFAULT_RANK_RTOL``, and the matrix reads as full
+        rank — so a test written outside the context would compare the two
+        spellings on the one input that cannot tell them apart.
+        """
+        rng = np.random.default_rng(20260816)
+        base = rng.standard_normal((200, 64))
+        base[:, -8:] = base[:, :8]  # eight exactly dependent columns
+
+        with _in_float64():
+            a = jnp.asarray(base / np.linalg.norm(base, axis=0))
+            _, s_true, v_true = jnp.linalg.svd(a, full_matrices=True)
+            _, s_false, v_false = jnp.linalg.svd(a, full_matrices=False)
+
+            s_true = np.asarray(s_true, dtype=np.float64)
+            rank = int(np.sum(s_true > DEFAULT_RANK_RTOL * s_true[0]))
+            assert 0 < rank < 64, rank  # the null space is real, not an artefact
+
+            assert np.array_equal(s_true, np.asarray(s_false, dtype=np.float64))
+            assert v_true.shape == v_false.shape == (64, 64)
+            assert np.array_equal(
+                np.asarray(v_true[rank:], dtype=np.float64),
+                np.asarray(v_false[rank:], dtype=np.float64),
+            )

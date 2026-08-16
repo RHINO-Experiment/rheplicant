@@ -339,8 +339,8 @@ class IdentifiabilityReport:
                 f"Inconsistent report: nullity is {self.nullity} over {self.n_par} "
                 f"parameters, so null_space should have shape "
                 f"{(self.nullity, self.n_par)}, but it has {self.null_space.shape}. "
-                "The SVD behind it must be taken with full_matrices=True, or the "
-                "null space is truncated whenever n_data < n_par."
+                "The SVD behind it must be taken with full_matrices=True whenever "
+                "n_data < n_par, or the null space is truncated there."
             )
         return self.null_space[index]
 
@@ -514,18 +514,30 @@ def identifiability(
         # for every model. Leaving it at zero is both finite and correct.
         safe_norms = jnp.where(norms > 0, norms, 1.0)
         normalised = jacobian / safe_norms
-        # The full_matrices flag is load-bearing, and precisely in the headline
-        # case: the free-per-cell model has 64 data points against 72 parameters.
-        # Turned off, `right` comes back (n_data, n_par) with no rows past index
-        # n_data, so `right[rank:]` below would be EMPTY while `nullity` still
-        # reported n_par - rank — a report whose two halves disagree, and whose
-        # direction() passes its bounds check and then indexes off the end. It is
-        # also the obvious performance simplification, so it is pinned by
-        # test_the_null_space_is_whole_when_there_are_fewer_data_than_parameters.
-        _, spectrum, right = jnp.linalg.svd(normalised, full_matrices=True)
 
         n_par = int(x0.size)
         n_data = int(jacobian.shape[0])
+        # The full_matrices flag is load-bearing in exactly ONE regime, and it is
+        # the headline case: the free-per-cell model has 64 data points against
+        # 72 parameters. Turned off there, `right` comes back (n_data, n_par)
+        # with no rows past index n_data, so `right[rank:]` below would be EMPTY
+        # while `nullity` still reported n_par - rank — a report whose two halves
+        # disagree, and whose direction() passes its bounds check and then
+        # indexes off the end. Pinned by
+        # test_the_null_space_is_whole_when_there_are_fewer_data_than_parameters.
+        #
+        # Everywhere else it is pure waste, and expensively so. `U` is discarded
+        # and `right` is read only as `right[rank:]`; for n_data >= n_par both
+        # spellings return the same (n_par,) spectrum and the same (n_par, n_par)
+        # `right`, bit for bit — TestTheSVDAsksForWhatItUses pins that on a
+        # matrix with a real null space, since an equality that only held at full
+        # rank would say nothing. What `full_matrices=True` adds there is an
+        # (n_data, n_data) left factor nothing reads: measured on (32768, n_par)
+        # in float64, `U` alone is 8.59 GB and the call runs 2.43 s against
+        # 0.002 s at n_par=8, and 20.27 s against 0.22 s at n_par=128. The memory
+        # is the real hazard — a realistic grid is far larger than the toy models
+        # in the test suite, all but one of which are over-determined.
+        _, spectrum, right = jnp.linalg.svd(normalised, full_matrices=n_data < n_par)
         spectrum = np.asarray(spectrum, dtype=np.float64)
         # The SVD returns min(n_data, n_par) values; the remaining directions of
         # parameter space are exactly null, so pad rather than drop them. Then
