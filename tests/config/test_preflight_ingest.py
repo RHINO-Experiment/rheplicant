@@ -1097,32 +1097,101 @@ class TestTheRegistry:
         a six-way parallel wave leaves legal (§0.3 F.2)."""
         assert CHECKS[check] is function
 
-    def test_the_three_ids_run_between_fitting_and_model(self):
-        """``CHECKS`` insertion order IS run order, and the foot-import block
-        is alphabetical, so ``ingest`` sits between ``fitting`` and ``model``.
+    def test_this_modules_own_three_ids_run_in_the_order_it_writes_them(self):
+        """The three ids this module registers keep their own relative order.
 
-        Kills: a head import of ``preflight.model`` or ``preflight.observing``
-        in this task's module, which would register THEIR ids first and
-        reorder the pass in silence.  It also kills a DELETED foot import --
-        measured, removing this task's line from ``preflight/__init__.py``
-        takes both the shared ``TestTheFootImportCannotRot`` guard and this
-        test red, which is the blind spot Task 6 reported and this module does
-        not have.
+        This is the surviving half of a test that also asserted
+        ``A28 < A10 < A2`` -- ``fitting`` before ``ingest`` before ``model``.
+        **That half was refuted at the wave-1 merge and is deleted**, not
+        repaired: measured on the merged branch, ``A2`` sits at index 17 and
+        ``A10`` at 31, because ``preflight/beam_spill.py`` sorts FIRST in the
+        alphabetical foot block and *head*-imports ``preflight.document`` and
+        ``preflight.model``, so ``model``'s ids register before ``ingest`` is
+        foot-imported at all.
 
-        **This is a RECORDED EXEMPTION, not an oversight.**  Standing-brief R8
-        and §0.3 F.2 ban "any registration-*index* assertion", and read
-        literally this is one.  The orchestrator has recorded the exemption in
-        §0.3 F.2: **a RELATIVE index comparison between ids in named modules
-        is legal; an ABSOLUTE index is not.**  The reason it is safe in a
-        six-way parallel wave is that ``A28``, ``A10`` and ``A2`` live in
-        ``fitting``, ``ingest`` and ``model``, and the four modules wave 1 adds
-        to the foot block -- ``depends``, ``instrument``, ``noise``,
-        ``resources`` -- change none of those three relative positions.  A
-        length, a set, or an absolute index would still be a merge landmine
-        and none is written here."""
+        The rule that replaces the one this test was written against, and
+        which §0.3 C.5's "alphabetical foot order gives run order" got wrong:
+        **a foot-imported module's checks register after everything its own
+        head imports transitively register.**  Position in the foot block
+        decides nothing on its own.
+
+        What remains here is intra-module and therefore immune to every
+        sibling: A10, A45 and A46 are all registered by *this* file, in this
+        order, so no other task's imports can reorder them.  The two
+        properties the deleted half was buying are asserted directly instead
+        -- the wiring by :meth:`test_the_foot_import_is_what_registers_them`,
+        and the absence of a sibling head import by
+        :meth:`test_this_module_head_imports_no_preflight_sibling`."""
         order = list(CHECKS)
-        assert order.index("A28") < order.index("A10") < order.index("A2")
         assert order.index("A10") < order.index("A45") < order.index("A46")
+
+    def test_model_and_observing_are_imported_inside_the_functions(self):
+        """The property the deleted ordering assertion was really buying.
+
+        A **head** import of a ``preflight/`` sibling makes that sibling's
+        ``@register`` decorators run before this module's own, so its ids land
+        earlier in ``CHECKS`` -- which is run order.  This module's own source
+        says it imports ``preflight.model`` and ``preflight.observing``
+        *inside* its functions for exactly that reason; this asserts it rather
+        than trusting the comment.
+
+        ``preflight.document`` IS head-imported, for ``_task3_where``, and
+        that is deliberate and allowed -- it is named here so the day someone
+        adds a second head import the failure says which one and why.
+
+        Only module-level statements count: ``ast.walk`` would descend into
+        the function bodies and report the very imports whose placement is the
+        point.  Measured at the wave-1 merge -- a walk over the whole tree
+        reports ``document``, ``model`` and ``observing`` and the test is then
+        asserting the opposite of what it means.
+        """
+        import ast
+        import importlib
+
+        module = importlib.import_module("rheplicant.config.preflight.ingest")
+        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+        package = "rheplicant.config.preflight"
+        siblings = set()
+        for node in ast.parse(source).body:          # module level ONLY
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.startswith(f"{package}."):
+                    siblings.add(node.module)        # from ...preflight.X import y
+                elif node.module == package:
+                    # `from ...preflight import X` -- the sibling is the
+                    # ALIAS, not the module path.  This is the spelling the
+                    # foot-import block itself uses, and a walk that only
+                    # inspects `node.module` misses it entirely: measured, a
+                    # `from rheplicant.config.preflight import model` mutant
+                    # SURVIVED the first version of this test.
+                    siblings.update(f"{package}.{a.name}" for a in node.names
+                                    if a.name != "register")
+            elif isinstance(node, ast.Import):
+                siblings.update(a.name for a in node.names
+                                if a.name.startswith(f"{package}."))
+        assert siblings == {"rheplicant.config.preflight.document"}, (
+            f"{module.__name__}'s module-level preflight imports are "
+            f"{sorted(siblings)}; only `document` (for `_task3_where`) is "
+            "allowed, because a head import registers that sibling's ids "
+            "before this module's own")
+
+    def test_the_foot_import_is_what_registers_them(self):
+        """R1: deleting the foot import leaves this file's own tests green.
+
+        The file's ``from rheplicant.config.preflight.ingest import ...`` runs
+        the ``@register`` decorators itself, so nothing in-process can tell
+        "registered for a user" from "registered by this test module".  A
+        subprocess that imports only the package is the honest form.
+        """
+        import subprocess
+        import sys
+
+        done = subprocess.run(
+            [sys.executable, "-c",
+             "from rheplicant.config.preflight import CHECKS\n"
+             "print(sorted(k for k in CHECKS if k in ('A10', 'A45', 'A46')))"],
+            capture_output=True, text=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert done.stdout.strip() == "['A10', 'A45', 'A46']"
 
 
 class TestTheOneBinding:
