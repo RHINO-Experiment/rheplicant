@@ -219,6 +219,7 @@ from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402
 from rheplicant.config.preflight import ingest as _ingest_checks  # noqa: E402,F401
 from rheplicant.config.preflight import instrument as _instrument_checks  # noqa: E402,F401
 from rheplicant.config.preflight import model as _model_checks  # noqa: E402,F401
+from rheplicant.config.preflight import noise as _noise_checks  # noqa: E402,F401
 from rheplicant.config.preflight import observing as _observing_checks  # noqa: E402,F401
 from rheplicant.config.preflight import resources as _resources_checks  # noqa: E402,F401
 from rheplicant.config.preflight import values as _values_checks  # noqa: E402,F401
