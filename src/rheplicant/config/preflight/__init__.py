@@ -244,6 +244,7 @@ from rheplicant.config.preflight import beam_spill as _beam_spill_checks  # noqa
 from rheplicant.config.preflight import depends as _depends_checks  # noqa: E402,F401
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401
+from rheplicant.config.preflight import gated as _gated_checks  # noqa: E402,F401
 from rheplicant.config.preflight import ingest as _ingest_checks  # noqa: E402,F401
 from rheplicant.config.preflight import instrument as _instrument_checks  # noqa: E402,F401
 from rheplicant.config.preflight import model as _model_checks  # noqa: E402,F401

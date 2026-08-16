@@ -197,6 +197,7 @@ def register_built(*checks: str) -> Callable[[Check], Check]:
 # `sorted(AXIS_CHECKS)` is the answer and it cannot go stale.
 from rheplicant.config.inflight import axes as _axis_checks  # noqa: E402,F401
 from rheplicant.config.inflight import grids as _grid_checks  # noqa: E402,F401
+from rheplicant.config.inflight import noise_waves as _noise_wave_checks  # noqa: E402,F401
 from rheplicant.config.inflight import optics as _optics_checks  # noqa: E402,F401
 from rheplicant.config.inflight import twin as _twin_checks  # noqa: E402,F401
 

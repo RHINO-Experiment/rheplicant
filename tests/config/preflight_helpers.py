@@ -213,6 +213,68 @@ def repatch(document, **sections):
     return patched
 
 
+# --- Plan 3C Task 2's constants ---------------------------------------------
+#
+# Appended at the foot and each named for its OWN subject, per §3.2(f): a
+# generic name here is a name the next task reaches for and quietly widens.
+# Nothing above this line is edited.
+
+#: An ``inference.checks:`` patch declaring one legal skip -- the shape A37 is
+#: about when its ``reason:`` is taken away, and the shape the phase assertion
+#: puts BESIDE :data:`UNREADABLE_BEAM`.  ``linearity`` and not one of the other
+#: two because it is the only check on by default (``gating.DEFAULT_MODE``), so
+#: a skip of it is a document that actually changes what runs.
+CHECKS_SKIP = {"linearity": {"mode": "skip", "reason": "campaign"}}
+
+#: ``model.noise`` drawn by the radiometer operator -- C18.kind's other
+#: drawing type.  :data:`RADIOMETER_NODE` above is the same fields WITHOUT the
+#: ``type:``, because ``inference.twin.replace`` and ``model:`` want them under
+#: different spellings; this is the ``model:`` spelling.
+RADIOMETER_DRAWN = {"type": "RadiometerNoiseOperator", **RADIOMETER_NODE}
+
+#: Three switch positions, so ``context.shape_scope.n_source`` is 3 rather
+#: than the base document's 1.  C15's ``min(n_source, k)`` cap is invisible on
+#: a one-load document, where the product is ``min(1, k) * n_freq`` whatever
+#: ``k`` is.
+NOISE_WAVE_SWITCHING = {"mode": "cycle", "order": ["antenna", "ambient",
+                                                   "hot"]}
+
+#: The two calibration loads :data:`NOISE_WAVE_SWITCHING`'s order names.
+NOISE_WAVE_LOADS = {"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
+                    "hot": {"t_load": {"value": 400.0, "unit": "K"}}}
+
+#: A ``model:`` PATCH lighting the ``noise_wave`` node -- C15's subject.  A
+#: patch and not a whole model, because ``preflight_document`` merges one
+#: level deep and a test that wants a basis beside it writes
+#: ``{**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS}``.
+#:
+#: The four temperatures are written out separately rather than defaulted: C15
+#: counts which of them a LATENT frees, and a node that omitted one would make
+#: the freed-set assertions read against a field that is not there.
+NOISE_WAVE_MODEL = {
+    "noise_wave": {"type": "NoiseWaveOperator",
+                   "t_unc": {"value": 1.0, "unit": "K"},
+                   "t_cos": {"value": 1.0, "unit": "K"},
+                   "t_sin": {"value": 1.0, "unit": "K"},
+                   "t_rx": {"value": 1.0, "unit": "K"},
+                   "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
+                   "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
+                   "gamma_rec_re": {"zeros": ["n_freq"]},
+                   "gamma_rec_im": {"zeros": ["n_freq"]}},
+}
+
+#: A ``model.t_sys_extra`` entry of the type C15 declines under.  **Its
+#: ``graph_node`` is ``t_sys_extra`` and NOT ``noise_wave``** (measured), which
+#: is why the detector cannot look under the node the check is otherwise about.
+#: ``t_sys_extra`` is a ``many`` node, so the entry is written under a label.
+NOISE_WAVE_BASIS = {
+    "smooth": {"type": "BasisTemperatureOperator",
+               "coeff": {"zeros": ["n_freq"]},
+               "freq_basis": {"kind": "polynomial", "order": 2},
+               "time_basis": None},
+}
+
+
 def findings(document) -> tuple[Finding, ...]:
     """Everything the pass found on ``document``, in run order."""
     return preflight(document).findings
