@@ -1879,18 +1879,31 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
     every message carries ``inference.noise.kind: <kind>`` verbatim so the
     other end is named too.
 
-    **One ordering this hoist REVERSES, recorded rather than gated.**  The
-    ``inference.noise:`` grammar is ``build_noise``'s, at P2, so on a
-    document with a readable beam it used to speak before A27 did.  Measured,
-    ``kind: radiometer`` with no ``include_logdet`` earns *"is required for a
-    prediction-dependent noise model and has no default"* and a stray key
-    earns ``check_unknown_keys``' sentence; beside a ``conjugate.wiener`` run
-    both now arrive after A27.  Standing down for them would mean
-    re-implementing ``_KIND_KEYS``' sweep here, which §2.5 forbids and which
-    would be a second validator for a grammar ``build_noise`` owns; hoisting
-    that grammar to P-1 as well is the real answer and belongs to whichever
-    plan takes A49.  ``test_a_noise_wrong_in_its_GRAMMAR_too_still_hears_
-    A27`` is what keeps this paragraph a measurement rather than a claim.
+    **One ordering this hoist REVERSES, recorded rather than gated -- and
+    Plan 3B took half of it back.**  The ``inference.noise:`` grammar is
+    ``build_noise``'s, at P2, so on a document with a readable beam it used to
+    speak before A27 did.  Standing down for it would mean re-implementing
+    ``_KIND_KEYS``' sweep here, which §2.5 forbids and which would be a second
+    validator for a grammar ``build_noise`` owns; hoisting that grammar to
+    P-1 as well was named as the real answer, and **Plan 3B's A49 did exactly
+    that for the ``include_logdet`` leg** (``preflight/noise.py::_a49_in``).
+
+    So the position today, measured on a ``conjugate.wiener`` run rather than
+    inferred:
+
+    * ``kind: radiometer`` with no ``include_logdet`` now earns **A27 and A49
+      in one report**, A27 first -- the round trip is gone, and the second
+      sentence is *"include_logdet: is required for a prediction-dependent
+      noise model and has no default"* in A49's voice at P-1 rather than
+      ``build_noise``'s at P2;
+    * a **stray key** still earns nothing here.  A49's hoist is gated on
+      ``include_logdet`` being one of the unknown keys, deliberately, so that
+      a typo'd ``flors:`` is not claimed under A49's id; that sentence still
+      arrives from ``check_unknown_keys`` at P2, after A27.
+
+    ``test_a_noise_wrong_in_its_GRAMMAR_too_still_hears_A27`` is what keeps
+    this paragraph a measurement rather than a claim -- and note that it calls
+    :func:`_t10_decided` directly, so no registration can move it.
     """
     section = document.get("inference")
     noise = section.get("noise") if isinstance(section, Mapping) else None

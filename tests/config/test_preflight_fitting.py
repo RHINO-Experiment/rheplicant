@@ -4283,15 +4283,27 @@ class TestTheDecidedTable:
         ``radiometer`` with no ``include_logdet`` earns *"is required for a
         prediction-dependent noise model and has no default"*, and a stray
         key earns *"kind: radiometer does not take ['banana']"*.  Beside a
-        ``conjugate.wiener`` run both now arrive after A27, and the user pays
+        ``conjugate.wiener`` run both arrive after A27, and the user pays
         a second round trip if they take the ``conjugate.gls`` way out rather
         than the ``radiometer_frozen`` one (which drops ``include_logdet``
         from the key set entirely).
 
         Not gated, and the alternative is why: standing down would mean
         re-implementing ``_KIND_KEYS``' sweep in this module, which §2.5
-        forbids by name.  Hoisting that grammar to P-1 as well is the real
-        answer and is nobody's in Plan 3A.
+        forbids by name.  Hoisting that grammar to P-1 as well was named here
+        as the real answer, and **Plan 3B did it for the ``include_logdet``
+        leg**: A49 now decides that one key at P-1
+        (``preflight/noise.py::_a49_in``), so on the whole document a reader
+        hears A27 *and* A49 in one report instead of paying the round trip.
+        The stray-key half did not move -- A49's hoist is gated on
+        ``include_logdet`` being one of the unknown keys, so a typo is not
+        claimed under A49's id -- and that is why this test still finds
+        exactly one finding in each direction.
+
+        **This test itself did not have to move**, which is the point worth
+        keeping: it calls :func:`_t10_decided` directly, so a new registration
+        in another module cannot change what it sees.  The paragraph above is
+        the only thing Plan 3B had to bring up to date.
         """
         broken = {key: value for key, value in RADIOMETER.items()
                   if key != "include_logdet"}
