@@ -6,17 +6,25 @@ The feature half -- an installed module that is too old for the route -- is
 **Every absence in this module is SIMULATED and none of them reads the real
 environment.**  The two are different tests and conflating them is how a suite
 becomes a report about the machine it ran on: this worktree's venv carries
-healpy, pygdsm, pyuvdata, limTOD, limtod_jax, rhino_cal_jax, h5py and numpyro,
-and the main checkout's carries neither pyuvdata nor pytest-xdist -- so a test
-that asserted "``format: uvbeam`` earns A35" against the live environment would
-be green in one tree and red in the other.  The recipe is
-:func:`blocked`: ``sys.modules[name] = None``, which is CPython's own way of
-making an import fail, and which ``importlib.util.find_spec`` reports as
-absence.
+healpy, pygdsm, pyuvdata, limTOD, limtod_jax, rhino_cal_jax, h5py and numpyro
+and does NOT carry MomentRFI, while the main checkout's venv carries MomentRFI
+and does NOT carry pyuvdata -- so a test that asserted "``format: uvbeam``
+earns A35" against the live environment would be green in one tree and red in
+the other.  The recipe is :func:`blocked`: ``sys.modules[name] = None``, which
+is CPython's own way of making an import fail, and which
+``importlib.util.find_spec`` reports as absence.
 
-**MomentRFI is the one genuine absence** and it is used as one deliberately:
-it is not on PyPI, no test environment carries it, and it is what makes
-:class:`TestApplyingTheAdvice` a real R4 test rather than a simulated one.
+**MomentRFI is no exception, and it used to be one.**  This module shipped
+declaring MomentRFI "the one distribution no test environment has" and leaving
+two tests to read the real environment for it.  **That premise was false when
+it was written**: the repository's own primary venv
+(``/Users/zzhang/projects/e-RHINO/.venv``) has MomentRFI installed as an
+editable, so both tests failed there with *"A35 produced 0 findings"* while
+passing in every worktree -- a suite that was a report about which checkout it
+ran in.  Measured, then fixed: presence is simulated in BOTH directions here,
+by :func:`blocked` for the absence and by :func:`_stand_in` for the presence,
+and :data:`PRESENCE_ALWAYS_SIMULATED` names the distribution that gets the
+treatment.
 """
 
 import pathlib
@@ -54,9 +62,20 @@ MODULES = tuple(sorted({requirement[1]
                         for requirements in _FEATURES.values()
                         for requirement in requirements}))
 
-#: The one distribution no test environment has, and the only absence in this
-#: module that is real.
-ABSENT_FOR_REAL = "MomentRFI"
+#: The distribution this module never asks the environment about, in either
+#: direction.
+#:
+#: **It was called ``ABSENT_FOR_REAL`` and described as "the one distribution
+#: no test environment has".  That was measured to be false**: the
+#: repository's primary venv carries MomentRFI as an editable install, and the
+#: two tests that trusted the claim failed there and nowhere else.  Every
+#: other row in :data:`ROUTES` can be handled by :func:`present_or_skip`,
+#: which skips honestly when a distribution is missing; MomentRFI cannot,
+#: because it is present in one of this repository's two environments and
+#: absent in the other, so *either* real-environment branch loses its coverage
+#: in one of them.  Simulating both directions is what makes the verdict the
+#: same in both.
+PRESENCE_ALWAYS_SIMULATED = "MomentRFI"
 
 
 def blocked(monkeypatch, *names):
@@ -244,15 +263,33 @@ class TestTheRegistration:
         that: a module sorting first in the foot block whose own check landed
         at index 29 of 40.
 
-        A35 is at index 0 in this tree (``list(CHECKS)[:4] == ['A35',
-        'A1.runs', 'A1.horizon', 'A1.variants']``, measured in a fresh
-        process), and it is at index 0 because of THIS: every helper this
-        module borrows from ``preflight/document.py`` and ``preflight/model.py``
-        is imported inside a function, so importing ``depends`` registers A35
-        and nothing else.  The position itself is not asserted, because a
-        sibling landing a module that sorts before ``depends`` and head-imports
-        ``document`` would move it -- green here, red at merge, which is
-        exactly what R8 bans.
+        **This docstring used to say "A35 is at index 0 in this tree
+        (``list(CHECKS)[:4] == ['A35', 'A1.runs', 'A1.horizon',
+        'A1.variants']``, measured in a fresh process)". It was true when it
+        was written and is now false.** Re-measured in a fresh process at the
+        merged tree: ``len(CHECKS)`` is **49**, ``list(CHECKS)[:4]`` is
+        ``['A1.runs', 'A1.horizon', 'A1.variants', 'A38']``, and **A35 is at
+        index 30**.  Five sibling tasks landed foot imports after this one was
+        written and every one of them moved it.
+
+        Which is the finding, not an embarrassment: **the sentence that
+        rotted is the sentence explaining why the index must not be
+        asserted**, and it rotted by exactly the mechanism it describes.  The
+        test itself never touched the index -- its assertion is the ``ast``
+        walk below -- so a suite of 7264 tests could not see the measurement
+        going stale.  A measured number written into prose has no guard; only
+        the assertion does.  The number is kept here rather than deleted
+        because the *mechanism* claim still needs an illustration, and it is
+        dated so the next reader knows to re-take it.
+
+        The mechanism, which is what the assertion below holds: every helper
+        this module borrows from ``preflight/document.py`` and
+        ``preflight/model.py`` is imported inside a function, so importing
+        ``depends`` registers A35 and nothing else.  The position itself is
+        not asserted, because a sibling landing a module that sorts before
+        ``depends`` and head-imports ``document`` moves it -- green here, red
+        at merge, which is exactly what R8 bans.  That is not hypothetical any
+        more; it is what happened.
         """
         import ast
 
@@ -403,12 +440,16 @@ class TestEveryRouteThatReachesTheUserBadlyToday:
 
         Without this, an A35 that fired on the TOKEN rather than on the token
         AND the absence would pass every positive test in this module while
-        refusing every document in the world.  ``MomentRFI`` is genuinely
-        absent, so its row is given a stand-in rather than the real thing --
-        which is itself the assertion that A35 reads the environment and not
-        the document alone.
+        refusing every document in the world.  ``MomentRFI`` is given a
+        stand-in rather than the real thing, because it is the one requirement
+        present in one of this repository's two environments and absent in the
+        other: ``present_or_skip`` would drop this row's coverage in whichever
+        tree lacks it, and asserting it is there would fail in that tree
+        outright.  The stand-in gives the same verdict in both -- and it is
+        itself the assertion that A35 reads the environment and not the
+        document alone.
         """
-        if module == ABSENT_FOR_REAL:
+        if module == PRESENCE_ALWAYS_SIMULATED:
             monkeypatch.setitem(sys.modules, module, _stand_in(module))
         else:
             present_or_skip(module)
@@ -474,8 +515,17 @@ class TestTheWholeSentence:
 
     def test_the_momentrfi_node_says_what_needs_none_of_it(self, monkeypatch):
         """The alternative clause, and the sentence :class:`TestApplyingTheAdvice`
-        then follows."""
-        del monkeypatch  # MomentRFI is absent for real; nothing to simulate.
+        then follows.
+
+        ``blocked`` rather than the real environment, and that is a
+        correction.  This line read ``del monkeypatch  # MomentRFI is absent
+        for real; nothing to simulate.``, which was true of every worktree and
+        false of the repository's own primary venv -- where MomentRFI is
+        installed, A35 correctly stands down, and ``only`` then asserts on
+        zero findings: *"A35 produced 0 findings on this document, not one:
+        []"*.  See :data:`PRESENCE_ALWAYS_SIMULATED`.
+        """
+        blocked(monkeypatch, PRESENCE_ALWAYS_SIMULATED)
         finding = only(preflight_document(**ROUTES[11][1]), "A35")
         assert finding.message == (
             "model.flagging: MomentRFIFlaggingOperator needs the MomentRFI distribution, "
@@ -1141,14 +1191,22 @@ class TestTheStandDowns:
 
 
 class TestApplyingTheAdvice:
-    """S4's second half, on the one distribution that is absent for real.
+    """S4's second half, on the distribution whose remedy a user can act on.
 
-    No simulation anywhere in this class: MomentRFI is not on PyPI and no test
-    environment carries it, so the refusal is the one a user meets and the
-    remedy is one they can actually take.
+    MomentRFI is not on PyPI, so the message has to name a git install and a
+    document-level alternative rather than an extra -- and the second is the
+    one a test can take.
+
+    **The absence is simulated here, and this class used to say the opposite.**
+    Its docstring read *"No simulation anywhere in this class: MomentRFI is not
+    on PyPI and no test environment carries it"*; the repository's primary venv
+    carries it, and the first test below failed there and nowhere else.  Being
+    on PyPI and being installed are different questions, and only the first is
+    still true.  See :data:`PRESENCE_ALWAYS_SIMULATED`.
     """
 
-    def test_the_document_that_earns_it_would_otherwise_load_and_die_later(self):
+    def test_the_document_that_earns_it_would_otherwise_load_and_die_later(
+            self, monkeypatch):
         """What A35 buys, stated as the thing it replaces.
 
         With MomentRFI present the document LOADS -- constructing
@@ -1156,9 +1214,38 @@ class TestApplyingTheAdvice:
         arrives at forward-evaluation time from inside a ``jax.pure_callback``.
         A35 is the whole of what stands between the two.
         """
+        blocked(monkeypatch, PRESENCE_ALWAYS_SIMULATED)
         document = preflight_document(
             model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
         assert only(document, "A35")
+
+    @pytest.mark.parametrize("installed", [False, True],
+                             ids=["simulated-absent", "simulated-present"])
+    def test_both_verdicts_are_reachable_whatever_this_venv_carries(
+            self, monkeypatch, installed):
+        """Both sides of the only dispatch A35 makes, pinned in one test.
+
+        The check branches on one question -- is the distribution findable --
+        and the failure this closes was that the branch taken depended on
+        which checkout the suite ran in rather than on anything the test said.
+        So both sides are driven here from simulations, and the pair is the
+        statement that this document's verdict is a function of the simulation
+        and of nothing else.  Whichever venv runs it, both legs execute and
+        both are asserted.
+
+        What it does NOT cover, said plainly: it cannot stop a *sibling* test
+        from reading the real environment again -- it only pins that the
+        simulations reach both answers.  The sibling above is the one that
+        regressed, and its own ``blocked`` call is what holds it.
+        """
+        if installed:
+            monkeypatch.setitem(sys.modules, PRESENCE_ALWAYS_SIMULATED,
+                                _stand_in(PRESENCE_ALWAYS_SIMULATED))
+        else:
+            blocked(monkeypatch, PRESENCE_ALWAYS_SIMULATED)
+        document = preflight_document(
+            model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
+        assert a35_wheres(document) == ([] if installed else ["model.flagging"])
 
     def test_taking_the_advice_leaves_a_document_that_loads(self):
         """R4: the remedy the message names, applied, reaches a document this

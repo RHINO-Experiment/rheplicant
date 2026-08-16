@@ -2049,7 +2049,15 @@ class TestTheReVoicedChecksInThePass:
         """
         for section in (["gain"], "gain", 3):
             document = _with_data(preflight_document(model=section))
-            assert preflight(document).checks() == frozenset()
+            # `& T5_CHECKS` and not a bare `== frozenset()`: the ids this
+            # docstring reasons about ARE A5, A8 and A31, and a RAISING check
+            # is reported under its own id -- so the intersection still kills
+            # the AttributeError this test exists for, while no longer
+            # claiming that no check any later plan registers fires here.
+            # R8: an unscoped equality over the real registry is green in one
+            # branch and red in the next, in a module that will not be the
+            # cause.
+            assert preflight(document).checks() & T5_CHECKS == frozenset()
 
     def test_a_malformed_node_spec_produces_findings_and_never_raises(self):
         """§2.3's TRAP one level in, where Task 4's rounds found it.
