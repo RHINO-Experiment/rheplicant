@@ -396,3 +396,276 @@ class TestAgainstTheRealMachinery:
             bindings=[Bind("eta", into=compile_path("antenna_loss.efficiency"))],
         )
         space.validate(twin)
+
+
+# --- Plan 3B Task 9: the two schema rows with nothing left to check ---
+
+
+#: A projector with no beam and no file, and a sky model with no file, so the
+#: two reference sites in :class:`TestB7OneResourceIsOneObject` can coexist in
+#: one loadable document.  ``engine: matrix`` returns before any beam is read
+#: (``kinds/projectors.py``); the shape is written ``["n_time", 12]`` rather
+#: than ``[16, 12]`` because a literal extent equal to ``n_time`` earns A41 and
+#: the finding would be noise in a test that is not about it.
+_SHARED_PROJECTOR = {"engine": "matrix", "matrix": {"zeros": ["n_time", 12]},
+                     "provenance": {"built_by": "the test suite",
+                                    "lat_deg": 0.0}}
+_SHARED_SKY_MODEL = {"kind": "uniform", "n_pix": 12,
+                     "amplitude": {"value": 200.0, "unit": "K"}}
+
+
+@pytest.fixture(scope="module")
+def shared_projector_run():
+    """One ``load_document`` whose ``filters`` and ``observed_astro_sky``
+    reference the SAME projector resource.
+
+    Module-scoped because both classes below read the same built objects and
+    a per-test build would pay the cold JAX trace several times.  Measured:
+    about 1 s cold, 50 ms warm, and the document earns no finding at all.
+    """
+    from rheplicant.config import load_document
+    from tests.config.preflight_helpers import (
+        BASE_MODEL,
+        BASE_OBSERVATION,
+        preflight_document,
+    )
+
+    document = preflight_document(
+        observation={**BASE_OBSERVATION,
+                     "pointing": {"mode": "baked",
+                                  "provenance": {"built_by": "a test"}}},
+        resources={"projectors": {"p": _SHARED_PROJECTOR},
+                   "sky_models": {"s": _SHARED_SKY_MODEL}},
+        model={**BASE_MODEL,
+               "observed_astro_sky": {
+                   "sky_model": {"ref": "resources.sky_models.s"},
+                   "projector": {"ref": "resources.projectors.p"}},
+               "filters": [{"type": "SkySpaceFilter",
+                            "projector": {"ref": "resources.projectors.p"},
+                            "regularization": 1e-3}]})
+    return load_document(document)
+
+
+def _out_degrees(edges) -> dict[str, int]:
+    """How many edges leave each node, over a plain ``(source, target)`` list.
+
+    A free function and not a method, so that
+    ``TestB2TheShippedGraphIsATree.test_the_tree_reading_is_capable_of_failing``
+    can hand it a FORKED edge list and watch it say so. A checker that is only
+    ever run on the one graph it passes on is a checker nobody has seen fail.
+    """
+    degrees: dict[str, int] = {}
+    for source, _target in edges:
+        degrees[source] = degrees.get(source, 0) + 1
+    return degrees
+
+
+class TestB2TheShippedGraphIsATree:
+    """Schema B2: "a path into an aliased node is refused".
+
+    ``Assembly.aliased`` is empty for every shipped radio graph, which is why
+    B2 is a **pinning test** in Plan 3B rather than a check --
+    :meth:`TestTheSixRefusals.test_3_a_path_into_an_aliased_node_is_refused`
+    above already says so in its own docstring and stubs the tuple, because
+    no document can produce a non-empty one.
+
+    **The half that is weak, measured rather than assumed -- and the plan's
+    own statement of it is too strong.** Plan 3B's §0.3 E.5 says patching
+    ``RADIO_GRAPH`` to the fork ``('uniform_sky', 't_ant_sum')`` leaves
+    ``assemble(...).aliased == ()`` **on a non-tree graph**, because a
+    document lights only 9 of the 33 nodes. Re-measured here with that exact
+    fork applied to the real graph: this class's document earns
+    ``aliased == ('uniform_sky',)`` and the pin below goes RED. So the
+    weakness is **document-dependent**, not absolute: ``aliased == ()`` sees
+    a fork the document happens to light and is blind to every fork it does
+    not, which is a property of the fixture rather than of the graph. The
+    assertion that fires the day someone adds an edge, whatever any document
+    lights, is the STRUCTURAL one over the graph's own edge list -- and that
+    is what this class leads with.
+
+    Three legs, because the theorem needs all three:
+
+    1. the shipped graph is a tree -- every node's out-degree is at most one,
+       and ``|edges| == |nodes| - 1``;
+    2. the config layer never chooses a graph: ``compose.py::_graph()`` takes
+       no argument and hardcodes ``return RADIO_GRAPH``, which is what makes
+       the public ``register_graph``/``get_graph`` pair harmless here;
+    3. ``aliased`` really is ``()`` on a built twin -- kept, and labelled, as
+       the weak half.
+    """
+
+    def test_the_shipped_graph_is_a_tree(self):
+        """Out-degree <= 1 and one fewer edge than nodes: no node's
+        contribution reaches the sink by two paths, so the fold can never
+        embed one at two positions and ``aliased`` cannot be non-empty.
+
+        Measured at this commit: 33 nodes, 32 edges, max out-degree 1, sink
+        ``filters``, graph name ``single-antenna``. The counts are asserted
+        as a RELATION and not as the two numbers, so adding a node with one
+        edge -- which keeps the theorem -- is not a red test, while adding a
+        second edge out of any node is.
+        """
+        from rheplicant.radio.graph import RADIO_GRAPH
+
+        degrees = _out_degrees(RADIO_GRAPH.edges)
+        forks = {node: out for node, out in degrees.items() if out > 1}
+        assert forks == {}, (
+            f"RADIO_GRAPH is no longer a tree: {forks} reach the sink by "
+            "more than one path. Assembly.aliased can now be non-empty, and "
+            "schema B2 -- a path into an aliased node -- stops being a "
+            "structural theorem and becomes a check somebody has to write."
+        )
+        assert len(RADIO_GRAPH.edges) == len(RADIO_GRAPH.nodes) - 1, (
+            f"{len(RADIO_GRAPH.nodes)} nodes and "
+            f"{len(RADIO_GRAPH.edges)} edges: a tree with one sink has "
+            "exactly one fewer edge than nodes, so this graph is either "
+            "disconnected or has a cycle."
+        )
+
+    def test_the_tree_reading_is_capable_of_failing(self):
+        """Anti-vacuity for the leg above, and it is not decoration.
+
+        The whole reason B2 is a pinning test is that the OBVIOUS pin --
+        ``aliased == ()`` -- passes on a graph that is not a tree. A tree
+        check that had the same property would be the same defect one level
+        up, so the checker is handed a fork built from the real edge list and
+        must report it.
+        """
+        from rheplicant.radio.graph import RADIO_GRAPH
+
+        forked = [*RADIO_GRAPH.edges, ("uniform_sky", "t_ant_sum")]
+        assert _out_degrees(forked)["uniform_sky"] == 2
+
+    def test_the_config_layer_never_chooses_a_graph(self):
+        """``compose.py::_graph()`` hardcodes ``return RADIO_GRAPH``.
+
+        ``core/graph.py`` publishes ``register_graph`` and ``get_graph``, so
+        a second graph CAN exist in a process. What makes that harmless to
+        every check keyed on ``RADIO_GRAPH`` -- B2 here, and A2/A3/A4 in
+        ``preflight/model.py`` -- is that no document-reachable route selects
+        one: the config layer's single accessor takes no parameter, and
+        ``get_graph`` is called nowhere under ``config/`` outside two
+        docstring citations.
+
+        Asserted over ``ast`` rather than over the source text, so that a
+        citation in a comment cannot make this red and a real call cannot
+        hide behind formatting.
+
+        **Both spellings, and that is measured.** A first version matched only
+        ``ast.Name`` -- a bare ``get_graph(...)`` -- and review defeated it
+        with one line: ``_core_graph.get_graph(RADIO_GRAPH.name)``, an
+        ``ast.Attribute`` call that really does resolve through
+        ``register_graph``'s mutable table (``get_graph("single-antenna") is
+        RADIO_GRAPH`` is True) and **survived the whole of ``tests/config``**.
+        The ``id``-or-``attr`` idiom below is the same one
+        ``test_config_surface.py``'s walker floor uses, for the same reason.
+
+        **Why leg 3 carries weight.** It is what makes leg 1 sufficient: if a
+        document-reachable route could select a graph, out-degree <= 1 over
+        ``RADIO_GRAPH`` would stop implying ``aliased == ()`` and B2 would
+        stop being a theorem, which is this class's whole conclusion.
+        """
+        import ast
+        import inspect
+        from pathlib import Path
+
+        from rheplicant.config.sections import compose
+        from rheplicant.radio.graph import RADIO_GRAPH
+
+        assert compose._graph() is RADIO_GRAPH
+        assert not inspect.signature(compose._graph).parameters, (
+            "compose._graph() grew a parameter; a document that can choose "
+            "its graph makes every RADIO_GRAPH-keyed check conditional."
+        )
+        config = Path(compose.__file__).parent.parent
+        modules = sorted(config.rglob("*.py"))
+        # Anti-vacuity, the line this test's sibling floor in
+        # `test_config_surface.py` already has: if `config` ever stops being
+        # the package directory, `called == []` passes for the wrong reason
+        # and this guard reports "no route selects a graph" about nothing.
+        assert len(modules) > 20, (
+            f"the walk found only {len(modules)} modules under {config}; it "
+            "is not looking at config/ and every verdict below is vacuous"
+        )
+        called: list[str] = []
+        for path in modules:
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(node, ast.Call):
+                    continue
+                # `id` OR `attr`: `get_graph(...)` and `mod.get_graph(...)`
+                # are the same call and only the first is an `ast.Name`.
+                name = getattr(node.func, "id", None) or getattr(
+                    node.func, "attr", None)
+                if name == "get_graph":
+                    called.append(str(path.relative_to(config)))
+        assert called == [], f"config/ now selects a graph in {called}"
+
+    def test_aliased_is_empty_on_a_built_twin_and_that_half_is_weak(
+            self, shared_projector_run):
+        """The half the plan named and then measured to be vacuous.
+
+        Kept because it is the property ``refuse_aliased_target`` reads, and
+        labelled because a reader finding only this test would conclude the
+        tree property was checked. It is not: it is ``()`` on every fork this
+        document does not light, and that is a fact about the document.
+        Asserted on a real ``Assembly`` off ``load_document`` -- the module's
+        ``twin`` fixture is a ``Pipeline``, which has no ``aliased`` at all.
+        """
+        assert shared_projector_run.twin.aliased == ()
+
+
+class TestB7OneResourceIsOneObject:
+    """Schema B7: two references to one resource name reach one object.
+
+    B7 is "identity by construction" -- ``build_resources`` memoises by
+    dotted name and ``sections/model.py`` resolves an object field to the
+    built object rather than to a copy -- so Plan 3B ships a pinning test
+    rather than a check. It lives beside the path grammar because that is
+    the mechanism: ``{ref: resources.projectors.p}`` is a path, an inline
+    projector at an object field is refused, and the identity is what the
+    reference buys.
+
+    **``is`` and never ``==``, measured.** ``MatrixProjector(m) ==
+    MatrixProjector(m)`` and ``a == copy.deepcopy(a)`` are both truthy while
+    ``is`` is False, so an equality here would pass on the very failure B7
+    exists to exclude: two objects built twice from one spec. The weight
+    used by ``filters`` and the sky average taken through
+    ``observed_astro_sky`` have to come off ONE object, and only ``is`` says
+    that.
+
+    **No beam.** See :data:`_SHARED_PROJECTOR` and
+    :func:`shared_projector_run` for the document and why it is shaped the
+    way it is.
+    """
+
+    def test_both_references_reach_the_same_object(self,
+                                                   shared_projector_run):
+        """B7, stated: ``filters[].projector`` **is**
+        ``observed_astro_sky.projector`` when they name one resource.
+
+        And both are the object ``build_resources`` put in the table -- the
+        three-way identity, because two nodes sharing a private copy would
+        satisfy a two-way one and still not be the resource the rest of the
+        layer resolves ``{ref:}`` to.
+        """
+        run = shared_projector_run
+        built = run.resources.resources["resources.projectors.p"]
+        assert run.twin["filters"].projector is built
+        assert run.twin["observed_astro_sky"].projector is built
+
+    def test_equality_would_not_have_said_that(self, shared_projector_run):
+        """Why B7's pin is ``is``. §0.3 E.5 ruling 4, re-measured here.
+
+        A deep copy of the one projector compares EQUAL to it and is a
+        different object. An ``==`` pin above would therefore be green on a
+        build that constructed the projector twice -- which is exactly the
+        state B7 exists to exclude, because a weight and a sky average taken
+        off two objects agree until one of them is rebuilt.
+        """
+        import copy
+
+        run = shared_projector_run
+        built = run.resources.resources["resources.projectors.p"]
+        other = copy.deepcopy(built)
+        assert other == built
+        assert other is not built

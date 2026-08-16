@@ -148,16 +148,79 @@ def _task3_where(label: str) -> str:
     return pieces[0]
 
 
-def _task3_layers(document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...]:
-    """``("", document)`` plus one ``("variants.<name>", merged)`` per variant.
+#: The ONE-ENTRY memo behind :func:`_task3_layers`: ``(document, layers)`` for
+#: the document most recently walked, or ``None`` before the first walk.
+#:
+#: **The document itself is held, not only its ``id()``, and that is a
+#: correctness requirement rather than a convenience.**  ``id()`` in CPython is
+#: a memory address, and an address is reused the moment its object is freed --
+#: so a memo keyed on the bare integer would answer a hit for a DIFFERENT
+#: document that happened to land where the first one used to be, and hand it
+#: another document's layers.  Holding the reference is what makes the address
+#: un-reusable for as long as the entry lives, and the hit path below asserts
+#: ``is`` rather than ``==``: two equal documents are still two documents, and
+#: either may be mutated after the other was walked.
+#:
+#: **What a live entry costs, stated as the measurement and not as an
+#: impression.**  It is not "one document": it is the document PLUS one deep
+#: merge of it per declared variant -- 42 340 bytes of document and 777 475
+#: bytes of entry on the cold guard's own 21-variant row.  That is why
+#: :func:`preflight` drops it on the way out as well as on the way in: a
+#: process that loads one config would otherwise hold all of it for the rest of
+#: its life, for a cache nothing will read again.  Inside the pass it is paid
+#: once rather than once per check, which is the whole point.
+#:
+#: **No test can show this memo returning another document's layers if the
+#: reference is dropped, and the honest reason is written here rather than
+#: implied by a test that does not exist.**  Layer 0 IS ``("", document)``, so
+#: the layers tuple holds the document too, and a single entry can only hold
+#: one of them -- an id-only key would therefore be un-recyclable today by
+#: accident.  It is an accident: a walk that ever handed out a COPY as layer 0,
+#: or a memo that ever held more than one entry, loses it, and the failure
+#: would be a silent wrong answer rather than an exception.  The reference is
+#: explicit so that the guarantee stops depending on the shape of the value.
+_TASK3_LAYER_MEMO: tuple[Mapping[str, Any], tuple[tuple[str, Mapping], ...]] | None = None
 
-    Layering is one level deep by design (``layering.py:9-12``), so the walk
-    is one layer per DECLARED variant and never a pair of them merged.
 
-    A variant ``apply_variant`` refuses is dropped rather than raised on:
-    ``_variant_text`` is the check that reports it, and a walk that let the
-    ``ConfigError`` out would abort the pass and hide every later finding
-    (§2.3's TRAP).
+def _task3_forget_layers() -> None:
+    """Drop the memo.  ``preflight`` calls this at the head AND the tail of
+    every pass -- the head for correctness, the tail so nothing is retained.
+
+    **Identity alone is not a safe key ACROSS passes, and that is measured
+    rather than argued.**  Within one pass a document cannot change: every
+    check reads text and layer 0 IS the caller's own document object, shared
+    by every layering caller since the walk was written.  BETWEEN two passes
+    it changes constantly -- ``tests/config/test_preflight_instrument.py:970``
+    earns A13, writes the remedy the message advises straight into the
+    document it already passed to :func:`preflight`, and requires the next pass
+    to see it.  That is R4's "apply your own advice" shape, the suite is full
+    of it, and a memo that outlived the pass would answer those documents from
+    before their own fix -- silently, since layer 0 would show the mutation and
+    only the merged variants would be stale.
+
+    So the memo's lifetime is ONE pass, and the assumption it rests on is only
+    the one the walk already rested on.
+
+    The tail drop is a second reason rather than a second mechanism: the entry
+    is the document plus one merge of it per variant, and a library that leaves
+    that behind after answering a question is holding a cache with no reader.
+    It also keeps ``inflight``'s two passes out of the question entirely --
+    ``_assemble`` runs :func:`preflight` and then ``axes`` on the SAME document
+    object, so an entry that outlived the pass would be inherited by the first
+    axis check that ever walks layers.
+    """
+    global _TASK3_LAYER_MEMO
+
+    _TASK3_LAYER_MEMO = None
+
+
+def _task3_build_layers(
+        document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...]:
+    """:func:`_task3_layers` without the memo -- the walk itself.
+
+    Split out so that the memo is one readable branch rather than a flag
+    threaded through the build, and so a test can drive the uncached walk
+    directly.
     """
     from rheplicant.config.layering import apply_variant
 
@@ -171,6 +234,56 @@ def _task3_layers(document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...
         except ConfigError:
             continue
     return tuple(layers)
+
+
+def _task3_layers(document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...]:
+    """``("", document)`` plus one ``("variants.<name>", merged)`` per variant.
+
+    Layering is one level deep by design (``layering.py:9-12``), so the walk
+    is one layer per DECLARED variant and never a pair of them merged.
+
+    A variant ``apply_variant`` refuses is dropped rather than raised on:
+    ``_variant_text`` is the check that reports it, and a walk that let the
+    ``ConfigError`` out would abort the pass and hide every later finding
+    (§2.3's TRAP).
+
+    **Built ONCE per document and handed to every caller, because
+    ``apply_variant`` is a deep merge of the whole document and every check
+    that layers used to pay for its own copy of it.**  Measured on the cold
+    guard's own child (40 ``plan.sample`` runs, 21 declared variants) at the
+    wave-1 tip: **ten of the eleven merge sites ran** -- ``noise``'s walk is
+    gated off on that document -- for 210 ``apply_variant`` calls and 45 ms
+    against a 50 ms budget the pass then breached 3 runs in 5 under
+    ``-n 16``.  With the
+    memo it is 21 calls, one per declared variant, and the number no longer
+    moves when a check that layers is added.
+
+    **The assumption, stated rather than left implicit: a document is not
+    mutated between two checks of one pass.**  That is already what the layer
+    walk rests on -- layer 0 IS the caller's own document object, shared by
+    every check since the walk was written -- and the memo extends the same
+    assumption to the merged layers.  A document mutated between two calls
+    WITHIN one pass gets the layers built for the first, and
+    ``test_a_mutation_inside_one_pass_is_not_seen_by_the_memo`` pins that as
+    documented behaviour rather than leaving it to be discovered.  Across
+    passes there is no such limit: :func:`_task3_forget_layers` drops the entry
+    at the head of every pass, for the reason written there.
+
+    The layers are a ``tuple`` of ``(prefix, Mapping)`` and callers only read
+    them, so nothing is copied on the way out.
+
+    Reading the memo into a local before testing it is deliberate: the entry is
+    an immutable tuple, so a concurrent pass on another document can cost this
+    one a hit but can never hand it half of someone else's entry.
+    """
+    global _TASK3_LAYER_MEMO
+
+    memo = _TASK3_LAYER_MEMO
+    if memo is not None and memo[0] is document:
+        return memo[1]
+    layers = _task3_build_layers(document)
+    _TASK3_LAYER_MEMO = (document, layers)
+    return layers
 
 
 def _task3_over_layers(document, per_layer) -> Iterable[Finding]:
@@ -350,6 +463,25 @@ def _variant_text(document) -> Iterable[Finding]:
     ``preflight`` would walk over itself, and every base-document finding
     would be reported once per layer.  The model interior of an unselected
     variant therefore stays open here, and §6 records it.
+
+    **The merge comes from :func:`_task3_layers`, which is the same merge.**
+    This check used to call ``apply_variant`` itself, once per declared
+    variant, on top of the once per variant every layering check was already
+    paying -- so it was the tenth caller of a walk that had one answer.  A
+    variant the merge REFUSES is not in the layers (``_task3_layers`` drops
+    it), and that is exactly the variant this check exists to report: for
+    those, and only those, ``apply_variant`` is called here to re-raise the
+    ``ConfigError`` whose text becomes the finding.
+
+    **A name that is not a string misses the lookup and re-merges, recorded
+    rather than left to be discovered.**  ``merged`` is keyed by the layer
+    prefix with ``variants.`` cut off, which is always a ``str``, while
+    ``variants:`` may carry any YAML scalar as a key -- ``{1: {...}}`` is legal
+    and loads.  Such a name falls through to the ``apply_variant`` branch and
+    pays for one extra merge of its own layer, which is the pre-memo cost for
+    that one variant.  The ANSWER is identical either way, because that branch
+    is exactly the code this check used to run; only the cost differs, only on
+    a document nobody has yet written.
     """
     from rheplicant.config.layering import apply_variant
     from rheplicant.config.preflight import _structural
@@ -365,9 +497,12 @@ def _variant_text(document) -> Iterable[Finding]:
             "until a variant is selected, so today this document loads and "
             "the error waits for the run that asks for one (check A1).")
         return
+    merged = {prefix.removeprefix("variants."): layer
+              for prefix, layer in _task3_layers(document) if prefix}
     for name in variants:
         try:
-            _structural(apply_variant(document, name))
+            _structural(merged[name] if name in merged
+                        else apply_variant(document, name))
         except ConfigError as exc:
             yield refuse(
                 "A1", _task3_where(f"variants.{name}"),

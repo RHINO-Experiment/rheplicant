@@ -23,6 +23,15 @@ the switch cycle; `resources:` resolve against that context; `model:`
 assembles the twin; and an ingested recording is finished last, because
 `to_state`'s `source_order` is read off the assembled twin.
 
+Three validation passes are threaded through that order, and where each one
+sits is the whole of what it can decide: the [pre-flight
+pass](config-validation.md#the-pre-flight-pass) runs first over the document's
+own text; the **axes** pass runs once the grids exist and one line *above*
+`resources:`, which is where the money is; and the **built** pass runs at the
+end, over the twin, the state and the built resources, before `load_document`
+returns. Only the first two run in front of a beam — see [the two later
+slots](config-validation.md#the-two-later-slots-and-what-each-one-buys).
+
 ## observation
 
 The synthetic form declares the axes (`freq.grid`, `time.grid` — checked by

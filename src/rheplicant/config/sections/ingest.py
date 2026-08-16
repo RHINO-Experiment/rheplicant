@@ -20,12 +20,55 @@ from rheplicant.config.files import register_reader
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
 
-__all__ = ["parse_from_file"]
+__all__ = ["freq_unit_problem", "parse_from_file"]
 
 _FROM_FILE_KEYS = frozenset(
     {"format", "path", "sha256", "freq_unit", "thermistor_columns",
      "settle_seconds", "thermistor_unit"}
 )
+
+#: The one ingestion format whose reader demands ``freq_unit:``.  Bound here
+#: rather than spelled twice: :func:`parse_from_file` refuses any other
+#: ``observation.from_file`` format outright, and
+#: ``config.preflight.ingest`` needs the same token to tell a ``{file: ...}``
+#: value node that reaches THIS reader from one that does not.
+RHINO_FORMAT = "rhino_hdf5"
+
+
+def freq_unit_problem(spec: Any) -> str | None:
+    """Check A10: a ``rhino_hdf5`` file node must declare ``freq_unit:``.
+
+    The message, or ``None`` when the spec declares one.
+
+    **One binding, two callers** (§2.2): :func:`_read_rhino_hdf5` below, and
+    ``config.preflight.ingest._freq_unit``, which asks the same question of
+    the document's raw text one phase earlier.  The words are unchanged --
+    this is a hoist, and the sentence said the right thing in the wrong place.
+
+    **What the wrong place costs, measured at ``ea4839b``.**  With
+    ``hashlib.sha256`` and ``Path.read_bytes`` instrumented, loading a
+    document whose ``from_file:`` omits ``freq_unit`` records
+    ``['read_bytes', 'sha256']`` before this refusal is reached: the whole
+    recording is slurped off disk and hashed to miss a one-token key.  The
+    digest is not moved to fix that -- it is read TODAY and not only by a
+    later plan, because :func:`parse_from_file` writes ``from_file/sha256``
+    into the provenance record and
+    ``tests/config/test_config_document.py`` asserts it is there.  What moves
+    is the question, into a pass that runs before any file is opened.
+
+    ``Any`` rather than ``Mapping``: the pre-flight caller hands over whatever
+    the document holds at that key, and a non-mapping is
+    :func:`parse_from_file`'s refusal (or the ``file:`` grammar's), not this
+    one's.  Answering ``None`` for it is the stand-down, not an oversight.
+    """
+    if isinstance(spec, Mapping) and "freq_unit" in spec:
+        return None
+    return (
+        "from_file: freq_unit is required and has no default -- the file "
+        "does not record its frequency unit and its two producers "
+        "disagree (rhino-cal writes Hz, the notebook writes MHz; "
+        "radio/rhino.py's module docstring is the evidence)."
+    )
 
 
 def _seconds(value: Any, key: str) -> float:
@@ -48,7 +91,7 @@ def _seconds(value: Any, key: str) -> float:
 
 
 @register_reader(
-    "rhino_hdf5",
+    RHINO_FORMAT,
     frozenset({"freq_unit", "thermistor_columns", "settle_seconds",
                "thermistor_unit"}),
     array=False,
@@ -58,16 +101,16 @@ def _read_rhino_hdf5(path, spec: dict):
 
     ``array=False``: the return value is a ``RhinoObservation`` -- the whole
     recording with its diagnostics -- not an array.
+
+    The ``freq_unit`` refusal stays here as the backstop (§2.2 step 3): the
+    pre-flight pass reads the document's text and this reader is reached from
+    routes that text alone cannot always see.
     """
     from rheplicant.radio.rhino import read_rhino_observation
 
-    if "freq_unit" not in spec:
-        raise ConfigError(
-            "from_file: freq_unit is required and has no default -- the file "
-            "does not record its frequency unit and its two producers "
-            "disagree (rhino-cal writes Hz, the notebook writes MHz; "
-            "radio/rhino.py's module docstring is the evidence)."
-        )
+    problem = freq_unit_problem(spec)
+    if problem is not None:
+        raise ConfigError(problem)
     kwargs: dict[str, Any] = {"freq_unit": str(spec["freq_unit"])}
     if "thermistor_columns" in spec:
         columns = spec["thermistor_columns"]
@@ -103,7 +146,7 @@ def parse_from_file(spec: Any, context: ResolutionContext):
     check_unknown_keys("observation.from_file", dict(spec), _FROM_FILE_KEYS,
                        label="from_file:")
     fmt = spec.get("format")
-    if fmt != "rhino_hdf5":
+    if fmt != RHINO_FORMAT:
         raise ConfigError(
             f"observation.from_file: format is 'rhino_hdf5' (the one "
             f"ingestion format this layer reads); got {fmt!r}."

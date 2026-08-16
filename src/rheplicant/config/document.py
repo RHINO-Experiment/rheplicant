@@ -25,6 +25,7 @@ from typing import Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.inflight import Axes, Built, axes, built
 from rheplicant.config.layering import apply_variant
 from rheplicant.config.preflight import preflight
 from rheplicant.config.resources import BuiltResources, build_resources
@@ -50,9 +51,23 @@ class ConfiguredRun(NamedTuple):
     context: ResolutionContext
 
 
-def load_document(document: Mapping, *, variant: str | None = None,
-                  base_dir: str | None = None) -> ConfiguredRun:
-    """Build the objects a document declares, in the order they feed each other."""
+def _assemble(document: Mapping, *, variant: str | None = None,
+              base_dir: str | None = None) -> ConfiguredRun:
+    """:func:`load_document`'s body WITHOUT the built hook.
+
+    Variants, the pre-flight pass, the axes hook, and every builder through
+    ``build_inference``.  **Split out for one reason, and it is a testability
+    one that is load-bearing rather than cosmetic:** the built hook calls
+    ``raise_if_refused()`` before :func:`load_document` returns, so
+    ``Built(*load_document(d))`` can never observe a built-slot REFUSAL -- the
+    document that earns one never comes back.  Most built-slot rows are
+    refusals, so a test helper built on ``load_document`` could only ever
+    exercise the passing half of the slot it exists to test.
+
+    ``tests/config/inflight_helpers.built_run`` calls THIS; a test about the
+    HOOK -- that a refusal actually stops the load -- calls
+    :func:`load_document` under ``pytest.raises``.
+    """
     if not isinstance(document, Mapping):
         raise ConfigError(
             f"A document is a mapping of sections; got "
@@ -72,6 +87,16 @@ def load_document(document: Mapping, *, variant: str | None = None,
     observation, context = build_observation(doc["observation"],
                                              runtime=runtime,
                                              base_dir=base_dir)
+    # P-0.5, and its position is the point: `build_resources` on the next line
+    # is the 90.9 % of this function's wall time that a bad time axis or a
+    # non-uniform lst_deg has nothing to do with.  Raise before you warn, for
+    # the same reason P-1 does; across slots that ordering cannot be global
+    # (this pass has already returned when `build_resources` runs) and
+    # `inflight/__init__.py` records why that is correct rather than tolerated.
+    axis_report = axes(Axes(document=doc, runtime=runtime,
+                            observation=observation, context=context))
+    axis_report.raise_if_refused()
+    axis_report.emit_warnings()
     resources = build_resources(doc.get("resources") or {}, context)
     context = dataclasses.replace(context,
                                   resources=dict(resources.resources),
@@ -110,6 +135,22 @@ def load_document(document: Mapping, *, variant: str | None = None,
     return ConfiguredRun(document=doc, runtime=runtime, state=state,
                          twin=twin, inference=inference, resources=resources,
                          context=context)
+
+
+def load_document(document: Mapping, *, variant: str | None = None,
+                  base_dir: str | None = None) -> ConfiguredRun:
+    """Build the objects a document declares, in the order they feed each other."""
+    run = _assemble(document, variant=variant, base_dir=base_dir)
+    # P-1.5, immediately before the return: after `build_inference`, so one
+    # payload carries the raw twin, the fit twin and the space.  Being late
+    # costs nothing (`build_inference` is 2.4 % of a warm load) and buys
+    # `Built` mirroring `ConfiguredRun` field for field.  **This slot saves no
+    # money** -- the beam is long since read -- and the sentence "before any
+    # beam is analysed" is false about every check registered here.
+    built_report = built(Built(*run))
+    built_report.raise_if_refused()
+    built_report.emit_warnings()
+    return run
 
 
 def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,

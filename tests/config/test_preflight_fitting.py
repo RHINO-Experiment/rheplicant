@@ -84,6 +84,26 @@ THREE = {"d": LINEAR_D, "a": LINEAR_A, "w": NONLINEAR_W}
 #: never the subject.  `engine: gradient` on the linear pair keeps A17 off it.
 CLEAN = [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}]
 
+#: Every id ``preflight/fitting.py`` registers -- the ids THIS module is about.
+#:
+#: The `MINE` idiom, which `test_preflight_model.py:110` shipped first and
+#: which R8 requires of every "and nothing else" assertion: the pass runs
+#: every registered check, so `preflight(doc).checks() == frozenset()` written
+#: bare is a claim about the whole layer, and it goes red on whichever later
+#: plan first fires any check on one of these documents -- naming this module,
+#: which will have nothing to do with it.  Two such assertions survived Plan
+#: 3B's review here (`test_a_names_that_cannot_be_iterated_does_not_abort_the_
+#: pass` and `test_following_the_whole_remedy_clears_every_check`); both are
+#: now scoped, and neither was deleted, because the property each states is
+#: real -- it was only stated about too much.
+#:
+#: A LITERAL rather than a comprehension over `CHECKS`: a set derived from
+#: `fn.__module__` would follow a check that moved modules, and following it
+#: is exactly what must not happen silently.
+#: :func:`test_the_scope_set_is_this_module_s_own` re-measures it.
+MINE = frozenset({"A16", "A17", "A18", "A19", "A20", "A21", "A23", "A24",
+                  "A25", "A27", "A28", "A29"})
+
 
 def _plan(blocks, kind="plan.estimate", **options):
     return {"name": "fit", "kind": kind, "blocks": blocks, **options}
@@ -541,6 +561,33 @@ class TestBlocks:
                    "blocks": [{"names": ["d"]}]}])
         assert _found(document) == []
 
+    def test_the_scope_set_is_this_module_s_own(self):
+        """ANTI-VACUITY for :data:`MINE`, without which scoping is a way of
+        turning an assertion off.
+
+        ``checks() & MINE == frozenset()`` is trivially true for an empty or
+        a wrong ``MINE``, and that is the shape a "fix" for an unscoped
+        assertion most easily takes -- the assertion stops going red and
+        stops saying anything in the same edit.  So the literal is re-measured
+        against the live registry here: it must be exactly the ids
+        ``preflight/fitting.py`` owns, no more and no fewer.
+
+        A check MOVING module is the case this reports rather than follows.
+        A comprehension over ``fn.__module__`` used as the scope itself would
+        track the move in silence and take every assertion above with it; this
+        goes red and names both directions, which is a decision for whoever
+        moved it.
+        """
+        registered = frozenset(
+            slot for slot, fn in CHECKS.items()
+            if fn.__module__ == "rheplicant.config.preflight.fitting")
+        assert MINE == registered, (
+            f"MINE claims {sorted(MINE - registered)} that preflight/fitting.py "
+            f"does not register, and omits {sorted(registered - MINE)} that it "
+            "does. Every scoped assertion in this module is measured against "
+            "this set, so a stale one silently narrows all of them."
+        )
+
     def test_the_four_ids_are_registered_and_the_pass_runs_them_once(self):
         # 2C's shape 3: a correct decision shipped with no test, so reverting
         # it stays green.  Deleting any one `@register` line leaves every test
@@ -953,7 +1000,11 @@ class TestWhatThisCheckStandsDownOn:
         document = preflight_document(inference={"parameters": THREE},
                                       runs=[_plan([{"names": 5}])])
         assert _found(document) == []
-        assert preflight(document).checks() == frozenset()
+        # `& MINE` and not a bare `== frozenset()`: a check that RAISES is
+        # reported under its own id, so intersecting with this module's ids
+        # still catches the abort this test is about, and stops the assertion
+        # being a claim about every check the layer will ever register.
+        assert preflight(document).checks() & MINE == frozenset()
 
 
 class TestNoHostileDocumentCanAbortThePass:
@@ -2067,7 +2118,13 @@ class TestA23AndA29AreNotAClosedLoop:
         followed = {key: value for key, value in self._SAMPLE.items()
                     if key not in ("n_sweeps", "warmup", "seed")}
         followed["kind"] = "plan.estimate"
-        assert preflight(self._document(followed)).checks() == frozenset()
+        # `A1` is named beside :data:`MINE` because the remedy this test
+        # follows is a COUPLED edit and A23's own sentence says so: changing
+        # `kind:` alone "trades this refusal for check A1's, and check A29's
+        # on seed:".  A scope that dropped A1 would leave the half-followed
+        # remedy passing, which is the exact loop the test exists to close.
+        assert preflight(self._document(followed)).checks() & (
+            MINE | {"A1"}) == frozenset()
 
     def test_the_first_listed_remedy_still_terminates_too(self):
         """The one that always worked, kept as the anti-vacuity partner: a
@@ -4283,15 +4340,27 @@ class TestTheDecidedTable:
         ``radiometer`` with no ``include_logdet`` earns *"is required for a
         prediction-dependent noise model and has no default"*, and a stray
         key earns *"kind: radiometer does not take ['banana']"*.  Beside a
-        ``conjugate.wiener`` run both now arrive after A27, and the user pays
+        ``conjugate.wiener`` run both arrive after A27, and the user pays
         a second round trip if they take the ``conjugate.gls`` way out rather
         than the ``radiometer_frozen`` one (which drops ``include_logdet``
         from the key set entirely).
 
         Not gated, and the alternative is why: standing down would mean
         re-implementing ``_KIND_KEYS``' sweep in this module, which §2.5
-        forbids by name.  Hoisting that grammar to P-1 as well is the real
-        answer and is nobody's in Plan 3A.
+        forbids by name.  Hoisting that grammar to P-1 as well was named here
+        as the real answer, and **Plan 3B did it for the ``include_logdet``
+        leg**: A49 now decides that one key at P-1
+        (``preflight/noise.py::_a49_in``), so on the whole document a reader
+        hears A27 *and* A49 in one report instead of paying the round trip.
+        The stray-key half did not move -- A49's hoist is gated on
+        ``include_logdet`` being one of the unknown keys, so a typo is not
+        claimed under A49's id -- and that is why this test still finds
+        exactly one finding in each direction.
+
+        **This test itself did not have to move**, which is the point worth
+        keeping: it calls :func:`_t10_decided` directly, so a new registration
+        in another module cannot change what it sees.  The paragraph above is
+        the only thing Plan 3B had to bring up to date.
         """
         broken = {key: value for key, value in RADIOMETER.items()
                   if key != "include_logdet"}

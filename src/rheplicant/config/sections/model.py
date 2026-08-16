@@ -33,6 +33,7 @@ from rheplicant.config.hatch import import_target
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.units import check_field_name_unit
 from rheplicant.config.values import ResolvedValue, resolve_value
+from rheplicant.core.errors import StateValidationError
 
 __all__ = ["ambiguous_class_problem", "build_node_operator", "operator_table"]
 
@@ -169,6 +170,54 @@ def _construct(node_id: str, cls: type, spec: Mapping,
     return operator
 
 
+def _c7_beam_spill(ref: str, projector: Any, t_ground: Any,
+                   context: ResolutionContext):
+    """``model.beam_spill: {from: projector}``, refused in this layer's voice.
+
+    The above-horizon fraction has two routes into a document and only one of
+    them speaks config.  ``{from: horizon_fraction}`` as a VALUE node reaches
+    ``kinds/projectors.py::_horizon_fraction``, which refuses a projector
+    built with ``optimizations: [cache_beam_rotation]`` in a ``ConfigError``
+    naming both that key and the beam's own
+    ``{ref: resources.beams.<n>.sky_fraction}`` alternative.  This route
+    reaches the same number through ``BeamSpillOperator.from_projector`` and,
+    measured, gets neither: a projector with no ``horizon_fraction()`` earns
+    a ``StateValidationError``, and a ``beam_frame='reference'`` one reaches
+    ``horizon_fraction()`` itself and earns a second ``StateValidationError``
+    from the package, naming no document key in either case.  Both are
+    SIBLINGS of ``ConfigError`` rather than subclasses (0.2 C-12), so a test
+    written as ``pytest.raises(ConfigError)`` never caught them -- which is
+    why nobody noticed.
+
+    Neither sentence is rewritten here.  ``from_projector`` runs first and
+    owns the "this class defines no horizon_fraction()" case; when it fails,
+    the value-node route is asked the same question, and where that route has
+    a config-level sentence -- the cached-rotation one -- that sentence wins.
+    Measured, the guard there returns before ``horizon_fraction()`` is
+    called, so the refused document pays for no second beam integral, and a
+    document that builds never enters this branch at all.
+    """
+    from rheplicant.radio import BeamSpillOperator
+
+    try:
+        return BeamSpillOperator.from_projector(projector, t_ground=t_ground)
+    except StateValidationError as exc:
+        try:
+            resolve_value({"from": "horizon_fraction",
+                           "projector": {"ref": ref}}, context)
+        except ConfigError as better:
+            raise ConfigError(
+                f"model.beam_spill.projector: {better}"
+            ) from better
+        except Exception:  # noqa: BLE001 - measured: a bare AttributeError
+            # The value-node route answers a projector with no
+            # `horizon_fraction()` with an AttributeError, which is not a
+            # DirtError and names nothing. There is no sentence to borrow;
+            # `from_projector`'s own, below, is the better one.
+            pass
+        raise ConfigError(f"model.beam_spill.projector: {exc}") from exc
+
+
 def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
     route = spec["from"]
     if node_id == "beam_spill" and route == "projector":
@@ -194,7 +243,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
         projector = resolve_reference(node["ref"], context)
         t_ground = _field_value("beam_spill", BeamSpillOperator, "t_ground",
                                 spec["t_ground"], context)
-        return BeamSpillOperator.from_projector(projector, t_ground=t_ground)
+        return _c7_beam_spill(node["ref"], projector, t_ground, context)
     if node_id == "t_sys_extra" and route == "basis":
         from rheplicant.radio import BasisTemperatureOperator
 

@@ -33,6 +33,8 @@ CST meridian, is the fact its file cannot state. ``healpix`` still needs
 """
 
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
@@ -109,6 +111,112 @@ class Beam:
     normalize: str
 
 
+def _a12_normalize(name: str, spec: Mapping[str, Any]) -> str | None:
+    """Check A12, the beam half: ``normalize:`` is written and is one of ours.
+
+    **A membership test, not a presence one.**  ``normalize: pixelsum`` is
+    present and is not a convention this package has; the pair that decides
+    the output's unit is only decided when the value is one of
+    :data:`BEAM_NORMALIZATIONS`, so a typo has to be refused the same as an
+    omission.
+
+    Extracted so that :mod:`rheplicant.config.preflight.resources` can ask the
+    same question of the document's own text, one whole phase earlier --
+    ``build_resources`` has no validation pre-pass, so on a two-beam document
+    the first beam is read, cast and normalised before this one is asked about
+    the second.  The sentence lives here and nowhere else (§2.2's one-binding
+    rule); the pass CALLS this and wraps the answer in a ``Finding``.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    normalize = spec.get("normalize")
+    if normalize in BEAM_NORMALIZATIONS:
+        return None
+    return (
+        f"{name}: normalize is required and has no default; it is one of "
+        f"{list(BEAM_NORMALIZATIONS)} and got {normalize!r}. The output's unit is "
+        "decided by the PAIR (this key, the projector's normalize_beam): an "
+        "unnormalised beam with normalize_beam: false gives 32838 K on a uniform "
+        "200 K sky, and a unit-pixel-sum beam with the same flag gives 100.42 K "
+        "against a 99.79 K sky. Neither half is inferable from the numbers, and no "
+        "preset may supply this one."
+    )
+
+
+def _a11_chart_keys(name: str, spec: Mapping[str, Any]) -> str | None:
+    """Check A11: ``phi0_deg``/``phi_sense``/``frame``, per format. Four legs.
+
+    1. ``format: cst`` REQUIRES ``phi0_deg`` and ``phi_sense``.
+    2. ``format: uvbeam`` REFUSES all three, ``frame`` included -- the limTOD
+       bridge owns the azimuth convention and its output is beam_local by
+       construction.  Leg 2 refusing ``frame`` while leg 4 requires it is the
+       asymmetry this check is easiest to get backwards.
+    3. every other format REFUSES ``phi0_deg``/``phi_sense``.
+    4. every other format REQUIRES ``frame``.
+
+    **Legs 3 and 4 are written out rather than driven off**
+    :data:`RAW_ARRAY_FORMATS`.  That tuple has one definition and zero readers
+    (measured: ``grep -rn RAW_ARRAY_FORMATS src/ tests/``); it happens to
+    equal this ``else`` today, which is exactly why keying the gate on it
+    would create a second source of truth that nothing would ever notice
+    diverging.
+
+    **Stands down when ``format:`` is not one of** :data:`BEAM_FORMATS`.  The
+    format-value refusal above is more specific and is not this check's row,
+    and an A11 that reached its ``else`` on ``format: nonsense`` would
+    pre-empt it with a sentence about ``frame:``.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    fmt = spec.get("format")
+    if fmt not in BEAM_FORMATS:
+        return None
+    if fmt == "cst":
+        for key in ("phi0_deg", "phi_sense"):
+            if key not in spec:
+                return (
+                    f"{name}: {key} is required for format: cst and has no default. "
+                    "phi0_deg is the CST azimuth landing on the beam map's phi = 0 "
+                    "meridian and phi_sense is its handedness -- 'a fact about the "
+                    "as-built horn, not the file'. They cannot be defaulted and no "
+                    "preset may supply them, because a MIRRORED beam passes every "
+                    "integral, every peak and every azimuthally-symmetric diagnostic "
+                    "unchanged: there is no numerical symptom, so the only protection "
+                    "is that someone who knew the horn wrote the value down."
+                )
+        return None
+    if fmt == "uvbeam":
+        offending = sorted({"phi0_deg", "phi_sense", "frame"} & set(spec))
+        if offending:
+            return (
+                f"{name}: {offending} are not written for format: uvbeam. The limTOD "
+                "bridge carries the azimuth convention itself -- "
+                "healpix_phi_to_uvbeam_az is the adapter, pinned by limTOD's own "
+                "orientation suite -- and its output is beam_local by construction, "
+                "so a declared frame is either redundant or a contradiction the "
+                "maps cannot settle."
+            )
+        return None
+    offending = sorted({"phi0_deg", "phi_sense"} & set(spec))
+    if offending:
+        return (
+            f"{name}: {offending} describe how a CST export's azimuth maps onto "
+            "the beam-local chart and are meaningless for format: "
+            f"{fmt!r}. Requiring them everywhere is the invent-a-value habit they "
+            "exist to break. For a raw array the genuinely unverifiable fact is "
+            "frame:, which is required instead."
+        )
+    if "frame" not in spec:
+        return (
+            f"{name}: frame is required for format: {fmt!r} and is one of "
+            "'beam_local' or 'reference'. It is declared and unverifiable -- "
+            "nothing in the array says which chart it was sampled on."
+        )
+    return None
+
+
 @register_kind("beams")
 def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
     """Build one beam resource."""
@@ -120,57 +228,18 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
             "examples build their beam analytically and are designed to run without "
             "the unpublished CST dataset."
         )
+    # A12 and A11, in the order they were written in: the pre-flight pass
+    # calls these two functions on the document's text and this call is the
+    # section's own second opinion (§2.2), so an entry reached some other way
+    # -- a `python:` caller, a future kind that composes beams -- is still
+    # refused here rather than only where the pass happens to look.
     normalize = spec.get("normalize")
-    if normalize not in BEAM_NORMALIZATIONS:
-        raise ConfigError(
-            f"{name}: normalize is required and has no default; it is one of "
-            f"{list(BEAM_NORMALIZATIONS)} and got {normalize!r}. The output's unit is "
-            "decided by the PAIR (this key, the projector's normalize_beam): an "
-            "unnormalised beam with normalize_beam: false gives 32838 K on a uniform "
-            "200 K sky, and a unit-pixel-sum beam with the same flag gives 100.42 K "
-            "against a 99.79 K sky. Neither half is inferable from the numbers, and no "
-            "preset may supply this one."
-        )
-    if fmt == "cst":
-        for key in ("phi0_deg", "phi_sense"):
-            if key not in spec:
-                raise ConfigError(
-                    f"{name}: {key} is required for format: cst and has no default. "
-                    "phi0_deg is the CST azimuth landing on the beam map's phi = 0 "
-                    "meridian and phi_sense is its handedness -- 'a fact about the "
-                    "as-built horn, not the file'. They cannot be defaulted and no "
-                    "preset may supply them, because a MIRRORED beam passes every "
-                    "integral, every peak and every azimuthally-symmetric diagnostic "
-                    "unchanged: there is no numerical symptom, so the only protection "
-                    "is that someone who knew the horn wrote the value down."
-                )
-    elif fmt == "uvbeam":
-        offending = sorted({"phi0_deg", "phi_sense", "frame"} & set(spec))
-        if offending:
-            raise ConfigError(
-                f"{name}: {offending} are not written for format: uvbeam. The limTOD "
-                "bridge carries the azimuth convention itself -- "
-                "healpix_phi_to_uvbeam_az is the adapter, pinned by limTOD's own "
-                "orientation suite -- and its output is beam_local by construction, "
-                "so a declared frame is either redundant or a contradiction the "
-                "maps cannot settle."
-            )
-    else:
-        offending = sorted({"phi0_deg", "phi_sense"} & set(spec))
-        if offending:
-            raise ConfigError(
-                f"{name}: {offending} describe how a CST export's azimuth maps onto "
-                "the beam-local chart and are meaningless for format: "
-                f"{fmt!r}. Requiring them everywhere is the invent-a-value habit they "
-                "exist to break. For a raw array the genuinely unverifiable fact is "
-                "frame:, which is required instead."
-            )
-        if "frame" not in spec:
-            raise ConfigError(
-                f"{name}: frame is required for format: {fmt!r} and is one of "
-                "'beam_local' or 'reference'. It is declared and unverifiable -- "
-                "nothing in the array says which chart it was sampled on."
-            )
+    problem = _a12_normalize(name, spec)
+    if problem is not None:
+        raise ConfigError(problem)
+    problem = _a11_chart_keys(name, spec)
+    if problem is not None:
+        raise ConfigError(problem)
 
     # After the gate above, deliberately: that gate already gives phi0_deg,
     # phi_sense and frame their own reasoned, format-specific refusals (why a

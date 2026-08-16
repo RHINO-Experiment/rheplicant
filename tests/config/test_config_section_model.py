@@ -1,6 +1,7 @@
 """model node specs -> operators: delivery, object fields, routes, eqx_leaves."""
 
 import dataclasses
+import types
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,6 +12,8 @@ from rheplicant.config.sections.model import (
     build_node_operator,
     operator_table,
 )
+from rheplicant.config.sections.twin import build_fit_twin
+from rheplicant.config.values import resolve_value
 from rheplicant.radio import (
     ADCOperator,
     BeamSpillOperator,
@@ -187,6 +190,252 @@ class TestFromRoutes:
     def test_an_unknown_route_is_refused(self, context):
         with pytest.raises(ConfigError, match="from:"):
             build_node_operator("gain", {"from": "nowhere"}, context)
+
+
+def _twin_with_beam_spill(ctx):
+    """A twin carrying a ``beam_spill`` node, so ``replace:`` has one to hit.
+
+    ``replace_node`` needs the node to already be lit; the operator it starts
+    with is irrelevant to the refusal under test, so it is the cheapest legal
+    one -- an explicit ``sky_fraction:``, which takes no projector at all.
+    """
+    from rheplicant.config.sections.compose import build_model
+
+    return build_model(
+        {"global_signal": {"depth": {"value": 0.5, "unit": "K"},
+                           "centre": {"value": 75.0, "unit": "MHz"},
+                           "width": {"value": 5.0, "unit": "MHz"}},
+         "beam_spill": {"sky_fraction": {"value": 0.9,
+                                         "unit": "dimensionless"},
+                        "t_ground": {"value": 290.0, "unit": "K"}}},
+        ctx, switch_order=())
+
+
+class _NoFraction(eqx.Module):
+    """A projector class that defines no ``horizon_fraction()`` at all."""
+
+
+class _ReferenceFrame(eqx.Module):
+    """A driftscan-shaped projector whose rotation has been cached.
+
+    ``optimizations: [cache_beam_rotation]`` sets ``beam_frame='reference'``,
+    and the real ``DriftScanProjector.horizon_fraction()`` then raises a
+    ``StateValidationError`` -- the unmasked denominator has been folded away.
+    The stand-in raises the same class for the same reason, so that neither
+    route is being tested against a beam this test does not need.
+    """
+
+    beam_frame: str = eqx.field(static=True, default="reference")
+
+    def horizon_fraction(self):
+        from rheplicant.core.errors import StateValidationError
+
+        raise StateValidationError(
+            "horizon_fraction() needs the unmasked beam, but this projector "
+            "has beam_frame='reference'."
+        )
+
+
+class TestBeamSpillFromProjectorSpeaksConfig:
+    """Check C7's second route, re-voiced.
+
+    ``{from: horizon_fraction}`` as a VALUE node and
+    ``model.beam_spill: {from: projector}`` reach the same number, and
+    measured at ``e0e024a`` only the first spoke config:
+
+    ======================  ==============================  =================
+    projector               model.beam_spill route          value-node route
+    ======================  ==============================  =================
+    ``MatrixProjector``     ``StateValidationError``        ``AttributeError``
+    no ``horizon_fraction`` ``StateValidationError``        ``AttributeError``
+    ``beam_frame`` cached   reaches ``horizon_fraction()``  ``ConfigError``
+    ======================  ==============================  =================
+
+    ``StateValidationError`` is a SIBLING of ``ConfigError`` rather than a
+    subclass (0.2 C-12), so ``pytest.raises(ConfigError)`` never caught the
+    left-hand column -- which is why nobody noticed.  The right-hand column's
+    third row is the sentence that names ``optimizations:`` and the beam's own
+    ``{ref: resources.beams.<n>.sky_fraction}``, and it is CALLED here rather
+    than copied, so it keeps exactly one home in ``kinds/projectors.py``.
+    """
+
+    def _ctx(self, context, projector):
+        return context.with_resource("resources.projectors.p", projector)
+
+    def _build(self, ctx):
+        return build_node_operator(
+            "beam_spill",
+            {"from": "projector",
+             "projector": {"ref": "resources.projectors.p"},
+             "t_ground": {"value": 290.0, "unit": "K"}},
+            ctx)
+
+    def test_a_cached_rotation_earns_the_value_routes_own_sentence(self,
+                                                                   context):
+        """The row that had NO config-level guard on this route at all."""
+        with pytest.raises(ConfigError) as caught:
+            self._build(self._ctx(context, _ReferenceFrame()))
+        message = str(caught.value)
+        assert message.startswith("model.beam_spill.projector: "
+                                  "horizon_fraction: ")
+        assert "optimizations: [cache_beam_rotation]" in message
+        assert "{ref: resources.beams.<name>.sky_fraction}" in message
+
+    def test_the_two_routes_say_the_same_thing_about_a_cached_rotation(
+            self, context):
+        """The two guards agree at the boundary, asserted rather than assumed.
+
+        This is the property that makes calling the owner better than
+        restating its condition: the model route's sentence is the value
+        route's sentence, character for character, under one added key.
+        A copy would pass on the day it was written and drift afterwards.
+        """
+        ctx = self._ctx(context, _ReferenceFrame())
+        with pytest.raises(ConfigError) as by_model:
+            self._build(ctx)
+        with pytest.raises(ConfigError) as by_value:
+            resolve_value({"from": "horizon_fraction",
+                           "projector": {"ref": "resources.projectors.p"}},
+                          ctx)
+        assert str(by_model.value) == (
+            f"model.beam_spill.projector: {by_value.value}")
+
+    def test_a_projector_without_the_method_is_refused_as_a_ConfigError(
+            self, context):
+        """The class-naming sentence, kept -- and now catchable.
+
+        The value-node route answers this one with a bare ``AttributeError``
+        naming nothing (0.3 E.7), so there is no better sentence to borrow
+        and ``from_projector``'s own is carried through instead.
+        """
+        with pytest.raises(ConfigError) as caught:
+            self._build(self._ctx(context, _NoFraction()))
+        assert str(caught.value) == (
+            "model.beam_spill.projector: _NoFraction does not expose "
+            "horizon_fraction(), so the above-horizon beam fraction cannot "
+            "be read off it. Only DriftScanProjector defines the cut today "
+            "(a fixed pointing makes it time-independent); for a scanning "
+            "strategy the fraction varies per sample and needs a per-sample "
+            "sky_fraction."
+        )
+
+    def test_a_matrix_projector_is_refused_by_name_and_not_by_AttributeError(
+            self, context):
+        """S3's named twin: the value-node route beside the model route.
+
+        Measured: the value-node route raises ``'MatrixProjector' object has
+        no attribute 'horizon_fraction'``, which is not a ``DirtError`` and
+        names no document key. The model route no longer does anything of
+        the sort. The false negative on the OTHER route is recorded in the
+        task report rather than repaired here -- ``kinds/projectors.py`` is
+        outside this task's files.
+        """
+        ctx = self._ctx(context, MatrixProjector(matrix=jnp.ones((4, 12))))
+        with pytest.raises(ConfigError, match="MatrixProjector does not "
+                                              "expose horizon_fraction"):
+            self._build(ctx)
+        with pytest.raises(AttributeError):
+            resolve_value({"from": "horizon_fraction",
+                           "projector": {"ref": "resources.projectors.p"}},
+                          ctx)
+
+    def test_the_replace_route_gets_the_same_refusal_as_the_model_route(
+            self, context):
+        """0.3 E.10, closed for C7 rather than recorded as a false negative.
+
+        ``inference.twin.replace.<node>`` reaches ``build_node_operator``
+        (``sections/twin.py:69``), which is the route ``preflight/model.py``'s
+        ``_nodes()`` cannot see and the hole that ruling is about.  This fix
+        does not walk ``model:`` as text -- it sits INSIDE ``_from_route``,
+        below ``build_node_operator`` -- so both routes are covered by
+        construction and neither can drift from the other.
+
+        Asserted rather than argued, because "it is the same function" is
+        exactly the claim that stops being true when someone adds a branch.
+        """
+        ctx = self._ctx(context, _ReferenceFrame())
+        spec = {"from": "projector",
+                "projector": {"ref": "resources.projectors.p"},
+                "t_ground": {"value": 290.0, "unit": "K"}}
+        with pytest.raises(ConfigError) as by_model:
+            build_node_operator("beam_spill", spec, ctx)
+        with pytest.raises(ConfigError) as by_replace:
+            build_fit_twin({"replace": {"beam_spill": spec}},
+                           _twin_with_beam_spill(ctx), ctx)
+        assert str(by_replace.value) == str(by_model.value)
+
+    def test_applying_the_refusals_own_advice_makes_the_document_build(
+            self, context):
+        """S4's second half for C7, which was missing.
+
+        Both C7 sentences carry advice -- *"Take it from the beam instead,
+        ``{ref: resources.beams.<name>.sky_fraction}``"* on the cached-rotation
+        leg, and *"needs a per-sample sky_fraction"* on the wrong-class one.
+        R4's four known loops on this plan were all found by RUNNING the
+        advice, so a row nobody runs it on is where a fifth would hide. This
+        runs the cached-rotation one: the refused document, then the same
+        node written the way the sentence says, which must build.
+        """
+        beam = types.SimpleNamespace(maps=jnp.ones((8, 12)),
+                                     sky_fraction=jnp.full((8,), 0.83))
+        ctx = self._ctx(context, _ReferenceFrame()).with_resource(
+            "resources.beams.horn", beam)
+        with pytest.raises(ConfigError, match="sky_fraction"):
+            self._build(ctx)
+        operator = build_node_operator(
+            "beam_spill",
+            {"sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
+             "t_ground": {"value": 290.0, "unit": "K"}},
+            ctx)
+        assert isinstance(operator, BeamSpillOperator)
+        assert operator.sky_fraction.shape == (8,)
+
+    def test_a_failure_that_is_not_the_packages_propagates_as_itself(
+            self, context):
+        """The handler catches ``StateValidationError`` and nothing wider.
+
+        C-12 is the stated reason the handler exists, so the class it names
+        is load-bearing. Widening it to ``except Exception`` left every test
+        green while an unrelated failure -- an ``OSError`` from a beam read
+        inside ``from_projector``, say -- would be re-labelled
+        ``model.beam_spill.projector: ...`` as though the document were at
+        fault.
+        """
+        class _Exploding(eqx.Module):
+            def horizon_fraction(self):
+                raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            self._build(self._ctx(context, _Exploding()))
+
+    def test_the_package_classes_are_siblings_of_ConfigError(self):
+        """0.2 C-12 measured here, because it is this row's whole cause."""
+        from rheplicant.core.errors import DirtError, StateValidationError
+
+        assert not issubclass(StateValidationError, ConfigError)
+        assert issubclass(StateValidationError, DirtError)
+        assert issubclass(ConfigError, DirtError)
+
+    def test_a_working_projector_is_untouched_and_pays_for_no_second_read(
+            self, context):
+        """The happy path does not enter the re-voicing branch at all.
+
+        ``horizon_fraction()`` is a beam integral on a real projector, so a
+        guard that ran it twice to decide whether to complain would be a
+        real cost on every document that builds. Counting the calls is the
+        only assertion that can tell.
+        """
+        calls = []
+
+        class _Counting(eqx.Module):
+            def horizon_fraction(self):
+                calls.append(1)
+                return jnp.array(0.83)
+
+        op = self._build(self._ctx(context, _Counting()))
+        assert isinstance(op, BeamSpillOperator)
+        assert float(op.sky_fraction) == pytest.approx(0.83)
+        assert len(calls) == 1
 
 
 class TestThermistorsRoute:

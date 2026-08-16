@@ -13,6 +13,22 @@ prediction, once Task 6 has either in hand (:func:`freeze_sigma`).
 ``include_logdet`` is parsed and checked here (A49, both directions) and
 RECORDED on the build; its first consumer is 2C's likelihood-carrying exits
 (``NoiseModelLikelihood.include_logdet``, ``inference/noise.py:372``).
+
+**Three of this section's refusals are now decided one phase early**, by
+``preflight/noise.py``, which imports :func:`_a26_sigma_axis_problem`,
+:func:`_a49_logdet_problem` and :data:`_A49_HINTS` and calls them with what
+the document's TEXT says.  The words live here and only here (plan §2.2's
+one-binding rule): the pass calls these functions, this module keeps calling
+them at build time as a second opinion, and
+``tests/config/test_preflight_noise.py`` asserts each literal appears in
+exactly one module under ``src/``.
+
+**What did NOT move, and why.**  ``axis:`` on a sigma that is not 1-D
+interpolates ``tuple(sigma.shape)`` -- the RESOLVED extents, which belong to
+the axes slot and not to a text pass -- so the mirror leg stays here whole.
+The 1-D expansion (``sigma[:, None]`` / ``sigma[None, :]``) stays for the
+same reason: it needs the array, and a pre-flight check that reaches for one
+has left its slot (plan §0.2 C-4).
 """
 
 from __future__ import annotations
@@ -39,6 +55,81 @@ _KIND_KEYS = {
     "radiometer_frozen": frozenset({"kind", "source", "channel_width",
                                     "integration_time", "floor"}),
 }
+
+#: A49's REFUSED direction, as :func:`check_unknown_keys` says it.  A
+#: module-level constant rather than a literal at the call site, because
+#: ``preflight/noise.py`` runs the same sweep one phase early and passes this
+#: same dict: written twice, the sentence would be bound twice and the two
+#: copies would drift with nothing measuring it.
+_A49_HINTS = {
+    "include_logdet": ("include_logdet is required exactly when the sigma "
+                       "depends on the prediction (kind: radiometer) and "
+                       "refused otherwise -- for a constant sigma it changes "
+                       "nothing (A49)"),
+}
+
+
+def _a26_sigma_axis_problem(*, rank: int | None, axis: Any) -> str | None:
+    """A26: a 1-D sigma with no ``axis:``, decided from RANK alone.
+
+    Rank and not shape, which is what lets the same function answer for the
+    text and for the built array: ``{linspace: ...}`` and ``{arange: ...}``
+    are unconditionally 1-D even when ``num`` is a shape symbol, so no extent
+    has to be resolved to know that this document needs an ``axis:``.
+
+    Both stand-downs are deliberate and each has a test in
+    ``tests/config/test_preflight_noise.py``:
+
+    * ``axis`` outside ``('none', 'time', 'freq')`` -> None.  That is
+      :func:`build_noise`'s own, more specific refusal ("is none, time or
+      freq"), and A26 saying "declare axis: time or axis: freq" in front of it
+      would name a remedy the reader has already attempted.
+    * ``rank is None`` -> None.  A ``{ref:}`` or ``{file:}`` sigma carries no
+      shape in the text (plan §3.2(c)); refusing on "I could not tell" refuses
+      documents that build.
+
+    Args:
+        rank: the sigma's ``ndim``, or None when it is not decidable.
+        axis: ``inference.noise.axis`` as written -- the SIBLING key, never
+            the value node's ``axis:`` modifier, which is recorded and never
+            applied (``modifiers.py``'s own docstring).
+
+    Returns:
+        The refusal, or None when this document has no A26 problem.
+    """
+    if axis not in ("none", "time", "freq"):
+        return None
+    if rank != 1 or axis != "none":
+        return None
+    return ("inference.noise.sigma: is 1-D, and a 1-D sigma reads "
+            "equally well along either axis of (n_time, n_freq) "
+            "data; declare axis: time or axis: freq (check A26).")
+
+
+def _a49_logdet_problem(kind: Any, section: Mapping[str, Any]) -> str | None:
+    """A49's REQUIRED direction: ``include_logdet`` on ``kind: radiometer``.
+
+    ``isinstance(include, bool)`` and not a truthiness test, which is the
+    whole point of the sentence: ``include_logdet: 1`` is a lost declaration,
+    not a yes, and a truthy read would take it as a yes and change the
+    estimator without saying so.
+
+    The refused direction is not here -- it is :data:`_A49_HINTS` riding on
+    :func:`check_unknown_keys`, because "this kind does not take that key" is
+    one sweep for every key and not A49's alone.
+
+    Returns:
+        The refusal, or None when this document has no A49 problem.
+    """
+    if kind != "radiometer":
+        return None
+    if isinstance(section.get("include_logdet"), bool):
+        return None
+    return ("inference.noise.include_logdet: is required for a "
+            "prediction-dependent noise model and has no default. False "
+            "is the documented GLS variant -- a DIFFERENT estimator, "
+            "biased high by (1 + f^2) (inference/noise.py:56-68) -- and "
+            "a lost declaration comes back True with no error.")
 
 
 class NoiseBuild(NamedTuple):
@@ -115,12 +206,7 @@ def build_noise(section: Any, *, observation: ObservationBuild,
             f"{sorted(_KIND_KEYS)}."
         )
     check_unknown_keys("inference.noise", dict(section), _KIND_KEYS[kind],
-                       label=f"kind: {kind}",
-                       hints={"include_logdet":
-                              "include_logdet is required exactly when the "
-                              "sigma depends on the prediction (kind: "
-                              "radiometer) and refused otherwise -- for a "
-                              "constant sigma it changes nothing (A49)"})
+                       label=f"kind: {kind}", hints=_A49_HINTS)
     if kind == "none":
         return NoiseBuild(kind="none")
     if kind == "homoscedastic":
@@ -133,13 +219,13 @@ def build_noise(section: Any, *, observation: ObservationBuild,
         if axis not in ("none", "time", "freq"):
             raise ConfigError(f"inference.noise.axis: is none, time or freq; "
                               f"got {axis!r}.")
+        # The second opinion, on the RESOLVED rank: `preflight/noise.py` asked
+        # the same function what the document's text says, and a `{ref:}` or
+        # `{file:}` sigma is one it had to stand down on.
+        problem = _a26_sigma_axis_problem(rank=int(sigma.ndim), axis=axis)
+        if problem is not None:
+            raise ConfigError(problem)
         if sigma.ndim == 1:
-            if axis == "none":
-                raise ConfigError(
-                    "inference.noise.sigma: is 1-D, and a 1-D sigma reads "
-                    "equally well along either axis of (n_time, n_freq) "
-                    "data; declare axis: time or axis: freq (check A26)."
-                )
             sigma = sigma[:, None] if axis == "time" else sigma[None, :]
         elif axis != "none":
             raise ConfigError(
@@ -168,14 +254,9 @@ def build_noise(section: Any, *, observation: ObservationBuild,
                                    what="a noise floor").value)
     if kind == "radiometer":
         include = section.get("include_logdet")
-        if not isinstance(include, bool):
-            raise ConfigError(
-                "inference.noise.include_logdet: is required for a "
-                "prediction-dependent noise model and has no default. False "
-                "is the documented GLS variant -- a DIFFERENT estimator, "
-                "biased high by (1 + f^2) (inference/noise.py:56-68) -- and "
-                "a lost declaration comes back True with no error."
-            )
+        problem = _a49_logdet_problem(kind, section)
+        if problem is not None:
+            raise ConfigError(problem)
         model = RadiometerNoise(width, tau, floor)
         if "flags" in section:
             model = _wrap_flags("inference.noise", section["flags"],
