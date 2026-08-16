@@ -1405,12 +1405,43 @@ class TestTheCostOfTheTwoSlots:
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
         """The plan's own §0.1 bound for this slot, on the worked document,
         kept verbatim so that a later task can see which number it must
-        keep -- and kept KNOWING it is x750 the measurement.  It is the
-        contract; the test above is the one that can fail."""
+        keep -- and kept KNOWING it is roughly x700 the measurement (x670 on
+        one box, x752 on another; it is a property of the machine, not of the
+        pass).
+
+        **This assertion is IMPLIED by the one above, and saying so is the
+        point.**  Both now run the same estimator on the same call, so
+        ``best_ms(...) < 10.0`` cannot fail while ``best_ms(...) < 0.09``
+        passes -- there is no such world, and the x10 and x1000 runs below are
+        exactly that shape.  It is here to carry §0.1's contract number where a
+        later task will see it, not to add sensitivity.  Before the change it
+        did have one independent failure mode: a single-reading outlier.  That
+        mode was the flake, not a regression it caught.
+
+        **Taken with :func:`best_ms` rather than from one call, because one
+        call measured the box.**  As a single ``perf_counter`` reading it went
+        red 1 run in 8 under ``pytest tests/config --no-cov -n 16``, at
+        **14.2 ms** against this 10 ms -- while ``best_ms`` puts the same call
+        at **0.0149 ms** and the median of 200 at 0.0155 ms.  That is a
+        scheduling stall of about x950, not a cost: fifteen sibling xdist
+        workers can only ADD time, which is the argument ``best_ms``' own
+        docstring makes and the reason the two tests above already take their
+        numbers that way.  A guard that goes red 1 run in 8 for reasons that
+        are not about the code makes every other red in the suite need triage
+        before it can be believed, which is the real cost of leaving it.
+
+        **What it can and cannot catch, measured rather than claimed.**  A
+        clean x10 slowdown of the pass leaves this GREEN (0.13-0.15 ms against
+        10) and takes the 0.09 ms test above red -- which is that test's
+        calibrated job, "six is the largest margin that still dies at x10", and
+        which was run rather than trusted.  A x1000 slowdown takes this one red
+        at 13.8-13.9 ms, so the contract is not decoration either.  The tight
+        bound is the instrument, this one is the contract, and neither is now
+        decided by what else the machine is doing.
+        """
         facts = axis_facts(preflight_document())
-        started = time.perf_counter()
-        axes(facts)
-        assert time.perf_counter() - started < 0.01
+        axes(facts)                                    # warm
+        assert best_ms(lambda: axes(facts)) < 10.0     # §0.1's 0.01 s, in ms
 
     def test_building_the_axes_payload_does_not_pay_for_the_beam(self):
         """The slot's REASON, in time.  ``build_resources`` is 90.9 % of

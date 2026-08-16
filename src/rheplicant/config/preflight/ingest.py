@@ -72,6 +72,25 @@ at all** and fails outright.  ~94 % of the layered walk is ``apply_variant``'s
 wave owns rather than this task: +15 ms of a 50 ms budget, with ~22 ms already
 spent and five sibling branches landing into the same registry.  Restoring it
 costs four test edits and becomes cheap the day ``_task3_layers`` is memoised.
+
+**THAT DAY HAS COME, AND THE ARITHMETIC ABOVE IS RETIRED.**  The wave-boundary
+fix memoised ``_task3_layers``: one document's layers are built once per pass
+and shared by every check that walks them, so a check added to that walk now
+costs **zero additional ``apply_variant`` calls** -- measured on this very
+guard's document, 210 merges before and 21 after, with the cold pass at 13 ms
+against 45 ms.  The "+15 ms" that justified the drop does not exist any more;
+the walk here would add only its own per-layer read.
+
+**The orchestrator's ruling, recorded rather than left as silence.**  The cost
+objection is dead, so the recorded false negative above should be re-opened --
+but restoring the walk is a behaviour change to a merged task's checks, it
+needs its own adversarial round, and wave 2 was closing when the trigger fired.
+It is therefore DEFERRED to Plan 3C or a dedicated follow-up, and it is the
+first thing that should be picked up there.  This paragraph exists because a
+pre-registered trigger that fires and produces nothing is worse than no trigger
+at all: the condition is met, the reason for the drop is gone, and the only
+thing still standing between these three checks and the un-selected variant is
+scheduling.
 """
 
 from __future__ import annotations

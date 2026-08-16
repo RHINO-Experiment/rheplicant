@@ -606,11 +606,22 @@ def _extras(document: Mapping[str, Any]) -> Iterable[Finding]:
     sorting before ``depends`` would move it.
 
     **Cost.**  This calls ``_task3_over_layers`` exactly once per pass.  On
-    3A's cold-cost document (forty runs, twenty variants) that walk costs
-    **3.65 ms** of A35's **5.1 ms**, because ``_task3_layers`` builds every
-    layer eagerly through ``apply_variant``, which deep-copies the document.
-    It is not memoised and there were already four callers of it before this
-    one; see this task's report.
+    3A's cold-cost document (forty runs, twenty variants) that walk used to
+    cost **3.65 ms** of A35's **5.1 ms**, because ``_task3_layers`` built every
+    layer eagerly through ``apply_variant``, which deep-copies the document --
+    once per declared variant for THIS caller and again for each of the others.
+
+    **Both halves of that sentence are now out of date, and the correction is
+    the point.**  ``_task3_layers`` IS memoised as of the wave-boundary fix:
+    one document's layers are built once per pass and handed to every caller,
+    of which there were ELEVEN by the end of wave 1, not four -- ten
+    ``_task3_over_layers`` call sites plus ``_variant_text``'s own merge.
+    Measured on the cold guard's own document, where ten of the eleven run
+    (``noise``'s is gated off there): 210 ``apply_variant`` calls before and **21**
+    after -- one per declared variant, for the whole pass.  What this walk still
+    pays is its own per-layer read; the deep merge is no longer its to pay, and
+    ``test_preflight_depends_cost.py`` times the read rather than the merge for
+    exactly that reason.
     """
     from rheplicant.config.preflight.document import _task3_over_layers
 
