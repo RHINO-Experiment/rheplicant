@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### The rest of what text decides, and two slots for what it cannot
+
+Plan 3B: the checks Plan 3A left in the wrong phase, plus two new passes for
+the ones text alone was never going to settle. It registers 22 schema §6 ids
+across the three passes — fourteen more in the text pass, five in a new
+**axes** pass that runs one line above `build_resources`, and four in a new
+**built** pass that runs when everything exists and the fit does not yet;
+twenty-two and not twenty-three, because A13 is **one** row decided in two of
+them — its text legs in the first pass and its grid bounds in the second. Four
+further rows were fixed in place rather than moved, and two are pinning tests
+because the property they name is a theorem about the shipped graph rather
+than something a document can break.
+
+The four in-place rows are the ones a feature audit would have missed. A
+document's parameter space was **never validated against the twin it binds
+into** — `ParameterSpace.validate` existed, was tested, and was called by
+nothing at load — so a scalar `init:` into an `(8, 45)` leaf built happily and
+died at the first call. `sections/observed.py` compared an observed file
+against the wrong reference and cited its own check while getting it
+backwards: with `averaging: {n_chunk: 4}` on `(16, 8)` grids the prediction is
+`(4, 8)`, and the layer accepted the `(16, 8)` file and refused the `(4, 8)`
+one. Both are now the other way round, with tests that name the inversion.
+
+The axes pass is the one that still saves the beam: it reads the resolved time
+and frequency grids and nothing behind a file, so a run whose time axis the
+stored dtype cannot carry, or whose calibration tone falls outside its own
+observed band, is refused before the 90.9 % is spent. It costs under a
+hundredth of a second. **The built pass does not save the beam and this
+release says so** — schema §6's preamble claims every check runs before any
+beam is analysed, and that is false for the twin-shaped rows: comparing the
+fit twin's switch positions against a declared switch order, or two
+projectors' analysed beams, needs the objects. Those findings arrive before
+the *fit*, which is what they protect.
+
+A switched run whose antenna branch is dark under its own switch order is now
+refused rather than run with every label off by one; two projectors that
+nominally share a beam and in fact analyse it twice are said out loud; a
+calibration tone the flagger would eat is named before the fit; and a
+document naming a package this install does not have is told so by the
+feature that needs it, with an install line that exists.
+
+**What it ships knowingly.** Every one of these is measured and none of them
+is closed here. A26 and A13's grid bounds say nothing when the value is
+`{ref:}` or `{file:}`, because there is no shape in the text; the builders
+remain the backstop three phases later. A40 does not reach `static_tuple` or
+`static_mapping`, which fail later with a bare `TypeError` that is not a
+`DirtError` and so is catchable by no name. A13's presence leg ships as a
+second sentence beside `sections/model.py`'s own, deliberately, because the
+shipped one hardcodes `model.<node>` and misnames the section on the
+`inference.twin.replace` route. Four messages advise a remedy the layer then
+refuses, or a Python API no document author can reach, or a key the grammar
+they name does not have — A48 on `engine: general_pointing`, B4's
+unbound-latent sentence, B9 on two driftscan projectors (where the honest
+answer is that no edit exists), and A26's `axis:`, one of whose two readings
+re-earns the sentence it was offered against. A fifth is milder and is the one
+this release corrects on the page: **A27's own "or
+`inference.noise.kind: radiometer_frozen`" names one edit where three are
+needed** — that kind also refuses `include_logdet:` and has no default
+`source:` — and the message is unchanged while the page now names all three.
+A9 is deferred with its design written down rather than half-built; A51 waits
+on a 2012-line file being split; A52's second half is still nobody's, and the
+two tripwire tests that stop the next reader implementing it from the schema
+are untouched. `compare`, `benchmark`, `outputs:`, `defaults:` and `plugins:` are
+still refused naming Plan 4, and `campaign:` is still reserved.
+
+`docs/config-validation.md` gained a section on the two new slots and lost two
+broken remedies: the page told readers to fix its bandpass with a transform
+whose free vector is one shorter than the array it produces, and to swap a
+noise kind while keeping a key that kind does not take. Both left a document
+that does not load. The suite now asserts that the page's three fixes,
+applied together, produce a document that **loads** — which is how it found
+them.
+
 ### Everything a document can be refused for before it costs anything
 
 Plan 3A: a pre-flight pass over the document's own text, run before

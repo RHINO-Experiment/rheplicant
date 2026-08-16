@@ -39,6 +39,27 @@ same blind spot as the code is this project's recorded failure mode:
   caught, which is the shape a copy-paste hoist actually produces.
 * a duplicate outside ``src/rheplicant/`` -- a message written out in a test,
   or in ``docs/``.  Those are not bindings.
+* **an exact duplicate WITHIN one module.** :func:`modules_carrying` counts
+  MODULES, not occurrences, so a builder that goes on restating a sentence
+  the extraction it calls also carries reads as "bound once".  Measured
+  during Plan 3B: a mutant that undid Task 2's extraction *inside*
+  ``kinds/beams.py`` -- the builder raising the A12 sentence inline again
+  while ``_a12_normalize`` stayed -- survived this walker and every
+  behavioural test, because the behaviour is identical either way.  **The
+  property that catches it is not the message's text but that the builder
+  CALLS the extraction**, which is what
+  ``test_preflight_resources.py::TestTheBuilderStillAsksTheSameQuestions``
+  asserts, parametrized over all five extracted functions.  Counting
+  occurrences here instead would report every legitimate loop that raises one
+  sentence from two branches, so this stays a module count and the call-site
+  test is the partner it needs.
+* **two DIFFERENT sentences for one rule.**  Where a hoist could not import
+  the shipped literal, the pre-flight row writes its own -- and two sentences
+  that differ are two literals, each "bound once", so this walker is green by
+  construction.  Plan 3B ships one such pair knowingly (A13's presence leg
+  against ``sections/model.py::_construct``'s, which hardcodes the wrong
+  section on the ``inference.twin.replace`` route); it is recorded in that
+  plan's §7 rather than defended here.
 """
 
 import ast

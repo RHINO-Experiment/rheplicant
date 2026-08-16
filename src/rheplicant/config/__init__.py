@@ -40,6 +40,22 @@ they are the four a CALLER touches: the registry (``CHECKS``, ``register``)
 stays module-local for the reason ``EXECUTORS`` does -- a check id is
 something the schema says, not something a caller registers.
 
+Plan 3B adds two more passes -- the **axes** pass, run one line above
+``build_resources`` over the resolved time and frequency grids, and the
+**built** pass, run when the twin, the state and the resources all exist and
+``load_document`` is ready to return -- and **adds no name here at all**.
+That is a decision and not an oversight, and it is mechanical rather than
+stylistic: ``inflight.axes`` takes an ``Axes``, whose ``runtime`` and
+``observation`` fields come from ``build_runtime`` and ``build_observation``,
+and **neither builder is exported**, so an exported ``axes()`` would be an
+entry point no caller could construct an argument for. ``inflight.built`` is
+further out again -- its payload carries the twin, the state and the built
+resources. Both passes are things ``load_document`` runs *for* a caller, and
+``preflight`` remains the one a front-end calls itself, because it is the one
+that answers before anything is built. ``AXIS_CHECKS`` and ``BUILT_CHECKS``
+follow ``CHECKS`` for the reason above. Pinned, either way, by
+``test_config_surface.py::TestPlan3BsWiringAndItsSurface``.
+
 Binding ``preflight`` here SHADOWS the ``rheplicant.config.preflight``
 subpackage attribute: after this module runs, ``config.preflight`` is the
 function, and the module is reached through ``sys.modules`` or

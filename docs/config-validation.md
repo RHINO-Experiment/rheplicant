@@ -1,7 +1,8 @@
 # Config validation: the pre-flight pass, and what it decides from text
 
-Plan 3A of the config layer: everything a document can be refused for
-**before** a file is read or a beam is analysed. On a toy nside-16 beam,
+Plans 3A and 3B of the config layer: everything a document can be refused for
+**before** a file is read or a beam is analysed, and — since 3B — two later
+slots for the things text alone cannot settle. On a toy nside-16 beam,
 `build_resources` is 1.397 s of `load_document`'s 1.536 s — 90.9 % — and on a
 real CST directory the share goes up. A refusal that arrives after that has
 been paid for is a refusal that cost what it was meant to save.
@@ -83,15 +84,48 @@ Anything that needs a value. `observation.freq.grid` may be `{value: [...]}`,
 `{file: ...}` or `{ref: ...}`, and only the first is text; a check that wants
 the grid's length wants a resolved value node. The same is true of every shape
 comparison, every unit identity over a derived scalar, and every rank or
-Jacobian question. Those refusals still exist — they arrive from
-[`load_document`](config-sections.md#the-build-order) and from the exits
-themselves — and this pass is what stops you paying for a beam analysis to
-reach one that two words already ruled out.
+Jacobian question. This pass is what stops you paying for a beam analysis to
+reach a refusal that two words already ruled out.
 
 `inference.twin` is the clearest boundary. Whether a *repaired* twin still
 contains a stochastic stage is decided here from `model:` plus
 `twin.without:`/`twin.replace:`, all three of which are text. Whether that
 twin's Jacobian has a null direction is not.
+
+## The two later slots, and what each one buys
+
+Plan 3B added two more passes inside `load_document`. Each is decided by the
+inputs it reads, not by where the schema files it, and each has its own cost
+bound.
+
+| slot | when it runs | what it may read on top of the text | bound |
+|---|---|---|---|
+| **the axes pass** | after `runtime:` and `observation:` are built, **before `resources:`** | `RuntimeFacts`, `ObservationBuild`, `ResolutionContext` — the resolved time and frequency grids | under 0.01 s |
+| **the built pass** | when everything is built and `load_document` is ready to return | `BuiltResources`, the twin, the `State`, the `InferenceBuild` | one `jax.eval_shape` per check, no forward pass |
+
+The axes pass is the one that still saves the beam: it sits one line above
+`build_resources`, so a run whose time axis the stored dtype cannot carry, or
+whose calibration tone falls outside its own observed band, is refused before
+the 90.9 % is spent. It costs about a hundredth of what it saves.
+
+**The built pass runs after the money is spent, and this page says so rather
+than implying otherwise.** Schema §6's preamble — "all run before any file is
+read that is not needed to decide them, and before any beam is analysed" —
+is **false for the twin-shaped rows**, and `config/paths.py`'s module
+docstring already states the honest version. A check that compares the fit
+twin's switch positions against the declared switch order, or two projectors'
+analysed beams, needs the objects to exist; there is nothing textual left to
+ask. Those findings arrive before the *fit* — which is the expensive thing
+they are protecting — and after the build, which they cannot be moved in
+front of without a shape-only twin built from `ShapeDtypeStruct` stand-ins.
+That is a mechanism of its own and no plan has taken it.
+
+So the ordering guarantee is per slot, and only the first slot is free:
+
+- text pass — nothing is read, nothing is built;
+- axes pass — the grids exist, no file behind them has been opened for a
+  beam;
+- built pass — everything exists; the saving is the fit, not the build.
 
 ## A document that is wrong three ways
 
@@ -134,9 +168,14 @@ The page's document is parsed by the suite, so the exponent form would reach
 the value grammar as a string and refuse for a reason the page is not about.
 
 Three findings, **in registry order — which is the order a reader meets them,
-and A27 is first**. The foot import of `preflight/__init__.py` is alphabetical,
-so `fitting` registers before `model`: A27 and A28 are bound before A30 and
-A33. Write the bullets in that order and keep them in it;
+and A27 is first**. The rule that decides that order is not the one an earlier
+version of this page gave: alphabetical position in `preflight/__init__.py`'s
+foot-import block decides nothing on its own. **A foot-imported module's
+checks register after everything its own head imports transitively register**
+— measured, `beam_spill` sorts first in that block and its check lands
+two-thirds of the way down, because it head-imports `document` and `model`.
+`fitting` still registers before `model` here, so A27 and A28 are bound before
+A30 and A33. Write the bullets in that order and keep them in it;
 `_ordered_ids_on_the_page` is what makes a silent re-sort a red test.
 
 - **A27** — `kind: conjugate.wiener` takes a sigma already decided into an
@@ -145,7 +184,10 @@ A33. Write the bullets in that order and keep them in it;
   which iterates the covariance it implies — and drop `width:` with it, which
   is `conjugate.wiener`'s key and not that exit's — or
   `inference.noise.kind: radiometer_frozen`, which decides one sigma up front
-  and keeps the run as written. See
+  and keeps this exit. That second way out is **three edits and not one**: the
+  frozen kind does not take `include_logdet:`, so drop it (check A49), and it
+  does not default its `source:`, so write `source: observed`, which is where
+  a frozen sigma comes from. See
   [the noise section](config-inference.md#noise).
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
@@ -156,12 +198,17 @@ A33. Write the bullets in that order and keep them in it;
 - **A33** — `b` is free into `bandpass` and `g` is free into `gain`. The two
   multiply the same prediction, so only their product is constrained and the
   fit has one exactly null direction. Fix: `transform: unit_mean_bandpass` on
-  `b`.
+  `b`, whose free vector is the `(n_freq - 1,)` mean-1 coordinates rather than
+  the bandpass itself — so `init:` becomes `{ones: [7]}` on this document's
+  eight channels. Written as `{ones: [n_freq]}` the transform hands the fit a
+  nine-channel bandpass for eight channels of data, and the bind is refused.
 
 Each has been read off the real `Report` rather than described: this document
 is executed by the test suite, which asserts that these are exactly the checks
-it earns, **in this order**, and that each fix named above really does clear
-the finding it is offered for.
+it earns, **in this order**, that each fix named above really does clear the
+finding it is offered for, and that the document with all three applied
+**loads** — the last of which is what caught two of these three remedies
+being incomplete.
 
 ## Reading the report in code
 

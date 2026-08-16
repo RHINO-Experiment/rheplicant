@@ -1044,6 +1044,61 @@ class TestTheCountsProseStatesAboutThisLayer:
             f"registers them: {sorted(self.PLAN_3A - bare)}"
         )
 
+    #: The schema §6 rows Plan 3B decides, across all THREE registries -- the
+    #: text pass's ``CHECKS``, the axes pass's ``AXIS_CHECKS`` and the built
+    #: pass's ``BUILT_CHECKS``. A per-plan set BESIDE :data:`PLAN_3A` and not
+    #: a widening of it, which is what ``test_every_check_plan_3a_claims_is_
+    #: registered``'s docstring asked Plan 3B for by name.
+    #:
+    #: A13 is in both this set and two registries: ``A13.text`` decides the
+    #: tone's text legs in the pre-flight pass and ``A13.grid`` decides its
+    #: grid bounds in the axes pass. It is ONE schema row, so it is one entry
+    #: here, and that is why the count below is not the sum of three
+    #: registry lengths.
+    #:
+    #: What is NOT here, and deliberately: B2 and B7 (pinning tests -- the
+    #: shipped graph is a tree and one resource is one object, so there is
+    #: nothing to register), and Task 8's C7, C11, C17 and B4, which are
+    #: refusals fixed or added IN PLACE inside ``config/sections/`` and
+    #: register no slot at all. A set built from "what this plan worked on"
+    #: rather than "what this plan registered" would be a set no registry can
+    #: check.
+    PLAN_3B = frozenset({
+        "A10", "A11", "A12", "A13", "A26", "A35", "A40", "A43", "A44", "A45",
+        "A46", "A47", "A48", "A49", "A50", "B5", "B9", "C1", "C2", "C3", "C8",
+        "C9",
+    })
+
+    def test_every_check_plan_3b_claims_is_registered(self):
+        """The same direction as 3A's, over the three registries 3B ships.
+
+        Subset and not equality, for the reason 3A's own docstring gives: a
+        later plan registers into the same tables. What equality would buy is
+        bought instead by the disjointness assertion below -- an id that
+        drifted from one plan's set to the other's is caught there without
+        making either set a hostage to the next plan's work.
+        """
+        from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
+        from rheplicant.config.preflight import CHECKS
+
+        bare = {slot.split(".")[0]
+                for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS)
+                for slot in registry}
+        assert self.PLAN_3B <= bare, (
+            f"these schema ids are in Plan 3B's scope and no function "
+            f"registers them in any of the three passes: "
+            f"{sorted(self.PLAN_3B - bare)}"
+        )
+
+    def test_the_two_plans_claim_disjoint_rows(self):
+        """Neither plan re-decided a row the other had already taken.
+
+        This is what makes the two sets addable and the changelog's two
+        numbers independent. It is also the assertion that goes red if a
+        later reader "fixes" a drifted id by adding it to both lists.
+        """
+        assert self.PLAN_3A & self.PLAN_3B == frozenset()
+
     #: ``TestThePagesSayWhatTheLayerDoes``' table, plus the neighbourhood the
     #: changelog's own number sits in. Extended rather than replaced: a
     #: reworded "thirty-two" must fail as a WRONG COUNT (32 != 31), where an
@@ -1051,6 +1106,64 @@ class TestTheCountsProseStatesAboutThisLayer:
     _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
               "twenty-nine": 29, "thirty": 30, "thirty-one": 31,
               "thirty-two": 32, "thirty-three": 33}
+
+    #: Each plan's changelog entry, by its own ``### `` heading, and the
+    #: sentence that entry states its count in.
+    #:
+    #: **The heading is what anchors the search, and that is the whole point.**
+    #: ``CHANGELOG.md`` is newest-at-top and ``re.search`` returns the
+    #: *leftmost* match, so a guard that searches the whole file reads
+    #: whichever entry happens to be highest -- and every later plan writes
+    #: above every earlier one. Measured by review: an entry saying
+    #: *"Thirty-one schema §6 checks now decide something entirely
+    #: different."* placed above these two leaves the whole module at exit 0
+    #: while Plan 3A's guard reads **that entry's** number.
+    _ENTRIES = {
+        "3A": ("### Everything a document can be refused for before it costs "
+               "anything",
+               r"([A-Za-z-]+)\s+schema §6 checks now decide"),
+        "3B": ("### The rest of what text decides, and two slots for what it "
+               "cannot",
+               r"registers\s+(\d+)\s+schema §6 ids\s+across\s+the\s+three"
+               r"\s+passes"),
+    }
+
+    def _entry(self, plan: str) -> tuple[str, str]:
+        """``(the text of that plan's entry, the whole file)``.
+
+        The entry runs from its own ``### `` heading to the next heading at
+        the same level or above -- so a count stated in a *neighbouring*
+        entry is outside the slice and cannot be mistaken for this one's.
+
+        **Two guards and not one, because ``in`` is weaker than the slice.**
+        The membership test below accepts a heading that has been *reworded*
+        around this one -- ``"### The rest of what text decides, and two
+        slots for what it cannot (2026)"`` contains the string but is not the
+        line ``partition`` needs. That produces an EMPTY slice, and an empty
+        slice makes ``changelog.index("")`` return 0, so the callers below go
+        red pointing at a sentence-collision that does not exist. The second
+        assertion turns that into the true message: *the heading moved.*
+        Same failure mode as the tautology this class replaced, one layer
+        down -- the guard survives, but what it tells the reader is false.
+        """
+        heading, _ = self._ENTRIES[plan]
+        changelog = (_DOCS.parent / "CHANGELOG.md").read_text()
+        assert heading in changelog, (
+            f"CHANGELOG.md no longer carries Plan {plan}'s entry under "
+            f"{heading!r}. This guard finds that plan's count by its own "
+            "heading; renaming the heading without moving the guard leaves "
+            "the guard reading whichever entry sorts highest."
+        )
+        after = changelog.partition(f"\n{heading}\n")[2]
+        entry = re.split(r"\n#{1,3} ", after)[0]
+        assert entry.strip(), (
+            f"Plan {plan}'s heading {heading!r} appears in CHANGELOG.md but "
+            "not as a heading LINE of its own -- it has been reworded or has "
+            "something appended to it, so this guard slices an empty entry "
+            "and every count below would fail for the wrong reason. Update "
+            "_ENTRIES to the new wording."
+        )
+        return entry, changelog
 
     def test_the_changelog_counts_the_checks_plan_3a_decided(self):
         """"Thirty-one schema §6 checks" was prose with no reader.
@@ -1062,19 +1175,233 @@ class TestTheCountsProseStatesAboutThisLayer:
         registry. ``\\s+`` and not a space: the sentence wraps between the
         number and the word it counts, and a line-anchored scan would read
         nothing and stay green.
+
+        **Searched inside Plan 3A's own entry, not over the file.** See
+        :data:`_ENTRIES`: the unanchored form read whichever entry sat
+        highest, which every later plan changes.
         """
-        stated = re.search(r"([A-Za-z-]+)\s+schema §6 checks now decide",
-                           (_DOCS.parent / "CHANGELOG.md").read_text())
+        entry, _ = self._entry("3A")
+        stated = re.search(self._ENTRIES["3A"][1], entry)
         assert stated, (
-            "CHANGELOG.md no longer states how many schema §6 checks Plan 3A "
-            "decides in the 'N schema §6 checks now decide' form this guard "
-            "reads."
+            "Plan 3A's CHANGELOG entry no longer states how many schema §6 "
+            "checks it decides, in the 'N schema §6 checks now decide' form "
+            "this guard reads."
         )
         word = stated.group(1).lower()
         assert word in self._WORDS, f"unknown number word {word!r}"
         assert self._WORDS[word] == len(self.PLAN_3A), (
             f"CHANGELOG.md says {word} checks; Plan 3A's scope table has "
             f"{len(self.PLAN_3A)}."
+        )
+
+    def test_the_changelog_counts_the_rows_plan_3b_registered(self):
+        """Plan 3B's own number, in a sentence form of its own, and in DIGITS.
+
+        Digits and a different sentence, for two measured reasons.
+        :data:`_WORDS` stops at "thirty-three", so a number word outside its
+        table would fail as ``unknown number word`` -- which reads as this
+        guard's bug rather than as a wrong count -- and ``\\d+`` needs no word
+        table at all. And reusing 3A's wording in a *newer* entry is the trap
+        :data:`_ENTRIES` describes; a distinct sentence means the two guards
+        cannot confuse each other's numbers even if one day the anchoring
+        breaks.
+
+        The number is the count of schema ROWS, over the three registries and
+        de-duplicated -- A13 is one row decided in two passes. ``\\s+`` and not
+        a space, for the reason the sibling above gives: the sentence wraps.
+        """
+        entry, _ = self._entry("3B")
+        stated = re.search(self._ENTRIES["3B"][1], entry)
+        assert stated, (
+            "Plan 3B's CHANGELOG entry no longer states how many schema §6 "
+            "rows it registers, in the 'registers N schema §6 ids across the "
+            "three passes' form this guard reads."
+        )
+        assert int(stated.group(1)) == len(self.PLAN_3B), (
+            f"CHANGELOG.md says {stated.group(1)} rows; Plan 3B's scope set "
+            f"has {len(self.PLAN_3B)}."
+        )
+
+    @pytest.mark.parametrize("plan", sorted(_ENTRIES))
+    def test_each_count_sentence_appears_in_exactly_one_entry(self, plan):
+        """No entry other than this plan's states its count in this plan's
+        words.
+
+        **This replaces an assertion that could not fail.** The first version
+        sliced the file at the leftmost match and asserted there was no match
+        before it -- true by construction, because ``re.search`` returns the
+        leftmost match. Review demonstrated the consequence: a foreign entry
+        above Plan 3A's, reusing 3A's exact wording, left the whole module at
+        exit 0 while 3A's guard read that entry's number.
+
+        What is asserted now is the real property, and it is checked over the
+        WHOLE FILE rather than over a prefix: this plan's sentence occurs
+        exactly once, and the one occurrence is inside this plan's own entry.
+        A later plan reusing either wording -- above, below, anywhere -- is a
+        red test with a message naming what it collided with.
+
+        Plan 3C writes above both of these. This is what it will hear.
+        """
+        heading, pattern = self._ENTRIES[plan]
+        entry, changelog = self._entry(plan)
+        everywhere = [match.start() for match in re.finditer(pattern,
+                                                             changelog)]
+        assert len(everywhere) == 1, (
+            f"Plan {plan}'s count sentence appears {len(everywhere)} times in "
+            f"CHANGELOG.md. It is how that plan's guard finds its own number, "
+            "so a second entry using the same words makes the guard read "
+            "whichever sits highest. Give the newer entry a sentence form of "
+            "its own, as Plan 3B's does."
+        )
+        start = changelog.index(entry)
+        assert start <= everywhere[0] < start + len(entry), (
+            f"Plan {plan}'s count sentence is not inside its own entry "
+            f"({heading!r}); the guard is reading a neighbour's number."
+        )
+
+
+class TestPlan3BsWiringAndItsSurface:
+    """What Plan 3B added to the wiring, and what it deliberately did not add
+    to the surface.
+
+    Three subjects, all of them decisions the plan asked to be pinned "either
+    way" rather than left to a reader's inference.
+    """
+
+    def test_plan_3b_adds_no_name_to_the_surface_and_here_is_why(self):
+        """The export decision, pinned with its reason rather than asserted.
+
+        Plan 3B ships two new passes and two new registries and exports
+        **nothing**. The reason is mechanical, not stylistic: ``axes()`` takes
+        an ``Axes``, whose ``runtime`` and ``observation`` fields come from
+        ``build_runtime`` and ``build_observation`` -- and **neither builder
+        is exported**, so an exported ``axes()`` would be a public entry point
+        a caller could not construct an argument for. ``built()`` is worse
+        again: its payload carries the twin, the state and the resources.
+
+        ``AXIS_CHECKS`` and ``BUILT_CHECKS`` follow ``CHECKS``, which
+        ``test_the_check_registry_stays_wiring_rather_than_surface`` already
+        keeps off the surface: a registry is a mutable handle on the table
+        that decides what every document means.
+
+        The whole-list assertion in ``TestThePlan2CSurface`` is what would go
+        red if a name were added; this says why none was, and asserts the
+        premise -- so if a later plan DOES export ``build_runtime``, the
+        argument recorded here stops being true and this test says so.
+        """
+        import rheplicant.config as config
+
+        for builder in ("build_runtime", "build_observation"):
+            assert builder not in config.__all__, (
+                f"{builder} is exported now, so the reason recorded here for "
+                "keeping axes() off the surface no longer holds; re-decide it "
+                "rather than letting this comment rot."
+            )
+        for name in ("axes", "built", "AXIS_CHECKS", "BUILT_CHECKS", "Axes",
+                     "Built"):
+            assert name not in config.__all__, name
+
+    def test_the_three_prior_gates_are_one_function_in_the_order_written(self):
+        """3A's load-bearing anchors A20, A21 and A23 keep their order.
+
+        **What this actually pins, said plainly, because the plan's own
+        framing of it was wrong.** A20, A21 and A23 are bound by ONE
+        ``@register("A20", "A21", "A23")`` on ONE function
+        (``preflight/fitting.py::_prior_gates``), and ``passes.sweep``
+        de-duplicates by ``id(fn)`` -- so the pass calls that function once
+        and there is no "A20 runs, then A23 runs" sequence in the pass at all.
+        The ordering that matters is INSIDE the function's body, where A20 and
+        A21 ``continue`` past runs whose A23 legs are unreachable, and the
+        function's own docstring records it as structural.
+
+        So the index comparison below pins the decorator's argument order --
+        a real property, and the one a reader looking up a slot meets -- and
+        nothing more. The identity assertion is the load-bearing half.
+
+        **Why an index comparison is legal here when the cross-module one was
+        withdrawn.** §0.3 F.2's exemption for a relative registration-index
+        assertion was granted and then refuted at Plan 3B's wave-1 merge:
+        ``test_preflight_ingest.py``'s ``A28 < A10 < A2`` went red because
+        ``preflight/beam_spill.py`` head-imports ``document`` and ``model``,
+        so a module's position in the alphabetical foot block decides nothing.
+        That failure mode cannot reach this assertion: one ``@register`` call
+        in one module fixes all three positions relative to each other, and no
+        sibling's imports can interleave them.
+        """
+        from rheplicant.config.preflight import CHECKS
+
+        assert CHECKS["A20"] is CHECKS["A21"] is CHECKS["A23"], (
+            "A20, A21 and A23 are no longer one function. The 'A20 and A21 "
+            "make two of A23's legs moot' reasoning in _prior_gates' "
+            "docstring is about one body's control flow; split across "
+            "functions it becomes a claim about run order, which is not what "
+            "the registry gives you."
+        )
+        order = list(CHECKS)
+        assert order.index("A20") < order.index("A21") < order.index("A23")
+
+    def test_the_one_binding_walker_is_called_from_the_modules_that_hoist(
+            self):
+        """A FLOOR on ``assert_bound_once`` call sites, found by a glob.
+
+        §3.2(h)'s shared table was replaced by "each hoisting task
+        parametrizes a test in its own module over its own literals", which
+        is the right shape and has one failure mode: a task can simply not
+        write one, and nothing central notices. This is the central notice --
+        deliberately a floor and not an equality, so a later plan adding rows
+        is never a red test here.
+
+        **Discovered by a glob over ``tests/config/*.py``**, never a module
+        list: a maintained list is indistinguishable from a glob while the
+        set does not change, and this project has already paid for that
+        (§0.3 F.5(6)). ``message_binding.py`` itself is excluded -- it holds
+        the definition and its own anti-vacuity case, neither of which is a
+        task pinning a hoisted literal.
+
+        **The floor undercounts on purpose.** Most call sites sit inside a
+        ``parametrize`` over a tuple of literals, so eleven call sites walk
+        considerably more than eleven messages. Counting the literals would
+        mean importing seven modules and reading private tuples out of them,
+        which is a second copy of each task's own list.
+
+        **Counted over ``ast`` and not with ``str.count``, and that is
+        measured.** A mutant that replaced ``assert_bound_once(literal)`` with
+        ``pass  # assert_bound_once(literal)`` SURVIVED the substring form:
+        the text is still in the file, in a comment. A call node is a call.
+        """
+        import ast
+
+        def _calls(source: str) -> int:
+            found = 0
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = getattr(node.func, "id", None) or getattr(
+                    node.func, "attr", None)
+                found += name == "assert_bound_once"
+            return found
+
+        helper = "message_binding.py"
+        # Off this file's OWN location, never off the cwd: a relative
+        # "tests/config" glob answers an empty list when pytest is run from
+        # anywhere else, and an empty list would make the floor unreachable
+        # rather than red -- which is why the anti-vacuity line is below.
+        modules = sorted(pathlib.Path(__file__).resolve().parent.glob("*.py"))
+        assert any(path.name == helper for path in modules), (
+            "the glob found no message_binding.py, so it is not looking "
+            "where it thinks it is and every count below is zero"
+        )
+        sites = {path.name: _calls(path.read_text())
+                 for path in modules if path.name != helper}
+        carrying = {name: n for name, n in sites.items() if n}
+        assert sum(carrying.values()) >= 11, (
+            f"only {sum(carrying.values())} assert_bound_once call sites: "
+            f"{carrying}. Plans 3A and 3B leave eleven across seven modules; "
+            "a hoisted message with no one-binding pin is the "
+            "_number-vs-_whole divergence with nothing comparing the two."
+        )
+        assert len(carrying) >= 7, (
+            f"only {len(carrying)} modules call the walker: {sorted(carrying)}"
         )
 
 
@@ -1103,12 +1430,18 @@ _PAGE_FIXES = {
          lambda doc: {**doc, "runs": [{k: v for k, v in doc["runs"][0].items()
                                        if k != "width"}
                                       | {"kind": "conjugate.gls"}]}),
-        (("inference.noise.kind: radiometer_frozen",
-          "keeps the run as written"),
+        # THREE edits, and the page says so since Plan 3B. Writing only the
+        # kind leaves `include_logdet:` on a kind whose key set does not carry
+        # it (A49, and `build_noise` before A49 was hoisted), and leaves
+        # `source:` unwritten, which `radiometer_frozen` has no default for.
+        (("inference.noise.kind: radiometer_frozen", "keeps this exit",
+          "drop it (check A49)", "source: observed"),
          lambda doc: {**doc, "inference": {
              **doc["inference"],
-             "noise": {**doc["inference"]["noise"],
-                       "kind": "radiometer_frozen"}}}),
+             "noise": {**{k: v for k, v in doc["inference"]["noise"].items()
+                          if k != "include_logdet"},
+                       "kind": "radiometer_frozen",
+                       "source": "observed"}}}),
     ],
     "A30": [
         (("inference.twin: {without: [noise]}",),
@@ -1116,12 +1449,20 @@ _PAGE_FIXES = {
                                            "twin": {"without": ["noise"]}}}),
     ],
     "A33": [
-        (("transform: unit_mean_bandpass", "on\n  `b`"),
+        # `init:` goes with the transform, and that is the half the page left
+        # out until Plan 3B: `unit_mean_bandpass` takes the `(n_freq - 1,)`
+        # free coordinates and RETURNS `(n_freq,)`, so `{ones: [n_freq]}`
+        # produces a nine-channel bandpass for eight channels of data. The
+        # pre-flight pass cannot see it -- it is a shape -- so only
+        # `test_the_three_fixes_together_leave_a_document_that_LOADS` does.
+        (("transform: unit_mean_bandpass", "`b`, whose free vector",
+          "{ones: [7]}"),
          lambda doc: {**doc, "inference": {
              **doc["inference"],
              "parameters": {
                  **doc["inference"]["parameters"],
                  "b": {**doc["inference"]["parameters"]["b"],
+                       "init": {"ones": [7]},
                        "transform": "unit_mean_bandpass"}}}}),
     ],
 }
@@ -1130,21 +1471,24 @@ _PAGE_FIXES = {
 #: Check ids a page REMEDY earns because the page's own advice is wrong, so
 #: that the assertion below can still say "and nothing else" about every other
 #: id.  **Each entry is a defect in ``docs/config-validation.md``, not in the
-#: pass**, and it goes the day the page is corrected.
+#: pass.**
 #:
-#: ``A49``: the page's SECOND A27 remedy tells a reader to write
-#: ``inference.noise.kind: radiometer_frozen`` and keep the rest, which leaves
-#: ``include_logdet:`` on a kind that does not take it.  Measured with all
-#: three of the page's remedies applied, and identical with A26/A49 popped out
-#: of ``CHECKS`` -- i.e. the remedied document did not load before Plan 3B
-#: either; the refusal simply came from ``build_noise`` at P2.
+#: **EMPTY, and deliberately kept rather than deleted.**  Task 6 shipped it
+#: holding ``A49``: the page's second A27 remedy told a reader to write
+#: ``inference.noise.kind: radiometer_frozen`` and keep the rest, which left
+#: ``include_logdet:`` on a kind that does not take it.  Plan 3B's Task 9
+#: corrected the page -- the bullet now names all three edits -- so the
+#: exemption has nothing left to exempt and the "and nothing else" assertion
+#: below is unconditional again.
 #:
-#: **Subtracted rather than intersected with the page's own ids**: ``listed``
-#: does not contain A1, and A1 is exactly what the ``width:`` clause in the
-#: test's docstring exists to catch, so an intersection would delete that
-#: guard along with this exemption.  Widening this set is a visible one-line
-#: decision; scoping is a silent hole.
-_BROKEN_ON_THE_PAGE = frozenset({"A49"})
+#: The constant stays because the NEXT page defect wants a visible one-line
+#: home, and because an empty frozenset subtracted from a set changes nothing:
+#: measured, the assertion is identical with and without it, so keeping it
+#: costs no strength.  **Subtracted rather than intersected with the page's
+#: own ids**: ``listed`` does not contain A1, and A1 is exactly what the
+#: ``width:`` clause in the test's docstring exists to catch, so an
+#: intersection would delete that guard along with any exemption.
+_BROKEN_ON_THE_PAGE: frozenset[str] = frozenset()
 
 
 class TestTheValidationPageDocument:
@@ -1283,10 +1627,17 @@ class TestTheValidationPageDocument:
 
         ``checks()`` is a frozenset and ``_ids_on_the_page`` is a set, so both
         assertions around this one pass with the bullets in any order at all
-        -- and the order is a real claim: it is what a reader meets, and it is
-        decided by ``preflight/__init__.py``'s ALPHABETICAL foot import, where
-        ``fitting`` sorts before ``model`` and A27 therefore precedes A30 and
-        A33.
+        -- and the order is a real claim: it is what a reader meets.
+
+        **The reason this page used to give for that order is REFUTED**, and
+        the page now gives the measured one. Alphabetical position in
+        ``preflight/__init__.py``'s foot block decides nothing on its own: a
+        foot-imported module's checks register after everything its own head
+        imports transitively register, which is why ``beam_spill`` sorts first
+        in that block and lands two-thirds of the way down ``CHECKS``.
+        ``fitting`` does still register before ``model``, so A27 precedes A30
+        and A33 -- but for a reason no reader could have derived from the
+        sentence that used to be here.
 
         Kills a bullet list re-sorted for readability, and kills a foot import
         reordered without moving the page.
@@ -1374,16 +1725,16 @@ class TestTheValidationPageDocument:
         is what the phrase test above is for -- so the pair is asymmetric on
         purpose and this is the side it is open on.
 
-        **One id is exempted BY NAME, and the exemption is a live finding
-        rather than a loosening.**  Measured while Plan 3B hoisted A49: the
-        page's second A27 remedy -- *"inference.noise.kind: radiometer_frozen
-        ... keeps the run as written"* -- leaves ``include_logdet: true``
-        behind on a kind whose key set does not carry it, so the document the
-        page tells a reader to write is refused with *"kind: radiometer_frozen
-        does not take ['include_logdet']"*.  That was true before A49 was
-        hoisted too; it arrived from ``build_noise`` at P2, where this test
-        could not see it.  **The PAGE is what is wrong**; see
-        :data:`_BROKEN_ON_THE_PAGE`.
+        **The one id that used to be exempted, and why it no longer is.**
+        Measured while Plan 3B hoisted A49: the page's second A27 remedy --
+        *"inference.noise.kind: radiometer_frozen ... keeps the run as
+        written"* -- left ``include_logdet: true`` behind on a kind whose key
+        set does not carry it, so the document the page told a reader to write
+        was refused with *"kind: radiometer_frozen does not take
+        ['include_logdet']"*.  That was true before A49 was hoisted too; it
+        arrived from ``build_noise`` at P2, where this test could not see it.
+        **The PAGE was what was wrong, and Task 9 corrected it** rather than
+        widening the exemption; :data:`_BROKEN_ON_THE_PAGE` is now empty.
 
         **A named subtraction and NOT an intersection with ``listed``**, which
         was this test's first repair and was wrong: ``listed`` is
@@ -1409,6 +1760,42 @@ class TestTheValidationPageDocument:
             f"what that leaves is {sorted(left)} and the page's other faults "
             f"are {sorted(listed - {check})}"
         )
+
+    @pytest.mark.parametrize("a27", range(len(_PAGE_FIXES["A27"])))
+    def test_the_three_fixes_together_leave_a_document_that_LOADS(self, a27):
+        """The assertion that was missing, and it found two broken remedies.
+
+        Every test above stops at ``preflight``. A remedy can therefore clear
+        its own finding, earn no other, and still leave a document the layer
+        refuses one phase later -- and until Plan 3B **two of this page's
+        three remedies did exactly that**, invisibly:
+
+        * the A33 remedy named ``transform: unit_mean_bandpass`` and not the
+          ``init:`` that goes with it, so the bind produced ``(9,)`` for an
+          ``(8,)`` leaf and ``load_document`` refused;
+        * the A27 ``radiometer_frozen`` remedy left ``include_logdet:``
+          behind (A49 at P-1, ``build_noise`` before that) and never named
+          ``source:``, which that kind has no default for.
+
+        Parametrized over A27's two ways out, because the page offers two and
+        a test that took only the first would have shipped the second broken
+        for a second time.
+
+        Costs one build per case on a document with no beam -- measured about
+        0.7 s for the ``source: observed`` branch, which pays one forward
+        evaluation through ``inference.observed: {from: simulation}``, and
+        milliseconds for the other.
+        """
+        from rheplicant.config import load_document, preflight
+
+        document = self._document()
+        for check, index in (("A27", a27), ("A30", 0), ("A33", 0)):
+            document = _PAGE_FIXES[check][index][1](document)
+        remaining = [f.check for f in preflight(document).findings]
+        assert remaining == [], (
+            f"the three remedies together still leave {remaining}"
+        )
+        load_document(document)
 
     def test_the_pass_on_the_pages_document_is_free(self):
         """The page says the pass costs under 0.05 s. This is that sentence.
