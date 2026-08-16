@@ -213,6 +213,7 @@ def _check_where(check: str, finding: Finding) -> None:
 # A dotted slot (`A1.runs`) is several functions deciding parts of one check
 # (§3.2 (a)); `Finding.check` is always the bare id.
 
+from rheplicant.config.preflight import depends as _depends_checks  # noqa: E402,F401
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401
 from rheplicant.config.preflight import model as _model_checks  # noqa: E402,F401
