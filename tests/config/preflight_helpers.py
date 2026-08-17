@@ -323,3 +323,169 @@ def only(document, check: str) -> Finding:
         f"{[one.where for one in found]}"
     )
     return found[0]
+
+
+# --- Plan 3C Task 4's constants ---------------------------------------------
+#
+# C12/C13/C19 and the C14 auto-skip.  Appended at the foot and each named for
+# its OWN subject, per §3.2(f).  Every name here begins ``LINEAR_``,
+# ``NONLINEAR_``, ``COMPLEX_``, ``INTEGER_`` or ``T4_`` so that Tasks 5 and 6,
+# which append to this same file, cannot collide with one.  Nothing above this
+# line is edited.
+
+#: :data:`~tests.config.exit_helpers.NONLINEAR_LATENT`'s ``w`` with the claim
+#: TAKEN AWAY -- the same document, the same non-affine ``global_signal.width``,
+#: and no ``linear: true`` for C12 to check.  It is the anti-vacuity partner of
+#: every C12 refusal test: the refusal must come from the DECLARATION and not
+#: from the model, and a check that refused this document would be refusing
+#: physics nobody claimed anything about.
+NONLINEAR_NOT_DECLARED = {
+    "parameters": {"w": {"init": 5.0, "into": "global_signal.width",
+                         "prior": {"normal": {"loc": 5.0, "scale": 1.0}}}},
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation", "at": {"w": 6.0}},
+}
+
+#: Two latents SUMMED into one leaf -- an exactly degenerate pair, by
+#: construction rather than by luck.  ``gain.gain = g1 + g2``, so the data
+#: constrains the sum and nothing else: measured, ``rank 1`` of ``n_par 2``
+#: over 128 data points, ``nullity 1``, ``participation(0) == {'g1': 0.5,
+#: 'g2': 0.5}``.
+#:
+#: **Neither latent is declared ``linear: true``**, deliberately: ``linearity``
+#: is the one check on by default, so a ``linear: true`` here would put a C12
+#: finding beside every C13 assertion and make "and nothing else" read against
+#: the wrong list.  The prediction IS affine in both -- the claim is simply not
+#: made.
+#:
+#: **A WHOLE inference block, for** :func:`repatch` **and not**
+#: :func:`preflight_document`: the latter merges one level deep, so the base's
+#: ``g`` would survive beside ``g1``/``g2`` and the pair would no longer be the
+#: whole space.  That is why ``twin: {without: [noise]}`` is written out here --
+#: ``exit_helpers._repaired`` supplies it on the delegated path and a repatch
+#: goes round it.
+T4_DEGENERATE_PAIR = {
+    "parameters": {
+        "g1": {"init": 0.55, "prior": {"normal": {"loc": 0.55, "scale": 0.5}}},
+        "g2": {"init": 0.55, "prior": {"normal": {"loc": 0.55, "scale": 0.5}}},
+    },
+    "bindings": [{"latents": ["g1", "g2"], "into": "gain.gain",
+                  "transform": {"python": "jax.numpy:add",
+                                "fan": "broadcast"}}],
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation"},
+    "twin": {"without": ["noise"]},
+}
+
+#: The base document's inference block with ``observed:`` REMOVED -- the one
+#: shape on which ``inference.observed`` is ``None`` while ``inference.space``
+#: is not.  C19 needs data and stands down here; C12 and C13 do not and still
+#: run, which is what makes the stand-down C19's own rather than the document's.
+#:
+#: Derived from :func:`_base` rather than written out, so the twin repair and
+#: the noise block travel with it.  **For** :func:`repatch`: a one-level merge
+#: cannot express a removal (:func:`preflight_document`'s own docstring).
+T4_NO_OBSERVED_INFERENCE = {key: value
+                            for key, value in _base()["inference"].items()
+                            if key != "observed"}
+
+#: The base document's inference block with its ONE observation replaced by
+#: TWO named ones, neither called ``primary``.  ``sections/observed.py:266-271``
+#: names a ``primary`` entry, falls back to the single entry when there is
+#: exactly one, and otherwise leaves ``ObservedBuild.primary`` **None** -- so
+#: this is the shape on which ``observed`` is not ``None`` and its ``primary``
+#: is, which is the second half of C19's stand-down and the only one a
+#: document can reach.  Measured: ``entries == ['day', 'night']``,
+#: ``primary is None``.
+#:
+#: Without the ``primary is None`` half of the guard, C19 evaluates
+#: ``observed.entries[None]`` and dies as ``post-flight check 'C19' RAISED
+#: KeyError: None`` -- laundered blame.  **For** :func:`repatch`.
+T4_TWO_NAMED_OBSERVATIONS = {
+    **{key: value for key, value in _base()["inference"].items()
+       if key != "observed"},
+    "observed": {"night": dict(_base()["inference"]["observed"]),
+                 "day": dict(_base()["inference"]["observed"])},
+}
+
+#: An ``inference:`` PATCH turning the noise off.  ``decided_noise`` returns
+#: ``None`` for ``kind: none`` (``sections/noise.py:318``) and
+#: ``as_noise_model(None, ...)`` is a ``TypeError`` out of the package, so C19
+#: stands down here rather than handing it over.  A patch and not a block: the
+#: one-level merge keeps the base's ``g``, its priors and its observed data, so
+#: the ONLY thing that differs from the passing document is the noise.
+T4_NOISE_NONE = {"noise": {"kind": "none"}}
+
+#: An ``inference:`` patch whose latent asks for a COMPLEX init.  It is
+#: **accepted**, and that is the whole point: ``sections/parameters.py:162``
+#: casts every ``init`` to ``context.dtype``, which ``RuntimeFacts.dtype``
+#: restricts to ``float32``/``float64``, so the complex value arrives as a
+#: ``float32`` latent with a ``ComplexWarning`` and nothing downstream ever
+#: sees a complex dtype.  ``dtype: int32`` is not even writable --
+#: ``modifiers.DTYPES`` holds four names and none of them is an integer.
+#:
+#: This is the fixture behind the one end-to-end C14 test: it is what goes red
+#: the day the config layer starts admitting a complex latent, at which point
+#: the four unit tests over a doctored build stop being hypothetical.
+COMPLEX_INIT_LATENT = {
+    "parameters": {"g": {"init": {"value": 1.0, "dtype": "complex64"},
+                         "linear": True, "into": "gain.gain",
+                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+}
+
+#: All three gates at ``mode: refuse`` -- the anti-vacuity partner of the
+#: call-count property.  With no ``inference.checks:`` at all the counts are
+#: ``(one per linear latent, 0, 0)``; with this they are ``(n, 1, 1)``, and a
+#: default table quietly reversed cannot satisfy both.
+T4_CHECKS_ALL_REFUSE = {"linearity": {"mode": "refuse"},
+                        "identifiability": {"mode": "refuse"},
+                        "prior_sensitivity": {"mode": "refuse"}}
+
+#: ``identifiability`` turned on at ``mode: refuse``.  Off by default, so
+#: every C13 test has to write something.
+T4_CHECKS_IDENTIFIABILITY_REFUSE = {"identifiability": {"mode": "refuse"}}
+
+#: ``identifiability`` turned on and asked to record its numbers on a PASS.
+T4_CHECKS_IDENTIFIABILITY_REPORT = {"identifiability": {"mode": "report",
+                                                        "report": True}}
+
+#: ``identifiability`` declined in writing -- the shape
+#: :meth:`~rheplicant.config.gating.Gate.runs` is false for with a ``reason:``
+#: the record keeps.  Used to show that one gate standing down does not silence
+#: another.
+T4_CHECKS_IDENTIFIABILITY_SKIP = {
+    "identifiability": {"mode": "skip",
+                        "reason": "the joint rank is checked by hand"}}
+
+#: ``identifiability`` with its own ``rtol:`` -- the ONLY check whose entry may
+#: carry one (``gating.check_gates``'s ``allowed`` set).  ``1e-2`` is four
+#: decades above ``DEFAULT_RANK_RTOL`` and is chosen to be visibly not the
+#: default in the recorded numbers.
+T4_CHECKS_IDENTIFIABILITY_RTOL = {"identifiability": {"mode": "report",
+                                                      "report": True,
+                                                      "rtol": 1e-2}}
+
+#: ``prior_sensitivity`` turned on and asked to record its numbers on a PASS.
+#: **This is the one fixture in Task 4 that pays the real cold cost** of the
+#: two Newton solves; every other C19 test either stands down before the call
+#: or drives a stub.
+T4_CHECKS_PRIOR_SENSITIVITY_REPORT = {
+    "prior_sensitivity": {"mode": "report", "report": True}}
+
+#: ``linearity`` downgraded -- the first escape C12's own refusal names, applied
+#: literally by the advice-loop test.
+T4_CHECKS_LINEARITY_WARN = {"linearity": {"mode": "warn"}}
+
+#: ``linearity`` declined in writing -- the second escape C12's refusal names.
+#: Distinct from :data:`CHECKS_SKIP` (Task 2's) only in the ``reason:``, and
+#: kept apart because the advice-loop test asserts the sentence a reader would
+#: actually have copied out of the refusal.
+T4_CHECKS_LINEARITY_SKIP = {
+    "linearity": {"mode": "skip",
+                  "reason": "this block's linearity is checked in the campaign "
+                            "notebook"}}
+
+#: ``linearity`` asked to record its margins on a PASS.  Without ``report:
+#: true`` a passing check says nothing at all (§2.3's table, rows 3, 6 and 9),
+#: so this is the only way the margins reach the record.
+T4_CHECKS_LINEARITY_REPORT = {"linearity": {"mode": "refuse", "report": True}}
