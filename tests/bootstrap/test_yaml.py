@@ -8,6 +8,7 @@ import pytest
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.yaml import (
+    BoundedSafeLoader,
     LoadedYaml,
     YamlLimits,
     compose_one_bounded,
@@ -133,3 +134,64 @@ def test_alias_expansion_is_detached_between_uses():
 
     assert value == [[1], [1]]
     assert value[0] is not value[1]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'"\\uD800"',
+        b"!!bool nope",
+        b'!!int ""',
+        b'!!float ""',
+    ],
+)
+def test_malformed_core_scalars_are_normalized_to_config_error(payload):
+    """Catches raw PyYAML scalar-constructor and surrogate exceptions leaking out."""
+    with pytest.raises(ConfigError):
+        safe_load_document(payload, source_name="malformed.yaml")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"!!python/name:os.system ''",
+        b"!!python/tuple [1]",
+        b"!!python/object {answer: 42}",
+    ],
+)
+def test_unsafe_scalar_sequence_and_mapping_tags_are_refused(payload):
+    """Catches a non-scalar unsafe tag slipping past the plain-value constructor."""
+    with pytest.raises(ConfigError, match="unsafe YAML tag"):
+        safe_load_document(payload, source_name="tags.yaml")
+
+
+@pytest.mark.parametrize("payload", [b"11: first\n0xB: second\n", b"true: first\n1: second\n"])
+def test_semantically_equal_yaml_keys_are_duplicate_keys(payload):
+    """Catches duplicate detection based on lexical spelling rather than constructed keys."""
+    with pytest.raises(ConfigError, match="duplicate key"):
+        safe_load_document(payload, source_name="semantic-duplicates.yaml")
+
+
+@pytest.mark.parametrize("payload", [b"? [a]\n: value\n", b"? {a: b}\n: value\n"])
+def test_unhashable_yaml_keys_are_normalized_to_config_error(payload):
+    """Catches raw TypeError from a sequence or mapping used as a mapping key."""
+    with pytest.raises(ConfigError, match="not scalar"):
+        safe_load_document(payload, source_name="unhashable-keys.yaml")
+
+
+def test_loader_is_disposed_after_success_and_refusal(monkeypatch):
+    """Catches a loader retained after either successful or refused composition."""
+    original_dispose = BoundedSafeLoader.dispose
+    disposed: list[BoundedSafeLoader] = []
+
+    def tracked_dispose(loader):
+        disposed.append(loader)
+        original_dispose(loader)
+
+    monkeypatch.setattr(BoundedSafeLoader, "dispose", tracked_dispose)
+
+    safe_load_document(b"answer: 42", source_name="success.yaml")
+    with pytest.raises(ConfigError):
+        safe_load_document(b"---\na: 1\n---\nb: 2\n", source_name="refusal.yaml")
+
+    assert len(disposed) == 2

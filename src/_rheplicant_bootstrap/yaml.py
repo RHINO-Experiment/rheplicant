@@ -77,7 +77,12 @@ class BoundedSafeLoader(yaml.SafeLoader):
     def compose_scalar_node(self, anchor: str | None) -> ScalarNode:
         event = self.peek_event()
         assert hasattr(event, "value")
-        scalar_size = len(event.value.encode("utf-8"))
+        try:
+            scalar_size = len(event.value.encode("utf-8"))
+        except UnicodeError as exc:
+            raise ConfigError(
+                f"{self._source_name}: invalid YAML scalar: {exc}"
+            ) from exc
         if scalar_size > self._limits.scalar_bytes:
             self._refuse_limit("scalar bytes", scalar_size, self._limits.scalar_bytes)
         self._count_node()
@@ -202,7 +207,15 @@ def construct_plain_bounded(
                     first_marks[key] = key_node.start_mark
                 return result
             raise ConfigError(f"{source_name}: unsupported YAML node at {_mark(node.start_mark)}.")
-        except (ValueError, TypeError, RecursionError) as exc:
+        except (
+            IndexError,
+            KeyError,
+            OverflowError,
+            UnicodeError,
+            ValueError,
+            TypeError,
+            RecursionError,
+        ) as exc:
             if isinstance(exc, ConfigError):
                 raise
             raise ConfigError(f"{source_name}: invalid YAML scalar: {exc}") from exc
