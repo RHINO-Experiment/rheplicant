@@ -305,6 +305,22 @@ NOISE_WAVE_BASIS = [
 #: prediction peaks at 12.116 ``adc_count`` against this ``n_bits: 12``'s
 #: 2048 ``adc_count`` clip limit (measured:
 #: ``tests/config/test_postflight_digitising.py``).
+#: The ``model.noise`` every cell below was measured against, pinned HERE
+#: rather than inherited from ``exit_helpers.MODEL_NOISE``.  ``noise`` is
+#: UPSTREAM of ``adc`` (``radio/graph.py``: ``noise -> emi -> adc``), and C16
+#: probes the FULL twin, so every peak and every boundary scale below moves
+#: with that sigma.  Measured: with ``MODEL_NOISE``'s sigma at ``SIGMA_K``
+#: (0.05 K) instead of 0.5 K -- which is exactly Task 6's D-10 edit -- the
+#: base peak drops 12.116166 -> 11.083971 and ALL THREE boundary cells and
+#: the :data:`WIDE_GRID` warn cell fall to fraction 0.0.
+T5_MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
+
+
+def t5_model(adc: dict) -> dict:
+    """A ``model:`` patch: this task's pinned ``noise`` plus an ``adc`` node."""
+    return {"noise": T5_MODEL_NOISE, "adc": dict(adc)}
+
+
 ADC_UNSATURATED = {"scale": 1.0, "n_bits": 12}
 
 #: A ``model.adc`` patch that saturates EVERY sample on the base document
