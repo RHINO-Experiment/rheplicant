@@ -41,6 +41,16 @@ def test_report_attaches_the_cumulative_report_when_supplied():
     assert str(caught.value) == first.message
 
 
+def test_zero_argument_refusal_attaches_the_current_report():
+    first = refuse("A1", "one", "one is refused")
+    report = Report(findings=(first,))
+
+    with pytest.raises(ConfigError) as caught:
+        report.raise_if_refused()
+
+    assert caught.value.report is report
+
+
 def test_report_without_refusals_returns_without_raising():
     assert Report().raise_if_refused() is None
 
