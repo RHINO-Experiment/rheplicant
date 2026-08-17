@@ -29,7 +29,7 @@ def synthetic_document():
                               "width": {"value": 5.0, "unit": "MHz"}},
             "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
             "noise": {"type": "NoiseOperator",
-                      "sigma": {"value": 0.5, "unit": "K"}},
+                      "sigma": {"value": 0.05, "unit": "K"}},
         },
         "variants": {
             "unity_gain": {"model": {"gain": {"gain": {"value": 1.0,
@@ -89,13 +89,18 @@ class TestLoadDocument:
         assert float(unity.twin["gain"].gain) == pytest.approx(1.0)
 
     def test_an_inference_section_builds_on_the_run(self):
+        # D-10 (Plan 3C Task 6): this sigma moves WITH synthetic_document()'s
+        # model.noise.sigma edit above -- observed: declares no twin: of its
+        # own, so it defaults to "full" (sections/observed.py's own default)
+        # and the FULL twin, carrying model.noise, is what draws this data.
+        # A numeric C18 refuses this document if the two disagree.
         doc = {**synthetic_document(),
                "inference": {
                    "twin": {"without": ["noise"]},
                    "parameters": {"g": {"init": 1.0, "linear": True,
                                         "into": "gain.gain"}},
                    "noise": {"kind": "homoscedastic",
-                             "sigma": {"value": 0.5, "unit": "K"}},
+                             "sigma": {"value": 0.05, "unit": "K"}},
                    "observed": {"from": "simulation", "at": {"g": 1.5}},
                }}
         run = load_document(doc)
