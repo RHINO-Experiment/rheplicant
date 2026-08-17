@@ -23,14 +23,17 @@ the switch cycle; `resources:` resolve against that context; `model:`
 assembles the twin; and an ingested recording is finished last, because
 `to_state`'s `source_order` is read off the assembled twin.
 
-Three validation passes are threaded through that order, and where each one
+Four validation passes are threaded through that order, and where each one
 sits is the whole of what it can decide: the [pre-flight
 pass](config-validation.md#the-pre-flight-pass) runs first over the document's
 own text; the **axes** pass runs once the grids exist and one line *above*
-`resources:`, which is where the money is; and the **built** pass runs at the
-end, over the twin, the state and the built resources, before `load_document`
-returns. Only the first two run in front of a beam — see [the two later
-slots](config-validation.md#the-two-later-slots-and-what-each-one-buys).
+`resources:`, which is where the money is; the **built** pass runs over the
+twin, the state and the built resources; and the **post-flight** pass runs
+last, after `build_inference`, holding the checks that have to run the model
+to decide anything. Only the first two run in front of a beam — see [the three
+later slots](config-validation.md#the-three-later-slots-and-what-each-one-buys).
+The post-flight pass is the only one whose price a document can decline, in
+[`inference.checks:`](config-inference.md#checks).
 
 ## observation
 

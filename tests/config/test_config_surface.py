@@ -48,6 +48,50 @@ def _page_document(heading: str, page: str = "config-inference.md") -> dict:
     return yaml.safe_load(fence.group(1))
 
 
+def _block(text: str, heading: str) -> str:
+    """The body under a heading of ANY level, up to the NEXT heading.
+
+    :func:`_section` is 3A's and stops only at the next ``## ``, which is what
+    a ``## `` section wants. Plan 3C's gate section carries ``### ``
+    subsections, and a guard that read one of them with ``_section`` would
+    swallow every sibling below it -- so a table asserted "under the defaults
+    heading" would in fact be matched anywhere in the section, and moving a row
+    between subsections would change nothing. This stops at ``\\n#`` of any
+    depth.
+    """
+    _, marker, after = text.partition(f"\n{heading}\n")
+    assert marker, f"{heading!r} is no longer a heading on the page"
+    return re.split(r"\n#{1,6} ", after)[0]
+
+
+def _rows(body: str) -> list[list[str]]:
+    """Every data row of every markdown table in ``body``, as cell lists.
+
+    **Not "the first table"**: it walks every ``|``-prefixed line in ``body``,
+    drops only rows that are entirely ``-``/``:``/space (the ``|---|`` rule),
+    and returns everything else past the very first row collected -- which
+    means a SECOND table's own header row is not recognised as a header and
+    is returned as if it were data. Every guarded block in this module holds
+    exactly one pipe-free table, so this has no live consequence today; if
+    that ever stops being true, this function needs splitting, not its
+    caller's arity assertion loosened. A cell is stripped. Escaped pipes
+    (``\\|``) are **not** handled -- a literal ``\\|`` inside a cell splits
+    that cell in two. Returns ``[]`` when there is no table, which every
+    caller turns into a red test with its own message rather than a vacuous
+    pass.
+    """
+    found = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if all(set(cell) <= set("-: ") for cell in cells):
+            continue          # the |---|---| rule
+        found.append(cells)
+    return found[1:] if found else []
+
+
 def _kinds_named_in(paragraph: str, kinds) -> set[str]:
     """Every run kind a paragraph names, family globs included.
 
@@ -276,18 +320,36 @@ class TestThePlan2CSurface:
     #: which plan put each name there.
     SURFACE_3A = ("ConfigWarning", "Finding", "Report", "preflight")
 
+    #: What Plan 3B adds: **nothing**, and
+    #: ``TestPlan3BsWiringAndItsSurface::test_plan_3b_adds_no_name_to_the_
+    #: surface_and_here_is_why`` carries the mechanical argument. An empty
+    #: tuple rather than an absent one, so the sum below reads as a per-plan
+    #: ledger and a later reader does not have to infer that 3B was skipped.
+    SURFACE_3B: tuple[str, ...] = ()
+
+    #: What Plan 3C adds, argued in ``config/__init__.py``'s own docstring: a
+    #: caller CALLS ``gates`` on the ``inference.checks:`` mapping it already
+    #: holds and READS the ``Gate``s it hands back -- the same
+    #: call/receive/read shape that put ``preflight``/``Report``/``Finding``
+    #: here. ``priced`` is deliberately absent, for 3B's reason: it is a pass
+    #: ``load_document`` runs for the caller, and its answer arrives on
+    #: ``ConfiguredRun.report``.
+    SURFACE_3C = ("Gate", "gates")
+
     def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(
             self):
         import rheplicant.config as config
 
         assert sorted(config.__all__) == sorted(self.SURFACE
-                                                + self.SURFACE_3A), (
+                                                + self.SURFACE_3A
+                                                + self.SURFACE_3B
+                                                + self.SURFACE_3C), (
             "rheplicant.config.__all__ changed. Plan 2C's decision was that "
             "nine new run kinds are document vocabulary rather than public "
             "API, and 2D's that a product received through run_document is "
-            "not one either; Plan 3A added exactly four. If a later plan "
-            "hands the caller a new object, add it here and to the docstring "
-            "paragraph that says what the layer does."
+            "not one either; Plan 3A added exactly four, 3B none and 3C two. "
+            "If a later plan hands the caller a new object, add it here and "
+            "to the docstring paragraph that says what the layer does."
         )
 
     def test_the_exit_registry_stays_wiring_rather_than_surface(self):
@@ -1090,14 +1152,73 @@ class TestTheCountsProseStatesAboutThisLayer:
             f"{sorted(self.PLAN_3B - bare)}"
         )
 
-    def test_the_two_plans_claim_disjoint_rows(self):
-        """Neither plan re-decided a row the other had already taken.
+    #: The schema §6 rows Plan 3C decides, across all FOUR registries -- the
+    #: three above plus the post-flight pass's own ``CHECKS``. Derived once
+    #: and written down, exactly as its two siblings are: measured at this
+    #: commit, the union of the four registries' bare ids is 60, of which
+    #: ``PLAN_3A`` holds 31 and ``PLAN_3B`` 22, leaving these seven.
+    #:
+    #: **A1 is NOT here even though Plan 3C registers ``A1.checks``.** A1 is
+    #: "unknown key anywhere", one schema row, and Plan 3A claimed it; a plan
+    #: adding a slot under a row somebody else already decided does not
+    #: re-claim the row. The RULE -- one schema row is one entry, however many
+    #: registries or slots implement it -- is the same rule 3B's own set
+    #: applies to A13 (one row, two registries, one entry); but A13's two
+    #: slots are BOTH 3B's, so that citation does not exercise the CROSS-PLAN
+    #: case A1 is. A1 is this set's own instance of that case, and it is what
+    #: keeps the three-way disjointness below meaningful rather than a
+    #: formality.
+    #:
+    #: C18 and C19 did not exist in schema §6 before this plan; Task 1 added
+    #: both rows in the commit that added their ids, so the census is green at
+    #: every commit rather than only at the end.
+    PLAN_3C = frozenset({"A37", "C12", "C13", "C15", "C16", "C18", "C19"})
 
-        This is what makes the two sets addable and the changelog's two
-        numbers independent. It is also the assertion that goes red if a
-        later reader "fixes" a drifted id by adding it to both lists.
+    def test_every_check_plan_3c_claims_is_registered(self):
+        """The same direction as 3A's and 3B's, over all four registries.
+
+        Subset and not equality, for the reason 3A's own docstring gives.
+        ``C15`` is in the AXES registry and not the text pass, deliberately:
+        the only text reader for ``n_freq``
+        (``preflight/values.py::_a41_scope``) answers ``None`` for a
+        non-``linspace``/``arange``/``modulo``/list grid, for a symbolic
+        ``num:`` and for every ingested run, so a pre-flight C15 would be
+        silent by construction on a whole class of documents. The axes pass
+        carries ``context.shape_scope`` and still runs ahead of
+        ``build_resources``.
         """
-        assert self.PLAN_3A & self.PLAN_3B == frozenset()
+        from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
+        from rheplicant.config.postflight import CHECKS as PRICED
+        from rheplicant.config.preflight import CHECKS
+
+        bare = {slot.split(".")[0]
+                for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS, PRICED)
+                for slot in registry}
+        assert self.PLAN_3C <= bare, (
+            f"these schema ids are in Plan 3C's scope and no function "
+            f"registers them in any of the four passes: "
+            f"{sorted(self.PLAN_3C - bare)}"
+        )
+
+    def test_the_three_plans_claim_disjoint_rows(self):
+        """No plan re-decided a row another had already taken.
+
+        This is what makes the three sets addable and the changelog's three
+        numbers independent. It is also the assertion that goes red if a
+        later reader "fixes" a drifted id by adding it to two lists.
+
+        **Pairwise and not a triple intersection.** ``A & B & C`` is empty the
+        moment any one pair is disjoint, so a row shared by exactly two plans
+        -- which is the mistake a reader actually makes -- would pass it.
+        """
+        for left, right in (("PLAN_3A", "PLAN_3B"), ("PLAN_3A", "PLAN_3C"),
+                            ("PLAN_3B", "PLAN_3C")):
+            shared = getattr(self, left) & getattr(self, right)
+            assert shared == frozenset(), (
+                f"{left} and {right} both claim {sorted(shared)}. A schema "
+                "row is decided by one plan; adding a drifted id to both "
+                "lists makes each plan's changelog count wrong by one."
+            )
 
     #: ``TestThePagesSayWhatTheLayerDoes``' table, plus the neighbourhood the
     #: changelog's own number sits in. Extended rather than replaced: a
@@ -1126,6 +1247,9 @@ class TestTheCountsProseStatesAboutThisLayer:
                "cannot",
                r"registers\s+(\d+)\s+schema §6 ids\s+across\s+the\s+three"
                r"\s+passes"),
+        "3C": ("### The checks that cost something, and the gate that decides "
+               "whether to pay",
+               r"puts a price on\s+(\d+)\s+schema §6 rows"),
     }
 
     def _entry(self, plan: str) -> tuple[str, str]:
@@ -1220,6 +1344,33 @@ class TestTheCountsProseStatesAboutThisLayer:
         assert int(stated.group(1)) == len(self.PLAN_3B), (
             f"CHANGELOG.md says {stated.group(1)} rows; Plan 3B's scope set "
             f"has {len(self.PLAN_3B)}."
+        )
+
+    def test_the_changelog_counts_the_rows_plan_3c_priced(self):
+        """Plan 3C's number, in a THIRD sentence form, and in DIGITS.
+
+        A third form and not a reuse of either sibling's, for the reason
+        :data:`_ENTRIES` gives and 3B's own docstring repeats: two entries
+        sharing a wording make each guard read whichever sits highest, and
+        3C's entry is written *above* both. Digits for 3B's reason --
+        :data:`_WORDS` stops at "thirty-three", so a number word outside its
+        table fails as ``unknown number word``, which reads as this guard's
+        bug rather than as a wrong count.
+
+        The number is the count of schema ROWS this plan decides, over all
+        four registries and de-duplicated. ``\\s+`` and not a space: the
+        sentence wraps.
+        """
+        entry, _ = self._entry("3C")
+        stated = re.search(self._ENTRIES["3C"][1], entry)
+        assert stated, (
+            "Plan 3C's CHANGELOG entry no longer states how many schema §6 "
+            "rows it prices, in the 'puts a price on N schema §6 rows' form "
+            "this guard reads."
+        )
+        assert int(stated.group(1)) == len(self.PLAN_3C), (
+            f"CHANGELOG.md says {stated.group(1)} rows; Plan 3C's scope set "
+            f"has {len(self.PLAN_3C)}."
         )
 
     @pytest.mark.parametrize("plan", sorted(_ENTRIES))
@@ -1403,6 +1554,553 @@ class TestPlan3BsWiringAndItsSurface:
         assert len(carrying) >= 7, (
             f"only {len(carrying)} modules call the walker: {sorted(carrying)}"
         )
+
+
+class TestPlan3CsSurfaceAndItsPage:
+    """What Plan 3C put on the surface, and the page that has to agree.
+
+    Two names land -- ``gates`` and ``Gate`` -- and one deliberately does not.
+    Everything below either asserts that decision or executes a claim the page
+    makes about the gate, so that the page cannot drift from
+    ``config/gating.py`` without a red test naming the drift.
+    """
+
+    PAGE = "config-validation.md"
+
+    #: The gate's own sections, by their exact headings. Written here rather
+    #: than inlined so that a heading renamed on the page fails ONCE, with
+    #: ``_block``'s own "no longer a heading" message, instead of once per
+    #: assertion with a message about a table that is really about a heading.
+    COSTS = "## The post-flight pass, and what it costs"
+    GATE = "## A gate: what runs, what a failure costs, and what is recorded"
+    STATES_TABLE = "### Six effective states, four of them writable"
+    CROSS = "### The cross-product, as one table"
+    IN_CODE = "### What a gate is, in code"
+    SLOTS = "## The three later slots, and what each one buys"
+    SPELLINGS = "### A refused document produces no record at all"
+
+    #: :data:`TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS` stops at sixteen
+    #: and the cross-product is eighteen cells. Extended here rather than
+    #: widened there, for the reason
+    #: :data:`TestTheCountsProseStatesAboutThisLayer._WORDS` gives: a reworded
+    #: count must fail as a WRONG COUNT, where an unknown word fails as a
+    #: broken scan and reads as this guard's own bug.
+    _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
+              "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20}
+
+    #: How the page's ``report:`` column expands into the cells it stands for.
+    #: THREE of the five spellings expand, and each for its own reason:
+    #: ``either`` says the outcome does not depend on ``report:``, ``—`` says
+    #: the column is meaningless for a gate that never ran, and ``ignored``
+    #: says :func:`~rheplicant.config.gating.verdict` reads past it. The two
+    #: literal spellings pin one value each.
+    _REPORT_CELL = {"either": (True, False), "true": (True,),
+                    "false": (False,), "ignored": (True, False),
+                    "—": (True, False)}
+
+    #: And how the ``it failed`` column does NOT expand. ``—`` is one cell and
+    #: not two: a gate that never ran has no failure to have had, so pairing
+    #: it with both truth values would count a state of the world that cannot
+    #: occur. This asymmetry is the whole of why the table is eighteen cells
+    #: and not twenty-four.
+    _FAILED_CELL = {"yes": True, "no": False, "—": False}
+
+    def _cross_product_rows(self):
+        rows = _rows(_block(_page(self.PAGE), self.CROSS))
+        assert rows, (
+            f"{self.PAGE}'s cross-product table stopped parsing under "
+            f"{self.CROSS!r}; every assertion over it would be vacuous."
+        )
+        return rows
+
+    # -- the surface ------------------------------------------------------
+
+    def test_plan_3c_adds_gates_and_gate_and_here_is_why(self):
+        """The two names, on the same footing as ``preflight``/``Report``.
+
+        A caller CALLS ``gates`` on the ``inference.checks:`` mapping their
+        own document already holds, and READS the ``Gate``s it hands back.
+        Both halves are asserted rather than described: the function must be
+        callable on a raw mapping with no build behind it, which is the
+        property that distinguishes it from ``axes``/``built``/``priced``.
+        """
+        import rheplicant.config as config
+
+        for name in ("Gate", "gates"):
+            assert name in config.__all__, name
+            assert hasattr(config, name), name
+        resolved = config.gates({"linearity": {"mode": "warn"}})
+        assert set(resolved) == set(config.gates(None))
+        assert all(isinstance(gate, config.Gate)
+                   for gate in resolved.values())
+
+    def test_the_priced_pass_stays_wiring_rather_than_surface(self):
+        """``priced`` is NOT exported, and the reason is Plan 3B's.
+
+        It is a pass ``load_document`` runs on the caller's behalf: its
+        payload carries the built twin, the state, the resources and the
+        resolved gates, and by the time a caller could construct one the
+        answer is already on ``ConfiguredRun.report``. ``preflight`` remains
+        the one pass a front-end calls itself, because it is the one that
+        answers before anything is built.
+
+        Pinned both ways, as ``CHECKS``/``register`` are: absent from
+        ``__all__`` is about ``import *``, and absent as an attribute is about
+        ``config.priced``.
+        """
+        import rheplicant.config as config
+
+        for name in ("priced", "Priced", "PostCheck", "verdict",
+                     "check_gates", "auto_skipped", "MODES", "STATES",
+                     "DEFAULT_MODE", "CHECK_ID", "CHECK_NAMES", "AUTO_SKIP",
+                     "AUTO_SKIP_ID", "OFF"):
+            assert name not in config.__all__, name
+            assert not hasattr(config, name), name
+
+    def test_the_defaults_are_reachable_through_the_exported_function(self):
+        """``gates(None)`` applies them, so no caller needs ``DEFAULT_MODE``.
+
+        This is the premise of keeping the defaults table module-local. If it
+        stopped holding -- if ``gates(None)`` returned ``{}`` the way
+        ``sections/inference.py::_checks(None)`` used to -- the argument for
+        not exporting ``DEFAULT_MODE`` would be gone and this says so.
+        """
+        from rheplicant.config import gates
+        from rheplicant.config.gating import CHECK_NAMES, DEFAULT_MODE
+
+        applied = {name: gate.state for name, gate in gates(None).items()}
+        assert applied == DEFAULT_MODE, (
+            f"gates(None) applies {applied}; DEFAULT_MODE is {DEFAULT_MODE}. "
+            "A caller told to ask gates(None) for the defaults is being told "
+            "something false, and DEFAULT_MODE would have to be exported."
+        )
+        assert set(applied) == set(CHECK_NAMES)
+
+    def test_a_state_this_package_does_not_know_does_not_run(self):
+        """``Gate.runs`` is a POSITIVE test and gating.py says why. Measured
+        at review: negating it survives the whole of tests/config.
+
+        ``state in ("refuse", "warn", "report")`` and
+        ``state not in ("skip", OFF, AUTO_SKIP)`` agree over every member of
+        :data:`~rheplicant.config.gating.STATES` -- six states, and the two
+        forms answer the same for each -- which is exactly why a mutation to
+        the negated form survived the whole suite: nothing in ``STATES`` can
+        tell them apart. But ``STATES`` is not the full domain. ``gates()``
+        never validates ``mode`` (see this class's precondition test), and
+        ``gates`` is public, so ``gates({"linearity": {"mode": <typo>}})``
+        builds exactly the gate below -- a state outside ``STATES`` -- and the
+        two forms disagree on it: the positive form stands it down, the
+        negated form runs it.
+        """
+        from rheplicant.config import Gate
+        from rheplicant.config.gating import STATES
+
+        unknown = Gate(name="linearity", state="a_state_no_plan_has_added",
+                       record=False, reason=None, rtol=None)
+        assert unknown.state not in STATES
+        assert unknown.runs() is False, (
+            "an unrecognised state RUNS. gating.py's docstring: a state added "
+            "later must default to NOT running -- a lost check is silent, a "
+            "refusal that should not have happened is loud. This is also "
+            "reachable from the public surface: gates({'linearity': "
+            "{'mode': <typo>}}) builds exactly this gate."
+        )
+
+    # -- the page ---------------------------------------------------------
+
+    def test_the_page_lists_every_effective_state_and_its_spelling(self):
+        """Six states, four writable, and the page's word for each.
+
+        Read off ``STATES`` and ``MODES`` so that a seventh state -- or a
+        fifth writable word -- moves the page rather than sitting undocumented
+        in a module nobody reads. The count in the HEADING is scanned too, and
+        it is the one that most needs it: it is also this table's locator, so
+        a page corrected to seven states and a heading left saying six keeps
+        every other assertion here passing.
+        """
+        from rheplicant.config.gating import MODES, STATES
+
+        rows = _rows(_block(_page(self.PAGE), self.STATES_TABLE))
+        assert rows, f"{self.PAGE}'s effective-state table stopped parsing"
+        listed = [row[0].strip("`") for row in rows]
+        assert listed == list(STATES), (
+            f"the page lists {listed}; gating.STATES is {list(STATES)}. The "
+            "order is the page's own claim -- the four writable ones, then "
+            "the two that are not."
+        )
+        writable = {row[0].strip("`") for row in rows
+                    if "mode:" in row[1]}
+        assert writable == set(MODES), (
+            f"the page shows {sorted(writable)} as writable as a mode:; "
+            f"gating.MODES is {sorted(MODES)}."
+        )
+        for word, what in ((r"(\w+) effective states", "the heading's count"),
+                           (r"states, (\w+) of them writable",
+                            "the heading's writable count")):
+            found = re.search(word, self.STATES_TABLE, re.IGNORECASE)
+            assert found, f"{what} is no longer in {self.STATES_TABLE!r}"
+            said = found.group(1).lower()
+            assert said in self._WORDS, f"{what}: unknown word {said!r}"
+        assert self._WORDS[re.search(r"(\w+) effective states",
+                                     self.STATES_TABLE,
+                                     re.IGNORECASE).group(1).lower()] == len(STATES)
+        assert self._WORDS[re.search(r"states, (\w+) of them writable",
+                                     self.STATES_TABLE,
+                                     re.IGNORECASE).group(1).lower()] == len(MODES)
+
+    def test_the_pages_cross_product_table_is_EXECUTED(self):
+        """Every cell of the page's table is driven through ``verdict``.
+
+        This is the load-bearing guard on this page and it is deliberately not
+        a shape check. §4.7.8 shipped the ``mode``-versus-``report:``
+        ambiguity in prose three times; a table that merely *parses* would
+        ship it a fourth. So each row is expanded into the cells it stands
+        for, a ``Gate`` is built for each, ``verdict`` is called, and the
+        severity and check id the page promises are compared against the
+        finding it actually returns.
+
+        ``name="linearity"`` throughout: the cross-product is a property of
+        the STATE and not of which check is in it, and ``CHECK_ID`` is read
+        rather than written so the expected id moves if the mapping does. The
+        ``auto_skip`` row promises a DIFFERENT id, and the page writes it in
+        backticks; that is read off the cell rather than hardcoded here.
+        """
+        from rheplicant.config.findings import REFUSE, REPORT, WARN
+        from rheplicant.config.gating import CHECK_ID, Gate, verdict
+
+        severities = {"REFUSE": REFUSE, "WARN": WARN, "REPORT": REPORT}
+        driven = 0
+        for state, ran, failed, record, promised in self._cross_product_rows():
+            state = state.strip("`")
+            # The "the check ran?" column is a claim too, and ``Gate.runs()``
+            # is what decides it. Asserted here rather than in a test of its
+            # own because it is what makes the ``—`` cells legible: a row that
+            # says "no" is exactly a row whose failed and report: columns
+            # stand for nothing.
+            probe = Gate(name="linearity", state=state, record=False,
+                         reason="the document said so", rtol=None)
+            assert probe.runs() == (ran == "yes"), (
+                f"the page says the {state!r} row {'runs' if ran == 'yes' else 'does not run'}; "
+                f"Gate.runs() says {probe.runs()}."
+            )
+            assert record in self._REPORT_CELL, (
+                f"the report: cell {record!r} on the {state!r} row is not one "
+                f"of {sorted(self._REPORT_CELL)}; this guard cannot know how "
+                "many cells it stands for."
+            )
+            assert failed in self._FAILED_CELL, (
+                f"the failed cell {failed!r} on the {state!r} row is not one "
+                f"of {sorted(self._FAILED_CELL)}."
+            )
+            named = re.search(r"\*\*(REFUSE|WARN|REPORT)\*\*", promised)
+            spelled = re.search(r"`(C\d+)`", promised)
+            assert named or "*none*" in promised, (
+                f"the {state!r}/{failed!r}/{record!r} row promises "
+                f"{promised!r}, which is neither a **SEVERITY** nor *none*."
+            )
+            for keeps in self._REPORT_CELL[record]:
+                gate = Gate(name="linearity", state=state, record=keeps,
+                            reason=("the document said so"
+                                    if state in ("skip", "auto_skip")
+                                    else None),
+                            rtol=None)
+                got = verdict(gate, failed=self._FAILED_CELL[failed],
+                              where="inference.parameters.g",
+                              message="the numbers")
+                driven += 1
+                if named is None:
+                    assert got is None, (
+                        f"the page promises no finding for state={state!r}, "
+                        f"failed={failed!r}, report={keeps}; verdict returns "
+                        f"{got}."
+                    )
+                    continue
+                assert got is not None, (
+                    f"the page promises **{named.group(1)}** for "
+                    f"state={state!r}, failed={failed!r}, report={keeps}; "
+                    "verdict returns nothing."
+                )
+                assert got.severity == severities[named.group(1)], (
+                    f"the page promises **{named.group(1)}** for "
+                    f"state={state!r}, failed={failed!r}, report={keeps}; the "
+                    f"finding is {got.severity!r}."
+                )
+                expected = spelled.group(1) if spelled else CHECK_ID["linearity"]
+                assert got.check == expected, (
+                    f"the page promises the finding to carry {expected!r} for "
+                    f"state={state!r}; it carries {got.check!r}."
+                )
+        assert driven == 18, (
+            f"the page's table expands to {driven} cells and this guard was "
+            "written against eighteen. If a state or a column spelling was "
+            "added, move the count HERE and in the page's own sentence -- do "
+            "not delete the assertion."
+        )
+
+    def test_the_page_counts_the_cells_its_table_stands_for(self):
+        """"eighteen cells, not twelve rows", against the table itself.
+
+        The sentence is the whole reason the table is legible: a reader who
+        counts rows concludes ``{mode: skip, report: true}`` has a cell, and
+        it does not. Both numbers are read off the page and both are compared
+        -- the row count against the table, the cell count against the
+        expansion -- because a page corrected in one and not the other is the
+        drift this guards.
+        """
+        body = _block(_page(self.PAGE), self.CROSS)
+        rows = self._cross_product_rows()
+        stated = re.search(r"(\w+) cells, not (\w+) rows", body,
+                           re.IGNORECASE)
+        assert stated, (
+            f"{self.PAGE} no longer counts its cross-product in the "
+            "'N cells, not M rows' form this guard reads. Reword the pattern "
+            "or the page, but do not leave the count unread."
+        )
+        cells, written = (word.lower() for word in stated.groups())
+        for word in (cells, written):
+            assert word in self._WORDS, f"unknown number word {word!r}"
+        assert self._WORDS[written] == len(rows), (
+            f"the page says {written} rows and the table has {len(rows)}."
+        )
+        expanded = sum(len(self._REPORT_CELL[row[3]]) for row in rows)
+        assert self._WORDS[cells] == expanded, (
+            f"the page says {cells} cells and the table expands to {expanded}."
+        )
+
+    def test_the_page_names_the_id_an_auto_skip_reports_under(self):
+        """C14 is bound by ``verdict``, never registered, so nothing else
+        would notice it moving.
+
+        ``AUTO_SKIP_ID`` is not in any registry -- that is the point of it, so
+        that a user grepping the record for C14 finds every check that was
+        asked for and could not be decided -- which means the schema-census
+        test cannot see it either. This is the only guard between the constant
+        and the page.
+        """
+        from rheplicant.config.gating import AUTO_SKIP_ID
+
+        # ``_section`` and not ``_block``: the id is named in the prose under
+        # the states table AND promised again in the cross-product's last
+        # row, and either is a legitimate home for it. What must not happen is
+        # the whole gate section going quiet about it.
+        body = _section(_page(self.PAGE), self.GATE)
+        assert f"`{AUTO_SKIP_ID}`" in body, (
+            f"the gate section no longer names {AUTO_SKIP_ID!r} as the id an "
+            "auto-skip reports under."
+        )
+
+    def test_the_page_counts_a_gates_fields_and_names_them(self):
+        """"A `Gate` is five fields" -- and it names all five.
+
+        The count and the names together, for the reason the ``Finding``
+        sibling above gives: a sixth field leaves the word "five" false, and a
+        renamed field leaves the page pointing at a name that is gone.
+        """
+        from rheplicant.config import Gate
+
+        body = _block(_page(self.PAGE), self.IN_CODE)
+        opens = re.search(r"A `Gate` is (\w+) fields: (.*?)\n\n", body,
+                          re.DOTALL)
+        assert opens, f"{self.PAGE} no longer counts a Gate's fields"
+        word = opens.group(1).lower()
+        assert word in self._WORDS, f"unknown number word {word!r}"
+        assert self._WORDS[word] == len(Gate._fields), (
+            f"the page says {word} fields; Gate has {len(Gate._fields)}."
+        )
+        named = set(re.findall(r"`(\w+)`", opens.group(2)))
+        assert set(Gate._fields) <= named, (
+            f"the page counts {word} fields and does not name "
+            f"{sorted(set(Gate._fields) - named)}."
+        )
+
+    def test_the_precondition_gates_advertises_holds_as_written(self):
+        """``gates`` is advertised as free and pure over RAW text -- the
+        schema's "Validate" panel holding a section the user is still typing
+        -- and neither the page nor ``config/__init__.py`` used to name a
+        precondition. Measured at review: on a section that has not passed
+        ``check_gates``, a non-numeric ``rtol:`` does not stand the check
+        down, it RAISES; and an unknown ``mode:`` word does not raise, it
+        becomes a ``Gate`` whose ``state`` is not in ``STATES`` at all
+        (``runs()`` reports it as standing down, per
+        ``test_a_state_this_package_does_not_know_does_not_run`` above).
+        Both behaviours are pinned here, driven rather than read, so the
+        sentence describing them cannot rot silently on either page.
+        """
+        import rheplicant.config as config
+        from rheplicant.config.gating import STATES
+
+        with pytest.raises(ValueError):
+            config.gates({"identifiability": {"rtol": "1e-8x"}})
+
+        typo = config.gates(
+            {"linearity": {"mode": "a_typo_no_plan_has_added"}})["linearity"]
+        assert typo.state not in STATES
+        assert typo.runs() is False
+
+        needle = "already passed the pre-flight grammar"
+        body = _block(_page(self.PAGE), self.IN_CODE)
+        assert needle in body, (
+            f"{self.PAGE} no longer states gates()'s precondition under "
+            f"{self.IN_CODE!r}."
+        )
+        assert needle in (config.__doc__ or ""), (
+            "rheplicant.config's own module docstring no longer states "
+            "gates()'s precondition -- the page and the package have drifted "
+            "apart again."
+        )
+
+    def test_the_page_counts_the_spellings_of_report_it_tabulates(self):
+        """The one count on this page taken from a sentence rather than a
+        table. Measured at review: "Three" and "Four" both passed -- nothing
+        compared the sentence to the table it introduces.
+
+        **Also checks ``gating.py``'s own copy of the same sentence, by
+        equality against the page's.** The two docstrings carry the same
+        claim over the same four-row list, in two unrelated syntaxes (a
+        markdown table here, an RST grid table there) that no single parser
+        reads -- two ROUTES to the same fact, which is exactly the shape the
+        project's own defect pattern names: closing the route through one
+        without checking the other is how a twin survives. Reverting either
+        file's count alone, with the other left correct, is measured to
+        reproduce the review's finding (``EXIT=0`` over the full suite either
+        way) if only one of the two assertions below exists.
+        """
+        body = _block(_page(self.PAGE), self.SPELLINGS)
+        stated = re.search(r"\*\*(\w+) unrelated things in this layer are "
+                           r'spelled "report"', body)
+        assert stated, f"{self.PAGE} no longer counts the report spellings"
+        word = stated.group(1).lower()
+        assert word in self._WORDS, f"unknown number word {word!r}"
+        rows = _rows(body)
+        assert rows, "the report-spellings table stopped parsing"
+        assert self._WORDS[word] == len(rows), (
+            f"the page says {word} spellings and tabulates {len(rows)}."
+        )
+
+        from rheplicant.config import gating
+
+        module_stated = re.search(
+            r"\*\*(\w+) unrelated things in this layer are "
+            r'spelled "report"', gating.__doc__ or "")
+        assert module_stated, (
+            "gating.py's own module docstring no longer counts the report "
+            "spellings in the same words the page does."
+        )
+        assert module_stated.group(1).lower() == word, (
+            f"the page says {word!r} spellings; gating.py's own docstring "
+            f"says {module_stated.group(1).lower()!r}. The two copies of "
+            "this sentence have drifted apart."
+        )
+
+    def test_the_cost_table_carries_each_checks_id_and_its_default(self):
+        """The page's own check table, against ``CHECK_ID`` and ``gates(None)``.
+
+        Both columns, because they go stale in different ways: an id drifts
+        when a schema row is renumbered, and a default drifts the moment
+        somebody decides a check is cheap enough to turn on. Equality over the
+        NAME set as well, so a fourth check name cannot arrive with no row.
+        """
+        from rheplicant.config import gates
+        from rheplicant.config.gating import CHECK_ID
+
+        rows = _rows(_block(_page(self.PAGE), self.COSTS))
+        assert rows, f"{self.PAGE}'s post-flight cost table stopped parsing"
+        table = {row[0].strip("`"): (row[2].strip("`"), row[3].strip("`"))
+                 for row in rows}
+        applied = gates(None)
+        assert set(table) == set(CHECK_ID), (
+            f"the page tabulates {sorted(table)}; gating.CHECK_ID knows "
+            f"{sorted(CHECK_ID)}."
+        )
+        for name, (check, default) in table.items():
+            assert check == CHECK_ID[name], (
+                f"the page gives {name} the id {check!r}; CHECK_ID says "
+                f"{CHECK_ID[name]!r}."
+            )
+            assert default == applied[name].state, (
+                f"the page says {name} defaults to {default!r}; gates(None) "
+                f"applies {applied[name].state!r}."
+            )
+
+    def test_the_slots_section_counts_the_passes_that_actually_exist(self):
+        """A counting heading, a table and an ordering list, all derived.
+
+        This section shipped with 3B counting **two** later slots and was
+        guarded by nothing, so a fourth pass made three separate claims false
+        at once and no run said so. Every one of the three is now read off the
+        registries: a fifth pass with a fifth registry turns all three red.
+
+        The ordering list is FOUR and the table is THREE, and that difference
+        is real rather than an off-by-one: the list starts at the text pass,
+        which is not a *later* slot.
+        """
+        from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
+        from rheplicant.config.postflight import CHECKS as PRICED
+        from rheplicant.config.preflight import CHECKS
+
+        passes = (CHECKS, AXIS_CHECKS, BUILT_CHECKS, PRICED)
+        body = _block(_page(self.PAGE), self.SLOTS)
+        heading = re.search(r"## The (\w+) later slots", self.SLOTS)
+        assert heading, "the slots heading no longer counts its slots"
+        word = heading.group(1).lower()
+        assert word in self._WORDS, f"unknown number word {word!r}"
+        assert self._WORDS[word] == len(passes) - 1, (
+            f"the heading says {word} later slots; there are "
+            f"{len(passes) - 1} registries after the text pass."
+        )
+        rows = _rows(body)
+        assert len(rows) == len(passes) - 1, (
+            f"the slots table has {len(rows)} rows for {len(passes) - 1} "
+            "later passes."
+        )
+        ordering = re.findall(r"^- (\w[\w -]*?) pass —", body, re.MULTILINE)
+        assert len(ordering) == len(passes), (
+            f"the ordering list names {ordering} for {len(passes)} passes. "
+            "It starts at the TEXT pass, so it is one longer than the table."
+        )
+
+    def test_the_checks_section_gates_rather_than_records(self):
+        """``docs/config-inference.md``'s ``## Checks``, which had no guard.
+
+        It ended *"The section is grammar plus record in 2B; its gating is
+        Plan 3's validate"* and survived five plans saying so, because nothing
+        read it. What is asserted now is what a reader needs and what actually
+        drifts: the three names, the four modes, and each check's real
+        default -- taken from ``gates(None)``, not from a sentence.
+
+        The stale sentence itself is pinned by absence as well. That is
+        normally a weak shape, and it is defensible exactly here: this is the
+        one sentence in this layer's prose with a five-plan record of being
+        restored by a reader "fixing" the paragraph around it.
+        """
+        from rheplicant.config import gates
+        from rheplicant.config.gating import CHECK_NAMES, MODES
+
+        body = _block(_page("config-inference.md"), "## Checks")
+        assert "its gating is Plan 3's validate" not in body, (
+            "config-inference.md's Checks section is claiming again that the "
+            "gating is future work. It is not: gating.py decides it and the "
+            "post-flight pass runs it."
+        )
+        modes = re.search(r"`mode: ([^`]+)`", body)
+        assert modes, "the Checks section no longer spells the mode words"
+        assert [word.strip() for word in modes.group(1).split("|")] == list(MODES), (
+            f"the page spells the modes {modes.group(1)!r}; gating.MODES is "
+            f"{list(MODES)}."
+        )
+        rows = _rows(body)
+        assert rows, "config-inference.md's Checks table stopped parsing"
+        table = {row[0].strip("`"): row[-1].strip("`") for row in rows}
+        assert set(table) == set(CHECK_NAMES), (
+            f"the page tabulates {sorted(table)}; gating.CHECK_NAMES is "
+            f"{sorted(CHECK_NAMES)}."
+        )
+        applied = gates(None)
+        for name, default in table.items():
+            assert default == applied[name].state, (
+                f"config-inference.md says {name} defaults to {default!r}; "
+                f"gates(None) applies {applied[name].state!r}."
+            )
 
 
 #: ``docs/config-validation.md``'s check id -> [(every phrase the page's own

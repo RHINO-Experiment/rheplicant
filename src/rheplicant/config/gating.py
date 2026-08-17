@@ -14,7 +14,7 @@ check composes the sentence, because it holds the numbers and knows whether it
 failed; this module owns the SEVERITY, because a severity chosen per check is
 six chances to disagree about what ``mode: warn`` means.
 
-**Three unrelated things in this layer are spelled "report", and conflating
+**Four unrelated things in this layer are spelled "report", and conflating
 any two of them is the likeliest way to ship something that reads right:**
 
 ============================================ ====================================

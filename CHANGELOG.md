@@ -2,6 +2,83 @@
 
 ## Unreleased
 
+### The checks that cost something, and the gate that decides whether to pay
+
+Plan 3C: a fourth validation pass for the checks that cannot be decided
+without running the model, and one place that decides what each of them costs
+you. It puts a price on 7 schema §6 rows — `C12`, `C13`, `C16`, `C18` and
+`C19` in the new **post-flight** pass, `C15` in the axes pass, and `A37` in the
+text pass, where the `checks:` grammar now lives. Two of those rows, `C18` and
+`C19`, did not exist in §6 before this plan; `prior_sensitivity` had shipped in
+`rheplicant.inference` and been named by `inference.checks:` since 2B with no
+row to gate it.
+
+**`inference.checks:` stops being a record and starts being a gate.** Before
+this release the section was parsed, stored on `InferenceBuild` and read by
+nothing under `src/`: a document could ask for `identifiability` at
+`mode: refuse` and get a fit. It now decides what runs.
+`config/gating.py` holds the four words a document may write, the six
+effective states, the defaults, and **one function that decides the whole
+cross-product of `mode` with `report:`** — two orthogonal axes that schema
+§4.7.8 asked one question of, which is how the ambiguity survived three
+rewrites of the prose. `mode` decides what a *failure* produces; `report:`
+decides whether the numbers are kept when the check *passes*. A failure with
+`report: true` is one finding carrying the numbers, never a refusal and a
+report.
+
+**Two cells that were never refusals become them, in pre-flight.**
+`{mode: skip, report: true}` asks to record the numbers of a check that will
+not run, and was accepted. And every one of the `checks:` grammar refusals
+lost a race it should have won: measured before this plan, **seven of seven**
+arrived after the beam had been read, so a user with a typo in a `mode:` word
+paid for a beam analysis to hear about it. They are decided from text now.
+
+**The defaults are measured, not chosen.** `check_linearity` is a fixed number
+of forward passes per `linear: true` latent and does not grow with the
+parameter count; `identifiability` is a `jacfwd` through the forward model plus
+a dense `(n_data, n_par)` SVD; `prior_sensitivity` is that plus two Newton
+solves, **3.031 s cold against a 0.715 s build**. So `linearity` is on at
+`mode: refuse` and the other two are off, which is what D-C4 and schema §11.15
+already said and nothing enforced.
+
+New in the pass: `C16` reads a converter's saturated fraction from one forward
+evaluation and escalates — nothing at zero, a warning above it, a refusal above
+0.1 %, and a refusal at any non-zero fraction when a latent binds upstream of
+the ADC, because that latent's gradient is dead. `C18` compares the sigma that
+*drew* a document's data against the sigma that *weighs* it, in two halves: a
+text-only family check in pre-flight, and a numeric one on the built objects
+that compares the fractional scatter each side's own class reports rather than
+a formula copied for the fourth time. `C15` reports what a switching cadence
+identifies per channel, and it ships in the **axes** pass rather than in
+pre-flight because the only text reader for `n_freq` answers `None` for a
+symbolic grid, a non-`linspace` grid and every ingested run — a pre-flight
+`C15` would have been silent by construction on a whole class of documents.
+
+`rheplicant.config` gains exactly two names, `gates` and `Gate`. `gates` is a
+pure function of the raw `inference.checks:` mapping, so a front-end can ask
+what a document will pay for before anything is built; the pass itself is not
+exported, for the reason Plan 3B did not export its two — it is something
+`load_document` runs for you, and its answer arrives on `ConfiguredRun.report`.
+
+**What it ships knowingly.** A **refused** document still produces no
+structured record: `raise_if_refused` raises, no `ConfiguredRun` comes back,
+and there is nowhere to hang the findings — closing that needs an API change
+and `diagnostics.json` still does not exist. `check: false` at a conjugate
+exit **no longer suffices on its own**: with `linearity` at `refuse` by
+default a user who declines the exit's own check must also decline the gate,
+and neither message names the other knob; six shipped fixtures had to say so.
+Any document that lights `adc` and declares `linear: true` on a latent bound
+upstream of it is refused at `C12` by default whether or not it saturates,
+because `check_linearity`'s outermost probe scale is `1e3` — the escape is
+`C12`'s own gate, and the refusal is correct. `load_document` now pays a full
+`check_linearity` before a run-time per-kind grammar error is reported —
+measured warm, **8.5–9.0 ms against 3.6–3.7 ms** with the gate declined; every
+pre-flight check is still in front of it. `inference.checks.linearity` cannot
+express the `rtol:` that `check_linearity` accepts, `C16` evaluates the twin at
+the declared inits and nowhere else, `C18` is scoped to the `noise` node and to
+a generating twin, and `C15` reports a predicted count and never a measured
+one.
+
 ### The rest of what text decides, and two slots for what it cannot
 
 Plan 3B: the checks Plan 3A left in the wrong phase, plus two new passes for

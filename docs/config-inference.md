@@ -132,11 +132,30 @@ binding — records *why* the truth is omitted rather than guessing.
 
 ## Checks
 
-`inference.checks` records `identifiability`, `linearity` and
-`prior_sensitivity`, each with `mode: refuse | warn | report | skip`, and
-`mode: skip` carries its own `reason:` (check A37) — three unrelated skips
-sharing one sentence was v0's mistake. The section is grammar plus record in
-2B; its gating is Plan 3's validate.
+`inference.checks` gates the three checks that cost something, each with
+`mode: refuse | warn | report | skip`, and `mode: skip` carries its own
+`reason:` (check A37) — three unrelated skips sharing one sentence was v0's
+mistake. **Since Plan 3C this section is not a record: it decides what
+`load_document` runs and what it charges you for.** The grammar is checked in
+the pre-flight pass, before anything is built; the checks themselves run in
+[the post-flight pass](config-validation.md#the-post-flight-pass-and-what-it-costs),
+after `build_inference` and immediately before `load_document` returns.
+
+| check | what it costs | default |
+|---|---|---|
+| `linearity` | `check_linearity` — a fixed number of forward passes per `linear: true` latent, and it does not grow with `n_par` | `refuse` |
+| `identifiability` | one `jacfwd` through the forward model plus a dense `(n_data, n_par)` SVD | `off` |
+| `prior_sensitivity` | `identifiability`'s work plus two Newton solves — 3.031 s cold against a 0.715 s build | `off` |
+
+`off` is not a mode you can write: it is what a check that nobody asked for
+is in, and it is deliberately not spelled `skip`, because A37 makes a written
+skip carry a reason and a check nobody asked for has no author to write one.
+`identifiability` alone also takes an `rtol:`. The whole cross-product of
+`mode` with `report:` — including the `auto_skip` that reports a check you
+asked for and could not have — is [one table on the validation
+page](config-validation.md#a-gate-what-runs-what-a-failure-costs-and-what-is-recorded),
+and `gates(...)` is the free, text-only function that answers what a given
+document will actually pay for.
 
 ## The npe section
 

@@ -56,6 +56,43 @@ that answers before anything is built. ``AXIS_CHECKS`` and ``BUILT_CHECKS``
 follow ``CHECKS`` for the reason above. Pinned, either way, by
 ``test_config_surface.py::TestPlan3BsWiringAndItsSurface``.
 
+Plan 3C adds the fourth pass -- **post-flight**, run after ``build_inference``
+and before ``load_document`` returns, holding the checks that have to RUN the
+thing they are deciding about (``check_linearity``'s ``len(scales) + 1``
+forward passes per linear claim, ``identifiability``'s ``jacfwd`` plus a dense
+SVD, ``prior_sensitivity``'s two Newton solves on top of that) -- and adds
+**two** names here: ``gates`` and ``Gate``.
+
+``priced``, the post-flight entry point, is NOT one of them, and the reason is
+3B's precedent rather than taste: it is a pass ``load_document`` runs on the
+caller's behalf, its payload carries the twin, the state, the built resources
+and the resolved gates, and by the time a caller could construct one the
+answer is already on ``ConfiguredRun.report``. ``preflight`` stays the one
+pass a front-end calls itself because it is the one that answers *before*
+anything is built.
+
+``gates`` is the opposite shape and that is why it lands. It is a pure
+function of the raw ``inference.checks:`` mapping -- text the caller already
+holds -- and it answers, for free and before any money is spent, the question
+``preflight`` cannot: not "is this document legal" but "which of the three
+checks will actually run, in what mode, and which are simply off". That is
+schema §10's "Validate" panel and it is what Plan 4 will ask when it wants the
+effective mode of a check rather than the declaration ``InferenceBuild.checks``
+keeps. ``Gate`` follows ``gates`` exactly as ``Finding`` follows ``Report``: a
+caller CALLS ``gates`` and READS the ``Gate``s it hands back.
+
+It assumes the section has already passed the pre-flight grammar
+(``A1.checks``/``A37``): on a section that has not, a non-numeric ``rtol:``
+raises ``ValueError`` and an unknown ``mode:`` word becomes a ``Gate`` in that
+state, which ``runs()`` reports as standing down. Call ``preflight`` first, or
+read ``gate.state`` against ``gating.STATES`` before trusting it.
+
+``MODES``, ``STATES``, ``DEFAULT_MODE``, ``CHECK_ID``, ``verdict`` and
+``check_gates`` stay module-local for the reason ``CHECKS`` does -- the words a
+document may write and the defaults they fall back to are things the SCHEMA
+says (§4.7.8, §11.15), not things a caller chooses -- and a caller who wants
+the defaults asks ``gates(None)``, which applies them.
+
 Binding ``preflight`` here SHADOWS the ``rheplicant.config.preflight``
 subpackage attribute: after this module runs, ``config.preflight`` is the
 function, and the module is reached through ``sys.modules`` or
@@ -72,6 +109,7 @@ from rheplicant.config.document import ConfiguredRun, load_document, run_forward
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import FILE_FORMATS
 from rheplicant.config.findings import ConfigWarning, Finding, Report
+from rheplicant.config.gating import Gate, gates
 from rheplicant.config.layering import apply_variant, recursive_update
 from rheplicant.config.paths import (
     ResolvedPath,
@@ -112,6 +150,7 @@ __all__ = [
     "ConfiguredRun",
     "FieldSpec",
     "Finding",
+    "Gate",
     "InferenceBuild",
     "Report",
     "ResolutionContext",
@@ -127,6 +166,7 @@ __all__ = [
     "convert_to_canonical",
     "deliver",
     "field_specs",
+    "gates",
     "load_document",
     "parse_path",
     "preflight",
