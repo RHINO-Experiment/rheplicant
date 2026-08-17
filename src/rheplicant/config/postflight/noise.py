@@ -25,13 +25,24 @@ and a weighed kind that name two different noise models entirely are already
 :func:`~rheplicant.config.preflight.gated._sigma_families`'s subject, and a
 REFUSE there halts the pipeline at ``load_document``'s very first pass -- this
 module never runs on such a document at all. Where the two tables disagree
-about what counts as "the same family" (today they do not), or where the text
-pass could not see the drawing class at all (a relocated ``python:`` target
-under a model key other than ``noise``, addressed by GRAPH NODE rather than by
-document key), this check still declines: it answers one question -- do the
-two sides of a MATCHING family agree on the number -- and a mismatched pairing
-that reaches it is a different check's subject, not a gap in coverage this one
-should quietly widen to fill.
+about what counts as "the same family" (today they do not), this check still
+declines: it answers one question -- do the two sides of a MATCHING family
+agree on the number -- and a mismatched pairing that reaches it is a
+different check's subject, not a gap in coverage this one should quietly
+widen to fill.
+
+**One case is NOT covered by that stand-down, and is recorded here rather
+than fixed -- owed to Task 7.** A ``python:`` target relocated onto a model
+key other than ``noise`` can still bind to the GRAPH NODE ``noise``.
+``_sigma_families`` reads the document's TEXT by KEY (``model.noise.type``)
+and cannot see such a document at all, so its REFUSE never fires on it --
+but :func:`_t6_drawn` reads the BUILT twin by node id and does see it. This
+module then runs on a document its sibling never touched, and its message
+still says ``model.noise`` even though the document's own text never wrote
+that key -- the same wrong-``where`` shape BLOCKER 3 closed for
+``inference.twin.replace:``. This is a real gap and not a "this check
+declines" case; it is recorded here because no document in this suite
+constructs a relocated ``python:`` target to measure it against.
 
 **Stand-down, in the order it is decided (contract step order, and it
 matters -- reading it any other way changes which reason a user is told):**
@@ -50,6 +61,22 @@ matters -- reading it any other way changes which reason a user is told):**
 3. ``inference.noise:`` was never declared, or was declared ``kind: none``.
    Task 2's ``C18.kind`` already warns on this document when it is a fitting
    run; a second sentence about the same absence is not this check's to add.
+
+   **This is also why a WARN from ``C18.kind`` and a REFUSE from this
+   check's bare ``C18`` can never co-fire on one document.** ``C18.kind``'s
+   only WARN row (``preflight/gated.py::_sigma_families``) fires exactly
+   when ``inference.noise`` is undeclared or ``kind: none`` and the run is a
+   fitting one -- precisely this stand-down's own condition -- and
+   ``C18.kind`` calls ``refuse()``/``warn()`` directly rather than through a
+   gate's ``verdict()``, so nothing downstream can promote or demote either
+   into the other. A document with ``weighed.kind == "none"`` cannot also
+   earn this check's REFUSE: the line just below says so in words, and
+   (measured) the two family guards further down -- ``weighed.kind not in
+   _T6_RADIOMETER_KINDS`` and ``weighed.kind != "homoscedastic"``, neither
+   of which contains ``"none"`` -- hold the same line on their own even if
+   this one is deleted. Three lines carry one invariant between them; this
+   is the one written in words, and the one this task's own mutation
+   testing named.
 4. The drawn class and the weighed kind belong to two different noise model
    families. See above.
 
@@ -87,6 +114,34 @@ is "a remedy for a reweighting iterate crossing zero, and a generator has no
 iterate." A document that declares one is not disagreeing with itself, and
 the refusal message says so explicitly whenever one is declared, so a reader
 is not sent looking for a difference this check chose to ignore.
+
+**Known scope edges, recorded here rather than widened into -- owed to
+Task 7.**
+
+* A multi-record ``inference.observed:`` whose PRIMARY is ``from: file``
+  while a SIBLING record is ``from: simulation`` stands this check down
+  entirely: :func:`_t6_generating_twin` reads only ``observed.primary``, and
+  a primary that did not come from the twin is contract step 1's stand-down
+  regardless of what a sibling record did. ``preflight/gated.py::
+  _t2c_generated`` reads the same way (primary alone), so this is a scope
+  the two C18 slots share, not a divergence between them.
+* :attr:`~rheplicant.config.sections.noise.NoiseBuild.by_observation` (the
+  per-observation frozen sigma ``radiometer_frozen`` with
+  ``source: observed`` produces, one entry per named observation) is never
+  read here -- this check reads ``weighed.frozen``, which
+  :func:`~rheplicant.config.sections.noise.freeze_sigmas` documents as
+  staying the PRIMARY's own facts. That is the same primary
+  :func:`_t6_generating_twin` reads, so the two stay aligned on a
+  multi-record document even though this module never opens
+  ``by_observation`` itself.
+
+**Vacuity, measured rather than assumed.** Mutated to an unconditional
+``return ()``, cache cleared, this module's own test file still passes 34 of
+its 52 tests -- expected of the negative half of any stand-down suite, not a
+defect in it, but worth writing down so a future green run is not mistaken
+for proof this check does anything. The 18 that fail are the ones that carry
+the weight: a real disagreement asserted to ``severity == "refuse"``, or a
+pinned message or ``where``.
 """
 
 from __future__ import annotations
@@ -128,9 +183,7 @@ _T6_GENERATING_TWIN: str = "full"
 #: the radiometer family, the sigma array for the homoscedastic one).
 #:
 #: **Measured, not assumed** -- both routes give EXACTLY 0.0 relative error
-#: between the two independently-built objects, so 1e-9 is chosen to guard
-#: float64 round-off in the ``**0.5`` rather than to paper over a real
-#: discrepancy this check would otherwise mistake for agreement:
+#: between the two independently-built objects, over the sweeps below:
 #:
 #: * Radiometer route: ``RadiometerNoiseOperator.channel_width`` /
 #:   ``.integration_time`` and ``RadiometerNoise.channel_width`` /
@@ -200,10 +253,22 @@ _T6_GENERATING_TWIN: str = "full"
 #:       print(worst)
 #:       "
 #:
-#: 1e-9 sits far above float64's own round-off in a square root and far below
-#: the smallest disagreement worth catching (the ten-fold one this module's
-#: tests construct), so both measured-0.0 routes and any real drift are
-#: distinguishable through it.
+#: **What this module's own tests can and cannot say about 1e-9.**  Both
+#: measured routes give ``rel = 0.0`` exactly, so every test in this file that
+#: exercises an agreeing pair would pass identically at ``_T6_RTOL = 0.0`` or
+#: ``_T6_RTOL = 1e-12``: measured directly, mutating this constant to either
+#: value leaves the whole of ``tests/config/test_postflight_noise.py`` green.
+#: ``test_the_constant_is_far_below_a_real_disagreement`` (``_T6_RTOL <
+#: 1e-6``) is the ONLY thing in this suite that discriminates the literal
+#: ``1e-9`` at all, and it is a restatement of the constant rather than a
+#: behavioural claim about it -- so read this comment as recording where
+#: ``1e-9`` sits (far below the ten-fold disagreement this module's tests
+#: construct, and comfortably inside the open interval ``(0, 1e-6)`` nothing
+#: here narrows further), not as a derivation of why THIS value and not
+#: another one in that interval was chosen.  No measurement in this file
+#: exhibits a nonzero disagreement on either route for ``_T6_RTOL`` to be
+#: guarding against; if one is ever found, it belongs in this comment as a
+#: number, not as a plausible-sounding mechanism.
 _T6_RTOL: float = 1e-9
 
 
@@ -235,6 +300,24 @@ def _t6_generating_twin(payload: Priced) -> Any | None:
     choice = record.get("twin", _T6_GENERATING_TWIN)
     if choice == _T6_GENERATING_TWIN:
         return payload.run.twin
+    if _T6_NOISE_NODE in (payload.run.inference.replaced or ()):
+        # `inference.twin.replace: {noise: ...}` swapped the FIT twin's own
+        # drawing node for a document-declared operator -- the operator that
+        # actually drew this data is THAT replacement, not `model.noise`, and
+        # a refusal built from `_t6_drawn` would go on to name `model.noise`
+        # (both in `where` and in the message) for a document whose
+        # `model.noise` may already agree with `inference.noise` exactly.
+        # `payload.run.inference.replaced` is `build_fit_twin`'s own record
+        # of which node ids `inference.twin.replace:` swapped
+        # (`sections/twin.py::build_fit_twin`, ``tuple(replace)`` off the
+        # declared mapping) -- reading it here is one voice with the builder
+        # that did the swapping, aligned with the text pass's own
+        # `preflight/gated.py::_t2c_repaired`, which already excludes this
+        # same case from `C18.kind`.  Standing down entirely, not reading the
+        # replacement's own sigma: the replacement is a document-declared
+        # node spec with no guarantee it is even a noise model, and no
+        # attempt is made to divine what the user meant by declaring it.
+        return None
     return payload.run.inference.fit_twin
 
 
@@ -280,16 +363,39 @@ def _t6_agrees(drawn_value: Any, weighed_value: Any) -> bool:
                              rtol=_T6_RTOL, atol=0.0))
 
 
+def _t6_unwrapped(model: Any) -> Any:
+    """The noise model itself, with any ``flags:`` wrapper taken off.
+
+    ``inference.noise.flags: {from: observation}`` wraps the built model in
+    :class:`~rheplicant.inference.noise.FlaggedNoise`, which carries neither
+    ``.sigma`` nor ``.fractional`` nor ``.floor``; reading any of them through
+    the wrapper is an ``AttributeError`` `sweep` launders into a sentence
+    blaming the user for a document that is correct.  Flags say a sample was
+    not OBSERVED, and ``FlaggedNoise.realise`` is the wrapped model's draw
+    unchanged (its own docstring, verified against the shipped class), so the
+    number this check compares is the base model's.
+    """
+    from rheplicant.inference import FlaggedNoise
+
+    while isinstance(model, FlaggedNoise):
+        model = model.base
+    return model
+
+
 def _t6_radiometer_fractional(kind: str, weighed: Any) -> float:
     """The likelihood side's fractional scatter, for either radiometer kind.
 
     ``kind: radiometer`` already built a
-    :class:`~rheplicant.inference.noise.RadiometerNoise` (``weighed.model``),
-    so its own ``.fractional`` answers directly.  ``kind: radiometer_frozen``
-    built no such object -- ``NoiseBuild.frozen`` carries the facts
-    (``channel_width_hz``, ``integration_time_s``) and nothing else -- so one
-    is built here FROM those facts and its ``.fractional`` is read the same
-    way, rather than re-writing ``1 / sqrt(dnu * tau)`` a fourth time.
+    :class:`~rheplicant.inference.noise.RadiometerNoise` (``weighed.model``,
+    unwrapped by :func:`_t6_unwrapped` in case ``flags:`` put a
+    :class:`~rheplicant.inference.noise.FlaggedNoise` around it), so its own
+    ``.fractional`` answers directly.  ``kind: radiometer_frozen`` built no
+    such object -- ``NoiseBuild.frozen`` carries the facts
+    (``channel_width_hz``, ``integration_time_s``) and nothing else, and
+    ``_KIND_KEYS["radiometer_frozen"]`` (``config/sections/noise.py``) does
+    not even accept a ``flags:`` key -- so one is built here FROM those facts
+    and its ``.fractional`` is read the same way, rather than re-writing
+    ``1 / sqrt(dnu * tau)`` a fourth time.
 
     Imported at function scope, matching ``config/sections/noise.py:195``'s
     own precedent for this exact class.
@@ -297,7 +403,7 @@ def _t6_radiometer_fractional(kind: str, weighed: Any) -> float:
     from rheplicant.inference import RadiometerNoise
 
     if kind == "radiometer":
-        return float(weighed.model.fractional)
+        return float(_t6_unwrapped(weighed.model).fractional)
     facts = weighed.frozen or {}
     return float(RadiometerNoise(
         channel_width=facts["channel_width_hz"],
@@ -308,13 +414,15 @@ def _t6_radiometer_floor(kind: str, weighed: Any) -> float:
     """The floor declared on the likelihood side, for either radiometer kind.
 
     ``0.0`` (the shipped default, and therefore "none declared") when there
-    is none. Read off ``weighed.model.floor`` for ``kind: radiometer`` and off
+    is none. Read off ``weighed.model.floor`` for ``kind: radiometer`` --
+    unwrapped the same way :func:`_t6_radiometer_fractional` is, since
+    ``flags:`` wraps the same object this reads -- and off
     ``NoiseBuild.frozen["floor_k"]`` for ``kind: radiometer_frozen`` -- the
     two places :func:`~rheplicant.config.sections.noise.build_noise` puts it,
     mirroring :func:`_t6_radiometer_fractional`'s own split.
     """
     if kind == "radiometer":
-        return float(weighed.model.floor)
+        return float(_t6_unwrapped(weighed.model).floor)
     facts = weighed.frozen or {}
     return float(facts.get("floor_k", 0.0))
 
@@ -363,9 +471,16 @@ def _t6_radiometer(kind: str, drawn: Any, weighed: Any) -> Iterable[Finding]:
 
 
 def _t6_homoscedastic(drawn: Any, weighed: Any) -> Iterable[Finding]:
-    """The ``NoiseOperator`` family: compare sigma, broadcasting."""
+    """The ``NoiseOperator`` family: compare sigma, broadcasting.
+
+    ``weighed.model`` is unwrapped by :func:`_t6_unwrapped` first: ``flags:
+    {from: observation}`` puts a
+    :class:`~rheplicant.inference.noise.FlaggedNoise` around the
+    :class:`~rheplicant.inference.noise.HomoscedasticNoise` this reads, and
+    ``FlaggedNoise`` carries no ``.sigma`` of its own.
+    """
     drawn_sigma = drawn.sigma
-    weighed_sigma = weighed.model.sigma
+    weighed_sigma = _t6_unwrapped(weighed.model).sigma
     if _t6_agrees(drawn_sigma, weighed_sigma):
         return ()
     return (refuse("C18", f"model.{_T6_NOISE_NODE}", (
