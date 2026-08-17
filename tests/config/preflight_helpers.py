@@ -34,6 +34,7 @@ from rheplicant.config.preflight import preflight
 from tests.config.exit_helpers import (
     HOMOSCEDASTIC,
     ONE_LATENT,
+    TRUTH_G,
     conjugate_document,
 )
 
@@ -293,6 +294,65 @@ NOISE_WAVE_BASIS = [
      "time_basis": {"ones": ["n_time", 2]},
      "freq_basis": {"ones": ["n_freq", 3]}},
 ]
+
+
+# --- Plan 3C Task 5's constants (C16, ADC saturation) -----------------------
+#
+# Appended at the foot, after Task 2's block; every name begins with ADC_,
+# WIDE_ or T5_ per this task's brief.  Nothing above this line is edited.
+
+#: A ``model.adc`` patch that never saturates -- the base document's own
+#: prediction peaks at 12.116 ``adc_count`` against this ``n_bits: 12``'s
+#: 2048 ``adc_count`` clip limit (measured:
+#: ``tests/config/test_postflight_digitising.py``).
+ADC_UNSATURATED = {"scale": 1.0, "n_bits": 12}
+
+#: A ``model.adc`` patch that saturates EVERY sample on the base document
+#: (measured fraction 1.000).  Used wherever a test needs a REFUSE that does
+#: not depend on the fine boundary arithmetic :data:`T5_BOUNDARY_SCALES`
+#: pins.
+ADC_SATURATING = {"scale": 1e6, "n_bits": 12}
+
+#: Three ``model.adc.scale`` values straddling the ``>=`` boundary at
+#: ``n_bits: 12`` (clip limit 2048 ``adc_count``) on the BASE observation
+#: grid (128 samples), measured: peak 2045.95 / fraction 0 just below;
+#: peak EXACTLY 2048.0 / fraction 0.0078125 (1/128) at the boundary; peak
+#: 2050.05 / fraction 0.0078125 just above.  A check counting a saturated
+#: sample with ``>`` instead of ``>=`` reads the middle cell as fraction 0.
+T5_BOUNDARY_SCALES = (168.861336, 169.030367, 169.199397)
+
+#: An ``observation:`` patch widening the base document's time grid from 16
+#: to 256 samples -- 2048 total against the base grid's 128 (``n_freq``
+#: stays 8).  C16's escalator only does work in the fraction band
+#: ``(0, 0.001]``, and the base grid's smallest non-zero fraction
+#: (``1/128 == 0.0078125``) is already 7.8x that threshold, so no scale on
+#: the base grid can reach the band.  **This grid exists for that
+#: arithmetic and not for realism** -- 256 was chosen over the nearer 128
+#: because ``1/1024`` sits only 2% under the threshold, too close to read
+#: as "clearly inside the band" against float noise.
+WIDE_GRID = {"time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 256},
+                               "unit": "s"}}}
+
+#: The ``model.adc.scale`` that lands exactly one of :data:`WIDE_GRID`'s 2048
+#: samples on the clip, measured: peak 2121.74 ``adc_count``, fraction
+#: 0.00048828125 (``1/2048``) -- inside C16's escalator band.
+T5_WIDE_WARN_SCALE = 162.532644
+
+#: The SAME latent 'g' -> gain.gain as :data:`~tests.config.exit_helpers.
+#: ONE_LATENT`, reached through ``inference.bindings[].into`` instead of
+#: ``inference.parameters.g.into`` -- the twin C16's escalator must also
+#: read, since ``preflight/model.py::_t11_bindings`` walks both routes and a
+#: check that read only one would miss a latent declared through the other
+#: (STANDING-RULES.md section C, "hunt twins").  ``g`` carries no ``into:``
+#: of its own here -- ``build_space`` refuses a latent naming both a sugared
+#: ``into:`` and a ``bindings:`` entry as mutually exclusive.
+T5_BINDING_LATENT = {
+    "parameters": {"g": {"init": 1.0, "linear": True,
+                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+    "bindings": [{"latents": ["g"], "into": "gain.gain"}],
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation", "at": {"g": TRUTH_G}, "twin": "full"},
+}
 
 
 def findings(document) -> tuple[Finding, ...]:
