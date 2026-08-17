@@ -627,3 +627,80 @@ T4_CHECKS_LINEARITY_SKIP = {
 #: true`` a passing check says nothing at all (§2.3's table, rows 3, 6 and 9),
 #: so this is the only way the margins reach the record.
 T4_CHECKS_LINEARITY_REPORT = {"linearity": {"mode": "refuse", "report": True}}
+
+
+# --- Plan 3C wave 4: the C16 documents' own inference side ------------------
+#
+# Tasks 4, 5 and 6 were drafted in parallel from one commit and each was green
+# alone.  Task 5's ``t5_model`` (above) pins ``model.noise`` at 0.5 K so that
+# Task 6's D-10 edit of ``exit_helpers.MODEL_NOISE`` could not move a single
+# ADC number -- but it pinned ONE side.  The base document's
+# ``inference.noise`` is ``HOMOSCEDASTIC`` (``SIGMA_K`` = 0.05 K), so every
+# document ``t5_model`` builds drew its data with one sigma and weighed it with
+# another, which is exactly what Task 6's C18 refuses; and Task 4's C12, merged
+# after Task 5 branched, refuses the same documents for declaring ``linear:
+# true`` on a latent an ADC clip makes non-affine.  Measured on the merged
+# tree: ``[('C12', 'refuse'), ('C18', 'refuse')]`` on every C16 document,
+# invisible to the module because only two of its tests called
+# ``load_document``.  Nothing above this line is edited.
+
+#: ``inference.noise`` for a C16 document: :data:`T5_MODEL_NOISE`'s OWN sigma,
+#: on the likelihood side.  Reads the drawn sigma rather than restating 0.5 as
+#: a second literal, so the pair cannot drift apart the way the pinned model
+#: side and the inherited likelihood side did -- and so a future edit of
+#: ``exit_helpers.SIGMA_K`` (D-10 was one) moves NEITHER side and leaves every
+#: measured ADC number below where Task 5 measured it.
+T5_LIKELIHOOD_NOISE = {"kind": "homoscedastic",
+                       "sigma": dict(T5_MODEL_NOISE["sigma"])}
+
+#: ``linearity`` declined, in the shape and for the reason
+#: ``test_config_exits_conjugate.LINEARITY_DECLINED`` established: a document
+#: that says WHY it cannot honour the claim rather than one that mutes the
+#: check.  A converter is a deliberate non-linearity and ``check_linearity``
+#: probes at 1000x the latent's scale, where it clips, so C12's refusal on
+#: these documents is CORRECT and the escape is the one C12's own message
+#: names.  Measured: 5.32 departure against ``rtol=1.19e-03`` on the base
+#: document's ``g`` -> ``gain.gain`` at ``adc.scale: 1.0, n_bits: 12``.
+T5_LINEARITY_DECLINED = {
+    "linearity": {"mode": "skip",
+                  "reason": "these documents digitise on purpose: an ADC clip "
+                            "is a deliberate non-linearity, and check_linearity "
+                            "probes at 1000x the latent's scale, where the "
+                            "converter saturates, so the prediction really is "
+                            "not affine in a latent bound upstream of adc"}}
+
+
+def t5_case(**patch) -> dict:
+    """:func:`preflight_document`, with the inference side a C16 document needs.
+
+    Every document ``t5_model`` builds is one ``load_document`` ACCEPTS, and
+    that is the whole contract: the two sigmas agree
+    (:data:`T5_LIKELIHOOD_NOISE` is :data:`T5_MODEL_NOISE`'s own), and the
+    ``linear: true`` claim a converter cannot honour is declined in writing
+    (:data:`T5_LINEARITY_DECLINED`) rather than left to refuse.
+
+    **Applied AFTER the merge, not through it.**  :func:`preflight_document`
+    merges a mapping one level deep, so ``inference=T5_BINDING_LATENT`` brings
+    that constant's own ``noise: HOMOSCEDASTIC`` with it and a pin written as
+    another ``inference=`` keyword would be overwritten by it. Replacing the
+    two keys on the merged block is what makes the pin hold for every caller,
+    whatever inference block they hand in.
+
+    ``inference=None`` removes the section outright and there is nothing to
+    pin: such a document has no latent to declare linear and no likelihood
+    sigma to disagree with, which is why the C16 cells built that way were the
+    only ones on this branch that already loaded.
+
+    **NOT named ``*_document``**, deliberately.
+    ``test_config_fixture_contract._builders`` discovers that suffix and drives
+    each match with NO argument through ``load_document``; driven bare this one
+    would pin a 0.5 K likelihood onto the base document's 0.05 K ``model.noise``
+    and earn the very C18 refusal it exists to remove.
+    """
+    document = preflight_document(**patch)
+    inference = document.get("inference")
+    if not isinstance(inference, dict):
+        return document
+    return repatch(document, inference={**inference,
+                                        "noise": T5_LIKELIHOOD_NOISE,
+                                        "checks": T5_LINEARITY_DECLINED})

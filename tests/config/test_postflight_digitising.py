@@ -41,13 +41,16 @@ boundary test below calls directly rather than re-deriving the arithmetic a
 second time.
 """
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import pytest
 
 from rheplicant.config.document import load_document
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.postflight import digitising
+from rheplicant.config.findings import ConfigWarning
+from rheplicant.config.postflight import digitising, priced
 from rheplicant.core.state import State
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.gain import GainOperator
@@ -61,6 +64,7 @@ from tests.config.preflight_helpers import (
     T5_WIDE_WARN_SCALE,
     WIDE_GRID,
     preflight_document,
+    t5_case,
     t5_model,
 )
 
@@ -82,6 +86,14 @@ def test_stands_down_without_an_adc():
     ``gain``/``noise`` only), so an unguarded read raises ``KeyError`` and
     ``passes.sweep`` turns that into a hard ``ConfigError`` that would abort
     ``priced_findings`` here rather than let it return quietly.
+
+    The ONE document in this module built by :func:`~tests.config.
+    preflight_helpers.preflight_document` rather than :func:`~tests.config.
+    preflight_helpers.t5_case`: with no ``adc`` there is no clip to make the
+    base document's ``g`` non-affine and no pinned ``model.noise`` to
+    disagree with the likelihood, so it needs neither half of ``t5_case``'s
+    pin -- and driven through it the 0.5 K likelihood would land on the base
+    model's own 0.05 K ``noise`` and earn a C18 refusal out of nowhere.
     """
     document = preflight_document()
     assert "C16" not in _ids(document)
@@ -121,7 +133,7 @@ def test_stands_down_on_a_composed_adc():
     ``ConfigError`` rather than return a frozenset, so this test is red on
     the whole pass, not just on a missing "C16".
     """
-    document = preflight_document(model=t5_model(COMPOSED_ADC))
+    document = t5_case(model=t5_model(COMPOSED_ADC))
     assert "C16" not in _ids(document)
 
 
@@ -134,7 +146,7 @@ def test_the_unsaturated_document_earns_nothing():
     **Kills** a check that fires on every document regardless of what the
     probe measures.
     """
-    document = preflight_document(model=t5_model(ADC_UNSATURATED), inference=None)
+    document = t5_case(model=t5_model(ADC_UNSATURATED), inference=None)
     assert "C16" not in _ids(document)
 
 
@@ -149,7 +161,7 @@ def test_an_unsaturated_document_with_an_upstream_latent_is_silent():
     _upstream_of_adc()`` returns), so a check that drops the fraction test
     refuses this document, which never saturates at all.
     """
-    document = preflight_document(model=t5_model(ADC_UNSATURATED))
+    document = t5_case(model=t5_model(ADC_UNSATURATED))
     assert "C16" not in _ids(document)
 
 
@@ -171,7 +183,7 @@ def test_the_saturation_fraction_uses_ge_not_gt(scale, expected_fraction,
     just below, 0.0078125 just above) are what proves the middle one is not
     an accident of rounding.
     """
-    document = preflight_document(model=t5_model({"scale": scale, "n_bits": 12}))
+    document = t5_case(model=t5_model({"scale": scale, "n_bits": 12}))
     payload = priced_run(document)
     node = payload.run.twin["adc"]
     peak, fraction, n = digitising._saturation_stats(payload.run.twin,
@@ -196,7 +208,7 @@ def test_the_refuse_threshold_is_not_tunable_to_let_128_samples_pass():
     neither merged test built: no ``inference=None`` there, no ``WIDE_GRID``
     here.
     """
-    document = preflight_document(
+    document = t5_case(
         model=t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
         inference=None)
     found = priced_only(document, "C16")
@@ -218,7 +230,7 @@ def test_a_negative_rail_clip_is_counted():
     never ``>= limit``, so the mutant reports fraction 0.0 on a document that
     genuinely clips.
     """
-    document = preflight_document(
+    document = t5_case(
         model={**t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
               "gain": {"gain": {"value": -1.1, "unit": "dimensionless"}}})
     payload = priced_run(document)
@@ -241,7 +253,7 @@ def test_a_saturating_document_with_an_upstream_latent_refuses():
     -- see :data:`~tests.config.preflight_helpers.WIDE_GRID`'s docstring for
     why the base grid cannot reach this band at all.
     """
-    document = preflight_document(
+    document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}))
     found = priced_only(document, "C16")
@@ -264,7 +276,7 @@ def test_a_saturating_document_with_no_upstream_latent_warns_below_the_threshold
     same threshold, and severity moves only because a latent's ``into:``
     does or does not reach a node upstream of ``adc``.
     """
-    document = preflight_document(
+    document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
         inference=None)
@@ -282,7 +294,7 @@ def test_a_binding_counts_as_well_as_an_into():
     **Kills** an escalator that reads only ``inference.parameters.<n>.into``
     and misses ``bindings:`` -- STANDING-RULES.md's "hunt twins".
     """
-    document = preflight_document(
+    document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
         inference=T5_BINDING_LATENT)
@@ -320,7 +332,7 @@ def test_a_list_form_into_reaches_the_escalator():
     test that keeps the next editor from reopening it with the suite still
     green.
     """
-    document = preflight_document(
+    document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
         inference=LIST_INTO)
@@ -339,7 +351,7 @@ def test_the_message_names_scale_bits_peak_and_the_unit():
     of this layer has no calibration for; ``adc_count`` is the raw digitiser
     unit the clip limit and the peak share.
     """
-    document = preflight_document(model=t5_model(ADC_SATURATING))
+    document = t5_case(model=t5_model(ADC_SATURATING))
     found = priced_only(document, "C16")
     assert "adc.scale" in found.message
     assert "adc.n_bits" in found.message
@@ -369,7 +381,7 @@ def test_the_peak_is_the_maximum_magnitude_independently_measured():
     nothing clips) and reading ``max(abs(out))`` directly off its output --
     a computation that does not go through ``_saturation_stats`` at all.
     """
-    document = preflight_document(model=t5_model({"scale": 1.0, "n_bits": 12}),
+    document = t5_case(model=t5_model({"scale": 1.0, "n_bits": 12}),
                                   inference=None)
     payload = priced_run(document)
     node = payload.run.twin["adc"]
@@ -389,7 +401,7 @@ def test_where_is_model_adc():
     strings a substring assertion on the message would not catch, and no
     other test in this module reads ``found.where`` at all.
     """
-    document = preflight_document(model=t5_model(ADC_SATURATING))
+    document = t5_case(model=t5_model(ADC_SATURATING))
     found = priced_only(document, "C16")
     assert found.where == "model.adc"
 
@@ -406,7 +418,7 @@ def test_the_message_reports_the_achieved_scale_and_bits():
     fact-reporting prefix mutated away.  Pinning the ``=`` and the achieved
     VALUE together is what the advice tail cannot also satisfy.
     """
-    document = preflight_document(model=t5_model(ADC_SATURATING))
+    document = t5_case(model=t5_model(ADC_SATURATING))
     found = priced_only(document, "C16")
     assert "adc.scale=1e+06" in found.message
     assert "adc.n_bits=12" in found.message
@@ -423,7 +435,7 @@ def test_the_message_reports_the_measured_fraction():
     notice since they check severity and the presence of ``"bound latent"``,
     never the number itself.
     """
-    document = preflight_document(
+    document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
         inference=None)
@@ -446,7 +458,7 @@ def test_the_advice_names_a_target_and_applying_it_clears_the_refusal():
     target) actually silences C16 -- proving the named number is not
     decorative.
     """
-    document = preflight_document(model=t5_model(ADC_SATURATING))
+    document = t5_case(model=t5_model(ADC_SATURATING))
     found = priced_only(document, "C16")
     payload = priced_run(document)
     node = payload.run.twin["adc"]
@@ -458,11 +470,11 @@ def test_the_advice_names_a_target_and_applying_it_clears_the_refusal():
     assert f"below {target_scale:.6g}" in found.message
     assert f"at least {target_bits}" in found.message
 
-    cleared_by_scale = preflight_document(
+    cleared_by_scale = t5_case(
         model=t5_model({"scale": target_scale * 0.99, "n_bits": 12}))
     assert "C16" not in _ids(cleared_by_scale)
 
-    cleared_by_bits = preflight_document(
+    cleared_by_bits = t5_case(
         model=t5_model({"scale": 1e6, "n_bits": target_bits + 1}))
     assert "C16" not in _ids(cleared_by_bits)
 
@@ -486,7 +498,7 @@ def test_the_probe_does_not_change_the_model():
     docstring already says the eager-only premise out loud; this is what
     would go red the day it stops being true.
     """
-    document = preflight_document(model=t5_model(ADC_SATURATING))
+    document = t5_case(model=t5_model(ADC_SATURATING))
     payload = priced_run(document)
     twin, state = payload.run.twin, payload.run.state
     node = twin["adc"]
@@ -520,7 +532,7 @@ def test_the_dead_gradient_is_real():
     """
 
     def gradient_at(scale: float) -> float:
-        document = preflight_document(model=t5_model({"scale": scale,
+        document = t5_case(model=t5_model({"scale": scale,
                                                       "n_bits": 12}))
         payload = priced_run(document)
         twin, state = payload.run.twin, payload.run.state
@@ -581,21 +593,189 @@ def test_advice_lowering_scale_clears_the_refusal():
     STANDING-RULES.md section D -- a refusal's advice is not sanity-checked
     by reading it, it is APPLIED, and the document is then asserted to load.
     """
-    saturating = preflight_document(model=t5_model(ADC_SATURATING))
+    saturating = t5_case(model=t5_model(ADC_SATURATING))
     with pytest.raises(ConfigError):
         load_document(saturating)
 
-    lowered = preflight_document(model=t5_model({"scale": 1.0, "n_bits": 12}))
+    lowered = t5_case(model=t5_model({"scale": 1.0, "n_bits": 12}))
     run = load_document(lowered)
     assert "C16" not in {found.check for found in run.report.findings}
 
 
 def test_advice_raising_n_bits_clears_the_refusal():
     """C16's other advice, applied literally: raise ``adc.n_bits``."""
-    saturating = preflight_document(model=t5_model(ADC_SATURATING))
+    saturating = t5_case(model=t5_model(ADC_SATURATING))
     with pytest.raises(ConfigError):
         load_document(saturating)
 
-    raised = preflight_document(model=t5_model({"scale": 1e6, "n_bits": 32}))
+    raised = t5_case(model=t5_model({"scale": 1e6, "n_bits": 32}))
     run = load_document(raised)
     assert "C16" not in {found.check for found in run.report.findings}
+
+
+# --- every document here is one load_document accepts -------------------------
+#
+# The guard the wave-3/4 boundary defect needed and did not have.  Only the
+# two advice-loop tests above call ``load_document``; every other test reaches
+# the check through ``priced_only``/``priced_findings``/``_ids``, which go via
+# ``_assemble`` and therefore OBSERVE a refusal rather than raise on it.  So
+# this module stayed green for a whole wave while every document it built
+# carried two refusals that have nothing to do with C16 -- measured on the
+# merged tree, ``[('C12', 'refuse'), ('C18', 'refuse')]`` on all fifteen of the
+# shapes below that declare a latent.  A C16 test whose document is refused for
+# an unrelated reason is a test whose subject nobody can reach.
+
+
+def _refusal_checks(document) -> frozenset[str]:
+    """The check ids that would STOP ``load_document`` on ``document``.
+
+    ``load_document`` raises on the first refusal, so a refused document's
+    report is not reachable through it at all.  ``priced_run`` re-walks the
+    same passes with neither raising hook -- it CARRIES the built report
+    instead of raising it (``inflight_helpers``' own docstring) -- and
+    ``priced`` runs the post-flight pass over the result, so the two together
+    are exactly the findings ``load_document`` consults.
+
+    Both halves are read, not just the post-flight one: C12, C16 and C18 all
+    happen to live in the post-flight pass today (measured: ``run.report`` is
+    empty on every shape below, before and after this fix), and a reader that
+    took only ``priced`` would go blind the day a built-slot check refuses one
+    of these documents -- which is the same shape of blindness this test
+    exists to close.
+    """
+    payload = priced_run(document)
+    return frozenset(found.check
+                     for found in (*payload.run.report.refusals(),
+                                   *priced(payload).refusals()))
+
+
+#: Every document shape this module builds, and the refusals its report is
+#: allowed to carry.  Pinned from a measurement rather than re-derived by
+#: asking the check -- an expectation computed by running C16 would agree with
+#: any C16 whatsoever.
+#:
+#: The three cells whose ``adc.scale`` this module COMPUTES rather than writes
+#: (``_t5_target_scale``'s output in
+#: :func:`test_the_advice_names_a_target_and_applying_it_clears_the_refusal`)
+#: are not rows here -- they cannot be, since the scale is not known until the
+#: check has run -- but they are the same shape as ``scale 1.0`` below with a
+#: different number in it, and that test's own ``_ids`` reading covers them.
+#:
+#: **A new test that builds a shape not listed here should add a row.**  The
+#: table is what makes "and nothing else" mean the whole document rather than
+#: only the post-flight check under test.
+_SHAPES: dict[str, tuple[dict, frozenset[str]]] = {
+    "no adc at all": ({}, frozenset()),
+    "composed adc": ({"model": t5_model(COMPOSED_ADC)}, frozenset()),
+    "unsaturated, no inference": ({"model": t5_model(ADC_UNSATURATED),
+                                   "inference": None}, frozenset()),
+    "unsaturated, base latent": ({"model": t5_model(ADC_UNSATURATED)},
+                                 frozenset()),
+    "boundary below": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[0],
+                                           "n_bits": 12})}, frozenset()),
+    "boundary at": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[1],
+                                        "n_bits": 12})}, frozenset({"C16"})),
+    "boundary above": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[2],
+                                           "n_bits": 12})}, frozenset({"C16"})),
+    "boundary at, no inference": ({"model": t5_model(
+        {"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
+        "inference": None}, frozenset({"C16"})),
+    "negative rail": ({"model": {**t5_model({"scale": T5_BOUNDARY_SCALES[1],
+                                             "n_bits": 12}),
+                                 "gain": {"gain": {"value": -1.1,
+                                                   "unit": "dimensionless"}}}},
+                      frozenset({"C16"})),
+    "wide, base latent": ({"observation": WIDE_GRID,
+                           "model": t5_model({"scale": T5_WIDE_WARN_SCALE,
+                                              "n_bits": 12})},
+                          frozenset({"C16"})),
+    "wide, no inference (the WARN cell)": (
+        {"observation": WIDE_GRID,
+         "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
+         "inference": None}, frozenset()),
+    "wide, bindings[] latent": ({"observation": WIDE_GRID,
+                                 "model": t5_model(
+                                     {"scale": T5_WIDE_WARN_SCALE,
+                                      "n_bits": 12}),
+                                 "inference": T5_BINDING_LATENT},
+                                frozenset({"C16"})),
+    "wide, list-form into": ({"observation": WIDE_GRID,
+                              "model": t5_model({"scale": T5_WIDE_WARN_SCALE,
+                                                 "n_bits": 12}),
+                              "inference": LIST_INTO}, frozenset({"C16"})),
+    "saturating": ({"model": t5_model(ADC_SATURATING)}, frozenset({"C16"})),
+    "saturating, no inference": ({"model": t5_model(ADC_SATURATING),
+                                  "inference": None}, frozenset({"C16"})),
+    "scale 1.0, no inference": ({"model": t5_model({"scale": 1.0,
+                                                    "n_bits": 12}),
+                                 "inference": None}, frozenset()),
+    "scale 1.0": ({"model": t5_model({"scale": 1.0, "n_bits": 12})},
+                  frozenset()),
+    "n_bits raised to 32": ({"model": t5_model({"scale": 1e6, "n_bits": 32})},
+                            frozenset()),
+}
+
+
+@pytest.mark.parametrize("name", list(_SHAPES))
+def test_no_document_here_carries_a_refusal_that_is_not_c16s(name):
+    """The guard that would have caught the wave-3/4 defect AT THE BRANCH.
+
+    Every shape this module builds is loaded, and its refusal set is asserted
+    EQUAL to the C16 one under test -- empty for the cells that pass, and
+    ``{"C16"}`` and nothing beside it for the cells that refuse.
+
+    **Kills** :func:`~tests.config.preflight_helpers.t5_case`'s two pins,
+    separately and measurably, and the two are told apart by WHICH refusal
+    comes back.  Drop ``noise`` from its ``repatch`` and the twelve
+    latent-carrying rows fail at ``frozenset({'C18'}) == frozenset()`` -- the
+    base document's likelihood sigma (``HOMOSCEDASTIC``, 0.05 K) against
+    ``t5_model``'s pinned ``model.noise`` (0.5 K), the disagreement C18 is
+    for.  Drop ``checks`` and the same twelve fail at
+    ``frozenset({'C12'}) == frozenset()`` -- ``check_linearity`` probes at
+    1000x the latent's scale, where every one of these converters clips, so
+    the prediction genuinely is not affine in ``g`` and the claim genuinely
+    does not hold.  Measured, each mutant: **14 failed, 53 passed**; the four
+    ``inference=None`` rows survive both (no latent to declare, no likelihood
+    sigma to disagree), and the only two casualties outside this test are
+    ``test_advice_lowering_scale_clears_the_refusal`` and
+    ``test_advice_raising_n_bits_clears_the_refusal`` -- the two that broke
+    when the wave merged, and the ONLY two of this module's forty-eight
+    others that call ``load_document`` at all.  That is the blind spot stated
+    as a number: forty-six tests could not see either refusal.
+
+    **The WARNINGS are held to the same standard**, and not by a second
+    column in the table: a document that loads still emits one
+    ``ConfigWarning`` per warning finding, and an unrelated one riding along
+    is the same defect one severity down.  The one cell that warns is
+    ``WIDE_GRID`` with no latent -- the escalator's WARN half -- so its own
+    C16 warning is admitted by name and anything else is not.
+    """
+    patch, expected = _SHAPES[name]
+    # The empty patch is the no-adc row, and it is the ONE document t5_case
+    # must not build -- see test_stands_down_without_an_adc.
+    document = t5_case(**patch) if patch else preflight_document()
+    assert _refusal_checks(document) == expected
+    if expected:
+        with pytest.raises(ConfigError):
+            load_document(document)
+        return
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        load_document(document)
+    assert [str(one.message) for one in caught
+            if issubclass(one.category, ConfigWarning)
+            and "(check C16)" not in str(one.message)] == []
+
+
+def test_the_shape_table_holds_both_kinds_of_cell():
+    """Anti-vacuity: the table above cannot be emptied, or made all-passing,
+    with the parametrized test still green.
+
+    Every assertion in :func:`test_no_document_here_carries_a_refusal_that_is_
+    not_c16s` is of the form "this document carries what it should"; a table
+    trimmed to its passing rows satisfies all of them while covering none of
+    the documents the defect was actually on.
+    """
+    expectations = [expected for _patch, expected in _SHAPES.values()]
+    assert expectations.count(frozenset({"C16"})) >= 8
+    assert expectations.count(frozenset()) >= 6

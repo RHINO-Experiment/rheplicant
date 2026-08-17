@@ -74,6 +74,29 @@ saturate" from "this document digitises nothing usable" -- both read as
 silence.  A6/A7/A40 in pre-flight are what would need to refuse a
 non-positive ``adc.scale`` on physical grounds; this check does not, and
 this paragraph is that gap recorded rather than silently shipped.
+
+**A shipped interaction with C12: any document that lights ``adc`` and
+declares ``linear: true`` on a latent bound upstream of it is refused at C12
+by default, whether or not it saturates.**  ``linearity`` is the one gate
+``gating.DEFAULT_MODE`` leaves at ``refuse``, and ``check_linearity``
+(``inference/linear.py``, ``DEFAULT_SCALES = (1e-3, 1.0, 1e3)``) probes each
+linear claim at a THOUSAND times the latent's own scale -- where a converter
+that never clips at ``1x`` clips hard.  Measured on the most benign ADC this
+package can build (``model.adc: {scale: 1.0, n_bits: 12}`` on the base
+document, achieved peak 12.116166 ``adc_count`` against a 2048 ``adc_count``
+clip limit, so the real forward pass clips NOTHING): C12 still refuses
+``inference.parameters.g``, departure 5.32e+00 at ``1000x`` against
+``rtol=1.19e-03``, with ``0.001x`` and ``1x`` both exactly 0.  **That refusal
+is correct** -- a converter is a deliberate non-linearity and the prediction
+really is not affine in ``g`` across the probed range -- so neither check is
+weakened for the other.  The consequence is for the AUTHOR of such a
+document: it must decline the claim in writing,
+``inference.checks.linearity: {mode: skip, reason: "..."}``, which is the
+escape C12's own message names.  ``tests/config/preflight_helpers.py``'s
+``t5_case``/``T5_LINEARITY_DECLINED`` is this package's own worked example.
+The two checks were drafted in parallel and this interaction was invisible
+to both; it is recorded here rather than left for the next document to
+discover.
 """
 
 from __future__ import annotations
