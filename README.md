@@ -7,9 +7,10 @@
 
 [![Documentation Status](https://readthedocs.org/projects/rheplicant/badge/?version=latest)](https://rheplicant.readthedocs.io/en/latest/)
 
-A **REPLIC**a of an **ANT**enna — a **JAX model of a radio telescope, run as a
-digital twin**. Built for **RHINO**, a horn antenna measuring the 21 cm global
-signal, and domain-agnostic underneath: horns, dipoles and dishes alike.
+A **REPLIC**a of an **ANT**enna: a **JAX model of a radio telescope that runs as
+a digital twin**. RHEPLICANT was built for **RHINO**, a horn antenna measuring
+the 21 cm global signal, but its underlying framework supports multiple antenna
+types, including horns, dipoles and dishes.
 (JAX + [Equinox](https://github.com/patrick-kidger/equinox).)
 **Documentation: [rheplicant.readthedocs.io](https://rheplicant.readthedocs.io/en/latest/)**
 
