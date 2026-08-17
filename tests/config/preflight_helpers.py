@@ -370,6 +370,68 @@ T5_BINDING_LATENT = {
     "observed": {"from": "simulation", "at": {"g": TRUTH_G}, "twin": "full"},
 }
 
+# --- Plan 3C Task 6's constants ---------------------------------------------
+#
+# Appended at the foot, per §3.2(f); nothing above this line is edited.
+# Every name here begins with SIGMA_, FROZEN_, FLOOR_ or T6_.
+
+#: ``model.noise``: a scalar ``NoiseOperator`` disagreeing with the base
+#: document's ``inference.noise`` (``HOMOSCEDASTIC``, ``SIGMA_K`` = 0.05 K)
+#: by ten-fold -- C18's own numeric check's subject.
+SIGMA_MISMATCHED_K = {"type": "NoiseOperator",
+                      "sigma": {"value": 0.5, "unit": "K"}}
+
+#: ``inference.noise``: a ``(1, n_freq)`` sigma, every entry
+#: ``HOMOSCEDASTIC``'s own scalar -- broadcastable agreement against a scalar
+#: drawn sigma, not a shape match.  Reads ``HOMOSCEDASTIC``'s own value rather
+#: than restating ``SIGMA_K`` as a second literal, so the two cannot drift.
+SIGMA_BROADCAST_FREQ = {
+    "kind": "homoscedastic", "axis": "freq",
+    "sigma": {"full": {"value": HOMOSCEDASTIC["sigma"]["value"],
+                       "shape": ["n_freq"]},
+             "unit": HOMOSCEDASTIC["sigma"]["unit"]},
+}
+
+#: ``inference.noise``: ``radiometer``, its ``channel_width`` and
+#: ``integration_time`` the VALUES of :data:`RADIOMETER_NODE` swapped with
+#: the UNITS kept (``2.0 MHz``, ``1.0 s`` against ``1.0 MHz``, ``2.0 s``) --
+#: the fractional scatter is commutative under this swap
+#: (``1e6 * 2 == 2e6 * 1``), so this is a document that AGREES.  D-C17's own
+#: "swapped" row -- units swapped, values kept -- is a DIFFERENT document and
+#: is refused by a dimension guard before this check ever sees it (D-21).
+T6_RADIOMETER_VALUES_SWAPPED = {
+    "kind": "radiometer", "include_logdet": True,
+    "channel_width": {"value": 2.0, "unit": "MHz"},
+    "integration_time": {"value": 1.0, "unit": "s"},
+}
+
+#: ``inference.noise``: ``radiometer``, its ``channel_width`` a hundred times
+#: :data:`RADIOMETER_NODE`'s -- a real, ten-fold disagreement in the
+#: fractional scatter (``f`` scales as the inverse SQUARE ROOT of the
+#: product).  The measured document named in the plan:
+#: ``(1 MHz, 2 s)`` against ``(100 MHz, 2 s)``.
+T6_RADIOMETER_TEN_FOLD = {
+    "kind": "radiometer", "include_logdet": True,
+    "channel_width": {"value": 100.0, "unit": "MHz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+}
+
+#: The same hundred-fold ``channel_width`` mismatch, for ``radiometer_frozen``
+#: -- ``source: observed`` decides the sigma from the DATA rather than from a
+#: ``model:``, so :data:`T6_RADIOMETER_TEN_FOLD`'s document cannot exercise
+#: this kind; this is the twin that does.
+T6_FROZEN_HUNDRED_FOLD = {
+    "kind": "radiometer_frozen", "source": "observed",
+    "channel_width": {"value": 100.0, "unit": "MHz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+}
+
+#: A floor declared on the likelihood side of a radiometer pairing --
+#: deliberately excluded from the comparison, because
+#: ``RadiometerNoiseOperator`` applies none (see
+#: ``rheplicant/config/postflight/noise.py``'s own docstring).
+FLOOR_DECLARED_K = {"value": 0.01, "unit": "K"}
+
 
 def findings(document) -> tuple[Finding, ...]:
     """Everything the pass found on ``document``, in run order."""

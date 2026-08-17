@@ -49,7 +49,17 @@ INTEGRATION_TIME_S = 2.0
 #: ``synthetic_document``'s own stochastic node, KEPT in every model here and
 #: repaired away in ``inference.twin.without:`` rather than omitted --
 #: see :func:`_repaired` for why the difference is load-bearing.
-MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
+#:
+#: **Drawn at SIGMA_K, not its own 0.5** (D-10, Plan 3C Task 6).  Before this
+#: edit this operator drew at 0.5 K while :data:`HOMOSCEDASTIC` below weighs
+#: at ``SIGMA_K`` = 0.05 K -- D-C17's own disagreement row, and the base
+#: fixture every ``preflight_document()`` delegates to.  A numeric C18
+#: implemented to contract refuses the base document itself.  The twin repair
+#: (``_repaired``, below) still applies on the ``twin: fit`` family, so on
+#: every document but ``preflight_document()``'s own (which pins
+#: ``observed.twin: full`` to dodge A42) this operator never touches the
+#: data anyway -- moving its sigma costs nothing pinned.
+MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": SIGMA_K, "unit": "K"}}
 
 # Named CONJUGATE_MODEL, not MODEL: tests/config/inference_helpers.py already
 # exports a MODEL with different contents (no uniform_sky), and Tasks 3-6 all
