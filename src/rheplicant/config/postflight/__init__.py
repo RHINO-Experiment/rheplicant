@@ -38,10 +38,21 @@ foot-import list.
 **ONE argument, because ``sweep`` calls ``fn(payload)``.**  The gates travel
 ON the payload rather than beside it (:class:`Priced`), so :func:`priced`
 mirrors ``axes(facts)`` and ``built(run)`` and a check is
-``def _linearity(run)`` reading ``run.gates``.  A two-argument check would die
-as ``TypeError: _linearity() missing 1 required positional argument: 'gates'``
-laundered by ``sweep``'s raise-guard into a sentence blaming the check author
--- which is exactly the failure the registry split exists to prevent.
+``def _linearity(payload)`` reading ``payload.gates`` and ``payload.run``.  A
+two-argument check would die as ``TypeError: _linearity() missing 1 required
+positional argument: 'gates'`` laundered by ``sweep``'s raise-guard into a
+sentence blaming the check author -- which is exactly the failure the
+registry split exists to prevent.
+
+**Why the parameter is named ``payload`` and not ``run``, in every example
+here and in the tests.**  ``run.run.inference.space`` is a stutter in a layer
+where ``run`` already means a ``runs:`` entry (``run_document``,
+``RunResult``, ``execute_run``), and the predictable typo ``payload.inference``
+surfaces as ``post-flight check 'C12' RAISED AttributeError: 'Priced' object
+has no attribute 'inference'`` -- laundered blame, the shape this module
+exists to prevent, rather than the quieter ``payload.run.inference``.  The
+FIELD stays named ``run`` (see :class:`Priced`); only the parameter a check
+example binds it to is spelled differently.
 
 **Run order is ``sorted(CHECKS)``, and that is not decoration.**  ``sweep``
 iterates INSERTION order, and under discovery insertion order is the import
@@ -112,15 +123,6 @@ _DECORATOR = "register"
 #: own label instead, so nothing but the section names needs importing.
 _DOCUMENT_SECTIONS = _SECTIONS
 
-#: Module stems under this package that would SHADOW one of its own names.
-#: Importing a submodule sets it as an attribute of its package, so a
-#: ``postflight/priced.py`` would make ``from ... import priced`` bind a
-#: module and ``document.py``'s hook raise "'module' object is not callable".
-#: ``inflight/__init__.py`` records exactly that measurement about its own
-#: ``axes`` and can only defend it with a comment about where its import block
-#: sits; discovery can refuse it outright.
-_RESERVED = frozenset({"gates", "priced", "register", "run"})
-
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Priced:
@@ -133,12 +135,60 @@ class Priced:
     price for a reason (it is spliced positionally out of a ``ConfiguredRun``
     and a test pins the two tuples equal); this payload is built from a whole
     ``ConfiguredRun`` and has nothing to mirror.
+
+    **"Frozen" and "read-only" are not one property; measured, here is which
+    half is which.**  ``Priced`` itself and ``ConfiguredRun``/``Report`` below
+    it are genuinely closed:
+
+    * ``payload.run = ...`` -- ``dataclasses.FrozenInstanceError`` (``Priced``
+      is ``frozen=True``).
+    * ``payload.gates["linearity"] = ...`` -- ``TypeError`` (the
+      ``MappingProxyType`` wrapper).
+    * ``payload.run.inference.space = ...`` -- ``AttributeError``
+      (``InferenceBuild`` is a ``NamedTuple``, immutable by construction).
+    * ``payload.run.report.findings = ...`` -- ``dataclasses.
+      FrozenInstanceError`` (``Report`` is frozen).
+
+    But ``payload.run.document`` is a plain ``dict`` and
+    ``payload.run.inference.checks`` is a plain mapping inside a frozen
+    dataclass -- freezing a dataclass stops attribute REBINDING, not mutation
+    of what an attribute already points at.  So **these succeed**, silently,
+    and the write is visible to every later check and escapes onto the
+    ``ConfiguredRun`` the caller holds:
+
+    * ``payload.run.document["model"]["x"] = ...``
+    * ``payload.run.inference.checks["x"] = ...``
+
+    This is a pre-existing property of the layer below this payload, not a
+    regression introduced here -- but a check author reading only "frozen" or
+    only "read-only" would not learn which half of the object that word
+    covers.
+
+    **The proxy over ``gates`` costs more than write access.**  Measured:
+    ``dataclasses.replace(payload, run=...)`` works and keeps the proxy;
+    ``copy.copy(payload)`` works; but ``copy.deepcopy(payload)``,
+    serialising it with the standard library's object-serialisation module,
+    and ``dataclasses.asdict(payload)`` all raise ``TypeError: cannot
+    pickle 'mappingproxy' object``, and ``hash(payload)`` raises
+    ``TypeError: unhashable type: 'dict'`` -- despite ``frozen=True``, which
+    buys unsafe-mutation protection and not hashability once a field holds an
+    unhashable value.  A drafter reaching for ``copy.deepcopy(payload)`` is
+    not exotic -- ``preflight_helpers._base()`` deepcopies routinely -- so
+    the escape is named here: use ``dataclasses.replace`` to build a derived
+    payload.
     """
 
     #: The ``ConfiguredRun``, carrying **the report earned by every earlier
-    #: pass** -- pre-flight, then axes, then built, in run order.  A priced
-    #: check can therefore read what an earlier check already said and need
-    #: not restate it.
+    #: PASS** -- pre-flight, then axes, then built, in run order.
+    #:
+    #: **NOT this pass.**  ``sweep`` accumulates into a local list and returns
+    #: only when every check has run, so ``run.report`` never holds a
+    #: post-flight finding: measured, a C13 running after a C12 that emitted
+    #: C14 reads ``[f.check for f in run.run.report.findings] == []``.  Two
+    #: priced checks CANNOT communicate through the report, in either
+    #: direction, whatever ``sorted(CHECKS)`` puts first.  A check that needs
+    #: another check's answer must recompute it or the two must be ONE
+    #: function bound to both ids (``@register("C13", "C19")``).
     #:
     #: Typed ``Any`` and not ``ConfiguredRun``: ``document.py`` imports this
     #: package for the hook, so a real annotation would close the cycle.
@@ -198,12 +248,28 @@ def register(*checks: str) -> Callable[[PostCheck], PostCheck]:
     ``sections/exit_support.py``'s ``register(kind)``.  The consequence worth
     knowing is that this one SHARES ITS NAME with ``preflight.register``, so a
     module here that imports the wrong one binds its check into the text pass,
-    where the payload is a document and ``run.gates`` is an
+    where the payload is a document and ``payload.gates`` is an
     ``AttributeError``.  ``test_config_postflight.py``'s
     ``test_every_module_under_postflight_contributes_a_slot`` is what catches
     that in production, because such a module owns no slot here.
     """
     return binder(CHECKS, *checks, label=_LABEL, decorator=_DECORATOR)
+
+
+def _reserved() -> frozenset[str]:
+    """Every name this file binds -- so every name a submodule would shadow.
+
+    DERIVED, never listed, and called from the loop at the FOOT of this
+    module so that everything is bound by the time it runs.  A package's
+    attributes ARE this module's globals: importing ``postflight.sweep`` sets
+    ``postflight.sweep``, which IS the global :func:`priced` reads.  Measured:
+    the hand-written ``{"gates", "priced", "register", "run"}`` missed
+    ``sweep`` -- a ``postflight/sweep.py`` makes every ``load_document`` raise
+    ``TypeError: 'module' object is not callable``, the exact failure this
+    guard exists to prevent -- and held two names (``gates``, ``run``) this
+    module never binds at all.
+    """
+    return frozenset(name for name in globals() if not name.startswith("__"))
 
 
 def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
@@ -215,10 +281,15 @@ def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
 
     Raises:
         ConfigError: a module here is named after one of this package's own
-            public names.  See :data:`_RESERVED`.
+            public names.  See :func:`_reserved`.
     """
+    # `iter_modules` and not `walk_packages`: equivalent on this flat
+    # package today (no subpackage under `postflight/`), and a real
+    # difference the day one is added -- `walk_packages` recurses and would
+    # hand back dotted names `_reserved`'s bare-stem comparison cannot match.
     found = tuple(sorted(name for _, name, _ in pkgutil.iter_modules(path)))
-    clash = [name for name in found if name in _RESERVED]
+    reserved = _reserved()
+    clash = [name for name in found if name in reserved]
     if clash:
         raise ConfigError(
             f"postflight/ holds {clash}, and importing a submodule SETS IT as "
@@ -226,9 +297,62 @@ def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
             "rheplicant.config.postflight import priced` would bind a MODULE "
             "and the hook in document.py would raise \"'module' object is not "
             "callable\". Rename the module; the reserved names are "
-            f"{sorted(_RESERVED)}."
+            f"{sorted(reserved)}."
         )
     return found
+
+
+def priced(run: Priced) -> Report:
+    """Every check that has to run the thing it is deciding about.
+
+    Runs after ``build_inference`` and before ``load_document`` returns, so
+    one payload carries the raw twin, the fit twin, the space and the observed
+    data -- and so no caller ever holds a ``ConfiguredRun`` whose priced
+    checks have not run.  **It saves nothing**: the beam is long since read,
+    and schema §6's preamble ("all run before any beam is analysed") is false
+    about every check registered here.  What it buys is that the checks run at
+    all, in this layer's voice, instead of detonating later inside a fit.
+
+    Structural problems have already been raised by ``preflight`` and the two
+    in-flight passes have already refused what they can, so every check here
+    may assume the document's top level is well formed and its grids and its
+    twin are built.
+
+    **``inference:`` may be absent from the document, and this pass still
+    runs (§3.2 (b)).**  A check that reaches for ``payload.run.inference``
+    on such a document finds it never ``None`` -- ``build_inference`` returns
+    one for a document with no ``inference:`` section at all -- but most of
+    what hangs off it is.  Measured on ``preflight_document(inference=None)``:
+
+    =====================  =======================================
+    ``payload.run.inference``  Value
+    =====================  =======================================
+    ``.fit_twin``          an ``Assembly`` (never ``None``)
+    ``.space``             ``None``
+    ``.observed``          ``None``
+    ``.noise``             ``NoiseBuild(kind='none', model=None, sigma=None, ...)``
+    ``.truth``             ``{}``
+    ``.truth_omitted``     ``{}``
+    ``.checks``            ``{}``
+    ``.refs``              ``{}``
+    ``.trainable``         ``None``
+    ``.npe``               ``None``
+    ``.replaced``          ``()``
+    =====================  =======================================
+
+    A check that reads, say, ``payload.run.inference.observed.entries``
+    without checking for ``None`` first dies as ``ConfigError: post-flight
+    check 'C16' RAISED AttributeError: 'NoneType' object has no attribute
+    'entries'`` -- laundered blame, the shape this module exists to prevent.
+    C16 is the worked example precisely because it needs no space at all and
+    is exactly the check a ``kind: forward`` document (no latents, no
+    ``inference:`` section) wants to run.
+
+    ``dict(sorted(...))`` and not a second runner: see this module's docstring
+    for why insertion order is the import graph's here.
+    """
+    return sweep(dict(sorted(CHECKS.items())), run, label=_LABEL,
+                 sections=_DOCUMENT_SECTIONS)
 
 
 # Importing the check modules is what registers their ids -- and unlike
@@ -249,26 +373,3 @@ def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
 # answer and it cannot go stale.
 for _found in _discoverable(__path__):
     importlib.import_module(f"{__name__}.{_found}")
-
-
-def priced(run: Priced) -> Report:
-    """Every check that has to run the thing it is deciding about.
-
-    Runs after ``build_inference`` and before ``load_document`` returns, so
-    one payload carries the raw twin, the fit twin, the space and the observed
-    data -- and so no caller ever holds a ``ConfiguredRun`` whose priced
-    checks have not run.  **It saves nothing**: the beam is long since read,
-    and schema §6's preamble ("all run before any beam is analysed") is false
-    about every check registered here.  What it buys is that the checks run at
-    all, in this layer's voice, instead of detonating later inside a fit.
-
-    Structural problems have already been raised by ``preflight`` and the two
-    in-flight passes have already refused what they can, so every check here
-    may assume the document's top level is well formed and its grids and its
-    twin are built.
-
-    ``dict(sorted(...))`` and not a second runner: see this module's docstring
-    for why insertion order is the import graph's here.
-    """
-    return sweep(dict(sorted(CHECKS.items())), run, label=_LABEL,
-                 sections=_DOCUMENT_SECTIONS)

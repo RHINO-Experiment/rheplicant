@@ -138,7 +138,7 @@ def built_only(document, check: str, *, base_dir=None) -> Finding:
     return _only(built_findings(document, base_dir=base_dir), check, "built")
 
 
-def priced_run(document, *, base_dir=None) -> Priced:
+def priced_run(document, *, variant=None, base_dir=None) -> Priced:
     """The post-flight payload, WITHOUT the hook that would raise on it.
 
     ``_assemble`` for the same reason :func:`built_run` uses it -- the priced
@@ -156,8 +156,13 @@ def priced_run(document, *, base_dir=None) -> Priced:
     :func:`~rheplicant.config.document._priced_payload` are reused rather than
     restated: which section the gates come from is one contract, and a second
     reading of it here is how the two come to disagree.
+
+    **N7 -- ``variant=`` matches** :func:`~rheplicant.config.document.load_document`'s
+    signature.  It was missing here while every sibling positional call
+    (``base_dir``) was present, which is the asymmetry a Task 4/5/6 test
+    written against a variant would have discovered the hard way.
     """
-    run = _assemble(document, base_dir=base_dir)
+    run = _assemble(document, variant=variant, base_dir=base_dir)
     return _priced_payload(_carrying(run, built(Built(*run))))
 
 

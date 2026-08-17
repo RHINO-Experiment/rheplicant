@@ -27,11 +27,13 @@ set this task widens to four.  A second copy here would be a second binding of
 one contract, and the two would drift.
 """
 
+import copy
 import dataclasses
 import pathlib
 import pkgutil
 import subprocess
 import sys
+import tempfile
 import types
 import warnings
 
@@ -53,6 +55,7 @@ from rheplicant.config.postflight import (
     CHECKS,
     Priced,
     _discoverable,
+    _reserved,
     priced,
     register,
 )
@@ -161,6 +164,65 @@ class TestThePayload:
         with pytest.raises(TypeError):
             payload.gates["linearity"] = None
 
+    def test_which_half_of_the_payload_is_actually_frozen(self):
+        """M5: "frozen" and "read-only" are not one property; here is which
+        half is which, pinned so a future change that opens one of the four
+        genuinely-closed writes is caught.
+
+        ``Priced`` is ``frozen=True``, the gates are a ``MappingProxyType``,
+        ``InferenceBuild`` is a ``NamedTuple`` and ``Report`` is
+        ``frozen=True`` -- all four writes below raise.  But
+        ``payload.run.document`` is a plain ``dict`` and
+        ``payload.run.inference.checks`` is a plain ``dict`` inside a frozen
+        NamedTuple -- freezing stops attribute REBINDING, not mutation of
+        what an attribute already points at -- so those two succeed
+        silently and the write is visible to every later check and escapes
+        onto the ``ConfiguredRun`` the caller holds.  Not asserted here as a
+        MUST, only as a fact: this is a pre-existing property of the layer
+        below this payload, and the point of the docstring and this test
+        together is that a reader learns which half of "frozen" covers what.
+        """
+        payload = priced_run(_document())
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            payload.run = None
+        with pytest.raises(TypeError):
+            payload.gates["linearity"] = None
+        with pytest.raises(AttributeError):
+            payload.run.inference.space = None
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            payload.run.report.findings = ()
+
+        payload.run.document["model"]["_written_by_a_check"] = True
+        assert payload.run.document["model"]["_written_by_a_check"] is True
+        payload.run.inference.checks["_written_by_a_check"] = None
+        assert "_written_by_a_check" in payload.run.inference.checks
+
+    def test_the_gates_proxy_costs_more_than_write_access(self):
+        """M6: the ``MappingProxyType`` wrapper costs ``deepcopy``, ``asdict``
+        and ``hash`` too, not only assignment -- and ``dataclasses.replace``
+        is the escape a drafter reaching for ``copy.deepcopy`` needs, named
+        because ``preflight_helpers._base()`` deepcopies routinely.
+
+        **``run=None``, deliberately, and not a real ``priced_run(...)``.**
+        A real ``ConfiguredRun`` carries its own immutable containers several
+        layers down (``rheplicant.core.frozen.FrozenMapping`` among them),
+        and ``copy.deepcopy`` on the whole payload trips one of THOSE first
+        -- a separate, true fact about the layer below ``run`` and not what
+        this test is about.  The claim under test is narrower and isolated
+        by handing ``run`` a plain value: it is the ``gates`` proxy itself
+        that neither serialising code nor ``hash`` can get past.
+        """
+        payload = Priced(run=None, gates=gates(None))
+        copy.copy(payload)
+        replaced = dataclasses.replace(payload, run="something else")
+        assert isinstance(replaced.gates, types.MappingProxyType)
+        with pytest.raises(TypeError, match="mappingproxy"):
+            copy.deepcopy(payload)
+        with pytest.raises(TypeError, match="mappingproxy"):
+            dataclasses.asdict(payload)
+        with pytest.raises(TypeError, match="unhashable"):
+            hash(payload)
+
     def test_the_gates_are_a_copy_of_what_the_caller_passed(self):
         """The proxy wraps a COPY, never the caller's own dict.
 
@@ -196,8 +258,8 @@ class TestThePayload:
         the sentence names the check rather than the user's document."""
 
         @register("C12")
-        def _greedy(run):
-            run.gates["linearity"] = None
+        def _greedy(payload):
+            payload.gates["linearity"] = None
             return ()
 
         with pytest.raises(ConfigError) as raised:
@@ -213,8 +275,8 @@ class TestThePayload:
         seen = {}
 
         @register("C12")
-        def _reader(run):
-            seen.update(run.gates)
+        def _reader(payload):
+            seen.update(payload.gates)
             return ()
 
         priced(priced_run(_document()))
@@ -227,7 +289,7 @@ class TestThePayload:
         """**The gates are READ OFF THE DOCUMENT**, and this is the only test
         in this file that says so.
 
-        Every other assertion about ``run.gates`` here is on a document that
+        Every other assertion about ``payload.gates`` here is on a document that
         declares no ``inference.checks:`` at all -- and ``gating.gates(None)``
         returns exactly the defaults those assertions read, so a
         ``_priced_payload`` that ignored the document entirely and always
@@ -241,8 +303,8 @@ class TestThePayload:
         seen = {}
 
         @register("C12")
-        def _reader(run):
-            seen.update(run.gates)
+        def _reader(payload):
+            seen.update(payload.gates)
             return ()
 
         load_document(_document(inference={"checks": {
@@ -253,6 +315,30 @@ class TestThePayload:
         assert seen["identifiability"].state == "report"
         assert seen["identifiability"].rtol == 1e-6
         assert seen["prior_sensitivity"].state == "off"
+
+    def test_priced_run_takes_a_variant_keyword(self):
+        """N7: ``priced_run(document, *, base_dir=None)`` had no ``variant=``
+        while :func:`~rheplicant.config.document.load_document` does --
+        the one keyword ``built_run`` and ``priced_run`` both lacked while
+        ``base_dir`` was present on both.  Threaded to ``_assemble`` exactly
+        as ``base_dir`` already was.
+        """
+        base = _document()
+        assert base["model"]["gain"]["gain"]["value"] != 1.0
+        payload = priced_run(base, variant="unity_gain")
+        assert payload.run.document["model"]["gain"]["gain"]["value"] == 1.0
+
+    def test_the_base_document_earns_no_post_flight_finding_of_its_own(self):
+        """The REAL registry -- deliberately no clearing fixture.
+
+        3B ships exactly this for its two passes
+        (``test_config_inflight.py:552``) and says why: a base that is itself
+        a finding makes every later task's "and nothing else" assertion
+        inherit an extra id, with nothing recording it.  Vacuous while
+        ``CHECKS`` is empty and load-bearing from Task 4 on -- which is when a
+        check written against the wrong document would first be noticed.
+        """
+        assert priced_findings(_document()) == ()
 
     def test_the_run_carries_every_finding_earned_before_this_pass(
             self, every_registry):
@@ -274,6 +360,33 @@ class TestThePayload:
         assert [one.check for one in payload.run.report.findings] == [
             "C11", "B3", "A9"]
 
+    def test_a_priced_check_cannot_see_an_earlier_priced_checks_finding(
+            self, priced_registry):
+        """B1's correction, as a pin rather than a corrected sentence.
+
+        ``Priced.run.report`` is pre-flight + axes + built -- **NOT this
+        pass**.  ``sweep`` accumulates ``priced``'s own findings into a local
+        list and returns only once every check has run, so a C13 that runs
+        after a C12 in ``sorted(CHECKS)`` order still reads an empty report
+        for this pass: two priced checks cannot communicate through
+        ``payload.run.report``, in either direction.  A check that needs
+        another check's answer must recompute it or the two must be bound to
+        one function (``@register('C13', 'C19')``).
+        """
+        seen = []
+
+        @register("C12")
+        def _first(payload):
+            return (report("C12", "inference.parameters", "C12's finding."),)
+
+        @register("C13")
+        def _second(payload):
+            seen.append([one.check for one in payload.run.report.findings])
+            return ()
+
+        priced(priced_run(_document()))
+        assert seen == [[]]
+
 
 # ---------------------------------------------------------------------------
 # The registry
@@ -287,7 +400,7 @@ class TestTheRegistry:
 
     def test_a_registered_id_binds_to_its_function(self, priced_registry):
         @register("C12")
-        def _one(run):
+        def _one(payload):
             return ()
 
         assert CHECKS["C12"] is _one
@@ -300,12 +413,12 @@ class TestTheRegistry:
         **The two share a NAME**, so a Task 4/5/6 module that writes
         ``from rheplicant.config.preflight import register`` binds its check
         into the text pass in silence -- where the payload is a document, so
-        ``run.gates`` is a ``KeyError`` laundered into a sentence blaming the
-        check author.  ``test_every_module_under_postflight_contributes_a_slot``
+        ``payload.gates`` is a ``KeyError`` laundered into a sentence blaming
+        the check author.  ``test_every_module_under_postflight_contributes_a_slot``
         is what catches that in production; this is what says the two
         registries are distinct objects at all.
         """
-        register("C12")(lambda run: ())
+        register("C12")(lambda payload: ())
         assert "C12" in CHECKS
         assert "C12" not in TEXT_CHECKS
         assert "C12" not in AXIS_CHECKS
@@ -354,7 +467,7 @@ class TestTheRegistry:
         C9 first should find the answer here rather than in a bug report.
         """
         def _emit(check):
-            return lambda run, check=check: (
+            return lambda payload, check=check: (
                 refuse(check, "model.gain", f"{check}!"),)
 
         for order in (("C16", "C12"), ("C12", "C16")):
@@ -373,7 +486,7 @@ class TestTheRegistry:
         calls = []
 
         @register("C13", "C19")
-        def _both(run):
+        def _both(payload):
             calls.append(1)
             return (refuse("C13", "inference.parameters", "one."),)
 
@@ -388,7 +501,7 @@ class TestTheRegistry:
         beginning after it discriminates nothing.  Measured while ``passes.py``
         was written: rewriting every ``pre-flight`` to ``in-flight`` left the
         whole of ``tests/config`` at exit 0."""
-        register("C12")(lambda run: (_ for _ in ()).throw(
+        register("C12")(lambda payload: (_ for _ in ()).throw(
             RuntimeError("the Jacobian went missing")))
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
@@ -406,12 +519,38 @@ class TestTheRegistry:
         calling it would report its own defect as a pre-flight one.
         ``passes.sweep`` does the guarding with this pass's label instead, and
         this is the pin that says so."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             refuse("C12", "src/rheplicant/config/postflight/fitting.py",
                    "wrong."),))
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
         assert str(raised.value).startswith("post-flight check 'C12' emitted ")
+
+    def test_a_where_whose_head_is_not_a_section(self, priced_registry):
+        """N3: the where-guard's SECOND branch (valid path syntax, head not a
+        section), unexercised for this pass until now.
+
+        The test above drives the FIRST branch only -- a slash-separated
+        source path is not valid ``head.step.step`` syntax at all, so it
+        never reaches the "is the head a section" check.  ``beam.horn`` is
+        syntactically a path; ``'beam'`` is simply not one of
+        :data:`~rheplicant.config.postflight._DOCUMENT_SECTIONS`'s twelve
+        names.  The two sibling passes pin this branch whole
+        (``test_config_preflight.py::test_a_where_whose_head_is_not_a_section``,
+        ``test_config_inflight.py::test_a_where_whose_head_is_not_a_section``);
+        this is this pass's own copy.
+        """
+        register("C12")(lambda payload: (
+            refuse("C12", "beam.horn", "reserved."),))
+        with pytest.raises(ConfigError) as raised:
+            priced(priced_run(_document()))
+        assert str(raised.value) == (
+            "post-flight check 'C12' emitted where='beam.horn', whose first "
+            "segment 'beam' is not a document section. The sections are "
+            "['schema_version', 'defaults', 'plugins', 'runtime', "
+            "'observation', 'resources', 'model', 'variants', 'inference', "
+            "'runs', 'outputs', 'campaign']."
+        )
 
     def test_the_binder_refusals_open_with_this_passs_label(self):
         """The registration-time refusals, whole.  ``decorator="register"`` is
@@ -427,10 +566,32 @@ class TestTheRegistry:
             "up; a private name here reaches the user as '(check _mine).'"
         )
 
-    def test_a_slot_claimed_twice_names_both_modules(self, priced_registry):
-        register("C12")(lambda run: ())
+    def test_the_binder_names_this_passs_own_decorator(self):
+        """``decorator="register"``, WHOLE -- and the slot refusal above
+        cannot see it.
+
+        The slot refusal carries the LABEL and no decorator at all, so
+        ``_DECORATOR`` was unpinned: measured, ``_DECORATOR = "register_built"``
+        left ``test_config_postflight.py`` and ``test_config_inflight.py`` at
+        **exit 0** while telling a Task 4/5/6 drafter to write
+        ``@register_built``, which binds the check into the BUILT registry in
+        silence.  The other three passes pin their own word the same way --
+        ``test_config_preflight.py:1044``, ``test_config_inflight.py:356``
+        and ``:367``.
+        """
         with pytest.raises(ConfigError) as raised:
-            register("C12")(lambda run: ())
+            register()
+        assert str(raised.value) == (
+            "register() takes one or more check ids -- @register('A30'), or "
+            "@register('A16', 'A17') when one function decides several. A "
+            "registration with no id binds nothing, so the check it decorates "
+            "never runs and nothing says so."
+        )
+
+    def test_a_slot_claimed_twice_names_both_modules(self, priced_registry):
+        register("C12")(lambda payload: ())
+        with pytest.raises(ConfigError) as raised:
+            register("C12")(lambda payload: ())
         assert str(raised.value).startswith(
             "post-flight check 'C12' is registered twice, by ")
 
@@ -456,7 +617,7 @@ class TestTheHookIsPositioned:
         monkeypatch.setattr(document_module, "build_inference",
                             lambda *a, **k: (order.append("inference"),
                                              real(*a, **k))[1])
-        register("C12")(lambda run: (order.append("priced"), ())[1])
+        register("C12")(lambda payload: (order.append("priced"), ())[1])
         load_document(_document())
         assert order == ["inference", "priced"]
 
@@ -464,7 +625,7 @@ class TestTheHookIsPositioned:
             self, priced_registry):
         """**Before the return**, so no caller ever holds a ``ConfiguredRun``
         whose priced checks have not run."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             refuse("C12", "inference.parameters", "not linear."),))
         with pytest.raises(ConfigError, match="not linear."):
             load_document(_document())
@@ -473,9 +634,9 @@ class TestTheHookIsPositioned:
         """Collect, do not raise: a user with two problems sees two.  Read off
         ``raise_if_refused``'s tail, which is the only place the second one
         reaches a user."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             refuse("C12", "inference.parameters", "first."),))
-        register("C16")(lambda run: (
+        register("C16")(lambda payload: (
             refuse("C16", "model.adc", "second."),))
         with pytest.raises(ConfigError) as raised:
             load_document(_document())
@@ -489,8 +650,8 @@ class TestTheHookIsPositioned:
         ``kind: forward`` document wants.  A pass that short-circuited on
         ``inference is None`` would lose it."""
         seen = []
-        register("C16")(lambda run: (seen.append(run.gates["linearity"]),
-                                     ())[1])
+        register("C16")(lambda payload: (seen.append(payload.gates["linearity"]),
+                                         ())[1])
         load_document(_document(inference=None))
         assert [one.state for one in seen] == ["refuse"]
 
@@ -506,7 +667,7 @@ class TestTheHookIsPositioned:
         for Tasks 4-6's own helpers, and every other test in this file stays
         green while it does.
         """
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             refuse("C12", "inference.parameters", "priced refusal."),))
         assert built_run(_document()) is not None
         assert priced_run(_document()) is not None
@@ -525,7 +686,7 @@ class TestTheHookIsPositioned:
         across all three severities, and a refusals-only reading would make
         every test about a ``mode: warn`` gate unwritable.
         """
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             warn("C12", "inference.parameters", "one warning."),))
         assert priced_only(_document(), "C12").message == "one warning."
 
@@ -542,7 +703,7 @@ class TestTheHookIsPositioned:
         reached = []
         monkeypatch.setattr(exits_module, "execute_run",
                             lambda *a, **k: reached.append(1))
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             refuse("C12", "inference.parameters", "the gate refuses."),))
         with pytest.raises(ConfigError, match="the gate refuses."):
             run_document(_document(
@@ -577,7 +738,7 @@ class TestTheReportAccumulates:
         register_built("A9")(
             lambda run: (report("A9", "model.gain", "built."),))
         register("C17")(
-            lambda run: (report("C17", "inference.parameters", "priced."),))
+            lambda payload: (report("C17", "inference.parameters", "priced."),))
         run = load_document(_document())
         assert run.report.checks() == frozenset({"C11", "B3", "A9", "C17"})
         assert [one.check for one in run.report.findings] == [
@@ -603,7 +764,7 @@ class TestTheReportAccumulates:
         interrupting anybody.  ``emit_warnings`` walks ``self.warnings()`` and
         not ``self.findings``; the difference is one word and it converts the
         whole feature into ``warn``."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             report("C12", "inference.parameters", "recorded, not shouted."),))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -616,7 +777,7 @@ class TestTheReportAccumulates:
         """ANTI-VACUITY for the test above: it passes trivially if the hook
         stopped calling ``emit_warnings`` at all, or if the pass stopped
         running."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             warn("C12", "inference.parameters", "worth saying out loud."),))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -631,7 +792,7 @@ class TestTheReportAccumulates:
         which is the whole of "3C can gate but cannot durably record".  Kills
         ``report=`` being dropped from the final ``_replace``, under which the
         priced findings are computed, emitted and thrown away."""
-        register("C12")(lambda run: (
+        register("C12")(lambda payload: (
             report("C12", "inference.parameters", "kept."),))
         run = load_document(_document())
         assert [one.message for one in run.report.findings] == ["kept."]
@@ -690,6 +851,40 @@ def _uncontributing(directory: pathlib.Path,
     contributing = {fn.__module__.rsplit(".", 1)[-1]
                     for fn in registry.values()}
     return present - contributing
+
+
+class TestTheScopeOfThisPackage:
+    """The invariant this package's own docstring states and nothing checked.
+
+    ``preflight`` has ``test_config_preflight.py::test_importing_the_pass_
+    drags_in_no_optional_dependency``; ``inflight`` has
+    ``test_config_inflight.py::test_the_package_imports_no_optional_
+    dependency``.  This package had neither, while being the one whose three
+    consumer tasks exist in order to take a Jacobian and run a Newton solve.
+    """
+
+    def test_importing_the_pass_drags_in_no_optional_dependency(self):
+        """``document.py`` imports this package and ``rheplicant.config``
+        imports ``document``, so one module-scope ``import numpyro`` under
+        ``postflight/`` puts numpyro in every process that so much as reads a
+        config.
+
+        A SUBPROCESS and not ``inflight``'s static AST ban, deliberately: a
+        priced check MAY import an optional dependency **inside a function**
+        -- that is how ``prior_sensitivity`` reaches numpyro at all, and
+        ``config/sections/noise.py:195`` is the shipped precedent -- and a
+        walk over every ``ast.Import`` node forbids exactly that.  The child
+        answers the question the invariant actually asks.
+        """
+        source = (
+            "import sys, rheplicant.config.postflight\n"
+            "print(sorted(m for m in ('numpyro', 'limtod_jax', 'healpy', "
+            "'h5py', 'pyuvdata', 'rhino_cal_jax') if m in sys.modules))\n"
+        )
+        done = subprocess.run([sys.executable, "-c", source],
+                              capture_output=True, text=True, check=True,
+                              cwd=str(_ROOT))
+        assert done.stdout.strip() == "[]", done.stdout
 
 
 class TestTheDiscoveryMechanism:
@@ -824,5 +1019,39 @@ class TestTheDiscoveryMechanism:
             "rheplicant.config.postflight import priced` would bind a MODULE "
             "and the hook in document.py would raise \"'module' object is not "
             "callable\". Rename the module; the reserved names are "
-            "['gates', 'priced', 'register', 'run']."
+            f"{sorted(_reserved())}."
         )
+
+    def test_the_found_modules_come_back_sorted(self, tmp_path):
+        """N1: ``sorted()`` inside :func:`_discoverable`, pinned on ORDER.
+
+        A single-module fixture cannot see this -- a one-element tuple is
+        sorted whether or not the call is there, which is exactly why
+        removing ``sorted()`` from ``_discoverable`` left this module at
+        **exit 0** before this test existed.  Written out of alphabetical
+        order so a walk that happened to preserve filesystem or creation
+        order cannot pass by luck.
+        """
+        for stem in ("zeta", "alpha", "mu"):
+            (tmp_path / f"{stem}.py").touch()
+        assert _discoverable([str(tmp_path)]) == ("alpha", "mu", "zeta")
+
+    def test_the_reserved_names_are_derived_from_this_module_and_not_listed(
+            self):
+        """A hand-written list is a list that goes stale.
+
+        Measured: the four-name literal this replaced held ``gates`` and
+        ``run`` -- neither of which this package binds, so neither could
+        shadow anything -- and MISSED ``sweep``.  A ``postflight/sweep.py``
+        makes every ``load_document`` raise ``TypeError: 'module' object is
+        not callable``, which is the exact failure the guard exists to
+        prevent.
+        """
+        reserved = _reserved()
+        assert {"priced", "register", "sweep", "binder", "CHECKS", "Priced",
+                "PostCheck", "Report", "Finding", "Gate"} <= reserved
+        assert "gates" not in reserved
+        (tmp := pathlib.Path(tempfile.mkdtemp())) and None
+        (tmp / "sweep.py").touch()
+        with pytest.raises(ConfigError, match="holds \\['sweep'\\]"):
+            _discoverable([str(tmp)])

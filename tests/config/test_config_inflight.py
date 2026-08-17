@@ -42,7 +42,7 @@ import pytest
 import rheplicant.config.document as document_module
 from rheplicant.config.document import ConfiguredRun, _assemble, load_document
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.findings import ConfigWarning, refuse, report, warn
+from rheplicant.config.findings import ConfigWarning, Report, refuse, report, warn
 from rheplicant.config.inflight import (
     AXIS_CHECKS,
     BUILT_CHECKS,
@@ -182,6 +182,25 @@ class TestThePayloads:
         assert without.inference is not None
         assert without.inference.space is None
         assert with_block.inference.space is not None
+
+    def test_the_report_default_is_a_report_with_no_findings(self):
+        """N4: the VALUE of the ``report`` default, not just its position.
+
+        ``test_the_two_field_tuples_are_equal`` pins that a ``report`` field
+        exists on both types and comes last; neither that test nor any other
+        in this module pins what an OMITTED ``report`` actually is.
+        Measured: ``Report()`` swapped for ``None`` as the default on either
+        ``ConfiguredRun`` or ``Built`` leaves this module at exit 0, and a
+        helper that constructs either positionally with no report then hands
+        out ``None``, so ``run.report.findings`` is an ``AttributeError``.
+        """
+        built_default = next(field.default
+                             for field in dataclasses.fields(Built)
+                             if field.name == "report")
+        run_default = ConfiguredRun._field_defaults["report"]
+        for default in (built_default, run_default):
+            assert isinstance(default, Report)
+            assert default.findings == ()
 
 
 # ---------------------------------------------------------------------------
@@ -690,6 +709,30 @@ def _unnamed_hook_calls() -> list[tuple[str, int]]:
                 and node.func.attr in ("raise_if_refused", "emit_warnings"))]
 
 
+def _incomplete_hook_pairs() -> dict[str, list[str]]:
+    """Receivers in document.py that call ONE of the two hooks and not both.
+
+    :func:`_raise_then_warn` DROPS these (``if len(calls) == 2``), so a fifth
+    pass that raises and never warns -- or warns and never raises -- is
+    invisible to both tests above.  Measured while reviewing Plan 3C's Task 3:
+    a fifth ``fifth_report = Report(); fifth_report.raise_if_refused()`` with
+    no ``emit_warnings`` left ``test_config_postflight.py`` and
+    ``test_config_inflight.py`` at **exit 0**, and so did the mirror image --
+    a pass that warns and never raises, which lets a REFUSED document out of
+    ``load_document``.
+    """
+    found: dict[str, dict[str, int]] = {}
+    for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text())):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.attr in ("raise_if_refused", "emit_warnings")):
+            found.setdefault(node.func.value.id, {})[
+                node.func.attr] = node.lineno
+    return {name: sorted(calls) for name, calls in found.items()
+            if len(calls) != 2}
+
+
 class TestEachSlotRaisesBeforeItWarns:
     """§3.2(a), as a pin rather than as a sentence."""
 
@@ -717,12 +760,36 @@ class TestEachSlotRaisesBeforeItWarns:
 
         Plan 3C's post-flight pass is the fourth, and its receiver is
         ``priced_report``.  The name is pinned rather than left free because
-        this guard keys on it: a hook whose receiver were spelled anything
-        else would fail here, which is the intended way to be told that a
-        fifth pass has landed.
+        this guard keys on it: a hook whose receiver is spelled anything else
+        fails ``test_no_hook_is_called_on_an_unnamed_receiver`` (a receiver
+        that is not a plain ``Name``), a hook with only one of the two halves
+        fails ``test_no_hook_is_half_a_pair`` (kept out of THIS test's set by
+        ``_raise_then_warn``'s own ``len(calls) == 2`` filter) -- and this
+        test alone sees neither.  It is the third leg, not the whole guard:
+        it says the four hooks this repository already has are still four and
+        still named these four things.
         """
         assert set(_raise_then_warn()) == {"report", "axis_report",
                                            "built_report", "priced_report"}
+
+    def test_no_hook_is_half_a_pair(self):
+        """The OTHER hole in the harvester, and the one a fifth pass falls in.
+
+        ``_raise_then_warn`` keeps only receivers with BOTH calls, so a
+        receiver with one of them never enters the dict and
+        ``test_all_four_hooks_are_present_and_named``'s set equality still
+        holds at four.  Measured: adding ``fifth_report = Report()`` plus a
+        lone ``raise_if_refused()`` -- and, separately, a lone
+        ``emit_warnings()`` -- left every other test in this repository
+        green.
+        """
+        assert _incomplete_hook_pairs() == {}, (
+            "a report in document.py is raised on without being warned on, or "
+            "warned on without being raised on. Both halves, in that order, "
+            "for every pass -- a pass that only warns lets a refused document "
+            "out of load_document, and a pass that only raises drops every "
+            "warning it found."
+        )
 
     def test_no_hook_is_called_on_an_unnamed_receiver(self):
         """The blind spot in the harvester, as an assertion.
