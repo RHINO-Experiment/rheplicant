@@ -1,6 +1,7 @@
 """The resources DAG: build order, extends:, identity, and the kind registry."""
 
-from collections import namedtuple
+from collections import defaultdict, namedtuple
+from collections.abc import Mapping
 from types import MappingProxyType
 
 import jax.numpy as jnp
@@ -20,6 +21,18 @@ _Pair = namedtuple("_Pair", ("left", "right"))
 
 class _FancyTuple(tuple):
     pass
+
+
+class _FancyStr(str):
+    pass
+
+
+class _HostileCallbackConfigError(ConfigError):
+    def __str__(self):
+        raise AssertionError("marker text must not run")
+
+    def __repr__(self):
+        raise AssertionError("marker repr must not run")
 
 
 @pytest.fixture
@@ -222,6 +235,301 @@ class TestExtends:
             return
 
         assert merged["loop"] is merged
+
+    def test_one_deepcopy_context_preserves_aliases_across_both_roots(self):
+        shared = {"leaf": [1]}
+        parent = {"kept": shared, "items": [shared]}
+        child = {
+            "replacement": shared,
+            "items": {"append": [shared]},
+        }
+
+        merged = merge_extends(child, parent)
+
+        assert merged["kept"] is merged["replacement"]
+        assert merged["kept"] is merged["items"][0]
+        assert merged["kept"] is merged["items"][1]
+        assert merged["kept"] is not shared
+
+    def test_nested_defaultdict_preserves_ordinary_deepcopy_semantics(self):
+        nested = defaultdict(list, {"value": [1]})
+
+        copied = merge_extends({"nested": nested}, {})["nested"]
+
+        assert isinstance(copied, defaultdict)
+        assert copied.default_factory is list
+        assert copied is not nested
+
+    def test_recursively_patched_defaultdict_preserves_its_concrete_type(self):
+        nested = defaultdict(list, {"old": 1})
+
+        copied = merge_extends(
+            {"nested": {"new": 2}}, {"nested": nested}
+        )["nested"]
+
+        assert isinstance(copied, defaultdict)
+        assert copied.default_factory is list
+        assert copied == {"old": 1, "new": 2}
+        assert copied is not nested
+
+    def test_recursive_patch_splits_one_occurrence_of_a_shared_parent(self):
+        nested = {"leaf": []}
+        shared = {"old": 1, "nested": nested}
+        parent = {"left": shared, "right": shared}
+
+        merged = merge_extends({"left": {"added": 2}}, parent)
+
+        assert merged["left"] == {
+            "old": 1,
+            "nested": {"leaf": []},
+            "added": 2,
+        }
+        assert merged["right"] == {"old": 1, "nested": {"leaf": []}}
+        assert merged["left"] is not merged["right"]
+        assert merged["left"]["nested"] is merged["right"]["nested"]
+        assert merged["right"] is not shared
+
+    @pytest.mark.parametrize("mutual", [False, True])
+    def test_recursive_patch_never_silently_breaks_parent_cycles(self, mutual):
+        node = {}
+        if mutual:
+            sibling = {"back": node}
+            node["next"] = sibling
+        else:
+            node["self"] = node
+
+        try:
+            merged_node = merge_extends(
+                {"node": {"added": 2}}, {"node": node}
+            )["node"]
+        except ConfigError:
+            return
+
+        if mutual:
+            assert merged_node["next"]["back"] is merged_node
+        else:
+            assert merged_node["self"] is merged_node
+
+    def test_recursive_patch_bypasses_detached_dict_subclass_hooks(self):
+        marker = _HostileCallbackConfigError("private mutation marker")
+
+        class HostileDict(dict):
+            def __init__(self, *args, **kwargs):
+                self.armed = False
+                dict.__init__(self, *args, **kwargs)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)()
+                memo[id(self)] = copied
+                dict.update(copied, dict.items(self))
+                copied.armed = True
+                return copied
+
+            def __copy__(self):
+                copied = type(self)()
+                dict.update(copied, dict.items(self))
+                copied.armed = True
+                return copied
+
+            def get(self, *args, **kwargs):
+                if self.armed:
+                    raise marker
+                return dict.get(self, *args, **kwargs)
+
+            def pop(self, *args, **kwargs):
+                if self.armed:
+                    raise marker
+                return dict.pop(self, *args, **kwargs)
+
+            def __setitem__(self, key, value):
+                if self.armed:
+                    raise marker
+                return dict.__setitem__(self, key, value)
+
+        copied = merge_extends(
+            {"nested": {"new": 2}},
+            {"nested": HostileDict({"old": 1})},
+        )["nested"]
+
+        assert type(copied) is HostileDict
+        assert dict(copied) == {"old": 1, "new": 2}
+
+    def test_nested_custom_mapping_uses_its_deepcopy_protocol(self):
+        class CustomMapping(dict):
+            calls = 0
+
+            def __deepcopy__(self, memo):
+                type(self).calls += 1
+                copied = type(self)({"copied": True})
+                memo[id(self)] = copied
+                return copied
+
+        nested = CustomMapping({"source": True})
+
+        copied = merge_extends({"nested": nested}, {})["nested"]
+
+        assert type(copied) is CustomMapping
+        assert copied == {"copied": True}
+        assert CustomMapping.calls == 1
+
+    def test_callback_configerror_from_deepcopy_is_replaced_statically(self):
+        marker = _HostileCallbackConfigError("private deepcopy marker")
+
+        class FailingLeaf:
+            def __deepcopy__(self, memo):
+                raise marker
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"value": FailingLeaf()}, {})
+
+        assert caught.value is not marker
+        assert "merge_extends" in str(caught.value)
+
+    @pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
+    def test_callback_configerror_from_mapping_traversal_is_replaced_statically(
+        self, seam
+    ):
+        marker = _HostileCallbackConfigError("private mapping marker")
+
+        class FailingIterator:
+            def __init__(self):
+                self.done = False
+
+            def __iter__(self):
+                if seam == "iter":
+                    raise marker
+                return self
+
+            def __next__(self):
+                if seam == "next":
+                    raise marker
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                if seam == "unpack":
+                    class BrokenItem:
+                        def __iter__(self):
+                            raise marker
+
+                    return BrokenItem()
+                return "value", 1
+
+        class FailingMapping(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter(("value",))
+
+            def __getitem__(self, key):
+                return 1
+
+            def items(self):
+                if seam == "items":
+                    raise marker
+                return FailingIterator()
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(FailingMapping(), {})
+
+        assert caught.value is not marker
+        assert "merge_extends" in str(caught.value)
+
+    def test_nested_append_mapping_callback_configerror_is_replaced_statically(self):
+        marker = _HostileCallbackConfigError("private append marker")
+
+        class FailingAppend(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                raise marker
+
+            def __getitem__(self, key):
+                raise marker
+
+            def __contains__(self, key):
+                raise marker
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"items": FailingAppend()}, {"items": []})
+
+        assert caught.value is not marker
+        assert "merge_extends" in str(caught.value)
+
+    def test_compatibility_protocols_do_not_catch_baseexceptions(self):
+        class StopNow(BaseException):
+            pass
+
+        class StoppingLeaf:
+            def __deepcopy__(self, memo):
+                raise StopNow
+
+        class StoppingMapping(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                raise StopNow
+
+            def __getitem__(self, key):
+                raise StopNow
+
+            def items(self):
+                raise StopNow
+
+        with pytest.raises(StopNow):
+            merge_extends({"value": StoppingLeaf()}, {})
+        with pytest.raises(StopNow):
+            merge_extends(StoppingMapping(), {})
+
+    def test_compatibility_keys_are_canonicalized_before_use(self):
+        class HostileKey(str):
+            armed = False
+
+            def startswith(self, *args, **kwargs):
+                if self.armed:
+                    raise AssertionError("startswith must not run")
+                return str.startswith(self, *args, **kwargs)
+
+            def __hash__(self):
+                if self.armed:
+                    raise AssertionError("hash must not run")
+                return str.__hash__(self)
+
+            def __eq__(self, other):
+                if self.armed:
+                    raise AssertionError("equality must not run")
+                return str.__eq__(self, other)
+
+            def __repr__(self):
+                raise AssertionError("repr must not run")
+
+        key = HostileKey("value")
+        child = {key: 2}
+        key.armed = True
+
+        merged = merge_extends(child, {"kept": 1})
+
+        assert merged == {"kept": 1, "value": 2}
+        assert type(next(key for key in merged if key == "value")) is str
+
+    def test_compatibility_refuses_keys_that_collide_after_canonicalization(self):
+        class ItemsMapping(Mapping):
+            def __len__(self):
+                return 2
+
+            def __iter__(self):
+                return iter(("value", "value"))
+
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def items(self):
+                return iter((("value", 1), (_FancyStr("value"), 2)))
+
+        with pytest.raises(ConfigError, match="collide"):
+            merge_extends(ItemsMapping(), {})
 
     def test_append_with_a_sibling_key_is_refused(self):
         """{append: [...], other: ...} used to fall through to the

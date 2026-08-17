@@ -54,6 +54,29 @@ def _canonical_segment(value: object, *, where: str) -> OriginSegment:
     raise ConfigError(f"{where} must be str or int; got {type(value).__name__}.")
 
 
+def _mapping_pairs(mapping: Mapping, *, failure: str):
+    try:
+        pairs = mapping.items()
+    except Exception:
+        raise ConfigError(failure) from None
+    try:
+        iterator = iter(pairs)
+    except Exception:
+        raise ConfigError(failure) from None
+    while True:
+        try:
+            pair = next(iterator)
+        except StopIteration:
+            return
+        except Exception:
+            raise ConfigError(failure) from None
+        try:
+            key, value = pair
+        except Exception:
+            raise ConfigError(failure) from None
+        yield key, value
+
+
 @dataclass(frozen=True, slots=True)
 class OriginNode:
     """One value/container in the origin tree; the document root has no origin."""
@@ -62,35 +85,117 @@ class OriginNode:
     children: Mapping[OriginSegment, OriginNode]
 
     def __post_init__(self) -> None:
-        origin = (
-            None
-            if self.origin is None
-            else _canonical_origin(self.origin, where="origin node origin")
-        )
-        if not isinstance(self.children, Mapping):
-            raise ConfigError("origin children must be a mapping.")
-        canonical: dict[OriginSegment, OriginNode] = {}
+        rebuilt = _detach_origin_tree(self, public_origin_node=True)
+        object.__setattr__(self, "origin", rebuilt.origin)
+        object.__setattr__(self, "children", rebuilt.children)
+
+
+def _trusted_origin_node(
+    origin: Origin | None,
+    children: Mapping[OriginSegment, OriginNode],
+) -> OriginNode:
+    node = object.__new__(OriginNode)
+    object.__setattr__(node, "origin", origin)
+    object.__setattr__(node, "children", children)
+    return node
+
+
+def _detach_origin_tree(
+    root: OriginNode, *, public_origin_node: bool
+) -> OriginNode:
+    completed: dict[int, list[tuple[object, OriginNode]]] = {}
+    active: dict[int, list[object]] = {}
+    traversal_failure = (
+        "origin children mapping traversal failed."
+        if public_origin_node
+        else "merge result origin tree children traversal failed."
+    )
+
+    def rebuild(node: object) -> OriginNode:
+        if not isinstance(node, OriginNode):
+            message = (
+                "origin child value must be an OriginNode; got "
+                if public_origin_node
+                else "merge result origin tree children must be OriginNode values; got "
+            )
+            raise ConfigError(f"{message}{type(node).__name__}.")
+        identity = id(node)
+        for source, result in completed.get(identity, ()):
+            if source is node:
+                return result
+        bucket = active.setdefault(identity, [])
+        if any(source is node for source in bucket):
+            raise ConfigError(
+                "origin tree must be acyclic."
+                if public_origin_node
+                else "merge result origin tree must be acyclic."
+            )
+        bucket.append(node)
         try:
-            for segment, child in self.children.items():
-                exact_segment = _canonical_segment(
-                    segment, where="origin child segment"
+            origin = (
+                None
+                if node.origin is None
+                else _canonical_origin(
+                    node.origin,
+                    where=(
+                        "origin node origin"
+                        if public_origin_node
+                        else "merge result origin tree origin"
+                    ),
                 )
-                if not isinstance(child, OriginNode):
-                    raise ConfigError(
-                        "origin child value must be an OriginNode; got "
-                        f"{type(child).__name__}."
-                    )
+            )
+            if not isinstance(node.children, Mapping):
+                raise ConfigError(
+                    "origin children must be a mapping."
+                    if public_origin_node
+                    else "merge result origin tree children must be a mapping."
+                )
+            canonical: dict[OriginSegment, OriginNode] = {}
+            for segment, child in _mapping_pairs(
+                node.children, failure=traversal_failure
+            ):
+                exact_segment = _canonical_segment(
+                    segment,
+                    where=(
+                        "origin child segment"
+                        if public_origin_node
+                        else "merge result origin tree segment"
+                    ),
+                )
                 if exact_segment in canonical:
                     raise ConfigError(
                         "origin child segments collide after canonicalization."
+                        if public_origin_node
+                        else "merge result origin tree segments collide after "
+                        "canonicalization."
                     )
-                canonical[exact_segment] = child
-        except ConfigError:
-            raise
-        except Exception:
-            raise ConfigError("origin children mapping traversal failed.") from None
-        object.__setattr__(self, "origin", origin)
-        object.__setattr__(self, "children", MappingProxyType(canonical))
+                canonical[exact_segment] = rebuild(child)
+            result = _trusted_origin_node(
+                origin, MappingProxyType(canonical)
+            )
+            completed.setdefault(identity, []).append((node, result))
+            return result
+        finally:
+            assert bucket.pop() is node
+            if not bucket:
+                del active[identity]
+
+    try:
+        return rebuild(root)
+    except ConfigError:
+        raise
+    except RecursionError:
+        raise ConfigError(
+            "origin tree recursion exceeds the supported depth."
+            if public_origin_node
+            else "merge result origin tree recursion exceeds the supported depth."
+        ) from None
+    except Exception:
+        raise ConfigError(
+            "origin tree protocol failed."
+            if public_origin_node
+            else "merge result origin tree protocol failed."
+        ) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,76 +222,7 @@ class DeletionRecord:
 
 
 def _canonicalize_origin_tree(root: OriginNode) -> OriginNode:
-    completed: dict[int, OriginNode] = {}
-    active: set[int] = set()
-
-    def canonicalize(node: object) -> OriginNode:
-        if not isinstance(node, OriginNode):
-            raise ConfigError(
-                "merge result origin tree children must be OriginNode values."
-            )
-        identity = id(node)
-        if identity in completed:
-            return completed[identity]
-        if identity in active:
-            raise ConfigError("merge result origin tree must be acyclic.")
-        active.add(identity)
-        try:
-            canonical_origin = (
-                None
-                if node.origin is None
-                else _canonical_origin(
-                    node.origin, where="merge result origin tree origin"
-                )
-            )
-            if not isinstance(node.children, Mapping):
-                raise ConfigError(
-                    "merge result origin tree children must be a mapping."
-                )
-            canonical_children: dict[OriginSegment, OriginNode] = {}
-            changed = (
-                type(node) is not OriginNode
-                or type(node.children) is not MappingProxyType
-                or canonical_origin is not node.origin
-            )
-            try:
-                items = tuple(node.children.items())
-            except Exception:
-                raise ConfigError(
-                    "merge result origin tree children traversal failed."
-                ) from None
-            for segment, child in items:
-                exact_segment = _canonical_segment(
-                    segment, where="merge result origin tree segment"
-                )
-                exact_child = canonicalize(child)
-                if exact_segment in canonical_children:
-                    raise ConfigError(
-                        "merge result origin tree segments collide after "
-                        "canonicalization."
-                    )
-                canonical_children[exact_segment] = exact_child
-                changed = changed or exact_segment is not segment or exact_child is not child
-            result = (
-                OriginNode(canonical_origin, canonical_children)
-                if changed
-                else node
-            )
-            completed[identity] = result
-            return result
-        finally:
-            active.remove(identity)
-
-    try:
-        return canonicalize(root)
-    except ConfigError:
-        raise
-    except RecursionError:
-        raise ConfigError(
-            "merge result origin tree recursion exceeds the supported depth."
-        ) from None
-    except Exception:
-        raise ConfigError("merge result origin tree protocol failed.") from None
+    return _detach_origin_tree(root, public_origin_node=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,12 +260,32 @@ class MergeResult:
         object.__setattr__(self, "deletions", deletions)
 
 
+def _trusted_merge_result(
+    document: Mapping[str, object],
+    origins: OriginNode,
+    deletions: tuple[DeletionRecord, ...],
+) -> MergeResult:
+    """Build an internal result from lockstep COW fragments already validated."""
+    assert type(document) is MappingProxyType
+    assert type(origins) is OriginNode
+    assert origins.origin is None
+    assert type(origins.children) is MappingProxyType
+    assert len(document) == len(origins.children)
+    result = object.__new__(MergeResult)
+    object.__setattr__(result, "document", document)
+    object.__setattr__(result, "origins", origins)
+    object.__setattr__(result, "deletions", deletions)
+    return result
+
+
 def _validate_parallel_origin_tree(
     document: Mapping[str, object], origins: OriginNode
 ) -> None:
     pending: list[tuple[object, OriginNode, bool]] = [(document, origins, True)]
-    seen_pairs: set[tuple[int, int]] = set()
-    document_origins: dict[int, int] = {}
+    seen_pairs: dict[
+        tuple[int, int], list[tuple[object, OriginNode]]
+    ] = {}
+    document_origins: dict[int, list[tuple[object, OriginNode]]] = {}
     while pending:
         value, node, is_root = pending.pop()
         if not isinstance(node, OriginNode):
@@ -254,18 +310,30 @@ def _validate_parallel_origin_tree(
         if is_alias_container:
             document_identity = id(value)
             origin_identity = id(node)
-            prior_origin = document_origins.setdefault(
-                document_identity, origin_identity
+            origins_bucket = document_origins.setdefault(document_identity, [])
+            prior = next(
+                (
+                    prior_node
+                    for prior_value, prior_node in origins_bucket
+                    if prior_value is value
+                ),
+                None,
             )
-            if prior_origin != origin_identity:
+            if prior is not None and prior is not node:
                 raise ConfigError(
                     "merge result origin tree assigns divergent origins to "
                     "one shared document container."
                 )
+            if prior is None:
+                origins_bucket.append((value, node))
             pair = (document_identity, origin_identity)
-            if pair in seen_pairs:
+            pair_bucket = seen_pairs.setdefault(pair, [])
+            if any(
+                prior_value is value and prior_node is node
+                for prior_value, prior_node in pair_bucket
+            ):
                 continue
-            seen_pairs.add(pair)
+            pair_bucket.append((value, node))
 
         children = node.children
         try:
@@ -317,7 +385,9 @@ def _frozen_children(
 
 
 def _origin_node(
-    value: object, origin: Origin, memo: dict[int, OriginNode] | None = None
+    value: object,
+    origin: Origin,
+    memo: dict[int, list[tuple[object, OriginNode]]] | None = None,
 ) -> OriginNode:
     if memo is None:
         memo = {}
@@ -325,8 +395,10 @@ def _origin_node(
     memoized = isinstance(value, Mapping) or (
         isinstance(value, tuple) and tuple.__len__(value) != 0
     )
-    if memoized and identity in memo:
-        return memo[identity]
+    if memoized:
+        for source, node in memo.get(identity, ()):
+            if source is value:
+                return node
     if isinstance(value, Mapping):
         children = {
             key: _origin_node(item, origin, memo) for key, item in value.items()
@@ -338,15 +410,17 @@ def _origin_node(
         }
     else:
         children = {}
-    result = OriginNode(origin=origin, children=_frozen_children(children))
+    result = _trusted_origin_node(
+        origin=origin, children=_frozen_children(children)
+    )
     if memoized:
-        memo[identity] = result
+        memo.setdefault(identity, []).append((value, result))
     return result
 
 
 def _root_node(document: Mapping[str, object], origin: Origin) -> OriginNode:
-    memo: dict[int, OriginNode] = {}
-    return OriginNode(
+    memo: dict[int, list[tuple[object, OriginNode]]] = {}
+    return _trusted_origin_node(
         origin=None,
         children=_frozen_children(
             {
@@ -366,7 +440,7 @@ def initial_merge(document: Mapping[str, object], *, origin: Origin) -> MergeRes
     origin = _canonical_origin(origin, where="initial_merge origin")
     evidence = freeze_evidence(document, where="initial_merge document")
     assert isinstance(evidence, Mapping)
-    return MergeResult(
+    return _trusted_merge_result(
         document=evidence,
         origins=_root_node(evidence, origin),
         deletions=(),
@@ -383,9 +457,18 @@ def _append_value(
     context: _MergeContext,
 ) -> tuple[tuple[object, ...], OriginNode]:
     cache_key = (id(inherited), id(inherited_origin), id(given))
-    cached = context.appends.get(cache_key)
-    if cached is not None:
-        return cached
+    for (
+        cached_inherited,
+        cached_origin,
+        cached_given,
+        cached_result,
+    ) in context.appends.get(cache_key, ()):
+        if (
+            cached_inherited is inherited
+            and cached_origin is inherited_origin
+            and cached_given is given
+        ):
+            return cached_result
     if set(given) != {"append"}:
         siblings = sorted(str(item) for item in set(given) - {"append"})
         raise ConfigError(
@@ -405,7 +488,9 @@ def _append_value(
         )
     if tuple.__len__(appended) == 0:
         result = (inherited, inherited_origin)
-        context.appends[cache_key] = result
+        context.appends.setdefault(cache_key, []).append(
+            (inherited, inherited_origin, given, result)
+        )
         return result
     values = tuple([*inherited, *appended])
     inherited_children = dict(inherited_origin.children)
@@ -418,12 +503,14 @@ def _append_value(
     )
     result = (
         values,
-        OriginNode(
+        _trusted_origin_node(
             origin=inherited_origin.origin,
             children=_frozen_children(inherited_children),
         ),
     )
-    context.appends[cache_key] = result
+    context.appends.setdefault(cache_key, []).append(
+        (inherited, inherited_origin, given, result)
+    )
     return result
 
 
@@ -439,17 +526,34 @@ class _MergeContext:
 
     def __init__(self) -> None:
         self.appends: dict[
-            tuple[int, int, int], tuple[tuple[object, ...], OriginNode]
+            tuple[int, int, int],
+            list[
+                tuple[
+                    object,
+                    OriginNode,
+                    Mapping[object, object],
+                    tuple[tuple[object, ...], OriginNode],
+                ]
+            ],
         ] = {}
         self.fragments: dict[
             tuple[int, int, int],
-            tuple[
-                Mapping[str, object],
-                OriginNode,
-                tuple[tuple[OriginSegment, ...], ...],
+            list[
+                tuple[
+                    Mapping[str, object],
+                    OriginNode,
+                    Mapping[str, object],
+                    tuple[
+                        Mapping[str, object],
+                        OriginNode,
+                        tuple[tuple[OriginSegment, ...], ...],
+                    ],
+                ]
             ],
         ] = {}
-        self.origin_nodes: dict[int, OriginNode] = {}
+        self.origin_nodes: dict[
+            int, list[tuple[object, OriginNode]]
+        ] = {}
 
 
 def _merge_mapping(
@@ -464,9 +568,18 @@ def _merge_mapping(
     Mapping[str, object], OriginNode, tuple[tuple[OriginSegment, ...], ...]
 ]:
     cache_key = (id(base), id(base_origins), id(patch))
-    cached = context.fragments.get(cache_key)
-    if cached is not None:
-        return cached
+    for (
+        cached_base,
+        cached_origins,
+        cached_patch,
+        cached_result,
+    ) in context.fragments.get(cache_key, ()):
+        if (
+            cached_base is base
+            and cached_origins is base_origins
+            and cached_patch is patch
+        ):
+            return cached_result
     merged = dict(base)
     children = dict(base_origins.children)
     deletions: list[tuple[OriginSegment, ...]] = []
@@ -523,13 +636,15 @@ def _merge_mapping(
         children[key] = _origin_node(value, origin, context.origin_nodes)
     result = (
         MappingProxyType(merged),
-        OriginNode(
+        _trusted_origin_node(
             origin=base_origins.origin,
             children=_frozen_children(children),
         ),
         tuple(deletions),
     )
-    context.fragments[cache_key] = result
+    context.fragments.setdefault(cache_key, []).append(
+        (base, base_origins, patch, result)
+    )
     return result
 
 
@@ -561,10 +676,10 @@ def merge_with_origins(
         diagnostic_prefix=(),
     )
     deletions = (*parent.deletions, *(DeletionRecord(path, origin) for path in relative_deletions))
-    return MergeResult(
+    return _trusted_merge_result(
         document=document,
         origins=origins,
-        deletions=deletions,
+        deletions=tuple(deletions),
     )
 
 
@@ -591,91 +706,244 @@ def origins_at(origins: OriginNode, path: Sequence[OriginSegment]) -> Origin:
     return node.origin
 
 
-def _compatibility_deepcopy(value: object) -> object:
-    """Use standard deepcopy topology while materializing frozen mapping views."""
+_COMPATIBILITY_FAILURE = "merge_extends: compatibility traversal or deepcopy failed."
+
+
+def _compatibility_pairs(
+    mapping: Mapping,
+    *,
+    deepcopy_memo: dict[int, object] | None = None,
+    retained_keys: list[object] | None = None,
+) -> dict[str, object]:
+    canonical: dict[str, object] = {}
+    for key, value in _mapping_pairs(
+        mapping, failure=_COMPATIBILITY_FAILURE
+    ):
+        if not isinstance(key, str):
+            raise ConfigError(
+                "merge_extends: keys are strings; got "
+                f"{type(key).__name__}."
+            )
+        exact_key = str.__str__(key)
+        if deepcopy_memo is not None and type(key) is not str:
+            deepcopy_memo[id(key)] = exact_key
+            assert retained_keys is not None
+            retained_keys.append(key)
+        if exact_key in canonical:
+            raise ConfigError(
+                "merge_extends: keys collide after canonicalization."
+            )
+        canonical[exact_key] = value
+    return canonical
+
+
+def _compatibility_deepcopy_roots(
+    parent: Mapping, child: Mapping
+) -> tuple[Mapping, Mapping]:
+    """Detach both roots in one deepcopy graph, materializing only frozen views."""
     memo: dict[int, object] = {}
-    mappings: list[tuple[Mapping, dict[object, object]]] = []
-    seen: set[int] = set()
+    proxies: list[tuple[MappingProxyType, dict[object, object]]] = []
+    seen: dict[int, list[object]] = {}
+    retained_keys: list[object] = []
+
+    def protocol_values(value: object):
+        try:
+            iterator = iter(value)  # type: ignore[arg-type]
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        while True:
+            try:
+                yield next(iterator)
+            except StopIteration:
+                return
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
     def discover(item: object) -> None:
         identity = id(item)
-        if identity in seen:
+        bucket = seen.setdefault(identity, [])
+        if any(source is item for source in bucket):
             return
-        seen.add(identity)
-        if isinstance(item, Mapping):
+        bucket.append(item)
+        if type(item) is MappingProxyType:
             shell: dict[object, object] = {}
             memo[identity] = shell
-            mappings.append((item, shell))
-            for key, child in item.items():
-                discover(key)
-                discover(child)
+            proxies.append((item, shell))
+            canonical = _compatibility_pairs(
+                item,
+                deepcopy_memo=memo,
+                retained_keys=retained_keys,
+            )
+            for nested in canonical.values():
+                discover(nested)
+        elif isinstance(item, Mapping):
+            if getattr(type(item), "__deepcopy__", None) is not None:
+                return
+            canonical = _compatibility_pairs(
+                item,
+                deepcopy_memo=memo,
+                retained_keys=retained_keys,
+            )
+            for nested in canonical.values():
+                discover(nested)
         elif isinstance(item, list | tuple | set | frozenset):
-            for child in item:
-                discover(child)
+            for nested in protocol_values(item):
+                discover(nested)
 
-    discover(value)
-    for original, shell in mappings:
-        for key, item in original.items():
-            shell[copy.deepcopy(key, memo)] = copy.deepcopy(item, memo)
-    return copy.deepcopy(value, memo)
+    # Validate the two control mappings before copy protocols can touch their keys.
+    _compatibility_pairs(
+        parent, deepcopy_memo=memo, retained_keys=retained_keys
+    )
+    _compatibility_pairs(
+        child, deepcopy_memo=memo, retained_keys=retained_keys
+    )
+    discover((parent, child))
+
+    def detached(value: object) -> object:
+        try:
+            return copy.deepcopy(value, memo)
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+    for original, shell in proxies:
+        for key, value in _mapping_pairs(
+            original, failure=_COMPATIBILITY_FAILURE
+        ):
+            shell[detached(key)] = detached(value)
+    roots = detached((parent, child))
+    assert isinstance(roots, tuple) and len(roots) == 2
+    detached_parent, detached_child = roots
+    if not isinstance(detached_parent, Mapping) or not isinstance(
+        detached_child, Mapping
+    ):
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    return detached_parent, detached_child
+
+
+def _compatibility_reaches_mapping(
+    values: object,
+    target: Mapping,
+) -> bool:
+    """Detect whether a shallow COW shell would break a cycle to ``target``."""
+    try:
+        pending = list(values)  # values is an exact dict view at call sites
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    seen: dict[int, list[object]] = {}
+    while pending:
+        item = pending.pop()
+        if item is target:
+            return True
+        if isinstance(item, Mapping):
+            identity = id(item)
+            bucket = seen.setdefault(identity, [])
+            if any(source is item for source in bucket):
+                continue
+            bucket.append(item)
+            pending.extend(_compatibility_pairs(item).values())
+            continue
+        if isinstance(item, list | tuple | set | frozenset):
+            try:
+                iterator = iter(item)
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
+            while True:
+                try:
+                    pending.append(next(iterator))
+                except StopIteration:
+                    break
+                except Exception:
+                    raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    return False
 
 
 def _merge_extends_compat(
-    child: Mapping, parent: Mapping, *, active_children: set[int]
+    child: Mapping,
+    parent: Mapping,
+    *,
+    active_children: dict[int, list[object]],
+    reuse_parent: bool,
 ) -> dict:
     child_identity = id(child)
-    if child_identity in active_children:
+    active_bucket = active_children.setdefault(child_identity, [])
+    if any(source is child for source in active_bucket):
         raise ConfigError(
             "merge_extends: overlapping cyclic mappings cannot be merged."
         )
-    active_children.add(child_identity)
+    active_bucket.append(child)
     try:
-        merged = _compatibility_deepcopy(parent)
-        assert isinstance(merged, dict)
-        for key, value in child.items():
-            if not isinstance(key, str):
-                raise ConfigError(
-                    "merge_extends: keys are strings; got "
-                    f"{type(key).__name__} ({key!r})."
-                )
-            if key.startswith("~"):
+        parent_values = _compatibility_pairs(parent)
+        if not reuse_parent and _compatibility_reaches_mapping(
+            parent_values.values(), parent
+        ):
+            raise ConfigError(
+                "merge_extends: overlapping cyclic mappings cannot be merged."
+            )
+        if reuse_parent and isinstance(parent, dict):
+            merged = parent
+        elif type(parent) is dict:
+            merged = dict(parent_values)
+        elif isinstance(parent, dict):
+            try:
+                merged = copy.copy(parent)
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
+            if not isinstance(merged, dict):
+                raise ConfigError(_COMPATIBILITY_FAILURE)
+        else:
+            merged = dict(parent_values)
+        if isinstance(merged, dict):
+            dict.clear(merged)
+            dict.update(merged, parent_values)
+        child_values = _compatibility_pairs(child)
+        for key, value in child_values.items():
+            if str.startswith(key, "~"):
                 target = _deletion_target(key)
                 if value is not None:
                     raise ConfigError(f"{key!r}: deletion value must be null.")
-                merged.pop(target, None)
+                dict.pop(merged, target, None)
                 continue
-            if isinstance(value, Mapping) and "append" in value:
-                if set(value) != {"append"}:
-                    siblings = sorted(str(item) for item in set(value) - {"append"})
+            value_mapping = (
+                _compatibility_pairs(value)
+                if isinstance(value, Mapping)
+                else None
+            )
+            if value_mapping is not None and "append" in value_mapping:
+                if set(value_mapping) != {"append"}:
+                    siblings = sorted(set(value_mapping) - {"append"})
                     raise ConfigError(
                         f"{key!r}: append must be the only key when extending a list; "
                         f"got the sibling keys {siblings}."
                     )
-                appended = value["append"]
+                appended = value_mapping["append"]
                 if not isinstance(appended, list | tuple):
                     raise ConfigError(
                         f"{key!r}: append is a sequence; got "
-                        f"{type(appended).__name__} ({appended!r})."
+                        f"{type(appended).__name__}."
                     )
-                inherited = merged.get(key, [])
+                inherited = dict.get(merged, key, [])
                 if not isinstance(inherited, list):
                     raise ConfigError(
                         f"{key!r} is extended with {{append: ...}} but the inherited "
                         f"value is {type(inherited).__name__}, not a list."
                     )
-                copied = _compatibility_deepcopy(appended)
-                assert isinstance(copied, tuple | list)
-                merged[key] = [*inherited, *copied]
+                dict.__setitem__(merged, key, [*inherited, *appended])
                 continue
-            if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
-                merged[key] = _merge_extends_compat(
-                    value, merged[key], active_children=active_children
-                )
+            inherited = dict.get(merged, key)
+            if isinstance(value, Mapping) and isinstance(inherited, Mapping):
+                dict.__setitem__(merged, key, _merge_extends_compat(
+                    value,
+                    inherited,
+                    active_children=active_children,
+                    reuse_parent=False,
+                ))
                 continue
-            merged[key] = _compatibility_deepcopy(value)
+            dict.__setitem__(merged, key, value)
         return merged
     finally:
-        active_children.remove(child_identity)
+        assert active_bucket.pop() is child
+        if not active_bucket:
+            del active_children[child_identity]
 
 
 def merge_extends(child: dict, parent: dict) -> dict:
@@ -687,7 +955,17 @@ def merge_extends(child: dict, parent: dict) -> dict:
                 f"{type(given).__name__}."
             )
     try:
-        return _merge_extends_compat(child, parent, active_children=set())
+        detached_parent, detached_child = _compatibility_deepcopy_roots(
+            parent, child
+        )
+        return _merge_extends_compat(
+            detached_child,
+            detached_parent,
+            active_children={},
+            reuse_parent=True,
+        )
+    except ConfigError:
+        raise
     except RecursionError as exc:
         raise ConfigError(
             "merge_extends: value graph recursion exceeds the supported depth."
@@ -707,29 +985,61 @@ def recursive_update(base: Mapping, patch: Mapping) -> dict:
 
 def apply_variant(document: Mapping, name: str) -> dict:
     """Return the document with one named one-level variant patch applied."""
-    variants = document.get("variants") or {}
+    if not isinstance(document, Mapping):
+        raise ConfigError(
+            "variant document is a mapping; got "
+            f"{type(document).__name__}."
+        )
+    if not isinstance(name, str):
+        raise ConfigError(
+            "variant name is a string; got " f"{type(name).__name__}."
+        )
+    name = str.__str__(name)
+
+    def mapping_values(mapping: Mapping) -> dict[str, object]:
+        canonical: dict[str, object] = {}
+        for key, value in _mapping_pairs(
+            mapping, failure="apply_variant: mapping traversal failed."
+        ):
+            if not isinstance(key, str):
+                raise ConfigError(
+                    "apply_variant: mapping keys are strings; got "
+                    f"{type(key).__name__}."
+                )
+            exact_key = str.__str__(key)
+            if exact_key in canonical:
+                raise ConfigError(
+                    "apply_variant: mapping keys collide after canonicalization."
+                )
+            canonical[exact_key] = value
+        return canonical
+
+    document_values = mapping_values(document)
+    variants = document_values.get("variants", {})
     if not isinstance(variants, Mapping):
         raise ConfigError(
             f"variants: is a mapping of name -> patch; got "
-            f"{type(variants).__name__} ({variants!r})."
+            f"{type(variants).__name__}."
         )
-    if not variants:
+    variant_values = mapping_values(variants)
+    if not variant_values:
         raise ConfigError(
             f"variant {name!r} was requested but this document declares no variants."
         )
-    if name not in variants:
+    if name not in variant_values:
         raise ConfigError(
             f"variant {name!r} is not declared; this document declares "
-            f"{sorted(variants)}."
+            f"{sorted(variant_values)}."
         )
-    patch = variants[name]
+    patch = variant_values[name]
     if not isinstance(patch, Mapping):
         raise ConfigError(
             f"variant {name!r}: the patch is a mapping of sections; got "
-            f"{type(patch).__name__} ({patch!r})."
+            f"{type(patch).__name__}."
         )
+    patch_values = mapping_values(patch)
     for key in ("variants", "~variants"):
-        if key in patch:
+        if key in patch_values:
             raise ConfigError(
                 f"variant {name!r} declares {key!r}. Layering is one level "
                 "deep by design: there is no ordering between variants and "
@@ -737,7 +1047,7 @@ def apply_variant(document: Mapping, name: str) -> dict:
                 "cannot drift apart through a chain."
             )
     for key in ("schema_version", "~schema_version"):
-        if key in patch:
+        if key in patch_values:
             raise ConfigError(
                 f"variant {name!r} touches {key!r}. The version belongs to "
                 "the document; a patch that changes -- or deletes -- how the "
@@ -754,23 +1064,20 @@ def parse_default(raw: object) -> PresetRequest:
             "defaults: each entry is a preset name or a {from:, only:} mapping."
         )
     canonical: dict[str, object] = {}
-    try:
-        for key, value in raw.items():
-            if not isinstance(key, str):
-                raise ConfigError(
-                    "defaults: preset entry keys are strings; got "
-                    f"{type(key).__name__}."
-                )
-            exact_key = str.__str__(key)
-            if exact_key in canonical:
-                raise ConfigError(
-                    "defaults: preset entry keys collide after canonicalization."
-                )
-            canonical[exact_key] = value
-    except ConfigError:
-        raise
-    except Exception:
-        raise ConfigError("defaults: preset entry mapping traversal failed.") from None
+    for key, value in _mapping_pairs(
+        raw, failure="defaults: preset entry mapping traversal failed."
+    ):
+        if not isinstance(key, str):
+            raise ConfigError(
+                "defaults: preset entry keys are strings; got "
+                f"{type(key).__name__}."
+            )
+        exact_key = str.__str__(key)
+        if exact_key in canonical:
+            raise ConfigError(
+                "defaults: preset entry keys collide after canonicalization."
+            )
+        canonical[exact_key] = value
     unknown = sorted(set(canonical) - {"from", "only"})
     if unknown:
         raise ConfigError(f"defaults: preset entry has unknown keys {unknown}.")
@@ -857,9 +1164,9 @@ def _without_key(result: MergeResult, key: str) -> MergeResult:
     document.pop(key, None)
     children = dict(result.origins.children)
     children.pop(key, None)
-    return MergeResult(
-        document=document,
-        origins=OriginNode(None, _frozen_children(children)),
+    return _trusted_merge_result(
+        document=MappingProxyType(document),
+        origins=_trusted_origin_node(None, _frozen_children(children)),
         deletions=tuple(result.deletions),
     )
 
@@ -884,9 +1191,9 @@ def _replace_key_with_node(
     document[key] = value
     children = dict(without.origins.children)
     children[key] = node
-    return MergeResult(
-        document=document,
-        origins=OriginNode(None, _frozen_children(children)),
+    return _trusted_merge_result(
+        document=MappingProxyType(document),
+        origins=_trusted_origin_node(None, _frozen_children(children)),
         deletions=tuple(result.deletions),
     )
 
@@ -894,6 +1201,8 @@ def _replace_key_with_node(
 def _apply_user_model(
     result: MergeResult, user_model: object, *, origin: Origin
 ) -> MergeResult:
+    if user_model is None:
+        return _replace_key(result, "model", None, origin=origin)
     if not isinstance(user_model, Mapping):
         raise ConfigError("model: is a mapping when package presets are layered.")
     if "inherit" not in user_model:
@@ -905,7 +1214,9 @@ def _apply_user_model(
     candidate_node = result.origins.children.get("model")
     if not isinstance(candidate, Mapping) or candidate_node is None:
         candidate = {}
-        candidate_node = OriginNode(origin=None, children=_frozen_children({}))
+        candidate_node = _trusted_origin_node(
+            origin=None, children=_frozen_children({})
+        )
     inherited: dict[str, object] = {}
     inherited_children: dict[str, OriginNode] = {}
     seen: set[str] = set()
@@ -921,7 +1232,7 @@ def _apply_user_model(
         inherited_children[name] = candidate_node.children[name]
     declared = {key: value for key, value in user_model.items() if key != "inherit"}
     model_origin = candidate_node.origin if inherited else origin
-    seed_node = OriginNode(
+    seed_node = _trusted_origin_node(
         origin=model_origin,
         children=_frozen_children(inherited_children),
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 
 import pytest
 
@@ -114,12 +115,83 @@ def test_parse_default_rejects_a_nonstring_selector_without_using_repr():
         parse_default({"from": "one", "only": [HostileSelector()]})
 
 
+class _ForgedCallbackConfigError(ConfigError):
+    def __str__(self):
+        raise AssertionError("callback exception text must not run")
+
+    def __repr__(self):
+        raise AssertionError("callback exception repr must not run")
+
+
+class _FailingItemsIterator:
+    def __init__(self, marker, seam):
+        self.marker = marker
+        self.seam = seam
+        self.done = False
+
+    def __iter__(self):
+        if self.seam == "iter":
+            raise self.marker
+        return self
+
+    def __next__(self):
+        if self.seam == "next":
+            raise self.marker
+        if self.done:
+            raise StopIteration
+        self.done = True
+        if self.seam == "unpack":
+            marker = self.marker
+
+            class BrokenItem:
+                def __iter__(self):
+                    raise marker
+
+            return BrokenItem()
+        return "from", "one"
+
+
+class _ProtocolMapping(Mapping):
+    def __init__(self, marker, seam):
+        self.marker = marker
+        self.seam = seam
+
+    def __len__(self):
+        return 1
+
+    def __iter__(self):
+        return iter(("from",))
+
+    def __getitem__(self, key):
+        if key == "from":
+            return "one"
+        raise KeyError(key)
+
+    def items(self):
+        if self.seam == "items":
+            raise self.marker
+        return _FailingItemsIterator(self.marker, self.seam)
+
+
+@pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
+def test_parse_default_replaces_callback_configerror_at_each_mapping_seam(seam):
+    marker = _ForgedCallbackConfigError("private marker")
+
+    with pytest.raises(ConfigError) as caught:
+        parse_default(_ProtocolMapping(marker, seam))
+
+    assert caught.value is not marker
+    assert str(caught.value) == "defaults: preset entry mapping traversal failed."
+
+
 def test_only_overlap_work_is_bounded_by_total_selector_segments():
     """Catches restoring a pairwise-quadratic overlap scan."""
     count = 2_000
-    selectors = [f"section_{index}.leaf" for index in range(count)]
+    selectors = [f"resources.section_{index}.leaf" for index in range(count)]
     document = {
-        f"section_{index}": {"leaf": index} for index in range(count)
+        "resources": {
+            f"section_{index}": {"leaf": index} for index in range(count)
+        }
     }
     request = parse_default({"from": "one", "only": selectors})
     target_code = layering_module._select_only.__code__
@@ -139,8 +211,8 @@ def test_only_overlap_work_is_bounded_by_total_selector_segments():
     finally:
         sys.settrace(None)
 
-    assert len(result.document) == count
-    total_segments = count * 2
+    assert len(result.document["resources"]) == count
+    total_segments = count * 3
     assert line_events <= total_segments * 40
 
 
@@ -363,6 +435,57 @@ def test_preset_provider_revalidates_an_exact_but_forged_snapshot():
         )
 
 
+@pytest.mark.parametrize(
+    "section",
+    [
+        "schema_version",
+        "defaults",
+        "plugins",
+        "variants",
+        "runs",
+        "outputs",
+        "campaign",
+        "unexpected_section",
+    ],
+)
+def test_preset_provider_cannot_introduce_a_forbidden_section(section):
+    forged = object.__new__(PresetSnapshot)
+    object.__setattr__(forged, "name", "one")
+    object.__setattr__(
+        forged, "resource", "rheplicant/config/presets/one.yaml"
+    )
+    object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
+    object.__setattr__(forged, "sha256", _FIXTURE_SHA256)
+    object.__setattr__(forged, "document", {section: {}})
+    object.__setattr__(forged, "expanded_nodes", 1)
+
+    with pytest.raises(ConfigError, match=section):
+        layer_presets(
+            {}, (parse_default("one"),), preset_provider=lambda _: forged
+        )
+
+
+def test_provider_snapshot_validation_replaces_callback_configerror():
+    marker = _ForgedCallbackConfigError("private snapshot marker")
+    forged = object.__new__(PresetSnapshot)
+    object.__setattr__(forged, "name", "one")
+    object.__setattr__(
+        forged, "resource", "rheplicant/config/presets/one.yaml"
+    )
+    object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
+    object.__setattr__(forged, "sha256", _FIXTURE_SHA256)
+    object.__setattr__(forged, "document", _ProtocolMapping(marker, "items"))
+    object.__setattr__(forged, "expanded_nodes", 1)
+
+    with pytest.raises(ConfigError) as caught:
+        layer_presets(
+            {}, (parse_default("one"),), preset_provider=lambda _: forged
+        )
+
+    assert caught.value is not marker
+    assert "preset:one" in str(caught.value)
+
+
 def test_preset_provider_requires_the_exact_snapshot_class():
     class SnapshotSubclass(PresetSnapshot):
         pass
@@ -408,6 +531,21 @@ def test_user_model_without_inherit_replaces_the_preset_candidate():
         preset_provider=_provider({"one": {"model": {"preset_node": {"x": 1}}}}),
     )
     assert thaw(result.document)["model"] == {"user_node": {"x": 2}}
+
+
+def test_explicit_user_null_model_replaces_the_preset_candidate():
+    result, _ = layer_presets(
+        {"model": None},
+        (parse_default("one"),),
+        preset_provider=_provider(
+            {"one": {"model": {"preset_node": {"x": 1}}}}
+        ),
+    )
+
+    assert "model" in result.document
+    assert result.document["model"] is None
+    assert result.origins.children["model"].origin is not None
+    assert result.origins.children["model"].origin.kind == "user"
 
 
 def test_model_inherit_copies_named_candidate_nodes_and_is_consumed():

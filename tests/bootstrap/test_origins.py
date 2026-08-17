@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from types import MappingProxyType
 
@@ -211,6 +212,65 @@ class _HostileInt(int):
         raise AssertionError("repr must not run")
 
 
+@pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
+def test_origin_node_replaces_a_callback_raised_configerror(seam):
+    class Marker(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    marker = Marker("private origin marker")
+
+    class FailingIterator:
+        def __init__(self):
+            self.done = False
+
+        def __iter__(self):
+            if seam == "iter":
+                raise marker
+            return self
+
+        def __next__(self):
+            if seam == "next":
+                raise marker
+            if self.done:
+                raise StopIteration
+            self.done = True
+            if seam == "unpack":
+                class BrokenItem:
+                    def __iter__(self):
+                        raise marker
+
+                return BrokenItem()
+            return "leaf", OriginNode(Origin("user"), {})
+
+    class FailingChildren(_ItemsMapping):
+        def items(self):
+            if seam == "items":
+                raise marker
+            return FailingIterator()
+
+    with pytest.raises(ConfigError) as caught:
+        OriginNode(None, FailingChildren([]))
+
+    assert caught.value is not marker
+    assert str(caught.value) == "origin children mapping traversal failed."
+
+
+def test_origin_node_does_not_catch_mapping_baseexceptions():
+    class StopNow(BaseException):
+        pass
+
+    class StoppingChildren(_ItemsMapping):
+        def items(self):
+            raise StopNow
+
+    with pytest.raises(StopNow):
+        OriginNode(None, StoppingChildren([]))
+
+
 def test_origin_records_canonicalize_origins_and_segments_to_exact_builtins():
     kind = _StatefulStr("preset")
     name = _StatefulStr("one")
@@ -286,7 +346,8 @@ def test_merge_result_requires_an_exact_parallel_origin_tree():
     valid_leaf = OriginNode(user, {})
     valid_root = OriginNode(None, {"value": valid_leaf})
     result = MergeResult({"value": 1}, valid_root, ())
-    assert result.origins is valid_root
+    assert result.origins is not valid_root
+    assert result.origins.children["value"] is not valid_leaf
 
     invalid_roots = (
         OriginNode(user, {"value": valid_leaf}),
@@ -297,6 +358,41 @@ def test_merge_result_requires_an_exact_parallel_origin_tree():
     for invalid_root in invalid_roots:
         with pytest.raises(ConfigError, match="origin tree"):
             MergeResult({"value": 1}, invalid_root, ())
+
+
+def test_public_origin_node_recursively_detaches_proxy_backing_mappings():
+    user = Origin("user")
+    leaf = OriginNode(user, {})
+    backing = {"leaf": leaf}
+    forged_child = object.__new__(OriginNode)
+    object.__setattr__(forged_child, "origin", user)
+    object.__setattr__(
+        forged_child, "children", MappingProxyType(backing)
+    )
+
+    root = OriginNode(None, {"branch": forged_child})
+    backing["late"] = leaf
+
+    rebuilt = root.children["branch"]
+    assert rebuilt is not forged_child
+    assert tuple(rebuilt.children) == ("leaf",)
+
+
+def test_public_merge_result_recursively_detaches_proxy_backing_mappings():
+    user = Origin("user")
+    leaf = OriginNode(user, {})
+    backing = {"value": leaf}
+    forged_root = object.__new__(OriginNode)
+    object.__setattr__(forged_root, "origin", None)
+    object.__setattr__(
+        forged_root, "children", MappingProxyType(backing)
+    )
+
+    result = MergeResult({"value": 1}, forged_root, ())
+    backing["late"] = leaf
+
+    assert result.origins is not forged_root
+    assert tuple(result.origins.children) == ("value",)
 
 
 def test_merge_result_requires_sequence_indices_to_match_exactly():
@@ -323,7 +419,11 @@ def test_merge_result_compares_origin_segments_by_exact_type_and_value(alias):
         "children",
         MappingProxyType({0: first, alias: second}),
     )
-    root = OriginNode(None, {"items": forged_sequence})
+    root = object.__new__(OriginNode)
+    object.__setattr__(root, "origin", None)
+    object.__setattr__(
+        root, "children", MappingProxyType({"items": forged_sequence})
+    )
 
     with pytest.raises(ConfigError, match="origin tree"):
         MergeResult({"items": [1, 2]}, root, ())
@@ -379,6 +479,66 @@ def test_origin_alias_memo_is_shared_within_but_not_across_initial_merges():
     assert first.origins.children["left"] is not second.origins.children["left"]
 
 
+class _EphemeralOriginMapping(Mapping):
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+    def __len__(self):
+        return 1
+
+    def __iter__(self):
+        return iter((f"leaf_{self.value}",))
+
+    def __getitem__(self, key):
+        if key == f"leaf_{self.value}":
+            return self.value
+        raise KeyError(key)
+
+
+class _GenerativeOriginMapping(Mapping):
+    def __init__(self, count):
+        self.count = count
+        self.prior_ids = []
+        self.built_sources = []
+
+    def __len__(self):
+        return self.count
+
+    def __iter__(self):
+        return iter(f"key_{index}" for index in range(self.count))
+
+    def __getitem__(self, key):
+        raise KeyError(key)
+
+    def items(self):
+        for index in range(self.count):
+            child = _EphemeralOriginMapping(index)
+            self.built_sources.append(child)
+            self.prior_ids.append(id(child))
+            yield f"key_{index}", child
+
+
+def test_origin_builder_strongly_retains_generative_mapping_identities(monkeypatch):
+    real_id = id
+    def colliding_id(value):
+        if isinstance(value, _EphemeralOriginMapping):
+            return 17
+        return real_id(value)
+
+    monkeypatch.setattr(layering_module, "id", colliding_id, raising=False)
+    source = _GenerativeOriginMapping(12)
+
+    node = layering_module._origin_node(source, Origin("user"))
+
+    assert tuple(
+        tuple(node.children[f"key_{index}"].children)
+        for index in range(12)
+    ) == tuple((f"leaf_{index}",) for index in range(12))
+    assert len({real_id(value) for value in source.built_sources}) == 12
+
+
 def test_one_branch_merge_splits_that_occurrence_but_keeps_nested_aliases():
     nested = {"value": 1}
     shared = {"nested": nested}
@@ -399,6 +559,68 @@ def test_one_branch_merge_splits_that_occurrence_but_keeps_nested_aliases():
         result.origins.children["left"].children["nested"]
         is result.origins.children["right"].children["nested"]
     )
+
+
+def test_one_branch_merge_preserves_untouched_parent_branches_by_identity():
+    parent = initial_merge(
+        {
+            "changed": {"before": 1},
+            "untouched": {"deep": {"value": 2}},
+        },
+        origin=Origin("user"),
+    )
+
+    result = merge_with_origins(
+        parent,
+        {"changed": {"after": 3}},
+        origin=Origin("preset", "one"),
+    )
+
+    assert result.document["untouched"] is parent.document["untouched"]
+    assert (
+        result.origins.children["untouched"]
+        is parent.origins.children["untouched"]
+    )
+
+
+def test_internal_merge_work_does_not_scale_with_an_untouched_branch():
+    def merge_line_events(width):
+        parent = initial_merge(
+            {
+                "untouched": {
+                    f"item_{index}": index for index in range(width)
+                }
+            },
+            origin=Origin("user"),
+        )
+        line_events = 0
+
+        def trace(frame, event, arg):
+            nonlocal line_events
+            if event == "line" and frame.f_code.co_filename.endswith(
+                ("/_rheplicant_bootstrap/frozen.py", "/_rheplicant_bootstrap/layering.py")
+            ):
+                line_events += 1
+            return trace
+
+        sys.settrace(trace)
+        try:
+            result = merge_with_origins(
+                parent, {"added": 1}, origin=Origin("preset", "one")
+            )
+        finally:
+            sys.settrace(None)
+        assert result.document["untouched"] is parent.document["untouched"]
+        assert (
+            result.origins.children["untouched"]
+            is parent.origins.children["untouched"]
+        )
+        return line_events
+
+    small = merge_line_events(1)
+    large = merge_line_events(5_000)
+
+    assert large <= small + 100
 
 
 def test_identical_recursive_merge_state_reuses_one_result_fragment():
@@ -524,16 +746,25 @@ def test_shared_binary_dag_remains_linear_through_merge_and_validation(monkeypat
     for _ in range(levels):
         shared = {"left": shared, "right": shared}
     document = {"tree": shared}
-    monkeypatch.setattr(layering_module, "OriginNode", _CountingOriginNode)
-    _CountingOriginNode.allocations = 0
+    original_trusted = layering_module._trusted_origin_node
+    allocations = 0
+
+    def counted_trusted(origin, children):
+        nonlocal allocations
+        allocations += 1
+        return original_trusted(origin, children)
+
+    monkeypatch.setattr(
+        layering_module, "_trusted_origin_node", counted_trusted
+    )
 
     result = initial_merge(document, origin=Origin("user"))
-    initial_allocations = _CountingOriginNode.allocations
-    _CountingOriginNode.allocations = 0
+    initial_allocations = allocations
+    allocations = 0
     merged = merge_with_origins(
         result, {"marker": 2}, origin=Origin("preset", "one")
     )
-    merge_allocations = _CountingOriginNode.allocations
+    merge_allocations = allocations
     unique_origin_nodes = _instrument_origin_children(result.origins)
     _CountingChildren.iterations = 0
     _CountingChildren.lookups = 0

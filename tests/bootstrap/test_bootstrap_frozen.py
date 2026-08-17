@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import struct
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -405,3 +405,344 @@ def test_freeze_evidence_normalizes_a_nested_recursion_error():
 
     with pytest.raises(ConfigError, match=r"snapshot\.document.*RecursingList"):
         _freeze_evidence(RecursingList([1]), where="snapshot.document")
+
+
+class _EphemeralChild(Sequence):
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        if index == 0:
+            return self.value
+        raise IndexError
+
+
+class _GenerativeSequence(Sequence):
+    def __init__(self, count):
+        self.count = count
+        self.emitted_ids = []
+        self.built_sources = []
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self, index):
+        raise AssertionError("the declared iterator must be used")
+
+    def __iter__(self):
+        for index in range(self.count):
+            child = _EphemeralChild(index)
+            self.built_sources.append(child)
+            self.emitted_ids.append(id(child))
+            yield child
+
+
+class _GenerativeItems:
+    def __init__(self, count):
+        self.count = count
+        self.emitted_ids = []
+        self.built_sources = []
+
+    def __iter__(self):
+        for index in range(self.count):
+            child = _EphemeralChild(index)
+            self.built_sources.append(child)
+            self.emitted_ids.append(id(child))
+            yield f"key_{index}", child
+
+
+class _GenerativeMapping(Mapping):
+    def __init__(self, count):
+        self.generated = _GenerativeItems(count)
+
+    def __len__(self):
+        return self.generated.count
+
+    def __iter__(self):
+        return iter(())
+
+    def __getitem__(self, key):
+        raise KeyError(key)
+
+    def items(self):
+        return self.generated
+
+
+@pytest.mark.parametrize("factory", [_GenerativeSequence, _GenerativeMapping])
+def test_freeze_evidence_strongly_retains_generative_child_identities(
+    factory, monkeypatch
+):
+    """Catches bare-id memo hits after a protocol releases an emitted child."""
+    real_id = id
+    def colliding_id(value):
+        if isinstance(value, _EphemeralChild):
+            return 7
+        return real_id(value)
+
+    monkeypatch.setattr(frozen_module, "id", colliding_id, raising=False)
+    source = factory(12)
+
+    frozen = _freeze_evidence(source, where="snapshot.document")
+
+    values = frozen if isinstance(frozen, tuple) else tuple(frozen.values())
+    assert values == tuple((index,) for index in range(12))
+    emitted_ids = (
+        source.emitted_ids
+        if isinstance(source, _GenerativeSequence)
+        else source.generated.emitted_ids
+    )
+    assert len(set(emitted_ids)) == 12
+
+
+def test_freeze_evidence_strongly_retains_seen_scalar_subclasses(monkeypatch):
+    """Catches allocator reuse undercounting the unique-node evidence budget."""
+    class EphemeralInt(int):
+        pass
+
+    class Scalars(Sequence):
+        def __init__(self):
+            self.sources = []
+
+        def __len__(self):
+            return 4
+
+        def __getitem__(self, index):
+            if index >= 4:
+                raise IndexError
+            value = EphemeralInt(index)
+            self.sources.append(value)
+            return value
+
+    real_id = id
+
+    def colliding_id(value):
+        if isinstance(value, EphemeralInt):
+            return 11
+        return real_id(value)
+
+    monkeypatch.setattr(frozen_module, "id", colliding_id, raising=False)
+    # The sequence plus four distinct scalar sources is five unique nodes,
+    # even though the injected identity function collides for every scalar.
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 4)
+    source = Scalars()
+    with pytest.raises(ConfigError, match=r"unique node count 5 exceeds limit 4"):
+        _freeze_evidence(source, where="snapshot.document")
+    assert len({real_id(value) for value in source.sources}) == 4
+
+
+class _EphemeralMapping(Mapping):
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+    def __len__(self):
+        return 1
+
+    def __iter__(self):
+        return iter((f"leaf_{self.value}",))
+
+    def __getitem__(self, key):
+        if key == f"leaf_{self.value}":
+            return self.value
+        raise KeyError(key)
+
+
+class _GenerativeThawMapping(_GenerativeMapping):
+    def items(self):
+        self.thaw_sources = []
+        for index in range(self.generated.count):
+            child = _EphemeralMapping(index)
+            self.thaw_sources.append(child)
+            yield f"key_{index}", child
+
+
+def test_thaw_strongly_retains_generative_mapping_identities(monkeypatch):
+    real_id = id
+    def colliding_id(value):
+        if isinstance(value, _EphemeralMapping):
+            return 13
+        return real_id(value)
+
+    monkeypatch.setattr(frozen_module, "id", colliding_id, raising=False)
+    source = _GenerativeThawMapping(12)
+
+    mutable = thaw(source)
+
+    assert mutable == {
+        f"key_{index}": {f"leaf_{index}": index} for index in range(12)
+    }
+    assert len({real_id(value) for value in source.thaw_sources}) == 12
+
+
+class _ForgedCallbackConfigError(ConfigError):
+    def __str__(self):
+        raise AssertionError("callback exception text must not run")
+
+    def __repr__(self):
+        raise AssertionError("callback exception repr must not run")
+
+
+class _FailingIterator:
+    def __init__(self, marker, *, fail_iter=False, fail_next=False, bad_item=False):
+        self.marker = marker
+        self.fail_iter = fail_iter
+        self.fail_next = fail_next
+        self.bad_item = bad_item
+        self.done = False
+
+    def __iter__(self):
+        if self.fail_iter:
+            raise self.marker
+        return self
+
+    def __next__(self):
+        if self.fail_next:
+            raise self.marker
+        if self.done:
+            raise StopIteration
+        self.done = True
+        if self.bad_item:
+            marker = self.marker
+
+            class BrokenItem:
+                def __iter__(self):
+                    raise marker
+
+            return BrokenItem()
+        return "key", 1
+
+
+class _ProtocolMapping(_ItemsMapping):
+    def __init__(self, marker, seam):
+        super().__init__([])
+        self.marker = marker
+        self.seam = seam
+
+    def items(self):
+        if self.seam == "items":
+            raise self.marker
+        return _FailingIterator(
+            self.marker,
+            fail_iter=self.seam == "iter",
+            fail_next=self.seam == "next",
+            bad_item=self.seam == "unpack",
+        )
+
+
+class _ProtocolSequence(Sequence):
+    def __init__(self, marker, seam):
+        self.marker = marker
+        self.seam = seam
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        raise AssertionError("the declared iterator must be used")
+
+    def __iter__(self):
+        if self.seam == "iter":
+            raise self.marker
+        return _FailingIterator(self.marker, fail_next=True)
+
+
+@pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
+def test_freeze_evidence_replaces_callback_configerror_at_each_mapping_seam(seam):
+    marker = _ForgedCallbackConfigError("private marker")
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(
+            _ProtocolMapping(marker, seam), where="snapshot.document"
+        )
+
+    assert caught.value is not marker
+    assert str(caught.value).startswith("snapshot.document: evidence protocol failed")
+
+
+@pytest.mark.parametrize("seam", ["iter", "next"])
+def test_freeze_evidence_replaces_callback_configerror_at_each_sequence_seam(seam):
+    marker = _ForgedCallbackConfigError("private marker")
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(
+            _ProtocolSequence(marker, seam), where="snapshot.document"
+        )
+
+    assert caught.value is not marker
+    assert str(caught.value).startswith("snapshot.document: evidence protocol failed")
+
+
+def test_sequence_node_budget_stops_protocol_consumption_without_materializing(
+    monkeypatch,
+):
+    class Values(Sequence):
+        def __init__(self):
+            self.next_calls = 0
+
+        def __len__(self):
+            return 100
+
+        def __getitem__(self, index):
+            raise AssertionError("the declared iterator must be used")
+
+        def __iter__(self):
+            owner = self
+
+            class Iterator:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    owner.next_calls += 1
+                    if owner.next_calls > 3:
+                        raise AssertionError("sequence was consumed past refusal")
+                    return owner.next_calls
+
+            return Iterator()
+
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 3)
+    source = Values()
+
+    with pytest.raises(ConfigError, match="unique node count 4 exceeds limit 3"):
+        _freeze_evidence(source, where="snapshot.document")
+
+    assert source.next_calls == 3
+
+
+def test_mapping_node_budget_stops_protocol_consumption_without_materializing(
+    monkeypatch,
+):
+    class Values(_ItemsMapping):
+        def __init__(self):
+            super().__init__([])
+            self.next_calls = 0
+
+        def items(self):
+            owner = self
+
+            class Iterator:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    owner.next_calls += 1
+                    if owner.next_calls > 2:
+                        raise AssertionError("mapping was consumed past refusal")
+                    index = owner.next_calls
+                    return f"key_{index}", index
+
+            return Iterator()
+
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 3)
+    source = Values()
+
+    with pytest.raises(ConfigError, match="unique node count 4 exceeds limit 3"):
+        _freeze_evidence(source, where="snapshot.document")
+
+    assert source.next_calls == 2

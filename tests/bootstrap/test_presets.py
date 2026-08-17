@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tracemalloc
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -141,6 +142,42 @@ def test_explicit_editable_distribution_uses_the_unique_package_root(tmp_path, m
     assert snapshot.input_bytes == b"model: {}\n"
 
 
+def test_editable_metadata_text_is_canonicalized_before_truthiness(
+    tmp_path, monkeypatch
+):
+    class HostileText(str):
+        def __bool__(self):
+            raise AssertionError("metadata text truthiness must not run")
+
+        def __len__(self):
+            raise AssertionError("metadata text length hook must not run")
+
+    class Distribution:
+        files = ()
+
+        def read_text(self, name):
+            assert name == "direct_url.json"
+            return HostileText('{"dir_info": {"editable": true}}')
+
+    monkeypatch.setattr(
+        presets.importlib.metadata, "distribution", lambda _: Distribution()
+    )
+    monkeypatch.setattr(
+        presets.importlib.util,
+        "find_spec",
+        lambda _: SimpleNamespace(submodule_search_locations=(str(tmp_path),)),
+    )
+    monkeypatch.setattr(
+        presets,
+        "read_stable_regular_bytes",
+        lambda *args, **kwargs: b"runtime: {}\n",
+    )
+
+    snapshot = read_installed_preset("rhino_v1")
+
+    assert thaw(snapshot.document) == {"runtime": {}}
+
+
 @pytest.mark.parametrize("direct_url", [None, {}, {"dir_info": {"editable": False}}])
 def test_missing_record_is_not_treated_as_editable_without_explicit_metadata(
     direct_url, monkeypatch
@@ -184,6 +221,75 @@ def test_distribution_protocol_failure_is_normalized_without_rendering(monkeypat
 
     with pytest.raises(ConfigError, match="cannot discover package preset"):
         read_installed_preset("rhino_v1")
+
+
+def test_distribution_discovery_does_not_catch_baseexceptions(monkeypatch):
+    class StopNow(BaseException):
+        pass
+
+    def stop_distribution(_):
+        raise StopNow
+
+    monkeypatch.setattr(
+        presets.importlib.metadata, "distribution", stop_distribution
+    )
+
+    with pytest.raises(StopNow):
+        read_installed_preset("rhino_v1")
+
+
+def test_record_files_truthiness_is_not_required(tmp_path, monkeypatch):
+    path = tmp_path / "recorded.yaml"
+    path.write_bytes(b"runtime: {}\n")
+    resource = "rheplicant/config/presets/rhino_v1.yaml"
+
+    class Files:
+        def __bool__(self):
+            raise AssertionError("files truthiness must not run")
+
+        def __iter__(self):
+            return iter((_RecordedFile(resource, path),))
+
+    class Distribution:
+        files = Files()
+
+    monkeypatch.setattr(
+        presets.importlib.metadata,
+        "distribution",
+        lambda _: Distribution(),
+    )
+
+    assert read_installed_preset("rhino_v1").input_bytes == b"runtime: {}\n"
+
+
+def test_editable_locations_truthiness_is_not_required(tmp_path, monkeypatch):
+    root = tmp_path / "rheplicant"
+    resource = root / "config/presets/rhino_v1.yaml"
+    resource.parent.mkdir(parents=True)
+    resource.write_bytes(b"runtime: {}\n")
+
+    class Locations:
+        def __bool__(self):
+            raise AssertionError("locations truthiness must not run")
+
+        def __iter__(self):
+            return iter((str(root),))
+
+    distribution = _Distribution(
+        direct_url={"dir_info": {"editable": True}}
+    )
+    monkeypatch.setattr(
+        presets.importlib.metadata,
+        "distribution",
+        lambda _: distribution,
+    )
+    monkeypatch.setattr(
+        presets.importlib.util,
+        "find_spec",
+        lambda _: SimpleNamespace(submodule_search_locations=Locations()),
+    )
+
+    assert read_installed_preset("rhino_v1").input_bytes == b"runtime: {}\n"
 
 
 def test_malformed_real_record_csv_is_normalized_to_config_error(tmp_path, monkeypatch):
@@ -476,6 +582,85 @@ def test_snapshot_enforces_exact_input_and_expansion_limits():
         )
 
 
+@pytest.mark.parametrize("buffer_kind", ["bytearray", "multibyte_memoryview"])
+def test_snapshot_rejects_oversized_mutable_buffers_before_copying(buffer_kind):
+    observed = MAXIMUM_PRESET_BYTES + 2
+    backing = bytearray(observed)
+    value = (
+        backing
+        if buffer_kind == "bytearray"
+        else memoryview(backing).cast("H")
+    )
+    if isinstance(value, memoryview):
+        assert len(value) * value.itemsize == observed
+        assert value.nbytes == observed
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(
+            ConfigError, match=rf"input_bytes.*{observed}.*16777216"
+        ):
+            PresetSnapshot(
+                name="one",
+                resource="rheplicant/config/presets/one.yaml",
+                input_bytes=value,
+                sha256="0" * 64,
+                document={},
+                expanded_nodes=0,
+            )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "schema_version",
+        "defaults",
+        "plugins",
+        "variants",
+        "runs",
+        "outputs",
+        "campaign",
+        "unexpected_section",
+    ],
+)
+def test_snapshot_direct_construction_enforces_preset_document_grammar(section):
+    with pytest.raises(ConfigError, match=section):
+        PresetSnapshot(
+            name="one",
+            resource="rheplicant/config/presets/one.yaml",
+            input_bytes=FIXTURE_BYTES,
+            sha256=FIXTURE_SHA256,
+            document={section: {}},
+            expanded_nodes=1,
+        )
+
+
+def test_snapshot_accepts_every_scientific_preset_section():
+    document = {
+        "runtime": {},
+        "observation": {},
+        "resources": {},
+        "model": {},
+        "inference": {},
+    }
+
+    snapshot = PresetSnapshot(
+        name="one",
+        resource="rheplicant/config/presets/one.yaml",
+        input_bytes=FIXTURE_BYTES,
+        sha256=FIXTURE_SHA256,
+        document=document,
+        expanded_nodes=5,
+    )
+
+    assert tuple(snapshot.document) == tuple(document)
+
+
 def test_snapshot_normalizes_a_released_memoryview_without_using_repr():
     view = memoryview(FIXTURE_BYTES)
     view.release()
@@ -563,6 +748,169 @@ def test_validate_preset_document_rejects_hostile_nonstring_key_without_repr():
         presets.validate_preset_document(
             "one", _ItemsMapping([(HostileKey(), {})])
         )
+
+
+class _ForgedCallbackConfigError(ConfigError):
+    def __str__(self):
+        raise AssertionError("callback exception text must not run")
+
+    def __repr__(self):
+        raise AssertionError("callback exception repr must not run")
+
+
+class _FailingIterator:
+    def __init__(self, marker, *, fail_iter=False, fail_next=False, bad_item=False):
+        self.marker = marker
+        self.fail_iter = fail_iter
+        self.fail_next = fail_next
+        self.bad_item = bad_item
+        self.done = False
+
+    def __iter__(self):
+        if self.fail_iter:
+            raise self.marker
+        return self
+
+    def __next__(self):
+        if self.fail_next:
+            raise self.marker
+        if self.done:
+            raise StopIteration
+        self.done = True
+        if self.bad_item:
+            marker = self.marker
+
+            class BrokenItem:
+                def __iter__(self):
+                    raise marker
+
+            return BrokenItem()
+        return "runtime", {}
+
+
+class _ProtocolMapping(_ItemsMapping):
+    def __init__(self, marker, seam):
+        super().__init__([])
+        self.marker = marker
+        self.seam = seam
+
+    def items(self):
+        if self.seam == "items":
+            raise self.marker
+        return _FailingIterator(
+            self.marker,
+            fail_iter=self.seam == "iter",
+            fail_next=self.seam == "next",
+            bad_item=self.seam == "unpack",
+        )
+
+
+@pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
+def test_validate_preset_document_replaces_callback_configerror(seam):
+    marker = _ForgedCallbackConfigError("private marker")
+
+    with pytest.raises(ConfigError) as caught:
+        presets.validate_preset_document(
+            "one", _ProtocolMapping(marker, seam)
+        )
+
+    assert caught.value is not marker
+    assert str(caught.value) == "preset:one: document mapping traversal failed."
+
+
+@pytest.mark.parametrize(
+    "seam",
+    [
+        "distribution",
+        "files_getter",
+        "files_iter",
+        "as_posix",
+        "locate",
+        "read_text",
+        "find_spec",
+        "locations",
+        "pathlike",
+    ],
+)
+def test_discovery_replaces_callback_configerror_at_every_protocol_seam(
+    seam, tmp_path, monkeypatch
+):
+    marker = _ForgedCallbackConfigError("private marker")
+    resource = "rheplicant/config/presets/rhino_v1.yaml"
+
+    class BadFiles:
+        def __bool__(self):
+            return True
+
+        def __iter__(self):
+            raise marker
+
+    class Entry:
+        def as_posix(self):
+            if seam == "as_posix":
+                raise marker
+            return resource
+
+        def locate(self):
+            if seam == "locate":
+                raise marker
+            return tmp_path / "unused.yaml"
+
+    class BadPath:
+        def __fspath__(self):
+            raise marker
+
+    class Spec:
+        @property
+        def submodule_search_locations(self):
+            if seam == "locations":
+                raise marker
+            return (BadPath(),) if seam == "pathlike" else (str(tmp_path),)
+
+    class Distribution:
+        @property
+        def files(self):
+            if seam == "files_getter":
+                raise marker
+            if seam == "files_iter":
+                return BadFiles()
+            if seam in {"as_posix", "locate"}:
+                return (Entry(),)
+            return ()
+
+        def read_text(self, name):
+            if seam == "read_text":
+                raise marker
+            return json.dumps({"dir_info": {"editable": True}})
+
+    if seam == "distribution":
+        monkeypatch.setattr(
+            presets.importlib.metadata,
+            "distribution",
+            lambda _: (_ for _ in ()).throw(marker),
+        )
+    else:
+        monkeypatch.setattr(
+            presets.importlib.metadata,
+            "distribution",
+            lambda _: Distribution(),
+        )
+    if seam == "find_spec":
+        monkeypatch.setattr(
+            presets.importlib.util,
+            "find_spec",
+            lambda _: (_ for _ in ()).throw(marker),
+        )
+    else:
+        monkeypatch.setattr(presets.importlib.util, "find_spec", lambda _: Spec())
+
+    with pytest.raises(ConfigError) as caught:
+        read_installed_preset("rhino_v1")
+
+    assert caught.value is not marker
+    assert str(caught.value) == (
+        "defaults: cannot discover package preset 'rhino_v1'."
+    )
 
 
 def test_clean_bootstrap_preset_read_imports_neither_rheplicant_nor_jax():

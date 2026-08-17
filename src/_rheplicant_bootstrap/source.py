@@ -72,19 +72,21 @@ def _read_bounded_forward(stream: BinaryIO, *, source_name: str, limit: int) -> 
     """Accumulate legal short reads without traversing the source a second time."""
     maximum = limit + 1
     data = bytearray()
-    try:
-        while len(data) < maximum:
-            given = stream.read(maximum - len(data))
-            if not isinstance(given, bytes):
-                raise ConfigError(f"{source_name}: binary source did not produce bytes.")
-            chunk = bytes.__bytes__(given)
-            if bytes.__len__(chunk) == 0:
-                break
-            data.extend(chunk)
-    except ConfigError:
-        raise
-    except Exception:
-        raise ConfigError(f"{source_name}: cannot read source.") from None
+    while len(data) < maximum:
+        requested = maximum - len(data)
+        try:
+            given = stream.read(requested)
+        except Exception:
+            raise ConfigError(f"{source_name}: cannot read source.") from None
+        if not isinstance(given, bytes):
+            raise ConfigError(f"{source_name}: binary source did not produce bytes.")
+        observed = bytes.__len__(given)
+        if observed > requested:
+            raise _byte_limit_error(source_name, maximum, limit)
+        chunk = bytes.__bytes__(given)
+        if observed == 0:
+            break
+        data.extend(chunk)
     if len(data) > limit:
         raise _byte_limit_error(source_name, len(data), limit)
     return bytes(data)
@@ -106,6 +108,9 @@ def _read_stable_regular_file(
     )
     try:
         given_path = os.fspath(path)
+    except Exception:
+        raise ConfigError(f"{display_name}: cannot read source.") from None
+    try:
         if not isinstance(given_path, str):
             raise TypeError("source path must be text")
         source_path = str.__str__(given_path)
@@ -159,6 +164,11 @@ def _read_stable_regular_file(
         after_target, final_target
     ):
         raise ConfigError(f"{display_name}: source target changed while reading.")
+    if bytes.__len__(data) != before_target.st_size:
+        raise ConfigError(
+            f"{display_name}: captured byte count {bytes.__len__(data)} does not "
+            f"match stable source size {before_target.st_size}."
+        )
     return data, source_realpath
 
 

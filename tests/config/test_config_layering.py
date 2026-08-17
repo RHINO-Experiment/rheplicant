@@ -1,5 +1,6 @@
 """Document layering: variants are one-level deep-merge patches over the base."""
 
+from collections.abc import Mapping
 from types import MappingProxyType
 
 import pytest
@@ -128,3 +129,158 @@ class TestApplyVariant:
             apply_variant(BASE, "deletes_version")
         with pytest.raises(ConfigError, match="one level deep"):
             apply_variant(BASE, "deletes_variants")
+
+    @pytest.mark.parametrize(
+        "seam",
+        [
+            "document_get",
+            "variants_bool",
+            "variants_contains",
+            "variants_lookup",
+            "variants_iter",
+            "patch_contains",
+        ],
+    )
+    def test_mapping_callback_configerrors_are_replaced_statically(self, seam):
+        class CallbackMarker(ConfigError):
+            def __str__(self):
+                raise AssertionError("marker text must not run")
+
+            def __repr__(self):
+                raise AssertionError("marker repr must not run")
+
+        marker = CallbackMarker("private variant marker")
+
+        class CallbackMapping(Mapping):
+            def __init__(self, role):
+                self.role = role
+
+            def __len__(self):
+                if self.role == "variants_bool":
+                    raise marker
+                return 1
+
+            def __iter__(self):
+                if self.role == "variants_iter":
+                    raise marker
+                return iter(
+                    ("added",)
+                    if self.role in {"patch", "patch_contains"}
+                    else ("one",)
+                )
+
+            def items(self):
+                if self.role in {"patch", "patch_contains"}:
+                    return iter((("added", 2),))
+                return iter((("one", self["one"]),))
+
+            def __contains__(self, key):
+                if self.role in {"variants_contains", "patch_contains"}:
+                    raise marker
+                if self.role == "variants_iter":
+                    return False
+                return key == "one"
+
+            def __getitem__(self, key):
+                if self.role == "variants_lookup":
+                    raise marker
+                if self.role in {"patch", "patch_contains"}:
+                    if key == "added":
+                        return 2
+                    raise KeyError(key)
+                if self.role == "variants_patch":
+                    return CallbackMapping("patch_contains")
+                if self.role.startswith("variants"):
+                    return CallbackMapping("patch")
+                raise KeyError(key)
+
+        class Document(dict):
+            def get(self, key, default=None):
+                if seam == "document_get":
+                    raise marker
+                return super().get(key, default)
+
+        document = Document(
+            kept=1,
+            variants=CallbackMapping(
+                "variants_patch" if seam == "patch_contains" else seam
+            )
+            if seam.startswith("variants") or seam == "patch_contains"
+            else {"one": {"added": 2}}
+        )
+
+        try:
+            merged = apply_variant(document, "one")
+        except ConfigError as caught:
+            assert caught is not marker
+            assert "variant" in str(caught)
+        else:
+            assert set(merged) == {"kept", "variants", "added"}
+            assert merged["kept"] == 1
+            assert merged["added"] == 2
+            assert dict(merged["variants"].items()) == {
+                "one": {"added": 2}
+            }
+
+    def test_variant_name_is_canonicalized_before_mapping_operations(self):
+        class HostileName(str):
+            def __hash__(self):
+                raise AssertionError("hash must not run")
+
+            def __eq__(self, other):
+                raise AssertionError("equality must not run")
+
+            def __repr__(self):
+                raise AssertionError("repr must not run")
+
+        merged = apply_variant(BASE, HostileName("seven"))
+
+        assert "ns" in merged["model"]["cal_loads"]
+
+    def test_variant_rejects_a_nonstring_name_without_using_repr(self):
+        class HostileName:
+            def __repr__(self):
+                raise AssertionError("repr must not run")
+
+        with pytest.raises(ConfigError, match="HostileName"):
+            apply_variant(BASE, HostileName())
+
+    def test_variant_mapping_protocols_do_not_catch_baseexceptions(self):
+        class StopNow(BaseException):
+            pass
+
+        class StoppingDocument(dict):
+            def items(self):
+                raise StopNow
+
+        with pytest.raises(StopNow):
+            apply_variant(StoppingDocument(BASE), "seven")
+
+    def test_required_variant_mapping_failure_is_normalized_statically(self):
+        class Marker(ConfigError):
+            def __str__(self):
+                raise AssertionError("marker text must not run")
+
+            def __repr__(self):
+                raise AssertionError("marker repr must not run")
+
+        marker = Marker("private variant marker")
+
+        class FailingDocument(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                raise marker
+
+            def __getitem__(self, key):
+                raise marker
+
+            def items(self):
+                raise marker
+
+        with pytest.raises(ConfigError) as caught:
+            apply_variant(FailingDocument(), "seven")
+
+        assert caught.value is not marker
+        assert str(caught.value) == "apply_variant: mapping traversal failed."

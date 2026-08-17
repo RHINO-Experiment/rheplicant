@@ -23,15 +23,24 @@ def freeze(value: object) -> object:
 
 def thaw(value: object) -> object:
     """Copy frozen bootstrap containers back into independently mutable values."""
-    completed: dict[int, object] = {}
+    completed: dict[int, list[tuple[object, object]]] = {}
+
+    def completed_value(item: object) -> object | None:
+        for source, result in completed.get(id(item), ()):
+            if source is item:
+                return result
+        return None
+
+    def remember(item: object, result: object) -> None:
+        completed.setdefault(id(item), []).append((item, result))
 
     def thaw_one(item: object) -> object:
-        identity = id(item)
         if isinstance(item, Mapping):
-            if identity in completed:
-                return completed[identity]
+            cached = completed_value(item)
+            if cached is not None:
+                return cached
             result: dict[object, object] = {}
-            completed[identity] = result
+            remember(item, result)
             result.update(
                 (thaw_one(key), thaw_one(child))
                 for key, child in item.items()
@@ -40,10 +49,11 @@ def thaw(value: object) -> object:
         if isinstance(item, tuple):
             if tuple.__len__(item) == 0:
                 return []
-            if identity in completed:
-                return completed[identity]
+            cached = completed_value(item)
+            if cached is not None:
+                return cached
             sequence: list[object] = []
-            completed[identity] = sequence
+            remember(item, sequence)
             sequence.extend(thaw_one(child) for child in item)
             return sequence
         return item
@@ -53,9 +63,10 @@ def thaw(value: object) -> object:
 
 def freeze_evidence(value: object, *, where: str) -> object:
     """Detach and strictly freeze one tree safe to retain as audit evidence."""
-    active: set[int] = set()
-    completed: dict[int, tuple[object, int, str]] = {}
-    seen: set[int] = set()
+    active: dict[int, list[object]] = {}
+    completed: dict[int, list[tuple[object, object, int, str]]] = {}
+    seen: dict[int, list[object]] = {}
+    node_count = 0
     current_type = type(value).__name__
     unsupported = object()
 
@@ -79,7 +90,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
         return unsupported
 
     def register(item: object, depth: int) -> None:
-        nonlocal current_type
+        nonlocal current_type, node_count
         current_type = type(item).__name__
         if depth > _EVIDENCE_DEPTH_LIMIT:
             raise ConfigError(
@@ -87,14 +98,63 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 f"{_EVIDENCE_DEPTH_LIMIT} at type {current_type}."
             )
         identity = id(item)
-        if identity in seen:
+        bucket = seen.setdefault(identity, [])
+        if any(retained is item for retained in bucket):
             return
-        seen.add(identity)
-        if len(seen) > _EVIDENCE_NODE_LIMIT:
+        bucket.append(item)
+        node_count += 1
+        if node_count > _EVIDENCE_NODE_LIMIT:
             raise ConfigError(
-                f"{where}: evidence unique node count {len(seen)} exceeds limit "
+                f"{where}: evidence unique node count {node_count} exceeds limit "
                 f"{_EVIDENCE_NODE_LIMIT} at type {current_type}."
             )
+
+    def mapping_pairs(item: Mapping, container_type: str):
+        try:
+            pairs = item.items()
+        except Exception:
+            raise ConfigError(
+                f"{where}: evidence protocol failed at type {container_type}."
+            ) from None
+        try:
+            iterator = iter(pairs)
+        except Exception:
+            raise ConfigError(
+                f"{where}: evidence protocol failed at type {container_type}."
+            ) from None
+        while True:
+            try:
+                pair = next(iterator)
+            except StopIteration:
+                return
+            except Exception:
+                raise ConfigError(
+                    f"{where}: evidence protocol failed at type {container_type}."
+                ) from None
+            try:
+                key, child = pair
+            except Exception:
+                raise ConfigError(
+                    f"{where}: evidence protocol failed at type {container_type}."
+                ) from None
+            yield key, child
+
+    def sequence_items(item: Sequence, container_type: str):
+        try:
+            iterator = iter(item)
+        except Exception:
+            raise ConfigError(
+                f"{where}: evidence protocol failed at type {container_type}."
+            ) from None
+        while True:
+            try:
+                yield next(iterator)
+            except StopIteration:
+                return
+            except Exception:
+                raise ConfigError(
+                    f"{where}: evidence protocol failed at type {container_type}."
+                ) from None
 
     def freeze_one(item: object, depth: int) -> tuple[object, int, str]:
         register(item, depth)
@@ -102,8 +162,16 @@ def freeze_evidence(value: object, *, where: str) -> object:
         if scalar is not unsupported:
             return scalar, 1, type(item).__name__
         identity = id(item)
-        if identity in completed:
-            result, height, deepest_type = completed[identity]
+        cached = next(
+            (
+                record
+                for record in completed.get(identity, ())
+                if record[0] is item
+            ),
+            None,
+        )
+        if cached is not None:
+            _, result, height, deepest_type = cached
             deepest_depth = depth + height - 1
             if deepest_depth > _EVIDENCE_DEPTH_LIMIT:
                 raise ConfigError(
@@ -112,17 +180,19 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 )
             return result, height, deepest_type
         if isinstance(item, Mapping):
-            if identity in active:
+            active_bucket = active.setdefault(identity, [])
+            if any(retained is item for retained in active_bucket):
                 raise ConfigError(
                     f"{where}: cyclic evidence container of type "
                     f"{type(item).__name__} is not allowed."
                 )
-            active.add(identity)
+            active_bucket.append(item)
             try:
                 frozen_mapping: dict[str, object] = {}
                 maximum_child_height = 0
                 deepest_type = type(item).__name__
-                for key, child in item.items():
+                container_type = type(item).__name__
+                for key, child in mapping_pairs(item, container_type):
                     register(key, depth + 1)
                     if not isinstance(key, str):
                         raise ConfigError(
@@ -144,23 +214,27 @@ def freeze_evidence(value: object, *, where: str) -> object:
                         deepest_type = child_deepest_type
                 result = MappingProxyType(frozen_mapping)
                 height = 1 + maximum_child_height
-                record = (result, height, deepest_type)
-                completed[identity] = record
-                return record
+                record = (item, result, height, deepest_type)
+                completed.setdefault(identity, []).append(record)
+                return result, height, deepest_type
             finally:
-                active.remove(identity)
+                assert active_bucket.pop() is item
+                if not active_bucket:
+                    del active[identity]
         if isinstance(item, Sequence):
-            if identity in active:
+            active_bucket = active.setdefault(identity, [])
+            if any(retained is item for retained in active_bucket):
                 raise ConfigError(
                     f"{where}: cyclic evidence container of type "
                     f"{type(item).__name__} is not allowed."
                 )
-            active.add(identity)
+            active_bucket.append(item)
             try:
                 frozen_children: list[object] = []
                 maximum_child_height = 0
                 deepest_type = type(item).__name__
-                for child in item:
+                container_type = type(item).__name__
+                for child in sequence_items(item, container_type):
                     frozen_child, child_height, child_deepest_type = freeze_one(
                         child, depth + 1
                     )
@@ -170,11 +244,13 @@ def freeze_evidence(value: object, *, where: str) -> object:
                         deepest_type = child_deepest_type
                 result = tuple(frozen_children)
                 height = 1 + maximum_child_height
-                record = (result, height, deepest_type)
-                completed[identity] = record
-                return record
+                record = (item, result, height, deepest_type)
+                completed.setdefault(identity, []).append(record)
+                return result, height, deepest_type
             finally:
-                active.remove(identity)
+                assert active_bucket.pop() is item
+                if not active_bucket:
+                    del active[identity]
         raise ConfigError(
             f"{where}: unsupported evidence leaf type {type(item).__name__}."
         )

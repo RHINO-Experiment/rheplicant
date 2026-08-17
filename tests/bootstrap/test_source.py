@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import sys
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,27 @@ def test_shared_reader_normalizes_path_protocol_errors_without_rendering_them():
         read_stable_regular_bytes(FailingPath(), maximum=8)
 
 
+def test_shared_reader_replaces_a_callback_raised_configerror_from_fspath():
+    class Marker(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    marker = Marker("private path marker")
+
+    class FailingPath:
+        def __fspath__(self):
+            raise marker
+
+    with pytest.raises(ConfigError) as caught:
+        read_stable_regular_bytes(FailingPath(), maximum=8)
+
+    assert caught.value is not marker
+    assert str(caught.value) == "<source>: cannot read source."
+
+
 def test_shared_reader_does_not_catch_path_protocol_baseexceptions():
     class StopNow(BaseException):
         pass
@@ -404,6 +426,27 @@ def test_source_normalizes_ordinary_stream_protocol_errors_statically():
         read_source("-", base_dir=".", stdin=FailingStream())
 
 
+def test_source_replaces_a_callback_raised_configerror_from_stream_read():
+    class Marker(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    marker = Marker("private stream marker")
+
+    class FailingStream:
+        def read(self, size):
+            raise marker
+
+    with pytest.raises(ConfigError) as caught:
+        read_source("-", base_dir=".", stdin=FailingStream())
+
+    assert caught.value is not marker
+    assert str(caught.value) == "<stdin>: cannot read source."
+
+
 def test_source_does_not_catch_stream_protocol_baseexceptions():
     class StopNow(BaseException):
         pass
@@ -440,6 +483,32 @@ def test_chunked_stdin_overflow_stops_at_the_bounded_extra_byte(monkeypatch):
         read_source("-", base_dir=".", stdin=stdin)
 
     assert stdin.read_sizes == [9, 7, 5, 3, 1]
+
+
+def test_overreturn_is_refused_at_the_bounded_extra_byte_without_copying_it(
+    monkeypatch,
+):
+    _small_source_limit(monkeypatch)
+    payload = _HostileBytes(b"x" * (16 * 1024 * 1024))
+
+    class OverReturningStream:
+        requested = []
+
+        def read(self, size):
+            self.requested.append(size)
+            return payload
+
+    stream = OverReturningStream()
+    tracemalloc.start()
+    try:
+        with pytest.raises(ConfigError, match="byte count 9 exceeds limit 8"):
+            read_source("-", base_dir=".", stdin=stream)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert stream.requested == [9]
+    assert peak < 1024 * 1024
 
 
 @pytest.mark.parametrize("from_stdin", [False, True])
@@ -510,6 +579,144 @@ def _resized_stat(result: os.stat_result, size: int) -> os.stat_result:
     fields = list(result)
     fields[6] = size
     return os.stat_result(fields)
+
+
+def test_stable_reader_refuses_premature_eof_against_descriptor_size(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "truncated.yaml"
+    path.write_bytes(b"abcdef")
+    original_fdopen = os.fdopen
+
+    class EarlyEofFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.calls = 0
+
+        def read(self, size):
+            self.calls += 1
+            return self.wrapped.read(2) if self.calls == 1 else b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.wrapped.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.wrapped, name)
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: EarlyEofFile(original_fdopen(*args, **kwargs)),
+    )
+
+    with pytest.raises(ConfigError, match="preset:fixture"):
+        read_stable_regular_bytes(
+            path, maximum=8, source_name="preset:fixture"
+        )
+
+
+def test_link_mutation_refusal_precedes_a_premature_eof_refusal(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "truncated.yaml"
+    path.write_bytes(b"abcdef")
+    original_fdopen = os.fdopen
+    original_lstat = os.lstat
+    lstat_calls = 0
+
+    class EarlyEofFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.calls = 0
+
+        def read(self, size):
+            self.calls += 1
+            return self.wrapped.read(2) if self.calls == 1 else b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.wrapped.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.wrapped, name)
+
+    def changed_lstat(target, *args, **kwargs):
+        nonlocal lstat_calls
+        result = original_lstat(target, *args, **kwargs)
+        if os.fspath(target) == str(path):
+            lstat_calls += 1
+            if lstat_calls >= 3:
+                return _changed_stat(result)
+        return result
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: EarlyEofFile(original_fdopen(*args, **kwargs)),
+    )
+    monkeypatch.setattr(source_module, "_lexical_lstat", changed_lstat)
+
+    with pytest.raises(ConfigError, match="source link changed"):
+        read_stable_regular_bytes(
+            path, maximum=8, source_name="preset:fixture"
+        )
+
+
+def test_target_mutation_refusal_precedes_a_premature_eof_refusal(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "truncated.yaml"
+    path.write_bytes(b"abcdef")
+    original_fdopen = os.fdopen
+    original_fstat = os.fstat
+    original_stat = os.stat
+    fstat_calls = 0
+
+    class EarlyEofFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.calls = 0
+
+        def read(self, size):
+            self.calls += 1
+            return self.wrapped.read(2) if self.calls == 1 else b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.wrapped.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.wrapped, name)
+
+    def changed_second_fstat(fd, *args, **kwargs):
+        nonlocal fstat_calls
+        fstat_calls += 1
+        result = original_fstat(fd, *args, **kwargs)
+        return _changed_stat(result) if fstat_calls == 2 else result
+
+    def matching_final_stat(target, *args, **kwargs):
+        result = original_stat(target, *args, **kwargs)
+        return _changed_stat(result) if os.fspath(target) == str(path) else result
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: EarlyEofFile(original_fdopen(*args, **kwargs)),
+    )
+    monkeypatch.setattr(source_module.os, "fstat", changed_second_fstat)
+    monkeypatch.setattr(source_module.os, "stat", matching_final_stat)
+
+    with pytest.raises(ConfigError, match="source target changed"):
+        read_stable_regular_bytes(
+            path, maximum=8, source_name="preset:fixture"
+        )
 
 
 def test_changed_lexical_lstat_is_refused(tmp_path, monkeypatch):

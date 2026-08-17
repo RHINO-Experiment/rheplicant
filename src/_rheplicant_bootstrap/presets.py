@@ -26,15 +26,32 @@ _MAXIMUM_PRESET_BYTES = 16 * 1024 * 1024
 _MAXIMUM_EXPANDED_NODES = 250_000
 
 
-def _canonical_bytes(value: object, *, where: str) -> bytes:
+def _canonical_bytes(value: object, *, where: str, maximum: int) -> bytes:
     try:
         if isinstance(value, bytes):
+            observed = bytes.__len__(value)
+            if observed > maximum:
+                raise ConfigError(
+                    f"{where} byte count {observed} exceeds limit {maximum}."
+                )
             return bytes.__bytes__(value)
         if isinstance(value, bytearray):
+            observed = bytearray.__len__(value)
+            if observed > maximum:
+                raise ConfigError(
+                    f"{where} byte count {observed} exceeds limit {maximum}."
+                )
             copied = bytearray.__getitem__(value, slice(None))
             return bytes.__new__(bytes, copied)
         if isinstance(value, memoryview):
+            observed = memoryview.nbytes.__get__(value)
+            if observed > maximum:
+                raise ConfigError(
+                    f"{where} byte count {observed} exceeds limit {maximum}."
+                )
             return memoryview.tobytes(value)
+    except ConfigError:
+        raise
     except Exception:
         raise ConfigError(
             f"{where} must be a usable byte buffer; got {type(value).__name__}."
@@ -102,13 +119,10 @@ class PresetSnapshot:
         if not resource:
             raise ConfigError(f"preset:{name}: resource must be a non-empty string.")
         input_bytes = _canonical_bytes(
-            self.input_bytes, where=f"preset:{name}: input_bytes"
+            self.input_bytes,
+            where=f"preset:{name}: input_bytes",
+            maximum=_MAXIMUM_PRESET_BYTES,
         )
-        if len(input_bytes) > _MAXIMUM_PRESET_BYTES:
-            raise ConfigError(
-                f"preset:{name}: input_bytes byte count {len(input_bytes)} "
-                f"exceeds limit {_MAXIMUM_PRESET_BYTES}."
-            )
         if not isinstance(self.sha256, str):
             raise ConfigError(
                 f"preset:{name}: sha256 must be a lowercase hexadecimal digest."
@@ -141,6 +155,7 @@ class PresetSnapshot:
             self.document, where=f"preset:{name}.document"
         )
         assert isinstance(frozen_document, Mapping)
+        validate_preset_document(name, frozen_document)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "resource", resource)
         object.__setattr__(self, "input_bytes", input_bytes)
@@ -170,25 +185,39 @@ def validate_preset_document(name: str, loaded: object) -> dict[str, object]:
         )
     canonical: dict[str, object] = {}
     try:
-        for key, value in loaded.items():
-            if not isinstance(key, str):
-                raise ConfigError(
-                    f"preset:{name}: top-level key is a string; got "
-                    f"{type(key).__name__}."
-                )
-            exact_key = str.__str__(key)
-            if exact_key in canonical:
-                raise ConfigError(
-                    f"preset:{name}: top-level keys collide after "
-                    "canonicalization."
-                )
-            canonical[exact_key] = value
-    except ConfigError:
-        raise
+        pairs = loaded.items()
+        iterator = iter(pairs)
     except Exception:
         raise ConfigError(
             f"preset:{name}: document mapping traversal failed."
         ) from None
+    while True:
+        try:
+            pair = next(iterator)
+        except StopIteration:
+            break
+        except Exception:
+            raise ConfigError(
+                f"preset:{name}: document mapping traversal failed."
+            ) from None
+        try:
+            key, value = pair
+        except Exception:
+            raise ConfigError(
+                f"preset:{name}: document mapping traversal failed."
+            ) from None
+        if not isinstance(key, str):
+            raise ConfigError(
+                f"preset:{name}: top-level key is a string; got "
+                f"{type(key).__name__}."
+            )
+        exact_key = str.__str__(key)
+        if exact_key in canonical:
+            raise ConfigError(
+                f"preset:{name}: top-level keys collide after "
+                "canonicalization."
+            )
+        canonical[exact_key] = value
     forbidden = sorted(set(canonical) - _PRESET_SECTIONS)
     if forbidden:
         raise ConfigError(
@@ -205,42 +234,90 @@ def read_installed_preset(name: str) -> PresetSnapshot:
     except KeyError:
         raise ConfigError(f"defaults: unknown package preset {name!r}.") from None
 
-    try:
-        distribution = importlib.metadata.distribution("rheplicant")
-        recorded = {item.as_posix(): item for item in (distribution.files or ())}
-        if resource in recorded:
-            path = Path(recorded[resource].locate())
+    failure = f"defaults: cannot discover package preset {name!r}."
+
+    def protocol(operation):
+        try:
+            return operation()
+        except Exception:
+            raise ConfigError(failure) from None
+
+    def protocol_values(value):
+        iterator = protocol(lambda: iter(value))
+        while True:
+            try:
+                yield next(iterator)
+            except StopIteration:
+                return
+            except Exception:
+                raise ConfigError(failure) from None
+
+    distribution = protocol(
+        lambda: importlib.metadata.distribution("rheplicant")
+    )
+    files = protocol(lambda: distribution.files)
+    recorded: dict[str, object] = {}
+    if files is not None:
+        for item in protocol_values(files):
+            recorded_name = protocol(lambda item=item: item.as_posix())
+            if not isinstance(recorded_name, str):
+                raise ConfigError(failure)
+            recorded[str.__str__(recorded_name)] = item
+    if resource in recorded:
+        located = protocol(lambda: recorded[resource].locate())
+        path = protocol(lambda: Path(located))
+    else:
+        direct_url_text = protocol(
+            lambda: distribution.read_text("direct_url.json")
+        )
+        if direct_url_text is None:
+            exact_direct_url_text = ""
+        elif isinstance(direct_url_text, str):
+            exact_direct_url_text = str.__str__(direct_url_text)
         else:
-            direct_url_text = distribution.read_text("direct_url.json")
-            direct_url = json.loads(direct_url_text) if direct_url_text else {}
-            if not isinstance(direct_url, Mapping):
-                raise TypeError("direct_url.json is not a mapping")
-            dir_info = direct_url.get("dir_info", {})
-            if not isinstance(dir_info, Mapping):
-                raise TypeError("direct_url.json dir_info is not a mapping")
-            editable = dir_info.get("editable") is True
-            if not editable:
-                raise ConfigError(
-                    f"defaults: installed distribution does not contain {resource!r}."
-                )
-            spec = importlib.util.find_spec("rheplicant")
+            raise ConfigError(failure)
+        try:
+            direct_url = (
+                json.loads(exact_direct_url_text)
+                if exact_direct_url_text
+                else {}
+            )
+        except Exception:
+            raise ConfigError(failure) from None
+        if not isinstance(direct_url, Mapping):
+            raise ConfigError(failure)
+        dir_info = protocol(lambda: direct_url.get("dir_info", {}))
+        if not isinstance(dir_info, Mapping):
+            raise ConfigError(failure)
+        editable = protocol(lambda: dir_info.get("editable")) is True
+        if not editable:
+            raise ConfigError(
+                f"defaults: installed distribution does not contain {resource!r}."
+            )
+        spec = protocol(lambda: importlib.util.find_spec("rheplicant"))
+        if spec is None:
+            locations = ()
+        else:
+            given_locations = protocol(
+                lambda: spec.submodule_search_locations
+            )
             locations = (
                 ()
-                if spec is None
-                else tuple(spec.submodule_search_locations or ())
+                if given_locations is None
+                else tuple(protocol_values(given_locations))
             )
-            if len(locations) != 1:
-                raise ConfigError(
-                    "defaults: editable rheplicant package root is not unique."
-                )
-            relative = Path(resource).relative_to("rheplicant")
-            path = Path(locations[0]) / relative
-    except ConfigError:
-        raise
-    except Exception:
+        if len(locations) != 1:
+            raise ConfigError(
+                "defaults: editable rheplicant package root is not unique."
+            )
+        relative = Path(resource).relative_to("rheplicant")
+        root = protocol(lambda: Path(locations[0]))
+        path = root / relative
+
+    if not isinstance(path, Path):
         raise ConfigError(
             f"defaults: cannot discover package preset {name!r}."
-        ) from None
+        )
 
     raw = read_stable_regular_bytes(
         path, maximum=_MAXIMUM_PRESET_BYTES, source_name=f"preset:{name}"
