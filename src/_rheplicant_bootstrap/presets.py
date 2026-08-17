@@ -31,7 +31,8 @@ class PresetRequest:
     only: Sequence[str] | None
 
     def __post_init__(self) -> None:
-        validate_preset_name(self.name)
+        name = validate_preset_name(self.name)
+        object.__setattr__(self, "name", name)
         if self.only is None:
             return
         if isinstance(self.only, str | bytes) or not isinstance(self.only, Sequence):
@@ -39,16 +40,20 @@ class PresetRequest:
         only = tuple(self.only)
         if not only:
             raise ConfigError("defaults: only: must select at least one path.")
+        canonical: list[str] = []
         for path in only:
-            if (
-                not isinstance(path, str)
-                or not path
-                or any(not part for part in path.split("."))
-            ):
+            if not isinstance(path, str):
                 raise ConfigError(
-                    f"defaults: only: has invalid document path {path!r}."
+                    "defaults: only: document paths are strings; got "
+                    f"{type(path).__name__}."
                 )
-        object.__setattr__(self, "only", only)
+            exact_path = str.__str__(path)
+            if not exact_path or any(not part for part in exact_path.split(".")):
+                raise ConfigError(
+                    f"defaults: only: has invalid document path {exact_path!r}."
+                )
+            canonical.append(exact_path)
+        object.__setattr__(self, "only", tuple(canonical))
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,27 +66,63 @@ class PresetSnapshot:
     expanded_nodes: int
 
     def __post_init__(self) -> None:
-        validate_preset_name(self.name)
+        name = validate_preset_name(self.name)
+        if not isinstance(self.resource, str):
+            raise ConfigError(
+                f"preset:{name}: resource must be a non-empty string; got "
+                f"{type(self.resource).__name__}."
+            )
+        resource = str.__str__(self.resource)
+        if not resource:
+            raise ConfigError(f"preset:{name}: resource must be a non-empty string.")
         if not isinstance(self.input_bytes, bytes | bytearray | memoryview):
             raise ConfigError(
-                f"preset:{self.name}: input_bytes must be a byte buffer."
+                f"preset:{name}: input_bytes must be a byte buffer."
+            )
+        if not isinstance(self.sha256, str):
+            raise ConfigError(
+                f"preset:{name}: sha256 must be a lowercase hexadecimal digest."
+            )
+        sha256 = str.__str__(self.sha256)
+        if re.fullmatch(r"[0-9a-f]{64}", sha256) is None:
+            raise ConfigError(
+                f"preset:{name}: sha256 must be a lowercase hexadecimal digest."
+            )
+        if isinstance(self.expanded_nodes, bool) or not isinstance(
+            self.expanded_nodes, int
+        ):
+            raise ConfigError(
+                f"preset:{name}: expanded_nodes must be a non-negative integer."
+            )
+        expanded_nodes = int(self.expanded_nodes)
+        if expanded_nodes < 0:
+            raise ConfigError(
+                f"preset:{name}: expanded_nodes must be a non-negative integer."
             )
         if not isinstance(self.document, Mapping):
-            raise ConfigError(f"preset:{self.name}: snapshot document is a mapping.")
+            raise ConfigError(f"preset:{name}: snapshot document is a mapping.")
         frozen_document = freeze_evidence(
-            self.document, where=f"preset:{self.name}.document"
+            self.document, where=f"preset:{name}.document"
         )
         assert isinstance(frozen_document, Mapping)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "resource", resource)
         object.__setattr__(self, "input_bytes", bytes(self.input_bytes))
+        object.__setattr__(self, "sha256", sha256)
         object.__setattr__(self, "document", frozen_document)
+        object.__setattr__(self, "expanded_nodes", expanded_nodes)
 
 
 def validate_preset_name(name: object) -> str:
-    if not isinstance(name, str) or re.fullmatch(
-        r"[A-Za-z][A-Za-z0-9_-]*", name
-    ) is None:
-        raise ConfigError(f"defaults: invalid package preset name {name!r}.")
-    return name
+    if not isinstance(name, str):
+        raise ConfigError(
+            "defaults: invalid package preset name of type "
+            f"{type(name).__name__}."
+        )
+    canonical = str.__str__(name)
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", canonical) is None:
+        raise ConfigError(f"defaults: invalid package preset name {canonical!r}.")
+    return canonical
 
 
 def validate_preset_document(name: str, loaded: object) -> dict[str, object]:

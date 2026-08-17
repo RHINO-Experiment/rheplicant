@@ -133,6 +133,18 @@ def test_shared_reader_normalizes_an_invalid_pathlike_with_semantic_name():
         )
 
 
+def test_shared_reader_uses_a_neutral_label_without_repr_for_invalid_pathlike():
+    class HostilePath:
+        def __fspath__(self):
+            return 42
+
+        def __repr__(self):
+            raise AssertionError("repr must not run")
+
+    with pytest.raises(ConfigError, match=r"^<source>: cannot read source"):
+        read_stable_regular_bytes(HostilePath(), maximum=8)
+
+
 @pytest.mark.parametrize("linked", [False, True])
 def test_fifo_sources_are_refused_without_blocking(tmp_path, linked):
     """Catches opening a FIFO in blocking mode or reading it before fstat refusal."""

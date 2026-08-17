@@ -75,7 +75,7 @@ def _read_stable_regular_file(
 ) -> tuple[bytes, str]:
     """Return exact bytes and resolved identity from one stable descriptor."""
     fd = -1
-    display_name = source_name if source_name is not None else repr(path)
+    display_name = source_name if source_name is not None else "<source>"
     try:
         source_path = os.fspath(path)
         if not isinstance(source_path, str):

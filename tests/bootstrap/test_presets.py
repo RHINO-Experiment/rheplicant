@@ -17,7 +17,11 @@ import pytest
 from _rheplicant_bootstrap import presets
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import thaw
-from _rheplicant_bootstrap.presets import PresetSnapshot, read_installed_preset
+from _rheplicant_bootstrap.presets import (
+    PresetRequest,
+    PresetSnapshot,
+    read_installed_preset,
+)
 
 PRESET_BYTES = b"""# RHINO v1 example-derived starting values.
 # These are copied from repository examples, not measured instrument constants.
@@ -233,6 +237,87 @@ def test_direct_snapshot_construction_detaches_and_canonicalizes_evidence():
     assert snapshot.document["runtime"]["values"] == (b"one",)
     with pytest.raises(TypeError):
         snapshot.document["late"] = True
+
+
+class _StatefulStr(str):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.state = []
+        return instance
+
+
+class _StatefulInt(int):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.state = []
+        return instance
+
+
+class _StatefulBytes(bytes):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.state = []
+        return instance
+
+
+def test_preset_records_canonicalize_every_scalar_field_to_exact_builtins():
+    name = _StatefulStr("one")
+    selector = _StatefulStr("runtime")
+    resource = _StatefulStr("rheplicant/config/presets/one.yaml")
+    raw = _StatefulBytes(b"fixture")
+    sha256 = _StatefulStr("0" * 64)
+    expanded_nodes = _StatefulInt(2)
+
+    request = PresetRequest(name=name, only=[selector])
+    snapshot = PresetSnapshot(
+        name=name,
+        resource=resource,
+        input_bytes=raw,
+        sha256=sha256,
+        document={"runtime": {}},
+        expanded_nodes=expanded_nodes,
+    )
+
+    assert type(request.name) is str
+    assert type(request.only[0]) is str
+    assert type(snapshot.name) is str
+    assert type(snapshot.resource) is str
+    assert type(snapshot.input_bytes) is bytes
+    assert type(snapshot.sha256) is str
+    assert type(snapshot.expanded_nodes) is int
+
+
+@pytest.mark.parametrize(
+    ("overrides", "needle"),
+    [
+        ({"name": object()}, "name"),
+        ({"resource": object()}, "resource"),
+        ({"resource": ""}, "resource"),
+        ({"sha256": object()}, "sha256"),
+        ({"sha256": "not-a-digest"}, "sha256"),
+        ({"expanded_nodes": True}, "expanded_nodes"),
+        ({"expanded_nodes": -1}, "expanded_nodes"),
+    ],
+)
+def test_snapshot_direct_construction_validates_every_scalar_field(overrides, needle):
+    arguments = {
+        "name": "one",
+        "resource": "rheplicant/config/presets/one.yaml",
+        "input_bytes": b"fixture",
+        "sha256": "0" * 64,
+        "document": {"runtime": {}},
+        "expanded_nodes": 1,
+    }
+    arguments.update(overrides)
+
+    with pytest.raises(ConfigError, match=needle):
+        PresetSnapshot(**arguments)
+
+
+@pytest.mark.parametrize("name", [object(), "", "not.valid"])
+def test_request_direct_construction_validates_name(name):
+    with pytest.raises(ConfigError, match="name"):
+        PresetRequest(name=name, only=None)
 
 
 def test_clean_bootstrap_preset_read_imports_neither_rheplicant_nor_jax():

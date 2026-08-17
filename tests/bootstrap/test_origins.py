@@ -11,6 +11,7 @@ from _rheplicant_bootstrap.layering import (
     MergeResult,
     OriginNode,
     initial_merge,
+    merge_extends,
     merge_with_origins,
     origins_at,
 )
@@ -77,7 +78,8 @@ def test_origins_at_refuses_a_path_missing_from_the_origin_tree():
 
 def test_direct_origin_records_canonicalize_all_mappings_and_sequences():
     """Catches direct construction leaving mutable audit-record containers."""
-    leaf = OriginNode(Origin("user"), {})
+    item = OriginNode(Origin("user"), {})
+    leaf = OriginNode(Origin("user"), {0: item})
     children = {"value": leaf}
     root = OriginNode(None, children)
     path = ["value"]
@@ -109,3 +111,103 @@ def test_origin_merge_canonicalizes_buffers_and_refuses_unsupported_leaves():
 
     with pytest.raises(ConfigError, match="document"):
         initial_merge({"unsafe": object()}, origin=Origin("user"))
+
+
+class _StatefulStr(str):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.state = []
+        return instance
+
+
+class _StatefulInt(int):
+    def __new__(cls, value):
+        instance = super().__new__(cls, value)
+        instance.state = []
+        return instance
+
+
+def test_origin_records_canonicalize_origins_and_segments_to_exact_builtins():
+    kind = _StatefulStr("preset")
+    name = _StatefulStr("one")
+    segment = _StatefulStr("value")
+    index = _StatefulInt(0)
+    item = OriginNode(Origin(kind, name), {})
+    sequence = OriginNode(Origin(kind, name), {index: item})
+    root = OriginNode(None, {segment: sequence})
+    deletion = DeletionRecord([segment, index], Origin(kind, name))
+    result = MergeResult({"value": [1]}, root, [deletion])
+
+    root_segment = next(iter(result.origins.children))
+    sequence_segment = next(iter(result.origins.children[root_segment].children))
+    assert type(root_segment) is str
+    assert type(sequence_segment) is int
+    assert type(item.origin.kind) is str
+    assert type(item.origin.name) is str
+    assert tuple(type(part) for part in deletion.path) == (str, int)
+    assert type(deletion.origin.kind) is str
+    assert type(deletion.origin.name) is str
+
+
+@pytest.mark.parametrize(
+    ("factory", "needle"),
+    [
+        (lambda: OriginNode(object(), {}), "origin"),
+        (lambda: DeletionRecord((), Origin("user")), "non-empty"),
+        (lambda: DeletionRecord(("value",), object()), "origin"),
+    ],
+)
+def test_origin_records_validate_origins_and_nonempty_deletion_paths(factory, needle):
+    with pytest.raises(ConfigError, match=needle):
+        factory()
+
+
+def test_merge_entry_points_validate_origins_even_for_empty_documents():
+    with pytest.raises(ConfigError, match="origin"):
+        initial_merge({}, origin=object())
+
+    parent = initial_merge({}, origin=Origin("user"))
+    with pytest.raises(ConfigError, match="origin"):
+        merge_with_origins(parent, {}, origin=object())
+
+
+def test_merge_result_requires_an_exact_parallel_origin_tree():
+    user = Origin("user")
+    valid_leaf = OriginNode(user, {})
+    valid_root = OriginNode(None, {"value": valid_leaf})
+    result = MergeResult({"value": 1}, valid_root, ())
+    assert result.origins is valid_root
+
+    invalid_roots = (
+        OriginNode(user, {"value": valid_leaf}),
+        OriginNode(None, {"value": OriginNode(None, {})}),
+        OriginNode(None, {}),
+        OriginNode(None, {"value": OriginNode(user, {"extra": valid_leaf})}),
+    )
+    for invalid_root in invalid_roots:
+        with pytest.raises(ConfigError, match="origin tree"):
+            MergeResult({"value": 1}, invalid_root, ())
+
+
+def test_merge_result_requires_sequence_indices_to_match_exactly():
+    user = Origin("user")
+    wrong_indices = OriginNode(
+        None,
+        {"items": OriginNode(user, {1: OriginNode(user, {})})},
+    )
+
+    with pytest.raises(ConfigError, match="origin tree"):
+        MergeResult({"items": [1]}, wrong_indices, ())
+
+
+def test_empty_deletion_key_is_refused_identically_by_both_merge_paths():
+    message = "layering deletion key must name a value after '~'."
+    parent = initial_merge({"kept": 1}, origin=Origin("user"))
+
+    with pytest.raises(ConfigError) as origin_error:
+        merge_with_origins(parent, {"~": None}, origin=Origin("user"))
+    with pytest.raises(ConfigError) as compatibility_error:
+        merge_extends({"~": None}, {"kept": 1})
+
+    assert str(origin_error.value) == message
+    assert str(compatibility_error.value) == message

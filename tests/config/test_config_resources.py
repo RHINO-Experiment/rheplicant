@@ -1,5 +1,6 @@
 """The resources DAG: build order, extends:, identity, and the kind registry."""
 
+from collections import namedtuple
 from types import MappingProxyType
 
 import jax.numpy as jnp
@@ -13,6 +14,12 @@ from rheplicant.config.resources import (
     check_unknown_keys,
     merge_extends,
 )
+
+_Pair = namedtuple("_Pair", ("left", "right"))
+
+
+class _FancyTuple(tuple):
+    pass
 
 
 @pytest.fixture
@@ -157,6 +164,64 @@ class TestExtends:
         assert isinstance(merged["child_tuple"], tuple)
         assert parent_leaf.values == ["parent"]
         assert child_leaf.values == ["child"]
+
+    def test_deepcopy_keeps_an_immutable_tuple_object_identical(self):
+        """Catches rebuilding tuples that standard deepcopy deliberately reuses."""
+        immutable = (1, "two", b"three")
+
+        merged = merge_extends({"value": immutable}, {})
+
+        assert merged["value"] is immutable
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            _Pair("left", ["right"]),
+            _FancyTuple(("left", ["right"])),
+        ],
+    )
+    def test_deepcopy_preserves_namedtuple_and_tuple_subclasses(self, value):
+        merged = merge_extends({"value": value}, {})
+        copied = merged["value"]
+
+        assert type(copied) is type(value)
+        assert copied is not value
+        copied[-1].append("changed")
+        assert value[-1] == ["right"]
+
+    def test_deepcopy_preserves_a_tuple_list_cycle(self):
+        loop = []
+        cycle = (loop,)
+        loop.append(cycle)
+
+        copied = merge_extends({"cycle": cycle}, {})["cycle"]
+
+        assert copied is not cycle
+        assert copied[0] is not loop
+        assert copied[0][0] is copied
+
+    def test_deepcopy_preserves_topology_through_nested_mapping_views(self):
+        shared = ["value"]
+        nested = (MappingProxyType({"shared": shared}), shared)
+
+        copied = merge_extends({"nested": nested}, {})["nested"]
+
+        assert isinstance(copied[0], dict)
+        assert copied[0]["shared"] is copied[1]
+        assert copied[1] is not shared
+
+    def test_overlapping_cyclic_mapping_merge_never_leaks_recursion_error(self):
+        parent = {}
+        parent["loop"] = parent
+        child = {}
+        child["loop"] = child
+
+        try:
+            merged = merge_extends(child, parent)
+        except ConfigError:
+            return
+
+        assert merged["loop"] is merged
 
     def test_append_with_a_sibling_key_is_refused(self):
         """{append: [...], other: ...} used to fall through to the
