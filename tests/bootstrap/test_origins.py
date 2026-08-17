@@ -8,6 +8,8 @@ from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import thaw
 from _rheplicant_bootstrap.layering import (
     DeletionRecord,
+    MergeResult,
+    OriginNode,
     initial_merge,
     merge_with_origins,
     origins_at,
@@ -71,3 +73,39 @@ def test_origins_at_refuses_a_path_missing_from_the_origin_tree():
     result = initial_merge({"kept": 1}, origin=Origin("user"))
     with pytest.raises(ConfigError, match="origin path"):
         origins_at(result.origins, ("missing",))
+
+
+def test_direct_origin_records_canonicalize_all_mappings_and_sequences():
+    """Catches direct construction leaving mutable audit-record containers."""
+    leaf = OriginNode(Origin("user"), {})
+    children = {"value": leaf}
+    root = OriginNode(None, children)
+    path = ["value"]
+    deletion = DeletionRecord(path, Origin("user"))
+    deletions = [deletion]
+    document = {"value": [bytearray(b"one")]}
+
+    result = MergeResult(document, root, deletions)
+    children.clear()
+    path.append("late")
+    deletions.clear()
+    document["value"][0][:] = b"two"
+    document["value"].append(b"late")
+
+    assert tuple(root.children) == ("value",)
+    assert deletion.path == ("value",)
+    assert result.deletions == (deletion,)
+    assert result.document["value"] == (b"one",)
+    with pytest.raises(TypeError):
+        root.children["late"] = leaf
+
+
+def test_origin_merge_canonicalizes_buffers_and_refuses_unsupported_leaves():
+    """Catches mutable arbitrary leaves leaking through origin-bearing evidence."""
+    buffer = bytearray(b"one")
+    result = initial_merge({"value": buffer}, origin=Origin("user"))
+    buffer[:] = b"two"
+    assert result.document["value"] == b"one"
+
+    with pytest.raises(ConfigError, match="document"):
+        initial_merge({"unsafe": object()}, origin=Origin("user"))

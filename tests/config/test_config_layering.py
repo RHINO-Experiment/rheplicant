@@ -1,5 +1,7 @@
 """Document layering: variants are one-level deep-merge patches over the base."""
 
+from types import MappingProxyType
+
 import pytest
 
 from rheplicant.config import ConfigError
@@ -62,6 +64,26 @@ class TestRecursiveUpdate:
         merged = recursive_update(BASE, BASE["variants"]["seven"])
         assert repr(BASE) == before
         assert merged is not BASE
+
+    def test_frozen_mappings_keep_tuples_and_deepcopy_arbitrary_leaves(self):
+        """Catches routing the public compatibility merge through evidence thawing."""
+        class MutableLeaf:
+            def __init__(self, values):
+                self.values = values
+
+        base_leaf = MutableLeaf(["base"])
+        patch_leaf = MutableLeaf(["patch"])
+        base = MappingProxyType({"kept": (base_leaf,)})
+        patch = MappingProxyType({"added": (patch_leaf,)})
+
+        merged = recursive_update(base, patch)
+        merged["kept"][0].values.append("changed")
+        merged["added"][0].values.append("changed")
+
+        assert isinstance(merged["kept"], tuple)
+        assert isinstance(merged["added"], tuple)
+        assert base_leaf.values == ["base"]
+        assert patch_leaf.values == ["patch"]
 
     def test_non_mapping_inputs_are_refused(self):
         with pytest.raises(ConfigError, match="mapping"):

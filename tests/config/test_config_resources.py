@@ -1,5 +1,7 @@
 """The resources DAG: build order, extends:, identity, and the kind registry."""
 
+from types import MappingProxyType
+
 import jax.numpy as jnp
 import pytest
 
@@ -135,6 +137,26 @@ class TestExtends:
 
         assert parent["optimizations"] == [{"note": "a"}]
         assert child["optimizations"]["append"] == [{"note": "x"}]
+
+    def test_frozen_mapping_replacements_keep_tuple_type_and_detach_leaves(self):
+        """Catches the public merge converting tuples to lists or sharing leaves."""
+        class MutableLeaf:
+            def __init__(self, values):
+                self.values = values
+
+        parent_leaf = MutableLeaf(["parent"])
+        child_leaf = MutableLeaf(["child"])
+        parent = MappingProxyType({"parent_tuple": (parent_leaf,)})
+        child = MappingProxyType({"child_tuple": (child_leaf,)})
+
+        merged = merge_extends(child, parent)
+        merged["parent_tuple"][0].values.append("changed")
+        merged["child_tuple"][0].values.append("changed")
+
+        assert isinstance(merged["parent_tuple"], tuple)
+        assert isinstance(merged["child_tuple"], tuple)
+        assert parent_leaf.values == ["parent"]
+        assert child_leaf.values == ["child"]
 
     def test_append_with_a_sibling_key_is_refused(self):
         """{append: [...], other: ...} used to fall through to the

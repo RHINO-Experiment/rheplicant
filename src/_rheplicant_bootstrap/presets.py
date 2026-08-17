@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.frozen import freeze
+from _rheplicant_bootstrap.frozen import freeze_evidence
 from _rheplicant_bootstrap.source import read_stable_regular_bytes
 from _rheplicant_bootstrap.yaml import safe_load_document
 
@@ -29,6 +30,26 @@ class PresetRequest:
     name: str
     only: Sequence[str] | None
 
+    def __post_init__(self) -> None:
+        validate_preset_name(self.name)
+        if self.only is None:
+            return
+        if isinstance(self.only, str | bytes) or not isinstance(self.only, Sequence):
+            raise ConfigError("defaults: only: is a sequence of dotted paths.")
+        only = tuple(self.only)
+        if not only:
+            raise ConfigError("defaults: only: must select at least one path.")
+        for path in only:
+            if (
+                not isinstance(path, str)
+                or not path
+                or any(not part for part in path.split("."))
+            ):
+                raise ConfigError(
+                    f"defaults: only: has invalid document path {path!r}."
+                )
+        object.__setattr__(self, "only", only)
+
 
 @dataclass(frozen=True, slots=True)
 class PresetSnapshot:
@@ -38,6 +59,21 @@ class PresetSnapshot:
     sha256: str
     document: Mapping[str, object]
     expanded_nodes: int
+
+    def __post_init__(self) -> None:
+        validate_preset_name(self.name)
+        if not isinstance(self.input_bytes, bytes | bytearray | memoryview):
+            raise ConfigError(
+                f"preset:{self.name}: input_bytes must be a byte buffer."
+            )
+        if not isinstance(self.document, Mapping):
+            raise ConfigError(f"preset:{self.name}: snapshot document is a mapping.")
+        frozen_document = freeze_evidence(
+            self.document, where=f"preset:{self.name}.document"
+        )
+        assert isinstance(frozen_document, Mapping)
+        object.__setattr__(self, "input_bytes", bytes(self.input_bytes))
+        object.__setattr__(self, "document", frozen_document)
 
 
 def validate_preset_name(name: object) -> str:
@@ -109,7 +145,7 @@ def read_installed_preset(name: str) -> PresetSnapshot:
             path = Path(locations[0]) / relative
     except ConfigError:
         raise
-    except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
+    except (AttributeError, csv.Error, ImportError, OSError, TypeError, ValueError) as exc:
         raise ConfigError(f"defaults: cannot discover package preset {name!r}: {exc}") from exc
 
     raw = read_stable_regular_bytes(
@@ -117,14 +153,12 @@ def read_installed_preset(name: str) -> PresetSnapshot:
     )
     loaded = safe_load_document(raw, source_name=f"preset:{name}")
     document = validate_preset_document(name, loaded.value)
-    frozen_document = freeze(document)
-    assert isinstance(frozen_document, Mapping)
     return PresetSnapshot(
         name=name,
         resource=resource,
         input_bytes=raw,
         sha256=hashlib.sha256(raw).hexdigest(),
-        document=frozen_document,
+        document=document,
         expanded_nodes=loaded.expanded_nodes,
     )
 

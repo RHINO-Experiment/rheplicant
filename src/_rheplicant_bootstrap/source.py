@@ -75,11 +75,13 @@ def _read_stable_regular_file(
 ) -> tuple[bytes, str]:
     """Return exact bytes and resolved identity from one stable descriptor."""
     fd = -1
+    display_name = source_name if source_name is not None else repr(path)
     try:
         source_path = os.fspath(path)
         if not isinstance(source_path, str):
             raise TypeError("source path must be text")
-        display_name = source_path if source_name is None else source_name
+        if source_name is None:
+            display_name = source_path
         if maximum < 0:
             raise ValueError("maximum must be non-negative")
         before_link = _lexical_lstat(source_path)
@@ -107,9 +109,8 @@ def _read_stable_regular_file(
         final_link = _lexical_lstat(source_path)
     except ConfigError:
         raise
-    except (OSError, ValueError) as exc:
-        label = source_name if source_name is not None else os.fspath(path)
-        raise ConfigError(f"{label}: cannot read source: {exc}") from exc
+    except (OSError, TypeError, ValueError) as exc:
+        raise ConfigError(f"{display_name}: cannot read source: {exc}") from exc
     finally:
         if fd >= 0:
             try:
@@ -122,13 +123,13 @@ def _read_stable_regular_file(
         and _same_snapshot(after_initial_resolution_link, after_read_link)
         and _same_snapshot(after_read_link, final_link)
     ):
-        raise ConfigError(f"{source_path}: source link changed while reading.")
+        raise ConfigError(f"{display_name}: source link changed while reading.")
     if before_realpath != source_realpath:
-        raise ConfigError(f"{source_path}: source link changed while reading.")
+        raise ConfigError(f"{display_name}: source link changed while reading.")
     if not _same_snapshot(before_target, after_target) or not _same_snapshot(
         after_target, final_target
     ):
-        raise ConfigError(f"{source_path}: source target changed while reading.")
+        raise ConfigError(f"{display_name}: source target changed while reading.")
     return data, source_realpath
 
 

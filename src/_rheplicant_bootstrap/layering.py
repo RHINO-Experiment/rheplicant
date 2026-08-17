@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TypeAlias
 
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.frozen import freeze, thaw
+from _rheplicant_bootstrap.frozen import freeze_evidence, thaw
 from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot
 from _rheplicant_bootstrap.types import Origin
 
@@ -22,11 +23,36 @@ class OriginNode:
     origin: Origin | None
     children: Mapping[OriginSegment, OriginNode]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.children, Mapping):
+            raise ConfigError("origin children must be a mapping.")
+        canonical: dict[OriginSegment, OriginNode] = {}
+        for segment, child in self.children.items():
+            if isinstance(segment, bool) or not isinstance(segment, str | int):
+                raise ConfigError(
+                    f"origin child segment must be str or int; got {segment!r}."
+                )
+            if not isinstance(child, OriginNode):
+                raise ConfigError(f"origin child {segment!r} must be an OriginNode.")
+            canonical[segment] = child
+        object.__setattr__(self, "children", MappingProxyType(canonical))
+
 
 @dataclass(frozen=True, slots=True)
 class DeletionRecord:
     path: Sequence[OriginSegment]
     origin: Origin
+
+    def __post_init__(self) -> None:
+        if isinstance(self.path, str | bytes) or not isinstance(self.path, Sequence):
+            raise ConfigError("deletion path must be a sequence of segments.")
+        canonical = tuple(self.path)
+        if any(
+            isinstance(segment, bool) or not isinstance(segment, str | int)
+            for segment in canonical
+        ):
+            raise ConfigError("deletion path segments must be str or int.")
+        object.__setattr__(self, "path", canonical)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +60,23 @@ class MergeResult:
     document: Mapping[str, object]
     origins: OriginNode
     deletions: Sequence[DeletionRecord]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.document, Mapping):
+            raise ConfigError("merge result document must be a mapping.")
+        if not isinstance(self.origins, OriginNode):
+            raise ConfigError("merge result origins must be an OriginNode.")
+        if isinstance(self.deletions, str | bytes) or not isinstance(
+            self.deletions, Sequence
+        ):
+            raise ConfigError("merge result deletions must be a sequence.")
+        deletions = tuple(self.deletions)
+        if any(not isinstance(item, DeletionRecord) for item in deletions):
+            raise ConfigError("merge result deletions must contain DeletionRecord values.")
+        document = freeze_evidence(self.document, where="merge result document")
+        assert isinstance(document, Mapping)
+        object.__setattr__(self, "document", document)
+        object.__setattr__(self, "deletions", deletions)
 
 
 def _frozen_children(
@@ -67,11 +110,11 @@ def initial_merge(document: Mapping[str, object], *, origin: Origin) -> MergeRes
             "initial_merge: document is a mapping; got "
             f"{type(document).__name__} ({document!r})."
         )
-    mutable = thaw(freeze(document))
-    assert isinstance(mutable, dict)
+    evidence = freeze_evidence(document, where="initial_merge document")
+    assert isinstance(evidence, Mapping)
     return MergeResult(
-        document=freeze(mutable),
-        origins=_root_node(mutable, origin),
+        document=evidence,
+        origins=_root_node(evidence, origin),
         deletions=(),
     )
 
@@ -174,7 +217,7 @@ def _merge_mapping(
                 deletions=deletions,
             )
             continue
-        mutable_value = thaw(freeze(value))
+        mutable_value = thaw(value)
         merged[key] = mutable_value
         children[key] = _origin_node(mutable_value, origin)
     return merged, OriginNode(
@@ -194,17 +237,19 @@ def merge_with_origins(
             "merge_with_origins: patch is a mapping; got "
             f"{type(patch).__name__} ({patch!r})."
         )
+    frozen_patch = freeze_evidence(patch, where="merge_with_origins patch")
+    assert isinstance(frozen_patch, Mapping)
     deletions = list(parent.deletions)
     document, origins = _merge_mapping(
         parent.document,
         parent.origins,
-        patch,
+        frozen_patch,
         origin=origin,
         prefix=(),
         deletions=deletions,
     )
     return MergeResult(
-        document=freeze(document),
+        document=document,
         origins=origins,
         deletions=tuple(deletions),
     )
@@ -224,22 +269,79 @@ def origins_at(origins: OriginNode, path: Sequence[OriginSegment]) -> Origin:
     return node.origin
 
 
+def _compatibility_deepcopy(value: object, memo: dict[int, object] | None = None) -> object:
+    """Deep-copy arbitrary public values while converting mapping views to dicts."""
+    if memo is None:
+        memo = {}
+    identity = id(value)
+    if identity in memo:
+        return memo[identity]
+    if isinstance(value, Mapping):
+        result: dict[object, object] = {}
+        memo[identity] = result
+        for key, item in value.items():
+            result[copy.deepcopy(key, memo)] = _compatibility_deepcopy(item, memo)
+        return result
+    if isinstance(value, list):
+        result_list: list[object] = []
+        memo[identity] = result_list
+        result_list.extend(_compatibility_deepcopy(item, memo) for item in value)
+        return result_list
+    if isinstance(value, tuple):
+        result_tuple = tuple(_compatibility_deepcopy(item, memo) for item in value)
+        memo[identity] = result_tuple
+        return result_tuple
+    return copy.deepcopy(value, memo)
+
+
 def merge_extends(child: dict, parent: dict) -> dict:
-    """Deep-merge ``child`` over ``parent`` using the shared layering rules."""
+    """Deep-merge ``child`` over ``parent`` on the lossless public boundary."""
     for label, given in (("child", child), ("parent", parent)):
         if not isinstance(given, Mapping):
             raise ConfigError(
                 f"merge_extends: {label} is a mapping; got "
                 f"{type(given).__name__} ({given!r})."
             )
-    result = merge_with_origins(
-        initial_merge(parent, origin=Origin("rheplicant-default")),
-        child,
-        origin=Origin("user"),
-    )
-    mutable = thaw(result.document)
-    assert isinstance(mutable, dict)
-    return mutable
+    merged = _compatibility_deepcopy(parent)
+    assert isinstance(merged, dict)
+    for key, value in child.items():
+        if not isinstance(key, str):
+            raise ConfigError(
+                f"merge_extends: keys are strings; got {type(key).__name__} ({key!r})."
+            )
+        if key.startswith("~"):
+            if value is not None:
+                raise ConfigError(f"{key!r}: deletion value must be null.")
+            merged.pop(key[1:], None)
+            continue
+        if isinstance(value, Mapping) and "append" in value:
+            if set(value) != {"append"}:
+                siblings = sorted(str(item) for item in set(value) - {"append"})
+                raise ConfigError(
+                    f"{key!r}: append must be the only key when extending a list; "
+                    f"got the sibling keys {siblings}."
+                )
+            appended = value["append"]
+            if not isinstance(appended, list | tuple):
+                raise ConfigError(
+                    f"{key!r}: append is a sequence; got "
+                    f"{type(appended).__name__} ({appended!r})."
+                )
+            inherited = merged.get(key, [])
+            if not isinstance(inherited, list):
+                raise ConfigError(
+                    f"{key!r} is extended with {{append: ...}} but the inherited "
+                    f"value is {type(inherited).__name__}, not a list."
+                )
+            copied = _compatibility_deepcopy(appended)
+            assert isinstance(copied, tuple | list)
+            merged[key] = [*inherited, *copied]
+            continue
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            merged[key] = merge_extends(value, merged[key])
+            continue
+        merged[key] = _compatibility_deepcopy(value)
+    return merged
 
 
 def recursive_update(base: Mapping, patch: Mapping) -> dict:
@@ -250,7 +352,7 @@ def recursive_update(base: Mapping, patch: Mapping) -> dict:
                 f"recursive_update: {label} is a mapping; got "
                 f"{type(given).__name__} ({given!r})."
             )
-    return merge_extends(dict(patch), dict(base))
+    return merge_extends(patch, base)
 
 
 def apply_variant(document: Mapping, name: str) -> dict:
@@ -336,27 +438,49 @@ def _select_only(
         assert isinstance(mutable, dict)
         return mutable
     paths = [tuple(path.split(".")) for path in request.only]
-    seen: set[tuple[str, ...]] = set()
+    terminal = object()
+    trie: dict[object, object] = {}
     for parts in paths:
         rendered = ".".join(parts)
-        if parts in seen:
-            raise ConfigError(
-                f"defaults preset {request.name!r}: only path {rendered!r} is duplicate."
-            )
-        seen.add(parts)
         if parts[0] == "model" and len(parts) != 1:
             raise ConfigError(
                 f"defaults preset {request.name!r}: select model as a whole; "
                 f"{rendered!r} is a partial model selection."
             )
-    for left_index, left in enumerate(paths):
-        for right in paths[left_index + 1 :]:
-            shorter, longer = sorted((left, right), key=len)
-            if longer[: len(shorter)] == shorter:
+        node = trie
+        for part in parts:
+            prior = node.get(terminal)
+            if isinstance(prior, str):
                 raise ConfigError(
                     f"defaults preset {request.name!r}: only paths "
-                    f"{'.'.join(left)!r} and {'.'.join(right)!r} overlap."
+                    f"{prior!r} and {rendered!r} overlap."
                 )
+            child = node.get(part)
+            if child is None:
+                child = {}
+                node[part] = child
+            assert isinstance(child, dict)
+            node = child
+        if terminal in node:
+            raise ConfigError(
+                f"defaults preset {request.name!r}: only path {rendered!r} is duplicate."
+            )
+        if node:
+            descendant = node
+            while terminal not in descendant:
+                descendant = next(
+                    child
+                    for key, child in descendant.items()
+                    if key is not terminal
+                )
+                assert isinstance(descendant, dict)
+            prior = descendant[terminal]
+            assert isinstance(prior, str)
+            raise ConfigError(
+                f"defaults preset {request.name!r}: only paths "
+                f"{rendered!r} and {prior!r} overlap."
+            )
+        node[terminal] = rendered
 
     selected: dict[str, object] = {}
     for parts in paths:
@@ -382,7 +506,7 @@ def _without_key(result: MergeResult, key: str) -> MergeResult:
     children = dict(result.origins.children)
     children.pop(key, None)
     return MergeResult(
-        document=freeze(document),
+        document=document,
         origins=OriginNode(None, _frozen_children(children)),
         deletions=tuple(result.deletions),
     )
@@ -410,7 +534,7 @@ def _replace_key_with_node(
     children = dict(without.origins.children)
     children[key] = node
     return MergeResult(
-        document=freeze(document),
+        document=document,
         origins=OriginNode(None, _frozen_children(children)),
         deletions=tuple(result.deletions),
     )
@@ -474,10 +598,11 @@ def layer_presets(
         names.add(request.name)
         snapshot = preset_provider(request.name)
         chosen = _select_only(request, snapshot.document)
-        model = chosen.pop("model", None)
+        missing_model = object()
+        model = chosen.pop("model", missing_model)
         preset_origin = Origin("preset", request.name)
         result = merge_with_origins(result, chosen, origin=preset_origin)
-        if model is not None:
+        if model is not missing_model:
             result = _replace_key(result, "model", model, origin=preset_origin)
         selected.append((request, snapshot))
 

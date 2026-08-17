@@ -121,6 +121,18 @@ def test_shared_stable_reader_uses_its_source_name_in_limit_refusals(tmp_path):
         read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
+def test_shared_reader_normalizes_an_invalid_pathlike_with_semantic_name():
+    """Catches a raw os.fspath TypeError escaping the neutral source boundary."""
+    class InvalidPath:
+        def __fspath__(self):
+            return 42
+
+    with pytest.raises(ConfigError, match="preset:fixture: cannot read source"):
+        read_stable_regular_bytes(
+            InvalidPath(), maximum=8, source_name="preset:fixture"
+        )
+
+
 @pytest.mark.parametrize("linked", [False, True])
 def test_fifo_sources_are_refused_without_blocking(tmp_path, linked):
     """Catches opening a FIFO in blocking mode or reading it before fstat refusal."""
@@ -308,6 +320,27 @@ def test_changed_lexical_lstat_is_refused(tmp_path, monkeypatch):
         source_module._read_path_once(str(path))
 
 
+def test_shared_reader_uses_semantic_name_for_link_mutation(tmp_path, monkeypatch):
+    """Catches post-read identity refusals reverting to the filesystem spelling."""
+    path = tmp_path / "preset.yaml"
+    path.write_bytes(b"{}")
+    original_lstat = os.lstat
+    calls = 0
+
+    def changed_second_lstat(target, *args, **kwargs):
+        nonlocal calls
+        result = original_lstat(target, *args, **kwargs)
+        if os.fspath(target) == str(path):
+            calls += 1
+            if calls == 2:
+                return _changed_stat(result)
+        return result
+
+    monkeypatch.setattr(source_module, "_lexical_lstat", changed_second_lstat)
+    with pytest.raises(ConfigError, match="^preset:fixture: source link changed"):
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
+
+
 def test_late_symlink_swap_to_a_same_inode_hardlink_is_refused(tmp_path, monkeypatch):
     """Catches resolving provenance after the old final lexical-link check."""
     first_target = tmp_path / "first.yaml"
@@ -363,6 +396,30 @@ def test_changed_open_target_fstat_is_refused(tmp_path, monkeypatch):
 
     with pytest.raises(ConfigError, match="target changed"):
         source_module._read_path_once(str(path))
+
+
+def test_shared_reader_uses_semantic_name_for_target_mutation(tmp_path, monkeypatch):
+    """Catches target-change refusals exposing the discovery path instead."""
+    path = tmp_path / "preset.yaml"
+    path.write_bytes(b"{}")
+    original_fstat = os.fstat
+    original_stat = os.stat
+    calls = 0
+
+    def changed_second_fstat(fd, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        result = original_fstat(fd, *args, **kwargs)
+        return _changed_stat(result) if calls == 2 else result
+
+    def matching_final_stat(target, *args, **kwargs):
+        result = original_stat(target, *args, **kwargs)
+        return _changed_stat(result) if os.fspath(target) == str(path) else result
+
+    monkeypatch.setattr(source_module.os, "fstat", changed_second_fstat)
+    monkeypatch.setattr(source_module.os, "stat", matching_final_stat)
+    with pytest.raises(ConfigError, match="^preset:fixture: source target changed"):
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
 def test_changed_final_realpath_stat_is_refused(tmp_path, monkeypatch):

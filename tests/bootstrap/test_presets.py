@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -15,7 +17,7 @@ import pytest
 from _rheplicant_bootstrap import presets
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import thaw
-from _rheplicant_bootstrap.presets import read_installed_preset
+from _rheplicant_bootstrap.presets import PresetSnapshot, read_installed_preset
 
 PRESET_BYTES = b"""# RHINO v1 example-derived starting values.
 # These are copied from repository examples, not measured instrument constants.
@@ -156,6 +158,20 @@ def test_malformed_editable_metadata_is_normalized_to_config_error(monkeypatch):
         read_installed_preset("rhino_v1")
 
 
+def test_malformed_real_record_csv_is_normalized_to_config_error(tmp_path, monkeypatch):
+    """Catches importlib.metadata's csv.Error escaping the neutral boundary."""
+    dist_info = tmp_path / "rheplicant-1.0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text("Name: rheplicant\nVersion: 1.0\n")
+    oversized_field = "x" * (csv.field_size_limit() + 1)
+    (dist_info / "RECORD").write_text(oversized_field)
+    distribution = importlib.metadata.PathDistribution(dist_info)
+    monkeypatch.setattr(presets.importlib.metadata, "distribution", lambda _: distribution)
+
+    with pytest.raises(ConfigError, match="cannot discover package preset"):
+        read_installed_preset("rhino_v1")
+
+
 def test_editable_package_root_must_be_unique(monkeypatch):
     distribution = _Distribution(direct_url={"dir_info": {"editable": True}})
     monkeypatch.setattr(presets.importlib.metadata, "distribution", lambda _: distribution)
@@ -194,6 +210,29 @@ def test_preset_document_rejects_process_entry_sections(tmp_path, monkeypatch):
 
     with pytest.raises(ConfigError, match="plugins"):
         read_installed_preset("rhino_v1")
+
+
+def test_direct_snapshot_construction_detaches_and_canonicalizes_evidence():
+    """Catches custom providers returning time-varying shallow snapshot records."""
+    raw = bytearray(b"fixture")
+    document = {"runtime": {"values": [bytearray(b"one")]}}
+
+    snapshot = PresetSnapshot(
+        name="one",
+        resource="rheplicant/config/presets/one.yaml",
+        input_bytes=raw,
+        sha256="0" * 64,
+        document=document,
+        expanded_nodes=1,
+    )
+    raw[:] = b"changed"
+    document["runtime"]["values"][0][:] = b"two"
+    document["runtime"]["values"].append(b"late")
+
+    assert snapshot.input_bytes == b"fixture"
+    assert snapshot.document["runtime"]["values"] == (b"one",)
+    with pytest.raises(TypeError):
+        snapshot.document["late"] = True
 
 
 def test_clean_bootstrap_preset_read_imports_neither_rheplicant_nor_jax():

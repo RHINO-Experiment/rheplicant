@@ -7,7 +7,7 @@ import pytest
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import freeze, thaw
 from _rheplicant_bootstrap.layering import layer_presets, parse_default
-from _rheplicant_bootstrap.presets import PresetSnapshot
+from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot
 
 
 def _snapshot(name: str, document: dict) -> PresetSnapshot:
@@ -38,6 +38,56 @@ def test_parse_default_constructs_sequence_fields_as_tuples():
     assert request.name == "rhino_v1"
     assert request.only == ("runtime", "observation.site")
     assert isinstance(request.only, tuple)
+
+
+def test_direct_request_construction_canonicalizes_and_detaches_only():
+    """Catches custom callers bypassing parse_default's tuple invariant."""
+    only = ["runtime"]
+    request = PresetRequest(name="one", only=only)
+    only.append("model")
+
+    assert request.only == ("runtime",)
+    with pytest.raises(ConfigError, match="only: must select at least one path"):
+        PresetRequest(name="one", only=[])
+
+
+class _CountedSegment(str):
+    comparisons = 0
+
+    def __eq__(self, other):
+        type(self).comparisons += 1
+        return super().__eq__(other)
+
+    __hash__ = str.__hash__
+
+
+class _CountedSelector(str):
+    def __new__(cls, segment: _CountedSegment):
+        instance = super().__new__(cls, segment)
+        instance.segment = segment
+        return instance
+
+    def split(self, sep=None, maxsplit=-1):
+        if sep == ".":
+            return [self.segment]
+        return super().split(sep, maxsplit)
+
+
+def test_only_overlap_work_is_bounded_by_total_selector_segments():
+    """Catches restoring a pairwise-quadratic overlap scan."""
+    count = 2_000
+    segments = [_CountedSegment(f"section_{index}") for index in range(count)]
+    selectors = [_CountedSelector(segment) for segment in segments]
+    document = {segment: index for index, segment in enumerate(segments)}
+    request = parse_default({"from": "one", "only": selectors})
+    _CountedSegment.comparisons = 0
+
+    result, _ = layer_presets(
+        {}, (request,), preset_provider=_provider({"one": document})
+    )
+
+    assert len(result.document) == count
+    assert _CountedSegment.comparisons <= count * 8
 
 
 @pytest.mark.parametrize(
@@ -103,6 +153,37 @@ def test_two_preset_models_replace_instead_of_union():
         ),
     )
     assert thaw(result.document)["model"] == {"second_node": {"y": 2}}
+
+
+def test_explicit_null_preset_model_replaces_an_earlier_candidate():
+    """Catches conflating a present null model with an absent model key."""
+    result, _ = layer_presets(
+        {},
+        (parse_default("first"), parse_default("second")),
+        preset_provider=_provider(
+            {
+                "first": {"model": {"first_node": {"x": 1}}},
+                "second": {"model": None},
+            }
+        ),
+    )
+    assert "model" in result.document
+    assert result.document["model"] is None
+
+
+def test_custom_provider_snapshot_cannot_change_layered_evidence_after_construction():
+    """Catches trusting a provider's mutable document after snapshot construction."""
+    provider_document = {"runtime": {"values": [bytearray(b"one")]}}
+    snapshot = _snapshot("one", provider_document)
+    provider_document["runtime"]["values"][0][:] = b"two"
+    provider_document["runtime"]["values"].append(b"late")
+
+    result, selected = layer_presets(
+        {}, (parse_default("one"),), preset_provider=lambda _: snapshot
+    )
+
+    assert result.document["runtime"]["values"] == (b"one",)
+    assert selected[0][1].document["runtime"]["values"] == (b"one",)
 
 
 def test_user_model_without_inherit_replaces_the_preset_candidate():
