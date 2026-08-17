@@ -213,6 +213,88 @@ def repatch(document, **sections):
     return patched
 
 
+# --- Plan 3C Task 2's constants ---------------------------------------------
+#
+# Appended at the foot and each named for its OWN subject, per §3.2(f): a
+# generic name here is a name the next task reaches for and quietly widens.
+# Nothing above this line is edited.
+
+#: An ``inference.checks:`` patch declaring one legal skip -- the shape A37 is
+#: about when its ``reason:`` is taken away, and the shape the phase assertion
+#: puts BESIDE :data:`UNREADABLE_BEAM`.  ``linearity`` and not one of the other
+#: two because it is the only check on by default (``gating.DEFAULT_MODE``), so
+#: a skip of it is a document that actually changes what runs.
+CHECKS_SKIP = {"linearity": {"mode": "skip", "reason": "campaign"}}
+
+#: ``model.noise`` drawn by the radiometer operator -- C18.kind's other
+#: drawing type.  :data:`RADIOMETER_NODE` above is the same fields WITHOUT the
+#: ``type:``, because ``inference.twin.replace`` and ``model:`` want them under
+#: different spellings; this is the ``model:`` spelling.
+RADIOMETER_DRAWN = {"type": "RadiometerNoiseOperator", **RADIOMETER_NODE}
+
+#: Three switch positions, so ``context.shape_scope.n_source`` is 3 rather
+#: than the base document's 1.  C15's ``min(n_source, k)`` cap is invisible on
+#: a one-load document, where the product is ``min(1, k) * n_freq`` whatever
+#: ``k`` is.
+NOISE_WAVE_SWITCHING = {"mode": "cycle", "order": ["antenna", "ambient",
+                                                   "hot"]}
+
+#: The two calibration loads :data:`NOISE_WAVE_SWITCHING`'s order names.
+NOISE_WAVE_LOADS = {"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
+                    "hot": {"t_load": {"value": 400.0, "unit": "K"}}}
+
+#: A ``model:`` PATCH lighting the ``noise_wave`` node -- C15's subject.  A
+#: patch and not a whole model, because ``preflight_document`` merges one
+#: level deep and a test that wants a basis beside it writes
+#: ``{**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS}``.
+#:
+#: The four temperatures are written out separately rather than defaulted: C15
+#: counts which of them a LATENT frees, and a node that omitted one would make
+#: the freed-set assertions read against a field that is not there.
+NOISE_WAVE_MODEL = {
+    "noise_wave": {"type": "NoiseWaveOperator",
+                   "t_unc": {"value": 1.0, "unit": "K"},
+                   "t_cos": {"value": 1.0, "unit": "K"},
+                   "t_sin": {"value": 1.0, "unit": "K"},
+                   "t_rx": {"value": 1.0, "unit": "K"},
+                   "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
+                   "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
+                   "gamma_rec_re": {"zeros": ["n_freq"]},
+                   "gamma_rec_im": {"zeros": ["n_freq"]}},
+}
+
+#: A ``model.t_sys_extra`` entry of the type C15 declines under.  **Its
+#: ``graph_node`` is ``t_sys_extra`` and NOT ``noise_wave``** (measured), which
+#: is why the detector cannot look under the node the check is otherwise about.
+#:
+#: **A LIST, not a label-keyed mapping** (MAJOR 4 fix).  ``t_sys_extra`` IS a
+#: ``many`` node, but only ``cal_loads`` is FAN-shaped (a label-keyed
+#: mapping) -- ``foregrounds``, ``t_sys_extra`` and ``filters`` are
+#: SUM/CHAIN-shaped and take a non-empty LIST instead
+#: (``many_shape_problem``, ``sections/compose.py``).  Measured: the old
+#: mapping-shaped fixture was refused at check A6 --
+#: ``model.t_sys_extra: is a non-empty list (SUM); got dict`` -- and every
+#: C15 test built on it passed only because ``axis_findings`` reaches the
+#: axes pass alone and never runs the text pass A6 lives in.
+#:
+#: **Every field here is a real value node and the class is real**, so a
+#: document built on this fixture is one ``load_document`` accepts.
+#: ``time_basis``/``freq_basis`` are ordinary array leaves, not object
+#: fields (``sections/model.py::_object_fields`` names only ``sky_model``
+#: and ``projector``), so they cannot take a ``{ref: resources.bases.<n>}``
+#: -- they are written as literal ``ones`` arrays sized off the run's own
+#: ``n_time``/``n_freq`` symbols, so they build against whatever grid the
+#: calling document declares.  ``coeff``'s shape, ``(2, 3)``, is exactly
+#: what those two design matrices take: 2 time functions by 3 frequency
+#: ones (``BasisTemperatureOperator.__check_init__``).
+NOISE_WAVE_BASIS = [
+    {"type": "BasisTemperatureOperator",
+     "coeff": {"zeros": [2, 3], "unit": "K"},
+     "time_basis": {"ones": ["n_time", 2]},
+     "freq_basis": {"ones": ["n_freq", 3]}},
+]
+
+
 def findings(document) -> tuple[Finding, ...]:
     """Everything the pass found on ``document``, in run order."""
     return preflight(document).findings

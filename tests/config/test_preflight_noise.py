@@ -45,6 +45,7 @@ from rheplicant.config.sections.runtime import build_runtime
 from tests.config.inference_helpers import context
 from tests.config.message_binding import assert_bound_once, modules_carrying
 from tests.config.preflight_helpers import (
+    RADIOMETER_DRAWN,
     UNREADABLE_BEAM,
     findings,
     ids,
@@ -218,19 +219,34 @@ class TestTheRowsArriveBeforeTheBeam:
     'no_such_beam.npy'."*
     """
 
-    def _refusal(self, noise):
+    def _refusal(self, noise, *, model=None):
+        patch = {} if model is None else {"model": model}
         with pytest.raises(ConfigError) as caught:
-            load_document(with_noise(noise, resources=UNREADABLE_BEAM))
+            load_document(with_noise(noise, resources=UNREADABLE_BEAM,
+                                     **patch))
         return str(caught.value)
 
     def test_a_one_d_sigma_is_reported_and_not_the_missing_beam(self):
         assert self._refusal(ONE_D) == A26_MESSAGE
 
     def test_a_missing_include_logdet_is_reported_and_not_the_beam(self):
-        assert self._refusal(RADIOMETER_NO_LOGDET) == A49_REQUIRED
+        """``model.noise`` is given the RADIOMETER family here, not the base
+        document's ``NoiseOperator`` -- ``gated.py``'s ``C18.kind`` foot-imports
+        before ``noise.py``, so on the base model (which draws with a
+        ``NoiseOperator``) C18 refuses the family mismatch BEFORE A49 is ever
+        reached, and this test would read C18's sentence instead of its own
+        subject's.  Making the drawing operator agree with the likelihood
+        (V-7's rule, applied one module over: the fixture is made to agree,
+        the check is not weakened) leaves A49 as the first refusal without
+        touching what A49 itself decides."""
+        assert self._refusal(RADIOMETER_NO_LOGDET,
+                             model={"noise": RADIOMETER_DRAWN}) == (
+            A49_REQUIRED)
 
     def test_a_refused_include_logdet_is_reported_and_not_the_beam(self):
-        assert self._refusal({**FROZEN, "include_logdet": True}) == (
+        """See the sibling test above: same reason, same repair."""
+        assert self._refusal({**FROZEN, "include_logdet": True},
+                             model={"noise": RADIOMETER_DRAWN}) == (
             A49_REFUSED_ON_FROZEN)
 
     def test_the_beam_still_wins_when_the_noise_block_is_correct(self):
