@@ -31,9 +31,10 @@ import time
 
 import numpy as np
 
-from rheplicant.config.document import _assemble
+from rheplicant.config.document import _assemble, _carrying, _priced_payload
 from rheplicant.config.findings import Finding
 from rheplicant.config.inflight import Axes, Built, axes, built
+from rheplicant.config.postflight import Priced, priced
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
 
@@ -135,6 +136,40 @@ def axis_only(document, check: str, *, base_dir=None) -> Finding:
 def built_only(document, check: str, *, base_dir=None) -> Finding:
     """The one finding ``check`` produced in the built pass."""
     return _only(built_findings(document, base_dir=base_dir), check, "built")
+
+
+def priced_run(document, *, base_dir=None) -> Priced:
+    """The post-flight payload, WITHOUT the hook that would raise on it.
+
+    ``_assemble`` for the same reason :func:`built_run` uses it -- the priced
+    hook calls ``raise_if_refused()`` before ``load_document`` returns, so a
+    payload taken off ``load_document``'s result could only ever exercise the
+    passing half of the slot it exists to test, and most priced rows are
+    refusals.  A test about the HOOK -- that a refusal really does stop the
+    load -- calls ``load_document`` under ``pytest.raises`` instead.
+
+    **The built pass IS run here, and collected rather than raised**, because
+    ``Priced.run.report`` promises pre-flight + axes + built and a payload
+    whose report stopped at the axes pass would make that promise false in
+    exactly the tests written to check it.  ``document.py``'s own
+    :func:`~rheplicant.config.document._carrying` and
+    :func:`~rheplicant.config.document._priced_payload` are reused rather than
+    restated: which section the gates come from is one contract, and a second
+    reading of it here is how the two come to disagree.
+    """
+    run = _assemble(document, base_dir=base_dir)
+    return _priced_payload(_carrying(run, built(Built(*run))))
+
+
+def priced_findings(document, *, base_dir=None) -> tuple[Finding, ...]:
+    """Everything the post-flight pass found, in slot order."""
+    return priced(priced_run(document, base_dir=base_dir)).findings
+
+
+def priced_only(document, check: str, *, base_dir=None) -> Finding:
+    """The one finding ``check`` produced in the post-flight pass."""
+    return _only(priced_findings(document, base_dir=base_dir), check,
+                 "post-flight")
 
 
 def projector_sections(tmp_path, **overrides) -> dict:

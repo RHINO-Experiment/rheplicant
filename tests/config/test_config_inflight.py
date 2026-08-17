@@ -659,6 +659,37 @@ def _raise_then_warn() -> dict[str, tuple[int, int]]:
             if len(calls) == 2}
 
 
+def _unnamed_hook_calls() -> list[tuple[str, int]]:
+    """``(method, line)`` for every hook call whose receiver is NOT a name.
+
+    The blind spot in :func:`_raise_then_warn`, closed rather than recorded.
+    That harvester keys on the receiver VARIABLE, so a hook written
+    ``priced(...).raise_if_refused()`` -- a receiver that is a ``Call`` -- is
+    invisible to it: the pair never enters the dict and the order assertion
+    never sees it.
+
+    **Which of the two tests below would have caught it depends on whether
+    the hook is an EXISTING one respelled or a NEW one**, and only the first
+    was ever guarded.  Measured while Plan 3C's Task 3 added the fourth hook:
+    respelling the post-flight hook that way fails
+    ``test_all_four_hooks_are_present_and_named`` too, because
+    ``priced_report`` then vanishes from the set -- but ADDING a fifth
+    ``Report().emit_warnings()`` / ``Report().raise_if_refused()`` pair beside
+    the four named ones left **only this test** red, 1 failed / 212 passed.
+    That is the hole, and it is the shape a fifth pass would arrive in.
+
+    A receiver that is a name is also what makes the ORDER meaningful at all:
+    two chained calls on two separate temporaries are two different reports,
+    so "raise before warn" would be a statement about nothing.
+    """
+    return [(node.func.attr, node.lineno)
+            for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text()))
+            if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and not isinstance(node.func.value, ast.Name)
+                and node.func.attr in ("raise_if_refused", "emit_warnings"))]
+
+
 class TestEachSlotRaisesBeforeItWarns:
     """§3.2(a), as a pin rather than as a sentence."""
 
@@ -668,8 +699,8 @@ class TestEachSlotRaisesBeforeItWarns:
         silence.  A document about to be refused should not also spray
         warnings about lines the user is on their way to change.
 
-        The two new hooks are held to the same rule, so the assertion is over
-        all three receivers rather than over a named one.
+        The three later hooks are held to the same rule, so the assertion is
+        over every receiver rather than over a named one.
         """
         pairs = _raise_then_warn()
         assert pairs, "no raise/warn pair found in document.py -- see below"
@@ -680,11 +711,35 @@ class TestEachSlotRaisesBeforeItWarns:
                 "refused must not also spray warnings."
             )
 
-    def test_all_three_hooks_are_present_and_named(self):
+    def test_all_four_hooks_are_present_and_named(self):
         """ANTI-VACUITY: the test above passes trivially if the harvester
-        stops finding pairs, or if a hook is deleted.  Name the three."""
+        stops finding pairs, or if a hook is deleted.  Name the four.
+
+        Plan 3C's post-flight pass is the fourth, and its receiver is
+        ``priced_report``.  The name is pinned rather than left free because
+        this guard keys on it: a hook whose receiver were spelled anything
+        else would fail here, which is the intended way to be told that a
+        fifth pass has landed.
+        """
         assert set(_raise_then_warn()) == {"report", "axis_report",
-                                           "built_report"}
+                                           "built_report", "priced_report"}
+
+    def test_no_hook_is_called_on_an_unnamed_receiver(self):
+        """The blind spot in the harvester, as an assertion.
+
+        A hook whose receiver is a ``Call`` never enters the harvester's dict
+        at all, so it escapes the raise-before-warn property the two tests
+        above exist to protect.  Measured: a fifth pair added beside the four
+        named ones leaves **only this test** red.  It is what makes the
+        spelling illegal rather than merely unseen, and it is why the fourth
+        hook UPDATED the guard rather than routing around it.
+        """
+        assert _unnamed_hook_calls() == [], (
+            "a raise_if_refused()/emit_warnings() in document.py is called on "
+            "a receiver that is not a plain name, so _raise_then_warn cannot "
+            "pair it and the raise-before-warn order is unguarded for that "
+            "hook. Bind the report to a name first."
+        )
 
     def test_a_warning_from_an_earlier_slot_is_already_out_when_a_later_slot_refuses(
             self, axis_registry, built_registry):
