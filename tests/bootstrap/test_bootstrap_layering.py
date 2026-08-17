@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
+from _rheplicant_bootstrap import layering as layering_module
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.frozen import freeze, thaw
+from _rheplicant_bootstrap.frozen import thaw
 from _rheplicant_bootstrap.layering import layer_presets, parse_default
 from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot
+
+_FIXTURE_BYTES = b"fixture"
+_FIXTURE_SHA256 = "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"
 
 
 def _snapshot(name: str, document: dict) -> PresetSnapshot:
     return PresetSnapshot(
         name=name,
         resource=f"rheplicant/config/presets/{name}.yaml",
-        input_bytes=b"fixture",
-        sha256="0" * 64,
-        document=freeze(document),
+        input_bytes=_FIXTURE_BYTES,
+        sha256=_FIXTURE_SHA256,
+        document=document,
         expanded_nodes=1,
     )
 
@@ -51,43 +57,91 @@ def test_direct_request_construction_canonicalizes_and_detaches_only():
         PresetRequest(name="one", only=[])
 
 
-class _CountedSegment(str):
-    comparisons = 0
+def test_parse_default_does_not_invoke_scalar_subclass_hooks():
+    class HostileText(str):
+        def split(self, *args, **kwargs):
+            raise AssertionError("split must not run")
+
+        def __eq__(self, other):
+            raise AssertionError("equality must not run")
+
+        def __hash__(self):
+            raise AssertionError("hash must not run")
+
+        def __repr__(self):
+            raise AssertionError("repr must not run")
+
+    request = parse_default(
+        {"from": HostileText("one"), "only": [HostileText("runtime")]}
+    )
+
+    assert request == PresetRequest("one", ("runtime",))
+
+
+class _ArmedMappingKey(str):
+    armed = False
+
+    def __hash__(self):
+        if self.armed:
+            raise AssertionError("source-key hash must not run")
+        return str.__hash__(self)
 
     def __eq__(self, other):
-        type(self).comparisons += 1
-        return super().__eq__(other)
+        if self.armed:
+            raise AssertionError("source-key equality must not run")
+        return str.__eq__(self, other)
 
-    __hash__ = str.__hash__
+    def __repr__(self):
+        raise AssertionError("repr must not run")
 
 
-class _CountedSelector(str):
-    def __new__(cls, segment: _CountedSegment):
-        instance = super().__new__(cls, segment)
-        instance.segment = segment
-        return instance
+def test_parse_default_canonicalizes_mapping_keys_before_set_or_lookup():
+    source_key = _ArmedMappingKey("from")
+    raw = {source_key: "one", "only": ["runtime"]}
+    source_key.armed = True
 
-    def split(self, sep=None, maxsplit=-1):
-        if sep == ".":
-            return [self.segment]
-        return super().split(sep, maxsplit)
+    request = parse_default(raw)
+
+    assert request == PresetRequest("one", ("runtime",))
+
+
+def test_parse_default_rejects_a_nonstring_selector_without_using_repr():
+    class HostileSelector:
+        def __repr__(self):
+            raise AssertionError("repr must not run")
+
+    with pytest.raises(ConfigError, match=r"only:.*HostileSelector"):
+        parse_default({"from": "one", "only": [HostileSelector()]})
 
 
 def test_only_overlap_work_is_bounded_by_total_selector_segments():
     """Catches restoring a pairwise-quadratic overlap scan."""
     count = 2_000
-    segments = [_CountedSegment(f"section_{index}") for index in range(count)]
-    selectors = [_CountedSelector(segment) for segment in segments]
-    document = {segment: index for index, segment in enumerate(segments)}
+    selectors = [f"section_{index}.leaf" for index in range(count)]
+    document = {
+        f"section_{index}": {"leaf": index} for index in range(count)
+    }
     request = parse_default({"from": "one", "only": selectors})
-    _CountedSegment.comparisons = 0
+    target_code = layering_module._select_only.__code__
+    line_events = 0
 
-    result, _ = layer_presets(
-        {}, (request,), preset_provider=_provider({"one": document})
-    )
+    def count_lines(frame, event, arg):
+        nonlocal line_events
+        if frame.f_code is target_code and event == "line":
+            line_events += 1
+        return count_lines
+
+    sys.settrace(count_lines)
+    try:
+        result, _ = layer_presets(
+            {}, (request,), preset_provider=_provider({"one": document})
+        )
+    finally:
+        sys.settrace(None)
 
     assert len(result.document) == count
-    assert _CountedSegment.comparisons <= count * 8
+    total_segments = count * 2
+    assert line_events <= total_segments * 40
 
 
 @pytest.mark.parametrize(
@@ -184,6 +238,167 @@ def test_custom_provider_snapshot_cannot_change_layered_evidence_after_construct
 
     assert result.document["runtime"]["values"] == (b"one",)
     assert selected[0][1].document["runtime"]["values"] == (b"one",)
+
+
+def test_user_document_is_strictly_frozen_before_the_provider_runs():
+    user_document = {"runtime": {"value": "before"}}
+    snapshot = _snapshot("one", {})
+
+    def provider(_):
+        user_document["runtime"]["value"] = "after"
+        return snapshot
+
+    result, _ = layer_presets(
+        user_document, (parse_default("one"),), preset_provider=provider
+    )
+
+    assert result.document["runtime"]["value"] == "before"
+
+
+def test_invalid_user_evidence_is_refused_before_the_provider_runs():
+    provider_calls: list[str] = []
+
+    def provider(name):
+        provider_calls.append(name)
+        return _snapshot(name, {})
+
+    with pytest.raises(ConfigError, match="layer_presets document"):
+        layer_presets(
+            {"unsafe": object()},
+            (parse_default("one"),),
+            preset_provider=provider,
+        )
+
+    assert provider_calls == []
+
+
+def test_preset_provider_must_return_a_snapshot_without_using_repr():
+    class NotSnapshot:
+        def __repr__(self):
+            raise AssertionError("repr must not run")
+
+    with pytest.raises(ConfigError, match="NotSnapshot.*PresetSnapshot"):
+        layer_presets(
+            {},
+            (parse_default("one"),),
+            preset_provider=lambda _: NotSnapshot(),
+        )
+
+
+def test_preset_provider_snapshot_name_must_match_the_request():
+    with pytest.raises(ConfigError, match="other.*one"):
+        layer_presets(
+            {},
+            (parse_default("one"),),
+            preset_provider=lambda _: _snapshot("other", {}),
+        )
+
+
+class _HostileProviderError(Exception):
+    def __str__(self):
+        raise AssertionError("exception text must not run")
+
+    def __repr__(self):
+        raise AssertionError("exception repr must not run")
+
+
+def test_preset_provider_ordinary_failure_is_static_and_configerror_is_preserved():
+    def failing_provider(_):
+        raise _HostileProviderError
+
+    with pytest.raises(ConfigError, match=r"provider.*one"):
+        layer_presets({}, (parse_default("one"),), preset_provider=failing_provider)
+
+    marker = ConfigError("provider marker")
+
+    def refusing_provider(_):
+        raise marker
+
+    with pytest.raises(ConfigError) as caught:
+        layer_presets({}, (parse_default("one"),), preset_provider=refusing_provider)
+    assert caught.value is marker
+
+
+def test_preset_provider_does_not_catch_process_control_baseexceptions():
+    class StopNow(BaseException):
+        pass
+
+    def stopping_provider(_):
+        raise StopNow
+
+    with pytest.raises(StopNow):
+        layer_presets({}, (parse_default("one"),), preset_provider=stopping_provider)
+
+
+def test_request_sequence_protocol_failure_is_normalized_statically():
+    class HostileRequestsError(Exception):
+        def __str__(self):
+            raise AssertionError("exception text must not run")
+
+        def __repr__(self):
+            raise AssertionError("exception repr must not run")
+
+    class FailingRequests:
+        def __iter__(self):
+            raise HostileRequestsError
+
+    with pytest.raises(ConfigError, match="request sequence traversal failed"):
+        layer_presets({}, FailingRequests(), preset_provider=lambda _: None)
+
+
+def test_preset_provider_revalidates_an_exact_but_forged_snapshot():
+    forged = object.__new__(PresetSnapshot)
+    object.__setattr__(forged, "name", "one")
+    object.__setattr__(
+        forged, "resource", "rheplicant/config/presets/one.yaml"
+    )
+    object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
+    object.__setattr__(forged, "sha256", "0" * 64)
+    object.__setattr__(forged, "document", {})
+    object.__setattr__(forged, "expanded_nodes", 0)
+
+    with pytest.raises(ConfigError, match=r"sha256.*does not match"):
+        layer_presets(
+            {}, (parse_default("one"),), preset_provider=lambda _: forged
+        )
+
+
+def test_preset_provider_requires_the_exact_snapshot_class():
+    class SnapshotSubclass(PresetSnapshot):
+        pass
+
+    snapshot = SnapshotSubclass(
+        name="one",
+        resource="rheplicant/config/presets/one.yaml",
+        input_bytes=_FIXTURE_BYTES,
+        sha256=_FIXTURE_SHA256,
+        document={},
+        expanded_nodes=0,
+    )
+
+    with pytest.raises(ConfigError, match=r"SnapshotSubclass.*PresetSnapshot"):
+        layer_presets(
+            {}, (parse_default("one"),), preset_provider=lambda _: snapshot
+        )
+
+
+def test_only_selection_preserves_shared_preset_subtree_topology():
+    shared = {"leaf": 1}
+    result, _ = layer_presets(
+        {},
+        (parse_default({"from": "one", "only": ["runtime"]}),),
+        preset_provider=_provider(
+            {"one": {"runtime": {"first": shared, "second": shared}}}
+        ),
+    )
+
+    runtime = result.document["runtime"]
+    runtime_origins = result.origins.children["runtime"]
+    assert runtime["first"] is runtime["second"]
+    assert (
+        runtime_origins.children["first"]
+        is runtime_origins.children["second"]
+    )
 
 
 def test_user_model_without_inherit_replaces_the_preset_candidate():

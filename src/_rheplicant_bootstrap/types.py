@@ -40,14 +40,30 @@ class Origin:
     name: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind in ("user", "rheplicant-default"):
-            if self.name is not None:
-                raise ValueError(f"{self.kind} origin cannot have a name")
-        elif self.kind in ("variant", "preset"):
-            if not isinstance(self.name, str) or not self.name:
-                raise ValueError(f"{self.kind} origin requires a non-empty name")
+        if not isinstance(self.kind, str):
+            raise ValueError(
+                f"unknown origin kind type: {type(self.kind).__name__}"
+            )
+        kind = str.__str__(self.kind)
+        if self.name is None:
+            name = None
+        elif isinstance(self.name, str):
+            name = str.__str__(self.name)
         else:
-            raise ValueError(f"unknown origin kind: {self.kind!r}")
+            raise ValueError(
+                f"origin name must be a string or null; got "
+                f"{type(self.name).__name__}"
+            )
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "name", name)
+        if kind in ("user", "rheplicant-default"):
+            if name is not None:
+                raise ValueError(f"{kind} origin cannot have a name")
+        elif kind in ("variant", "preset"):
+            if not name:
+                raise ValueError(f"{kind} origin requires a non-empty name")
+        else:
+            raise ValueError(f"unknown origin kind: {kind!r}")
 
     def render(self) -> str:
         if self.kind in ("user", "rheplicant-default"):

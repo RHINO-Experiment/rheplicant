@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -23,6 +22,26 @@ _PRESET_RESOURCES = {
 _PRESET_SECTIONS = frozenset(
     {"runtime", "observation", "resources", "model", "inference"}
 )
+_MAXIMUM_PRESET_BYTES = 16 * 1024 * 1024
+_MAXIMUM_EXPANDED_NODES = 250_000
+
+
+def _canonical_bytes(value: object, *, where: str) -> bytes:
+    try:
+        if isinstance(value, bytes):
+            return bytes.__bytes__(value)
+        if isinstance(value, bytearray):
+            copied = bytearray.__getitem__(value, slice(None))
+            return bytes.__new__(bytes, copied)
+        if isinstance(value, memoryview):
+            return memoryview.tobytes(value)
+    except Exception:
+        raise ConfigError(
+            f"{where} must be a usable byte buffer; got {type(value).__name__}."
+        ) from None
+    raise ConfigError(
+        f"{where} must be a byte buffer; got {type(value).__name__}."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +56,12 @@ class PresetRequest:
             return
         if isinstance(self.only, str | bytes) or not isinstance(self.only, Sequence):
             raise ConfigError("defaults: only: is a sequence of dotted paths.")
-        only = tuple(self.only)
+        try:
+            only = tuple(self.only)
+        except Exception:
+            raise ConfigError(
+                "defaults: only: sequence traversal failed."
+            ) from None
         if not only:
             raise ConfigError("defaults: only: must select at least one path.")
         canonical: list[str] = []
@@ -48,7 +72,9 @@ class PresetRequest:
                     f"{type(path).__name__}."
                 )
             exact_path = str.__str__(path)
-            if not exact_path or any(not part for part in exact_path.split(".")):
+            if not exact_path or any(
+                not part for part in str.split(exact_path, ".")
+            ):
                 raise ConfigError(
                     f"defaults: only: has invalid document path {exact_path!r}."
                 )
@@ -75,9 +101,13 @@ class PresetSnapshot:
         resource = str.__str__(self.resource)
         if not resource:
             raise ConfigError(f"preset:{name}: resource must be a non-empty string.")
-        if not isinstance(self.input_bytes, bytes | bytearray | memoryview):
+        input_bytes = _canonical_bytes(
+            self.input_bytes, where=f"preset:{name}: input_bytes"
+        )
+        if len(input_bytes) > _MAXIMUM_PRESET_BYTES:
             raise ConfigError(
-                f"preset:{name}: input_bytes must be a byte buffer."
+                f"preset:{name}: input_bytes byte count {len(input_bytes)} "
+                f"exceeds limit {_MAXIMUM_PRESET_BYTES}."
             )
         if not isinstance(self.sha256, str):
             raise ConfigError(
@@ -94,10 +124,16 @@ class PresetSnapshot:
             raise ConfigError(
                 f"preset:{name}: expanded_nodes must be a non-negative integer."
             )
-        expanded_nodes = int(self.expanded_nodes)
-        if expanded_nodes < 0:
+        expanded_nodes = int.__int__(self.expanded_nodes)
+        if expanded_nodes < 0 or expanded_nodes > _MAXIMUM_EXPANDED_NODES:
             raise ConfigError(
-                f"preset:{name}: expanded_nodes must be a non-negative integer."
+                f"preset:{name}: expanded_nodes {expanded_nodes} must be between "
+                f"0 and {_MAXIMUM_EXPANDED_NODES}."
+            )
+        observed_sha256 = hashlib.sha256(input_bytes).hexdigest()
+        if sha256 != observed_sha256:
+            raise ConfigError(
+                f"preset:{name}: sha256 does not match input_bytes."
             )
         if not isinstance(self.document, Mapping):
             raise ConfigError(f"preset:{name}: snapshot document is a mapping.")
@@ -107,7 +143,7 @@ class PresetSnapshot:
         assert isinstance(frozen_document, Mapping)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "resource", resource)
-        object.__setattr__(self, "input_bytes", bytes(self.input_bytes))
+        object.__setattr__(self, "input_bytes", input_bytes)
         object.__setattr__(self, "sha256", sha256)
         object.__setattr__(self, "document", frozen_document)
         object.__setattr__(self, "expanded_nodes", expanded_nodes)
@@ -126,25 +162,40 @@ def validate_preset_name(name: object) -> str:
 
 
 def validate_preset_document(name: str, loaded: object) -> dict[str, object]:
+    name = validate_preset_name(name)
     if not isinstance(loaded, Mapping):
         raise ConfigError(
             f"preset:{name}: document is a mapping; got "
-            f"{type(loaded).__name__} ({loaded!r})."
+            f"{type(loaded).__name__}."
         )
-    invalid_keys = [key for key in loaded if not isinstance(key, str)]
-    if invalid_keys:
-        key = invalid_keys[0]
+    canonical: dict[str, object] = {}
+    try:
+        for key, value in loaded.items():
+            if not isinstance(key, str):
+                raise ConfigError(
+                    f"preset:{name}: top-level key is a string; got "
+                    f"{type(key).__name__}."
+                )
+            exact_key = str.__str__(key)
+            if exact_key in canonical:
+                raise ConfigError(
+                    f"preset:{name}: top-level keys collide after "
+                    "canonicalization."
+                )
+            canonical[exact_key] = value
+    except ConfigError:
+        raise
+    except Exception:
         raise ConfigError(
-            f"preset:{name}: top-level key is a string; got "
-            f"{type(key).__name__} ({key!r})."
-        )
-    forbidden = sorted(set(loaded) - _PRESET_SECTIONS)
+            f"preset:{name}: document mapping traversal failed."
+        ) from None
+    forbidden = sorted(set(canonical) - _PRESET_SECTIONS)
     if forbidden:
         raise ConfigError(
             f"preset:{name}: package presets may contain only scientific base "
             f"sections {sorted(_PRESET_SECTIONS)}; got {forbidden}."
         )
-    return dict(loaded)
+    return canonical
 
 
 def read_installed_preset(name: str) -> PresetSnapshot:
@@ -186,11 +237,13 @@ def read_installed_preset(name: str) -> PresetSnapshot:
             path = Path(locations[0]) / relative
     except ConfigError:
         raise
-    except (AttributeError, csv.Error, ImportError, OSError, TypeError, ValueError) as exc:
-        raise ConfigError(f"defaults: cannot discover package preset {name!r}: {exc}") from exc
+    except Exception:
+        raise ConfigError(
+            f"defaults: cannot discover package preset {name!r}."
+        ) from None
 
     raw = read_stable_regular_bytes(
-        path, maximum=16 * 1024 * 1024, source_name=f"preset:{name}"
+        path, maximum=_MAXIMUM_PRESET_BYTES, source_name=f"preset:{name}"
     )
     loaded = safe_load_document(raw, source_name=f"preset:{name}")
     document = validate_preset_document(name, loaded.value)

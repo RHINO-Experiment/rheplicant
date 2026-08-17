@@ -78,6 +78,45 @@ def test_origin_render_is_stable_and_names_are_validated():
         Origin("preset", "")
 
 
+class _HostileOriginText(str):
+    def __str__(self):
+        raise AssertionError("__str__ must not run")
+
+    def __bool__(self):
+        raise AssertionError("truth testing must not run")
+
+    def __eq__(self, other):
+        raise AssertionError("equality must not run")
+
+    def __hash__(self):
+        raise AssertionError("hash must not run")
+
+    def encode(self, *args, **kwargs):
+        raise AssertionError("encode must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+def test_origin_canonicalizes_text_before_validation_and_rendering():
+    from _rheplicant_bootstrap.types import Origin
+
+    origin = Origin(
+        _HostileOriginText("preset"), _HostileOriginText("base preset")
+    )
+
+    assert type(origin.kind) is str
+    assert type(origin.name) is str
+    assert origin.render() == "preset:n-6261736520707265736574"
+
+
+def test_invalid_hostile_origin_kind_raises_value_error_without_hooks():
+    from _rheplicant_bootstrap.types import Origin
+
+    with pytest.raises(ValueError, match="unknown origin kind"):
+        Origin(_HostileOriginText("invalid"))
+
+
 def test_destination_child_and_nested_preserve_the_parent_contract():
     from _rheplicant_bootstrap.types import DestinationDescriptor
 

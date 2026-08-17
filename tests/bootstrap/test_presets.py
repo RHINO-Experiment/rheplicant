@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -52,6 +53,10 @@ model:
     t_rx: {value: 290.0, unit: K}
 """
 PRESET_SHA256 = "863c3a7bfdccd428bb5bf69e87facf8286975b1c87e7b6c4a96f754a2376d7c4"
+FIXTURE_BYTES = b"fixture"
+FIXTURE_SHA256 = "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"
+MAXIMUM_PRESET_BYTES = 16 * 1024 * 1024
+MAXIMUM_EXPANDED_NODES = 250_000
 
 
 def _resource_path() -> Path:
@@ -162,6 +167,25 @@ def test_malformed_editable_metadata_is_normalized_to_config_error(monkeypatch):
         read_installed_preset("rhino_v1")
 
 
+def test_distribution_protocol_failure_is_normalized_without_rendering(monkeypatch):
+    class HostileMetadataError(Exception):
+        def __str__(self):
+            raise AssertionError("exception text must not run")
+
+        def __repr__(self):
+            raise AssertionError("exception repr must not run")
+
+    def fail_distribution(_):
+        raise HostileMetadataError
+
+    monkeypatch.setattr(
+        presets.importlib.metadata, "distribution", fail_distribution
+    )
+
+    with pytest.raises(ConfigError, match="cannot discover package preset"):
+        read_installed_preset("rhino_v1")
+
+
 def test_malformed_real_record_csv_is_normalized_to_config_error(tmp_path, monkeypatch):
     """Catches importlib.metadata's csv.Error escaping the neutral boundary."""
     dist_info = tmp_path / "rheplicant-1.0.dist-info"
@@ -218,14 +242,14 @@ def test_preset_document_rejects_process_entry_sections(tmp_path, monkeypatch):
 
 def test_direct_snapshot_construction_detaches_and_canonicalizes_evidence():
     """Catches custom providers returning time-varying shallow snapshot records."""
-    raw = bytearray(b"fixture")
+    raw = bytearray(FIXTURE_BYTES)
     document = {"runtime": {"values": [bytearray(b"one")]}}
 
     snapshot = PresetSnapshot(
         name="one",
         resource="rheplicant/config/presets/one.yaml",
         input_bytes=raw,
-        sha256="0" * 64,
+        sha256=FIXTURE_SHA256,
         document=document,
         expanded_nodes=1,
     )
@@ -260,12 +284,71 @@ class _StatefulBytes(bytes):
         return instance
 
 
+class _HostileStr(str):
+    def __str__(self):
+        raise AssertionError("__str__ must not run")
+
+    def split(self, *args, **kwargs):
+        raise AssertionError("split must not run")
+
+    def __eq__(self, other):
+        raise AssertionError("equality must not run")
+
+    def __hash__(self):
+        raise AssertionError("hash must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+class _HostileInt(int):
+    def __int__(self):
+        raise AssertionError("__int__ must not run")
+
+    def __index__(self):
+        raise AssertionError("__index__ must not run")
+
+    def __eq__(self, other):
+        raise AssertionError("equality must not run")
+
+    def __hash__(self):
+        raise AssertionError("hash must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+class _HostileBytes(bytes):
+    def __bytes__(self):
+        raise AssertionError("__bytes__ must not run")
+
+    def __eq__(self, other):
+        raise AssertionError("equality must not run")
+
+    def __hash__(self):
+        raise AssertionError("hash must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+class _HostileBytearray(bytearray):
+    def __bytes__(self):
+        raise AssertionError("__bytes__ must not run")
+
+    def __buffer__(self, flags):
+        raise AssertionError("__buffer__ must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
 def test_preset_records_canonicalize_every_scalar_field_to_exact_builtins():
     name = _StatefulStr("one")
     selector = _StatefulStr("runtime")
     resource = _StatefulStr("rheplicant/config/presets/one.yaml")
     raw = _StatefulBytes(b"fixture")
-    sha256 = _StatefulStr("0" * 64)
+    sha256 = _StatefulStr(FIXTURE_SHA256)
     expanded_nodes = _StatefulInt(2)
 
     request = PresetRequest(name=name, only=[selector])
@@ -287,6 +370,39 @@ def test_preset_records_canonicalize_every_scalar_field_to_exact_builtins():
     assert type(snapshot.expanded_nodes) is int
 
 
+def test_preset_record_scalar_canonicalization_uses_only_base_operations():
+    """Catches invoking hostile conversion, comparison, split, hash, or repr hooks."""
+    request = PresetRequest(
+        name=_HostileStr("one"), only=[_HostileStr("runtime")]
+    )
+    snapshot = PresetSnapshot(
+        name=_HostileStr("one"),
+        resource=_HostileStr("rheplicant/config/presets/one.yaml"),
+        input_bytes=_HostileBytes(FIXTURE_BYTES),
+        sha256=_HostileStr(FIXTURE_SHA256),
+        document={"runtime": {}},
+        expanded_nodes=_HostileInt(2),
+    )
+
+    assert request.name == "one"
+    assert request.only == ("runtime",)
+    assert type(snapshot.name) is str
+    assert type(snapshot.resource) is str
+    assert type(snapshot.input_bytes) is bytes
+    assert type(snapshot.sha256) is str
+    assert type(snapshot.expanded_nodes) is int
+
+    buffered = PresetSnapshot(
+        name="one",
+        resource="rheplicant/config/presets/one.yaml",
+        input_bytes=_HostileBytearray(FIXTURE_BYTES),
+        sha256=FIXTURE_SHA256,
+        document={},
+        expanded_nodes=0,
+    )
+    assert type(buffered.input_bytes) is bytes
+
+
 @pytest.mark.parametrize(
     ("overrides", "needle"),
     [
@@ -303,8 +419,8 @@ def test_snapshot_direct_construction_validates_every_scalar_field(overrides, ne
     arguments = {
         "name": "one",
         "resource": "rheplicant/config/presets/one.yaml",
-        "input_bytes": b"fixture",
-        "sha256": "0" * 64,
+        "input_bytes": FIXTURE_BYTES,
+        "sha256": FIXTURE_SHA256,
         "document": {"runtime": {}},
         "expanded_nodes": 1,
     }
@@ -314,10 +430,139 @@ def test_snapshot_direct_construction_validates_every_scalar_field(overrides, ne
         PresetSnapshot(**arguments)
 
 
+def test_snapshot_digest_must_equal_the_canonical_input_bytes():
+    with pytest.raises(ConfigError, match="sha256.*does not match"):
+        PresetSnapshot(
+            name="one",
+            resource="rheplicant/config/presets/one.yaml",
+            input_bytes=FIXTURE_BYTES,
+            sha256="0" * 64,
+            document={},
+            expanded_nodes=0,
+        )
+
+
+def test_snapshot_enforces_exact_input_and_expansion_limits():
+    at_limit = b"x" * MAXIMUM_PRESET_BYTES
+    snapshot = PresetSnapshot(
+        name="one",
+        resource="rheplicant/config/presets/one.yaml",
+        input_bytes=at_limit,
+        sha256=hashlib.sha256(at_limit).hexdigest(),
+        document={},
+        expanded_nodes=MAXIMUM_EXPANDED_NODES,
+    )
+    assert len(snapshot.input_bytes) == MAXIMUM_PRESET_BYTES
+    assert snapshot.expanded_nodes == MAXIMUM_EXPANDED_NODES
+
+    over_limit = at_limit + b"x"
+    with pytest.raises(ConfigError, match=r"input_bytes.*16777217.*16777216"):
+        PresetSnapshot(
+            name="one",
+            resource="rheplicant/config/presets/one.yaml",
+            input_bytes=over_limit,
+            sha256=hashlib.sha256(over_limit).hexdigest(),
+            document={},
+            expanded_nodes=0,
+        )
+    with pytest.raises(ConfigError, match=r"expanded_nodes.*250001.*250000"):
+        PresetSnapshot(
+            name="one",
+            resource="rheplicant/config/presets/one.yaml",
+            input_bytes=FIXTURE_BYTES,
+            sha256=FIXTURE_SHA256,
+            document={},
+            expanded_nodes=MAXIMUM_EXPANDED_NODES + 1,
+        )
+
+
+def test_snapshot_normalizes_a_released_memoryview_without_using_repr():
+    view = memoryview(FIXTURE_BYTES)
+    view.release()
+
+    with pytest.raises(ConfigError, match=r"preset:one.*input_bytes.*memoryview"):
+        PresetSnapshot(
+            name="one",
+            resource="rheplicant/config/presets/one.yaml",
+            input_bytes=view,
+            sha256=FIXTURE_SHA256,
+            document={},
+            expanded_nodes=0,
+        )
+
+
 @pytest.mark.parametrize("name", [object(), "", "not.valid"])
 def test_request_direct_construction_validates_name(name):
     with pytest.raises(ConfigError, match="name"):
         PresetRequest(name=name, only=None)
+
+
+class _ItemsMapping(Mapping):
+    def __init__(self, pairs):
+        self._pairs = tuple(pairs)
+
+    def __getitem__(self, key):
+        for given, value in self._pairs:
+            if given is key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self):
+        return (key for key, _ in self._pairs)
+
+    def __len__(self):
+        return len(self._pairs)
+
+    def items(self):
+        return iter(self._pairs)
+
+
+class _ArmedKey(str):
+    armed = False
+
+    def __hash__(self):
+        if self.armed:
+            raise AssertionError("source-key hash must not run")
+        return str.__hash__(self)
+
+    def __eq__(self, other):
+        if self.armed:
+            raise AssertionError("source-key equality must not run")
+        return str.__eq__(self, other)
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+def test_validate_preset_document_canonicalizes_keys_before_dict_operations():
+    key = _ArmedKey("runtime")
+    loaded = {key: {}}
+    key.armed = True
+
+    validated = presets.validate_preset_document("one", loaded)
+
+    assert validated == {"runtime": {}}
+    assert type(next(iter(validated))) is str
+
+
+def test_validate_preset_document_refuses_canonical_key_collisions():
+    loaded = _ItemsMapping(
+        [(_HostileStr("runtime"), {}), (_HostileStr("runtime"), {})]
+    )
+
+    with pytest.raises(ConfigError, match="keys collide"):
+        presets.validate_preset_document("one", loaded)
+
+
+def test_validate_preset_document_rejects_hostile_nonstring_key_without_repr():
+    class HostileKey:
+        def __repr__(self):
+            raise AssertionError("repr must not run")
+
+    with pytest.raises(ConfigError, match="HostileKey"):
+        presets.validate_preset_document(
+            "one", _ItemsMapping([(HostileKey(), {})])
+        )
 
 
 def test_clean_bootstrap_preset_read_imports_neither_rheplicant_nor_jax():

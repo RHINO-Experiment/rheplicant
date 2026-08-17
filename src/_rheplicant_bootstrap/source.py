@@ -33,6 +33,28 @@ def _canonical_dir(path: str) -> str:
     return os.path.realpath(os.path.abspath(path))
 
 
+def _canonical_text(value: object, *, where: str) -> str:
+    if not isinstance(value, str):
+        raise ConfigError(f"{where} must be a string; got {type(value).__name__}.")
+    return str.__str__(value)
+
+
+def _canonical_limit(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(
+            f"maximum must be a non-boolean integer; got {type(value).__name__}."
+        )
+    try:
+        maximum = int.__int__(value)
+    except Exception:
+        raise ConfigError(
+            f"maximum integer canonicalization failed for {type(value).__name__}."
+        ) from None
+    if maximum < 0:
+        raise ConfigError("maximum must be a non-negative integer.")
+    return maximum
+
+
 def _lexical_lstat(path: str) -> os.stat_result:
     """Return lexical path metadata without following its final symlink."""
     return os.lstat(path)
@@ -52,16 +74,17 @@ def _read_bounded_forward(stream: BinaryIO, *, source_name: str, limit: int) -> 
     data = bytearray()
     try:
         while len(data) < maximum:
-            chunk = stream.read(maximum - len(data))
-            if not isinstance(chunk, bytes):
+            given = stream.read(maximum - len(data))
+            if not isinstance(given, bytes):
                 raise ConfigError(f"{source_name}: binary source did not produce bytes.")
-            if not chunk:
+            chunk = bytes.__bytes__(given)
+            if bytes.__len__(chunk) == 0:
                 break
             data.extend(chunk)
     except ConfigError:
         raise
-    except (OSError, ValueError, TypeError) as exc:
-        raise ConfigError(f"{source_name}: cannot read source: {exc}") from exc
+    except Exception:
+        raise ConfigError(f"{source_name}: cannot read source.") from None
     if len(data) > limit:
         raise _byte_limit_error(source_name, len(data), limit)
     return bytes(data)
@@ -75,15 +98,21 @@ def _read_stable_regular_file(
 ) -> tuple[bytes, str]:
     """Return exact bytes and resolved identity from one stable descriptor."""
     fd = -1
-    display_name = source_name if source_name is not None else "<source>"
+    maximum = _canonical_limit(maximum)
+    display_name = (
+        "<source>"
+        if source_name is None
+        else _canonical_text(source_name, where="source_name")
+    )
     try:
-        source_path = os.fspath(path)
+        given_path = os.fspath(path)
+        if not isinstance(given_path, str):
+            raise TypeError("source path must be text")
+        source_path = str.__str__(given_path)
         if not isinstance(source_path, str):
             raise TypeError("source path must be text")
         if source_name is None:
             display_name = source_path
-        if maximum < 0:
-            raise ValueError("maximum must be non-negative")
         before_link = _lexical_lstat(source_path)
         before_realpath = os.path.realpath(source_path)
         after_initial_resolution_link = _lexical_lstat(source_path)
@@ -109,8 +138,8 @@ def _read_stable_regular_file(
         final_link = _lexical_lstat(source_path)
     except ConfigError:
         raise
-    except (OSError, TypeError, ValueError) as exc:
-        raise ConfigError(f"{display_name}: cannot read source: {exc}") from exc
+    except Exception:
+        raise ConfigError(f"{display_name}: cannot read source.") from None
     finally:
         if fd >= 0:
             try:
@@ -155,9 +184,16 @@ def _read_path_once(source_path: str) -> tuple[bytes, str]:
 
 def _stdin_base_dir(base_dir: str | None) -> str:
     try:
-        return _canonical_dir(base_dir if base_dir is not None else os.getcwd())
-    except (OSError, ValueError) as exc:
-        raise ConfigError(f"<stdin>: invalid base_dir: {exc}") from exc
+        chosen = (
+            os.getcwd()
+            if base_dir is None
+            else _canonical_text(base_dir, where="base_dir")
+        )
+        return _canonical_dir(chosen)
+    except ConfigError:
+        raise
+    except Exception:
+        raise ConfigError("<stdin>: invalid base_dir.") from None
 
 
 def _read_stdin_once(stdin: BinaryIO | None, *, limit: int) -> bytes:
@@ -176,6 +212,9 @@ def read_cli_source_once(
     stdin: BinaryIO | None,
 ) -> SourceInput:
     """Read one CLI source once, preserving its lexical and target identities."""
+    path_or_dash = _canonical_text(path_or_dash, where="source")
+    if base_dir is not None:
+        base_dir = _canonical_text(base_dir, where="base_dir")
     if path_or_dash == "-":
         limit = _input_limit()
         chosen_base_dir = _stdin_base_dir(base_dir)
@@ -199,8 +238,10 @@ def read_cli_source_once(
             )
     except ConfigError:
         raise
-    except (OSError, ValueError) as exc:
-        raise ConfigError(f"{path_or_dash!r}: invalid source or base_dir: {exc}") from exc
+    except Exception:
+        raise ConfigError(
+            f"{path_or_dash!r}: invalid source or base_dir."
+        ) from None
     data, source_realpath = _read_path_once(source_path)
     return SourceInput(
         input_bytes=data,

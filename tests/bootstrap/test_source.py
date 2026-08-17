@@ -145,6 +145,154 @@ def test_shared_reader_uses_a_neutral_label_without_repr_for_invalid_pathlike():
         read_stable_regular_bytes(HostilePath(), maximum=8)
 
 
+class _HostileSourceText(str):
+    def __str__(self):
+        raise AssertionError("__str__ must not run")
+
+    def __eq__(self, other):
+        raise AssertionError("equality must not run")
+
+    def startswith(self, *args, **kwargs):
+        raise AssertionError("startswith must not run")
+
+    def __format__(self, format_spec):
+        raise AssertionError("format must not run")
+
+    def __fspath__(self):
+        raise AssertionError("__fspath__ must not run for a string")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+class _HostileMaximum(int):
+    def __int__(self):
+        raise AssertionError("__int__ must not run")
+
+    def __index__(self):
+        raise AssertionError("__index__ must not run")
+
+    def __lt__(self, other):
+        raise AssertionError("comparison must not run")
+
+    def __gt__(self, other):
+        raise AssertionError("comparison must not run")
+
+    def __add__(self, other):
+        raise AssertionError("addition must not run")
+
+    def __radd__(self, other):
+        raise AssertionError("addition must not run")
+
+    def __format__(self, format_spec):
+        raise AssertionError("format must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+@pytest.mark.parametrize(
+    "maximum",
+    [True, 8.0],
+    ids=("bool", "float"),
+)
+def test_shared_reader_requires_an_exact_nonboolean_integer_limit(
+    tmp_path, maximum
+):
+    class CountedPath:
+        calls = 0
+
+        def __fspath__(self):
+            type(self).calls += 1
+            return str(tmp_path / "unused.yaml")
+
+    with pytest.raises(ConfigError, match=rf"maximum.*{type(maximum).__name__}"):
+        read_stable_regular_bytes(CountedPath(), maximum=maximum)
+    assert CountedPath.calls == 0
+
+
+def test_shared_reader_canonicalizes_an_integer_subclass_limit(tmp_path):
+    path = tmp_path / "payload.yaml"
+    path.write_bytes(b"12345678")
+
+    assert read_stable_regular_bytes(path, maximum=_HostileMaximum(8)) == b"12345678"
+
+
+def test_shared_reader_canonicalizes_path_and_semantic_label_before_use(tmp_path):
+    path = tmp_path / "payload.yaml"
+    path.write_bytes(b"x")
+
+    with pytest.raises(ConfigError, match=r"payload\.yaml: YAML byte count 1"):
+        read_stable_regular_bytes(_HostileSourceText(str(path)), maximum=0)
+    with pytest.raises(ConfigError, match=r"semantic: YAML byte count 1"):
+        read_stable_regular_bytes(
+            path, maximum=0, source_name=_HostileSourceText("semantic")
+        )
+
+
+def test_shared_reader_calls_pathlike_once_then_canonicalizes_its_text(tmp_path):
+    path = tmp_path / "payload.yaml"
+    path.write_bytes(b"{}")
+
+    class CountedPath:
+        calls = 0
+
+        def __fspath__(self):
+            type(self).calls += 1
+            return _HostileSourceText(str(path))
+
+    assert read_stable_regular_bytes(CountedPath(), maximum=2) == b"{}"
+    assert CountedPath.calls == 1
+
+
+def test_read_source_canonicalizes_path_and_base_dir_text_subclasses(tmp_path):
+    path = tmp_path / "payload.yaml"
+    path.write_bytes(b"{}")
+
+    source = read_source(
+        _HostileSourceText(str(path)), base_dir=None, stdin=None
+    )
+    stdin_source = read_source(
+        "-",
+        base_dir=_HostileSourceText(str(tmp_path)),
+        stdin=io.BytesIO(b"{}"),
+    )
+
+    assert type(source.source_path) is str
+    assert type(source.source_name) is str
+    assert type(source.base_dir) is str
+    assert type(stdin_source.base_dir) is str
+
+
+class _HostileProtocolError(Exception):
+    def __str__(self):
+        raise AssertionError("exception text must not run")
+
+    def __repr__(self):
+        raise AssertionError("exception repr must not run")
+
+
+def test_shared_reader_normalizes_path_protocol_errors_without_rendering_them():
+    class FailingPath:
+        def __fspath__(self):
+            raise _HostileProtocolError
+
+    with pytest.raises(ConfigError, match=r"^<source>: cannot read source\.$"):
+        read_stable_regular_bytes(FailingPath(), maximum=8)
+
+
+def test_shared_reader_does_not_catch_path_protocol_baseexceptions():
+    class StopNow(BaseException):
+        pass
+
+    class StoppingPath:
+        def __fspath__(self):
+            raise StopNow
+
+    with pytest.raises(StopNow):
+        read_stable_regular_bytes(StoppingPath(), maximum=8)
+
+
 @pytest.mark.parametrize("linked", [False, True])
 def test_fifo_sources_are_refused_without_blocking(tmp_path, linked):
     """Catches opening a FIFO in blocking mode or reading it before fstat refusal."""
@@ -207,6 +355,65 @@ class _ChunkedStdin(_CountingStdin):
         chunk = self.payload[self.offset : self.offset + min(size, 2)]
         self.offset += len(chunk)
         return chunk
+
+
+class _HostileBytes(bytes):
+    def __bytes__(self):
+        raise AssertionError("__bytes__ must not run")
+
+    def __bool__(self):
+        raise AssertionError("truth testing must not run")
+
+    def __len__(self):
+        raise AssertionError("length hook must not run")
+
+    def __iter__(self):
+        raise AssertionError("iteration must not run")
+
+    def __buffer__(self, flags):
+        raise AssertionError("__buffer__ must not run")
+
+    def __repr__(self):
+        raise AssertionError("repr must not run")
+
+
+class _HostileChunkStream:
+    def __init__(self):
+        self.done = False
+
+    def read(self, size):
+        if self.done:
+            return b""
+        self.done = True
+        return _HostileBytes(b"{}")
+
+
+def test_source_canonicalizes_bytes_subclass_chunks_before_any_operation():
+    source = read_source("-", base_dir=".", stdin=_HostileChunkStream())
+
+    assert source.input_bytes == b"{}"
+    assert type(source.input_bytes) is bytes
+
+
+def test_source_normalizes_ordinary_stream_protocol_errors_statically():
+    class FailingStream:
+        def read(self, size):
+            raise _HostileProtocolError
+
+    with pytest.raises(ConfigError, match=r"^<stdin>: cannot read source\.$"):
+        read_source("-", base_dir=".", stdin=FailingStream())
+
+
+def test_source_does_not_catch_stream_protocol_baseexceptions():
+    class StopNow(BaseException):
+        pass
+
+    class StoppingStream:
+        def read(self, size):
+            raise StopNow
+
+    with pytest.raises(StopNow):
+        read_source("-", base_dir=".", stdin=StoppingStream())
 
 
 def _small_source_limit(monkeypatch) -> None:
