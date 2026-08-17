@@ -61,12 +61,30 @@ from tests.config.preflight_helpers import (
     ADC_UNSATURATED,
     T5_BINDING_LATENT,
     T5_BOUNDARY_SCALES,
+    T5_LIKELIHOOD_NOISE,
+    T5_MODEL_NOISE,
     T5_WIDE_WARN_SCALE,
     WIDE_GRID,
     preflight_document,
     t5_case,
     t5_model,
 )
+
+
+def test_t5_likelihood_noise_agrees_with_t5_model_noise():
+    """MINOR 6 (Plan 3C fix round): ``T5_LIKELIHOOD_NOISE`` is DERIVED from
+    ``T5_MODEL_NOISE``'s own ``sigma`` at import
+    (``preflight_helpers.py:653-654``: ``{"kind": "homoscedastic", "sigma":
+    dict(T5_MODEL_NOISE["sigma"])}``) so ``t5_case``'s two pinned sides can
+    never independently drift -- but nothing asserted that the derivation
+    actually held.  A future edit that replaced the ``dict(...)`` copy with a
+    literal sigma of its own would silently reopen exactly the C18
+    disagreement ``t5_case``'s own docstring says every C16 document is built
+    to avoid.  This guards the DERIVATION, not a literal: it must still pass
+    whatever number ``T5_MODEL_NOISE["sigma"]`` carries.
+    """
+    assert T5_LIKELIHOOD_NOISE["sigma"] == T5_MODEL_NOISE["sigma"]
+    assert T5_LIKELIHOOD_NOISE["kind"] == "homoscedastic"
 
 
 def _ids(document) -> frozenset[str]:

@@ -123,6 +123,62 @@ def observed_as(document, **keys):
     return record
 
 
+# --- the seven moved messages, whole ---------------------------------------
+#
+# Measured at `e0e024a` in `sections/inference.py`, moved to `gating.py` by
+# Task 1, and reached from here through the pre-flight pass.  §3.2(g) prints
+# five of them; the two it omits (`_IS_A_MAPPING` and `_ENTRY_IS_A_MAPPING`)
+# were pinned by NOTHING in the tree -- `grep -rn "is a mapping with mode"
+# tests/` had no match -- so a move that dropped or re-worded either would
+# have been silent.
+#
+# **Defined ABOVE `TestItRunsBeforeTheBeam` (Plan 3C fix round, MINOR 3):**
+# that class's own phase test is now parametrised over :data:`MOVED`, and a
+# decorator evaluates its arguments at class-body execution time -- moved
+# below this block, `MOVED` would not exist yet and collection would fail
+# with `NameError` before a single test ran.
+
+_IS_A_MAPPING = "inference.checks: is a mapping; got 'banana'."
+_UNKNOWN_NAME = (
+    "inference.checks.linearty: 'linearty' is not a check; v1 knows "
+    "['identifiability', 'linearity', 'prior_sensitivity'].")
+_ENTRY_IS_A_MAPPING = (
+    "inference.checks.linearity: is a mapping with mode:; got 'banana'.")
+_UNKNOWN_KEY = (
+    "inference.checks.linearity: a check: does not take ['rtol']; it takes "
+    "['mode', 'reason', 'report'].")
+_MODE_ENUM = (
+    "inference.checks.linearity.mode: is one of ['refuse', 'warn', 'report', "
+    "'skip']; got 'banana'.")
+A37_SKIP_WITHOUT_REASON = (
+    "inference.checks.linearity: mode: skip carries its own reason: (check "
+    "A37) -- three unrelated skips sharing one sentence was v0's mistake.")
+_REASON_WITHOUT_SKIP = (
+    "inference.checks.linearity: reason: belongs to mode: skip alone.")
+
+#: The one NEW cell (§2.3), which moved from nowhere.
+_SKIP_WITH_REPORT = (
+    "inference.checks.linearity: mode: skip and report: true together ask to "
+    "record the numbers of a check that will not run. Drop report:, or drop "
+    "reason: and change mode: skip to mode: report so the check runs and has "
+    "numbers to record (check A1).")
+
+#: ``(the section a document writes, the sentence it earns, the id)``.  SEVEN
+#: moved rows and one new one.
+MOVED = [
+    ("banana", _IS_A_MAPPING, "A1"),
+    ({"linearty": {"mode": "warn"}}, _UNKNOWN_NAME, "A1"),
+    ({"linearity": "banana"}, _ENTRY_IS_A_MAPPING, "A1"),
+    ({"linearity": {"mode": "warn", "rtol": 1e-8}}, _UNKNOWN_KEY, "A1"),
+    ({"linearity": {"mode": "banana"}}, _MODE_ENUM, "A1"),
+    ({"linearity": {"mode": "skip"}}, A37_SKIP_WITHOUT_REASON, "A37"),
+    ({"linearity": {"mode": "warn", "reason": "x"}}, _REASON_WITHOUT_SKIP,
+     "A1"),
+    ({"linearity": {"mode": "skip", "reason": "x", "report": True}},
+     _SKIP_WITH_REPORT, "A1"),
+]
+
+
 # --- the phase assertion, which is why this task exists ---------------------
 
 
@@ -134,17 +190,29 @@ class TestItRunsBeforeTheBeam:
     a user who typed ``mode: sipk`` was told about a file they had not
     touched."""
 
-    def test_a_checks_fault_beats_an_unreadable_beam(self):
-        """**Kills the whole task being registered and never reached.**  The
-        document carries ``UNREADABLE_BEAM`` -- ``no_such_beam.npy``, measured
-        at 0.115 s to its refusal -- AND a ``mode: skip`` with no
-        ``reason:``.  A37's sentence must be the one raised, and the beam's
-        file name must not appear in it at all."""
-        document = checks_document({"linearity": {"mode": "skip"}},
-                                   resources=UNREADABLE_BEAM)
+    @pytest.mark.parametrize("section, message, check", MOVED,
+                             ids=[one[2] + "-" + str(index)
+                                  for index, one in enumerate(MOVED)])
+    def test_a_checks_fault_beats_an_unreadable_beam(self, section, message,
+                                                      check):
+        """**Kills the whole task being registered and never reached.**
+
+        MINOR 3 (Plan 3C fix round): parametrised over every one of
+        :data:`MOVED`'s eight rows, not the one (``A37_SKIP_WITHOUT_REASON``
+        alone).  The reviewer measured that the phase property -- a
+        ``checks:`` fault beats an unreadable beam -- was driven through
+        ``UNREADABLE_BEAM`` for exactly one of the eight rows this pass can
+        raise; the coverage this class's own docstring claims (**"the beam
+        won seven times out of seven"** before the task, measured against all
+        seven of the sentences that then moved here) was never repeated
+        against the fix.  **9 for 9** beats ``UNREADABLE_BEAM`` -- each row's
+        own sentence is the one raised, and the beam's file name
+        (``no_such_beam``) appears in NONE of them.
+        """
+        document = checks_document(section, resources=UNREADABLE_BEAM)
         with pytest.raises(ConfigError) as caught:
             load_document(document)
-        assert str(caught.value) == A37_SKIP_WITHOUT_REASON
+        assert str(caught.value) == message
         assert "no_such_beam" not in str(caught.value)
 
     def test_the_beam_still_refuses_a_document_with_legal_checks(self):
@@ -201,54 +269,10 @@ class TestTheSlots:
         only(checks_document({"linearty": {"mode": "warn"}}), "A1")
 
 
-# --- the seven moved messages, whole ---------------------------------------
+# --- the seven moved messages, whole ----------------------------------------
 #
-# Measured at `e0e024a` in `sections/inference.py`, moved to `gating.py` by
-# Task 1, and reached from here through the pre-flight pass.  §3.2(g) prints
-# five of them; the two it omits (`_IS_A_MAPPING` and `_ENTRY_IS_A_MAPPING`)
-# were pinned by NOTHING in the tree -- `grep -rn "is a mapping with mode"
-# tests/` had no match -- so a move that dropped or re-worded either would
-# have been silent.
-
-_IS_A_MAPPING = "inference.checks: is a mapping; got 'banana'."
-_UNKNOWN_NAME = (
-    "inference.checks.linearty: 'linearty' is not a check; v1 knows "
-    "['identifiability', 'linearity', 'prior_sensitivity'].")
-_ENTRY_IS_A_MAPPING = (
-    "inference.checks.linearity: is a mapping with mode:; got 'banana'.")
-_UNKNOWN_KEY = (
-    "inference.checks.linearity: a check: does not take ['rtol']; it takes "
-    "['mode', 'reason', 'report'].")
-_MODE_ENUM = (
-    "inference.checks.linearity.mode: is one of ['refuse', 'warn', 'report', "
-    "'skip']; got 'banana'.")
-A37_SKIP_WITHOUT_REASON = (
-    "inference.checks.linearity: mode: skip carries its own reason: (check "
-    "A37) -- three unrelated skips sharing one sentence was v0's mistake.")
-_REASON_WITHOUT_SKIP = (
-    "inference.checks.linearity: reason: belongs to mode: skip alone.")
-
-#: The one NEW cell (§2.3), which moved from nowhere.
-_SKIP_WITH_REPORT = (
-    "inference.checks.linearity: mode: skip and report: true together ask to "
-    "record the numbers of a check that will not run. Drop report:, or drop "
-    "reason: and change mode: skip to mode: report so the check runs and has "
-    "numbers to record (check A1).")
-
-#: ``(the section a document writes, the sentence it earns, the id)``.  SEVEN
-#: moved rows and one new one.
-MOVED = [
-    ("banana", _IS_A_MAPPING, "A1"),
-    ({"linearty": {"mode": "warn"}}, _UNKNOWN_NAME, "A1"),
-    ({"linearity": "banana"}, _ENTRY_IS_A_MAPPING, "A1"),
-    ({"linearity": {"mode": "warn", "rtol": 1e-8}}, _UNKNOWN_KEY, "A1"),
-    ({"linearity": {"mode": "banana"}}, _MODE_ENUM, "A1"),
-    ({"linearity": {"mode": "skip"}}, A37_SKIP_WITHOUT_REASON, "A37"),
-    ({"linearity": {"mode": "warn", "reason": "x"}}, _REASON_WITHOUT_SKIP,
-     "A1"),
-    ({"linearity": {"mode": "skip", "reason": "x", "report": True}},
-     _SKIP_WITH_REPORT, "A1"),
-]
+# The data (the seven-plus-one message constants and :data:`MOVED`) moved
+# ABOVE `TestItRunsBeforeTheBeam`, for the reason given there.
 
 
 class TestTheMovedMessages:

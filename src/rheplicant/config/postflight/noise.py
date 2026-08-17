@@ -125,6 +125,32 @@ Task 7.**
   regardless of what a sibling record did. ``preflight/gated.py::
   _t2c_generated`` reads the same way (primary alone), so this is a scope
   the two C18 slots share, not a divergence between them.
+* **BLOCKER 2 (Plan 3C fix round), recorded rather than widened -- owed to
+  Plan 4.** A multi-record ``inference.observed:`` with TWO OR MORE named
+  records and NONE of them literally named ``primary`` resolves no primary at
+  all -- ``ObservedBuild.primary`` is ``None`` -- and :func:`_t6_generating_twin`
+  returns ``None`` on it exactly as it does on a document with no ``observed:``
+  section. **Both C18 bindings stand down together**: this numeric check and
+  ``preflight/gated.py::_t2c_generated`` (the family check, ``C18.kind``) read
+  ``observed.primary`` the same way, so the two-vantage-point agreement this
+  design relies on is not broken by this gap -- both are silent, together,
+  precisely because neither has a primary to read. Measured:
+
+  .. code-block:: text
+
+      single-record (``primary``)                REFUSED
+      named ``'primary'``                         REFUSED
+      named ``'alpha'`` ALONE (only record)        REFUSED
+      named ``'alpha'`` + ``'beta'`` (no ``'primary'``)  LOADS, report=[]
+
+  The trigger is a record NAME, not a document property -- the fourth row can
+  carry the same tenfold sigma disagreement measured elsewhere in this module
+  and load clean, because the primary-resolution rule this check and its
+  sibling both depend on has nothing to resolve. **Decision: record it, do
+  not widen the readers** -- widening C18 to per-record is a contract change
+  that needs its own adversarial pass, which this fix round does not have.
+  See ``preflight/gated.py::_t2c_generated``'s own docstring for the matching
+  entry and the plan's §6 residues for the standing decision record.
 * :attr:`~rheplicant.config.sections.noise.NoiseBuild.by_observation` (the
   per-observation frozen sigma ``radiometer_frozen`` with
   ``source: observed`` produces, one entry per named observation) is never
@@ -134,6 +160,32 @@ Task 7.**
   :func:`_t6_generating_twin` reads, so the two stay aligned on a
   multi-record document even though this module never opens
   ``by_observation`` itself.
+* **MAJOR 2 (Plan 3C fix round), recorded rather than widened -- owed to
+  Task 7.** A composed ``model.noise: {compose: cascade, stages: [...]}``
+  resolves to a ``Pipeline`` (``core/pipeline.py``) at the ``noise`` node, not
+  a bare :class:`~rheplicant.radio.instrument.noise.NoiseOperator` or
+  :class:`~rheplicant.radio.instrument.noise.RadiometerNoiseOperator`. Neither
+  ``isinstance`` guard in :func:`_t6_sigma_agreement` matches a ``Pipeline``,
+  so this check stands down entirely and silently on a composed draw, exactly
+  as ``postflight/digitising.py`` documents at length for a composed
+  ``model.adc`` (see that module's docstring, "Also stands down when
+  ``model.adc`` resolved to a COMPOSED node") -- a ``Pipeline`` carries no
+  ``.sigma``/``.fractional`` for either check to read, and answering here
+  would be a claim about an arbitrary composed pipeline this check cannot
+  make. **This is not a false negative on a document that happens to be
+  correct.** Measured: a cascade of two ``NoiseOperator(sigma=0.05 K)``
+  stages draws this document's data at an effective sigma of ``~0.075 K``
+  (``std(drawn - noiseless) == 0.07492221891880035``) while a single, flat
+  ``inference.noise: {kind: homoscedastic, sigma: 0.05 K}`` weighs it at
+  ``0.05 K`` -- a **41% mis-weighting**, invisible to every diagnostic, on a
+  document ``load_document`` accepts clean. Composing the twin's noise stages
+  and composing the likelihood's weight are two independent authoring
+  actions with no shared grammar tying them together, so there is no single
+  number this check could compare without first deciding what "the sigma of
+  a composed noise pipeline" even means -- a widening this fix round does not
+  have the scope to make. Recorded here, and in the plan's §6 residues, as
+  scope this check knowingly does not cover, matching ``digitising.py``'s own
+  precedent for a composed node stand-down.
 
 **Vacuity, measured rather than assumed.** Mutated to an unconditional
 ``return ()``, cache cleared, this module's own test file still passes 34 of

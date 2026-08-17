@@ -2022,6 +2022,65 @@ class TestPlan3CsSurfaceAndItsPage:
                 f"applies {applied[name].state!r}."
             )
 
+    def test_the_linearity_interaction_paragraph_is_pinned_and_executed(self):
+        """MAJOR 3 (Plan 3C fix round): the page used to mention the probe
+        scales only in a table cell, and nothing user-facing said
+        ``linearity`` refuses a converter document at the defaults whether or
+        not it actually saturates -- ``digitising.py``'s own docstring
+        already carried this measurement, but only a reader of the source.
+
+        **Guarded the way this class guards its other prose**
+        (``test_the_pages_cross_product_table_is_EXECUTED`` is the precedent):
+        the paragraph's own numbers are pinned by substring AND the claim is
+        EXECUTED against the real check, so a rewrite that quietly changed
+        the probe scales, the escape, or the underlying behaviour goes red
+        here rather than reading right forever.
+        """
+        from rheplicant.config.postflight import priced
+        from tests.config.inflight_helpers import priced_run
+        from tests.config.preflight_helpers import unsaturated_linear_case
+
+        body = _block(_page(self.PAGE), self.COSTS)
+        assert "(1e-3, 1, 1e3)" in body, (
+            f"{self.PAGE} no longer names the probe scales beside the "
+            "linearity row."
+        )
+        assert "mode: skip" in body and "reason:" in body, (
+            f"{self.PAGE} no longer names linearity's own escape beside the "
+            "shipped-interaction paragraph."
+        )
+        assert "5.32e+00" in body and "12.116166" in body, (
+            f"{self.PAGE}'s shipped-interaction paragraph no longer carries "
+            "the measured departure/peak it claims."
+        )
+
+        # Execute the claim itself: the most benign ADC this package can
+        # build, no linearity decline, no C16 finding, C12 refuses anyway.
+        document = unsaturated_linear_case()
+        payload = priced_run(document)
+        assert payload.run.report.refusals() == (), (
+            "the built pass already refuses this document; the paragraph's "
+            "premise -- a document that otherwise loads clean -- no longer "
+            "holds."
+        )
+        findings = priced(payload)
+        checks = {found.check: found for found in findings.findings}
+        assert "C16" not in checks, (
+            "model.adc: {scale: 1.0, n_bits: 12} now saturates on the base "
+            "document -- the paragraph's own worked example ('clips "
+            "nothing') is stale."
+        )
+        assert "C12" in checks and checks["C12"].severity == "refuse", (
+            "the base document, with an unsaturating ADC and a declared "
+            "linear: true latent, no longer earns a C12 refusal -- the "
+            "page's central claim ('refused... whether or not it "
+            "saturates') is stale."
+        )
+        assert "5.32e+00" in checks["C12"].message, (
+            "C12's own message no longer carries the departure the page "
+            "quotes."
+        )
+
     def test_the_slots_section_counts_the_passes_that_actually_exist(self):
         """A counting heading, a table and an ordering list, all derived.
 

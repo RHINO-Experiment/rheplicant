@@ -64,6 +64,38 @@ assertion after measuring ``beam_spill`` sorting first and registering fourth.
 The dict is sorted at the call site, which keeps the property and adds no
 second runner.
 
+**MAJOR 1 (Plan 3C fix round), recorded rather than reordered -- run order can
+surface a symptom before the fault that causes it.** ``sorted(CHECKS)`` over
+today's five slots is ``['C12', 'C13', 'C16', 'C18', 'C19']``, and
+``Report.raise_if_refused`` raises only the FIRST refusal it finds, in that
+order. On a document whose ``model.adc`` clips ~100% of its samples AND binds
+a ``linear: true`` latent upstream of it, C12 (``digitising.py``'s own
+documented interaction: any such document is refused at C12 by default,
+whether or not it saturates -- see that module's docstring) fires first and
+is what the user is shown; C16 -- which actually names the converter and the
+saturation, the more specific diagnosis -- runs later and is not raised at
+all. Applying C12's own advice (``inference.checks.linearity: {mode: skip,
+reason: "..."}``) removes C12's refusal and then surfaces C16's, so a user
+who follows the first refusal's advice literally meets a second fault about
+the same document, one check name later.
+
+**Decision: keep** ``sorted(CHECKS)``, **do not reorder.** Reordering by
+"cause before symptom" reverses D-2 -- ``pkgutil`` discovery order is the
+import graph's, not a hand-placed priority, and this repository has already
+paid once for an ordering assertion built on it (commit ``8bcf74d``). The
+refusal tail already tells the user there is another refusal and where:
+``raise_if_refused`` appends ``"(This document has N more refusal(s), at
+<where>, ...)"`` (pinned verbatim by
+``tests/config/test_config_postflight.py::test_two_refusals_both_arrive``,
+whose fixture is this exact C12-then-C16 shape: ``"first.\n(This document
+has 1 more refusal, at model.adc.)"``) -- so a document with both faults does
+tell its own second half, in the same exception, on the very first
+``load_document`` call. The interaction is real and is recorded here rather
+than hidden: **a cheap consequence check can be preceded by an expensive
+cause check**, the tail names the other refusal and its ``where``, and a
+user who fixes only the first thing they are told about will meet the
+second fault the next time they run ``load_document``.
+
 **TRAP -- ``expect: refuse`` cannot catch a refusal from this pass.**
 ``expect:`` is per RUN (``sections/runs.py``, consumed by
 ``sections/exits.py::execute_run``) and this pass raises out of

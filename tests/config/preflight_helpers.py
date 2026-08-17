@@ -704,3 +704,32 @@ def t5_case(**patch) -> dict:
     return repatch(document, inference={**inference,
                                         "noise": T5_LIKELIHOOD_NOISE,
                                         "checks": T5_LINEARITY_DECLINED})
+
+
+def unsaturated_linear_case() -> dict:
+    """MAJOR 3 (Plan 3C fix round)'s own worked example: the base document
+    with the most benign ADC this package can build (:data:`ADC_UNSATURATED`)
+    and ``linearity`` left at its own default (``refuse``) -- **not**
+    declined the way :func:`t5_case` declines it for every other C16
+    document in this module.
+
+    This is the document `docs/config-validation.md`'s shipped-interaction
+    paragraph describes (a converter that clips nothing at its own operating
+    point still earns a C12 refusal, because ``check_linearity`` probes at
+    1000x the latent's scale) and the one
+    ``test_config_surface.py::TestPlan3CsSurfaceAndItsPage::
+    test_the_linearity_interaction_paragraph_is_pinned_and_executed`` EXECUTES
+    rather than merely asserts.
+
+    **NOT named ``*_document``**, deliberately -- matching :func:`t5_case`'s
+    own reason, one level further out. A name ending that way is what
+    ``test_config_fixture_contract._factories()`` discovers, and a MODULE
+    that CALLS such a name earns "rolls its own document"
+    (``TestOnlyOnePlaceBuildsADocument``) the moment that same module ALSO
+    writes a depth-1 ``inference:`` block anywhere in itself -- which
+    ``test_config_surface.py`` already does, in its own ``_PAGE_FIXES``
+    table, for an unrelated reason. Calling THIS name instead keeps that
+    guard's ``_called()`` scan clean for any test module that reaches for a
+    C16 document without becoming a fixture author itself.
+    """
+    return preflight_document(model=t5_model(ADC_UNSATURATED))

@@ -194,6 +194,44 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     The primary is picked exactly as ``build_observed`` picks it: the
     single-record form is ``primary``; otherwise a record literally named
     ``primary``, else the only one, else none at all.
+
+    **BLOCKER 2 (Plan 3C fix round), recorded rather than widened -- owed to
+    Plan 4.**  That last case -- two or more NAMED records, none of them
+    literally called ``primary`` -- resolves no primary at all, and this
+    function returns ``False`` on it exactly as it does on a document with no
+    ``observed:`` section whatsoever.  Both C18 bindings share this scope:
+    this one (the family check, C18.kind) and
+    :func:`~rheplicant.config.postflight.noise._t6_generating_twin` (the
+    numeric check, bare C18) both read ``observed.primary`` alone, so a
+    document that trips this stands the numeric check down too, silently, on
+    a document ``load_document`` accepts. Measured:
+
+    .. code-block:: text
+
+        single-record (``primary``)                REFUSED
+        named ``'primary'``                         REFUSED
+        named ``'alpha'`` ALONE (only record)        REFUSED
+        named ``'alpha'`` + ``'beta'`` (no ``'primary'``)  LOADS, report=[]
+
+    The trigger is a record NAME, not a physical property of the document --
+    the fourth row can carry the exact same tenfold sigma disagreement as the
+    first three and load clean, because the primary-resolution rule that
+    every other check relies on has nothing to resolve.  **This is not a
+    principled boundary; it is an accident of the primary-resolution rule**,
+    and it is the same shape D-C17 exists to name: *"finite, correctly
+    shaped, wrong, and invisible to every diagnostic."*
+
+    **Decision: record it, do not widen the readers.** Widening C18 from
+    per-document to per-record is a contract change that needs its own
+    adversarial pass, which this fix round does not have; both bindings share
+    the boundary, so the two vantage points (text here, built twin in
+    ``postflight/noise.py``) stay in agreement rather than one silently
+    covering more than the other; and ``postflight/noise.py``'s own
+    Known-scope-edges block already records the adjacent case (a primary
+    ``from: file`` while a sibling record simulates) using the same
+    primary-alone read. See ``postflight/noise.py``'s module docstring for
+    the matching entry and the plan's §6 residues for the standing decision
+    record.
     """
     section = document.get("inference")
     if not isinstance(section, Mapping):

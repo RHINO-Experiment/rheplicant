@@ -291,6 +291,30 @@ class TestTheTwin:
             "a": {"init": 1.0, "into": "noise_wave.t_unc[0]"}}), "C15")
         assert "min(1, 1) * 8 = 8" in found.message
 
+    @pytest.mark.parametrize("bindings", [
+        [{"into": "noise_wave.t_unc"}],
+        [{"latents": 7, "into": "noise_wave.t_unc"}],
+        [{"latents": ["ghost"], "into": "noise_wave.t_unc"}],
+    ], ids=["missing", "non-string", "undeclared"])
+    def test_a_binding_whose_latents_cannot_be_read_frees_nothing(
+            self, bindings):
+        """MINOR 1 (fix round): ``_t2c_routes`` used to count a ``bindings[]``
+        entry's ``into:`` whatever ``latents:`` said, while
+        ``preflight/model.py::_t11_bindings`` (A33's own walk over this same
+        grammar) deliberately DROPS an entry whose ``latents:`` is missing,
+        non-string, or names nothing ``inference.parameters`` declares -- the
+        more specific refusal at build time is what names that fault, and a
+        check that counted it anyway reported a rank the document cannot
+        reach.  Measured before this fix: the ``undeclared`` cell alone
+        (``latents: ['ghost']``, nothing named ``ghost`` in ``parameters:``)
+        reported ``min(1, 1) * 8 = 8`` -- a temperature no declared latent
+        actually reaches.  All three cells now stand C15 down entirely,
+        exactly as ``_t11_bindings`` stands A33 down on the same three
+        documents.
+        """
+        assert silent_here(_document(parameters={"a": {"init": 1.0}},
+                                     bindings=bindings))
+
 
 # --- declining --------------------------------------------------------------
 

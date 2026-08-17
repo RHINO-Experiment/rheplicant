@@ -219,7 +219,18 @@ def test_the_readme_states_one_live_coverage_figure_beside_its_test_count():
         "looking at different sentences."
     )
     everywhere = _ANY_COVERAGE.findall(text)
-    assert everywhere.count(figure) == 1 and len(everywhere) == 1, (
+    # MINOR 5 (Plan 3C fix round): the earlier form asserted
+    # `everywhere.count(figure) == 1 and len(everywhere) == 1` -- and the
+    # first conjunct is DEAD.  `figure` is the exact substring `_LIVE_COVERAGE`
+    # matched out of `text`, and the substring it matched always contains the
+    # literal `<figure> % coverage`, which `_ANY_COVERAGE` -- a strictly
+    # broader pattern over the same text -- is therefore guaranteed to find at
+    # least once.  So whenever `len(everywhere) == 1`, that one entry IS
+    # `figure`, and `everywhere.count(figure) == 1` follows for free; no input
+    # can make the first conjunct fail while the second holds.  What the
+    # docstring's property 3 actually needs -- "exactly one percentage on the
+    # page is a live coverage claim" -- is the length check alone.
+    assert len(everywhere) == 1, (
         f"the README states {len(everywhere)} coverage percentages "
         f"({everywhere}) and exactly one may be a live claim. The 99.7 % "
         "figure is a statement about a past commit and is written as one "

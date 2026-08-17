@@ -186,9 +186,30 @@ def _t2c_routes(document: Mapping[str, Any]
     This is ``preflight/model.py::_t11_bindings``' walk with its return
     changed: that one answers with the path HEADS, which is A33's question,
     and this one needs the LEAF.
+
+    **MINOR 1 (Plan 3C fix round): a ``bindings[]`` entry's ``latents:`` is
+    now filtered exactly as ``_t11_bindings`` filters it.**  Before this fix
+    this function counted every ``bindings[]`` entry whose ``into:`` reached a
+    noise-wave leaf, whatever its ``latents:`` said -- ``_t11_bindings``
+    deliberately DROPS an entry whose ``latents:`` is missing, non-string or
+    names nothing ``inference.parameters`` declares, because a more specific
+    refusal names that fault at build time and a check that counted it anyway
+    reports a rank the document cannot reach.  Measured before this fix, on a
+    single ``bindings[{'latents': ['ghost'], 'into': 'noise_wave.t_unc'}]``
+    entry with no ``parameters:`` declaring ``ghost``: ``_t11_bindings`` (the
+    A33 walk) answers ``[]`` while this function answered
+    ``[('inference.bindings[0]', frozenset({'t_unc'}), None)]`` -- C15's ``k``
+    counted a temperature no declared latent actually reaches.  Reusing
+    ``_t11_bindings`` outright is not available here -- it returns the path
+    HEAD (A33's question) and this function needs the LEAF -- so the same
+    ``declared`` gate is applied to the same walk instead, at the same point
+    :func:`~rheplicant.config.preflight.model._t11_bindings` applies it.
     """
+    from rheplicant.config.preflight.fitting import _latents
+
     section = document.get("inference")
     section = section if isinstance(section, Mapping) else {}
+    declared = _latents(document)
     written: list[tuple[str, Any, Any]] = []
     parameters = section.get("parameters")
     if isinstance(parameters, Mapping):
@@ -200,11 +221,18 @@ def _t2c_routes(document: Mapping[str, Any]
             if isinstance(name, str) and isinstance(spec, Mapping))
     bindings = section.get("bindings")
     if isinstance(bindings, (list, tuple)):
-        written.extend(
-            (f"inference.bindings[{index}]", entry.get("into"),
-             entry.get("transform"))
-            for index, entry in enumerate(bindings)
-            if isinstance(entry, Mapping))
+        for index, entry in enumerate(bindings):
+            if not isinstance(entry, Mapping) or entry.get("into") is None:
+                continue
+            latents = entry.get("latents")
+            latents = (latents,) if isinstance(latents, str) else latents
+            names = tuple(one for one in latents
+                          if isinstance(one, str) and one in declared) \
+                if isinstance(latents, (list, tuple)) else ()
+            if not names:
+                continue
+            written.append((f"inference.bindings[{index}]",
+                            entry.get("into"), entry.get("transform")))
 
     out: list[tuple[str, frozenset[str], Any]] = []
     for where, into, transform in written:

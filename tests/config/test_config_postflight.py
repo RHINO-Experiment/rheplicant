@@ -727,10 +727,20 @@ class TestTheReportAccumulates:
         REPORT each.
 
         **The ids are deliberately not in sorted order.**  ``sorted`` of the
-        four is ``['A9', 'B3', 'C11', 'C17']`` and the pass order is
-        ``['C11', 'B3', 'A9', 'C17']``, so a walk that happened to sort the
+        four is ``['A9', 'B3', 'C11', 'C97']`` and the pass order is
+        ``['C11', 'B3', 'A9', 'C97']``, so a walk that happened to sort the
         accumulated findings, or one that concatenated them in the wrong
         order, cannot pass this by luck.
+
+        **The priced id is a synthetic ``C97``, not ``C17`` (MINOR 8, Plan 3C
+        fix round).**  ``C17`` is a real, SHIPPED schema id (``sections/
+        transforms.py``, ``sections/observed.py``) and D-14 bans any NEW id,
+        message, test name or commit subject from being the string ``C17``
+        outside a ``C1..C17`` range-literal widening -- this test's registered
+        id is a mechanism probe with no relationship to the real check and
+        does not need to borrow its name.  ``C97`` is outside every schema
+        range (``A1..A52``, ``B1..B9``, ``C1..C19``) so it also cannot be
+        mistaken for a future real id.
         """
         register_text("C11")(
             lambda doc: (report("C11", "runtime.dtype", "text."),))
@@ -738,12 +748,12 @@ class TestTheReportAccumulates:
             lambda facts: (report("B3", "observation.time", "axes."),))
         register_built("A9")(
             lambda run: (report("A9", "model.gain", "built."),))
-        register("C17")(
-            lambda payload: (report("C17", "inference.parameters", "priced."),))
+        register("C97")(
+            lambda payload: (report("C97", "inference.parameters", "priced."),))
         run = load_document(_document())
-        assert run.report.checks() == frozenset({"C11", "B3", "A9", "C17"})
+        assert run.report.checks() == frozenset({"C11", "B3", "A9", "C97"})
         assert [one.check for one in run.report.findings] == [
-            "C11", "B3", "A9", "C17"]
+            "C11", "B3", "A9", "C97"]
 
     def test_the_built_payload_carries_pre_flight_and_axes(self,
                                                            every_registry):

@@ -152,6 +152,22 @@ a fourth pass, run after `build_inference` and immediately before
 `linearity` is the only one on by default; `off` is what the other two are in
 until a document asks, and it is a state no document can write.
 
+**A document that lights `model.adc` and declares `linear: true` on a latent
+bound upstream of it is refused by `linearity` at the defaults above, whether
+or not the converter actually saturates.** `check_linearity` probes each
+`linear: true` claim at `(1e-3, 1, 1e3)` times the latent's own scale, and a
+converter that clips nothing at `1x` still clips hard at `1000x`. Measured on
+the most benign ADC this package can build (`model.adc: {scale: 1.0, n_bits:
+12}`, achieved peak `12.116166 adc_count` against a `2048 adc_count` clip
+limit — the real forward pass clips *nothing*): `linearity` still refuses,
+departure `5.32e+00` at the `1000x` probe against `rtol=1.19e-03`, with the
+`0.001x` and `1x` probes both exactly `0`. **This is correct, not a false
+positive** — a converter is a deliberate non-linearity, and the claim really
+is false at the probe's outer scale even when it is true at the run's own
+operating point. The escape is `linearity`'s own `mode:` — decline the claim
+in writing, `inference.checks.linearity: {mode: skip, reason: "..."}` — which
+is what the refusal's own message names.
+
 **The defaults are forced by measurement, not by taste.** Measured on a
 two-latent document on a 16 × 8 grid with no beam: `load_document` cold is
 0.715 s; `check_linearity` is 0.188 s cold and 0.007 s warm *per linear

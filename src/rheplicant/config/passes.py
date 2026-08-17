@@ -72,6 +72,28 @@ Registry = dict[str, Check]
 #: and ``C`` ids, which is why the two new passes need no widening of it --
 #: measured, ``"C1"``, ``"C2.time"`` and ``"A13.grid"`` all ``fullmatch`` and
 #: ``"A12a"`` does not (a bare letter suffix is not a dotted slot).
+#:
+#: **MINOR 2 (Plan 3C fix round): this is a SHAPE check, not a RANGE check --
+#: and it does not enforce the range :func:`binder`'s own refusal claims.**
+#: Measured: ``SLOT.fullmatch("A99")``, ``SLOT.fullmatch("B77")`` and
+#: ``SLOT.fullmatch("C42")`` all match, though none is a real schema §6 id and
+#: :func:`binder`'s malformed-id message says the space is
+#: ``(A1..A52, B1..B9, C1..C19)``. The RANGE is enforced elsewhere, at test
+#: time, by the census that walks every registry's bare ids against the real
+#: schema id list --
+#: ``tests/config/test_config_preflight.py::TestTheRegistry::
+#: test_every_registered_id_is_a_schema_6_id`` (BLOCKER 1, Plan 3C fix round),
+#: which -- as of this fix -- walks ``preflight.CHECKS``, ``inflight.
+#: AXIS_CHECKS``, ``inflight.BUILT_CHECKS`` **and** ``postflight.CHECKS``, not
+#: the first of the four alone. Widening ``SLOT`` itself to enforce the range
+#: was considered and rejected here: the regex runs at IMPORT time, inside
+#: :func:`binder`, and a bad id there aborts the whole module import with a
+#: stack trace; the census runs as a TEST, with a message that names the
+#: offending registry and id. The two are complementary rather than
+#: redundant -- shape first (so a malformed id never reaches a registry at
+#: all), range second (so a well-shaped but non-existent id is caught before
+#: it ships) -- and this comment is the one place that says so, since neither
+#: check's own code says the other exists.
 SLOT = re.compile(r"[ABC][1-9][0-9]*(\.[a-z_]+)?")
 
 
