@@ -91,6 +91,11 @@ class TestEachEntryIsBuiltOnce:
 
 
 class TestExtends:
+    def test_public_merge_is_the_neutral_function_object(self):
+        from _rheplicant_bootstrap.layering import merge_extends as neutral_merge
+
+        assert merge_extends is neutral_merge
+
     def test_mappings_merge(self):
         """The child's z0 supplies only `value`, so `unit` must survive from
         the parent -- a child asserting on a key it also supplied would pass
@@ -153,6 +158,10 @@ class TestExtends:
         merged = merge_extends({"~apod_deg": None}, {"apod_deg": 1.0, "lmax": 8})
         assert "apod_deg" not in merged
         assert merged["lmax"] == 8
+
+    def test_a_tilde_key_must_carry_null(self):
+        with pytest.raises(ConfigError, match="deletion value must be null"):
+            merge_extends({"~apod_deg": 1.0}, {"apod_deg": 1.0})
 
     def test_extending_a_sibling_of_another_kind_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:

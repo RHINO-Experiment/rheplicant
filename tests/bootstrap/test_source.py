@@ -12,7 +12,7 @@ import pytest
 
 from _rheplicant_bootstrap import source as source_module
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.source import read_source
+from _rheplicant_bootstrap.source import read_source, read_stable_regular_bytes
 from _rheplicant_bootstrap.yaml import YamlLimits
 
 
@@ -105,6 +105,20 @@ def test_cross_directory_symlink_uses_lexical_parent_for_base_dir(tmp_path):
 
     assert source.base_dir == str(lexical_dir.resolve())
     assert source.source_realpath == str(target.resolve())
+
+
+def test_shared_stable_reader_accepts_pathlike_and_exact_limit(tmp_path):
+    """Catches the preset reader gaining a second, incompatible file traversal."""
+    path = tmp_path / "preset.yaml"
+    path.write_bytes(b"12345678")
+    assert read_stable_regular_bytes(path, maximum=8) == b"12345678"
+
+
+def test_shared_stable_reader_uses_its_source_name_in_limit_refusals(tmp_path):
+    path = tmp_path / "preset.yaml"
+    path.write_bytes(b"123456789")
+    with pytest.raises(ConfigError, match="preset:fixture: YAML byte count 9"):
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
 @pytest.mark.parametrize("linked", [False, True])

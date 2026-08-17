@@ -264,6 +264,14 @@ class TestThePlan2ASurface:
             assert name in config.__all__
             assert getattr(config, name) is not None
 
+    def test_exported_layering_functions_are_the_neutral_objects(self):
+        """Catches package-level imports preserving an obsolete wrapper."""
+        import rheplicant.config as config
+        from _rheplicant_bootstrap import layering as neutral
+
+        assert config.apply_variant is neutral.apply_variant
+        assert config.recursive_update is neutral.recursive_update
+
     def test_importing_the_package_registers_the_object_readers(self):
         import rheplicant.config as config
 

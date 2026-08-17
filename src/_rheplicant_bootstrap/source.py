@@ -67,25 +67,39 @@ def _read_bounded_forward(stream: BinaryIO, *, source_name: str, limit: int) -> 
     return bytes(data)
 
 
-def _read_path_once(source_path: str) -> tuple[bytes, str]:
-    """Read one regular file descriptor once without trusting its advertised size."""
-    limit = _input_limit()
+def _read_stable_regular_file(
+    path: str | os.PathLike[str],
+    *,
+    maximum: int,
+    source_name: str | None,
+) -> tuple[bytes, str]:
+    """Return exact bytes and resolved identity from one stable descriptor."""
     fd = -1
     try:
+        source_path = os.fspath(path)
+        if not isinstance(source_path, str):
+            raise TypeError("source path must be text")
+        display_name = source_path if source_name is None else source_name
+        if maximum < 0:
+            raise ValueError("maximum must be non-negative")
         before_link = _lexical_lstat(source_path)
         before_realpath = os.path.realpath(source_path)
         after_initial_resolution_link = _lexical_lstat(source_path)
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        if not stat.S_ISLNK(before_link.st_mode):
+            flags |= getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(source_path, flags)
         before_target = os.fstat(fd)
         if not stat.S_ISREG(before_target.st_mode):
-            raise ConfigError(f"{source_path}: source must be a regular file.")
-        if before_target.st_size > limit:
-            raise _byte_limit_error(source_path, before_target.st_size, limit)
+            raise ConfigError(f"{display_name}: source must be a regular file.")
+        if before_target.st_size > maximum:
+            raise _byte_limit_error(display_name, before_target.st_size, maximum)
         stream = os.fdopen(fd, "rb")
         fd = -1
         with stream:
-            data = _read_bounded_forward(stream, source_name=source_path, limit=limit)
+            data = _read_bounded_forward(
+                stream, source_name=display_name, limit=maximum
+            )
             after_target = os.fstat(stream.fileno())
         after_read_link = _lexical_lstat(source_path)
         source_realpath = os.path.realpath(source_path)
@@ -94,7 +108,8 @@ def _read_path_once(source_path: str) -> tuple[bytes, str]:
     except ConfigError:
         raise
     except (OSError, ValueError) as exc:
-        raise ConfigError(f"{source_path}: cannot read source: {exc}") from exc
+        label = source_name if source_name is not None else os.fspath(path)
+        raise ConfigError(f"{label}: cannot read source: {exc}") from exc
     finally:
         if fd >= 0:
             try:
@@ -115,6 +130,26 @@ def _read_path_once(source_path: str) -> tuple[bytes, str]:
     ):
         raise ConfigError(f"{source_path}: source target changed while reading.")
     return data, source_realpath
+
+
+def read_stable_regular_bytes(
+    path: str | os.PathLike[str],
+    *,
+    maximum: int,
+    source_name: str | None = None,
+) -> bytes:
+    """Read one unchanged regular file in one bounded forward consumption."""
+    data, _ = _read_stable_regular_file(
+        path, maximum=maximum, source_name=source_name
+    )
+    return data
+
+
+def _read_path_once(source_path: str) -> tuple[bytes, str]:
+    """Read a CLI path with the shared stable-file primitive."""
+    return _read_stable_regular_file(
+        source_path, maximum=_input_limit(), source_name=source_path
+    )
 
 
 def _stdin_base_dir(base_dir: str | None) -> str:
@@ -186,4 +221,4 @@ def read_source(
     return read_cli_source_once(path_or_dash, base_dir=base_dir, stdin=stdin)
 
 
-__all__ = ["read_cli_source_once", "read_source"]
+__all__ = ["read_cli_source_once", "read_source", "read_stable_regular_bytes"]

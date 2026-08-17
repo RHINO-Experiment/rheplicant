@@ -20,11 +20,11 @@ one document -- split across two files, the halves can silently disagree in
 exactly the keys the comparison is about.
 """
 
-import copy
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
+from _rheplicant_bootstrap.layering import merge_extends
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.registry import LiveNames
@@ -113,42 +113,6 @@ class BuiltResources(NamedTuple):
     resources: dict[str, Any]
     shared_objects: tuple[frozenset[str], ...]
     order: tuple[str, ...]
-
-
-def merge_extends(child: dict, parent: dict) -> dict:
-    """Deep-merge ``child`` over ``parent``.
-
-    Mappings merge; lists replace; ``{"append": [...]}`` extends the parent's
-    list; a ``~key`` entry deletes ``key``.
-    """
-    merged = copy.deepcopy(parent)
-    for key, value in child.items():
-        if key.startswith("~"):
-            merged.pop(key[1:], None)
-            continue
-        if isinstance(value, dict) and "append" in value:
-            if set(value) != {"append"}:
-                siblings = sorted(set(value) - {"append"})
-                raise ConfigError(
-                    f"{key!r}: append must be the only key when extending a list; "
-                    f"got the sibling keys {siblings}."
-                )
-            base = merged.get(key, [])
-            if not isinstance(base, list):
-                raise ConfigError(
-                    f"{key!r} is extended with {{append: ...}} but the inherited value "
-                    f"is {type(base).__name__}, not a list."
-                )
-            # deepcopy the appended items too -- splicing them in by reference
-            # would let a caller's later mutation of the merge RESULT reach
-            # back into the document they passed in as `child`.
-            merged[key] = [*base, *copy.deepcopy(value["append"])]
-            continue
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_extends(value, merged[key])
-            continue
-        merged[key] = copy.deepcopy(value)
-    return merged
 
 
 def _referenced_names(node: Any) -> set[str]:
