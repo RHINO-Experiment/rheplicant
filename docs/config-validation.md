@@ -280,6 +280,12 @@ mapping, and applies the defaults — so it answers "what will this document
 actually pay for" before a single object is built. Pass `None` and you get the
 defaults themselves.
 
+It assumes the section has already passed the pre-flight grammar
+(`A1.checks`/`A37`): on a section that has not, a non-numeric `rtol:` raises
+`ValueError` and an unknown `mode:` word becomes a `Gate` in that state, which
+`runs()` reports as standing down. Call `preflight` first, or read
+`gate.state` against `gating.STATES` before trusting it.
+
 ```python
 from rheplicant.config import gates
 
@@ -312,7 +318,7 @@ belong to the plan that writes `diagnostics.json`, which **still does not
 exist**: schema §4.7.8 names it twice, and `outputs:` is refused wholesale
 until Plan 4.
 
-**Three unrelated things in this layer are spelled "report", and conflating
+**Four unrelated things in this layer are spelled "report", and conflating
 any two of them is the likeliest way to ship something that reads right:**
 
 | spelling | what it is |

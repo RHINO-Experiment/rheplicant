@@ -187,6 +187,17 @@ def test_the_readme_states_one_live_coverage_figure_beside_its_test_count():
        claiming less coverage than ``--cov-fail-under`` states something every
        passing run disproves.
 
+    **The one decimal is a TRUNCATION of the measured percentage, never a
+    rounding, and that is a deliberate choice, not an oversight to "fix".**
+    90.65 % is written as 90.6 %, not 90.7 %. Truncating keeps the printed
+    figure a true FLOOR on measured coverage, which is what property 4 above
+    actually needs -- a floor claim stays true if coverage drifts down to
+    90.62 %, where a *rounded* 90.7 % would already be false. Round-to-nearest
+    would silently convert this guard's "at least" into an "approximately",
+    and this file's whole point is that the number is checkable rather than
+    decorative. Whoever next updates this figure by hand: truncate, do not
+    round.
+
     **What this deliberately does NOT assert, said plainly so nobody assumes
     otherwise:** that the figure is the true coverage. That needs the
     twelve-minute run, and this file's own docstring explains why an exact

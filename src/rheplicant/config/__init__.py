@@ -81,6 +81,12 @@ effective mode of a check rather than the declaration ``InferenceBuild.checks``
 keeps. ``Gate`` follows ``gates`` exactly as ``Finding`` follows ``Report``: a
 caller CALLS ``gates`` and READS the ``Gate``s it hands back.
 
+It assumes the section has already passed the pre-flight grammar
+(``A1.checks``/``A37``): on a section that has not, a non-numeric ``rtol:``
+raises ``ValueError`` and an unknown ``mode:`` word becomes a ``Gate`` in that
+state, which ``runs()`` reports as standing down. Call ``preflight`` first, or
+read ``gate.state`` against ``gating.STATES`` before trusting it.
+
 ``MODES``, ``STATES``, ``DEFAULT_MODE``, ``CHECK_ID``, ``verdict`` and
 ``check_gates`` stay module-local for the reason ``CHECKS`` does -- the words a
 document may write and the defaults they fall back to are things the SCHEMA

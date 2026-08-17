@@ -65,11 +65,20 @@ def _block(text: str, heading: str) -> str:
 
 
 def _rows(body: str) -> list[list[str]]:
-    """Every data row of the first markdown table in ``body``, as cell lists.
+    """Every data row of every markdown table in ``body``, as cell lists.
 
-    The header and the ``|---|`` rule are dropped; a cell is stripped. Returns
-    ``[]`` when there is no table, which every caller turns into a red test
-    with its own message rather than a vacuous pass.
+    **Not "the first table"**: it walks every ``|``-prefixed line in ``body``,
+    drops only rows that are entirely ``-``/``:``/space (the ``|---|`` rule),
+    and returns everything else past the very first row collected -- which
+    means a SECOND table's own header row is not recognised as a header and
+    is returned as if it were data. Every guarded block in this module holds
+    exactly one pipe-free table, so this has no live consequence today; if
+    that ever stops being true, this function needs splitting, not its
+    caller's arity assertion loosened. A cell is stripped. Escaped pipes
+    (``\\|``) are **not** handled -- a literal ``\\|`` inside a cell splits
+    that cell in two. Returns ``[]`` when there is no table, which every
+    caller turns into a red test with its own message rather than a vacuous
+    pass.
     """
     found = []
     for line in body.splitlines():
@@ -1152,9 +1161,13 @@ class TestTheCountsProseStatesAboutThisLayer:
     #: **A1 is NOT here even though Plan 3C registers ``A1.checks``.** A1 is
     #: "unknown key anywhere", one schema row, and Plan 3A claimed it; a plan
     #: adding a slot under a row somebody else already decided does not
-    #: re-claim the row. That is the same rule 3B's own set applies to A13 --
-    #: one row, two registries, one entry -- and it is what keeps the
-    #: three-way disjointness below meaningful rather than a formality.
+    #: re-claim the row. The RULE -- one schema row is one entry, however many
+    #: registries or slots implement it -- is the same rule 3B's own set
+    #: applies to A13 (one row, two registries, one entry); but A13's two
+    #: slots are BOTH 3B's, so that citation does not exercise the CROSS-PLAN
+    #: case A1 is. A1 is this set's own instance of that case, and it is what
+    #: keeps the three-way disjointness below meaningful rather than a
+    #: formality.
     #:
     #: C18 and C19 did not exist in schema §6 before this plan; Task 1 added
     #: both rows in the commit that added their ids, so the census is green at
@@ -1564,6 +1577,7 @@ class TestPlan3CsSurfaceAndItsPage:
     CROSS = "### The cross-product, as one table"
     IN_CODE = "### What a gate is, in code"
     SLOTS = "## The three later slots, and what each one buys"
+    SPELLINGS = "### A refused document produces no record at all"
 
     #: :data:`TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS` stops at sixteen
     #: and the cross-product is eighteen cells. Extended here rather than
@@ -1661,6 +1675,36 @@ class TestPlan3CsSurfaceAndItsPage:
             "something false, and DEFAULT_MODE would have to be exported."
         )
         assert set(applied) == set(CHECK_NAMES)
+
+    def test_a_state_this_package_does_not_know_does_not_run(self):
+        """``Gate.runs`` is a POSITIVE test and gating.py says why. Measured
+        at review: negating it survives the whole of tests/config.
+
+        ``state in ("refuse", "warn", "report")`` and
+        ``state not in ("skip", OFF, AUTO_SKIP)`` agree over every member of
+        :data:`~rheplicant.config.gating.STATES` -- six states, and the two
+        forms answer the same for each -- which is exactly why a mutation to
+        the negated form survived the whole suite: nothing in ``STATES`` can
+        tell them apart. But ``STATES`` is not the full domain. ``gates()``
+        never validates ``mode`` (see this class's precondition test), and
+        ``gates`` is public, so ``gates({"linearity": {"mode": <typo>}})``
+        builds exactly the gate below -- a state outside ``STATES`` -- and the
+        two forms disagree on it: the positive form stands it down, the
+        negated form runs it.
+        """
+        from rheplicant.config import Gate
+        from rheplicant.config.gating import STATES
+
+        unknown = Gate(name="linearity", state="a_state_no_plan_has_added",
+                       record=False, reason=None, rtol=None)
+        assert unknown.state not in STATES
+        assert unknown.runs() is False, (
+            "an unrecognised state RUNS. gating.py's docstring: a state added "
+            "later must default to NOT running -- a lost check is silent, a "
+            "refusal that should not have happened is loud. This is also "
+            "reachable from the public surface: gates({'linearity': "
+            "{'mode': <typo>}}) builds exactly this gate."
+        )
 
     # -- the page ---------------------------------------------------------
 
@@ -1867,6 +1911,85 @@ class TestPlan3CsSurfaceAndItsPage:
         assert set(Gate._fields) <= named, (
             f"the page counts {word} fields and does not name "
             f"{sorted(set(Gate._fields) - named)}."
+        )
+
+    def test_the_precondition_gates_advertises_holds_as_written(self):
+        """``gates`` is advertised as free and pure over RAW text -- the
+        schema's "Validate" panel holding a section the user is still typing
+        -- and neither the page nor ``config/__init__.py`` used to name a
+        precondition. Measured at review: on a section that has not passed
+        ``check_gates``, a non-numeric ``rtol:`` does not stand the check
+        down, it RAISES; and an unknown ``mode:`` word does not raise, it
+        becomes a ``Gate`` whose ``state`` is not in ``STATES`` at all
+        (``runs()`` reports it as standing down, per
+        ``test_a_state_this_package_does_not_know_does_not_run`` above).
+        Both behaviours are pinned here, driven rather than read, so the
+        sentence describing them cannot rot silently on either page.
+        """
+        import rheplicant.config as config
+        from rheplicant.config.gating import STATES
+
+        with pytest.raises(ValueError):
+            config.gates({"identifiability": {"rtol": "1e-8x"}})
+
+        typo = config.gates(
+            {"linearity": {"mode": "a_typo_no_plan_has_added"}})["linearity"]
+        assert typo.state not in STATES
+        assert typo.runs() is False
+
+        needle = "already passed the pre-flight grammar"
+        body = _block(_page(self.PAGE), self.IN_CODE)
+        assert needle in body, (
+            f"{self.PAGE} no longer states gates()'s precondition under "
+            f"{self.IN_CODE!r}."
+        )
+        assert needle in (config.__doc__ or ""), (
+            "rheplicant.config's own module docstring no longer states "
+            "gates()'s precondition -- the page and the package have drifted "
+            "apart again."
+        )
+
+    def test_the_page_counts_the_spellings_of_report_it_tabulates(self):
+        """The one count on this page taken from a sentence rather than a
+        table. Measured at review: "Three" and "Four" both passed -- nothing
+        compared the sentence to the table it introduces.
+
+        **Also checks ``gating.py``'s own copy of the same sentence, by
+        equality against the page's.** The two docstrings carry the same
+        claim over the same four-row list, in two unrelated syntaxes (a
+        markdown table here, an RST grid table there) that no single parser
+        reads -- two ROUTES to the same fact, which is exactly the shape the
+        project's own defect pattern names: closing the route through one
+        without checking the other is how a twin survives. Reverting either
+        file's count alone, with the other left correct, is measured to
+        reproduce the review's finding (``EXIT=0`` over the full suite either
+        way) if only one of the two assertions below exists.
+        """
+        body = _block(_page(self.PAGE), self.SPELLINGS)
+        stated = re.search(r"\*\*(\w+) unrelated things in this layer are "
+                           r'spelled "report"', body)
+        assert stated, f"{self.PAGE} no longer counts the report spellings"
+        word = stated.group(1).lower()
+        assert word in self._WORDS, f"unknown number word {word!r}"
+        rows = _rows(body)
+        assert rows, "the report-spellings table stopped parsing"
+        assert self._WORDS[word] == len(rows), (
+            f"the page says {word} spellings and tabulates {len(rows)}."
+        )
+
+        from rheplicant.config import gating
+
+        module_stated = re.search(
+            r"\*\*(\w+) unrelated things in this layer are "
+            r'spelled "report"', gating.__doc__ or "")
+        assert module_stated, (
+            "gating.py's own module docstring no longer counts the report "
+            "spellings in the same words the page does."
+        )
+        assert module_stated.group(1).lower() == word, (
+            f"the page says {word!r} spellings; gating.py's own docstring "
+            f"says {module_stated.group(1).lower()!r}. The two copies of "
+            "this sentence have drifted apart."
         )
 
     def test_the_cost_table_carries_each_checks_id_and_its_default(self):
