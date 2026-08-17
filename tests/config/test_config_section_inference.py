@@ -501,20 +501,77 @@ class TestValidateRunsAtLoad:
         of ``build_inference``, one level below -- true, and not the same
         claim: a second call could be added by the hook, or the whole builder
         could stop being reached, without any of them moving.
+
+        **On a document whose ``linearity`` gate does not run**, and that is
+        Plan 3C's correction rather than a weakening. The post-flight C12
+        calls ``check_linearity``, which runs ``_isolate``, which validates --
+        so on a document at the default ``linearity: refuse`` the count is
+        ``1 + <one per linear latent>``, measured. The BUILDER's call is still
+        exactly one and is still on the fit twin, which is what this test is
+        about; :meth:`test_load_document_validates_once_more_per_linear_latent`
+        pins the priced pass's own calls beside it.
         """
         from rheplicant.config.document import load_document
         from rheplicant.inference import ParameterSpace
         from tests.config.exit_helpers import conjugate_document
 
+        document = conjugate_document()
+        document["inference"]["checks"] = {
+            "linearity": {"mode": "skip",
+                          "reason": "counted on its own, one test down"}}
         seen = []
         monkeypatch.setattr(
             ParameterSpace, "validate",
             lambda self, pipeline: seen.append((self, pipeline)))
-        run = load_document(conjugate_document())
+        run = load_document(document)
         assert len(seen) == 1
         assert seen[0][0] is run.inference.space
         assert seen[0][1] is run.inference.fit_twin
         assert seen[0][1] is not run.twin
+
+    def test_load_document_validates_once_more_per_linear_latent(
+            self, monkeypatch):
+        """What the priced pass adds, pinned as a NUMBER rather than left
+        to drift.
+
+        ``check_linearity`` runs ``_isolate`` before ``_require_inexact``
+        (``linear.py:517`` then ``:518``) and ``_isolate`` validates the space
+        against the pipeline -- so C12, which calls it once per latent
+        declared ``linear: true``, costs one extra validate each. Measured on
+        ``conjugate_document()`` (one linear latent): **2**; on the two-latent
+        document: **3**.
+
+        **The surviving invariant is "validate is called, and every call is on
+        the FIT twin"**, and that second half is the one the 3B defect was
+        about -- an ``(8,)`` latent bound into a scalar leaf was accepted
+        because nothing validated at all. A count that grows with the linear
+        latents does not weaken it; a call on ``run.twin`` would.
+
+        **Kills** a priced check that validates against the raw twin, and a
+        C12 that silently stopped running.
+        """
+        from rheplicant.config.document import load_document
+        from rheplicant.inference import ParameterSpace
+        from tests.config.exit_helpers import TWO_LATENTS, conjugate_document
+
+        for label, inference, expected in (
+            ("one linear latent", None, 2),
+            ("two linear latents", dict(TWO_LATENTS), 3),
+        ):
+            seen = []
+            document = (conjugate_document() if inference is None
+                        else conjugate_document(inference=inference))
+            monkeypatch.setattr(
+                ParameterSpace, "validate",
+                lambda self, pipeline, _s=seen: _s.append((self, pipeline)))
+            run = load_document(document)
+            linear = [name for name in run.inference.space.names
+                      if run.inference.space.latent(name).linear]
+            assert len(seen) == expected == 1 + len(linear), label
+            assert all(space is run.inference.space for space, _ in seen), label
+            assert all(pipeline is run.inference.fit_twin
+                       for _, pipeline in seen), label
+            assert run.inference.fit_twin is not run.twin, label
 
 
 class TestSequence:

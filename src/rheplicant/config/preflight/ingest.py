@@ -50,47 +50,95 @@ time, and ``replace.cal_loads: {from: thermistors, label: ghost}`` reaches
 the reader's own ``DataIngestionError``.  A10 walks it by walking every
 section that is not ``variants:``.
 
-**None of the three walks the variant LAYERS.**  ``document.py::_assemble``
-applies the selected variant and THEN runs this pass, so a variant a user
-actually runs is read by all three checks on the merged mapping.  What
-``preflight/document.py::_task3_over_layers`` would add is therefore **only
-the reporting of faults in variants nobody selected** -- and that is true of
-every check in this layer, not just these three.  The un-selected variant is a
-RECORDED false negative (§3.2 (c)), with a test per row that names it.
+**All three now walk the variant LAYERS** (Plan 3C Task 0).
+``document.py::_assemble`` applies the selected variant and THEN runs this
+pass, so the route a user actually takes was always read on the merged
+mapping; what ``preflight/document.py::_task3_over_layers`` adds is the
+reporting of faults in variants **nobody selected** -- a fault a user wrote
+into a variant they did not choose used to be accepted at load and refused
+only on the day they passed ``--variant <name>``.  Measured before this task,
+four such false negatives: A10 on both its routes, A45, A46.  **Fixed here
+for these three, and ONLY these three** -- the same blind spot is true of
+every OTHER check in this layer (**18 of 33 pre-flight functions, 29 of 49
+registry slots**, measured on this commit), and widening this task to close it
+is a stop-and-ask, not a default (see the cost paragraph below).  That wider
+defect is recorded, not acted on.
 
-**The cost, measured properly, and the reason for the drop.**  Cold, on the
-shipped guard's own document (40 ``plan.sample`` runs, 20 variants, one
-``preflight()`` per fresh process, 22 samples each): **22.3 ms unlayered
-against 37.8 ms layered, BOTH under §5's 50 ms bound**; the layered walk never
-exceeded 42.5 ms.  So the layering is affordable in isolation and this module
-must not claim otherwise -- an earlier draft of this paragraph said it took the
-guard "from 26 ms to 52.6 ms", which was **machine noise from a box running
-six agents at once**, not a property of the layering.  Measured under
-``pytest tests/config -n 16``, the same guard reads **52.2 ms with no layering
-at all** and fails outright.  ~94 % of the layered walk is ``apply_variant``'s
-``deepcopy``, so the real reason the walk is dropped here is arithmetic the
-wave owns rather than this task: +15 ms of a 50 ms budget, with ~22 ms already
-spent and five sibling branches landing into the same registry.  Restoring it
-costs four test edits and becomes cheap the day ``_task3_layers`` is memoised.
+The census must be taken at RUNTIME, not by grepping for
+``_task3_over_layers``: ``preflight/noise.py`` walks with its own
+``_b6_over_layers`` behind the ``_b6_is_layered`` cost gate, so A26 and A49
+count as walking but only reveal it on a document whose variants patch
+``inference:``.  A static search for one walker's name reports 21/32 -- the
+count as it stood BEFORE this task -- and reports it unchanged after, which is
+how a census that cannot see its own subject looks from the inside.
 
-**THAT DAY HAS COME, AND THE ARITHMETIC ABOVE IS RETIRED.**  The wave-boundary
-fix memoised ``_task3_layers``: one document's layers are built once per pass
-and shared by every check that walks them, so a check added to that walk now
-costs **zero additional ``apply_variant`` calls** -- measured on this very
-guard's document, 210 merges before and 21 after, with the cold pass at 13 ms
-against 45 ms.  The "+15 ms" that justified the drop does not exist any more;
-the walk here would add only its own per-layer read.
+**The cost history, and why the walk was affordable to restore.**  Cold, on
+the shipped guard's own document (40 ``plan.sample`` runs, 21 declared
+variants), this module's docstring used to read 22.3 ms unlayered against
+37.8 ms layered -- both under §5's 50 ms bound -- and the walk was still
+dropped for the WAVE's arithmetic (+15 ms of a budget with ~22 ms already
+spent and five sibling branches landing into the same registry), not for a
+breach.  ``preflight/document.py::_task3_layers`` was then memoised: one
+document's layers are built once per pass and shared by every check that
+walks them, so a check ADDED to the walk after the memo landed costs zero
+additional ``apply_variant`` calls, only its own per-layer read.  Re-measured
+at ``0030724``, on that same guard's document, min of five fresh processes:
+**13.51 ms today (unlayered) against 16.91 ms with these three walked** --
+the "+15 ms" that justified the original drop does not exist any more.
 
-**The orchestrator's ruling, recorded rather than left as silence.**  The cost
-objection is dead, so the recorded false negative above should be re-opened --
-but restoring the walk is a behaviour change to a merged task's checks, it
-needs its own adversarial round, and wave 2 was closing when the trigger fired.
-It is therefore DEFERRED to Plan 3C or a dedicated follow-up, and it is the
-first thing that should be picked up there.  This paragraph exists because a
-pre-registered trigger that fires and produces nothing is worse than no trigger
-at all: the condition is met, the reason for the drop is gone, and the only
-thing still standing between these three checks and the un-selected variant is
-scheduling.
+**Scope, and it is a refusal as much as a permission.**  Walking all 21 of
+the non-layering pre-flight functions the same way costs **31.19 ms** on the
+same guard (one sample at 63.53 ms), which takes §5's 50 ms margin from 3.7x
+to 1.6x and re-breaks the guard the memo just fixed.  So only ``_freq_unit``
+(A10), ``_switch_key`` (A45) and ``_thermistor_columns`` (A46) are added
+here; the other **18** functions across this registry's **29** remaining
+slots still do not walk, and that is size, not an oversight -- re-opening
+them is its own task.
+
+**Recorded, not opened.**  ``inflight/`` is structurally out of reach for
+this class of false negative: both ``Axes`` and ``Built`` carry the
+variant-APPLIED mapping by design, so there is no "unselected variant" left
+to walk by the time either runs.  ``resources.<kind>.<name>.extends:`` is a
+SECOND layering route entirely, and ``_task3_over_layers`` does not touch it
+-- four pre-flight modules read through ``resources.resolved_specs`` instead
+of ``ingest.py``'s document walk, and A10 misses that route outright.  That
+is a separate task, probably worth more than this one.
+
+**A10 is the first path-free message on this walk, and that is recorded
+here rather than fixed (fix-round MAJOR-3).**  ``_task3_over_layers``'s own
+docstring justifies its whole-``Finding`` de-dup key on "every message this
+module emits opens with the label its ``where`` is derived from" -- true of
+A45's and A46's sentences, both of which interpolate the path they are
+about, and NOT true of ``A10_MESSAGE``, which is a constant naming no
+document key.  Combined with ``_task3_where`` collapsing distinct
+non-identifier segments to the same cut-back prefix, two genuinely
+different A10 sites can produce the identical unprefixed ``Finding`` --
+and when one of them is the base document's own fault, the wrapper's set
+swallows a variant's independent one of the same shape, silently.
+``TestTheLayerWalkItself.test_a10s_path_free_message_lets_a_variants_own_fault_hide``
+pins the current behaviour.  Fixing it is a change to
+``_task3_over_layers`` (outside this task's Files list) or to
+``A10_MESSAGE`` (a separate task, and one that would need its own pass at
+``assert_bound_once``) -- so the claim "the message determines the
+finding" is no longer true registry-wide, and this paragraph is what keeps
+that known.
+
+**One more hole, recorded and not this task's to close.**  A hostile
+variant-layer patch with a non-string mapping key raises ``AttributeError``
+from inside ``apply_variant``/``merge_extends`` rather than a ``ConfigError``
+-- measured (``{1: "oops"}`` at the top of a variant patch, and the same
+shape one level down), ``_task3_build_layers``'s ``except ConfigError:
+continue`` does not catch it, so it climbs out through whichever
+``_task3_over_layers``-based check runs first (``A1.runs`` today, by
+registration order) and ``preflight/passes.py``'s own outer guard converts
+it to a pass-ending ``ConfigError`` -- the whole pass dies, hiding every
+later check's findings (§2.3's TRAP), for a document with nothing wrong in
+it that any SCHEMA clause names.  ``document.py`` is unchanged since
+``5cae62e``, so this is a pre-existing hole in ``_task3_build_layers``, not
+one this task opened, and not one A10/A45/A46 can fix from ``ingest.py``.
+Broadening the ``except ConfigError`` there, or refusing a non-string key
+before the merge, is the fix, and it is out of scope here because it
+touches ``document.py``.
 """
 
 from __future__ import annotations
@@ -102,7 +150,7 @@ from typing import Any
 from rheplicant.config.delivery import field_specs
 from rheplicant.config.findings import Finding, refuse, warn
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_where
+from rheplicant.config.preflight.document import _task3_over_layers, _task3_where
 from rheplicant.config.sections.ingest import RHINO_FORMAT, freq_unit_problem
 from rheplicant.config.sections.model import operator_table
 from rheplicant.config.sections.pointing import pointing_extra_keys
@@ -335,26 +383,44 @@ def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]],
 # ---------------------------------------------------------------------------
 
 
-@register("A10")
-def _freq_unit(document: Mapping[str, Any]) -> Iterable[Finding]:
-    """A10: a ``rhino_hdf5`` recording is asked which unit its channels are in.
+def _a10_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
+    """A10 on one layer: a ``rhino_hdf5`` recording asked which unit its
+    channels are in.
 
     The message is ``sections/ingest.py::freq_unit_problem``'s, verbatim and
     by call -- this pass owns no copy of it (§2.2).
 
     Walks ``inference.twin.replace`` (§0.3 E.10) and every other section but
     ``variants:``, because the route is a ``{file:}`` value node and one can
-    be written anywhere a value node can.
+    be written anywhere a value node can.  ``_task3_where`` is called HERE,
+    on this layer's own path, and not re-cut by the caller: what
+    :func:`~rheplicant.config.preflight.document._task3_over_layers` adds on
+    top is the ``variants.<name>.`` prefix for a layer that is not the base.
     """
-    for where, spec in _a10_sites(document):
+    for where, spec in _a10_sites(layer):
         problem = freq_unit_problem(spec)
         if problem is not None:
             yield refuse("A10", _task3_where(where), f"{problem} (check A10).")
 
 
-@register("A45")
-def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
-    """A45: ``switch_key:`` names a key ``coords.extra`` will actually carry.
+@register("A10")
+def _freq_unit(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A10: a ``rhino_hdf5`` recording is asked which unit its channels are
+    in, over every layer (Plan 3C Task 0).
+
+    ``_task3_over_layers`` is CALLED and not re-implemented
+    (``preflight/noise.py::_b6_over_layers`` is the precedent): the base
+    document's own fault is said once, unprefixed, and each declared
+    variant's is said once more with its own name in front, so a fault in a
+    variant nobody has selected yet is no longer accepted at load and
+    refused only the day it is.
+    """
+    return _task3_over_layers(document, _a10_in)
+
+
+def _a45_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
+    """A45 on one layer: ``switch_key:`` names a key ``coords.extra`` will
+    actually carry.
 
     Walks ``inference.twin.replace`` (§0.3 E.10), and that route is the one
     that matters: measured, ``replace.noise_wave.switch_key: nope`` LOADS
@@ -362,15 +428,38 @@ def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
     route this check was written for.
 
     ``operator_table()`` is resolved once, at the top: it costs 1.7e-04 s and
-    a document with several noise-wave sites would otherwise pay it per site.
+    a document with several noise-wave sites would otherwise pay it per site
+    -- once per LAYER now, which is what the walk costs and no more.
+
+    ``_task3_where`` is called HERE, on this layer's own path; the caller
+    only prepends the ``variants.<name>.`` prefix for a layer that is not
+    the base.
+
+    **The ``_task3_where`` call here is UNDEFENDABLE today, and that is
+    recorded rather than left implicit (fix-round MAJOR-1's third
+    mutation).**  A45's ``where`` is always ``f"{path}.{_A45_FIELD}"``,
+    and ``path`` comes from :func:`_a45_sites`, which builds it from
+    ``model.<node_id>`` or ``inference.twin.replace.<node_id>`` plus
+    ``_t4_entries``'s own steps -- a graph node id (always an identifier,
+    §2.4), the literal ``.switch_key``, and, for a ``many`` node, either an
+    index (``[0]``, spellable) or a FAN entry's own key.  No ``many`` node
+    in today's graph carries ``switch_key`` (only ``noise_wave``, which is
+    not ``many``), so no reachable A45 path has a non-identifier segment to
+    cut.  A mutant that drops this ``_task3_where`` call therefore survives
+    every test in this module -- there is no document that can be built
+    against today's graph to kill it -- and it stays anyway, for the same
+    reason ``_a45_carries_switch_key``'s ``is_dataclass`` guard stays
+    undefended (see that function's own docstring): the day a ``many`` node
+    grows a ``switch_key`` field, this call is what keeps the pass alive
+    rather than aborting on the first hyphenated FAN key.
     """
     from rheplicant.config.preflight.observing import _a15_declared_class
 
-    written = _a45_written_keys(document)
+    written = _a45_written_keys(layer)
     if written is None:
         return
     table = operator_table()
-    for path, node_id, entry in _a45_sites(document):
+    for path, node_id, entry in _a45_sites(layer):
         if not isinstance(entry, Mapping) or _A45_FIELD not in entry:
             continue
         if not _a45_carries_switch_key(_a15_declared_class(node_id, entry,
@@ -395,9 +484,20 @@ def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
             f"would come from (check A45).")
 
 
-@register("A46")
-def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
-    """A46 legs 2 and 3: the column a load's label has, and the one two share.
+@register("A45")
+def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A45: ``switch_key:`` names a key ``coords.extra`` will actually
+    carry, over every layer (Plan 3C Task 0).
+
+    ``_task3_over_layers`` is CALLED and not re-implemented
+    (``preflight/noise.py::_b6_over_layers`` is the precedent).
+    """
+    return _task3_over_layers(document, _a45_in)
+
+
+def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
+    """A46 legs 2 and 3 on one layer: the column a label has, the one two
+    share.
 
     **Leg 2 refuses**, leg 3 **warns**.  Leg 3 must not fire on a document
     ``A14.cal_loads`` already refuses, and it does not need a rule of its own
@@ -415,8 +515,13 @@ def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
     measured, that route reaches ``cal_load_operators`` and the reader's own
     ``DataIngestionError`` -- and NOT for leg 3, which is about two loads in
     one twin.
+
+    ``_task3_where`` is called HERE, on this layer's own path (leg 2 only --
+    leg 3's ``where`` is the fixed ``model.cal_loads``, which the caller
+    prefixes exactly as it is); the caller only prepends the
+    ``variants.<name>.`` prefix for a layer that is not the base.
     """
-    observation = document.get("observation")
+    observation = layer.get("observation")
     if not isinstance(observation, Mapping):
         return
     from_file = observation.get("from_file")
@@ -427,7 +532,7 @@ def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
     if columns is not None and not isinstance(columns, Mapping):
         # `sections/ingest.py` refuses the shape with the value it got.
         return
-    model_loads, replace_loads = _a46_loads(document)
+    model_loads, replace_loads = _a46_loads(layer)
     for where, label in model_loads + replace_loads:
         if columns is None or label not in columns:
             yield refuse(
@@ -461,3 +566,14 @@ def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
             f"column its own thermistor was recorded in; a column shared "
             f"with a label no load reads -- the antenna -- is legal and the "
             f"file's own map often forces it (check A46).")
+
+
+@register("A46")
+def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A46 legs 2 and 3: the column a label has, the one two share, over
+    every layer (Plan 3C Task 0).
+
+    ``_task3_over_layers`` is CALLED and not re-implemented
+    (``preflight/noise.py::_b6_over_layers`` is the precedent).
+    """
+    return _task3_over_layers(document, _a46_in)

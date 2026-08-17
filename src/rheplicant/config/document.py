@@ -15,6 +15,14 @@ where a CST directory is read and a spherical harmonic transform runs, and
 measured at ``be2027b`` a missing beam file out-ranked an unknown ``model:``
 node, a junction given an operator, a ``flagging`` with no ``type:`` and two
 capability-reserved keys, five for five.
+
+**FOUR passes run here, and every one of their reports is kept.**  Pre-flight
+and the axes pass inside :func:`_assemble`; the built pass and the post-flight
+pass in :func:`load_document`, the second of them after ``build_inference``
+because its checks evaluate the twin.  Each raises before it warns and each
+concatenates onto ``ConfiguredRun.report``, in run order -- which is the only
+place a ``mode: report`` finding can live, since it is neither a refusal nor a
+warning and every pass used to drop its report on the floor.
 """
 
 from __future__ import annotations
@@ -25,8 +33,11 @@ from typing import Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.findings import Report
+from rheplicant.config.gating import gates
 from rheplicant.config.inflight import Axes, Built, axes, built
 from rheplicant.config.layering import apply_variant
+from rheplicant.config.postflight import Priced, priced
 from rheplicant.config.preflight import preflight
 from rheplicant.config.resources import BuiltResources, build_resources
 from rheplicant.config.sections.compose import build_model
@@ -49,24 +60,45 @@ class ConfiguredRun(NamedTuple):
     inference: Any
     resources: BuiltResources
     context: ResolutionContext
+    #: Every finding this document earned, over all FOUR passes and in the
+    #: order they ran: pre-flight, axes, built, post-flight.  A ``mode:
+    #: report`` finding has nowhere else to go -- it is not a refusal and not
+    #: a warning -- so without this field the whole ``report:`` half of schema
+    #: §4.7.8 is computed and thrown away.  The record is in memory, on the
+    #: object the caller already holds; serialising it is Plan 4's.
+    #:
+    #: DEFAULTED so that a caller constructing one by keyword need not know
+    #: about it, and LAST because :class:`~rheplicant.config.inflight.Built`
+    #: is spliced out of this tuple positionally (``Built(*run)``).
+    #:
+    #: Named ``report`` and not ``checks``: ``run.inference.checks`` is the
+    #: DECLARATION -- what the document asked for -- and keeping both under
+    #: one word is how a reader ends up asserting on the wrong one.
+    report: Report = Report()
 
 
 def _assemble(document: Mapping, *, variant: str | None = None,
               base_dir: str | None = None) -> ConfiguredRun:
-    """:func:`load_document`'s body WITHOUT the built hook.
+    """:func:`load_document`'s body WITHOUT the built or the post-flight hook.
 
     Variants, the pre-flight pass, the axes hook, and every builder through
     ``build_inference``.  **Split out for one reason, and it is a testability
-    one that is load-bearing rather than cosmetic:** the built hook calls
+    one that is load-bearing rather than cosmetic:** those two hooks call
     ``raise_if_refused()`` before :func:`load_document` returns, so
     ``Built(*load_document(d))`` can never observe a built-slot REFUSAL -- the
     document that earns one never comes back.  Most built-slot rows are
-    refusals, so a test helper built on ``load_document`` could only ever
-    exercise the passing half of the slot it exists to test.
+    refusals, and so are most priced ones, so a test helper built on
+    ``load_document`` could only ever exercise the passing half of the slot it
+    exists to test.
 
-    ``tests/config/inflight_helpers.built_run`` calls THIS; a test about the
-    HOOK -- that a refusal actually stops the load -- calls
-    :func:`load_document` under ``pytest.raises``.
+    ``tests/config/inflight_helpers.built_run`` and ``priced_run`` both call
+    THIS; a test about a HOOK -- that a refusal actually stops the load --
+    calls :func:`load_document` under ``pytest.raises``.  **A later task that
+    moves either hook down here re-arms exactly the failure this split was
+    created to prevent**, for every built-slot and post-flight test at once.
+
+    The report it returns carries the two passes it has run: pre-flight, then
+    axes.  :func:`load_document` appends the two later ones.
     """
     if not isinstance(document, Mapping):
         raise ConfigError(
@@ -132,9 +164,49 @@ def _assemble(document: Mapping, *, variant: str | None = None,
         )
     inference = build_inference(doc.get("inference"), twin=twin, state=state,
                                 observation=observation, context=context)
+    # The two reports this function raised on and emitted are KEPT rather
+    # than dropped, and this is the only place they can be: both are locals
+    # of this function, and `load_document` -- which appends the two later
+    # passes -- never sees either.  `Report` has no `+`, no `merge` and no
+    # `extend`; concatenating the tuples is the spelling everywhere.
     return ConfiguredRun(document=doc, runtime=runtime, state=state,
                          twin=twin, inference=inference, resources=resources,
-                         context=context)
+                         context=context,
+                         report=Report(findings=report.findings
+                                       + axis_report.findings))
+
+
+def _carrying(run: ConfiguredRun, found: Report) -> ConfiguredRun:
+    """``run`` with ``found`` appended to the report it already carries.
+
+    One binding for the concatenation, because ``Report`` has no ``+``: two
+    hand-written ``Report(findings=a.findings + b.findings)`` in one function
+    is two chances to write ``found.findings + run.report.findings`` and put
+    a later pass's findings in front of an earlier one's.
+    """
+    return run._replace(
+        report=Report(findings=run.report.findings + found.findings))
+
+
+def _priced_payload(run: ConfiguredRun) -> Priced:
+    """The post-flight payload for a run every earlier pass has finished with.
+
+    Here rather than inside ``postflight`` so that ``priced(run)`` mirrors
+    ``axes(facts)`` and ``built(run)`` -- an entry point that takes its
+    payload -- and here rather than inline in :func:`load_document` so that
+    ``tests/config/inflight_helpers.priced_run`` reaches the SAME reading of
+    the document.  A second reading is how "which section the gates come
+    from" ends up answered twice and differently.
+
+    ``inference:`` may be absent, and this pass still runs (§3.2 (b)): a
+    document with no latents has ``space is None`` and every gate stands down,
+    but C16 needs no space and is exactly the check a ``kind: forward``
+    document wants.  ``gating.gates`` returns all three gates with their
+    defaults for a ``None`` section, so there is no branch here.
+    """
+    declared = run.document.get("inference")
+    section = declared.get("checks") if isinstance(declared, Mapping) else None
+    return Priced(run=run, gates=gates(section))
 
 
 def load_document(document: Mapping, *, variant: str | None = None,
@@ -150,7 +222,23 @@ def load_document(document: Mapping, *, variant: str | None = None,
     built_report = built(Built(*run))
     built_report.raise_if_refused()
     built_report.emit_warnings()
-    return run
+    run = _carrying(run, built_report)
+    # P-2.5, after `build_inference` and before the return: the checks that
+    # have to RUN the thing -- a forward pass per linear claim, a `jacfwd`
+    # plus an SVD, two Newton solves.  It saves nothing and buys that they
+    # run at all, in this layer's voice, rather than detonating inside a fit.
+    #
+    # **In `load_document` and NOT in `_assemble`, and that is load-bearing.**
+    # `tests/config/inflight_helpers.built_run` calls `_assemble` precisely so
+    # a raising hook cannot hide a slot's refusing half; a `raise_if_refused`
+    # here-but-one-frame-lower re-arms that for every built-slot test and for
+    # every post-flight one.  The receiver is `priced_report` and not `priced`
+    # or `built`, both of which are entry points bound at module scope: a
+    # local of either name shadows the function into an `UnboundLocalError`.
+    priced_report = priced(_priced_payload(run))
+    priced_report.raise_if_refused()
+    priced_report.emit_warnings()
+    return _carrying(run, priced_report)
 
 
 def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,

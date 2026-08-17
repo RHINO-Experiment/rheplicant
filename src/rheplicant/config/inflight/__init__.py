@@ -135,6 +135,24 @@ class Built:
     resources: Any
     #: ``ResolutionContext``, now carrying the built resources and the ingest.
     context: Any
+    #: Everything this document has earned SO FAR: the pre-flight pass then
+    #: the axes pass, in run order.  Not this pass's own findings -- the pass
+    #: has not run yet -- so a built check reads what text and the grids
+    #: already said and need not restate it.
+    #:
+    #: **LAST and DEFAULTED**, and both halves matter.  ``ConfiguredRun`` is a
+    #: ``NamedTuple`` whose own ``report`` is last and defaulted, and
+    #: ``document.py`` splats ``Built(*run)`` positionally: a field added
+    #: anywhere else here puts every later value in the wrong slot, and one
+    #: added to ``ConfiguredRun`` alone is ``TypeError: Built.__init__() takes
+    #: 8 positional arguments but 9 were given`` out of ``load_document``, on
+    #: every document.  ``Report`` is frozen and hashable, so it is a legal
+    #: dataclass default.
+    #:
+    #: The sentence above is true only because ``document.py`` accumulates:
+    #: measured with this field alone and no accumulation,
+    #: ``built_run(preflight_document()).report`` is ``Report(findings=())``.
+    report: Report = Report()
 
 
 #: Slot -> the function, for the axes pass.  **Insertion order IS run order**,
@@ -197,6 +215,7 @@ def register_built(*checks: str) -> Callable[[Check], Check]:
 # `sorted(AXIS_CHECKS)` is the answer and it cannot go stale.
 from rheplicant.config.inflight import axes as _axis_checks  # noqa: E402,F401
 from rheplicant.config.inflight import grids as _grid_checks  # noqa: E402,F401
+from rheplicant.config.inflight import noise_waves as _noise_wave_checks  # noqa: E402,F401
 from rheplicant.config.inflight import optics as _optics_checks  # noqa: E402,F401
 from rheplicant.config.inflight import twin as _twin_checks  # noqa: E402,F401
 

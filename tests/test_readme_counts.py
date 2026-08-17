@@ -15,13 +15,26 @@ unregistered one raises ``PytestUnknownMarkWarning`` -- a warning nobody reads
 is precisely the failure mode this file exists to close. The collection
 subprocess costs about three seconds.
 
-**Coverage is deliberately not pinned here.** It moves with every line added to
-``src/``, so an exact assertion would fail on unrelated work and be loosened
-until it meant nothing; and the run that would measure it costs twelve minutes,
-which is not a price to pay on every invocation of the suite. The README states
-it to one decimal and ``pyproject.toml``'s ``--cov-fail-under`` is what actually
-holds the floor. What is pinned is the count that a plain collection already
-knows.
+**Coverage's VALUE is deliberately not pinned here.** It moves with every line
+added to ``src/``, so an exact assertion would fail on unrelated work and be
+loosened until it meant nothing; and the run that would measure it costs twelve
+minutes, which is not a price to pay on every invocation of the suite. The
+README states it to one decimal and ``pyproject.toml``'s ``--cov-fail-under``
+is what actually holds the floor. What is pinned exactly is the count that a
+plain collection already knows.
+
+**Its SHAPE is pinned, and that is new in Plan 3C.** Until now the count was
+pinned by equality while the percentage standing beside it was matched by
+nothing at all -- so the two numbers in one parenthesis had completely
+different guarantees, and a reader had no way to know which. What
+:func:`test_the_readme_states_one_live_coverage_figure_beside_its_test_count`
+asserts is everything about that figure that is checkable without a
+twelve-minute run: that there is exactly ONE live claim, that it stands in the
+same parenthesis as the pinned count so the two are edited together, that it is
+written to the one decimal the README promises, and that it is not below the
+floor the suite actually enforces. The README carries a SECOND percentage --
+99.7 %, a claim about a past commit -- and keeping the live one distinguishable
+from it is most of the value.
 """
 
 import re
@@ -123,9 +136,113 @@ def _quoted_counts() -> list[int]:
     return [int(n.replace(",", "")) for n in re.findall(r"([\d,]+) tests\b", README.read_text())]
 
 
+#: The LIVE coverage claim: a percentage standing in the same parenthesis as a
+#: test count. Written as one pattern over both numbers on purpose -- it is
+#: what makes the pinned count and the unpinned percentage a single edit, and
+#: it is what tells the live claim apart from the README's other percentage
+#: ("the 99.7 % it was before the evidence layer landed"), which is a statement
+#: about a past commit and is deliberately not touched.
+_LIVE_COVERAGE = re.compile(r"\(([\d,]+) tests, (\d+\.\d) % coverage")
+
+#: Any sentence claiming a coverage percentage, live or not. The count of
+#: these minus the live one is what must be explained as historical.
+_ANY_COVERAGE = re.compile(r"(\d+(?:\.\d+)?) % coverage")
+
+
+def _cov_fail_under() -> int:
+    """The floor ``pyproject.toml`` makes the suite actually enforce."""
+    found = re.search(r"--cov-fail-under=(\d+)",
+                      (ROOT / "pyproject.toml").read_text())
+    assert found, (
+        "pyproject.toml no longer carries --cov-fail-under. It is the only "
+        "thing that holds the coverage floor, and the README's figure is "
+        "compared against it below -- with it gone, that comparison would "
+        "either crash or, if softened, pass vacuously forever."
+    )
+    return int(found.group(1))
+
+
 def test_the_readme_quotes_a_test_count_at_all():
     """Guard the guard: a README that stopped stating one would pass vacuously."""
     assert _quoted_counts(), "README states no test count for this to check"
+
+
+def test_the_readme_states_one_live_coverage_figure_beside_its_test_count():
+    """The percentage next to the pinned count was matched by nothing.
+
+    Four properties, and each one can fail on its own:
+
+    1. **The live claim exists at all**, in the "(N tests, X % coverage"
+       shape. A README that moved the figure into a sentence of its own would
+       separate it from the count this file pins by equality, and the next
+       reader updating the count would have no reason to touch it.
+    2. **The number beside it is the number the sibling test pins.** The same
+       match yields both, so they cannot be read from two different sentences.
+    3. **Exactly one percentage on the page is a live coverage claim.** The
+       README carries a second -- 99.7 %, about a past commit -- and the whole
+       reason this guard reads a *pairing* rather than a percentage is to tell
+       them apart. A second live claim, or the historical one reworded into
+       the live shape, is caught here.
+    4. **The live figure is not below the floor the suite enforces.** A README
+       claiming less coverage than ``--cov-fail-under`` states something every
+       passing run disproves.
+
+    **The one decimal is a TRUNCATION of the measured percentage, never a
+    rounding, and that is a deliberate choice, not an oversight to "fix".**
+    90.65 % is written as 90.6 %, not 90.7 %. Truncating keeps the printed
+    figure a true FLOOR on measured coverage, which is what property 4 above
+    actually needs -- a floor claim stays true if coverage drifts down to
+    90.62 %, where a *rounded* 90.7 % would already be false. Round-to-nearest
+    would silently convert this guard's "at least" into an "approximately",
+    and this file's whole point is that the number is checkable rather than
+    decorative. Whoever next updates this figure by hand: truncate, do not
+    round.
+
+    **What this deliberately does NOT assert, said plainly so nobody assumes
+    otherwise:** that the figure is the true coverage. That needs the
+    twelve-minute run, and this file's own docstring explains why an exact
+    pin would be loosened until it meant nothing. The floor comparison is a
+    bound, not a measurement.
+    """
+    text = README.read_text()
+    live = _LIVE_COVERAGE.findall(text)
+    assert len(live) == 1, (
+        f"the README states {len(live)} '(N tests, X % coverage' pairings and "
+        "this guard needs exactly one. The pairing is what keeps the pinned "
+        "count and the unpinned percentage a single edit; splitting them "
+        "leaves the percentage with no reader again."
+    )
+    counted, figure = live[0]
+    assert int(counted.replace(",", "")) in _quoted_counts(), (
+        f"the count beside the coverage figure is {counted}, which is not one "
+        "of the counts the equality pin above reads. The two guards are "
+        "looking at different sentences."
+    )
+    everywhere = _ANY_COVERAGE.findall(text)
+    # MINOR 5 (Plan 3C fix round): the earlier form asserted
+    # `everywhere.count(figure) == 1 and len(everywhere) == 1` -- and the
+    # first conjunct is DEAD.  `figure` is the exact substring `_LIVE_COVERAGE`
+    # matched out of `text`, and the substring it matched always contains the
+    # literal `<figure> % coverage`, which `_ANY_COVERAGE` -- a strictly
+    # broader pattern over the same text -- is therefore guaranteed to find at
+    # least once.  So whenever `len(everywhere) == 1`, that one entry IS
+    # `figure`, and `everywhere.count(figure) == 1` follows for free; no input
+    # can make the first conjunct fail while the second holds.  What the
+    # docstring's property 3 actually needs -- "exactly one percentage on the
+    # page is a live coverage claim" -- is the length check alone.
+    assert len(everywhere) == 1, (
+        f"the README states {len(everywhere)} coverage percentages "
+        f"({everywhere}) and exactly one may be a live claim. The 99.7 % "
+        "figure is a statement about a past commit and is written as one "
+        "('rather than the 99.7 % it was before ...'); if a second live claim "
+        "is really wanted, it needs its own guard, not a widening of this."
+    )
+    floor = _cov_fail_under()
+    assert float(figure) >= floor, (
+        f"README says {figure} % coverage while pyproject.toml enforces a "
+        f"--cov-fail-under={floor} floor that every passing run clears. One "
+        "of the two is wrong, and it is not the run."
+    )
 
 
 def test_the_collection_probe_can_still_see_the_suite():

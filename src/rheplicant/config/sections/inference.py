@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.gating import CHECK_NAMES, MODES, check_gates
 from rheplicant.config.paths import resolve_path_on
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.noise import (
@@ -38,9 +39,14 @@ __all__ = ["CheckSpec", "InferenceBuild", "build_inference"]
 _INFERENCE_KEYS = frozenset({"twin", "observed", "parameters", "bindings",
                              "joint_prior", "trainable", "noise", "truth",
                              "checks", "npe"})
-_CHECK_NAMES = frozenset({"identifiability", "linearity",
-                          "prior_sensitivity"})
-_MODES = ("refuse", "warn", "report", "skip")
+#: The check names and the four mode words, ONE binding each, in
+#: :mod:`rheplicant.config.gating` -- where ``preflight/gated.py`` can reach
+#: them without importing this module and the builders behind it.  Kept under
+#: their old private names because they are read from outside (``findings.py``
+#: pins ``set(SEVERITIES) < set(_MODES)``, which is the argument for why there
+#: are three severities and four modes).
+_CHECK_NAMES = CHECK_NAMES
+_MODES = MODES
 _TRAINABLE_KEYS = frozenset({"all", "nodes", "leaves"})
 
 
@@ -78,41 +84,29 @@ class InferenceBuild(NamedTuple):
 
 
 def _checks(section: Any) -> dict[str, CheckSpec]:
+    """Grammar, then the record.  The grammar itself lives in
+    :func:`~rheplicant.config.gating.check_gates`.
+
+    The refusal a caller sees is unchanged, character for character: this
+    raises the FIRST finding's message, and ``check_gates`` decides in the
+    order this function used to and yields at most one finding per entry.
+    There is no second copy of the grammar here -- two validators for one
+    property is the divergence this layer has already paid for once.  What
+    stays is the RECORD: ``CheckSpec`` is what the document DECLARED, and the
+    effective gate (defaults applied) is ``gating.gates``' answer, asked by the
+    pass rather than by the builder.
+    """
+    found = check_gates(section)
+    if found:
+        raise ConfigError(found[0].message)
     if section is None:
         return {}
-    if not isinstance(section, Mapping):
-        raise ConfigError(f"inference.checks: is a mapping; got {section!r}.")
     parsed: dict[str, CheckSpec] = {}
     for name, spec in section.items():
-        where = f"inference.checks.{name}"
-        if name not in _CHECK_NAMES:
-            raise ConfigError(
-                f"{where}: {name!r} is not a check; v1 knows "
-                f"{sorted(_CHECK_NAMES)}."
-            )
-        if not isinstance(spec, Mapping):
-            raise ConfigError(f"{where}: is a mapping with mode:; got "
-                              f"{spec!r}.")
-        allowed = frozenset({"mode", "report", "reason"}) | (
-            frozenset({"rtol"}) if name == "identifiability" else frozenset())
-        check_unknown_keys(where, dict(spec), allowed, label="a check:")
-        mode = spec.get("mode")
-        if mode not in _MODES:
-            raise ConfigError(f"{where}.mode: is one of {list(_MODES)}; "
-                              f"got {mode!r}.")
-        reason = spec.get("reason")
-        if mode == "skip" and not isinstance(reason, str):
-            raise ConfigError(
-                f"{where}: mode: skip carries its own reason: (check A37) -- "
-                "three unrelated skips sharing one sentence was v0's mistake."
-            )
-        if mode != "skip" and reason is not None:
-            raise ConfigError(f"{where}: reason: belongs to mode: skip "
-                              "alone.")
         rtol = spec.get("rtol")
-        parsed[name] = CheckSpec(mode=mode, report=bool(spec.get("report",
-                                                                 False)),
-                                 reason=reason,
+        parsed[name] = CheckSpec(mode=spec.get("mode"),
+                                 report=bool(spec.get("report", False)),
+                                 reason=spec.get("reason"),
                                  rtol=float(rtol) if rtol is not None
                                  else None)
     return parsed

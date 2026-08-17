@@ -73,6 +73,13 @@ CONDITION_WHERE = "runs['condition']"
 # reword of the production one would leave these four green.
 
 
+LINEARITY_DECLINED = {"linearity": {"mode": "skip",
+                      "reason": "this fixture declares linear: true on a "
+                                "latent the prediction is not affine in, on "
+                                "purpose, so that the exit-level check: has "
+                                "a lever"}}
+
+
 class TestTheLeafIsWired:
     def test_exits_imports_the_conjugate_leaf_at_its_foot(self):
         """Importing exits must pull the leaf modules in.
@@ -151,7 +158,8 @@ class TestTheConjugateBlock:
         in, so the declared linear=True is a false claim: check=True catches
         it and check=False builds the block anyway.
         """
-        nonlinear = conjugate_built(inference=NONLINEAR_LATENT)
+        nonlinear = conjugate_built(
+            inference={**NONLINEAR_LATENT, "checks": LINEARITY_DECLINED})
         with pytest.raises(ParameterSpaceError, match="not affine"):
             _conjugate_block(spec(names=["w"]), nonlinear, WHERE)
         block, _, _ = _conjugate_block(spec(names=["w"], check=False),

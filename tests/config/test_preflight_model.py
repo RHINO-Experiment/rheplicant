@@ -83,7 +83,12 @@ PICKUP = {"t_ground": {"value": 300.0, "unit": "K"},
           "coupling": {"value": 0.05, "unit": "dimensionless"}}
 FILTER = {"type": "FourierBandFilter", "axis": 0, "low": 0.02, "high": 0.5,
           "mode": "extract"}
-SIGMA = {"value": 0.5, "unit": "K"}
+#: D-10 (Plan 3C Task 6): 0.05, matching exit_helpers.SIGMA_K -- several
+#: documents built from this constant reach load_document, where a numeric
+#: C18 compares this model's drawn sigma against the base inference block's
+#: HOMOSCEDASTIC weighing sigma (SIGMA_K).  A mismatched value here would
+#: refuse those documents for a reason unrelated to what each test is about.
+SIGMA = {"value": 0.05, "unit": "K"}
 LOAD = {"t_load": {"value": 300.0, "unit": "K"}}
 
 #: Every model below refuses BEFORE a value node is resolved, so the context

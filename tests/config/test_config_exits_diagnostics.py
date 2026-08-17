@@ -66,7 +66,15 @@ WIDTH_LATENT = {"w": {"init": {"value": 5.0, "unit": "MHz"}, "linear": True,
                       "into": "global_signal.width"}}
 
 
-def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None):
+LINEARITY_DECLINED = {"linearity": {"mode": "skip",
+                      "reason": "this fixture declares linear: true on a "
+                                "latent the prediction is not affine in, on "
+                                "purpose, so that the exit-level check: has "
+                                "a lever"}}
+
+
+def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None,
+                       checks=None):
     """A document with two linear temperatures, a sigma, and NO observed data.
 
     ``condition_estimate`` takes no ``observed`` and never calls
@@ -102,6 +110,8 @@ def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None):
         "noise": {"kind": "homoscedastic",
                   "sigma": {"value": sigma, "unit": "K"}},
     }
+    if checks is not None:
+        doc["inference"]["checks"] = checks
     doc["runs"] = [run]
     return doc
 
@@ -421,9 +431,10 @@ class TestWhatItRefuses:
         pair = {**KAPPA, "names": ["a", "w"],
                 "prior_std": {"a": 100.0, "w": 100.0}}
         with pytest.raises(ParameterSpaceError, match="JOINTLY"):
-            kappa_of(pair, extra=WIDTH_LATENT)
+            kappa_of(pair, extra=WIDTH_LATENT, checks=LINEARITY_DECLINED)
         assert math.isnan(kappa_of({**pair, "check": False},
-                                   extra=WIDTH_LATENT))
+                                   extra=WIDTH_LATENT,
+                                   checks=LINEARITY_DECLINED))
 
 
 # --- The two diagnostics that need only a space ----------------------------

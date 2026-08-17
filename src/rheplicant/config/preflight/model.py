@@ -1423,8 +1423,10 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     The SHAPE half of A33 -- that ``unit_mean_bandpass`` maps ``(n,)`` to
     ``(n-1,)``, so a latent bound through it is one channel shorter than the
-    node it writes -- is check C17 and needs a resolved shape.  That is Plan
-    3C's; this half is two path heads, two latent names and a transform.
+    node it writes -- is check C17, shipped in place by Plan 3B inside
+    ``config/sections/`` (``sections/transforms.py``, ``sections/observed.py``)
+    rather than left for a later plan to build; this half is two path heads,
+    two latent names and a transform.
 
     **Measured absent today** at ``0263e0f``: a document lighting ``bandpass``
     and ``gain`` with a free latent into each and no transform builds with no

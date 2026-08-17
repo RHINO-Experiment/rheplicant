@@ -155,7 +155,7 @@ def registry():
 _SCHEMA_IDS: tuple[str, ...] = (
     tuple(f"A{n}" for n in range(1, 53))
     + tuple(f"B{n}" for n in range(1, 10))
-    + tuple(f"C{n}" for n in range(1, 18))
+    + tuple(f"C{n}" for n in range(1, 20))
 )
 
 
@@ -985,8 +985,38 @@ class TestTheRegistry:
         §3.2(a): a registry key is a SLOT and may carry a dotted suffix, so
         what is validated is the part before the first ``.``.  A test that
         rejected the dotted form would turn red at Task 3 and read as Task 3's
-        fault.  Its anti-vacuity partner is the next test."""
-        assert {slot.split(".", 1)[0] for slot in CHECKS} <= set(_schema_ids())
+        fault.  Its anti-vacuity partner is the next test.
+
+        **BLOCKER 1 (Plan 3C fix round): this covered ONE registry of four
+        until this fix, and it was the one where a wrong id could never
+        arrive unseen.** ``binder``'s ``SLOT`` regex (``passes.py``) validates
+        the SHAPE of an id, not the range -- measured, ``A99``, ``B77`` and
+        ``C42`` all ``fullmatch`` it, though the refusal it raises for a
+        malformed id claims the range is enforced (``A1..A52, B1..B9,
+        C1..C19)``.  Only ``preflight.CHECKS`` (the pre-flight registry) was
+        ever compared against the real id list here; ``inflight.AXIS_CHECKS``
+        and ``inflight.BUILT_CHECKS`` were checked against the regex alone,
+        and ``postflight.CHECKS`` -- a DISCOVERED registry, precisely where a
+        wrong id arrives with nobody reading the module that registers it --
+        was checked by nothing at all.  Measured before this fix: a
+        ``@register("C16", "C42")`` planted in ``postflight/digitising.py``,
+        or a ``@register_axes("C15", "C42")`` in ``inflight/noise_waves.py``,
+        both left ``tests/config`` at ``EXIT=0`` (4988 / 4984 passed); a
+        ``@register("C18.kind", "C42")`` planted in ``preflight/gated.py`` was
+        the only one of the three that was killed.  Walking all four
+        registries here is what makes this test the census §5 already claims
+        it is.
+        """
+        from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
+        from rheplicant.config.postflight import CHECKS as PRICED_CHECKS
+
+        for name, registry in (("pre-flight", CHECKS),
+                               ("axes", AXIS_CHECKS),
+                               ("built", BUILT_CHECKS),
+                               ("post-flight", PRICED_CHECKS)):
+            bare = {slot.split(".", 1)[0] for slot in registry}
+            assert bare <= set(_schema_ids()), (
+                name, sorted(bare - set(_schema_ids())))
 
     def test_the_schema_extractor_still_finds_the_table(self):
         """The partner.  Kills the §6 heading being renamed, the table losing
@@ -1000,7 +1030,7 @@ class TestTheRegistry:
         Where the spec is absent the literal below is all that runs; where it
         is present, this test holds the two to each other."""
         found = _schema_ids()
-        assert len(found) == 78, found[:5]
+        assert len(found) == 80, found[:5]
         assert len(set(found)) == len(found), "an id is declared twice"
         assert found[0] == "A1" and "A52" in found and "C17" in found
         from_spec = _schema_ids_from_the_spec()
@@ -1063,7 +1093,7 @@ class TestEveryRefusalOfThisPassIsPinnedWHOLE:
             register("_mine")(lambda document: ())
         assert str(caught.value) == (
             "pre-flight check id '_mine' is not a schema §6 id (A1..A52, "
-            "B1..B9, C1..C17), optionally with a dotted suffix such as "
+            "B1..B9, C1..C19), optionally with a dotted suffix such as "
             "'A1.runs' when several functions each decide part of one check. "
             "The id is what a Finding carries and what a reader looks up; a "
             "private name here reaches the user as '(check _mine).'"
