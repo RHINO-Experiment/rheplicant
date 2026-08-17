@@ -18,6 +18,7 @@ requires-python = ">=3.11"
 dependencies = [
     "jax>=0.5",
     "equinox>=0.13",
+    "PyYAML>=6.0",
     # The sky engines (GeneralPointingProjector, DriftScanProjector) and the beam
     # adapters are wired to limTOD, and they are the package's real forward model
     # rather than an accessory, so this is a dependency and not an extra.
@@ -77,7 +78,7 @@ cal = ["rhino-cal-jax"]
 #   uv pip install -e <path-to-MomentRFI>
 #   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 # The threshold-based FlaggingOperator needs none of it.
-rfi = ["MomentRFI"]
+rfi = ["MomentRFI", "MomentEmu"]
 # read_rhino_observation() reads the RHINO observation HDF5 through h5py. Unlike
 # rhino-cal-jax and MomentRFI this one IS on PyPI, so the extra resolves
 # normally:
@@ -110,6 +111,7 @@ dev = [
     "pytest>=8",
     "pytest-cov",
     "ruff",
+    "jsonschema>=4.23",
     # tests/test_docs_links.py checks every `](page.md#anchor)` against the
     # anchors myst would generate, and imports myst's own slugifier to do it
     # rather than inventing a third scheme that agrees with neither. That
@@ -137,6 +139,11 @@ dev = [
     # alone.
     "pytest-xdist",
 ]
+
+[tool.uv.sources]
+rhino-cal-jax = { git = "https://github.com/RHINO-Experiment/rhino-cal", branch = "feat/rhino-cal-jax" }
+MomentRFI = { git = "https://github.com/zzhang0123/MomentRFI" }
+MomentEmu = { git = "https://github.com/zzhang0123/MomentEmu" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rheplicant"]

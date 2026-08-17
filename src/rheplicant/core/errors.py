@@ -6,9 +6,7 @@ the closest builtin (``ValueError`` / ``RuntimeError``) so generic handlers
 keep working.
 """
 
-
-class DirtError(Exception):
-    """Base class for all rheplicant errors."""
+from _rheplicant_bootstrap.errors import DirtError
 
 
 class StateValidationError(DirtError, ValueError):

@@ -252,6 +252,13 @@ class TestRaiseIfRefused:
     def test_a_clean_report_raises_nothing(self):
         assert Report().raise_if_refused() is None
 
+    def test_a_refusal_attaches_the_supplied_cumulative_report(self):
+        current = Report(findings=(A,))
+        cumulative = Report(findings=(A, E))
+        with pytest.raises(ConfigError) as caught:
+            current.raise_if_refused(cumulative=cumulative)
+        assert caught.value.report is cumulative
+
     def test_a_report_of_warnings_alone_raises_nothing(self):
         """Kills ``if self.findings: raise`` -- a document with one warning
         would stop loading."""

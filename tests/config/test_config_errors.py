@@ -25,6 +25,13 @@ class TestConfigErrorJoinsTheFamily:
 
         assert not issubclass(ConfigError, DataIngestionError)
 
+    def test_it_preserves_all_exception_arguments_and_attaches_a_report(self):
+        marker = object()
+        error = ConfigError("first", "second", report=marker)
+        assert error.args == ("first", "second")
+        assert str(error) == "('first', 'second')"
+        assert error.report is marker
+
 
 class TestTheConfigLayerOwnsItsOwnVocabulary:
     def test_config_error_is_exported_from_the_config_package(self):
