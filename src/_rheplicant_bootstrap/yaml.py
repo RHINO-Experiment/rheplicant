@@ -109,8 +109,9 @@ def compose_one_bounded(
     text: str, *, source_name: str, limits: YamlLimits
 ) -> ComposedYaml:
     """Compose at most one YAML document and dispose the loader on every path."""
-    loader = BoundedSafeLoader(text, source_name=source_name, limits=limits)
+    loader: BoundedSafeLoader | None = None
     try:
+        loader = BoundedSafeLoader(text, source_name=source_name, limits=limits)
         loader.get_event()  # StreamStartEvent
         if loader.check_event(StreamEndEvent):
             loader.get_event()
@@ -129,7 +130,8 @@ def compose_one_bounded(
     except (yaml.YAMLError, RecursionError) as exc:
         raise ConfigError(f"{source_name}: invalid YAML: {exc}") from exc
     finally:
-        loader.dispose()
+        if loader is not None:
+            loader.dispose()
 
 
 _SCALAR_TAGS = {

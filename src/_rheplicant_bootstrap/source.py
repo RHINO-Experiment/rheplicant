@@ -33,6 +33,11 @@ def _canonical_dir(path: str) -> str:
     return os.path.realpath(os.path.abspath(path))
 
 
+def _lexical_lstat(path: str) -> os.stat_result:
+    """Return lexical path metadata without following its final symlink."""
+    return os.lstat(path)
+
+
 def _input_limit() -> int:
     return YamlLimits().input_bytes
 
@@ -41,12 +46,35 @@ def _byte_limit_error(source_name: str, observed: int, limit: int) -> ConfigErro
     return ConfigError(f"{source_name}: YAML byte count {observed} exceeds limit {limit}.")
 
 
+def _read_bounded_forward(stream: BinaryIO, *, source_name: str, limit: int) -> bytes:
+    """Accumulate legal short reads without traversing the source a second time."""
+    maximum = limit + 1
+    data = bytearray()
+    try:
+        while len(data) < maximum:
+            chunk = stream.read(maximum - len(data))
+            if not isinstance(chunk, bytes):
+                raise ConfigError(f"{source_name}: binary source did not produce bytes.")
+            if not chunk:
+                break
+            data.extend(chunk)
+    except ConfigError:
+        raise
+    except (OSError, ValueError, TypeError) as exc:
+        raise ConfigError(f"{source_name}: cannot read source: {exc}") from exc
+    if len(data) > limit:
+        raise _byte_limit_error(source_name, len(data), limit)
+    return bytes(data)
+
+
 def _read_path_once(source_path: str) -> tuple[bytes, str]:
     """Read one regular file descriptor once without trusting its advertised size."""
     limit = _input_limit()
     fd = -1
     try:
-        before_link = os.lstat(source_path)
+        before_link = _lexical_lstat(source_path)
+        before_realpath = os.path.realpath(source_path)
+        after_initial_resolution_link = _lexical_lstat(source_path)
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
         fd = os.open(source_path, flags)
         before_target = os.fstat(fd)
@@ -57,11 +85,12 @@ def _read_path_once(source_path: str) -> tuple[bytes, str]:
         stream = os.fdopen(fd, "rb")
         fd = -1
         with stream:
-            data = stream.read(limit + 1)
+            data = _read_bounded_forward(stream, source_name=source_path, limit=limit)
             after_target = os.fstat(stream.fileno())
-        after_link = os.lstat(source_path)
+        after_read_link = _lexical_lstat(source_path)
         source_realpath = os.path.realpath(source_path)
         final_target = os.stat(source_realpath)
+        final_link = _lexical_lstat(source_path)
     except ConfigError:
         raise
     except (OSError, ValueError) as exc:
@@ -73,16 +102,18 @@ def _read_path_once(source_path: str) -> tuple[bytes, str]:
             except OSError:
                 pass
 
-    if not _same_snapshot(before_link, after_link):
+    if not (
+        _same_snapshot(before_link, after_initial_resolution_link)
+        and _same_snapshot(after_initial_resolution_link, after_read_link)
+        and _same_snapshot(after_read_link, final_link)
+    ):
+        raise ConfigError(f"{source_path}: source link changed while reading.")
+    if before_realpath != source_realpath:
         raise ConfigError(f"{source_path}: source link changed while reading.")
     if not _same_snapshot(before_target, after_target) or not _same_snapshot(
         after_target, final_target
     ):
         raise ConfigError(f"{source_path}: source target changed while reading.")
-    if not isinstance(data, bytes):
-        raise ConfigError(f"{source_path}: binary source did not produce bytes.")
-    if len(data) > limit:
-        raise _byte_limit_error(source_path, len(data), limit)
     return data, source_realpath
 
 
@@ -99,15 +130,7 @@ def _read_stdin_once(stdin: BinaryIO | None, *, limit: int) -> bytes:
         import sys
 
         chosen_stdin = sys.stdin.buffer
-    try:
-        data = chosen_stdin.read(limit + 1)
-    except (OSError, ValueError, TypeError) as exc:
-        raise ConfigError(f"<stdin>: cannot read source: {exc}") from exc
-    if not isinstance(data, bytes):
-        raise ConfigError("<stdin>: binary source did not produce bytes.")
-    if len(data) > limit:
-        raise _byte_limit_error("<stdin>", len(data), limit)
-    return data
+    return _read_bounded_forward(chosen_stdin, source_name="<stdin>", limit=limit)
 
 
 def read_cli_source_once(

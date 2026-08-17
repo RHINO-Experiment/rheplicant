@@ -151,6 +151,12 @@ def test_malformed_core_scalars_are_normalized_to_config_error(payload):
         safe_load_document(payload, source_name="malformed.yaml")
 
 
+def test_nul_yaml_reader_error_is_normalized_to_config_error():
+    """Catches a ReaderError raised before composition enters the neutral wrapper."""
+    with pytest.raises(ConfigError):
+        safe_load_document(b"\x00", source_name="nul.yaml")
+
+
 @pytest.mark.parametrize(
     "payload",
     [

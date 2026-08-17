@@ -47,20 +47,21 @@ def test_stdin_has_one_closed_identity():
     assert source.launch_mode == "cli"
 
 
-def test_path_source_reads_the_open_file_once_with_a_bounded_size(tmp_path, monkeypatch):
-    """Catches an unbounded or repeated path-file read."""
+def test_path_source_reads_forward_until_eof_with_bounded_requests(tmp_path, monkeypatch):
+    """Catches assuming a legal path-file short read is end-of-file."""
     path = tmp_path / "one-read.yaml"
     path.write_bytes(b"a: 1\n")
     original_fdopen = os.fdopen
-    reads: list[int | None] = []
+    _small_source_limit(monkeypatch)
+    reads: list[int] = []
 
-    class ReadOnceFile:
+    class ChunkedFile:
         def __init__(self, wrapped):
             self._wrapped = wrapped
 
-        def read(self, *args, **kwargs):
-            reads.append(args[0] if args else kwargs.get("size"))
-            return self._wrapped.read(*args, **kwargs)
+        def read(self, size: int) -> bytes:
+            reads.append(size)
+            return self._wrapped.read(min(size, 2))
 
         def __enter__(self):
             return self
@@ -72,12 +73,12 @@ def test_path_source_reads_the_open_file_once_with_a_bounded_size(tmp_path, monk
             return getattr(self._wrapped, name)
 
     def tracked_fdopen(*args, **kwargs):
-        return ReadOnceFile(original_fdopen(*args, **kwargs))
+        return ChunkedFile(original_fdopen(*args, **kwargs))
 
     monkeypatch.setattr(source_module.os, "fdopen", tracked_fdopen)
 
     assert read_source(str(path), base_dir=None, stdin=None).input_bytes == b"a: 1\n"
-    assert reads == [YamlLimits().input_bytes + 1]
+    assert reads == [9, 7, 5, 4]
 
 
 def test_path_base_dir_must_match_the_lexical_parent(tmp_path):
@@ -153,25 +154,47 @@ class _CountingStdin:
     def __init__(self, payload: bytes) -> None:
         self.payload = payload
         self.read_sizes: list[int] = []
+        self.offset = 0
 
     def read(self, size: int) -> bytes:
         self.read_sizes.append(size)
-        return self.payload[:size]
+        chunk = self.payload[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+
+class _ChunkedStdin(_CountingStdin):
+    def read(self, size: int) -> bytes:
+        self.read_sizes.append(size)
+        chunk = self.payload[self.offset : self.offset + min(size, 2)]
+        self.offset += len(chunk)
+        return chunk
 
 
 def _small_source_limit(monkeypatch) -> None:
     monkeypatch.setattr(source_module, "YamlLimits", lambda: YamlLimits(input_bytes=8))
 
 
-def test_stdin_reads_once_with_the_input_limit_plus_one(monkeypatch):
-    """Catches stdin reads that omit the overflow byte or read more than once."""
+def test_stdin_reads_forward_until_eof_with_the_input_limit_plus_one(monkeypatch):
+    """Catches assuming a legal standard-input short read means EOF."""
     _small_source_limit(monkeypatch)
-    stdin = _CountingStdin(b"12345678")
+    stdin = _ChunkedStdin(b"12345")
 
     source = read_source("-", base_dir=".", stdin=stdin)
 
-    assert source.input_bytes == b"12345678"
-    assert stdin.read_sizes == [9]
+    assert source.input_bytes == b"12345"
+    assert stdin.read_sizes == [9, 7, 5, 4]
+
+
+def test_chunked_stdin_overflow_stops_at_the_bounded_extra_byte(monkeypatch):
+    """Catches a short-read loop that reads past the one-byte overflow boundary."""
+    _small_source_limit(monkeypatch)
+    stdin = _ChunkedStdin(b"1234567890")
+
+    with pytest.raises(ConfigError, match="byte count 9 exceeds limit 8"):
+        read_source("-", base_dir=".", stdin=stdin)
+
+    assert stdin.read_sizes == [9, 7, 5, 3, 1]
 
 
 @pytest.mark.parametrize("from_stdin", [False, True])
@@ -260,10 +283,47 @@ def test_changed_lexical_lstat_is_refused(tmp_path, monkeypatch):
                 return _changed_stat(result)
         return result
 
-    monkeypatch.setattr(source_module.os, "lstat", changed_second_lstat)
+    monkeypatch.setattr(
+        source_module,
+        "_lexical_lstat",
+        changed_second_lstat,
+        raising=False,
+    )
 
     with pytest.raises(ConfigError, match="link changed"):
         source_module._read_path_once(str(path))
+
+
+def test_late_symlink_swap_to_a_same_inode_hardlink_is_refused(tmp_path, monkeypatch):
+    """Catches resolving provenance after the old final lexical-link check."""
+    first_target = tmp_path / "first.yaml"
+    second_target = tmp_path / "second.yaml"
+    first_target.write_bytes(b"answer: 42\n")
+    os.link(first_target, second_target)
+    linked = tmp_path / "config.yaml"
+    linked.symlink_to(first_target.name)
+    original_lstat = os.lstat
+    calls = 0
+
+    def swap_after_second_lexical_lstat(target, *args, **kwargs):
+        nonlocal calls
+        result = original_lstat(target, *args, **kwargs)
+        if os.fspath(target) == str(linked):
+            calls += 1
+            if calls == 2:
+                linked.unlink()
+                linked.symlink_to(second_target.name)
+        return result
+
+    monkeypatch.setattr(
+        source_module,
+        "_lexical_lstat",
+        swap_after_second_lexical_lstat,
+        raising=False,
+    )
+
+    with pytest.raises(ConfigError, match="link changed"):
+        source_module._read_path_once(str(linked))
 
 
 def test_changed_open_target_fstat_is_refused(tmp_path, monkeypatch):
