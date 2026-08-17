@@ -9,6 +9,7 @@ from _rheplicant_bootstrap.errors import ConfigError
 
 _EVIDENCE_DEPTH_LIMIT = 100
 _EVIDENCE_NODE_LIMIT = 250_000
+_EVIDENCE_EDGE_LIMIT = 250_000
 _SCALAR_TYPES = (type(None), bool, int, float, str, bytes)
 
 
@@ -67,12 +68,13 @@ def freeze_evidence(value: object, *, where: str) -> object:
     completed: dict[int, list[tuple[object, object, int, str]]] = {}
     seen: dict[int, list[object]] = {}
     node_count = 0
+    edge_count = 0
     current_type = type(value).__name__
     unsupported = object()
 
     def canonical_scalar(item: object) -> object:
         item_type = type(item)
-        if item_type in _SCALAR_TYPES:
+        if any(item_type is scalar_type for scalar_type in _SCALAR_TYPES):
             return item
         if isinstance(item, str):
             return str.__str__(item)
@@ -131,6 +133,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 raise ConfigError(
                     f"{where}: evidence protocol failed at type {container_type}."
                 ) from None
+            charge_edge(container_type)
             try:
                 key, child = pair
             except Exception:
@@ -148,13 +151,24 @@ def freeze_evidence(value: object, *, where: str) -> object:
             ) from None
         while True:
             try:
-                yield next(iterator)
+                child = next(iterator)
             except StopIteration:
                 return
             except Exception:
                 raise ConfigError(
                     f"{where}: evidence protocol failed at type {container_type}."
                 ) from None
+            charge_edge(container_type)
+            yield child
+
+    def charge_edge(container_type: str) -> None:
+        nonlocal edge_count
+        edge_count += 1
+        if edge_count > _EVIDENCE_EDGE_LIMIT:
+            raise ConfigError(
+                f"{where}: evidence protocol emission count {edge_count} "
+                f"exceeds limit {_EVIDENCE_EDGE_LIMIT} at type {container_type}."
+            )
 
     def freeze_one(item: object, depth: int) -> tuple[object, int, str]:
         register(item, depth)
@@ -218,7 +232,8 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 completed.setdefault(identity, []).append(record)
                 return result, height, deepest_type
             finally:
-                assert active_bucket.pop() is item
+                removed = active_bucket.pop()
+                assert removed is item
                 if not active_bucket:
                     del active[identity]
         if isinstance(item, Sequence):
@@ -248,7 +263,8 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 completed.setdefault(identity, []).append(record)
                 return result, height, deepest_type
             finally:
-                assert active_bucket.pop() is item
+                removed = active_bucket.pop()
+                assert removed is item
                 if not active_bucket:
                     del active[identity]
         raise ConfigError(

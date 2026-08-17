@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import ast
 import struct
+import subprocess
+import sys
+import textwrap
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import pytest
 
@@ -54,6 +59,50 @@ def test_freeze_evidence_refuses_an_unsupported_leaf_with_its_location():
     """Catches sharing a mutable arbitrary object through immutable evidence records."""
     with pytest.raises(ConfigError, match="merge.document"):
         _freeze_evidence({"unsafe": object()}, where="merge.document")
+
+
+@pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+def test_freeze_evidence_type_checks_do_not_run_metaclass_equality(failure):
+    class HostileConfigError(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    class HostileError(Exception):
+        pass
+
+    class StopNow(BaseException):
+        pass
+
+    marker = {
+        "config": HostileConfigError("private equality marker"),
+        "ordinary": HostileError("private equality marker"),
+        "base": StopNow("stop"),
+    }[failure]
+
+    class HostileMeta(type):
+        equality_calls = 0
+
+        def __eq__(cls, other):
+            cls.equality_calls += 1
+            raise marker
+
+        __hash__ = type.__hash__
+
+    class HostileLeaf(metaclass=HostileMeta):
+        pass
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(
+            {"unsafe": HostileLeaf()}, where="snapshot.document"
+        )
+
+    assert str(caught.value) == (
+        "snapshot.document: unsupported evidence leaf type HostileLeaf."
+    )
+    assert HostileMeta.equality_calls == 0
 
 
 def test_freeze_evidence_refuses_cycles_with_its_location():
@@ -746,3 +795,256 @@ def test_mapping_node_budget_stops_protocol_consumption_without_materializing(
         _freeze_evidence(source, where="snapshot.document")
 
     assert source.next_calls == 2
+
+
+class _RepeatedSequence(Sequence):
+    def __init__(self, count, value=1):
+        self.count = count
+        self.value = value
+        self.next_calls = 0
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self, index):
+        raise AssertionError("the declared iterator must be used")
+
+    def __iter__(self):
+        for _ in range(self.count):
+            self.next_calls += 1
+            yield self.value
+
+
+class _RepeatedMapping(_ItemsMapping):
+    def __init__(self, count):
+        super().__init__([])
+        self.count = count
+        self.next_calls = 0
+
+    def items(self):
+        for index in range(self.count):
+            self.next_calls += 1
+            yield f"key_{index}", 1
+
+
+@pytest.mark.parametrize("factory", [_RepeatedSequence, _RepeatedMapping])
+def test_protocol_emission_budget_counts_repeated_scalars_incrementally(
+    factory, monkeypatch
+):
+    monkeypatch.setattr(
+        frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False
+    )
+    source = factory(4)
+
+    expected = (
+        "snapshot.document: evidence protocol emission count 4 exceeds "
+        f"limit 3 at type {type(source).__name__}."
+    )
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(source, where="snapshot.document")
+
+    assert str(caught.value) == expected
+    assert source.next_calls == 4
+
+
+def test_protocol_emission_budget_has_the_normative_default():
+    assert frozen_module._EVIDENCE_EDGE_LIMIT == 250_000
+
+
+def test_protocol_emission_budget_accepts_its_exact_bound_independently(
+    monkeypatch,
+):
+    class EmptyMapping(_ItemsMapping):
+        visits = 0
+
+        def items(self):
+            type(self).visits += 1
+            return iter(())
+
+    shared = EmptyMapping([])
+    source = _RepeatedSequence(3, shared)
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 2)
+    monkeypatch.setattr(
+        frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False
+    )
+
+    frozen = _freeze_evidence(source, where="snapshot.document")
+
+    assert EmptyMapping.visits == 1
+    assert frozen[0] is frozen[1] is frozen[2]
+
+
+@pytest.mark.parametrize("kind", ["sequence", "mapping"])
+def test_infinite_repeated_emissions_are_bounded(kind):
+    script = textwrap.dedent(
+        """
+        import sys
+        import time
+        from collections.abc import Mapping, Sequence
+
+        from _rheplicant_bootstrap import frozen as frozen_module
+        from _rheplicant_bootstrap.errors import ConfigError
+
+        frozen_module._EVIDENCE_EDGE_LIMIT = 3
+        frozen_module._EVIDENCE_NODE_LIMIT = 20
+
+        class InfiniteSequence(Sequence):
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, index):
+                raise AssertionError("iterator required")
+
+            def __iter__(self):
+                while True:
+                    time.sleep(0.001)
+                    yield 1
+
+        class InfiniteMapping(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter(())
+
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def items(self):
+                index = 0
+                while True:
+                    yield f"key_{index}", 1
+                    index += 1
+
+        source = InfiniteSequence() if sys.argv[1] == "sequence" else InfiniteMapping()
+        try:
+            frozen_module.freeze_evidence(source, where="snapshot.document")
+        except ConfigError as error:
+            expected = (
+                "snapshot.document: evidence protocol emission count 4 "
+                f"exceeds limit 3 at type {type(source).__name__}."
+            )
+            if str(error) != expected:
+                raise SystemExit(2)
+            raise SystemExit(0)
+        raise SystemExit(3)
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, kind],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_mapping_edge_budget_precedes_unpacking_the_limit_plus_one_pair(
+    monkeypatch,
+):
+    class BrokenPair:
+        unpack_calls = 0
+
+        def __iter__(self):
+            type(self).unpack_calls += 1
+            raise AssertionError("limit-plus-one pair must not be unpacked")
+
+    class Values(_ItemsMapping):
+        def __init__(self):
+            super().__init__([])
+
+        def items(self):
+            yield "first", 1
+            yield BrokenPair()
+
+    monkeypatch.setattr(
+        frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(Values(), where="snapshot.document")
+
+    assert str(caught.value) == (
+        "snapshot.document: evidence protocol emission count 2 exceeds "
+        "limit 1 at type Values."
+    )
+    assert BrokenPair.unpack_calls == 0
+
+
+def test_mapping_next_failure_precedes_any_unemitted_edge_charge(monkeypatch):
+    marker = _ForgedCallbackConfigError("private next marker")
+
+    class Values(_ItemsMapping):
+        def __init__(self):
+            super().__init__([])
+
+        def items(self):
+            yield "first", 1
+            raise marker
+
+    monkeypatch.setattr(
+        frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(Values(), where="snapshot.document")
+
+    assert id(caught.value) != id(marker)
+    assert str(caught.value) == (
+        "snapshot.document: evidence protocol failed at type Values."
+    )
+
+
+def test_cleanup_mutations_do_not_live_inside_assert_statements():
+    root = Path(__file__).parents[2]
+    violations = []
+    for relative in (
+        "src/_rheplicant_bootstrap/frozen.py",
+        "src/_rheplicant_bootstrap/layering.py",
+    ):
+        tree = ast.parse((root / relative).read_text())
+        for assertion in (
+            node for node in ast.walk(tree) if isinstance(node, ast.Assert)
+        ):
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "pop"
+                for node in ast.walk(assertion.test)
+            ):
+                violations.append((relative, assertion.lineno))
+
+    assert violations == []
+
+    expected_assignments = {
+        "freeze_evidence": 2,
+        "_detach_origin_tree": 1,
+        "_merge_extends_compat": 1,
+    }
+    actual_assignments = {}
+    for relative in (
+        "src/_rheplicant_bootstrap/frozen.py",
+        "src/_rheplicant_bootstrap/layering.py",
+    ):
+        tree = ast.parse((root / relative).read_text())
+        for function in (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name in expected_assignments
+        ):
+            actual_assignments[function.name] = sum(
+                1
+                for node in ast.walk(function)
+                if isinstance(node, ast.Try)
+                for statement in node.finalbody
+                if isinstance(statement, ast.Assign)
+                and isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Attribute)
+                and statement.value.func.attr == "pop"
+            )
+
+    assert actual_assignments == expected_assignments

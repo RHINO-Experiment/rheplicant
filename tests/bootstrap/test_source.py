@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import os
 import subprocess
@@ -457,6 +458,421 @@ def test_source_does_not_catch_stream_protocol_baseexceptions():
 
     with pytest.raises(StopNow):
         read_source("-", base_dir=".", stdin=StoppingStream())
+
+
+@pytest.mark.parametrize(
+    "seam",
+    ["fdopen", "enter", "fileno", "fstat_before", "fstat_after", "exit"],
+)
+@pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+def test_stable_reader_lifecycle_callback_failures_are_static_or_propagate(
+    tmp_path, monkeypatch, seam, failure
+):
+    path = tmp_path / "lifecycle.yaml"
+    path.write_bytes(b"{}")
+
+    class MarkerConfigError(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    class MarkerError(Exception):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    class StopNow(BaseException):
+        pass
+
+    marker = {
+        "config": MarkerConfigError("private lifecycle marker"),
+        "ordinary": MarkerError("private lifecycle marker"),
+        "base": StopNow("stop"),
+    }[failure]
+    original_fdopen = os.fdopen
+    original_fstat = os.fstat
+    fstat_calls = 0
+
+    class LifecycleFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def read(self, size):
+            return self.wrapped.read(size)
+
+        def __enter__(self):
+            if seam == "enter":
+                self.wrapped.close()
+                raise marker
+            self.wrapped.__enter__()
+            return self
+
+        def fileno(self):
+            if seam == "fileno":
+                raise marker
+            return self.wrapped.fileno()
+
+        def __exit__(self, *args):
+            result = self.wrapped.__exit__(*args)
+            if seam == "exit":
+                raise marker
+            return result
+
+    def lifecycle_fdopen(*args, **kwargs):
+        if seam == "fdopen":
+            raise marker
+        return LifecycleFile(original_fdopen(*args, **kwargs))
+
+    def lifecycle_fstat(fd, *args, **kwargs):
+        nonlocal fstat_calls
+        fstat_calls += 1
+        failing_fstat_call = {
+            "fstat_before": 1,
+            "fstat_after": 2,
+        }.get(seam)
+        if fstat_calls == failing_fstat_call:
+            raise marker
+        return original_fstat(fd, *args, **kwargs)
+
+    monkeypatch.setattr(source_module.os, "fdopen", lifecycle_fdopen)
+    monkeypatch.setattr(source_module.os, "fstat", lifecycle_fstat)
+
+    if failure == "base":
+        with pytest.raises(BaseException) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert caught.value is marker
+        return
+
+    with pytest.raises(ConfigError) as caught:
+        read_stable_regular_bytes(
+            path, maximum=8, source_name="preset:fixture"
+        )
+
+    assert id(caught.value) != id(marker)
+    assert str(caught.value) == "preset:fixture: cannot read source."
+
+
+def test_stable_reader_does_not_truth_test_a_normal_exit_result(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "normal-exit.yaml"
+    path.write_bytes(b"{}")
+    original_fdopen = os.fdopen
+
+    class HostileDecision:
+        def __bool__(self):
+            raise AssertionError("normal exit result must not be truth-tested")
+
+    class WrappedFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def read(self, size):
+            return self.wrapped.read(size)
+
+        def fileno(self):
+            return self.wrapped.fileno()
+
+        def __enter__(self):
+            self.wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            self.wrapped.__exit__(*args)
+            return HostileDecision()
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: WrappedFile(
+            original_fdopen(*args, **kwargs)
+        ),
+    )
+
+    assert read_stable_regular_bytes(path, maximum=8) == b"{}"
+
+
+@pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+def test_truthy_exit_never_suppresses_a_body_failure(
+    tmp_path, monkeypatch, failure
+):
+    path = tmp_path / "truthy-exit.yaml"
+    path.write_bytes(b"{}")
+    original_fdopen = os.fdopen
+    original_lstat = os.lstat
+    lstat_calls = 0
+
+    class MarkerConfigError(ConfigError):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    class MarkerError(Exception):
+        def __str__(self):
+            raise AssertionError("marker text must not run")
+
+        def __repr__(self):
+            raise AssertionError("marker repr must not run")
+
+    class StopNow(BaseException):
+        pass
+
+    marker = {
+        "config": MarkerConfigError("private body marker"),
+        "ordinary": MarkerError("private body marker"),
+        "base": StopNow("stop"),
+    }[failure]
+
+    class TruthyExitFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def read(self, size):
+            raise marker
+
+        def __enter__(self):
+            self.wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            self.wrapped.__exit__(*args)
+            return True
+
+    def counted_lstat(target, *args, **kwargs):
+        nonlocal lstat_calls
+        lstat_calls += 1
+        return original_lstat(target, *args, **kwargs)
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: TruthyExitFile(
+            original_fdopen(*args, **kwargs)
+        ),
+    )
+    monkeypatch.setattr(source_module, "_lexical_lstat", counted_lstat)
+
+    if failure == "base":
+        with pytest.raises(BaseException) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert caught.value is marker
+    else:
+        with pytest.raises(ConfigError) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert id(caught.value) != id(marker)
+        assert str(caught.value) == "preset:fixture: cannot read source."
+
+    assert lstat_calls == 2
+
+
+@pytest.mark.parametrize("body_failure", ["config", "ordinary", "base"])
+@pytest.mark.parametrize("exit_failure", ["ordinary", "base"])
+def test_exit_failure_obeys_process_control_precedence(
+    tmp_path, monkeypatch, body_failure, exit_failure
+):
+    path = tmp_path / "dual-failure.yaml"
+    path.write_bytes(b"{}")
+    original_fdopen = os.fdopen
+
+    class BodyStop(BaseException):
+        pass
+
+    class BodyError(Exception):
+        pass
+
+    class ExitError(Exception):
+        pass
+
+    class ExitStop(BaseException):
+        pass
+
+    body_marker = {
+        "config": ConfigError("body"),
+        "ordinary": BodyError("body"),
+        "base": BodyStop("body"),
+    }[body_failure]
+    exit_marker = (
+        ExitError("exit") if exit_failure == "ordinary" else ExitStop("exit")
+    )
+
+    class DualFailureFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def read(self, size):
+            raise body_marker
+
+        def __enter__(self):
+            self.wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            raise exit_marker
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: DualFailureFile(
+            original_fdopen(*args, **kwargs)
+        ),
+    )
+
+    if exit_failure == "base":
+        with pytest.raises(BaseException) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert caught.value is exit_marker
+    elif body_failure == "base":
+        with pytest.raises(BaseException) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert caught.value is body_marker
+    else:
+        with pytest.raises(ConfigError) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert str(caught.value) == "preset:fixture: cannot read source."
+
+
+def test_exit_failure_does_not_read_body_exception_class(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "hostile-body-class.yaml"
+    path.write_bytes(b"{}")
+    original_fdopen = os.fdopen
+
+    class BodyStop(BaseException):
+        class_lookups = 0
+
+        def __getattribute__(self, name):
+            if name == "__class__":
+                type(self).class_lookups += 1
+                raise RuntimeError("private class marker")
+            return BaseException.__getattribute__(self, name)
+
+    class ExitError(Exception):
+        pass
+
+    body_marker = BodyStop("body")
+
+    class DualFailureFile:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def read(self, size):
+            raise body_marker
+
+        def __enter__(self):
+            self.wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            raise ExitError("exit")
+
+    monkeypatch.setattr(
+        source_module.os,
+        "fdopen",
+        lambda *args, **kwargs: DualFailureFile(
+            original_fdopen(*args, **kwargs)
+        ),
+    )
+
+    with pytest.raises(BaseException) as caught:
+        read_stable_regular_bytes(
+            path, maximum=8, source_name="preset:fixture"
+        )
+
+    if id(caught.value) != id(body_marker):
+        pytest.fail("body process-control exception identity changed")
+    if BodyStop.class_lookups != 0:
+        pytest.fail("body exception instance __class__ hook ran")
+
+
+@pytest.mark.parametrize("seam", ["enter", "exit"])
+@pytest.mark.parametrize("failure", ["ordinary", "base"])
+def test_stable_reader_retains_fd_ownership_across_context_failures(
+    tmp_path, monkeypatch, seam, failure
+):
+    path = tmp_path / "fd-owner.yaml"
+    path.write_bytes(b"{}")
+    captured_fds = []
+
+    class MarkerError(Exception):
+        pass
+
+    class StopNow(BaseException):
+        pass
+
+    marker = (
+        MarkerError("private lifecycle marker")
+        if failure == "ordinary"
+        else StopNow("stop")
+    )
+
+    class NonClosingFile:
+        def __init__(self, fd):
+            self.fd = fd
+
+        def read(self, size):
+            return os.read(self.fd, size)
+
+        def fileno(self):
+            return self.fd
+
+        def __enter__(self):
+            if seam == "enter":
+                raise marker
+            return self
+
+        def __exit__(self, *args):
+            if seam == "exit":
+                raise marker
+            return False
+
+    def nonclosing_fdopen(fd, *args, **kwargs):
+        captured_fds.append(fd)
+        return NonClosingFile(fd)
+
+    monkeypatch.setattr(source_module.os, "fdopen", nonclosing_fdopen)
+
+    if failure == "base":
+        with pytest.raises(BaseException) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert caught.value is marker
+    else:
+        with pytest.raises(ConfigError) as caught:
+            read_stable_regular_bytes(
+                path, maximum=8, source_name="preset:fixture"
+            )
+        assert str(caught.value) == "preset:fixture: cannot read source."
+
+    assert len(captured_fds) == 1
+    fd = captured_fds[0]
+    try:
+        os.fstat(fd)
+    except OSError as error:
+        closed = error.errno == errno.EBADF
+    else:
+        closed = False
+        os.close(fd)
+    assert closed
 
 
 def _small_source_limit(monkeypatch) -> None:

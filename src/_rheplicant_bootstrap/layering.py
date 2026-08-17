@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Mapping, Sequence
+from collections import UserDict, defaultdict, deque
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from types import MappingProxyType
+from types import (
+    BuiltinFunctionType,
+    CellType,
+    CodeType,
+    FunctionType,
+    GetSetDescriptorType,
+    MappingProxyType,
+    MemberDescriptorType,
+    ModuleType,
+)
 from typing import TypeAlias
+from weakref import CallableProxyType, ProxyType, ReferenceType
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import freeze_evidence
@@ -176,7 +187,8 @@ def _detach_origin_tree(
             completed.setdefault(identity, []).append((node, result))
             return result
         finally:
-            assert bucket.pop() is node
+            removed = bucket.pop()
+            assert removed is node
             if not bucket:
                 del active[identity]
 
@@ -707,28 +719,134 @@ def origins_at(origins: OriginNode, path: Sequence[OriginSegment]) -> Origin:
 
 
 _COMPATIBILITY_FAILURE = "merge_extends: compatibility traversal or deepcopy failed."
+_COMPATIBILITY_ATOMIC_TYPES = (
+    type(None),
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    bytearray,
+    memoryview,
+)
+_COMPATIBILITY_OWNERSHIP_SCALAR_TYPES = (
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    CodeType,
+    type,
+    range,
+)
+_COMPATIBILITY_OWNERSHIP_COPY_ATOMIC_TYPES = (
+    *_COMPATIBILITY_OWNERSHIP_SCALAR_TYPES,
+    FunctionType,
+    BuiltinFunctionType,
+    ReferenceType,
+    property,
+)
+
+
+def _compatibility_has_exact_type(
+    value: object, candidates: tuple[type, ...]
+) -> bool:
+    value_type = type(value)
+    return any(value_type is candidate for candidate in candidates)
+
+
+_COMPATIBILITY_MISSING = object()
+_COMPATIBILITY_UNSAFE_LAZY_ANNOTATIONS = object()
+
+
+def _compatibility_raw_mro_descriptor(
+    value_type: type, name: str
+) -> object:
+    bases = type.__getattribute__(value_type, "__mro__")
+    for base in bases:
+        namespace = type.__getattribute__(base, "__dict__")
+        try:
+            return namespace[name]
+        except KeyError:
+            continue
+    return _COMPATIBILITY_MISSING
+
+
+def _compatibility_has_mro_identity(
+    value: object, candidates: tuple[type, ...]
+) -> bool:
+    try:
+        bases = type.__getattribute__(type(value), "__mro__")
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    return any(
+        base is candidate for base in bases for candidate in candidates
+    )
+
+
+def _compatibility_type_name(value: object) -> str:
+    try:
+        name = type.__getattribute__(type(value), "__name__")
+        if type(name) is not str:
+            raise TypeError
+        return name
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_has_mro_base(
+    value: object, candidates: tuple[type, ...]
+) -> bool:
+    value_type = type(value)
+    if _compatibility_has_mro_identity(value, candidates):
+        return True
+    try:
+        for name in ("__getattribute__", "__class__"):
+            resolved = _compatibility_raw_mro_descriptor(value_type, name)
+            expected = _compatibility_raw_mro_descriptor(object, name)
+            if resolved is not expected:
+                return False
+        metaclass = type(value_type)
+        for name in ("__eq__", "__hash__"):
+            resolved = _compatibility_raw_mro_descriptor(metaclass, name)
+            expected = _compatibility_raw_mro_descriptor(object, name)
+            if resolved is not expected:
+                return False
+        return isinstance(value, candidates)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_is_mapping(value: object) -> bool:
+    if type(value) is MappingProxyType:
+        return True
+    return _compatibility_has_mro_base(value, (dict, Mapping))
+
+
+def _compatibility_is_mutable_mapping(value: object) -> bool:
+    return _compatibility_has_mro_base(
+        value, (dict, MutableMapping)
+    )
 
 
 def _compatibility_pairs(
     mapping: Mapping,
-    *,
-    deepcopy_memo: dict[int, object] | None = None,
-    retained_keys: list[object] | None = None,
 ) -> dict[str, object]:
     canonical: dict[str, object] = {}
     for key, value in _mapping_pairs(
         mapping, failure=_COMPATIBILITY_FAILURE
     ):
-        if not isinstance(key, str):
+        if not _compatibility_has_mro_identity(key, (str,)):
             raise ConfigError(
                 "merge_extends: keys are strings; got "
-                f"{type(key).__name__}."
+                f"{_compatibility_type_name(key)}."
             )
         exact_key = str.__str__(key)
-        if deepcopy_memo is not None and type(key) is not str:
-            deepcopy_memo[id(key)] = exact_key
-            assert retained_keys is not None
-            retained_keys.append(key)
         if exact_key in canonical:
             raise ConfigError(
                 "merge_extends: keys collide after canonicalization."
@@ -739,12 +857,11 @@ def _compatibility_pairs(
 
 def _compatibility_deepcopy_roots(
     parent: Mapping, child: Mapping
-) -> tuple[Mapping, Mapping]:
+) -> tuple[Mapping, Mapping, dict[int, list[object]]]:
     """Detach both roots in one deepcopy graph, materializing only frozen views."""
     memo: dict[int, object] = {}
-    proxies: list[tuple[MappingProxyType, dict[object, object]]] = []
+    mapping_shells: list[tuple[Mapping, dict[str, object]]] = []
     seen: dict[int, list[object]] = {}
-    retained_keys: list[object] = []
 
     def protocol_values(value: object):
         try:
@@ -765,38 +882,36 @@ def _compatibility_deepcopy_roots(
         if any(source is item for source in bucket):
             return
         bucket.append(item)
-        if type(item) is MappingProxyType:
-            shell: dict[object, object] = {}
+        is_mapping = _compatibility_is_mapping(item)
+        if _compatibility_has_exact_type(item, (dict, MappingProxyType)):
+            shell: dict[str, object] = {}
             memo[identity] = shell
-            proxies.append((item, shell))
-            canonical = _compatibility_pairs(
-                item,
-                deepcopy_memo=memo,
-                retained_keys=retained_keys,
-            )
+            mapping_shells.append((item, shell))
+            canonical = _compatibility_pairs(item)
             for nested in canonical.values():
                 discover(nested)
-        elif isinstance(item, Mapping):
-            if getattr(type(item), "__deepcopy__", None) is not None:
+        elif is_mapping:
+            try:
+                deepcopy_protocol = getattr(
+                    type(item), "__deepcopy__", None
+                )
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
+            if deepcopy_protocol is not None:
                 return
-            canonical = _compatibility_pairs(
-                item,
-                deepcopy_memo=memo,
-                retained_keys=retained_keys,
-            )
+            canonical = _compatibility_pairs(item)
             for nested in canonical.values():
                 discover(nested)
-        elif isinstance(item, list | tuple | set | frozenset):
+        elif _compatibility_has_mro_identity(
+            item, (list, tuple, set, frozenset)
+        ):
             for nested in protocol_values(item):
                 discover(nested)
 
     # Validate the two control mappings before copy protocols can touch their keys.
-    _compatibility_pairs(
-        parent, deepcopy_memo=memo, retained_keys=retained_keys
-    )
-    _compatibility_pairs(
-        child, deepcopy_memo=memo, retained_keys=retained_keys
-    )
+    _compatibility_pairs(parent)
+    _compatibility_pairs(child)
+    original_mutables = _compatibility_original_mutables((parent, child))
     discover((parent, child))
 
     def detached(value: object) -> object:
@@ -805,19 +920,18 @@ def _compatibility_deepcopy_roots(
         except Exception:
             raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
-    for original, shell in proxies:
-        for key, value in _mapping_pairs(
-            original, failure=_COMPATIBILITY_FAILURE
-        ):
-            shell[detached(key)] = detached(value)
+    for original, shell in mapping_shells:
+        canonical = _compatibility_pairs(original)
+        for key, value in canonical.items():
+            shell[key] = detached(value)
     roots = detached((parent, child))
-    assert isinstance(roots, tuple) and len(roots) == 2
+    assert type(roots) is tuple and len(roots) == 2
     detached_parent, detached_child = roots
-    if not isinstance(detached_parent, Mapping) or not isinstance(
-        detached_child, Mapping
-    ):
+    if not _compatibility_is_mapping(
+        detached_parent
+    ) or not _compatibility_is_mapping(detached_child):
         raise ConfigError(_COMPATIBILITY_FAILURE)
-    return detached_parent, detached_child
+    return detached_parent, detached_child, original_mutables
 
 
 def _compatibility_reaches_mapping(
@@ -825,47 +939,814 @@ def _compatibility_reaches_mapping(
     target: Mapping,
 ) -> bool:
     """Detect whether a shallow COW shell would break a cycle to ``target``."""
+    return _compatibility_reaches_forbidden_mapping(
+        values,
+        target=target,
+        forbidden=None,
+        ignored=None,
+        opaque_is_failure=True,
+        inspect_object_state=False,
+        state_mappings=None,
+        public_mapping=None,
+    )
+
+
+def _compatibility_reaches_forbidden_mapping(
+    values: object,
+    *,
+    target: Mapping,
+    forbidden: dict[int, list[object]] | None,
+    ignored: object | None,
+    opaque_is_failure: bool,
+    inspect_object_state: bool,
+    state_mappings: object | None,
+    public_mapping: dict[str, object] | None,
+) -> bool:
+    field_role = 0
+    content_role = 1
+    public_role = 2
+    try:
+        pending = [(item, field_role, 0) for item in values]
+        if state_mappings is not None:
+            pending.extend(
+                (item, field_role, 2) for item in state_mappings
+            )
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    public_identities: dict[int, list[object]] = {}
+    if public_mapping is not None:
+        try:
+            for item in dict.values(public_mapping):
+                _compatibility_add_identity(public_identities, item)
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    seen_by_mode: tuple[dict[int, list[object]], ...] = ({}, {}, {})
+    while pending:
+        item, role, state_mapping_kind = pending.pop()
+        if role == content_role and _compatibility_has_identity(
+            public_identities, item
+        ):
+            role = public_role
+        if role == public_role:
+            continue
+        if item is _COMPATIBILITY_UNSAFE_LAZY_ANNOTATIONS:
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        if inspect_object_state and _compatibility_has_exact_type(
+            item, (ProxyType, CallableProxyType)
+        ):
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        if ignored is not None and item is ignored:
+            continue
+        if item is target or (
+            forbidden is not None
+            and _compatibility_has_identity(forbidden, item)
+        ):
+            return True
+        if _compatibility_has_exact_type(
+            item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
+        ):
+            continue
+        is_known_container = (
+            _compatibility_is_mapping(item)
+            or _compatibility_has_mro_identity(
+                item, (list, tuple, set, frozenset)
+            )
+        )
+        if not is_known_container and not inspect_object_state:
+            if opaque_is_failure:
+                raise ConfigError(_COMPATIBILITY_FAILURE)
+            continue
+        if state_mapping_kind:
+            mode = 2
+        elif role == public_role:
+            mode = 0
+        else:
+            mode = 1
+        if not _compatibility_add_identity(seen_by_mode[mode], item):
+            continue
+        if inspect_object_state and role != public_role:
+            (
+                state_values,
+                nested_state_mappings,
+                _,
+                state_is_complete,
+            ) = (
+                _compatibility_ownership_state(item)
+            )
+            if state_is_complete:
+                pending.extend(
+                    (state, field_role, 0) for state in state_values
+                )
+                pending.extend(
+                    (state, field_role, 1)
+                    for state in nested_state_mappings
+                )
+        if not is_known_container:
+            continue
+        if _compatibility_is_mapping(item):
+            if inspect_object_state:
+                nested_values = (
+                    _compatibility_uncanonicalized_mapping_values(item)
+                )
+            else:
+                nested_values = _compatibility_pairs(item).values()
+            child_role = (
+                content_role
+                if state_mapping_kind == 2
+                and public_mapping is not None
+                and _compatibility_state_mapping_is_public_view(
+                    item, public_mapping
+                )
+                else field_role
+                if state_mapping_kind
+                else public_role
+                if role == public_role
+                else content_role
+            )
+            pending.extend(
+                (nested, child_role, 0) for nested in nested_values
+            )
+            continue
+        try:
+            iterator = iter(item)
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        while True:
+            try:
+                nested = next(iterator)
+            except StopIteration:
+                break
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
+            child_role = (
+                public_role if role == public_role else content_role
+            )
+            pending.append((nested, child_role, 0))
+    return False
+
+
+def _compatibility_reset_mapping(
+    mapping: MutableMapping, values: Mapping[str, object]
+) -> None:
+    try:
+        if _compatibility_has_mro_identity(mapping, (dict,)):
+            dict.clear(mapping)
+            dict.update(mapping, values)
+        else:
+            MutableMapping.clear(mapping)
+            MutableMapping.update(mapping, values)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_mapping_get(
+    mapping: Mapping, key: str, default: object = None
+) -> object:
+    try:
+        if _compatibility_has_mro_identity(mapping, (dict,)):
+            return dict.get(mapping, key, default)
+        return Mapping.get(mapping, key, default)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_mapping_pop(
+    mapping: MutableMapping, key: str
+) -> None:
+    try:
+        if _compatibility_has_mro_identity(mapping, (dict,)):
+            dict.pop(mapping, key, None)
+        else:
+            MutableMapping.pop(mapping, key, None)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_mapping_set(
+    mapping: MutableMapping, key: str, value: object
+) -> None:
+    try:
+        if _compatibility_has_mro_identity(mapping, (dict,)):
+            dict.__setitem__(mapping, key, value)
+        else:
+            mapping[key] = value
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_add_identity(
+    buckets: dict[int, list[object]], item: object
+) -> bool:
+    identity = id(item)
+    bucket = buckets.setdefault(identity, [])
+    if any(source is item for source in bucket):
+        return False
+    bucket.append(item)
+    return True
+
+
+def _compatibility_has_identity(
+    buckets: dict[int, list[object]], item: object
+) -> bool:
+    return any(
+        source is item for source in buckets.get(id(item), ())
+    )
+
+
+def _compatibility_increment_occurrence(
+    occurrences: dict[int, list[tuple[object, int]]], item: object
+) -> None:
+    identity = id(item)
+    bucket = occurrences.setdefault(identity, [])
+    for index, (source, count) in enumerate(bucket):
+        if source is item:
+            bucket[index] = (source, count + 1)
+            return
+    bucket.append((item, 1))
+
+
+def _compatibility_occurrence_count(
+    occurrences: dict[int, list[tuple[object, int]]], item: object
+) -> int:
+    for source, count in occurrences.get(id(item), ()):
+        if source is item:
+            return count
+    return 0
+
+
+def _compatibility_iter_values(container: object):
+    if _compatibility_is_mapping(container):
+        yield from _compatibility_pairs(container).values()
+        return
+    try:
+        if _compatibility_has_mro_identity(container, (list,)):
+            iterator = list.__iter__(container)
+        elif _compatibility_has_mro_identity(container, (tuple,)):
+            iterator = tuple.__iter__(container)
+        elif _compatibility_has_mro_identity(container, (set,)):
+            iterator = set.__iter__(container)
+        elif _compatibility_has_mro_identity(container, (frozenset,)):
+            iterator = frozenset.__iter__(container)
+        else:
+            raise TypeError
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    while True:
+        try:
+            yield next(iterator)
+        except StopIteration:
+            return
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_mapping_occurrences(
+    roots: tuple[Mapping, Mapping],
+) -> dict[int, list[tuple[object, int]]]:
+    occurrences: dict[int, list[tuple[object, int]]] = {}
+    expanded: dict[int, list[object]] = {}
+    pending: list[object] = [*roots]
+    while pending:
+        item = pending.pop()
+        if _compatibility_is_mapping(item):
+            _compatibility_increment_occurrence(occurrences, item)
+        if not (
+            _compatibility_is_mapping(item)
+            or _compatibility_has_mro_identity(
+                item, (list, tuple, set, frozenset)
+            )
+        ):
+            continue
+        if not _compatibility_add_identity(expanded, item):
+            continue
+        pending.extend(_compatibility_iter_values(item))
+    return occurrences
+
+
+@dataclass(slots=True)
+class _CompatibilityMergeContext:
+    active_children: dict[int, list[object]]
+    mapping_occurrences: dict[int, list[tuple[object, int]]]
+    must_split_mappings: dict[int, list[object]]
+    original_mutables: dict[int, list[object]]
+
+
+def _compatibility_mark_mapping_descendants(
+    values: object, *, context: _CompatibilityMergeContext
+) -> None:
     try:
         pending = list(values)  # values is an exact dict view at call sites
     except Exception:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
-    seen: dict[int, list[object]] = {}
+    expanded: dict[int, list[object]] = {}
     while pending:
         item = pending.pop()
-        if item is target:
-            return True
-        if isinstance(item, Mapping):
-            identity = id(item)
-            bucket = seen.setdefault(identity, [])
-            if any(source is item for source in bucket):
-                continue
-            bucket.append(item)
-            pending.extend(_compatibility_pairs(item).values())
+        if not (
+            _compatibility_is_mapping(item)
+            or _compatibility_has_mro_identity(
+                item, (list, tuple, set, frozenset)
+            )
+        ):
             continue
-        if isinstance(item, list | tuple | set | frozenset):
+        if not _compatibility_add_identity(expanded, item):
+            continue
+        if _compatibility_is_mapping(item):
+            _compatibility_add_identity(context.must_split_mappings, item)
+        pending.extend(_compatibility_iter_values(item))
+
+
+def _compatibility_builtin_descriptor_value(
+    value: object, owner: type, name: str
+) -> object:
+    try:
+        descriptor = type.__getattribute__(owner, "__dict__")[name]
+        descriptor_type = type(descriptor)
+        if not any(
+            descriptor_type is candidate
+            for candidate in (GetSetDescriptorType, MemberDescriptorType)
+        ):
+            raise TypeError
+        return descriptor_type.__get__(descriptor, value, type(value))
+    except (AttributeError, KeyError, ValueError):
+        return _COMPATIBILITY_MISSING
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_builtin_descriptor_values(
+    value: object, owner: type, names: tuple[str, ...]
+) -> list[object]:
+    state_values: list[object] = []
+    for name in names:
+        state = _compatibility_builtin_descriptor_value(value, owner, name)
+        if state is not _COMPATIBILITY_MISSING and state is not None:
+            state_values.append(state)
+    return state_values
+
+
+def _compatibility_function_state(
+    value: object,
+) -> tuple[list[object], list[dict]]:
+    if type(value) is BuiltinFunctionType:
+        return (
+            _compatibility_builtin_descriptor_values(
+                value,
+                BuiltinFunctionType,
+                ("__self__", "__module__"),
+            ),
+            [],
+        )
+
+    state_values: list[object] = []
+    state_mappings: list[dict] = []
+    function_state = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__dict__"
+    )
+    if type(function_state) is not dict:
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    state_mappings.append(function_state)
+
+    closure = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__closure__"
+    )
+    if closure is not None:
+        if type(closure) is not tuple:
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        for cell in closure:
+            if type(cell) is not CellType:
+                raise ConfigError(_COMPATIBILITY_FAILURE)
+            state_values.append(cell)
+            contents = _compatibility_builtin_descriptor_value(
+                cell, CellType, "cell_contents"
+            )
+            if contents is not _COMPATIBILITY_MISSING:
+                state_values.append(contents)
+
+    defaults = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__defaults__"
+    )
+    if defaults is not None:
+        if type(defaults) is not tuple:
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        state_values.append(defaults)
+
+    keyword_defaults = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__kwdefaults__"
+    )
+    if keyword_defaults is not None:
+        if type(keyword_defaults) is not dict:
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        state_mappings.append(keyword_defaults)
+
+    annotate = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__annotate__"
+    )
+    if annotate is _COMPATIBILITY_MISSING or annotate is None:
+        annotations = _compatibility_builtin_descriptor_value(
+            value, FunctionType, "__annotations__"
+        )
+        if annotations is not None:
+            if type(annotations) is not dict:
+                raise ConfigError(_COMPATIBILITY_FAILURE)
+            state_mappings.append(annotations)
+    else:
+        state_values.append(_COMPATIBILITY_UNSAFE_LAZY_ANNOTATIONS)
+
+    for name in ("__doc__", "__module__"):
+        metadata = _compatibility_builtin_descriptor_value(
+            value, FunctionType, name
+        )
+        if metadata is not _COMPATIBILITY_MISSING and metadata is not None:
+            state_values.append(metadata)
+
+    type_parameters = _compatibility_builtin_descriptor_value(
+        value, FunctionType, "__type_params__"
+    )
+    if (
+        type_parameters is not _COMPATIBILITY_MISSING
+        and type_parameters is not None
+    ):
+        if type(type_parameters) is not tuple:
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        state_values.append(type_parameters)
+    return state_values, state_mappings
+
+
+def _compatibility_referential_atomic_state(value: object) -> list[object]:
+    if type(value) is property:
+        return _compatibility_builtin_descriptor_values(
+            value,
+            property,
+            ("fget", "fset", "fdel", "__doc__", "__name__"),
+        )
+
+    try:
+        referent = ReferenceType.__call__(value)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    callback = _compatibility_builtin_descriptor_value(
+        value, ReferenceType, "__callback__"
+    )
+    state_values = []
+    if referent is not None:
+        state_values.append(referent)
+    if callback is not _COMPATIBILITY_MISSING and callback is not None:
+        state_values.append(callback)
+    return state_values
+
+
+def _compatibility_ownership_state(
+    value: object,
+) -> tuple[list[object], list[dict], bool, bool]:
+    if _compatibility_has_exact_type(
+        value, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
+    ):
+        return [], [], False, True
+    if _compatibility_has_exact_type(
+        value, (FunctionType, BuiltinFunctionType)
+    ):
+        state_values, state_mappings = _compatibility_function_state(value)
+        return state_values, state_mappings, True, True
+    if _compatibility_has_exact_type(value, (ReferenceType, property)):
+        return (
+            _compatibility_referential_atomic_state(value),
+            [],
+            True,
+            True,
+        )
+    if type(value) is CellType:
+        contents = _compatibility_builtin_descriptor_value(
+            value, CellType, "cell_contents"
+        )
+        if contents is _COMPATIBILITY_MISSING:
+            return [], [], True, True
+        return [contents], [], True, True
+    if _compatibility_has_mro_identity(value, (type, ModuleType)):
+        return [], [], False, True
+    state_values: list[object] = []
+    state_mappings: list[dict] = []
+    state_bearing = False
+    state_is_complete = True
+    try:
+        value_type = type(value)
+        bases = type.__getattribute__(value_type, "__mro__")
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+    try:
+        dict_descriptor = _compatibility_raw_mro_descriptor(
+            value_type, "__dict__"
+        )
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    descriptor_type = type(dict_descriptor)
+    if any(
+        descriptor_type is candidate
+        for candidate in (GetSetDescriptorType, MemberDescriptorType)
+    ):
+        state_bearing = True
+        try:
+            instance_state = descriptor_type.__get__(
+                dict_descriptor, value, value_type
+            )
+        except AttributeError:
+            pass
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        else:
+            if type(instance_state) is not dict:
+                state_is_complete = False
+            else:
+                state_mappings.append(instance_state)
+    elif dict_descriptor is not _COMPATIBILITY_MISSING:
+        state_is_complete = False
+
+    for base in bases:
+        try:
+            namespace = type.__getattribute__(base, "__dict__")
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        for name, descriptor in namespace.items():
+            if name == "__dict__":
+                continue
+            if type(descriptor) is not MemberDescriptorType:
+                continue
+            state_bearing = True
             try:
-                iterator = iter(item)
+                state = MemberDescriptorType.__get__(
+                    descriptor, value, value_type
+                )
+            except AttributeError:
+                continue
             except Exception:
                 raise ConfigError(_COMPATIBILITY_FAILURE) from None
-            while True:
+            state_values.append(state)
+    if _compatibility_has_mro_identity(value, (memoryview,)):
+        try:
+            descriptor = type.__getattribute__(memoryview, "__dict__")[
+                "obj"
+            ]
+            backing = GetSetDescriptorType.__get__(
+                descriptor, value, value_type
+            )
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        state_bearing = True
+        state_values.append(backing)
+    if _compatibility_has_mro_identity(value, (deque,)):
+        try:
+            iterator = deque.__iter__(value)
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        while True:
+            try:
+                state_values.append(next(iterator))
+            except StopIteration:
+                break
+            except Exception:
+                raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        state_bearing = True
+    if _compatibility_has_mro_identity(value, (ReferenceType,)):
+        state_values.extend(
+            _compatibility_referential_atomic_state(value)
+        )
+        state_bearing = True
+    return state_values, state_mappings, state_bearing, state_is_complete
+
+
+def _compatibility_instance_state_values(value: object) -> list[object]:
+    state_values, state_mappings, _, state_is_complete = (
+        _compatibility_ownership_state(value)
+    )
+    if not state_is_complete:
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    return [*state_values, *state_mappings]
+
+
+def _compatibility_uncanonicalized_mapping_values(
+    mapping: Mapping,
+) -> list[object]:
+    return [
+        value
+        for _, value in _mapping_pairs(
+            mapping, failure=_COMPATIBILITY_FAILURE
+        )
+    ]
+
+
+def _compatibility_state_mapping_is_public_view(
+    state_mapping: object, public_mapping: dict[str, object]
+) -> bool:
+    if type(state_mapping) is not dict:
+        return False
+    if dict.__len__(state_mapping) != dict.__len__(public_mapping):
+        return False
+    for key, value in dict.items(state_mapping):
+        if not _compatibility_has_mro_identity(key, (str,)):
+            return False
+        exact_key = str.__str__(key)
+        try:
+            public_value = dict.__getitem__(public_mapping, exact_key)
+        except KeyError:
+            return False
+        if public_value is not value:
+            return False
+    return True
+
+
+def _compatibility_original_mutables(
+    roots: tuple[Mapping, Mapping],
+) -> dict[int, list[object]]:
+    mutables: dict[int, list[object]] = {}
+    seen: dict[int, list[object]] = {}
+    pending: list[object] = [*roots]
+    while pending:
+        item = pending.pop()
+        if _compatibility_has_exact_type(
+            item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
+        ):
+            continue
+        if not _compatibility_add_identity(seen, item):
+            continue
+        is_mapping = _compatibility_is_mapping(item)
+        is_copy_atomic = _compatibility_has_exact_type(
+            item, _COMPATIBILITY_OWNERSHIP_COPY_ATOMIC_TYPES
+        )
+        is_immutable_container = _compatibility_has_mro_identity(
+            item, (tuple, frozenset)
+        )
+        is_static_namespace = _compatibility_has_mro_identity(
+            item, (type, ModuleType)
+        )
+        state_values, state_mappings, _, state_is_complete = (
+            _compatibility_ownership_state(item)
+        )
+        if not (
+            is_copy_atomic
+            or is_immutable_container
+            or is_static_namespace
+        ):
+            _compatibility_add_identity(mutables, item)
+        if state_is_complete:
+            pending.extend(state_values)
+            pending.extend(state_mappings)
+        if is_mapping:
+            pending.extend(
+                _compatibility_uncanonicalized_mapping_values(item)
+            )
+        elif _compatibility_has_mro_identity(
+            item, (list, tuple, set, frozenset)
+        ):
+            pending.extend(_compatibility_iter_values(item))
+    return mutables
+
+
+def _compatibility_validate_split_state(
+    copied: MutableMapping,
+    parent: Mapping,
+    *,
+    context: _CompatibilityMergeContext,
+) -> None:
+    copied_data: object | None = None
+    if type(parent) is UserDict:
+        try:
+            parent_data = object.__getattribute__(parent, "data")
+            copied_data = object.__getattribute__(copied, "data")
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        if (
+            type(parent_data) is not dict
+            or type(copied_data) is not dict
+            or copied_data is parent_data
+        ):
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+    state_values = _compatibility_instance_state_values(copied)
+    if copied_data is not None:
+        state_values = [
+            state for state in state_values if state is not copied_data
+        ]
+    if _compatibility_reaches_forbidden_mapping(
+        state_values,
+        target=parent,
+        forbidden=context.must_split_mappings,
+        ignored=copied,
+        opaque_is_failure=True,
+        inspect_object_state=False,
+        state_mappings=None,
+        public_mapping=None,
+    ):
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+
+
+def _compatibility_validate_mapping_mutation_target(
+    mapping: MutableMapping,
+    *,
+    context: _CompatibilityMergeContext,
+    public_mapping: dict[str, object],
+) -> None:
+    if _compatibility_has_identity(context.original_mutables, mapping):
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    if _compatibility_has_mro_identity(mapping, (dict,)):
+        return
+    copied_data: object | None = None
+    if type(mapping) is UserDict:
+        try:
+            copied_data = object.__getattribute__(mapping, "data")
+        except Exception:
+            raise ConfigError(_COMPATIBILITY_FAILURE) from None
+        if (
+            type(copied_data) is not dict
+            or _compatibility_has_identity(
+                context.original_mutables, copied_data
+            )
+        ):
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+    state_values, state_mappings, _, state_is_complete = (
+        _compatibility_ownership_state(mapping)
+    )
+    if not state_is_complete:
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    if _compatibility_reaches_forbidden_mapping(
+        state_values,
+        target=mapping,
+        forbidden=context.original_mutables,
+        ignored=mapping,
+        opaque_is_failure=False,
+        inspect_object_state=True,
+        state_mappings=state_mappings,
+        public_mapping=public_mapping,
+    ):
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+
+
+def _compatibility_validate_dict_read_protocols(parent: dict) -> None:
+    protocols = (
+        ("__getattribute__", (dict, defaultdict)),
+        ("__getitem__", (dict,)),
+        ("__iter__", (dict,)),
+        ("__len__", (dict,)),
+        ("items", (dict,)),
+    )
+    try:
+        bases = type.__getattribute__(type(parent), "__mro__")
+        for name, expected_owners in protocols:
+            expected = tuple(
+                type.__getattribute__(owner, "__dict__")[name]
+                for owner in expected_owners
+            )
+            resolved = None
+            for base in bases:
+                namespace = type.__getattribute__(base, "__dict__")
                 try:
-                    pending.append(next(iterator))
-                except StopIteration:
-                    break
-                except Exception:
-                    raise ConfigError(_COMPATIBILITY_FAILURE) from None
-    return False
+                    resolved = namespace[name]
+                except KeyError:
+                    continue
+                break
+            if not any(resolved is candidate for candidate in expected):
+                raise ConfigError(_COMPATIBILITY_FAILURE)
+    except ConfigError:
+        raise
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+
+
+def _compatibility_split_mapping(
+    parent: Mapping,
+    parent_values: Mapping[str, object],
+    *,
+    context: _CompatibilityMergeContext,
+) -> MutableMapping:
+    if type(parent) is dict:
+        return dict(parent_values)
+    if not _compatibility_has_mro_identity(
+        parent, (dict,)
+    ) and type(parent) is not UserDict:
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    try:
+        merged = copy.copy(parent)
+    except Exception:
+        raise ConfigError(_COMPATIBILITY_FAILURE) from None
+    if (
+        type(merged) is not type(parent)
+        or merged is parent
+        or not _compatibility_is_mutable_mapping(merged)
+    ):
+        raise ConfigError(_COMPATIBILITY_FAILURE)
+    _compatibility_validate_split_state(
+        merged, parent, context=context
+    )
+    return merged
 
 
 def _merge_extends_compat(
     child: Mapping,
     parent: Mapping,
     *,
-    active_children: dict[int, list[object]],
+    context: _CompatibilityMergeContext,
     reuse_parent: bool,
-) -> dict:
+) -> MutableMapping:
     child_identity = id(child)
-    active_bucket = active_children.setdefault(child_identity, [])
+    active_bucket = context.active_children.setdefault(child_identity, [])
     if any(source is child for source in active_bucket):
         raise ConfigError(
             "merge_extends: overlapping cyclic mappings cannot be merged."
@@ -873,39 +1754,60 @@ def _merge_extends_compat(
     active_bucket.append(child)
     try:
         parent_values = _compatibility_pairs(parent)
-        if not reuse_parent and _compatibility_reaches_mapping(
-            parent_values.values(), parent
+        if type(parent) is not dict and _compatibility_has_mro_identity(
+            parent, (dict,)
         ):
-            raise ConfigError(
-                "merge_extends: overlapping cyclic mappings cannot be merged."
+            _compatibility_validate_dict_read_protocols(parent)
+        requires_split = not reuse_parent and (
+            _compatibility_occurrence_count(
+                context.mapping_occurrences, parent
             )
-        if reuse_parent and isinstance(parent, dict):
+            > 1
+            or _compatibility_has_identity(
+                context.must_split_mappings, parent
+            )
+        )
+        if requires_split:
+            if _compatibility_reaches_mapping(
+                parent_values.values(), parent
+            ):
+                raise ConfigError(
+                    "merge_extends: overlapping cyclic mappings cannot be merged."
+                )
+            _compatibility_mark_mapping_descendants(
+                parent_values.values(), context=context
+            )
+        if reuse_parent and _compatibility_has_mro_identity(
+            parent, (dict,)
+        ):
             merged = parent
-        elif type(parent) is dict:
+        elif reuse_parent:
             merged = dict(parent_values)
-        elif isinstance(parent, dict):
-            try:
-                merged = copy.copy(parent)
-            except Exception:
-                raise ConfigError(_COMPATIBILITY_FAILURE) from None
-            if not isinstance(merged, dict):
-                raise ConfigError(_COMPATIBILITY_FAILURE)
+        elif requires_split:
+            merged = _compatibility_split_mapping(
+                parent, parent_values, context=context
+            )
+        elif _compatibility_is_mutable_mapping(parent):
+            merged = parent
         else:
-            merged = dict(parent_values)
-        if isinstance(merged, dict):
-            dict.clear(merged)
-            dict.update(merged, parent_values)
+            raise ConfigError(_COMPATIBILITY_FAILURE)
+        _compatibility_validate_mapping_mutation_target(
+            merged,
+            context=context,
+            public_mapping=parent_values,
+        )
+        _compatibility_reset_mapping(merged, parent_values)
         child_values = _compatibility_pairs(child)
         for key, value in child_values.items():
             if str.startswith(key, "~"):
                 target = _deletion_target(key)
                 if value is not None:
                     raise ConfigError(f"{key!r}: deletion value must be null.")
-                dict.pop(merged, target, None)
+                _compatibility_mapping_pop(merged, target)
                 continue
             value_mapping = (
                 _compatibility_pairs(value)
-                if isinstance(value, Mapping)
+                if _compatibility_is_mapping(value)
                 else None
             )
             if value_mapping is not None and "append" in value_mapping:
@@ -916,52 +1818,81 @@ def _merge_extends_compat(
                         f"got the sibling keys {siblings}."
                     )
                 appended = value_mapping["append"]
-                if not isinstance(appended, list | tuple):
+                if not _compatibility_has_mro_identity(
+                    appended, (list, tuple)
+                ):
                     raise ConfigError(
                         f"{key!r}: append is a sequence; got "
-                        f"{type(appended).__name__}."
+                        f"{_compatibility_type_name(appended)}."
                     )
-                inherited = dict.get(merged, key, [])
-                if not isinstance(inherited, list):
+                inherited = _compatibility_mapping_get(merged, key, [])
+                if not _compatibility_has_mro_identity(
+                    inherited, (list,)
+                ):
                     raise ConfigError(
                         f"{key!r} is extended with {{append: ...}} but the inherited "
-                        f"value is {type(inherited).__name__}, not a list."
+                        f"value is {_compatibility_type_name(inherited)}, not a list."
                     )
-                dict.__setitem__(merged, key, [*inherited, *appended])
+                if _compatibility_has_identity(
+                    context.original_mutables, inherited
+                ):
+                    raise ConfigError(_COMPATIBILITY_FAILURE)
+                try:
+                    list.extend(inherited, appended)
+                except Exception:
+                    raise ConfigError(_COMPATIBILITY_FAILURE) from None
+                _compatibility_mapping_set(merged, key, inherited)
                 continue
-            inherited = dict.get(merged, key)
-            if isinstance(value, Mapping) and isinstance(inherited, Mapping):
-                dict.__setitem__(merged, key, _merge_extends_compat(
-                    value,
-                    inherited,
-                    active_children=active_children,
-                    reuse_parent=False,
-                ))
+            inherited = _compatibility_mapping_get(merged, key)
+            if _compatibility_is_mapping(
+                value
+            ) and _compatibility_is_mapping(inherited):
+                _compatibility_mapping_set(
+                    merged,
+                    key,
+                    _merge_extends_compat(
+                        value,
+                        inherited,
+                        context=context,
+                        reuse_parent=False,
+                    ),
+                )
                 continue
-            dict.__setitem__(merged, key, value)
+            _compatibility_mapping_set(merged, key, value)
         return merged
     finally:
-        assert active_bucket.pop() is child
+        removed = active_bucket.pop()
+        assert removed is child
         if not active_bucket:
-            del active_children[child_identity]
+            del context.active_children[child_identity]
 
 
 def merge_extends(child: dict, parent: dict) -> dict:
     """Deep-merge ``child`` over ``parent`` on the lossless public boundary."""
     for label, given in (("child", child), ("parent", parent)):
-        if not isinstance(given, Mapping):
+        if not _compatibility_is_mapping(given):
             raise ConfigError(
                 f"merge_extends: {label} is a mapping; got "
-                f"{type(given).__name__}."
+                f"{_compatibility_type_name(given)}."
             )
     try:
-        detached_parent, detached_child = _compatibility_deepcopy_roots(
-            parent, child
+        (
+            detached_parent,
+            detached_child,
+            original_mutables,
+        ) = _compatibility_deepcopy_roots(parent, child)
+        context = _CompatibilityMergeContext(
+            active_children={},
+            mapping_occurrences=_compatibility_mapping_occurrences(
+                (detached_parent, detached_child)
+            ),
+            must_split_mappings={},
+            original_mutables=original_mutables,
         )
         return _merge_extends_compat(
             detached_child,
             detached_parent,
-            active_children={},
+            context=context,
             reuse_parent=True,
         )
     except ConfigError:
@@ -975,10 +1906,10 @@ def merge_extends(child: dict, parent: dict) -> dict:
 def recursive_update(base: Mapping, patch: Mapping) -> dict:
     """Return ``patch`` deep-merged over ``base`` without mutating either."""
     for label, given in (("base", base), ("patch", patch)):
-        if not isinstance(given, Mapping):
+        if not _compatibility_is_mapping(given):
             raise ConfigError(
                 f"recursive_update: {label} is a mapping; got "
-                f"{type(given).__name__}."
+                f"{_compatibility_type_name(given)}."
             )
     return merge_extends(patch, base)
 

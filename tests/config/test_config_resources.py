@@ -1,8 +1,13 @@
 """The resources DAG: build order, extends:, identity, and the kind registry."""
 
-from collections import defaultdict, namedtuple
-from collections.abc import Mapping
-from types import MappingProxyType
+import subprocess
+import sys
+import textwrap
+import weakref
+from collections import UserDict, defaultdict, deque, namedtuple
+from collections.abc import Mapping, MutableMapping
+from functools import partial
+from types import CellType, FunctionType, MappingProxyType, MethodType
 
 import jax.numpy as jnp
 import pytest
@@ -143,6 +148,22 @@ class TestExtends:
                                {"optimizations": ["a"]})
         assert merged["optimizations"] == ["a", "cache_beam_rotation"]
 
+    def test_append_preserves_an_inherited_self_cycle(self):
+        inherited = []
+        inherited.append(inherited)
+
+        merged = merge_extends(
+            {"items": {"append": ["tail"]}},
+            {"items": inherited, "alias": inherited},
+        )
+        items = merged["items"]
+
+        assert items is not inherited
+        assert items is merged["alias"]
+        assert items[0] is items
+        assert items[1] == "tail"
+        assert inherited == [inherited]
+
     def test_merge_does_not_alias_the_inputs(self):
         """{append: [...]} used to splice the child's list in BY REFERENCE, so
         mutating the merge result reached back into the caller's own child
@@ -157,6 +178,2065 @@ class TestExtends:
 
         assert parent["optimizations"] == [{"note": "a"}]
         assert child["optimizations"]["append"] == [{"note": "x"}]
+
+    def test_nested_mapping_deepcopy_returning_self_is_not_mutated(self):
+        class ReturningSelfMapping(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        shared = ReturningSelfMapping({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": shared})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared) == {"old": 1}
+
+    def test_root_dict_deepcopy_returning_self_is_not_mutated(self):
+        class ReturningSelfDict(dict):
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        shared = ReturningSelfDict({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"new": 2}, shared)
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert shared == {"old": 1}
+
+    def test_appended_list_deepcopy_returning_self_is_not_mutated(self):
+        class ReturningSelfList(list):
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        shared = ReturningSelfList(["old"])
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"items": {"append": ["new"]}}, {"items": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert shared == ["old"]
+
+    def test_mutated_custom_mapping_cannot_share_caller_owned_backing(self):
+        class SharedBackingMapping(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)({})
+                memo[id(self)] = copied
+                copied._data = self._data
+                return copied
+
+        shared = SharedBackingMapping({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": shared})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared) == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_instance_dict_backing(self):
+        class InstanceDictMapping(MutableMapping):
+            def __getitem__(self, key):
+                return object.__getattribute__(self, "__dict__")[key]
+
+            def __setitem__(self, key, value):
+                object.__getattribute__(self, "__dict__")[key] = value
+
+            def __delitem__(self, key):
+                del object.__getattribute__(self, "__dict__")[key]
+
+            def __iter__(self):
+                return iter(object.__getattribute__(self, "__dict__"))
+
+            def __len__(self):
+                return len(object.__getattribute__(self, "__dict__"))
+
+            def __deepcopy__(self, memo):
+                copied = object.__new__(type(self))
+                memo[id(self)] = copied
+                object.__setattr__(
+                    copied,
+                    "__dict__",
+                    object.__getattribute__(self, "__dict__"),
+                )
+                return copied
+
+        source = InstanceDictMapping()
+        source["old"] = 1
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(source) == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_slotted_state(self):
+        class SlotStore:
+            __slots__ = ("old", "new")
+
+            def __init__(self):
+                self.old = 1
+
+        class SlotMapping(MutableMapping):
+            __slots__ = ("store",)
+
+            def __init__(self, store):
+                self.store = store
+
+            def __getitem__(self, key):
+                return getattr(self.store, key)
+
+            def __setitem__(self, key, value):
+                setattr(self.store, key, value)
+
+            def __delitem__(self, key):
+                delattr(self.store, key)
+
+            def __iter__(self):
+                yield "old"
+                try:
+                    object.__getattribute__(self.store, "new")
+                except AttributeError:
+                    return
+                yield "new"
+
+            def __len__(self):
+                return sum(1 for _ in self)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.store)
+                memo[id(self)] = copied
+                return copied
+
+        store = SlotStore()
+        source = SlotMapping(store)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(source) == {"old": 1}
+
+    @pytest.mark.parametrize(
+        "backing_kind", ["bytearray", "memoryview", "new_memoryview"]
+    )
+    def test_mutated_custom_mapping_cannot_share_mutable_buffer(
+        self, backing_kind
+    ):
+        class BufferMapping(MutableMapping):
+            def __init__(self, backing):
+                self.backing = backing
+
+            def __getitem__(self, key):
+                offset = 0 if key == "old" else 2
+                if not self.backing[offset]:
+                    raise KeyError(key)
+                return self.backing[offset + 1]
+
+            def __setitem__(self, key, value):
+                offset = 0 if key == "old" else 2
+                self.backing[offset] = 1
+                self.backing[offset + 1] = value
+
+            def __delitem__(self, key):
+                offset = 0 if key == "old" else 2
+                if not self.backing[offset]:
+                    raise KeyError(key)
+                self.backing[offset] = 0
+
+            def __iter__(self):
+                if self.backing[0]:
+                    yield "old"
+                if self.backing[2]:
+                    yield "new"
+
+            def __len__(self):
+                return bool(self.backing[0]) + bool(self.backing[2])
+
+            def __deepcopy__(self, memo):
+                if backing_kind == "new_memoryview":
+                    copied_backing = memoryview(self.backing.obj)
+                else:
+                    copied_backing = self.backing
+                copied = type(self)(copied_backing)
+                memo[id(self)] = copied
+                return copied
+
+        raw = bytearray((1, 1, 0, 0))
+        backing = raw if backing_kind == "bytearray" else memoryview(raw)
+        source = BufferMapping(backing)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert raw == bytearray((1, 1, 0, 0))
+
+    def test_function_leaf_retains_standard_deepcopy_semantics(self):
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        def callback():
+            return None
+
+        callback.label = "benign"
+        source = Box({"old": 1, "callback": callback})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert type(merged["node"]) is Box
+        assert dict(merged["node"]) == {
+            "old": 1,
+            "callback": callback,
+            "new": 2,
+        }
+        assert merged["node"]["callback"] is callback
+        assert dict(source) == {"old": 1, "callback": callback}
+
+    def test_empty_function_state_backing_is_protected_before_first_write(
+        self,
+    ):
+        def callback():
+            return None
+
+        class EmptyFunctionStateMapping(MutableMapping):
+            def __init__(self, anchor, virtual_old=True):
+                self.anchor = anchor
+                self.virtual_old = virtual_old
+
+            @property
+            def backing(self):
+                return self.anchor.__dict__
+
+            def __getitem__(self, key):
+                if key == "old" and self.virtual_old:
+                    return 1
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                if key == "old" and self.virtual_old:
+                    self.virtual_old = False
+                    return
+                del self.backing[key]
+
+            def __iter__(self):
+                if self.virtual_old:
+                    yield "old"
+                yield from self.backing
+
+            def __len__(self):
+                return self.virtual_old + len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.anchor, self.virtual_old)
+                memo[id(self)] = copied
+                return copied
+
+        source = EmptyFunctionStateMapping(callback)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert callback.__dict__ == {}
+        assert dict(source) == {"old": 1}
+
+    def test_range_leaf_retains_standard_deepcopy_semantics(self):
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        window = range(5)
+        source = Box({"old": 1, "window": window})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert type(merged["node"]) is Box
+        assert merged["node"]["window"] is window
+        assert dict(source) == {"old": 1, "window": window}
+
+    @pytest.mark.parametrize("leaf_kind", ["property", "weakref"])
+    def test_referential_atomic_leaf_retains_standard_deepcopy_semantics(
+        self, leaf_kind
+    ):
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        if leaf_kind == "property":
+            leaf = property(lambda _: None)
+        else:
+            class SafeReferent:
+                pass
+
+            leaf = weakref.ref(SafeReferent)
+        source = Box({"old": 1, "leaf": leaf})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert merged["node"]["leaf"] is leaf
+        assert dict(source) == {"old": 1, "leaf": leaf}
+
+    def test_bound_method_leaf_retains_standard_deepcopy_semantics(self):
+        class Receiver:
+            def __init__(self):
+                self.state = []
+
+            def callback(self):
+                return None
+
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        receiver = Receiver()
+        callback = receiver.callback
+        source = Box({"old": 1, "callback": callback})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+        copied_callback = merged["node"]["callback"]
+
+        assert type(copied_callback) is MethodType
+        assert copied_callback is not callback
+        assert copied_callback.__self__ is not receiver
+        assert copied_callback.__self__.state is not receiver.state
+        assert dict(source) == {"old": 1, "callback": callback}
+
+    @pytest.mark.parametrize("rebind", [False, True])
+    def test_mutated_custom_mapping_cannot_share_bound_method_state(
+        self, rebind
+    ):
+        class Store:
+            def __init__(self):
+                self.data = {"old": 1}
+
+            def operate(self, operation, key=None, value=None):
+                if operation == "get":
+                    return self.data[key]
+                if operation == "set":
+                    self.data[key] = value
+                    return None
+                if operation == "delete":
+                    del self.data[key]
+                    return None
+                if operation == "keys":
+                    return tuple(self.data)
+                if operation == "length":
+                    return len(self.data)
+                raise AssertionError("unknown operation")
+
+        class MethodMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return self.callback("get", key)
+
+            def __setitem__(self, key, value):
+                self.callback("set", key, value)
+
+            def __delitem__(self, key):
+                self.callback("delete", key)
+
+            def __iter__(self):
+                return iter(self.callback("keys"))
+
+            def __len__(self):
+                return self.callback("length")
+
+            def __deepcopy__(self, memo):
+                if rebind:
+                    callback = MethodType(
+                        self.callback.__func__, self.callback.__self__
+                    )
+                else:
+                    callback = self.callback
+                copied = type(self)(callback)
+                memo[id(self)] = copied
+                return copied
+
+        store = Store()
+        source = MethodMapping(store.operate)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert store.data == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_deque_backing(self):
+        class DequeMapping(MutableMapping):
+            def __init__(self, backing):
+                self.backing = backing
+
+            def __getitem__(self, key):
+                return dict(self.backing)[key]
+
+            def __setitem__(self, key, value):
+                self.__delitem__(key, missing_ok=True)
+                self.backing.append((key, value))
+
+            def __delitem__(self, key, missing_ok=False):
+                retained = deque(
+                    pair for pair in self.backing if pair[0] != key
+                )
+                if len(retained) == len(self.backing) and not missing_ok:
+                    raise KeyError(key)
+                self.backing.clear()
+                self.backing.extend(retained)
+
+            def __iter__(self):
+                return (key for key, _ in self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.backing)
+                memo[id(self)] = copied
+                return copied
+
+        backing = deque((("old", 1),))
+        source = DequeMapping(backing)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == deque((("old", 1),))
+
+    def test_mutated_custom_mapping_cannot_share_builtin_method_state(self):
+        class BuiltinMethodMapping(MutableMapping):
+            def __init__(self, anchor):
+                self.anchor = anchor
+
+            @property
+            def backing(self):
+                return self.anchor.__self__[0]
+
+            def __getitem__(self, key):
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                del self.backing[key]
+
+            def __iter__(self):
+                return iter(self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.anchor)
+                memo[id(self)] = copied
+                return copied
+
+        backing = [{"old": 1}]
+        source = BuiltinMethodMapping(backing.append)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == [{"old": 1}]
+
+    @pytest.mark.parametrize(
+        "metadata_name", ["__doc__", "__module__", "__type_params__"]
+    )
+    def test_mutated_custom_mapping_cannot_share_function_metadata_state(
+        self, metadata_name
+    ):
+        backing = {"old": 1}
+
+        def anchor():
+            return None
+
+        metadata = (backing,) if metadata_name == "__type_params__" else backing
+        setattr(anchor, metadata_name, metadata)
+
+        def clone_function(callback):
+            cloned = FunctionType(
+                callback.__code__,
+                callback.__globals__,
+                callback.__name__,
+                callback.__defaults__,
+                callback.__closure__,
+            )
+            setattr(cloned, metadata_name, getattr(callback, metadata_name))
+            return cloned
+
+        class FunctionMetadataMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            @property
+            def backing(self):
+                state = getattr(self.callback, metadata_name)
+                return state[0] if metadata_name == "__type_params__" else state
+
+            def __getitem__(self, key):
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                del self.backing[key]
+
+            def __iter__(self):
+                return iter(self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(clone_function(self.callback))
+                memo[id(self)] = copied
+                return copied
+
+        source = FunctionMetadataMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_function_annotate_is_tracked_without_reading_annotations(
+        self, monkeypatch
+    ):
+        from _rheplicant_bootstrap import layering as neutral_layering
+
+        backing = {"old": 1}
+        annotation_reads = []
+
+        def annotate(_format):
+            return backing
+
+        def anchor():
+            return None
+
+        original_reader = (
+            neutral_layering._compatibility_builtin_descriptor_value
+        )
+
+        def read_descriptor(value, owner, name):
+            if value is anchor and owner is FunctionType:
+                if name == "__annotate__":
+                    return annotate
+                if name == "__annotations__":
+                    annotation_reads.append(name)
+                    return {}
+            return original_reader(value, owner, name)
+
+        monkeypatch.setattr(
+            neutral_layering,
+            "_compatibility_builtin_descriptor_value",
+            read_descriptor,
+        )
+
+        class AnnotateMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return backing[key]
+
+            def __setitem__(self, key, value):
+                backing[key] = value
+
+            def __delitem__(self, key):
+                del backing[key]
+
+            def __iter__(self):
+                return iter(backing)
+
+            def __len__(self):
+                return len(backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = AnnotateMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert annotation_reads == []
+        assert backing == {"old": 1}
+
+    def test_hidden_function_with_annotate_refuses_cached_annotations(
+        self, monkeypatch
+    ):
+        from _rheplicant_bootstrap import layering as neutral_layering
+
+        backing = {"old": 1}
+        annotation_reads = []
+
+        def annotate(_format):
+            return {}
+
+        def anchor():
+            return None
+
+        function_pairs = [(anchor, annotate)]
+
+        original_reader = (
+            neutral_layering._compatibility_builtin_descriptor_value
+        )
+
+        def read_descriptor(value, owner, name):
+            if owner is FunctionType:
+                for function, annotation_callback in function_pairs:
+                    if value is function:
+                        if name == "__annotate__":
+                            return annotation_callback
+                        if name == "__annotations__":
+                            annotation_reads.append(name)
+                            return {"state": backing}
+            return original_reader(value, owner, name)
+
+        monkeypatch.setattr(
+            neutral_layering,
+            "_compatibility_builtin_descriptor_value",
+            read_descriptor,
+        )
+
+        class CachedAnnotationMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return backing[key]
+
+            def __setitem__(self, key, value):
+                backing[key] = value
+
+            def __delitem__(self, key):
+                del backing[key]
+
+            def __iter__(self):
+                return iter(backing)
+
+            def __len__(self):
+                return len(backing)
+
+            def __deepcopy__(self, memo):
+                annotation_callback = FunctionType(
+                    annotate.__code__,
+                    annotate.__globals__,
+                    annotate.__name__,
+                    annotate.__defaults__,
+                    annotate.__closure__,
+                )
+                callback = FunctionType(
+                    self.callback.__code__,
+                    self.callback.__globals__,
+                    self.callback.__name__,
+                    self.callback.__defaults__,
+                    self.callback.__closure__,
+                )
+                function_pairs.append((callback, annotation_callback))
+                copied = type(self)(callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = CachedAnnotationMapping(anchor)
+
+        caught = None
+        try:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+        except ConfigError as error:
+            caught = error
+
+        assert backing == {"old": 1}
+        assert caught is not None
+        assert str(caught) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert annotation_reads == []
+
+    @pytest.mark.skipif(
+        "__annotate__" not in vars(FunctionType),
+        reason="lazy function annotations require Python 3.14 or newer",
+    )
+    def test_public_lazy_annotation_function_does_not_run_callback(self):
+        events = []
+        namespace = {"events": events}
+        exec(
+            "def callback(value: events.append('called') or int):\n"
+            "    return value\n",
+            namespace,
+        )
+        callback = namespace["callback"]
+        assert events == []
+
+        merged = merge_extends({"callback": callback}, {})
+
+        assert merged["callback"] is callback
+        assert events == []
+
+    @pytest.mark.skipif(
+        "__annotate__" not in vars(FunctionType),
+        reason="lazy function annotations require Python 3.14 or newer",
+    )
+    def test_hidden_function_annotate_state_is_refused_without_calling(self):
+        backing = {"old": 1}
+        events = []
+
+        def annotate(format_code):
+            events.append(format_code)
+            return {"state": backing}
+
+        def anchor():
+            return None
+
+        anchor.__annotate__ = annotate
+
+        class AnnotateMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return backing[key]
+
+            def __setitem__(self, key, value):
+                backing[key] = value
+
+            def __delitem__(self, key):
+                del backing[key]
+
+            def __iter__(self):
+                return iter(backing)
+
+            def __len__(self):
+                return len(backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = AnnotateMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert events == []
+        assert backing == {"old": 1}
+
+    @pytest.mark.skipif(
+        "__annotate__" not in vars(FunctionType),
+        reason="lazy function annotations require Python 3.14 or newer",
+    )
+    def test_hidden_cached_lazy_annotations_are_refused(self):
+        backing = {"old": 1}
+        namespace = {"backing": backing}
+        exec(
+            "def anchor(value: backing):\n"
+            "    return value\n",
+            namespace,
+        )
+        anchor = namespace["anchor"]
+        cached = anchor.__annotations__
+        assert cached["value"] is backing
+        assert anchor.__annotate__ is not None
+
+        class CachedAnnotationMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            @property
+            def values(self):
+                return self.callback.__annotations__["value"]
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                annotation_callback = self.callback.__annotate__
+                cloned_annotation_callback = FunctionType(
+                    annotation_callback.__code__,
+                    annotation_callback.__globals__,
+                    annotation_callback.__name__,
+                    annotation_callback.__defaults__,
+                    annotation_callback.__closure__,
+                )
+                callback = FunctionType(
+                    self.callback.__code__,
+                    self.callback.__globals__,
+                    self.callback.__name__,
+                    self.callback.__defaults__,
+                    self.callback.__closure__,
+                )
+                callback.__annotations__ = self.callback.__annotations__
+                callback.__annotate__ = cloned_annotation_callback
+                copied = type(self)(callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = CachedAnnotationMapping(anchor)
+
+        caught = None
+        try:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+        except ConfigError as error:
+            caught = error
+
+        assert backing == {"old": 1}
+        assert caught is not None
+        assert str(caught) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+
+    @pytest.mark.parametrize("wrapper_kind", ["partial", "method"])
+    def test_function_metadata_is_followed_through_wrappers(
+        self, wrapper_kind
+    ):
+        backing = {"old": 1}
+
+        def callback():
+            return None
+
+        callback.__doc__ = backing
+        wrapper = (
+            partial(callback)
+            if wrapper_kind == "partial"
+            else MethodType(callback, object())
+        )
+
+        def wrapped_function(value):
+            return value.func if wrapper_kind == "partial" else value.__func__
+
+        def clone_function(value):
+            cloned = FunctionType(
+                value.__code__,
+                value.__globals__,
+                value.__name__,
+                value.__defaults__,
+                value.__closure__,
+            )
+            cloned.__doc__ = value.__doc__
+            return cloned
+
+        class WrappedFunctionMapping(MutableMapping):
+            def __init__(self, value):
+                self.wrapper = value
+
+            @property
+            def backing(self):
+                return wrapped_function(self.wrapper).__doc__
+
+            def __getitem__(self, key):
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                del self.backing[key]
+
+            def __iter__(self):
+                return iter(self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                function = clone_function(wrapped_function(self.wrapper))
+                wrapper = (
+                    partial(function)
+                    if wrapper_kind == "partial"
+                    else MethodType(function, object())
+                )
+                copied = type(self)(wrapper)
+                memo[id(self)] = copied
+                return copied
+
+        source = WrappedFunctionMapping(wrapper)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_function_closure_state(self):
+        backing = {"old": 1}
+
+        def anchor(operation, key=None, value=None):
+            if operation == "get":
+                return backing[key]
+            if operation == "set":
+                backing[key] = value
+                return None
+            if operation == "delete":
+                del backing[key]
+                return None
+            if operation == "keys":
+                return tuple(backing)
+            if operation == "length":
+                return len(backing)
+            raise AssertionError("unknown operation")
+
+        class ClosureMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return self.callback("get", key)
+
+            def __setitem__(self, key, value):
+                self.callback("set", key, value)
+
+            def __delitem__(self, key):
+                self.callback("delete", key)
+
+            def __iter__(self):
+                return iter(self.callback("keys"))
+
+            def __len__(self):
+                return self.callback("length")
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = ClosureMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_closure_cell_state(self):
+        def make_anchor():
+            old_present = True
+            old_value = 1
+            new_present = False
+            new_value = 0
+
+            def anchor(operation, key=None, value=None):
+                nonlocal old_present, old_value, new_present, new_value
+                is_old = key == "old"
+                if operation == "get":
+                    present = old_present if is_old else new_present
+                    if not present:
+                        raise KeyError(key)
+                    return old_value if is_old else new_value
+                if operation == "set":
+                    if is_old:
+                        old_present = True
+                        old_value = value
+                    else:
+                        new_present = True
+                        new_value = value
+                    return None
+                if operation == "delete":
+                    if is_old:
+                        if not old_present:
+                            raise KeyError(key)
+                        old_present = False
+                    else:
+                        if not new_present:
+                            raise KeyError(key)
+                        new_present = False
+                    return None
+                if operation == "keys":
+                    return (
+                        *(("old",) if old_present else ()),
+                        *(("new",) if new_present else ()),
+                    )
+                if operation == "length":
+                    return old_present + new_present
+                if operation == "snapshot":
+                    return {
+                        **({"old": old_value} if old_present else {}),
+                        **({"new": new_value} if new_present else {}),
+                    }
+                raise AssertionError("unknown operation")
+
+            return anchor
+
+        class CellMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __getitem__(self, key):
+                return self.callback("get", key)
+
+            def __setitem__(self, key, value):
+                self.callback("set", key, value)
+
+            def __delitem__(self, key):
+                self.callback("delete", key)
+
+            def __iter__(self):
+                return iter(self.callback("keys"))
+
+            def __len__(self):
+                return self.callback("length")
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        anchor = make_anchor()
+        source = CellMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert anchor("snapshot") == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_cell_contents(self):
+        def make_cell(value):
+            def capture():
+                return value
+
+            cell = capture.__closure__[0]
+            assert type(cell) is CellType
+            return cell
+
+        class CellBackedMapping(MutableMapping):
+            def __init__(self, cell):
+                self.cell = cell
+
+            @property
+            def backing(self):
+                return self.cell.cell_contents
+
+            def __getitem__(self, key):
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                del self.backing[key]
+
+            def __iter__(self):
+                return iter(self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(make_cell(self.cell.cell_contents))
+                memo[id(self)] = copied
+                return copied
+
+        backing = {"old": 1}
+        source = CellBackedMapping(make_cell(backing))
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    @pytest.mark.parametrize(
+        "capture_kind", ["default", "kwdefault", "annotation", "attribute"]
+    )
+    def test_mutated_custom_mapping_cannot_share_function_referents(
+        self, capture_kind
+    ):
+        backing = {"old": 1}
+        if capture_kind == "default":
+            def anchor(value=backing):
+                return value
+        elif capture_kind == "kwdefault":
+            def anchor(*, value=backing):
+                return value
+        else:
+            def anchor():
+                return None
+
+            if capture_kind == "annotation":
+                anchor.__annotations__["state"] = backing
+            else:
+                anchor.state = backing
+
+        class FunctionMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            @property
+            def backing(self):
+                if capture_kind == "annotation":
+                    return self.callback.__annotations__["state"]
+                if capture_kind == "attribute":
+                    return self.callback.state
+                return self.callback()
+
+            def __getitem__(self, key):
+                return self.backing[key]
+
+            def __setitem__(self, key, value):
+                self.backing[key] = value
+
+            def __delitem__(self, key):
+                del self.backing[key]
+
+            def __iter__(self):
+                return iter(self.backing)
+
+            def __len__(self):
+                return len(self.backing)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = FunctionMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    @pytest.mark.parametrize(
+        "state_kind", ["attributes", "kwdefaults", "annotations"]
+    )
+    def test_mutated_custom_mapping_cannot_share_function_state_mapping(
+        self, state_kind
+    ):
+        if state_kind == "attributes":
+            def anchor():
+                return None
+
+            anchor.__dict__["old"] = 1
+            backing = anchor.__dict__
+        elif state_kind == "kwdefaults":
+            def anchor(*, old=1):
+                return old
+
+            backing = anchor.__kwdefaults__
+        else:
+            def anchor(old: 1):
+                return old
+
+            backing = anchor.__annotations__
+
+        class FunctionStateMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            @property
+            def values(self):
+                if state_kind == "attributes":
+                    return self.callback.__dict__
+                if state_kind == "kwdefaults":
+                    return self.callback.__kwdefaults__
+                return self.callback.__annotations__
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = FunctionStateMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    @pytest.mark.parametrize("anchor_kind", ["property", "weakref"])
+    def test_mutated_custom_mapping_cannot_share_referential_atomic_state(
+        self, anchor_kind
+    ):
+        backing = {"old": 1}
+        if anchor_kind == "property":
+            def getter(_):
+                return backing
+
+            anchor = property(getter)
+
+            def values():
+                return anchor.fget(None)
+        else:
+            class Store:
+                def __init__(self, data):
+                    self.data = data
+
+            store = Store(backing)
+            anchor = weakref.ref(store)
+
+            def values():
+                return anchor().data
+
+        class ReferentialMapping(MutableMapping):
+            def __init__(self, reference):
+                self.reference = reference
+
+            def __getitem__(self, key):
+                return values()[key]
+
+            def __setitem__(self, key, value):
+                values()[key] = value
+
+            def __delitem__(self, key):
+                del values()[key]
+
+            def __iter__(self):
+                return iter(values())
+
+            def __len__(self):
+                return len(values())
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.reference)
+                memo[id(self)] = copied
+                return copied
+
+        source = ReferentialMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_property_doc_state(self):
+        backing = {"old": 1}
+        anchor = property(doc=backing)
+
+        class PropertyDocMapping(MutableMapping):
+            def __init__(self, descriptor):
+                self.descriptor = descriptor
+
+            @property
+            def values(self):
+                return self.descriptor.__doc__
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.descriptor)
+                memo[id(self)] = copied
+                return copied
+
+        source = PropertyDocMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_property_state_scan_avoids_computed_descriptor_callbacks(self):
+        class Getter:
+            calls = 0
+            __slots__ = ()
+
+            def __call__(self, instance):
+                return None
+
+            def __getattribute__(self, name):
+                if name == "__isabstractmethod__":
+                    type(self).calls += 1
+                    raise RuntimeError("private marker")
+                return object.__getattribute__(self, name)
+
+        class DescriptorMapping(MutableMapping):
+            def __init__(self, data, descriptor):
+                self.data = data
+                self.descriptor = descriptor
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(dict(self.data), property(Getter()))
+                memo[id(self)] = copied
+                return copied
+
+        source = DescriptorMapping({"old": 1}, property(Getter()))
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert dict(merged["node"]) == {"old": 1, "new": 2}
+        assert dict(source) == {"old": 1}
+        assert Getter.calls == 0
+
+    def test_property_name_is_in_the_safe_metadata_allowlist(
+        self, monkeypatch
+    ):
+        from _rheplicant_bootstrap import layering as neutral_layering
+
+        backing = {"old": 1}
+        descriptor = property()
+        original_reader = (
+            neutral_layering._compatibility_builtin_descriptor_value
+        )
+        name_reads = []
+
+        def read_descriptor(value, owner, name):
+            if value is descriptor and owner is property and name == "__name__":
+                name_reads.append(name)
+                return backing
+            return original_reader(value, owner, name)
+
+        monkeypatch.setattr(
+            neutral_layering,
+            "_compatibility_builtin_descriptor_value",
+            read_descriptor,
+        )
+
+        class PropertyNameMapping(MutableMapping):
+            def __init__(self, data, metadata):
+                self.data = data
+                self.metadata = metadata
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(dict(self.data), self.metadata)
+                memo[id(self)] = copied
+                return copied
+
+        source = PropertyNameMapping({"old": 1}, descriptor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert name_reads
+        assert backing == {"old": 1}
+
+    @pytest.mark.skipif(
+        "__name__" not in vars(property),
+        reason="property.__name__ requires Python 3.13 or newer",
+    )
+    def test_mutated_custom_mapping_cannot_share_property_name_state(self):
+        backing = {"old": 1}
+        descriptor = property()
+        descriptor.__name__ = backing
+
+        class PropertyNameMapping(MutableMapping):
+            def __init__(self, metadata):
+                self.metadata = metadata
+
+            @property
+            def values(self):
+                return self.metadata.__name__
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.metadata)
+                memo[id(self)] = copied
+                return copied
+
+        source = PropertyNameMapping(descriptor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_builtin_metadata_state(
+        self,
+    ):
+        backing = {"old": 1}
+        anchor = "".join
+        anchor.__module__ = backing
+
+        class BuiltinMetadataMapping(MutableMapping):
+            def __init__(self, callback):
+                self.callback = callback
+
+            @property
+            def values(self):
+                return self.callback.__module__
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.callback)
+                memo[id(self)] = copied
+                return copied
+
+        source = BuiltinMetadataMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert backing == {"old": 1}
+
+    def test_mutated_custom_mapping_cannot_share_weakref_subclass_state(
+        self,
+    ):
+        class Store:
+            def __init__(self):
+                self.data = {"old": 1}
+
+        class Reference(weakref.ref):
+            def __deepcopy__(self, memo):
+                copied = type(self)(self())
+                memo[id(self)] = copied
+                return copied
+
+        store = Store()
+        anchor = Reference(store)
+
+        class ReferenceMapping(MutableMapping):
+            def __init__(self, reference):
+                self.reference = reference
+
+            @property
+            def values(self):
+                return self.reference().data
+
+            def __getitem__(self, key):
+                return self.values[key]
+
+            def __setitem__(self, key, value):
+                self.values[key] = value
+
+            def __delitem__(self, key):
+                del self.values[key]
+
+            def __iter__(self):
+                return iter(self.values)
+
+            def __len__(self):
+                return len(self.values)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(self.reference.__deepcopy__(memo))
+                memo[id(self)] = copied
+                return copied
+
+        source = ReferenceMapping(anchor)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert store.data == {"old": 1}
+
+    @pytest.mark.parametrize("callable_proxy", [False, True])
+    def test_mutated_custom_mapping_refuses_hidden_weakref_proxy(
+        self, callable_proxy
+    ):
+        class Store:
+            def __init__(self):
+                self.data = {"old": 1}
+
+        class CallableStore(Store):
+            def __call__(self):
+                return None
+
+        store = CallableStore() if callable_proxy else Store()
+
+        class ProxyMapping(MutableMapping):
+            def __init__(self, anchor):
+                self.anchor = anchor
+
+            def __getitem__(self, key):
+                return self.anchor.data[key]
+
+            def __setitem__(self, key, value):
+                self.anchor.data[key] = value
+
+            def __delitem__(self, key):
+                del self.anchor.data[key]
+
+            def __iter__(self):
+                return iter(self.anchor.data)
+
+            def __len__(self):
+                return len(self.anchor.data)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(weakref.proxy(store, lambda _: None))
+                memo[id(self)] = copied
+                return copied
+
+        source = ProxyMapping(weakref.proxy(store))
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert store.data == {"old": 1}
+
+    @pytest.mark.parametrize("callable_proxy", [False, True])
+    def test_public_weakref_proxy_retains_standard_deepcopy_semantics(
+        self, callable_proxy
+    ):
+        class Referent:
+            def __init__(self):
+                self.state = []
+
+        class CallableReferent(Referent):
+            def __call__(self):
+                return None
+
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        referent = CallableReferent() if callable_proxy else Referent()
+        proxy = weakref.proxy(referent)
+        source = Box({"old": 1, "proxy": proxy})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+        copied_referent = merged["node"]["proxy"]
+
+        assert type(copied_referent) is type(referent)
+        assert copied_referent is not referent
+        assert copied_referent.state is not referent.state
+        assert dict(source) == {"old": 1, "proxy": proxy}
+
+    def test_arbitrary_leaf_does_not_bind_custom_dict_descriptor(self):
+        class Leaf:
+            calls = 0
+
+            @property
+            def __dict__(self):
+                type(self).calls += 1
+                raise RuntimeError("private dict marker")
+
+            def __deepcopy__(self, memo):
+                copied = object.__new__(type(self))
+                memo[id(self)] = copied
+                return copied
+
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        leaf = Leaf()
+        source = Box({"old": 1, "leaf": leaf})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert type(merged["node"]["leaf"]) is Leaf
+        assert merged["node"]["leaf"] is not leaf
+        assert Leaf.calls == 0
+        assert dict(source) == {"old": 1, "leaf": leaf}
+
+    @pytest.mark.parametrize("reuse_holder", [True, False])
+    def test_mutated_custom_mapping_refuses_caller_owned_opaque_state(
+        self, reuse_holder
+    ):
+        class Holder:
+            def __init__(self, values):
+                self.data = dict(values)
+
+        class HolderMapping(MutableMapping):
+            def __init__(self, holder):
+                self.holder = holder
+
+            def __getitem__(self, key):
+                return self.holder.data[key]
+
+            def __setitem__(self, key, value):
+                self.holder.data[key] = value
+
+            def __delitem__(self, key):
+                del self.holder.data[key]
+
+            def __iter__(self):
+                return iter(self.holder.data)
+
+            def __len__(self):
+                return len(self.holder.data)
+
+            def __deepcopy__(self, memo):
+                if reuse_holder:
+                    copied_holder = self.holder
+                else:
+                    copied_holder = Holder({})
+                    copied_holder.data = self.holder.data
+                copied = type(self)(copied_holder)
+                memo[id(self)] = copied
+                return copied
+
+        holder = Holder({"old": 1})
+        source = HolderMapping(holder)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert holder.data == {"old": 1}
+
+    def test_unique_custom_mapping_with_arbitrary_leaf_remains_supported(self):
+        class Leaf:
+            def __init__(self):
+                self.state = {1: ["private state"]}
+
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        leaf = Leaf()
+        box = Box({"old": 1, "leaf": leaf})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": box})
+        copied = merged["node"]
+
+        assert type(copied) is Box
+        assert dict(copied) == {"old": 1, "leaf": copied["leaf"], "new": 2}
+        assert type(copied["leaf"]) is Leaf
+        assert copied["leaf"] is not leaf
+        assert copied["leaf"].state is not leaf.state
+        assert copied["leaf"].state == {1: ["private state"]}
+        assert copied["leaf"].state[1] is not leaf.state[1]
+        assert dict(box) == {"old": 1, "leaf": leaf}
+
+    def test_public_leaf_deepcopy_returning_self_remains_supported(self):
+        class Leaf:
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        leaf = Leaf()
+        source = Box({"old": 1, "leaf": leaf})
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert type(merged["node"]) is Box
+        assert merged["node"]["leaf"] is leaf
+        assert dict(source) == {"old": 1, "leaf": leaf}
+
+    def test_instance_dict_public_leaf_returning_self_remains_supported(self):
+        class Leaf:
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        class InstanceDictMapping(MutableMapping):
+            def __getitem__(self, key):
+                return object.__getattribute__(self, "__dict__")[key]
+
+            def __setitem__(self, key, value):
+                object.__getattribute__(self, "__dict__")[key] = value
+
+            def __delitem__(self, key):
+                del object.__getattribute__(self, "__dict__")[key]
+
+            def __iter__(self):
+                return iter(object.__getattribute__(self, "__dict__"))
+
+            def __len__(self):
+                return len(object.__getattribute__(self, "__dict__"))
+
+        leaf = Leaf()
+        source = InstanceDictMapping()
+        source["old"] = 1
+        source["leaf"] = leaf
+
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
+
+        assert type(merged["node"]) is InstanceDictMapping
+        assert merged["node"]["leaf"] is leaf
+        assert dict(merged["node"]) == {
+            "old": 1,
+            "leaf": leaf,
+            "new": 2,
+        }
+        assert dict(source) == {"old": 1, "leaf": leaf}
+
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_unique_custom_mapping_does_not_read_instance_class(
+        self, failure
+    ):
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private class marker")
+        elif failure == "ordinary":
+            marker = RuntimeError("private class marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class HostileClassMapping(MutableMapping):
+            class_lookups = 0
+
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    type(self).class_lookups += 1
+                    raise marker
+                return object.__getattribute__(self, name)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        source = HostileClassMapping({"old": 1})
+
+        merged = merge_extends(
+            {"node": {"new": 2}}, {"node": source}
+        )
+
+        assert dict(merged["node"]) == {"old": 1, "new": 2}
+        assert dict(source) == {"old": 1}
+        assert HostileClassMapping.class_lookups == 0
+
+    def test_pure_replacement_may_honor_deepcopy_returning_self(self):
+        class ReturningSelfList(list):
+            def __deepcopy__(self, memo):
+                memo[id(self)] = self
+                return self
+
+        shared = ReturningSelfList(["replacement"])
+
+        merged = merge_extends({"items": shared}, {})
+
+        assert merged["items"] is shared
+        assert shared == ["replacement"]
 
     def test_frozen_mapping_replacements_keep_tuple_type_and_detach_leaves(self):
         """Catches the public merge converting tuples to lists or sharing leaves."""
@@ -271,6 +2351,784 @@ class TestExtends:
         assert copied.default_factory is list
         assert copied == {"old": 1, "new": 2}
         assert copied is not nested
+
+    def test_recursively_patched_userdict_preserves_deepcopy_type_and_state(self):
+        nested = UserDict({"old": 1})
+        nested.extra = {"state": []}
+
+        merged = merge_extends(
+            {"left": {"new": 2}}, {"left": nested, "right": nested}
+        )
+        copied = merged["left"]
+        untouched = merged["right"]
+
+        assert type(copied) is UserDict
+        assert type(untouched) is UserDict
+        assert copied == {"old": 1, "new": 2}
+        assert untouched == {"old": 1}
+        assert copied is not untouched
+        assert copied.data is not untouched.data
+        assert copied.extra == {"state": []}
+        assert copied.extra is untouched.extra
+        assert copied.extra is not nested.extra
+        assert copied is not nested
+        assert nested == {"old": 1}
+
+    def test_recursive_split_accepts_a_reconnected_dict_subclass_backref(self):
+        class ReconnectingDict(dict):
+            def __copy__(self):
+                copied = type(self)(dict.items(self))
+                copied.ref = copied
+                return copied
+
+        shared = ReconnectingDict({"old": 1})
+        shared.ref = shared
+
+        merged = merge_extends(
+            {"left": {"new": 2}}, {"left": shared, "right": shared}
+        )
+
+        assert merged["left"] == {"old": 1, "new": 2}
+        assert merged["right"] == {"old": 1}
+        assert merged["left"].ref is merged["left"]
+        assert merged["right"].ref is merged["right"]
+        assert shared.ref is shared
+
+    @pytest.mark.parametrize("kind", ["userdict", "dict_subclass"])
+    def test_recursive_split_refuses_a_hidden_self_backref(self, kind):
+        if kind == "userdict":
+            shared = UserDict({"old": 1})
+        else:
+            class CopyingDict(dict):
+                def __copy__(self):
+                    copied = type(self)(dict.items(self))
+                    copied.__dict__.update(self.__dict__)
+                    return copied
+
+            shared = CopyingDict({"old": 1})
+        shared.ref = shared
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert shared.ref is shared
+        assert "new" not in shared
+
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_hidden_split_state_traversal_normalizes_only_exceptions(
+        self, failure
+    ):
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private state marker")
+        elif failure == "ordinary":
+            class HostileError(Exception):
+                def __str__(self):
+                    raise AssertionError("marker text must not run")
+
+                def __repr__(self):
+                    raise AssertionError("marker repr must not run")
+
+            marker = HostileError("private state marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class FailingState(Mapping):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                raise marker
+
+            def __getitem__(self, key):
+                raise marker
+
+            def items(self):
+                raise marker
+
+            def __deepcopy__(self, memo):
+                copied = type(self)()
+                memo[id(self)] = copied
+                return copied
+
+        shared = UserDict({"old": 1})
+        shared.extra = FailingState()
+
+        if failure == "base":
+            with pytest.raises(BaseException) as caught:
+                merge_extends(
+                    {"left": {"new": 2}},
+                    {"left": shared, "right": shared},
+                )
+            assert caught.value is marker
+            return
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}},
+                {"left": shared, "right": shared},
+            )
+
+        assert caught.value is not marker
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+
+    def test_recursive_patch_never_mutates_a_custom_mapping_alias_backing(self):
+        class Box(MutableMapping):
+            def __init__(self, values):
+                self._data = dict(values)
+                self.state = {"shared": []}
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        shared = Box({"old": 1})
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared) == {"old": 1}
+
+    def test_recursive_copy_protocol_lookup_failure_is_replaced_statically(self):
+        marker = _HostileCallbackConfigError("private copy lookup marker")
+
+        class HostileMeta(type(MutableMapping)):
+            def __getattribute__(cls, name):
+                if name == "__copy__":
+                    raise marker
+                return super().__getattribute__(name)
+
+        class HostileMapping(MutableMapping, metaclass=HostileMeta):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        shared = HostileMapping({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert id(caught.value) != id(marker)
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared) == {"old": 1}
+
+    def test_recursive_split_refuses_a_custom_copy_with_shared_backing(self):
+        class CustomBox(MutableMapping):
+            mutations = 0
+
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                type(self).mutations += 1
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            def __copy__(self):
+                copied = type(self)({})
+                copied._data = self._data
+                return copied
+
+        shared = CustomBox({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared) == {"old": 1}
+        assert CustomBox.mutations == 0
+
+    def test_recursive_split_refuses_external_dict_subclass_storage(self):
+        class ExternalStoreDict(dict):
+            def __init__(self, values):
+                dict.__init__(self)
+                self.store = dict(values)
+
+            def __getitem__(self, key):
+                return self.store[key]
+
+            def __iter__(self):
+                return iter(self.store)
+
+            def __len__(self):
+                return len(self.store)
+
+            def items(self):
+                return self.store.items()
+
+            def __copy__(self):
+                copied = type(self)({})
+                copied.store = self.store
+                return copied
+
+        shared = ExternalStoreDict({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared.items()) == {"old": 1}
+
+    @pytest.mark.parametrize("location", ["nested", "root"])
+    def test_unique_external_dict_subclass_storage_is_refused(
+        self, location
+    ):
+        class ExternalStoreDict(dict):
+            def __init__(self, values):
+                dict.__init__(self)
+                self.store = dict(values)
+
+            def __getitem__(self, key):
+                return self.store[key]
+
+            def __iter__(self):
+                return iter(self.store)
+
+            def __len__(self):
+                return len(self.store)
+
+            def items(self):
+                return self.store.items()
+
+        shared = ExternalStoreDict({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            if location == "nested":
+                merge_extends({"node": {"new": 2}}, {"node": shared})
+            else:
+                merge_extends({"new": 2}, shared)
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert dict(shared.items()) == {"old": 1}
+
+    def test_recursive_split_refuses_a_dict_getattribute_override(self):
+        class AttributeDict(dict):
+            lookup_calls = 0
+
+            def __getattribute__(self, name):
+                if name == "__getattribute__":
+                    type(self).lookup_calls += 1
+                return object.__getattribute__(self, name)
+
+            def __copy__(self):
+                return type(self)(dict.items(self))
+
+        shared = AttributeDict({"old": 1})
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert shared == {"old": 1}
+        assert AttributeDict.lookup_calls == 0
+
+    def test_recursive_split_refuses_hidden_reference_to_split_descendant(self):
+        class AttrDict(dict):
+            def __copy__(self):
+                copied = type(self)(dict.items(self))
+                copied.__dict__.update(self.__dict__)
+                return copied
+
+        nested = {"old": 1}
+        shared = AttrDict({"nested": nested})
+        shared.ref = nested
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"nested": {"new": 2}}},
+                {"left": shared, "right": shared},
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert shared.ref is nested
+        assert nested == {"old": 1}
+
+    def test_recursive_patch_never_breaks_a_cycle_through_an_object_attribute(self):
+        class Holder:
+            pass
+
+        shared = {"old": 1}
+        holder = Holder()
+        holder.ref = shared
+        shared["holder"] = holder
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+        assert holder.ref is shared
+        assert "new" not in shared
+
+    def test_recursive_patch_mutates_a_unique_mapping_with_an_arbitrary_leaf(self):
+        class Leaf:
+            def __init__(self):
+                self.state = []
+
+        leaf = Leaf()
+        parent = {"node": {"old": 1, "leaf": leaf}}
+
+        merged = merge_extends({"node": {"new": 2}}, parent)
+        node = merged["node"]
+
+        assert node["old"] == 1
+        assert node["new"] == 2
+        assert type(node["leaf"]) is Leaf
+        assert node["leaf"] is not leaf
+        assert node["leaf"].state == []
+        assert node["leaf"].state is not leaf.state
+        assert parent == {"node": {"old": 1, "leaf": leaf}}
+
+    def test_recursive_patch_preserves_a_unique_object_attribute_backref(self):
+        class Holder:
+            pass
+
+        node = {"old": 1}
+        holder = Holder()
+        holder.ref = node
+        node["holder"] = holder
+        parent = {"node": node}
+
+        merged = merge_extends({"node": {"new": 2}}, parent)
+        copied = merged["node"]
+
+        assert copied["holder"].ref is copied
+        assert copied["new"] == 2
+        assert holder.ref is node
+        assert "new" not in node
+
+    def test_recursive_patch_splits_nested_descendants_of_a_shared_parent(self):
+        descendant = {"old": 1}
+        shared = {"nested": descendant}
+        parent = {"left": shared, "right": shared}
+
+        merged = merge_extends(
+            {"left": {"nested": {"new": 2}}}, parent
+        )
+
+        assert merged["left"] is not merged["right"]
+        assert merged["left"]["nested"] == {"old": 1, "new": 2}
+        assert merged["right"]["nested"] == {"old": 1}
+        assert merged["left"]["nested"] is not merged["right"]["nested"]
+        assert parent == {"left": shared, "right": shared}
+        assert descendant == {"old": 1}
+
+    def test_recursive_patch_keeps_a_nested_list_alias_during_append(self):
+        items = [1]
+        shared = {"items": items}
+        parent = {"left": shared, "right": shared}
+
+        merged = merge_extends(
+            {"left": {"items": {"append": [2]}}}, parent
+        )
+
+        assert merged["left"]["items"] == [1, 2]
+        assert merged["right"]["items"] == [1, 2]
+        assert merged["left"]["items"] is merged["right"]["items"]
+        assert parent == {"left": shared, "right": shared}
+        assert items == [1]
+
+    def test_recursive_patch_preserves_a_stateful_str_subclass_leaf(self):
+        class StatefulStr(str):
+            def __new__(cls, value):
+                instance = str.__new__(cls, value)
+                instance.state = []
+                return instance
+
+        leaf = StatefulStr("leaf")
+        parent = {"node": {"old": 1, "leaf": leaf}}
+
+        merged = merge_extends({"node": {"new": 2}}, parent)
+        copied = merged["node"]["leaf"]
+
+        assert type(copied) is StatefulStr
+        assert copied == "leaf"
+        assert copied is not leaf
+        assert copied.state == []
+        assert copied.state is not leaf.state
+
+    def test_deepcopy_protocol_lookup_failure_is_replaced_statically(self):
+        marker = _HostileCallbackConfigError("private deepcopy lookup marker")
+
+        class HostileMeta(type(MutableMapping)):
+            def __getattribute__(cls, name):
+                if name == "__deepcopy__":
+                    raise marker
+                return super().__getattribute__(name)
+
+        class HostileMapping(MutableMapping, metaclass=HostileMeta):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends({"node": HostileMapping({"old": 1})}, {})
+
+        assert caught.value is not marker
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+
+    @pytest.mark.parametrize("seam", ["discover", "reachability"])
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_compatibility_type_checks_do_not_run_metaclass_equality(
+        self, seam, failure
+    ):
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private equality marker")
+        elif failure == "ordinary":
+            class HostileError(Exception):
+                def __str__(self):
+                    raise AssertionError("marker text must not run")
+
+                def __repr__(self):
+                    raise AssertionError("marker repr must not run")
+
+            marker = HostileError("private equality marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class HostileMeta(type):
+            equality_calls = 0
+
+            def __eq__(cls, other):
+                cls.equality_calls += 1
+                raise marker
+
+            __hash__ = type.__hash__
+
+        class HostileLeaf(metaclass=HostileMeta):
+            pass
+
+        leaf = HostileLeaf()
+        if seam == "discover":
+            merged = merge_extends({"value": leaf}, {})
+
+            assert type(merged["value"]) is HostileLeaf
+        else:
+            from _rheplicant_bootstrap.layering import (
+                _compatibility_reaches_mapping,
+            )
+
+            with pytest.raises(ConfigError) as caught:
+                _compatibility_reaches_mapping([leaf], {})
+
+            assert str(caught.value) == (
+                "merge_extends: compatibility traversal or deepcopy failed."
+            )
+        assert HostileMeta.equality_calls == 0
+
+    @pytest.mark.parametrize("hook", ["__eq__", "__hash__"])
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_virtual_fallback_does_not_bind_metaclass_descriptors(
+        self, hook, failure
+    ):
+        from _rheplicant_bootstrap.layering import (
+            _compatibility_has_mro_base,
+        )
+
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private descriptor marker")
+        elif failure == "ordinary":
+            marker = RuntimeError("private descriptor marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class HostileDescriptor:
+            calls = 0
+
+            def __get__(self, instance, owner):
+                self.calls += 1
+                raise marker
+
+        descriptor = HostileDescriptor()
+        namespace = {hook: descriptor}
+        if hook == "__eq__":
+            namespace["__hash__"] = type.__hash__
+        HostileMeta = type("HostileMeta", (type,), namespace)
+        HostileLeaf = HostileMeta("HostileLeaf", (), {})
+
+        assert not _compatibility_has_mro_base(
+            HostileLeaf(), (dict, Mapping)
+        )
+        assert descriptor.calls == 0
+
+    @pytest.mark.parametrize(
+        "seam", ["merge_root", "recursive_root", "key", "append", "inherited"]
+    )
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_compatibility_diagnostics_do_not_run_metaclass_name_lookup(
+        self, seam, failure
+    ):
+        from _rheplicant_bootstrap.layering import recursive_update
+
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private name marker")
+        elif failure == "ordinary":
+            marker = RuntimeError("private name marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class HostileMeta(type):
+            name_lookups = 0
+
+            def __getattribute__(cls, name):
+                if name == "__name__":
+                    lookups = type.__getattribute__(cls, "name_lookups")
+                    type.__setattr__(cls, "name_lookups", lookups + 1)
+                    raise marker
+                return type.__getattribute__(cls, name)
+
+        class HostileValue(metaclass=HostileMeta):
+            pass
+
+        class KeyMapping(Mapping):
+            def __getitem__(self, key):
+                return 1
+
+            def __iter__(self):
+                return iter((value,))
+
+            def __len__(self):
+                return 1
+
+            def items(self):
+                return iter(((value, 1),))
+
+        value = HostileValue()
+        with pytest.raises(ConfigError) as caught:
+            if seam == "merge_root":
+                merge_extends(value, {})
+            elif seam == "recursive_root":
+                recursive_update({}, value)
+            elif seam == "key":
+                merge_extends(KeyMapping(), {})
+            elif seam == "append":
+                merge_extends({"items": {"append": value}}, {"items": []})
+            else:
+                merge_extends({"items": {"append": []}}, {"items": value})
+
+        messages = {
+            "merge_root": "merge_extends: child is a mapping; got HostileValue.",
+            "recursive_root": (
+                "recursive_update: patch is a mapping; got HostileValue."
+            ),
+            "key": "merge_extends: keys are strings; got HostileValue.",
+            "append": "'items': append is a sequence; got HostileValue.",
+            "inherited": (
+                "'items' is extended with {append: ...} but the inherited "
+                "value is HostileValue, not a list."
+            ),
+        }
+        assert str(caught.value) == messages[seam]
+        assert HostileMeta.name_lookups == 0
+
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_compatibility_type_name_normalizes_only_exceptions(
+        self, failure
+    ):
+        from _rheplicant_bootstrap.layering import _compatibility_type_name
+
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private name marker")
+        elif failure == "ordinary":
+            marker = RuntimeError("private name marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class HostileDescriptor:
+            def __get__(self, instance, owner):
+                raise marker
+
+        class HostileMeta(type):
+            __name__ = HostileDescriptor()
+
+        class HostileValue(metaclass=HostileMeta):
+            pass
+
+        if failure == "base":
+            with pytest.raises(BaseException) as caught:
+                _compatibility_type_name(HostileValue())
+            assert caught.value is marker
+            return
+
+        with pytest.raises(ConfigError) as caught:
+            _compatibility_type_name(HostileValue())
+
+        assert caught.value is not marker
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+
+    def test_recursive_patch_never_breaks_a_plain_dict_subclass_backref(self):
+        class AttrDict(dict):
+            pass
+
+        shared = AttrDict({"old": 1})
+        shared.ref = shared
+
+        try:
+            merged = merge_extends(
+                {"left": {"new": 2}}, {"left": shared, "right": shared}
+            )
+        except ConfigError as caught:
+            assert str(caught) == (
+                "merge_extends: compatibility traversal or deepcopy failed."
+            )
+            assert shared.ref is shared
+            assert "new" not in shared
+            return
+
+        left = merged["left"]
+        right = merged["right"]
+        assert left is not right
+        assert left.ref is left
+        assert right.ref is right
+        assert shared.ref is shared
+        assert "new" not in shared
+
+    def test_recursive_patch_splits_a_plain_dict_subclass(self):
+        class Plain(dict):
+            pass
+
+        shared = Plain({"old": 1})
+        parent = {"left": shared, "right": shared}
+
+        merged = merge_extends({"left": {"new": 2}}, parent)
+
+        assert type(merged["left"]) is Plain
+        assert type(merged["right"]) is Plain
+        assert merged["left"] == {"old": 1, "new": 2}
+        assert merged["right"] == {"old": 1}
+        assert merged["left"] is not merged["right"]
+        assert parent == {"left": shared, "right": shared}
+        assert shared == {"old": 1}
+
+    def test_virtual_mapping_with_a_benign_metaclass_remains_supported(self):
+        class BenignMeta(type):
+            pass
+
+        class VirtualMapping(metaclass=BenignMeta):
+            def __init__(self, values):
+                self._data = dict(values)
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            def items(self):
+                return self._data.items()
+
+        Mapping.register(VirtualMapping)
+        child = VirtualMapping({"new": 2})
+
+        merged = merge_extends(child, {"old": 1})
+
+        assert merged == {"old": 1, "new": 2}
+        assert child._data == {"new": 2}
 
     def test_recursive_patch_splits_one_occurrence_of_a_shared_parent(self):
         nested = {"leaf": []}
@@ -513,6 +3371,304 @@ class TestExtends:
 
         assert merged == {"kept": 1, "value": 2}
         assert type(next(key for key in merged if key == "value")) is str
+
+    def test_key_canonicalization_does_not_change_a_cross_role_value_alias(self):
+        class StatefulStr(str):
+            def __new__(cls, value):
+                instance = str.__new__(cls, value)
+                instance.state = []
+                return instance
+
+        shared = StatefulStr("shared")
+
+        merged = merge_extends({shared: shared, "alias": shared}, {})
+        copied_key = next(iter(merged))
+        copied_value = merged["shared"]
+        copied_alias = merged["alias"]
+
+        assert type(copied_key) is str
+        assert type(copied_value) is StatefulStr
+        assert copied_value == "shared"
+        assert copied_value is copied_alias
+        assert copied_value is not shared
+        assert copied_value.state == []
+        assert copied_value.state is not shared.state
+
+    @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
+    def test_compatibility_reachability_terminates_on_container_cycles(self, kind):
+        script = textwrap.dedent(
+            """
+            import sys
+
+            from _rheplicant_bootstrap.layering import (
+                _compatibility_reaches_mapping,
+            )
+
+            class HashableList(list):
+                __hash__ = object.__hash__
+
+            kind = sys.argv[1]
+            if kind == "list":
+                cycle = []
+                cycle.append(cycle)
+            elif kind == "tuple":
+                bridge = []
+                cycle = (bridge,)
+                bridge.append(cycle)
+            elif kind == "set":
+                bridge = HashableList()
+                cycle = {bridge}
+                bridge.append(cycle)
+            else:
+                bridge = HashableList()
+                cycle = frozenset({bridge})
+                bridge.append(cycle)
+
+            print(_compatibility_reaches_mapping([cycle], {}))
+            """
+        )
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script, kind],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout == "False\n"
+
+    @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
+    def test_compatibility_reachability_identity_cache_handles_collisions(
+        self, kind, monkeypatch
+    ):
+        from _rheplicant_bootstrap import layering as neutral_layering
+
+        class HashableMapping(dict):
+            __hash__ = object.__hash__
+
+        target = HashableMapping()
+        if kind == "list":
+            empty, reaching = [], [target]
+        elif kind == "tuple":
+            empty, reaching = (), (target,)
+        elif kind == "set":
+            empty, reaching = set(), {target}
+        else:
+            empty, reaching = frozenset(), frozenset({target})
+        real_id = id
+
+        def colliding_id(value):
+            if value is empty or value is reaching:
+                return 7
+            return real_id(value)
+
+        monkeypatch.setattr(
+            neutral_layering, "id", colliding_id, raising=False
+        )
+
+        assert neutral_layering._compatibility_reaches_mapping(
+            [reaching, empty], target
+        )
+
+    @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
+    def test_appended_traversal_normalizes_only_ordinary_exceptions(
+        self, failure
+    ):
+        if failure == "config":
+            marker = _HostileCallbackConfigError("private append marker")
+        elif failure == "ordinary":
+            class HostileError(Exception):
+                def __str__(self):
+                    raise AssertionError("marker text must not run")
+
+                def __repr__(self):
+                    raise AssertionError("marker repr must not run")
+
+            marker = HostileError("private append marker")
+        else:
+            class StopNow(BaseException):
+                pass
+
+            marker = StopNow("stop")
+
+        class ArmedList(list):
+            def __init__(self, values=(), *, armed=False):
+                list.__init__(self, values)
+                self.armed = armed
+
+            def __iter__(self):
+                if self.armed:
+                    raise marker
+                return list.__iter__(self)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(list.__iter__(self), armed=True)
+                memo[id(self)] = copied
+                return copied
+
+        inherited = ["old"]
+        appended = ArmedList(["new"])
+
+        if failure == "base":
+            with pytest.raises(BaseException) as caught:
+                merge_extends(
+                    {"items": {"append": appended}}, {"items": inherited}
+                )
+            assert caught.value is marker
+            return
+
+        with pytest.raises(ConfigError) as caught:
+            merge_extends(
+                {"items": {"append": appended}}, {"items": inherited}
+            )
+
+        assert id(caught.value) != id(marker)
+        assert str(caught.value) == (
+            "merge_extends: compatibility traversal or deepcopy failed."
+        )
+
+    def test_append_does_not_reiterate_the_detached_inherited_list(self):
+        marker = AssertionError("detached inherited list was iterated")
+
+        class ArmedInherited(list):
+            def __init__(self, values=(), *, armed=False):
+                list.__init__(self, values)
+                self.armed = armed
+
+            def __iter__(self):
+                if self.armed:
+                    raise marker
+                return list.__iter__(self)
+
+            def __deepcopy__(self, memo):
+                copied = type(self)(list.__iter__(self), armed=True)
+                memo[id(self)] = copied
+                return copied
+
+        merged = merge_extends(
+            {"items": {"append": ["new"]}},
+            {"items": ArmedInherited(["old"])},
+        )
+
+        items = merged["items"]
+        assert list.__len__(items) == 2
+        assert list.__getitem__(items, 0) == "old"
+        assert list.__getitem__(items, 1) == "new"
+
+    @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
+    def test_public_merge_terminates_when_parent_contains_a_container_cycle(
+        self, kind
+    ):
+        script = textwrap.dedent(
+            """
+            import sys
+
+            from _rheplicant_bootstrap.errors import ConfigError
+            from _rheplicant_bootstrap.layering import merge_extends
+
+            class HashableList(list):
+                __hash__ = object.__hash__
+
+            kind = sys.argv[1]
+            if kind == "list":
+                cycle = []
+                cycle.append(cycle)
+            elif kind == "tuple":
+                bridge = []
+                cycle = (bridge,)
+                bridge.append(cycle)
+            elif kind == "set":
+                bridge = HashableList()
+                cycle = {bridge}
+                bridge.append(cycle)
+            else:
+                bridge = HashableList()
+                cycle = frozenset({bridge})
+                bridge.append(cycle)
+
+            try:
+                result = merge_extends(
+                    {"node": {"added": 2}},
+                    {"node": {"cycle": cycle}},
+                )
+            except ConfigError:
+                raise SystemExit(0)
+            if result["node"]["added"] != 2:
+                raise SystemExit(2)
+            raise SystemExit(0)
+            """
+        )
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script, kind],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+
+    def test_optimized_python_preserves_cleanup_and_shared_graph_behavior(self):
+        script = textwrap.dedent(
+            """
+            from _rheplicant_bootstrap.frozen import freeze_evidence
+            from _rheplicant_bootstrap.layering import OriginNode, merge_extends
+            from _rheplicant_bootstrap.types import Origin
+
+            shared_mapping = {"leaf": [1]}
+            shared_sequence = [shared_mapping]
+            frozen = freeze_evidence(
+                {
+                    "mapping": [shared_mapping, shared_mapping],
+                    "sequence": [shared_sequence, shared_sequence],
+                },
+                where="optimized",
+            )
+            if frozen["mapping"][0] is not frozen["mapping"][1]:
+                raise SystemExit(2)
+            if frozen["sequence"][0] is not frozen["sequence"][1]:
+                raise SystemExit(3)
+
+            leaf = OriginNode(Origin("user"), {})
+            origins = OriginNode(None, {"left": leaf, "right": leaf})
+            if origins.children["left"] is not origins.children["right"]:
+                raise SystemExit(4)
+
+            patch = {"new": 2}
+            merged = merge_extends(
+                {"left": patch, "right": patch},
+                {"left": {"old": 1}, "right": {"old": 1}},
+            )
+            if merged != {
+                "left": {"old": 1, "new": 2},
+                "right": {"old": 1, "new": 2},
+            }:
+                raise SystemExit(5)
+            print("shared-graphs-ok")
+            """
+        )
+        completed = []
+        for optimization in ((), ("-O",)):
+            completed.append(
+                subprocess.run(
+                    [sys.executable, *optimization, "-c", script],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            )
+
+        assert [run.returncode for run in completed] == [0, 0], [
+            run.stderr for run in completed
+        ]
+        assert [run.stdout for run in completed] == [
+            "shared-graphs-ok\n",
+            "shared-graphs-ok\n",
+        ]
 
     def test_compatibility_refuses_keys_that_collide_after_canonicalization(self):
         class ItemsMapping(Mapping):

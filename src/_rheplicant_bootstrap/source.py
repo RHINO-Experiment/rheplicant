@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import stat
-from typing import BinaryIO
+from collections.abc import Callable
+from typing import BinaryIO, TypeVar
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.types import SourceInput
 from _rheplicant_bootstrap.yaml import YamlLimits
+
+_T = TypeVar("_T")
 
 
 def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -68,6 +71,53 @@ def _byte_limit_error(source_name: str, observed: int, limit: int) -> ConfigErro
     return ConfigError(f"{source_name}: YAML byte count {observed} exceeds limit {limit}.")
 
 
+def _stable_read_callback(
+    operation: Callable[[], _T], *, source_name: str
+) -> _T:
+    try:
+        return operation()
+    except Exception:
+        raise ConfigError(f"{source_name}: cannot read source.") from None
+
+
+class _StableStreamContext:
+    def __init__(self, stream: BinaryIO, *, source_name: str) -> None:
+        self._stream = stream
+        self._source_name = source_name
+
+    def __enter__(self) -> None:
+        _stable_read_callback(
+            lambda: self._stream.__enter__(), source_name=self._source_name
+        )
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: object | None,
+    ) -> bool:
+        try:
+            self._stream.__exit__(
+                exception_type, exception, traceback
+            )
+        except Exception:
+            if exception is not None:
+                try:
+                    exception_bases = type.__getattribute__(
+                        type(exception), "__mro__"
+                    )
+                except Exception:
+                    raise ConfigError(
+                        f"{self._source_name}: cannot read source."
+                    ) from None
+                if not any(base is Exception for base in exception_bases):
+                    return False
+            raise ConfigError(
+                f"{self._source_name}: cannot read source."
+            ) from None
+        return False
+
+
 def _read_bounded_forward(stream: BinaryIO, *, source_name: str, limit: int) -> bytes:
     """Accumulate legal short reads without traversing the source a second time."""
     maximum = limit + 1
@@ -125,18 +175,27 @@ def _read_stable_regular_file(
         if not stat.S_ISLNK(before_link.st_mode):
             flags |= getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(source_path, flags)
-        before_target = os.fstat(fd)
+        before_target = _stable_read_callback(
+            lambda: os.fstat(fd), source_name=display_name
+        )
         if not stat.S_ISREG(before_target.st_mode):
             raise ConfigError(f"{display_name}: source must be a regular file.")
         if before_target.st_size > maximum:
             raise _byte_limit_error(display_name, before_target.st_size, maximum)
-        stream = os.fdopen(fd, "rb")
-        fd = -1
-        with stream:
+        stream = _stable_read_callback(
+            lambda: os.fdopen(fd, "rb", closefd=False),
+            source_name=display_name,
+        )
+        with _StableStreamContext(stream, source_name=display_name):
             data = _read_bounded_forward(
                 stream, source_name=display_name, limit=maximum
             )
-            after_target = os.fstat(stream.fileno())
+            stream_fd = _stable_read_callback(
+                lambda: stream.fileno(), source_name=display_name
+            )
+            after_target = _stable_read_callback(
+                lambda: os.fstat(stream_fd), source_name=display_name
+            )
         after_read_link = _lexical_lstat(source_path)
         source_realpath = os.path.realpath(source_path)
         final_target = os.stat(source_realpath)
