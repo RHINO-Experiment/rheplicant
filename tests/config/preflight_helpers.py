@@ -389,6 +389,25 @@ T4_NO_OBSERVED_INFERENCE = {key: value
                             for key, value in _base()["inference"].items()
                             if key != "observed"}
 
+#: The base document's inference block with its ONE observation replaced by
+#: TWO named ones, neither called ``primary``.  ``sections/observed.py:266-271``
+#: names a ``primary`` entry, falls back to the single entry when there is
+#: exactly one, and otherwise leaves ``ObservedBuild.primary`` **None** -- so
+#: this is the shape on which ``observed`` is not ``None`` and its ``primary``
+#: is, which is the second half of C19's stand-down and the only one a
+#: document can reach.  Measured: ``entries == ['day', 'night']``,
+#: ``primary is None``.
+#:
+#: Without the ``primary is None`` half of the guard, C19 evaluates
+#: ``observed.entries[None]`` and dies as ``post-flight check 'C19' RAISED
+#: KeyError: None`` -- laundered blame.  **For** :func:`repatch`.
+T4_TWO_NAMED_OBSERVATIONS = {
+    **{key: value for key, value in _base()["inference"].items()
+       if key != "observed"},
+    "observed": {"night": dict(_base()["inference"]["observed"]),
+                 "day": dict(_base()["inference"]["observed"])},
+}
+
 #: An ``inference:`` PATCH turning the noise off.  ``decided_noise`` returns
 #: ``None`` for ``kind: none`` (``sections/noise.py:318``) and
 #: ``as_noise_model(None, ...)`` is a ``TypeError`` out of the package, so C19

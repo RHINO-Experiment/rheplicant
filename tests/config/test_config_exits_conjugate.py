@@ -41,6 +41,18 @@ from tests.config.exit_helpers import (
 NO_WIDTH = {key: value for key, value in WIENER.items() if key != "width"}
 
 
+LINEARITY_DECLINED = {"linearity": {"mode": "skip",
+                      "reason": "this fixture declares linear: true on a "
+                                "latent the prediction is not affine in, on "
+                                "purpose, so that the exit-level check: has "
+                                "a lever"}}
+
+
+def _declined(document):
+    document["inference"]["checks"] = LINEARITY_DECLINED
+    return document
+
+
 class TestTheKindIsRunnable:
     def test_conjugate_wiener_parses_rather_than_deferring(self):
         (run,) = parse_runs([{"kind": "conjugate.wiener", "width": "none"}])
@@ -361,9 +373,9 @@ class TestWidth:
         # the point moves.  _gaussian_width's docstring is right that no test
         # pins the point; a task that ever needs one must find a curved
         # latent whose Jacobian actually differs between init and mean.
-        product = run_product(wiener_document(
+        product = run_product(_declined(wiener_document(
             {**WIENER, "names": ["c"], "width": "fisher", "check": False},
-            parameters={"c": CENTRE_LATENT}, at={"c": 76.0}))
+            parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
         assert product["covariance"].kind == "posterior_covariance"
         assert float(product["covariance"].sigma("c")) == pytest.approx(
             10.0, rel=1e-3)
@@ -450,27 +462,34 @@ class TestCheckReachesLinearOperator:
     silence.
     """
 
-    def test_a_latent_that_is_not_linear_is_refused_by_default(self):
+    def test_a_latent_that_is_not_linear_is_refused_by_the_exits_own_default(self):
         # names: ["c"] rather than WIENER's ["g"]: this document's only
         # latent is c, and names: has no default to fall back on.
+        #
+        # Renamed from ...refused_by_default: the subject is the EXIT key
+        # check:'s default (True), which the document-level linearity gate
+        # does not touch (this fixture declines it via _declined()) -- but
+        # the document is no longer "at defaults" in the sense a reader took
+        # from the old name, now that C12 is refuse-by-default too.
         with pytest.raises(ParameterSpaceError, match="JOINTLY"):
-            run_document(wiener_document(
+            run_document(_declined(wiener_document(
                 {**WIENER, "names": ["c"]},
-                parameters={"c": CENTRE_LATENT}, at={"c": 76.0}))
+                parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
 
     def test_check_false_reaches_linear_operator(self):
         # Measured: the same document with check: false solves and lands at
         # c = 75.000008.  An executor that dropped check: from its sweep set
         # refuses the key outright; one that sent it to wiener_solve -- which
         # has no such parameter -- raises TypeError.  Neither produces this.
-        product = run_product(wiener_document(
+        product = run_product(_declined(wiener_document(
             {**WIENER, "names": ["c"], "check": False},
-            parameters={"c": CENTRE_LATENT}, at={"c": 76.0}))
+            parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
         assert float(product["mean"]["c"]) == pytest.approx(75.0, abs=1e-3)
 
 
 class TestTheCheapChecksComeFirst:
-    """A document broken in its grammar AND its model hears about the grammar.
+    """A document broken in its grammar AND its model hears about the grammar
+    -- WITHIN ``_run_conjugate``, and no longer at the top of the pipeline.
 
     **Since Plan 3A, the pre-flight pass is in front of both.**  A27 and A28
     are decided from two words of text before any executor exists, so a
@@ -492,6 +511,30 @@ class TestTheCheapChecksComeFirst:
     inside the package instead of a ConfigError -- a config-layer refusal
     turned into a package exception, which is the seam this layer exists to
     close.  The other two changed which refusal a doubly-broken document got.
+
+    **CORRECTION, Task 4 fix round.**  This class's title used to be true of
+    the WHOLE pipeline; it no longer is.  Document-level C12 (this plan's own
+    ``linearity`` gate, ``refuse`` by default) now runs during
+    ``load_document``, ahead of any run's own execution -- so on a document
+    that declares a ``linear: true`` latent and does NOT decline C12, the
+    document-level check_linearity pays its full cost and can refuse the
+    document BEFORE ``_run_conjugate``'s cheap per-kind grammar is ever
+    reached.  Measured on the smallest fixture, warm (excluding the first
+    JAX-compile call):
+    ``test_a_missing_width_is_heard_before_check_linearity``'s own document
+    costs 8.1-8.4 ms through ``run_document`` with C12 on against 3.3-3.7 ms
+    with it declined via :func:`_declined` -- roughly 2x, and the qualitative
+    point stands regardless of the exact ratio on a given machine.
+    ``A29``'s sibling test is unaffected -- A29 is pre-flight, still in front
+    of everything -- and this class's OWN per-kind-grammar-before-
+    check_linearity claim is unaffected
+    for the RUNS it covers, because every test that reaches a genuinely
+    nonlinear ``linear: true`` latent now declines the document gate via
+    :func:`_declined` so the exit-level ``check:`` knob, which is what this
+    class is actually about, is what gets exercised.  This is a consequence
+    of the plan's own §0.1 decision to default C12 to ``refuse``, not a
+    defect in this class or in Task 4; Task 7 carries the correction into the
+    plan record.
     """
 
     def test_the_undecidable_sigma_is_now_heard_before_the_missing_width(self):
@@ -526,9 +569,9 @@ class TestTheCheapChecksComeFirst:
         # the operator is built, and a run that never named a width has a
         # grammar error the layer can see without building anything.
         with pytest.raises(ConfigError, match="width: is required"):
-            run_document(wiener_document(
+            run_document(_declined(wiener_document(
                 {**NO_WIDTH, "names": ["c"]},
-                parameters={"c": CENTRE_LATENT}, at={"c": 76.0}))
+                parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
 
     def test_a_missing_seed_is_heard_before_check_linearity(self):
         # The same guarantee for the draw, and the reason A29 lives in

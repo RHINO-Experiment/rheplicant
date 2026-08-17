@@ -76,6 +76,27 @@ a run cannot expect a refusal of the document that configures it.
 is the pin, and it spies on the executor so the claim is "never reached"
 rather than "returned no product".
 
+**KNOWN LIMITATION, recorded rather than fixed -- a halfway import plus any
+retry silently loses slots.**  Reproduced in isolation: when one of the
+discovered submodules raises at import time, Python deletes the failed
+PACKAGE (``rheplicant.config.postflight``) from ``sys.modules`` but keeps the
+SUBMODULES that had already imported before the failure.  On a retry of the
+package import, ``importlib.import_module`` returns those submodules from
+cache rather than re-running their bodies, so a submodule that imports
+cleanly on the retry pass but ran (and registered via ``@register``) on the
+FIRST, failed pass is never re-executed -- its slot is simply absent from the
+fresh :data:`CHECKS` the retry builds, and :func:`priced` then runs FEWER
+checks than the document asked for, with no error at all: a green load that
+silently priced less than it claimed to.  Not fixed here: the scenario needs
+an import failure *and* a retry, which in production means the process is
+already broken, and the candidate fix -- raising at import if any discovered
+stem owns no slot -- would make a legitimate non-registering helper module
+under this package illegal at import time, a worse failure than the one it
+prevents.  (Two modules named after each other is NOT this failure mode:
+:func:`_discoverable` is fully evaluated, and with :data:`_RESERVED` frozen
+before the loop the reserved set is fixed, before the loop body imports
+anything.)
+
 **Scope.**  A module here MAY evaluate the twin, take a Jacobian and run an
 SVD -- that is the whole point -- and may NOT import
 ``rheplicant.config.document``, which imports this package for the hook and
@@ -272,12 +293,23 @@ def _reserved() -> frozenset[str]:
     return frozenset(name for name in globals() if not name.startswith("__"))
 
 
-def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
+def _discoverable(path: Iterable[str],
+                  reserved: frozenset[str] | None = None) -> tuple[str, ...]:
     """Every module stem under ``path``, sorted -- or a refusal for a shadow.
 
     Split out from the loop below so that the refusal is reachable from a
     test: the real package holds no reserved name, so a check written inline
     at import time could never be driven.
+
+    ``reserved`` defaults to :data:`_RESERVED` -- the SNAPSHOT taken at the
+    foot of this module before anything is imported -- and never to a fresh
+    :func:`_reserved` call.  That is not a micro-optimisation: importing a
+    submodule sets it as an attribute of its package, so once ``fitting.py``
+    is in, a recomputed reserved set CONTAINS ``fitting`` and this function
+    refuses the very module it just imported.  Measured before the snapshot
+    existed: a second ``_discoverable(__path__)`` raised ``postflight/ holds
+    ['fitting']``, and Tasks 5 and 6 add ``digitising`` and ``noise`` the
+    same way.
 
     Raises:
         ConfigError: a module here is named after one of this package's own
@@ -288,7 +320,7 @@ def _discoverable(path: Iterable[str]) -> tuple[str, ...]:
     # difference the day one is added -- `walk_packages` recurses and would
     # hand back dotted names `_reserved`'s bare-stem comparison cannot match.
     found = tuple(sorted(name for _, name, _ in pkgutil.iter_modules(path)))
-    reserved = _reserved()
+    reserved = _RESERVED if reserved is None else reserved
     clash = [name for name in found if name in reserved]
     if clash:
         raise ConfigError(
@@ -371,5 +403,20 @@ def priced(run: Priced) -> Report:
 #
 # WHICH MODULE CLAIMS WHICH SLOT IS NOT WRITTEN HERE.  `sorted(CHECKS)` is the
 # answer and it cannot go stale.
+
+#: :func:`_reserved` evaluated ONCE, here, with every name in this file bound
+#: and **before** the loop below imports anything.  It has to be a snapshot:
+#: importing a submodule SETS IT as an attribute of its package, and a
+#: package's attributes ARE this module's globals -- so a `_reserved()`
+#: recomputed after the loop holds `fitting`, and (once Tasks 5 and 6 land)
+#: `digitising` and `noise`, and `_discoverable` would refuse the very files
+#: it had just imported.  Measured on `config-plan-3c` before this existed:
+#: with only `fitting.py` present, a SECOND `_discoverable(__path__)` raised
+#: `postflight/ holds ['fitting']`.  Benign in production only because the
+#: loop runs once; every test that drives `_discoverable` sees it.
+#:
+#: Not in itself: the name binds only after `_reserved()` has returned.
+_RESERVED: frozenset[str] = _reserved()
+
 for _found in _discoverable(__path__):
     importlib.import_module(f"{__name__}.{_found}")

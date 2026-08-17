@@ -124,14 +124,20 @@ _PARAMETERS = "inference.parameters"
 #: The two escapes every gated message here names (§3.2 i), phrased so that
 #: the same sentence is true of a refusal, a warning and a passing record: a
 #: reader of any of the three learns what the check costs to downgrade and
-#: what it costs to decline.  ``mode: skip`` is written WITH its ``reason:``
-#: because check A37 refuses one without, and WITHOUT ``report:`` because
-#: ``{mode: skip, report: true}`` is refused by name in pre-flight -- advice
-#: that earns a second refusal is the advice loop this project keeps paying
-#: for, and ``TestTheAdviceLoop`` applies both of these literally.
-_ESCAPE = ("Write {where}: {{mode: warn}} for a failure here to warn instead "
-           "of refuse, or {{mode: skip, reason: \"...\"}} to decline the "
-           "check and record why.")
+#: what it costs to decline.  **Neither clause names the gate's CURRENT
+#: mode** -- "instead of refuse" would be false read against a gate already
+#: at ``mode: report`` (a REPORT-severity failure there is not being
+#: downgraded FROM a refusal; ``gating.verdict``'s REPORT branch never
+#: raises), so the wording below is deliberately mode-agnostic: it is true
+#: whether the reader's gate is at ``refuse``, ``warn`` or ``report``.
+#: ``mode: skip`` is written WITH its ``reason:`` because check A37 refuses
+#: one without, and WITHOUT ``report:`` because ``{mode: skip, report:
+#: true}`` is refused by name in pre-flight -- advice that earns a second
+#: refusal is the advice loop this project keeps paying for, and
+#: ``TestTheAdviceLoop`` applies both of these literally.
+_ESCAPE = ("Write {where}: {{mode: warn}} so a failure here warns rather "
+           "than blocks the load, or {{mode: skip, reason: \"...\"}} to "
+           "decline the check and record why.")
 
 #: The clause C13 and C19 carry and C12 does not: ``linearity`` is the one
 #: check on by default (``gating.DEFAULT_MODE``), so only the other two can
@@ -470,7 +476,7 @@ def _prior_sensitivity(payload: Priced) -> Iterable[Finding]:
                "to change a published central value without visibly widening "
                "its error bar")
     tail = (f"That element reaches {CRITERION_SHIFT:g} sigma at a prior width "
-            f"of {criterion:.3e}; compare it with the prior: this document "
+            f"of {criterion:.3e}; compare it with the prior this document "
             "declares.")
     message = _tagged("C19", (
         f"{subject}: {numbers}. {tail} {_escape(gate)}"))

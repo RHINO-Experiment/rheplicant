@@ -132,6 +132,20 @@ def _regated(payload, **modes):
     return dataclasses.replace(payload, gates=gates)
 
 
+def _recorded(payload, **modes):
+    """:func:`_regated`, with ``report: true`` on every gate it touches.
+
+    A gate at ``mode: report`` with ``record`` false says nothing at all on a
+    PASS (§2.3's table, rows 3/6/9), so a test whose subject is what a PASSING
+    check records has to set both -- ``gating.gates`` only ever sets ``record``
+    from the document's own ``report:``.
+    """
+    gates = {name: gate._replace(state=modes[name], record=True)
+             if name in modes else gate
+             for name, gate in payload.gates.items()}
+    return dataclasses.replace(payload, gates=gates)
+
+
 def _found(check, payload):
     """The findings one of this module's three functions produced, as a tuple."""
     return tuple(check(payload))
@@ -280,12 +294,21 @@ class TestTheCostContract:
             self, monkeypatch):
         """§0.2 item 7: ``rtol`` is ``identifiability``'s alone.
 
-        ``check_linearity`` HAS an ``rtol=`` and ``inference.checks.linearity``
-        cannot express one, so C12 must pass none -- and ``identifiability``'s
+        ``check_linearity``'s signature is ``rtol: float | None = None``, so
+        passing ``rtol=gate.rtol`` -- always ``None`` for ``linearity``,
+        because the gate schema has no ``rtol:`` for it -- is a
+        BYTE-FOR-BYTE IDENTICAL call to passing nothing at all.  The C12
+        half of this test therefore kills only an EQUIVALENT mutant: it pins
+        intent (``rtol`` is not part of C12's contract), not behaviour, and
+        no behavioural test can exist for it -- §0.2 item 7 is a real
+        contract regardless.  ``identifiability``'s ``rtol`` is different: it
         is **keyword-only with a default of 1e-08**, so passing
-        ``rtol=gate.rtol`` unconditionally is a ``TypeError`` on every default
-        C13 run (D-12, measured: *unsupported operand type(s) for *:
-        'NoneType' and 'float'*)."""
+        ``rtol=gate.rtol`` unconditionally IS a ``TypeError`` on every
+        default C13 run (D-12, measured: *unsupported operand type(s) for *:
+        'NoneType' and 'float'*).  That half, and only that half, is
+        behaviourally pinned --
+        :meth:`test_C13_runs_at_the_package_default_when_the_document_wrote_none`
+        is where."""
         counter = []
         _stub_all(monkeypatch, counter)
         priced_findings(_two_latent_document(
@@ -387,6 +410,67 @@ class TestC12:
         assert payload.run.inference.space is None
         assert payload.gates["linearity"].runs()
         assert _found(fitting_module._linearity, payload) == ()
+
+    def test_C12_asks_only_about_the_latents_the_document_claimed(self):
+        """The ``names=`` argument of :func:`_unlinearisable`, which nothing
+        else in this module drives with a PROPER SUBSET.
+
+        Every other C12 fixture declares every latent ``linear: true``, so
+        ``claimed`` and ``space.names`` are the same tuple and the selection
+        is invisible.  Here the two-latent space is doctored so that ``a`` is
+        an ``int32`` and is NOT claimed: C12 must still run on ``d`` and must
+        NOT auto-skip on the strength of a latent nobody made a claim about.
+
+        **Kills** ``_dtypes`` ignoring its ``names`` argument -- measured, that
+        mutation SURVIVED the whole module before this test existed, and under
+        it a stray integer latent silently suppresses the one check that is on
+        by default.
+        """
+        payload = priced_run(_two_latent_document())
+        space = payload.run.inference.space
+        doctored = ParameterSpace(
+            latents=tuple(
+                Latent(one.name, init=jnp.asarray(one.init, dtype=jnp.int32),
+                       prior=one.prior, linear=False)
+                if one.name == "a" else one
+                for one in space.latents),
+            bindings=space.bindings, joint_prior=space.joint_prior)
+        assert fitting_module._unlinearisable(doctored) == {"a": "int32"}
+        assert fitting_module._unlinearisable(doctored, ("d",)) == {}
+        payload = _recorded(
+            dataclasses.replace(payload, run=payload.run._replace(
+                inference=payload.run.inference._replace(space=doctored))),
+            linearity="report")
+        found = _found(fitting_module._linearity, payload)
+        assert [one.check for one in found] == ["C12"]
+        assert found[0].where == "inference.parameters.d"
+        # Under the mutation this is a C14 auto-skip at
+        # ``inference.parameters.a`` -- a latent nobody claimed anything
+        # about, silencing the one check that is on by default.  (What C12
+        # then says about ``d`` is the package's own bind refusal, because
+        # ``_isolate`` validates the WHOLE space; that is the package's
+        # business and not this module's.)
+
+    def test_C12_reads_the_claim_off_the_build_not_the_document_text(self):
+        """Step 2 of this module's own shape: *read the subject off the BUILD,
+        never off the document's text*.
+
+        The two agree on every fixture in this suite, so the rule is unpinned
+        unless they are made to disagree.  Here the document's text is edited
+        to say ``linear: false`` while the built space still says True -- C12
+        must follow the space.
+
+        **Kills** ``claimed`` derived from ``payload.run.document`` -- measured,
+        that mutation SURVIVED the whole module.  It matters because the space
+        is what every exit and every solver actually reads: a claim the build
+        carries and the text has lost is exactly the one nobody would check.
+        """
+        payload = _recorded(priced_run(preflight_document()),
+                            linearity="report")
+        payload.run.document["inference"]["parameters"]["g"]["linear"] = False
+        assert payload.run.inference.space.latent("g").linear is True
+        assert [one.check for one in
+                _found(fitting_module._linearity, payload)] == ["C12"]
 
     def test_C12_records_its_margins_only_when_the_document_asks(self):
         """§2.3's table, rows 3/6/9: ``report:`` governs the numbers of a
@@ -503,9 +587,15 @@ class TestC13:
 class TestC14:
     """The auto-skip, over a DOCTORED build -- see this module's docstring.
 
-    Each test says which shape it doctors.  All four doctor the SAME shape:
-    the base document's single latent ``g``, which binds DIRECTLY into the
-    float leaf ``gain.gain``.
+    D-11 (name the shape a doctored build takes) is met at the CLASS level
+    here, not per test: ``_doctored(`` is called at 12 sites across this
+    class's tests, and only two of them state the shape individually --
+    :meth:`test_C14_on_a_complex_latent_auto_skips_identifiability`'s
+    ``Shape:`` line and :meth:`test_C14_auto_skips_all_three_on_an_integer_latent`'s
+    "the other direction". Every one of the 12 doctors the SAME shape: the
+    base document's single latent ``g``, which binds DIRECTLY into the float
+    leaf ``gain.gain`` -- and this docstring is that statement, made once for
+    the whole class rather than claimed, wrongly, of each test individually.
     """
 
     @pytest.fixture
@@ -526,6 +616,22 @@ class TestC14:
         assert fitting_module._unlinearisable(complexed) == {}
         assert fitting_module._undifferentiable(integered) == {"g": "int32"}
         assert fitting_module._unlinearisable(integered) == {"g": "int32"}
+
+    def test_dtypes_stands_down_on_no_space(self):
+        """``_dtypes``'s ``if space is None: return {}`` -- DEAD in production,
+        because all three of ``_linearity``, ``_identifiability`` and
+        ``_prior_sensitivity`` guard ``space is None`` themselves before
+        either dtype predicate is ever called.
+
+        **Kills** mutating the clause to ``return None``, which nothing else
+        in this module drives: measured, that mutation SURVIVED the whole
+        module. Pinned rather than deleted, because the guard is still the
+        one thing standing between a hand-built caller of these predicates
+        (:func:`_dtypes` is not private to this module's own three
+        registrations) and a ``NoneType has no attribute 'names'``."""
+        assert fitting_module._dtypes(None, None) == {}
+        assert fitting_module._undifferentiable(None) == {}
+        assert fitting_module._unlinearisable(None) == {}
 
     def test_C14_on_a_complex_latent_auto_skips_identifiability(self, base):
         """Shape: ``g`` complex64, binding straight into ``gain.gain``.
@@ -722,6 +828,54 @@ class TestC19:
         assert payload.run.inference.observed is not None
         assert payload.gates["prior_sensitivity"].runs()
         assert _found(fitting_module._prior_sensitivity, payload) == ()
+
+    def test_C19_stands_down_when_no_observation_is_the_primary(self):
+        """The OTHER half of C19's first stand-down, and it is a document a
+        user can write.
+
+        ``sections/observed.py:266-271``: a block naming two observations and
+        calling neither of them ``primary`` leaves ``ObservedBuild.primary``
+        **None** beside two real entries.  ``observed is None`` is false here,
+        so only the second clause saves the check.
+
+        **Kills** ``if observed is None:`` alone -- measured, that mutation
+        SURVIVED the whole module, and under it C19 evaluates
+        ``observed.entries[None]`` and dies as ``post-flight check 'C19'
+        RAISED KeyError: None``, the laundered-blame shape this layer exists
+        to prevent.
+        """
+        payload = priced_run(repatch(preflight_document(), inference={
+            **preflight_helpers.T4_TWO_NAMED_OBSERVATIONS,
+            "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT}))
+        observed = payload.run.inference.observed
+        assert observed is not None
+        assert sorted(observed.entries) == ["day", "night"]
+        assert observed.primary is None
+        assert payload.gates["prior_sensitivity"].runs()
+        assert _found(fitting_module._prior_sensitivity, payload) == ()
+
+    @pytest.mark.parametrize(
+        ("shift", "refuses"),
+        [(0.15, True), (0.05, False), (-0.15, True), (-0.05, False)])
+    def test_C19_uses_the_packages_criterion_and_not_a_larger_one(
+            self, monkeypatch, shift, refuses):
+        """The THRESHOLD's value, and not merely that one exists.
+
+        ``test_C19_refuses_a_prior_that_moved_the_mode`` drives 1.75 sigma and
+        its partner 1e-3 -- both land on the same side of any criterion
+        between them, so replacing :data:`CRITERION_SHIFT` with ``0.5``
+        SURVIVED the whole module.  These four cells bracket 0.1 from both
+        sides and in both signs.
+
+        **Kills** a hard-coded threshold that is not the package's, which is
+        the second constant this module's docstring says it refuses to own.
+        """
+        counter = []
+        _stub_all(monkeypatch, counter, shift=shift)
+        found = priced_findings(_two_latent_document(
+            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        refused = [one.check for one in found if one.severity == REFUSE]
+        assert (refused == ["C19"]) is refuses, (shift, refused)
 
     def test_C19_reports_the_shift_the_priors_caused(self):
         """**The one test in this module that pays the real cold

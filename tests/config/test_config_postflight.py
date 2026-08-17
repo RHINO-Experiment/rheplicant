@@ -52,6 +52,7 @@ from rheplicant.config.inflight import (
     register_built,
 )
 from rheplicant.config.postflight import (
+    _RESERVED,
     CHECKS,
     Priced,
     _discoverable,
@@ -1007,9 +1008,17 @@ class TestTheDiscoveryMechanism:
 
         Driven on a temporary directory, because the real package holds no
         such module and the raise at import time is otherwise unreachable.
+
+        **The harmless stem is ``bystander`` and NOT a real check module's
+        name.**  It used to be ``fitting``, and that went red the day Task 4
+        landed: importing a submodule sets it as an attribute of its package,
+        so a recomputed ``_reserved()`` holds ``fitting`` and this call
+        refused it.  The fix is :data:`~rheplicant.config.postflight._RESERVED`
+        -- the snapshot taken before the discovery loop -- and this stem is
+        now one no task under this plan will ever create.
         """
-        (tmp_path / "fitting.py").touch()
-        assert _discoverable([str(tmp_path)]) == ("fitting",)
+        (tmp_path / "bystander.py").touch()
+        assert _discoverable([str(tmp_path)]) == ("bystander",)
         (tmp_path / "priced.py").touch()
         with pytest.raises(ConfigError) as raised:
             _discoverable([str(tmp_path)])
@@ -1019,8 +1028,33 @@ class TestTheDiscoveryMechanism:
             "rheplicant.config.postflight import priced` would bind a MODULE "
             "and the hook in document.py would raise \"'module' object is not "
             "callable\". Rename the module; the reserved names are "
-            f"{sorted(_reserved())}."
+            f"{sorted(_RESERVED)}."
         )
+
+    def test_the_reserved_set_is_a_snapshot_taken_before_discovery(self):
+        """A check module's own stem must NEVER be reserved.
+
+        Importing ``postflight.fitting`` sets ``postflight.fitting``, which IS
+        a global of this module, so a ``_reserved()`` recomputed at any point
+        after the loop contains it -- and ``_discoverable`` would then refuse
+        `fitting.py`, `digitising.py` and `noise.py`, the three modules this
+        plan exists to add.  Measured before :data:`_RESERVED` existed: a
+        second ``_discoverable(__path__)`` raised ``postflight/ holds
+        ['fitting']``.
+
+        **Kills** ``reserved = _reserved()`` inside ``_discoverable``, which is
+        what shipped, and which is invisible while the loop runs exactly once.
+        """
+        import rheplicant.config.postflight as package
+
+        stems = tuple(sorted(name for _, name, _ in
+                             pkgutil.iter_modules(package.__path__)))
+        assert stems, "discovery found no module at all -- the pin is vacuous"
+        assert set(stems).isdisjoint(_RESERVED), sorted(stems)
+        assert set(stems) <= set(_reserved()), (
+            "the recomputed set is expected to hold every imported stem -- "
+            "that is the defect _RESERVED exists to freeze out")
+        assert _discoverable(package.__path__) == stems
 
     def test_the_found_modules_come_back_sorted(self, tmp_path):
         """N1: ``sorted()`` inside :func:`_discoverable`, pinned on ORDER.
