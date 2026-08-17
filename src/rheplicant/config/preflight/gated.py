@@ -75,13 +75,16 @@ _T2C_NO_WEIGHT: frozenset[str] = frozenset({"none"})
 _T2C_NOISE_NODE: str = "noise"
 
 #: **Scoped exactly as the numeric C18 is** (D-10): the drawing operator is
-#: only the generator when the data came out of the FULL twin.  On the
-#: ``twin: fit`` family ``inference.twin.without: [noise]`` has taken the
-#: operator out of the tree that produced the data, so ``model.noise.type``
-#: describes something that provably never touched it, and a refusal naming
-#: it would be a claim about the document that is false.  ``full`` is
-#: ``sections/observed.py``'s own default, so a document that says nothing
-#: still gets the check.
+#: only the generator when the data came out of the FULL twin, OR out of a
+#: ``twin: fit`` that :func:`_t2c_repaired` finds was never actually repaired
+#: (MAJOR 5: with zero declared latents, nothing forces that repair, and a
+#: bare ``twin: fit`` is then the full twin under another name).  Where the
+#: repair really did take ``inference.twin.without: [noise]`` (or an
+#: equivalent ``replace:``) out of the tree that produced the data,
+#: ``model.noise.type`` describes something that provably never touched it,
+#: and a refusal naming it would be a claim about the document that is false.
+#: ``full`` is ``sections/observed.py``'s own default, so a document that
+#: says nothing still gets the check.
 _T2C_GENERATING_TWIN: str = "full"
 
 
@@ -179,9 +182,13 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
 
     * ``from: simulation`` -- when the data came from a file the twin drew
       nothing and there is no second sigma to disagree with (§2.6 item 6);
-    * ``twin: full`` -- on the ``twin: fit`` family the drawing operator has
-      been repaired out of the tree that produced the data, so its ``type:``
-      describes something that never touched it (D-10, and see
+    * ``twin: full``, OR a ``twin: fit`` whose ``inference.twin:`` has NOT
+      actually taken the drawing operator out of the tree
+      (:func:`_t2c_repaired`).  ``twin: fit`` alone is not sufficient: a
+      document declaring no latent at all never reaches
+      ``refuse_stochastic_stages``, so it can spell ``twin: fit`` with no
+      ``inference.twin:`` repair, and its fit twin is then the SAME object as
+      the full twin -- still carrying the draw (D-10, and see
       :data:`_T2C_GENERATING_TWIN`).
 
     The primary is picked exactly as ``build_observed`` picks it: the
@@ -205,9 +212,34 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
             record = next(iter(named.values()))
         else:
             return False
-    return (record.get("from") == "simulation"
-            and record.get("twin", _T2C_GENERATING_TWIN)
-            == _T2C_GENERATING_TWIN)
+    if record.get("from") != "simulation":
+        return False
+    if record.get("twin", _T2C_GENERATING_TWIN) == _T2C_GENERATING_TWIN:
+        return True
+    return not _t2c_repaired(section)
+
+
+def _t2c_repaired(section: Mapping[str, Any]) -> bool:
+    """Does ``inference.twin:`` take the noise node OUT of the fit twin?
+
+    A ``twin: fit`` observation is silent only when SOMETHING has actually
+    taken the drawing operator out of the tree that produced the data.  With
+    zero declared latents, ``refuse_stochastic_stages`` -- which is what
+    ordinarily forces a ``without:``/``replace:`` onto a fit twin that still
+    draws -- never runs (it is reached only while building a
+    ``ParameterSpace`` over a declared latent), so a document CAN spell
+    ``twin: fit`` with no ``inference.twin:`` at all, and its fit twin is
+    then the SAME object as the full twin: still carrying the draw.
+    """
+    twin = section.get("twin")
+    if not isinstance(twin, Mapping):
+        return False
+    without = twin.get("without")
+    without = [without] if isinstance(without, str) else without
+    if isinstance(without, (list, tuple)) and _T2C_NOISE_NODE in without:
+        return True
+    replace = twin.get("replace")
+    return isinstance(replace, Mapping) and _T2C_NOISE_NODE in replace
 
 
 @register("C18.kind")
@@ -243,6 +275,22 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
     earns anything from this check at all** -- REFUSE census 0, WARN census 0
     over all thirteen.
 
+    **MINOR 9, recorded rather than fixed: this check can pre-empt A26/A49 on
+    the very block it reads, and that is accepted.**  ``gated`` foot-imports
+    before ``noise``, and ``sweep`` runs the registered checks in that
+    insertion order, so on ``{kind: radiometer_frozen, include_logdet:
+    true}`` a user is told to change ``model.noise.type`` (C18's family
+    mismatch, if the drawing operator does not already agree) while their
+    actual fault is the stray ``include_logdet:`` A49 would have named.  Both
+    are real errors about the same document -- this is message ORDERING, not
+    a wrong answer -- and reordering the two modules is out of scope here (it
+    would move every other check's position in the report too).  It is also
+    the reason ``tests/config/test_preflight_noise.py::
+    TestTheRowsArriveBeforeTheBeam``'s two ``include_logdet`` documents give
+    ``model.noise`` the matching drawing operator rather than the base
+    document's default: that fixture WORKS AROUND this ordering rather than
+    resolving it.
+
     Yields at most one finding.
     """
     drawn = _t2c_drawn(document)
@@ -269,8 +317,9 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
             "fit still returns a finite, correctly-shaped answer; its error "
             "bars are the ones an unweighted least squares gives. Declare "
             f"inference.noise: {{kind: {sorted(agrees)[0]}}} to weigh what "
-            "you draw, or inference.twin.without: [noise] if this data is "
-            "meant to be noise-free (check C18).")),)
+            f"you draw, or drop model.{_T2C_NOISE_NODE} -- and the "
+            f"inference.twin.without: [{_T2C_NOISE_NODE}] that repairs it -- "
+            "if this data is meant to be noise-free (check C18).")),)
     other = sorted(
         name for name, kinds in _DRAWING_TYPES.items() if weighed in kinds)
     if not other:

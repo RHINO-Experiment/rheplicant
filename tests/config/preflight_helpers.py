@@ -266,13 +266,33 @@ NOISE_WAVE_MODEL = {
 #: A ``model.t_sys_extra`` entry of the type C15 declines under.  **Its
 #: ``graph_node`` is ``t_sys_extra`` and NOT ``noise_wave``** (measured), which
 #: is why the detector cannot look under the node the check is otherwise about.
-#: ``t_sys_extra`` is a ``many`` node, so the entry is written under a label.
-NOISE_WAVE_BASIS = {
-    "smooth": {"type": "BasisTemperatureOperator",
-               "coeff": {"zeros": ["n_freq"]},
-               "freq_basis": {"kind": "polynomial", "order": 2},
-               "time_basis": None},
-}
+#:
+#: **A LIST, not a label-keyed mapping** (MAJOR 4 fix).  ``t_sys_extra`` IS a
+#: ``many`` node, but only ``cal_loads`` is FAN-shaped (a label-keyed
+#: mapping) -- ``foregrounds``, ``t_sys_extra`` and ``filters`` are
+#: SUM/CHAIN-shaped and take a non-empty LIST instead
+#: (``many_shape_problem``, ``sections/compose.py``).  Measured: the old
+#: mapping-shaped fixture was refused at check A6 --
+#: ``model.t_sys_extra: is a non-empty list (SUM); got dict`` -- and every
+#: C15 test built on it passed only because ``axis_findings`` reaches the
+#: axes pass alone and never runs the text pass A6 lives in.
+#:
+#: **Every field here is a real value node and the class is real**, so a
+#: document built on this fixture is one ``load_document`` accepts.
+#: ``time_basis``/``freq_basis`` are ordinary array leaves, not object
+#: fields (``sections/model.py::_object_fields`` names only ``sky_model``
+#: and ``projector``), so they cannot take a ``{ref: resources.bases.<n>}``
+#: -- they are written as literal ``ones`` arrays sized off the run's own
+#: ``n_time``/``n_freq`` symbols, so they build against whatever grid the
+#: calling document declares.  ``coeff``'s shape, ``(2, 3)``, is exactly
+#: what those two design matrices take: 2 time functions by 3 frequency
+#: ones (``BasisTemperatureOperator.__check_init__``).
+NOISE_WAVE_BASIS = [
+    {"type": "BasisTemperatureOperator",
+     "coeff": {"zeros": [2, 3], "unit": "K"},
+     "time_basis": {"ones": ["n_time", 2]},
+     "freq_basis": {"ones": ["n_freq", 3]}},
+]
 
 
 def findings(document) -> tuple[Finding, ...]:

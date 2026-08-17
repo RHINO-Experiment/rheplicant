@@ -143,6 +143,20 @@ class TestItStandsDown:
         assert silent_here(_document(parameters={
             "x": {"init": 1.0, "into": into}}))
 
+    @pytest.mark.parametrize("into", ["noise_wave.gamma_src_re",
+                                      "noise_wave.switch_key"])
+    def test_a_noise_wave_field_that_is_not_one_of_the_four_is_not_counted(
+            self, into):
+        """MAJOR 6: **kills the LEAF-membership gate being dropped**, which
+        no document under another HEAD can see -- ``gamma_src_re`` and
+        ``switch_key`` are ``NoiseWaveOperator``'s own fields, correctly
+        headed at ``noise_wave``, but they are couplings and a selector
+        rather than one of the four counted temperatures.  Without this
+        gate a latent into either would count as a freed temperature and
+        raise ``k``."""
+        assert silent_here(_document(parameters={
+            "x": {"init": 1.0, "into": into}}))
+
 
 # --- the number -------------------------------------------------------------
 
@@ -266,6 +280,17 @@ class TestTheTwin:
                   "into": ["noise_wave.t_unc", "noise_wave.t_cos"]}}), "C15")
         assert "min(1, 2) * 8 = 8" in found.message
 
+    def test_an_index_after_the_leaf_still_counts_by_its_field(self):
+        """MAJOR 6: **kills an index being read as the leaf name.**
+        ``parse_path`` returns ``('noise_wave', 't_unc', 0)`` for
+        ``noise_wave.t_unc[0]``, and the docstring's own promise is that the
+        leaf is the LAST STRING segment -- the index is dropped before the
+        membership test, not read as the leaf itself.  Without that,
+        ``t_unc[0]`` silently drops out of ``freed`` and k reads one low."""
+        found = axis_only(_document(parameters={
+            "a": {"init": 1.0, "into": "noise_wave.t_unc[0]"}}), "C15")
+        assert "min(1, 1) * 8 = 8" in found.message
+
 
 # --- declining --------------------------------------------------------------
 
@@ -275,15 +300,76 @@ class TestItDeclines:
     one and leaving the other is 3A's recorded twin failure."""
 
     def test_C15_declines_under_a_basis_operator(self):
-        """A lit ``t_sys_extra`` of type ``BasisTemperatureOperator``."""
+        """A lit ``t_sys_extra`` of type ``BasisTemperatureOperator``.
+
+        ``**ONE_LATENT["parameters"]`` stays in the mix (MAJOR 4): the base
+        document's ``inference.observed.at`` names ``g``, and a bare
+        ``parameters={"a": ...}`` would leave that latent undeclared and
+        ``load_document`` would refuse it for a reason this test is not
+        about.
+        """
         document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
             inference=dict(parameters={
+                **ONE_LATENT["parameters"],
                 "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
         found = axis_only(document, "C15")
         assert found.severity == REPORT
         assert "does not apply" in found.message
         assert "min(1, 1) * 8" not in found.message
+        load_document(document)
+
+    def test_C15_declines_under_the_from_basis_route(self):
+        """MAJOR 3: the OTHER spelling of the same operator --
+        ``sections/model.py``'s ``t_sys_extra`` + ``from: basis`` route,
+        which writes no ``type:`` at all.  A detector that only looked for
+        ``type: BasisTemperatureOperator`` (or a ``python:`` naming it)
+        missed this one: measured on this exact document under the original
+        detector, ``declares_basis: False`` and C15 REPORTED A NUMBER the
+        package's own docstring contradicts in both directions -- and the
+        document LOADS, so the wrong number was not even confined to a
+        document nobody could run.
+        """
+        document = preflight_document(
+            model={**NOISE_WAVE_MODEL,
+                  "t_sys_extra": [{"from": "basis",
+                                   "basis": {"ref": "resources.bases.b"},
+                                   "coeff": {"zeros": [1, 3], "unit": "K"}}]},
+            resources={"bases": {"b": {"time": {"kind": "legendre",
+                                                "n_basis": 1},
+                                       "freq": {"kind": "legendre",
+                                               "n_basis": 3}}}},
+            inference=dict(parameters={
+                **ONE_LATENT["parameters"],
+                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+        found = axis_only(document, "C15")
+        assert found.severity == REPORT
+        assert "does not apply" in found.message
+        assert "min(1, 1) * 8" not in found.message
+        load_document(document)
+
+    def test_C15_declines_under_a_python_relocated_basis_operator(self):
+        """MAJOR 6: the THIRD spelling of the same operator -- a ``python:``
+        relocation naming ``BasisTemperatureOperator`` by its module path
+        rather than by ``type:``.  Untested before this commit: mutating the
+        ``python:`` clause away left every test in this class green, because
+        nothing drove that branch.
+        """
+        document = preflight_document(
+            model={**NOISE_WAVE_MODEL,
+                  "t_sys_extra": [
+                      {"python": "rheplicant.radio:BasisTemperatureOperator",
+                       "coeff": {"zeros": [2, 3], "unit": "K"},
+                       "time_basis": {"ones": ["n_time", 2]},
+                       "freq_basis": {"ones": ["n_freq", 3]}}]},
+            inference=dict(parameters={
+                **ONE_LATENT["parameters"],
+                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+        found = axis_only(document, "C15")
+        assert found.severity == REPORT
+        assert "does not apply" in found.message
+        assert "min(1, 1) * 8" not in found.message
+        load_document(document)
 
     def test_C15_declines_under_a_transform(self):
         """A latent reaching the leaf through ``transform:``.  The SECOND
@@ -322,16 +408,27 @@ class TestItDeclines:
     def test_a_basis_at_t_sys_extra_of_another_type_does_not_decline(self):
         """The anti-vacuity partner: ``t_sys_extra`` lit by something that is
         NOT the basis leaves the counting rule in force.  **Kills** a detector
-        that answered "basis" for a lit node whatever its type."""
+        that answered "basis" for a lit node whatever its type.
+
+        ``GroundPickupOperator``, relocated onto ``t_sys_extra`` via
+        ``python:`` (the package's own ``test_t_sys_extra_accepts_at_
+        injection`` builds the identical relocation) -- ``ConstantTsysOperator``
+        does not exist (MAJOR 4), and the old fixture's label-keyed mapping is
+        A6-refused on this node besides (only ``cal_loads`` is FAN-shaped; a
+        SUM node like ``t_sys_extra`` takes a LIST).
+        """
         document = preflight_document(
             model={**NOISE_WAVE_MODEL,
-                   "t_sys_extra": {"warm": {"type": "ConstantTsysOperator",
-                                            "t_sys": {"value": 300.0,
-                                                      "unit": "K"}}}},
+                  "t_sys_extra": [
+                      {"python": "rheplicant.radio:GroundPickupOperator",
+                       "coupling": {"value": 0.02, "unit": "dimensionless"},
+                       "t_ground": {"value": 300.0, "unit": "K"}}]},
             inference=dict(parameters={
+                **ONE_LATENT["parameters"],
                 "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
         found = axis_only(document, "C15")
         assert "min(1, 1) * 8 = 8" in found.message
+        load_document(document)
 
 
 # --- the raise-guard --------------------------------------------------------
@@ -452,11 +549,14 @@ class TestTheMessagesWhole:
         """The twin of the test above.  **Kills** the basis route being
         re-worded, or collapsing into the transform route's sentence, where
         no substring pin could see it."""
-        found = axis_only(preflight_document(
+        document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
             inference=dict(parameters={
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}})), "C15")
+                **ONE_LATENT["parameters"],
+                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+        found = axis_only(document, "C15")
         assert found.message == C15_DECLINED_BASIS
+        load_document(document)
 
     def test_the_where_is_the_latent_the_reader_edits(self):
         """``Finding.where`` is a path into the USER'S document; ``sweep``

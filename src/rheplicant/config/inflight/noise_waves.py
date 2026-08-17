@@ -97,6 +97,14 @@ _T2C_BASIS_TYPE: str = "BasisTemperatureOperator"
 #: Where :data:`_T2C_BASIS_TYPE` lands.  **Not** ``noise_wave``.
 _T2C_BASIS_NODE: str = "t_sys_extra"
 
+#: The OTHER spelling of the same operator (``sections/model.py``'s
+#: ``t_sys_extra`` + ``from: basis`` route), which writes no ``type:`` at
+#: all -- ``BasisTemperatureOperator.from_basis(basis, coeff)`` is built off
+#: ``basis: {ref: resources.bases.<name>}`` and ``coeff:`` alone.  Measured on
+#: a ``from: basis`` list-form document: ``declares_basis: False`` under the
+#: original detector, and the document LOADS -- a wrong number, not silence.
+_T2C_BASIS_ROUTE: str = "basis"
+
 #: The transforms that leave the per-channel counting in force.  ``identity``
 #: binds the leaf unchanged, so it ties no channels together; this layer
 #: already reads the pair this way (``sections/inference.py::_derive_truth``).
@@ -211,10 +219,20 @@ def _t2c_routes(document: Mapping[str, Any]
 def _t2c_declares_basis(document: Mapping[str, Any]) -> bool:
     """Does ``model.t_sys_extra`` light a :data:`_T2C_BASIS_TYPE`?
 
-    ``t_sys_extra`` is a ``many`` node, so its spec is a list of entries or a
-    FAN mapping of them; a bare mapping carrying its own ``type:`` is read too,
-    because a document that writes one gets the same operator.  A ``python:``
-    relocation naming the class counts by its target's last segment.
+    ``t_sys_extra`` is a ``many`` node, so its spec is a LIST -- unlike
+    ``cal_loads``, it is SUM-shaped rather than FAN-shaped, and
+    ``many_shape_problem`` (``sections/compose.py``) refuses a mapping there
+    outright: *"is a non-empty list (SUM); got dict"*.  **No mapping-shaped
+    spelling of this branch is worth reading**, because none of them survive
+    to reach a document ``load_document`` accepts -- an earlier version of
+    this function read a bare mapping and a FAN mapping anyway, and MAJOR 4
+    of the Task 2 fix round measured that the fixture built on the belief was
+    itself A6-refused. Three entry shapes are read instead, all of them LIST
+    entries: ``type: BasisTemperatureOperator``, the ``from: basis`` route
+    (which writes no ``type:`` at all -- ``sections/model.py``'s ``t_sys_
+    extra`` + ``from: basis`` builds ``BasisTemperatureOperator.from_basis``
+    directly), and a ``python:`` relocation naming the class by its target's
+    last segment.
 
     One level and no deeper, deliberately: a recursive walk over arbitrary
     document values would answer "basis" for a ``coeff:`` whose own mapping
@@ -225,16 +243,14 @@ def _t2c_declares_basis(document: Mapping[str, Any]) -> bool:
     if not isinstance(model, Mapping):
         return False
     spec = model.get(_T2C_BASIS_NODE)
-    if isinstance(spec, Mapping):
-        entries: tuple[Any, ...] = (spec,) + tuple(spec.values())
-    elif isinstance(spec, (list, tuple)):
-        entries = tuple(spec)
-    else:
+    if not isinstance(spec, (list, tuple)):
         return False
-    for entry in entries:
+    for entry in spec:
         if not isinstance(entry, Mapping):
             continue
         if entry.get("type") == _T2C_BASIS_TYPE:
+            return True
+        if entry.get("from") == _T2C_BASIS_ROUTE:
             return True
         python = entry.get("python")
         if isinstance(python, str) and python.rsplit(

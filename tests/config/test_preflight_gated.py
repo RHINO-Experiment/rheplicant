@@ -425,6 +425,33 @@ class TestSigmaFamiliesStandsDown:
                                   observed=observed_as(base, twin="fit"))
         assert mine(document) == frozenset()
 
+    def test_twin_fit_alone_is_not_enough_with_zero_declared_latents(self):
+        """MAJOR 5: ``twin: fit`` is not SUFFICIENT for the stand-down above --
+        it stands down only when something has actually taken the drawing
+        operator out of the fit twin.  ``refuse_stochastic_stages`` is what
+        ordinarily forces that (any document that declares a latent), and
+        with ZERO latents it never runs at all, so a document can spell
+        ``twin: fit`` with no ``inference.twin:`` repair whatsoever -- and
+        its fit twin is then the SAME object as the full twin, still
+        carrying the draw.
+
+        Before this fix: silent (``preflight ids: []``), and
+        ``load_document`` LOADS the document -- ``NoiseOperator`` drew the
+        data and ``radiometer`` weighed it, with nobody told.  After it, C18
+        reaches this document exactly as it would a ``twin: full`` one, and
+        ``load_document`` refuses with C18's own sentence rather than
+        returning a silently miscalibrated fit.
+        """
+        document = repatch(
+            preflight_document(),
+            inference={"parameters": {}, "noise": RADIOMETER,
+                      "observed": {"from": "simulation", "twin": "fit"}})
+        found = only(document, "C18")
+        assert found.severity == REFUSE
+        with pytest.raises(ConfigError) as caught:
+            load_document(document)
+        assert str(caught.value) == found.message
+
     def test_full_is_the_default_so_a_silent_document_is_still_checked(self):
         """The partner: ``sections/observed.py`` defaults ``twin:`` to
         ``full``, so a document that says nothing keeps the check.  **Kills**
@@ -483,6 +510,16 @@ class TestSigmaFamiliesStandsDown:
         naming the value and the enum.  Answering here would pre-empt a more
         specific sentence, and RAISING here would abort the pass."""
         assert mine(sigma_document(MODEL_NOISE, weighed)) == frozenset()
+
+    def test_the_primary_record_is_found_by_name_among_several(self):
+        """MINOR 7: **kills the ``"primary" in named`` branch being dropped.**
+        With two named records, dropping it falls through to ``elif
+        len(named) == 1``, which is false with two, and the check goes
+        silent about a primary observation it should still have read."""
+        document = sigma_document(MODEL_NOISE, RADIOMETER, observed={
+            "primary": {"from": "simulation", "twin": "full"},
+            "night": {"from": "simulation", "twin": "full"}})
+        assert only(document, "C18").severity == REFUSE
 
 
 class TestTheKindNoneWarning:
@@ -648,18 +685,37 @@ class TestApplyingTheAdviceLiterally:
         after = sigma_document(MODEL_NOISE, HOMOSCEDASTIC,
                                runs=[{"kind": "conjugate.gls"}])
         assert mine(after) == frozenset()
+        load_document(after)
 
     def test_repairing_the_twin_clears_the_warning(self):
-        """The WARN's escape 2: *"or inference.twin.without: [noise] if this
-        data is meant to be noise-free"*.  It is not a no-op -- taking the
-        node out of the FIT twin is what the base document already does, and
-        applying it here must clear the warning rather than trade it for
-        another finding."""
-        after = sigma_document(
-            MODEL_NOISE, None, runs=[{"kind": "conjugate.gls"}],
+        """The WARN's escape 2, corrected: *"drop model.noise -- and the
+        inference.twin.without: [noise] that repairs it -- if this data is
+        meant to be noise-free"*.
+
+        **The old wording was an advice loop.**  The WARN fires only when the
+        primary observation came out of the FULL twin, and
+        ``inference.twin.without:`` shapes the FIT twin alone -- so that key
+        cannot change what the WARN is about, and the base document already
+        carries it (``exit_helpers._repaired``'s default).  Applying the old
+        escape literally left the WARN standing.
+
+        The corrected escape drops ``model.noise`` too, and BOTH edits are
+        required together: dropping ``model.noise`` alone while
+        ``inference.twin.without: [noise]`` still names it is D-10's own
+        trap -- ``AssemblyError without('noise'): no operator sits at
+        'noise' in this assembly.`` -- so the ``twin:`` key is dropped
+        whole, which is the escape's own second clause.
+        """
+        before = sigma_document(MODEL_NOISE, None,
+                                runs=[{"kind": "conjugate.gls"}])
+        after = repatch(
+            before,
             model={key: value for key, value in BASE_MODEL.items()
-                   if key != "noise"})
+                   if key != "noise"},
+            inference={key: value for key, value in before["inference"].items()
+                       if key != "twin"})
         assert mine(after) == frozenset()
+        load_document(after)
 
 
 # --- what the pass itself must survive --------------------------------------
@@ -701,6 +757,20 @@ class TestNeitherCheckEverRaises:
     def test_a_hostile_observed_block_does_not_abort_the_pass(self, observed):
         preflight(sigma_document(MODEL_NOISE, RADIOMETER,
                                  observed=observed))
+
+    @pytest.mark.parametrize("patch", [
+        {"model": {"noise": {"type": {"a": 1}}}},
+        {"inference": {"noise": {"kind": ["x"]}}}])
+    def test_a_hostile_drawn_or_weighed_kind_does_not_abort_the_pass(self,
+                                                                     patch):
+        """MINOR 8: **kills either ``isinstance(..., str)`` guard.**  Without
+        the drawn-side one, ``{'a': 1} in _DRAWING_TYPES`` is a bare
+        ``TypeError: unhashable type: 'dict'``; without the weighed-side
+        one, ``['x'] in agrees`` is the same error over a list.  Both are
+        killed only by OTHER modules today -- some sibling check happens to
+        refuse first and ``_sigma_families`` is never reached -- which is
+        why this task carries its own pin."""
+        preflight(preflight_document(**patch))
 
     def test_the_base_document_earns_nothing_from_this_module(self):
         """THE BASE MUST EARN NO FINDING OF ITS OWN, and it is

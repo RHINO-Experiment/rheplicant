@@ -127,9 +127,9 @@ So the ordering guarantee is per slot, and only the first slot is free:
   beam;
 - built pass — everything exists; the saving is the fit, not the build.
 
-## A document that is wrong three ways
+## A document that is wrong four ways
 
-Every error below is decided from text, and all three come back from one call.
+Every error below is decided from text, and all four come back from one call.
 
 ```yaml
 schema_version: 1
@@ -167,7 +167,7 @@ requires a sign in the exponent, so `1.0e+6` is a float and `1.0e6` is not.
 The page's document is parsed by the suite, so the exponent form would reach
 the value grammar as a string and refuse for a reason the page is not about.
 
-Three findings, **in registry order — which is the order a reader meets them,
+Four findings, **in registry order — which is the order a reader meets them,
 and A27 is first**. The rule that decides that order is not the one an earlier
 version of this page gave: alphabetical position in `preflight/__init__.py`'s
 foot-import block decides nothing on its own. **A foot-imported module's
@@ -175,7 +175,8 @@ checks register after everything its own head imports transitively register**
 — measured, `beam_spill` sorts first in that block and its check lands
 two-thirds of the way down, because it head-imports `document` and `model`.
 `fitting` still registers before `model` here, so A27 and A28 are bound before
-A30 and A33. Write the bullets in that order and keep them in it;
+A30 and A33 — and `gated`, which imports neither, registers its C18 slot after
+both, so C18 is last. Write the bullets in that order and keep them in it;
 `_ordered_ids_on_the_page` is what makes a silent re-sort a red test.
 
 - **A27** — `kind: conjugate.wiener` takes a sigma already decided into an
@@ -202,13 +203,21 @@ A30 and A33. Write the bullets in that order and keep them in it;
   the bandpass itself — so `init:` becomes `{ones: [7]}` on this document's
   eight channels. Written as `{ones: [n_freq]}` the transform hands the fit a
   nine-channel bandpass for eight channels of data, and the bind is refused.
+- **C18** — `model.noise` draws this document's data with `NoiseOperator`, and
+  `inference.noise.kind: radiometer` weighs the likelihood with a different
+  noise model. They are not two spellings of one sigma, so there is no number
+  to compare, and the fit's error bars are wrong by whatever the two models
+  differ by. Fix: `model.noise.type: RadiometerNoiseOperator`, carrying the
+  same `channel_width:`/`integration_time:` that `inference.noise` already
+  declares, so the operator that draws the data agrees with the one that
+  weighs it.
 
 Each has been read off the real `Report` rather than described: this document
 is executed by the test suite, which asserts that these are exactly the checks
 it earns, **in this order**, that each fix named above really does clear the
-finding it is offered for, and that the document with all three applied
-**loads** — the last of which is what caught two of these three remedies
-being incomplete.
+finding it is offered for, and that the document with all four applied
+**loads** — the last of which is what caught two of these three A/A/A
+remedies being incomplete.
 
 ## Reading the report in code
 

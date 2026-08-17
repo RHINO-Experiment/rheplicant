@@ -1465,6 +1465,18 @@ _PAGE_FIXES = {
                        "init": {"ones": [7]},
                        "transform": "unit_mean_bandpass"}}}}),
     ],
+    "C18": [
+        # Only the `model.noise.type:` escape: the page's OTHER escape
+        # (`inference.noise.kind: homoscedastic`) also clears A27, which
+        # would fail the "and only it" assertion below -- measured, it
+        # leaves ['A30', 'A33', 'A49'], not ['A27', 'A30', 'A33'].
+        (("model.noise.type: RadiometerNoiseOperator",),
+         lambda doc: {**doc, "model": {
+             **doc["model"],
+             "noise": {"type": "RadiometerNoiseOperator",
+                       "channel_width": {"value": 1.0, "unit": "MHz"},
+                       "integration_time": {"value": 2.0, "unit": "s"}}}}),
+    ],
 }
 
 
@@ -1496,8 +1508,8 @@ class TestTheValidationPageDocument:
 
     The 2B precedent (``TestTheWorkedDocumentOnThePage``) executes a page's
     document because a page that carries one is making a promise. This page's
-    promise is the opposite shape -- that the document is wrong three ways,
-    that all three come back from one call, and that each fix it offers really
+    promise is the opposite shape -- that the document is wrong four ways,
+    that all four come back from one call, and that each fix it offers really
     clears the finding it is offered for -- so the test is the same idea with
     the assertion inverted.
 
@@ -1507,7 +1519,7 @@ class TestTheValidationPageDocument:
     about.
     """
 
-    HEADING = "## A document that is wrong three ways"
+    HEADING = "## A document that is wrong four ways"
 
     #: Every place the page states the SIZE of what its document earns, as
     #: ``(pattern, what it is)``. Anchored per sentence rather than a
@@ -1544,8 +1556,15 @@ class TestTheValidationPageDocument:
 
         The set-valued assertions below cannot see an order, and the page
         claims one ("in registry order") -- a claim nothing checked.
+
+        ``[ABC]\\d+`` and not ``A\\d+``: C18 joined this page's document in
+        Plan 3C Task 2, and the widened class is safe rather than merely
+        convenient -- the three assertions this feeds are all EQUALITIES
+        (``_ids_on_the_page() == preflight().checks()``, this list against
+        the pass's own order, and ``listed - {check}``), so widening it can
+        only ADD a subject it did not see before, never make one vacuous.
         """
-        return re.findall(r"^- \*\*(A\d+)\*\*", self._body(), re.MULTILINE)
+        return re.findall(r"^- \*\*([ABC]\d+)\*\*", self._body(), re.MULTILINE)
 
     def test_the_page_lists_ids_at_all(self):
         """A regex that stopped matching would make the tests below vacuous."""
@@ -1762,13 +1781,13 @@ class TestTheValidationPageDocument:
         )
 
     @pytest.mark.parametrize("a27", range(len(_PAGE_FIXES["A27"])))
-    def test_the_three_fixes_together_leave_a_document_that_LOADS(self, a27):
+    def test_the_four_fixes_together_leave_a_document_that_LOADS(self, a27):
         """The assertion that was missing, and it found two broken remedies.
 
         Every test above stops at ``preflight``. A remedy can therefore clear
         its own finding, earn no other, and still leave a document the layer
         refuses one phase later -- and until Plan 3B **two of this page's
-        three remedies did exactly that**, invisibly:
+        original three A/A/A remedies did exactly that**, invisibly:
 
         * the A33 remedy named ``transform: unit_mean_bandpass`` and not the
           ``init:`` that goes with it, so the bind produced ``(9,)`` for an
@@ -1776,6 +1795,12 @@ class TestTheValidationPageDocument:
         * the A27 ``radiometer_frozen`` remedy left ``include_logdet:``
           behind (A49 at P-1, ``build_noise`` before that) and never named
           ``source:``, which that kind has no default for.
+
+        C18's remedy joined in Plan 3C Task 2 and is checked here too, on the
+        same principle: clearing its own finding in isolation
+        (``test_the_fix_the_page_names_clears_the_finding_and_only_it``) says
+        nothing about whether the FOUR remedies compose into a document that
+        actually loads.
 
         Parametrized over A27's two ways out, because the page offers two and
         a test that took only the first would have shipped the second broken
@@ -1789,11 +1814,11 @@ class TestTheValidationPageDocument:
         from rheplicant.config import load_document, preflight
 
         document = self._document()
-        for check, index in (("A27", a27), ("A30", 0), ("A33", 0)):
+        for check, index in (("A27", a27), ("A30", 0), ("A33", 0), ("C18", 0)):
             document = _PAGE_FIXES[check][index][1](document)
         remaining = [f.check for f in preflight(document).findings]
         assert remaining == [], (
-            f"the three remedies together still leave {remaining}"
+            f"the four remedies together still leave {remaining}"
         )
         load_document(document)
 
