@@ -364,8 +364,11 @@ class TestThePlan2CSurface:
         """The dispatch table is not something a caller may hold."""
         import rheplicant.config as config
 
-        for name in ("EXECUTORS", "register", "reuse_of", "RunSpec",
-                     "execute_run"):
+        for name in ("EXECUTORS", "PARSERS", "PRE_EXECUTORS",
+                     "DEFERRED_CHECKS", "register", "handler_for",
+                     "parse_run", "parsed_options", "ParsedOptions",
+                     "ParsedRun", "RunParseContext", "ExitHandler",
+                     "reuse_of", "RunSpec", "execute_run"):
             assert name not in config.__all__, name
 
     def test_every_declared_kind_is_reachable_from_a_document(self):

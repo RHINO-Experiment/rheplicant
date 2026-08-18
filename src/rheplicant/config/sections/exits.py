@@ -14,8 +14,10 @@ in their own modules, imported at the foot of this one so that importing
 from __future__ import annotations
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
+from _rheplicant_bootstrap.variants import LayerRef
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
     _PROBE,
@@ -27,6 +29,8 @@ from rheplicant.config.sections.exit_support import (
     _passthrough,
     _space,
     _sweep,
+    handler_for,
+    parse_run,
     register,
 )
 from rheplicant.config.sections.runs import RunResult, RunSpec
@@ -298,19 +302,40 @@ def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
         **kwargs)
 
 
+#: The compatibility path has no canonical layer and no schedule position:
+#: ``run_document`` executes the base schedule through ``execute_run``
+#: without a trace, and Task 10's orchestration is what installs the real
+#: target layers and indices.  The shim carries an EMPTY document rather
+#: than ``built.document`` -- freezing a caller's document here would cost a
+#: deep evidence pass per run and could refuse programmatic documents the
+#: layer accepts today, neither of which the compatibility wrapper may do.
+_COMPATIBILITY_LAYER = LayerRef(kind="base", name=None, prefix="",
+                                document={}, declared_runs=None)
+
+
 def execute_run(run: RunSpec, built: Any,
                 results: Any = None) -> RunResult:
-    """One run entry against its ConfiguredRun -> a RunResult."""
-    executor = EXECUTORS.get(run.kind)
-    if executor is None:
+    """One run entry against its ConfiguredRun -> a RunResult.
+
+    The wrapper keeps its exact signature and its legacy unknown-kind
+    refusal byte-for-byte, then routes through the registry: parse once,
+    pre-execute, execute.  The ``expect: refuse`` capture wraps the
+    pre-execute/execute pair exactly where the bare executor call sat
+    before, so today's capture scope is unchanged.
+    """
+    if run.kind not in EXECUTORS:
         raise ConfigError(
             f"runs[{run.name!r}]: kind: {run.kind} has no executor. Every "
             f"kind this layer declares must register one; it knows "
             f"{sorted(EXECUTORS)}."
         )
+    parsed = parse_run(run, built, index=0, layer=_COMPATIBILITY_LAYER)
+    handler = handler_for(run.kind)
+    previous = results if results is not None else MappingProxyType({})
     if run.expect == "refuse":
         try:
-            executor(run, built, results=results)
+            handler.pre_execute(parsed, built, previous)
+            handler.execute(parsed, built, previous)
         except Exception as error:  # noqa: BLE001 -- run-and-capture is the point
             return RunResult(name=run.name, kind=run.kind, product=None,
                              error=error, variant=run.variant)
@@ -319,8 +344,9 @@ def execute_run(run: RunSpec, built: Any,
             "SUCCEEDED -- the assertion this run makes about the design no "
             "longer holds."
         )
+    handler.pre_execute(parsed, built, previous)
     return RunResult(name=run.name, kind=run.kind,
-                     product=executor(run, built, results=results),
+                     product=handler.execute(parsed, built, previous),
                      error=None, variant=run.variant)
 
 

@@ -7,7 +7,10 @@ from rheplicant.config import ConfigError
 from rheplicant.config.sections import exits
 from rheplicant.config.sections import runs as runs_module
 from rheplicant.config.sections.exit_support import (
+    DEFERRED_CHECKS,
     EXECUTORS,
+    PARSERS,
+    PRE_EXECUTORS,
     _binds,
     _decided_sigma,
     _noise,
@@ -110,11 +113,15 @@ class TestTheRegistryIsComplete:
 
         register("_probe_kind")(probe)
         try:
-            assert EXECUTORS["_probe_kind"] is probe
+            # The transitional legacy adapter wraps a parse-less binding;
+            # ``__wrapped__`` is the executor the caller registered.
+            assert EXECUTORS["_probe_kind"].__wrapped__ is probe
             with pytest.raises(ConfigError):
                 register("_probe_kind")(probe)
         finally:
-            EXECUTORS.pop("_probe_kind", None)
+            for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS,
+                             DEFERRED_CHECKS):
+                registry.pop("_probe_kind", None)
 
     def test_an_unregistered_kind_refuses_in_the_layers_own_voice(self):
         """A kind in _KINDS with no executor must not escape as a KeyError.
@@ -190,8 +197,8 @@ class TestTheLoopIsOrdered:
         """
         seen = {}
 
-        def spy(run, built, *, results=None):
-            seen[run.name] = sorted(results or {})
+        def spy(run, built, previous):
+            seen[run.name] = sorted(previous or {})
             return built.state
 
         original = EXECUTORS["forward"]
@@ -213,9 +220,9 @@ class TestTheLoopIsOrdered:
         """
         refused = []
 
-        def vandal(run, built, *, results=None):
+        def vandal(run, built, previous):
             try:
-                results["injected"] = "not a run"
+                previous["injected"] = "not a run"
             except TypeError as error:
                 refused.append(str(error))
             return built.state
