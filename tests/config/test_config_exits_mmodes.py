@@ -15,6 +15,7 @@ from rheplicant.config import ConfigError
 from rheplicant.config.document import load_document
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.sections.runs import run_document
+from tests.config.inflight_helpers import built_run
 from tests.config.test_config_document import synthetic_document
 
 pytest.importorskip("limtod_jax", reason="limTOD[jax] not installed")
@@ -355,20 +356,28 @@ class TestTheNormalizeBeamRefusal:
     def test_the_packages_refusal_could_not_have_satisfied_that_match(self):
         """What makes the assertion above capable of failing.
 
-        Deleting this layer's refusal leaves the package's, which fires a
-        few lines deeper.  MEASURED, so that the test above is known to be
-        about the earlier one and not merely about "something raised":
-        StateValidationError is not a subclass of ConfigError, and its
-        message does not contain the source's own 'measured ~18x off' --
-        that phrase lives in the mmodes() DOCSTRING (driftscan.py:676), not
-        in the exception text.
+        Deleting this layer's refusal leaves the package's.  MEASURED, so
+        that the test above is known to be about the earlier one and not
+        merely about "something raised": StateValidationError is not a
+        subclass of ConfigError, and its message does not contain the
+        source's own 'measured ~18x off' -- that phrase lives in the mmodes()
+        DOCSTRING (driftscan.py:676), not in the exception text.
+
+        The built object comes from ``built_run`` -- the payload route, with
+        no handler parse -- because Task 10's orchestration refuses this
+        document at load: the package's refusal is no longer reachable
+        THROUGH the layer at all, which is exactly the claim's force.
         """
         from rheplicant.core.errors import StateValidationError
 
         assert not issubclass(StateValidationError, ConfigError)
         assert not issubclass(ConfigError, StateValidationError)
         doc = document(RUN, normalize_beam=True)
-        projector, sky, coords = _by_hand(doc)
+        built = built_run(doc)
+        projector = resolve_reference("resources.projectors.drift",
+                                      built.context)
+        sky = resolve_reference("resources.sky_models.fg", built.context)
+        coords = built.state.coords
         assert projector.normalize_beam is True
         with pytest.raises(StateValidationError) as caught:
             projector.mmodes(sky(coords.freq), coords)
@@ -384,14 +393,20 @@ class TestTheNormalizeBeamRefusal:
         described, so the refusal must still fire -- an executor that keyed
         the check on the frame, or on a spec read before the swap, passes
         the test above and fails this one.
+
+        The swap is read off the parse-free payload route; the refusal now
+        arrives when the schedule is parsed at load -- the parser's only
+        access to the projector IS the built object on the parse context, so
+        a check that read the spec could not have fired it.
         """
         doc = document(RUN, normalize_beam=True,
                        optimizations=["cache_beam_rotation"])
-        projector, _, _ = _by_hand(doc)
+        projector = resolve_reference("resources.projectors.drift",
+                                      built_run(doc).context)
         assert projector.beam_frame == "reference"
         assert projector.normalize_beam is True
         with pytest.raises(ConfigError, match=r"measured ~18x off"):
-            run_document(doc)
+            load_document(doc)
 
     def test_the_optimisation_alone_does_not_refuse_anything(self):
         """The other leg: a cached rotation on a normalize_beam: false

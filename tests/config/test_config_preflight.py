@@ -1515,20 +1515,25 @@ class TestThePhaseGuard:
 
     def test_run_document_inherits_the_hook_and_adds_none_of_its_own(
             self, registry):
-        """Measured: three runs across two distinct variants run the pass
-        TWICE -- once per variant-applied document, which is what
-        ``configured(run.variant)`` memoises (``runs.py:152-156``).
+        """One attributed fan, each layer's own content, however many runs.
 
-        Kills both directions.  A ``preflight`` call added to ``run_document``
-        makes it three or four and runs the pass on the UNPATCHED document,
-        which is a document no variant describes; a hook that never fires makes
-        it nought.
+        Re-pinned at Task 10: the per-variant memoised ``load_document`` loop
+        is gone, and with it the pass running once per configured variant.
+        The orchestration runs the text pass ONCE over the canonical layers
+        before any build, so the count is the layer count -- and the values
+        are the layers' OWN, in canonical order, which is what keeps "the
+        pass ran on the unpatched document" dead: the variant layer's content
+        is the second entry, and the base's own value cannot stand in for it.
+
+        Kills both directions, as before: a hook that never fires makes it
+        nought, and one that re-reads a single document makes the two entries
+        equal.
         """
         seen = []
 
         @register("A2")
         def _watch(document):
-            seen.append(1)
+            seen.append(float(document["model"]["gain"]["gain"]["value"]))
             return ()
 
         doc = preflight_document(runs=[
@@ -1537,9 +1542,7 @@ class TestThePhaseGuard:
             {"kind": "forward", "name": "c", "variant": "unity_gain"},
         ])
         run_document(doc)
-        # ``run_document`` configures two distinct effective documents.  Each
-        # pass fans every check across the base and every declared variant.
-        assert len(seen) == 2 * len(_enumeration(doc).layers)
+        assert seen == [1.1, 1.0]
 
 
 class TestTheCostAndTheBoundary:

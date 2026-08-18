@@ -704,10 +704,12 @@ class TestApplyingTheAdviceLiterally:
         """The WARN's escape 1: *"Declare inference.noise: {kind:
         homoscedastic}"*."""
         before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls"}])
+                                runs=[{"kind": "conjugate.gls",
+                                       "names": ["g"]}])
         assert only(before, "C18").severity == WARN
         after = sigma_document(MODEL_NOISE, HOMOSCEDASTIC,
-                               runs=[{"kind": "conjugate.gls"}])
+                               runs=[{"kind": "conjugate.gls",
+                                      "names": ["g"]}])
         assert mine(after) == frozenset()
         load_document(after)
 
@@ -731,7 +733,8 @@ class TestApplyingTheAdviceLiterally:
         whole, which is the escape's own second clause.
         """
         before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls"}])
+                                runs=[{"kind": "conjugate.gls",
+                                       "names": ["g"]}])
         after = repatch(
             before,
             model={key: value for key, value in BASE_MODEL.items()

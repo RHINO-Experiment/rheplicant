@@ -35,6 +35,7 @@ from rheplicant.config.sections.npe import _estimator, _npe_spec, _simulate_bank
 from rheplicant.config.sections.runs import _KINDS, run_document
 from rheplicant.inference.npe import MIN_SCALE
 from tests.config.exit_helpers import FROZEN, PRIOR_FREE
+from tests.config.inflight_helpers import built_run
 from tests.config.posterior_helpers import (
     NPE_SECTION,
     NPE_SEEDS,
@@ -332,13 +333,22 @@ class TestTheSectionIsRequired:
         # without it declares no bank size, no seeds and no draw count.  The
         # refusal names the SECTION and lists its five subsections rather
         # than naming whichever key happened to be looked up first.
+        #
+        # Two boundaries, one refusal: Task 10's orchestration handler-parses
+        # the schedule at LOAD, so the document itself never loads; the
+        # payload route (``built_run``, no handler parse) still hands the
+        # helper a build, and the helper's own refusal is unchanged.
         doc = npe_document()
         del doc["inference"]["npe"]
-        built = load_document(doc)
+        built = built_run(doc)
         assert built.inference.npe is None
         with pytest.raises(ConfigError,
                            match="declares no inference.npe:") as caught:
             _npe_spec(npe_spec(), built)
+        assert str(caught.value).startswith("runs['amortized']: ")
+        with pytest.raises(ConfigError,
+                           match="declares no inference.npe:") as caught:
+            load_document(doc)
         assert str(caught.value).startswith("runs['amortized']: ")
 
     def test_a_subsection_with_no_seed_is_refused_naming_that_subsection(self):
