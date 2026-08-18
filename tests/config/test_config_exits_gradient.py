@@ -619,3 +619,26 @@ class TestTheSharedFixturesDiscriminate:
         _repaired(block)
         assert block == {"parameters": {},
                          "observed": {"from": "simulation"}}
+
+
+class TestTheExecutorReadsOnlyTheParsedView:
+    """Plan 4A Task 9: poisoning the raw mapping after parse changes nothing."""
+
+    def test_poisoning_the_raw_of_after_parse_changes_nothing(self):
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
+        from rheplicant.config.sections.runs import parse_runs
+
+        doc = gradient_document({"kind": "gradient", "objective": "mean",
+                                 "of": ["gain.gain"]})
+        built = load_document(doc)
+        (spec,) = parse_runs(doc["runs"])
+        parsed = parse_run(spec, built, index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        spec.options["of"] = ["global_signal.depth"]  # poison AFTER parse
+        product = handler_for("gradient").execute(parsed, built, {})
+        assert list(product) == ["gain.gain"]

@@ -39,7 +39,7 @@ from rheplicant.config.sections.exit_support import (
     parsed_options,
     register,
 )
-from rheplicant.config.sections.runs import _KINDS, RunSpec
+from rheplicant.config.sections.runs import _KINDS, RunResult, RunSpec
 from tests.config.exit_helpers import (
     FROZEN,
     HOMOSCEDASTIC,
@@ -48,6 +48,8 @@ from tests.config.exit_helpers import (
     TWO_LATENTS,
     conjugate_built,
 )
+from tests.config.posterior_helpers import npe_built, nuts_built
+from tests.config.test_config_document import synthetic_document
 
 _REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
@@ -94,16 +96,10 @@ class TestEveryDeclaredKindHasOneLiveHandler:
         assert set(_KINDS) == set(EXECUTORS) == set(DEFERRED_CHECKS)
         assert len(PARSERS) == 16
 
-    def test_every_builtin_is_transitionally_on_the_legacy_parser(self):
-        """Task 9 replaces the remaining entries and owns the no-legacy gate."""
-        unmigrated = ("identifiability", "score_directions", "gradient",
-                      "mmodes", "predict", "nuts", "npe")
-        for kind in unmigrated:
-            assert PARSERS[kind] is _legacy_freeze_parse, kind
-        for kind in ("forward", "fisher", "optimize", "plan.estimate",
-                     "plan.sample", "conjugate.wiener", "conjugate.gcr",
-                     "conjugate.gls", "condition"):
-            assert PARSERS[kind] is not _legacy_freeze_parse, kind
+    def test_no_builtin_handler_uses_the_legacy_parser_after_task_9(self):
+        """The identity half of Task 9's hard gate; the matrix is below."""
+        assert all(PARSERS[kind] is not _legacy_freeze_parse
+                   for kind in _KINDS)
         handler = handler_for("forward")
         assert isinstance(handler, ExitHandler)
         assert handler.deferred_checks == ()
@@ -1262,3 +1258,474 @@ class TestConjugateOptionRefusalsHappenAtParse:
         with pytest.raises(ConfigError, match="seed must NAME an entry"):
             _parse_conjugate("condition", conjugate_configured, names=["g"],
                              seed=11)
+
+
+# ---------------------------------------------------------------------------
+# Plan 4A Task 9: the remaining seven kinds, predict's deferred boundary, and
+# the hard no-legacy gate.
+
+from rheplicant.config.document import load_document  # noqa: E402
+
+
+def _mmodes_document(run):
+    """The smallest document with a drift scan mmodes can parse against.
+
+    Resources and pointing only -- no model/inference edit, so the fixture
+    census has nothing to object to (the same shape
+    ``test_config_exits_mmodes.py`` builds).
+    """
+    doc = synthetic_document()
+    doc["observation"]["pointing"] = {
+        "mode": "drift",
+        "az_deg": {"value": 0.0, "unit": "deg"},
+        "el_deg": {"value": 90.0, "unit": "deg"},
+        "materialise": ["pointing"],
+        "lst": {"mode": "uniform_turn", "n_time": "n_time",
+                "lst0_deg": {"value": 30.0, "unit": "deg"}},
+    }
+    doc["resources"] = {
+        "beams": {"horn": {"format": "gaussian",
+                           "fwhm_deg": {"value": 60.0, "unit": "deg"},
+                           "nside": 4, "normalize": "pixel_sum",
+                           "frame": "beam_local"}},
+        "projectors": {"drift": {
+            "engine": "driftscan",
+            "beam": {"ref": "resources.beams.horn"}, "lmax": 8,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "az_deg": {"value": 0.0, "unit": "deg"},
+            "el_deg": {"value": 90.0, "unit": "deg"},
+            "normalize_beam": False, "acknowledge_float32_sky": True}},
+        "arrays": {"two_argument": {"python": "operator:add"}},
+        "sky_models": {"fg": {"kind": "power_law",
+                              "amplitude": {"value": 300.0, "unit": "K"},
+                              "spectral_index": 4.0,
+                              "ref_freq": {"value": 60.0, "unit": "MHz"},
+                              "n_pix": 192}},
+    }
+    doc["runs"] = [run]
+    return doc
+
+
+@pytest.fixture(scope="module")
+def nuts_configured():
+    return nuts_built()
+
+
+@pytest.fixture(scope="module")
+def npe_configured():
+    return npe_built()
+
+
+@pytest.fixture(scope="module")
+def mmodes_configured():
+    return load_document(_mmodes_document({"kind": "forward"}))
+
+
+@pytest.fixture(scope="module")
+def no_parameters_configured():
+    return conjugate_built(
+        {"kind": "forward"},
+        inference={"noise": HOMOSCEDASTIC,
+                   "observed": {"from": "simulation"}})
+
+
+class TestRemainingParsersDoNotExecuteScience:
+    """Plan Step 1: the last seven parsers never reach a scientific call."""
+
+    @staticmethod
+    def _targets(kind, configured):
+        import numpyro.infer
+
+        import rheplicant.inference as inference
+        from rheplicant.config.refs import resolve_reference
+
+        twin = type(configured.inference.fit_twin)
+        if kind == "mmodes":
+            projector = resolve_reference("resources.projectors.drift",
+                                          configured.context)
+            sky = resolve_reference("resources.sky_models.fg",
+                                    configured.context)
+            return [(type(projector), "mmodes"), (type(sky), "__call__")]
+        return {
+            "identifiability": [(twin, "__call__"),
+                                (inference, "identifiability")],
+            "score_directions": [(twin, "__call__"),
+                                 (inference, "score_directions")],
+            "gradient": [(twin, "__call__"), (inference, "build_forward_fn"),
+                         (__import__("jax"), "grad")],
+            "predict": [(inference, "propagate_covariance"),
+                        (inference, "predict_from_samples")],
+            "nuts": [(inference, "to_numpyro_model"),
+                     (numpyro.infer, "NUTS"), (numpyro.infer, "MCMC")],
+            "npe": [(inference, "simulate_pairs"),
+                    (inference, "NeuralPosterior"),
+                    (inference, "train_posterior")],
+        }[kind]
+
+    @pytest.mark.parametrize(
+        "kind,fixture,options",
+        [("identifiability", "conjugate_configured", {}),
+         ("score_directions", "conjugate_configured", {}),
+         ("gradient", "conjugate_configured",
+          {"objective": "mean", "of": ["gain.gain"]}),
+         ("mmodes", "mmodes_configured",
+          {"projector": {"ref": "resources.projectors.drift"},
+           "sky": {"ref": "resources.sky_models.fg"}}),
+         ("predict", "conjugate_configured", {}),
+         ("nuts", "nuts_configured",
+          {"num_warmup": 2, "num_samples": 2,
+           "seed": {"from": "runtime.seeds.chain"}}),
+         ("npe", "npe_configured", {})],
+    )
+    def test_remaining_parsers_do_not_execute_science(
+            self, kind, fixture, options, request, monkeypatch):
+        configured = request.getfixturevalue(fixture)
+        for owner, name in self._targets(kind, configured):
+            monkeypatch.setattr(owner, name, _explode)
+        parsed = parse_run(_spec(kind, options=dict(options), reuse="src"),
+                           configured, index=0, layer=_layer())
+        assert parsed.kind == kind
+        assert isinstance(parsed.parsed.execution, Mapping)
+        assert _is_yaml_safe(parsed.parsed.resolved)
+
+
+class TestRemainingKindsNormalizeTheirDefaults:
+    def test_identifiability_rtol(self, conjugate_configured):
+        parsed = _parse_conjugate("identifiability", conjugate_configured)
+        assert _plain(parsed.parsed.resolved) == {"rtol": 1e-8}
+
+    def test_identifiability_carries_the_resolved_at_overrides(
+            self, conjugate_configured):
+        parsed = _parse_conjugate(
+            "identifiability", conjugate_configured, names=["g"],
+            at={"g": {"value": 2.0, "unit": "dimensionless"}})
+        assert _plain(parsed.parsed.resolved) == {
+            "names": ["g"],
+            "at": {"g": {"value": 2.0, "unit": "dimensionless"}},
+            "rtol": 1e-8}
+        # The execution view holds the resolved ARRAY, never the declaration.
+        assert float(parsed.parsed.execution["at"]["g"]) == 2.0
+
+    def test_score_directions_injects_nothing(self, conjugate_configured):
+        parsed = _parse_conjugate("score_directions", conjugate_configured)
+        assert _plain(parsed.parsed.resolved) == {}
+
+    def test_nuts_defaults(self, nuts_configured):
+        parsed = _parse_conjugate(
+            "nuts", nuts_configured, num_warmup=2, num_samples=2,
+            seed={"from": "runtime.seeds.chain"})
+        assert _plain(parsed.parsed.resolved) == {
+            "num_warmup": 2, "num_samples": 2, "seed": 3,
+            "init": "declared", "num_chains": 1, "chain_method": "parallel",
+            "thinning": 1, "progress_bar": True, "target_accept_prob": 0.8}
+
+    def test_gradient_projects_the_objective_declaration(
+            self, conjugate_configured):
+        parsed = _parse_conjugate("gradient", conjugate_configured,
+                                  objective="mean", of=["gain.gain"])
+        assert _plain(parsed.parsed.resolved) == {"objective": "mean",
+                                                  "of": ["gain.gain"]}
+        assert callable(parsed.parsed.execution["objective"])
+
+    def test_mmodes_projects_the_declarations(self, mmodes_configured):
+        parsed = _parse_conjugate(
+            "mmodes", mmodes_configured,
+            projector={"ref": "resources.projectors.drift"},
+            sky={"ref": "resources.sky_models.fg"})
+        assert _plain(parsed.parsed.resolved) == {
+            "projector": {"ref": "resources.projectors.drift"},
+            "sky": {"ref": "resources.sky_models.fg"}}
+        assert hasattr(parsed.parsed.execution["projector"], "mmodes")
+        assert callable(parsed.parsed.execution["sky"])
+
+    def test_predict_and_npe_have_empty_views(self, conjugate_configured,
+                                              npe_configured):
+        parsed = parse_run(_spec("predict", options={}, reuse="src"),
+                           conjugate_configured, index=1, layer=_layer())
+        assert _plain(parsed.parsed.execution) == {}
+        assert _plain(parsed.parsed.resolved) == {}
+        parsed = _parse_conjugate("npe", npe_configured)
+        assert _plain(parsed.parsed.execution) == {}
+        assert _plain(parsed.parsed.resolved) == {}
+
+
+class TestRemainingOptionRefusalsHappenAtParse:
+    def test_identifiability_rtol_bounds(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="rtol: must be < 1"):
+            _parse_conjugate("identifiability", conjugate_configured,
+                             rtol=1.0)
+        with pytest.raises(ConfigError, match="rtol: must be >= 0"):
+            _parse_conjugate("identifiability", conjugate_configured,
+                             rtol=-0.5)
+
+    def test_a_bare_string_names_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="non-empty list"):
+            _parse_conjugate("score_directions", conjugate_configured,
+                             names="gd")
+
+    def test_a_repeated_names_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="more than once"):
+            _parse_conjugate("identifiability", conjugate_configured,
+                             names=["g", "g"])
+
+    def test_gradient_objective_grammar(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="objective: is required"):
+            _parse_conjugate("gradient", conjugate_configured,
+                             of=["gain.gain"])
+        with pytest.raises(ConfigError, match="objective: is one of"):
+            _parse_conjugate("gradient", conjugate_configured,
+                             objective="l2", of=["gain.gain"])
+
+    def test_a_one_argument_python_objective_is_refused(
+            self, conjugate_configured):
+        with pytest.raises(ConfigError, match="cannot be called as"):
+            _parse_conjugate(
+                "gradient", conjugate_configured,
+                objective={"python": "tests.config.test_config_exit_parsers"
+                                     ":prediction_only_loss"},
+                of=["gain.gain"])
+
+    def test_gradient_of_grammar(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="of: is required"):
+            _parse_conjugate("gradient", conjugate_configured,
+                             objective="mean")
+        with pytest.raises(ConfigError, match="of: lists"):
+            _parse_conjugate("gradient", conjugate_configured,
+                             objective="mean",
+                             of=["gain.gain", "gain.gain"])
+
+    def test_at_names_a_declared_latent(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="at: names"):
+            _parse_conjugate("identifiability", conjugate_configured,
+                             at={"ghost": 1.0})
+
+    def test_at_without_parameters_is_refused(self, no_parameters_configured):
+        with pytest.raises(ConfigError,
+                           match="declares no inference.parameters"):
+            _parse_conjugate("gradient", no_parameters_configured,
+                             objective="mean", of=["gain.gain"],
+                             at={"g": 1.0})
+
+    def test_mmodes_ref_grammar(self, mmodes_configured):
+        with pytest.raises(ConfigError, match="is \\{ref:"):
+            _parse_conjugate("mmodes", mmodes_configured, projector="drift",
+                             sky={"ref": "resources.sky_models.fg"})
+
+    def test_a_two_argument_sky_is_refused(self, mmodes_configured):
+        with pytest.raises(ConfigError,
+                           match="cannot be called as \\(freq\\)"):
+            _parse_conjugate(
+                "mmodes", mmodes_configured,
+                projector={"ref": "resources.projectors.drift"},
+                sky={"ref": "resources.arrays.two_argument"})
+
+    def test_predict_from_is_the_second_spelling(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="second spelling"):
+            _parse_conjugate("predict", conjugate_configured,
+                             **{"from": "cov"})
+
+    def test_predict_n_draw_is_a_positive_whole(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="n_draw: is a whole number"):
+            _parse_conjugate("predict", conjugate_configured, n_draw=2.5)
+        with pytest.raises(ConfigError, match="n_draw: must be >= 1"):
+            _parse_conjugate("predict", conjugate_configured, n_draw=0)
+
+    def test_nuts_chain_method_vocabulary(self, nuts_configured):
+        with pytest.raises(ConfigError, match="is not one of numpyro's"):
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2,
+                             num_samples=2,
+                             seed={"from": "runtime.seeds.chain"},
+                             chain_method="sidecar")
+
+    def test_nuts_counts_are_required(self, nuts_configured):
+        with pytest.raises(ConfigError, match="num_samples: is required"):
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2,
+                             seed={"from": "runtime.seeds.chain"})
+
+    def test_nuts_seed_must_name_an_entry(self, nuts_configured):
+        with pytest.raises(ConfigError, match="seed must NAME an entry"):
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2,
+                             num_samples=2, seed=3)
+
+    def test_nuts_init_vocabulary_and_ref_availability(self, nuts_configured):
+        with pytest.raises(ConfigError, match="init: is one of"):
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2,
+                             num_samples=2,
+                             seed={"from": "runtime.seeds.chain"},
+                             init="random")
+        with pytest.raises(ConfigError, match="declares no ref:"):
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2,
+                             num_samples=2,
+                             seed={"from": "runtime.seeds.chain"},
+                             init="ref")
+
+    def test_npe_refuses_a_run_level_seed(self, npe_configured):
+        with pytest.raises(ConfigError, match="needs FOUR seeds"):
+            _parse_conjugate("npe", npe_configured,
+                             seed={"from": "runtime.seeds.bank"})
+
+    def test_npe_sweeps_every_run_key(self, npe_configured):
+        with pytest.raises(ConfigError, match="does not take"):
+            _parse_conjugate("npe", npe_configured, n_draws=4)
+
+
+PREDICT_DEFERRED = (
+    "predict.reuse_available",
+    "predict.reuse_succeeded",
+    "predict.variant_matches",
+    "predict.product_supported",
+    "predict.draw_count_available",
+)
+
+
+class TestPredictsDeferredBoundary:
+    """Plan Step 3: result-dependent checks live in pre_execute, named."""
+
+    def test_the_deferred_checks_are_the_five_named(self):
+        assert handler_for("predict").deferred_checks == PREDICT_DEFERRED
+
+    def test_parse_succeeds_and_reuse_availability_is_deferred(
+            self, conjugate_configured):
+        spec = _spec("predict", name="prediction", options={}, reuse="source")
+        parsed = parse_run(spec, conjugate_configured, index=1,
+                           layer=_layer())
+        assert parsed.kind == "predict"
+        with pytest.raises(ConfigError) as caught:
+            handler_for("predict").pre_execute(parsed, conjugate_configured,
+                                               {})
+        assert str(caught.value) == (
+            "runs['prediction']: reuse: 'source' names no earlier run; runs "
+            "execute in declaration order and by now [] have run.")
+
+    def _earlier(self, kind="fisher", product=None, error=None,
+                 variant=None):
+        return RunResult(name="src", kind=kind, product=product,
+                         error=error, variant=variant)
+
+    def _pre_execute(self, configured, earlier, **options):
+        parsed = parse_run(_spec("predict", name="prediction",
+                                 options=dict(options), reuse="src"),
+                           configured, index=1, layer=_layer())
+        handler_for("predict").pre_execute(parsed, configured,
+                                           {"src": earlier})
+
+    def test_reuse_succeeded(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="has no product to read"):
+            self._pre_execute(conjugate_configured,
+                              self._earlier(error=ConfigError("boom")))
+        self._pre_execute(conjugate_configured,
+                          self._earlier(product={"covariance": object()}))
+
+    def test_variant_matches(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="MIXES TWO BUILDS"):
+            self._pre_execute(conjugate_configured,
+                              self._earlier(product={"covariance": object()},
+                                            variant="at_65"))
+
+    def test_product_supported(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="knows how to propagate"):
+            self._pre_execute(conjugate_configured,
+                              self._earlier(kind="forward", product=object()))
+        with pytest.raises(ConfigError, match="draws nothing"):
+            self._pre_execute(conjugate_configured,
+                              self._earlier(product={"covariance": object()}),
+                              n_draw=2)
+
+    def test_draw_count_available(self, conjugate_configured):
+        class Draws:
+            n_draw = 2
+            samples = {"g": None}
+
+        with pytest.raises(ConfigError,
+                           match="exceeds the 2 draws"):
+            self._pre_execute(conjugate_configured,
+                              self._earlier(kind="plan.sample",
+                                            product=Draws()), n_draw=5)
+        self._pre_execute(conjugate_configured,
+                          self._earlier(kind="plan.sample", product=Draws()),
+                          n_draw=2)
+
+
+class TestNoKindDelegatesToTheLegacyParser:
+    """Task 9's hard gate, second half: the identity assertion alone could
+    pass with a parser that FORWARDS to the legacy one, so the legacy parser
+    is patched to raise and every kind is parsed."""
+
+    def test_all_sixteen_kinds_parse_with_the_legacy_parser_raising(
+            self, base_configured, conjugate_configured, nuts_configured,
+            npe_configured, mmodes_configured, monkeypatch):
+        import rheplicant.config.sections.exit_support as support
+
+        def explode(options, context):
+            raise AssertionError("the legacy parser ran")
+
+        monkeypatch.setattr(support, "_legacy_freeze_parse", explode)
+        cases = {
+            "forward": ({}, base_configured),
+            "fisher": ({}, base_configured),
+            "optimize": ({"optimizer": "gradient", "learning_rate": 0.1,
+                          "n_steps": 2}, base_configured),
+            "plan.estimate": ({"blocks": [{"names": ["g"]}],
+                               "check_identifiability": False},
+                              base_configured),
+            "plan.sample": ({"blocks": [{"names": ["g"]}],
+                             "seed": {"from": "runtime.seeds.sample"},
+                             "n_sweeps": 6}, base_configured),
+            "conjugate.wiener": ({"names": ["g"], "width": "none"},
+                                 conjugate_configured),
+            "conjugate.gcr": ({"names": ["g"],
+                               "seed": {"from": "runtime.seeds.draw"}},
+                              conjugate_configured),
+            "conjugate.gls": ({"names": ["g"]}, conjugate_configured),
+            "condition": ({"names": ["g"]}, conjugate_configured),
+            "identifiability": ({}, conjugate_configured),
+            "score_directions": ({}, conjugate_configured),
+            "gradient": ({"objective": "mean", "of": ["gain.gain"]},
+                         conjugate_configured),
+            "mmodes": ({"projector": {"ref": "resources.projectors.drift"},
+                        "sky": {"ref": "resources.sky_models.fg"}},
+                       mmodes_configured),
+            "predict": ({}, conjugate_configured),
+            "nuts": ({"num_warmup": 2, "num_samples": 2,
+                      "seed": {"from": "runtime.seeds.chain"}},
+                     nuts_configured),
+            "npe": ({}, npe_configured),
+        }
+        assert set(cases) == set(_KINDS)
+        for kind, (options, configured) in cases.items():
+            parsed = parse_run(_spec(kind, options=dict(options),
+                                     reuse="earlier"),
+                               configured, index=0, layer=_layer())
+            assert parsed.kind == kind
+
+
+class TestParsingAddsNoOptionalDependency:
+    """A process that parses no nuts/npe run keeps numpyro out of
+    sys.modules -- the parse-level half of the optional-import ruling."""
+
+    def test_parsing_a_forward_run_leaves_numpyro_out(self):
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "import sys;"
+            "import rheplicant.config;"
+            "from _rheplicant_bootstrap.variants import LayerRef;"
+            "from rheplicant.config.sections import exits;"
+            "from rheplicant.config.sections.exit_support import parse_run;"
+            "from rheplicant.config.sections.runs import RunSpec;"
+            "spec = RunSpec(name='run', kind='forward', variant=None,"
+            " on='primary', expect='ok', options={});"
+            "layer = LayerRef(kind='base', name=None, prefix='',"
+            " document={}, declared_runs=None);"
+            "parse_run(spec, object(), index=0, layer=layer);"
+            "print('numpyro' in sys.modules)"
+        )
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        if os.environ.get("PYTHONPATH"):
+            env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+        out = subprocess.run([sys.executable, "-c", script],
+                             capture_output=True, text=True, check=True,
+                             env=env)
+        assert out.stdout.strip() == "False", out.stdout

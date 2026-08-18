@@ -523,3 +523,27 @@ class TestTheGrammar:
                                  r"model"):
             run_document(document(
                 {**RUN, "sky": {"ref": "resources.projectors.drift"}}))
+
+
+class TestTheExecutorReadsOnlyTheParsedView:
+    """Plan 4A Task 9: poisoning the raw mapping after parse changes nothing."""
+
+    def test_poisoning_the_raw_sky_after_parse_changes_nothing(self):
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
+        from rheplicant.config.sections.runs import parse_runs
+
+        doc = document(RUN)
+        built = load_document(doc)
+        (spec,) = parse_runs(doc["runs"])
+        parsed = parse_run(spec, built, index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        # poison AFTER the parse: the mottled sky differs from fg in the
+        # m > 0 coefficients, so a raw-reading executor cannot pass.
+        spec.options["sky"] = {"ref": "resources.sky_models.mottled"}
+        got = handler_for("mmodes").execute(parsed, built, {})
+        assert np.array_equal(np.asarray(got), product())

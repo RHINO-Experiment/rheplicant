@@ -30,12 +30,32 @@ from tests.config.posterior_helpers import (
 )
 
 
+def _drive(spec, built):
+    """parse -> pre_execute -> execute: the registry's own triple, driven by
+    hand for the same reason this file always drove the executor directly.
+    Plan 4A Task 9 moved the grammar into the parser, so a SUCCESS path must
+    come through the parse seam (the seed travels as its resolved integer).
+    """
+    from _rheplicant_bootstrap.variants import LayerRef
+    from rheplicant.config.sections.exit_support import (
+        handler_for,
+        parse_run,
+    )
+
+    parsed = parse_run(spec, built, index=0,
+                       layer=LayerRef(kind="base", name=None, prefix="",
+                                      document={}, declared_runs=None))
+    handler = handler_for(spec.kind)
+    handler.pre_execute(parsed, built, {})
+    return handler.execute(parsed, built, {})
+
+
 def product(run=None, **document):
-    return _run_nuts(nuts_spec(**(run or {})), nuts_built(**document))
+    return _drive(nuts_spec(**(run or {})), nuts_built(**document))
 
 
 def needle(run=None):
-    """:data:`NEEDLE` on :data:`WIENER_MODEL`, straight through the executor.
+    """:data:`NEEDLE` on :data:`WIENER_MODEL`, straight through the handler.
 
     The model is named rather than left to ``conjugate_document``'s default
     because every number pinned below was measured on this one -- NOT because
@@ -44,8 +64,8 @@ def needle(run=None):
     simulated data alike, and the declared start finds the line under it just
     as well (mean 7.99978e7 against 7.99955e7 here).
     """
-    return _run_nuts(nuts_spec(**(run or {})),
-                     nuts_built(model=WIENER_MODEL, inference=NEEDLE))
+    return _drive(nuts_spec(**(run or {})),
+                  nuts_built(model=WIENER_MODEL, inference=NEEDLE))
 
 
 class TestTheChainComesBack:
@@ -153,9 +173,15 @@ class TestTheRequiredKeys:
 
     def test_the_seed_is_required(self):
         """A29's fourth member.  The refusal is draws.py's own, worn under
-        this run's `where`, so it names the run and names runtime.seeds."""
+        this run's `where`, so it names the run and names runtime.seeds.
+        Plan 4A Task 9 moved it into the parser."""
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import parse_run
+
         with pytest.raises(ConfigError) as caught:
-            _run_nuts(nuts_spec(drop=("seed",)), nuts_built())
+            parse_run(nuts_spec(drop=("seed",)), nuts_built(), index=0,
+                      layer=LayerRef(kind="base", name=None, prefix="",
+                                     document={}, declared_runs=None))
         assert str(caught.value).startswith("runs['chain']:")
         assert "runtime.seeds" in str(caught.value)
 
@@ -290,7 +316,7 @@ class TestTheStartMoves:
             return real(model, **kwargs)
 
         monkeypatch.setattr(numpyro.infer, "NUTS", spy)
-        _run_nuts(nuts_spec(init="ref"), nuts_built(inference=TWO_REFS))
+        _drive(nuts_spec(init="ref"), nuts_built(inference=TWO_REFS))
         values = captured["init_strategy"].keywords["values"]
         assert {name: float(value) for name, value in values.items()} == {
             "d": 0.25, "a": 40.0}
@@ -446,25 +472,16 @@ class TestTheKnobs:
                                init_strategy=None)
 
     def test_no_default_is_restated(self, monkeypatch):
-        """A silent document SENDS numpyro nothing but the two required counts.
+        """A silent document SENDS numpyro the parsed defaults -- its own.
 
-        This is a test about what the executor SENDS, and the product cannot
-        answer it: `n_chain == 1` and `n_draw == 200` are true whether the
-        executor forwarded nothing or forwarded every default by hand.
-        Measured -- replacing `**_passthrough(run.options, _MCMC_KEYS)` with
-        the exact forbidden form, `{"num_chains": options.get("num_chains", 1),
-        "chain_method": options.get("chain_method", "sequential"),
-        "thinning": options.get("thinning", 1), "progress_bar":
-        options.get("progress_bar", False)}` (the SCHEMA's wrong values, which
-        is what makes it the mutant worth killing) -- left every other test in
-        this module green.  So the spy is the test, and the product assertions
-        below are kept only as the cheap half.
-
-        The same spy closes two more holes for free: dropping `chain_method`
-        from `_MCMC_KEYS` survives every product assertion, because on a
-        one-device box `parallel` falls back to sequential and produces
-        BIT-IDENTICAL draws; and dropping `progress_bar` from it is invisible
-        for the same reason a bar is.
+        Plan 4A Task 9 changed WHAT this test can pin: the parser now
+        normalizes the six optional knobs into the parsed view, so the
+        executor always forwards them.  What must not change is the VALUES:
+        measured against numpyro's own signatures, ``num_chains=1``,
+        ``chain_method="parallel"``, ``thinning=1``, ``progress_bar=True``
+        (and ``target_accept_prob=0.8`` on the kernel) -- the SCHEMA's
+        ``sequential``/``false`` pair, the mutant this test was written to
+        kill, must still never appear.
 
         The document is the SILENT one on purpose: :data:`NUTS` declares
         `progress_bar: false`, so it is not silent, and this test builds the
@@ -481,9 +498,9 @@ class TestTheKnobs:
 
         monkeypatch.setattr(numpyro.infer, "MCMC", spy)
         drawn = product({"drop": ("progress_bar",)})
-        assert set(captured) == {"num_warmup", "num_samples"}, captured
-        assert captured["num_warmup"] == 200
-        assert captured["num_samples"] == 200
+        assert captured == {"num_warmup": 200, "num_samples": 200,
+                            "num_chains": 1, "chain_method": "parallel",
+                            "thinning": 1, "progress_bar": True}, captured
         assert drawn.n_chain == 1
         assert drawn.n_draw == 200
 
@@ -737,3 +754,19 @@ class TestTheDiagnostics:
             drawn = product({"thinning": 2, "target_accept_prob": 0.2})
         assert drawn.divergences == 100
         assert drawn.n_draw == 100
+
+
+class TestTheParserInjectedDefaultsAreThePackagesOwn:
+    """Plan 4A Task 9: the six injected defaults equal omission, in draws."""
+
+    def test_explicit_defaults_draw_the_same_chain(self):
+        implicit = product()
+        explicit = product({"init": "declared", "num_chains": 1,
+                            "chain_method": "parallel", "thinning": 1,
+                            "progress_bar": True, "target_accept_prob": 0.8})
+        assert set(implicit.samples) == set(explicit.samples)
+        import numpy as np
+
+        for name, stack in implicit.samples.items():
+            assert np.array_equal(np.asarray(stack),
+                                  np.asarray(explicit.samples[name])), name

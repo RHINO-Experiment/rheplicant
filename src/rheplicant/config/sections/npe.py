@@ -74,6 +74,12 @@ document before any beam is read (plan §2.2: one name, one binding, two call
 sites).  The three counts above are Plan 2D's and are left as they were --
 they are the per-task lists a later drafter actually needs, and re-totalling
 them here would put a number in this docstring that no test defends.
+
+*Plan 4A's Task 9 binds exactly one more*: :func:`_parse_npe_run`, the
+kind's parser (A29, the empty sweep, the section's presence) -- plus the
+``ParsedRun``/``parsed_options`` imports it added to the ``exit_support``
+list.  It is named for the RUN so it can never be mistaken for
+:func:`parse_npe`, the section parser ``build_inference`` calls.
 """
 
 from __future__ import annotations
@@ -89,11 +95,13 @@ from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.exit_support import (
     _PROBE,
+    ParsedRun,
     _binds,
     _decided_model,
     _observed,
     _passthrough,
     _sweep,
+    parsed_options,
     register,
 )
 from rheplicant.config.sections.posterior_support import (
@@ -596,8 +604,23 @@ def _a29_npe_takes_no_run_seed(where: str, options: Mapping[str, Any]) -> None:
         )
 
 
-@register("npe")
-def _run_npe(run: Any, built: Any, *, results: Any = None) -> Any:
+def _parse_npe_run(options, context):
+    """The whole run-level grammar: no keys, and the section must exist.
+
+    Everything else ``kind: npe`` reads lives in ``inference.npe:`` and was
+    parsed by :func:`parse_npe` when the document was built; both views are
+    therefore empty, and no simulation, training or draw happens here.
+    """
+    spec = context.spec
+    where = f"runs[{spec.name!r}]"
+    _a29_npe_takes_no_run_seed(where, options)
+    _sweep(spec, frozenset())
+    _npe_spec(spec, context.configured_run)
+    return parsed_options(options, resolved=options)
+
+
+@register("npe", parse=_parse_npe_run)
+def _run_npe(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """One ``kind: npe`` run -> an :class:`NpeProduct`."""
     from rheplicant.inference import train_posterior
 

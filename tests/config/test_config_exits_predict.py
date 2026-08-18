@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from _rheplicant_bootstrap.variants import LayerRef
 from rheplicant.config import ConfigError
 from rheplicant.config.sections.runs import run_document
 from tests.config.exit_helpers import conjugate_document
@@ -28,6 +29,10 @@ WIENER_FISHER = {"name": "w", "kind": "conjugate.wiener", "names": ["g"],
                  "width": "fisher"}
 FROM_COV = {"name": "p", "kind": "predict", "reuse": "cov"}
 FROM_CHAIN = {"name": "p", "kind": "predict", "reuse": "chain"}
+
+#: The compatibility base layer the parse seam is driven against directly.
+_BASE_LAYER = LayerRef(kind="base", name=None, prefix="", document={},
+                       declared_runs=None)
 
 # The repair moves the absorption centre from 75 MHz to 65 MHz, which moves
 # the widest prediction across the frequency grid (60..85 MHz, 8 points).
@@ -827,11 +832,16 @@ class TestTheReuseGrammar:
         it -- not because its product looks wrong.  A `hasattr` refactor
         accepts both of these fakes and fails here.
 
-        The executor is called directly, because a document cannot construct
-        a product of one kind and a run of another.
+        The handler is driven directly, because a document cannot construct
+        a product of one kind and a run of another.  The kind check is
+        result-dependent, so it sits in ``pre_execute`` (Plan 4A Task 9's
+        deferred boundary).
         """
         from rheplicant.config.document import load_document
-        from rheplicant.config.sections.diagnostics import _run_predict
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
         from rheplicant.config.sections.runs import RunResult, RunSpec
 
         built = load_document(document(FISHER))
@@ -844,8 +854,9 @@ class TestTheReuseGrammar:
                        expect="ok", options={}, reuse="other")
         results = {"other": RunResult(name="other", kind=kind,
                                       product=Chainlike(), error=None)}
+        parsed = parse_run(spec, built, index=1, layer=_BASE_LAYER)
         with pytest.raises(ConfigError) as caught:
-            _run_predict(spec, built, results=results)
+            handler_for("predict").pre_execute(parsed, built, results)
         message = str(caught.value)
         assert f"kind: {kind}" in message
         assert "knows how to propagate" in message
@@ -912,7 +923,10 @@ class TestAVariantMismatchIsRefused:
         ``ValueError: Got unexpected field names: ['variant']``.
         """
         from rheplicant.config.document import load_document
-        from rheplicant.config.sections.diagnostics import _run_predict
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
         from rheplicant.config.sections.exits import execute_run
         from rheplicant.config.sections.runs import RunSpec
 
@@ -923,8 +937,12 @@ class TestAVariantMismatchIsRefused:
                           load_document(doc, variant=None))
         spec = RunSpec(name="p", kind="predict", variant=name, on="primary",
                        expect="ok", options={}, reuse="cov")
-        return _run_predict(spec, load_document(doc, variant=name),
-                            results={"cov": cov._replace(variant=name)})
+        built = load_document(doc, variant=name)
+        parsed = parse_run(spec, built, index=1, layer=_BASE_LAYER)
+        handler = handler_for("predict")
+        results = {"cov": cov._replace(variant=name)}
+        handler.pre_execute(parsed, built, results)
+        return handler.execute(parsed, built, results)
 
     def test_the_covariance_route_refuses_a_mismatch(self):
         """Both runs named, both variants named, in the layer's own voice.

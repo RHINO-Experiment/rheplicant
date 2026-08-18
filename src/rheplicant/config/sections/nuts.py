@@ -54,7 +54,9 @@ imports -- ``annotations`` (the ``__future__`` import), ``Any``,
 ``NamedTuple``, ``ConfigError``, ``_noise``, ``_number``, ``_observed``,
 ``_sweep``, ``_draw_key``, ``_sampled_space`` -- and five are defined here:
 ``__all__``, :data:`_NUTS_KEYS`, ``_COUNTS``, :class:`NutsProduct` and
-:func:`_run_nuts`.
+:func:`_run_nuts`.  (Task 9 later dropped the ``_draw_key`` import: the
+parser resolves the seed to its reportable integer, so the executor builds
+the key itself and nothing here calls ``_draw_key`` any more.)
 
 *Two more bound by Task 5*, plus the ``register`` import it added to the
 ``exit_support`` list: ``_INITS`` (a tuple) and :func:`_init_strategy`.
@@ -66,11 +68,17 @@ NOT in it -- that knob is ``NUTS``'s, and a table carrying it would
 :data:`_NUTS_KERNEL_KEYS`.  Task 4 reserved exactly those two names here,
 because a name absent from an authoritative list reads as free -- which is
 the failure this whole block exists to prevent, and which an earlier draft of
-the block committed by reserving ``_MCMC_KEYS`` alone.  **That is the whole
-inventory: this module is written by Tasks 4, 5 and 6 and by nobody after
-them.**  The three ``chain_method`` words numpyro takes are a LOCAL inside
-:func:`_run_nuts` rather than a third module constant, so the reservation
-above stays exhaustive.
+the block committed by reserving ``_MCMC_KEYS`` alone.
+
+*Plan 4A's Task 9 binds three more*, plus the ``ParsedRun``/
+``parsed_options`` imports it added to the ``exit_support`` list:
+:data:`_NUTS_DEFAULTS` (the six injected defaults, measured against
+numpyro's own signatures), :func:`_init_choice` (the ``init:`` vocabulary
+and ref-availability check, split out of :func:`_init_strategy` so the
+parser raises it without building the strategy) and :func:`_parse_nuts`
+(the kind's parser, which is what the ``@register`` decorator now names).
+The three ``chain_method`` words numpyro takes stay a LOCAL, now inside
+:func:`_parse_nuts`, so this inventory stays exhaustive.
 
 Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and :class:`NutsProduct` rather than
 rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
@@ -84,17 +92,16 @@ from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
+    ParsedRun,
     _noise,
     _number,
     _observed,
     _passthrough,
     _sweep,
+    parsed_options,
     register,
 )
-from rheplicant.config.sections.posterior_support import (
-    _draw_key,
-    _sampled_space,
-)
+from rheplicant.config.sections.posterior_support import _sampled_space
 
 __all__ = ["NutsProduct"]
 
@@ -124,6 +131,16 @@ _COUNTS = ("num_warmup", "num_samples")
 #: layer's own choice rather than a restatement of numpyro's -- see
 #: :func:`_init_strategy`.
 _INITS = ("declared", "ref")
+
+#: The parser-injected defaults, measured against numpyro's own signatures
+#: (``MCMC(num_chains=1, thinning=1, chain_method='parallel',
+#: progress_bar=True)``, ``NUTS(target_accept_prob=0.8)``) -- an explicit
+#: keyword is byte-identical to an omission.  ``init:`` is this layer's own
+#: default (``_init_choice``), and ``num_warmup``/``num_samples`` have no
+#: package default to inject: they stay required.
+_NUTS_DEFAULTS = {"init": "declared", "num_chains": 1,
+                  "chain_method": "parallel", "thinning": 1,
+                  "progress_bar": True, "target_accept_prob": 0.8}
 
 
 class NutsProduct(NamedTuple):
@@ -156,6 +173,35 @@ class NutsProduct(NamedTuple):
     divergences: int
 
 
+def _init_choice(run: Any, built: Any, space: Any) -> str:
+    """``init:`` -> the validated word, without building the strategy.
+
+    Split out of :func:`_init_strategy` for Plan 4A's Task 9: the parser
+    raises the vocabulary and ref-availability refusals before any numpyro
+    object exists, and the executor builds the strategy from the same word.
+    """
+    where = f"runs[{run.name!r}]"
+    asked = run.options.get("init", "declared")
+    if asked not in _INITS:
+        raise ConfigError(
+            f"{where}: init: is one of {list(_INITS)} -- where the chain "
+            f"STARTS, not how it moves; got {asked!r}."
+        )
+    if asked == "ref":
+        refs = built.inference.refs or {}
+        without = [name for name in space.names if refs.get(name) is None]
+        if without:
+            raise ConfigError(
+                f"{where}: init: ref starts the chain at each latent's own "
+                f"ref:, and inference.parameters declares no ref: for "
+                f"{without}. Declare one for each, or say init: declared to "
+                "start at init: -- starting the named ones at ref: and the "
+                "rest at init: would be a third starting point no document "
+                "asked for."
+            )
+    return asked
+
+
 def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     """``init:`` -> the ``init_strategy=`` the KERNEL takes.
 
@@ -181,38 +227,92 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     It does not re-parse the section: a second ``parse_latents`` per run is a
     second validator that can disagree with the first the day either grows a
     context-dependent branch, and that shape is already on Plan 3's ledger
-    once.
+    once.  The word itself is :func:`_init_choice`'s, validated once there.
     """
-    where = f"runs[{run.name!r}]"
-    asked = run.options.get("init", "declared")
-    if asked not in _INITS:
-        raise ConfigError(
-            f"{where}: init: is one of {list(_INITS)} -- where the chain "
-            f"STARTS, not how it moves; got {asked!r}."
-        )
-    if asked == "declared":
+    if _init_choice(run, built, space) == "declared":
         from rheplicant.inference import init_to_declared
 
         return init_to_declared(space)
     import numpyro
 
     refs = built.inference.refs or {}
-    without = [name for name in space.names if refs.get(name) is None]
-    if without:
-        raise ConfigError(
-            f"{where}: init: ref starts the chain at each latent's own ref:, "
-            f"and inference.parameters declares no ref: for {without}. "
-            "Declare one for each, or say init: declared to start at init: "
-            "-- starting the named ones at ref: and the rest at init: would "
-            "be a third starting point no document asked for."
-        )
     return numpyro.infer.init_to_value(
         values={name: refs[name] for name in space.names})
 
 
-@register("nuts")
-def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
+def _parse_nuts(options, context):
+    """The whole nuts grammar: knob values, counts, seed form, gates.
+
+    Every refusal the executor used to raise mid-build, in the same order,
+    and the six measured defaults injected into both views.  What never
+    runs here: ``to_numpyro_model``, the kernel, the MCMC, and the
+    ``init_strategy`` build (numpyro stays out of a parse-only process).
+    """
+    from rheplicant.config.draws import _seed_name, seed_for
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _NUTS_KEYS)
+    for key in ("num_chains", "thinning"):
+        if key in options:
+            _number(spec, key, options[key], kind=int, minimum=1)
+    if "target_accept_prob" in options:
+        # minimum=0.0 and NO upper bound: 1.0 as a ceiling would be this
+        # layer restating numpyro's parametrisation, and 2.0 just runs.
+        _number(spec, "target_accept_prob", options["target_accept_prob"],
+                kind=float, minimum=0.0)
+    if "progress_bar" in options and not isinstance(
+            options["progress_bar"], bool):
+        raise ConfigError(
+            f"{where}: progress_bar: is true or false; got "
+            f"{options['progress_bar']!r}. Every non-empty string is "
+            'truthy, so progress_bar: "false" would print the very bar the '
+            "document asked to be rid of, and say nothing about it."
+        )
+    # numpyro's own three words -- see _run_nuts' note.  A LOCAL, so the
+    # module docstring's reserved-name list stays exhaustive.
+    methods = ("parallel", "sequential", "vectorized")
+    if ("chain_method" in options
+            and options["chain_method"] not in methods):
+        raise ConfigError(
+            f"{where}: chain_method: {options['chain_method']!r} is not "
+            f"one of numpyro's {', '.join(methods)}. parallel needs one "
+            "device per chain and falls back to sequential with a warning "
+            "when it does not have them; vectorized runs them under one vmap."
+        )
+    for key in _COUNTS:
+        if key not in options:
+            raise ConfigError(
+                f"{where}: {key}: is required -- numpyro's MCMC declares "
+                "num_warmup and num_samples keyword-only with NO default, so "
+                "there is no package default for this layer to stand aside "
+                "for, and a chain length invented here would be a number "
+                "nobody wrote down."
+            )
+    normalized = {key: _number(spec, key, options[key], kind=int, minimum=1)
+                  for key in _COUNTS}
+    # Presence and form, then the resolved integer in BOTH views -- the
+    # freeze turns a declaration mapping into a proxy ``_seed_name`` would
+    # refuse, so the executor reads the int and builds the key itself.
+    normalized["seed"] = seed_for(_seed_name(dict(options), where),
+                                  built.context)
+    space = _sampled_space(spec, built, route="nuts")
+    _observed(spec, built)
+    # _noise, never _decided_sigma: see the module docstring.  The call is
+    # for its refusal alone; the rule itself is execute's.
+    _noise(spec, built)
+    normalized["init"] = _init_choice(spec, built, space)
+    for key in ("num_chains", "chain_method", "thinning", "progress_bar",
+                "target_accept_prob"):
+        normalized[key] = options.get(key, _NUTS_DEFAULTS[key])
+    return parsed_options(normalized, resolved=normalized)
+
+
+@register("nuts", parse=_parse_nuts)
+def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """One ``kind: nuts`` run -> a :class:`NutsProduct`."""
+    import jax
     import numpyro
     from numpyro.diagnostics import summary
 
@@ -297,7 +397,9 @@ def _run_nuts(run: Any, built: Any, *, results: Any = None) -> Any:
     # `observed=` by keyword.  The model is a one-parameter closure, so the
     # positional form binds identically today; the keyword is what survives a
     # to_numpyro_model that grows a second parameter.
-    mcmc.run(_draw_key(run, where, built), observed=observed)
+    # The parser resolved the seed's name to its reportable integer, so the
+    # key the chain consumes is built from that integer and nothing else.
+    mcmc.run(jax.random.key(run.options["seed"]), observed=observed)
     drawn = mcmc.get_samples()
     samples = {name: drawn[name] for name in space.names}
     # `summary` needs the chain axis -- (1, 200) with one chain, (2, 200) with

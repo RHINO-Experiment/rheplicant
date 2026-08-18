@@ -758,3 +758,26 @@ class TestTheKindIsRunnable:
             "runs._KINDS_2D still exists; the last task to move a kind out of "
             "it deletes the tuple and its refusal branch."
         )
+
+
+class TestTheRunLevelParse:
+    """Plan 4A Task 9: npe's parse is the empty sweep plus the section's
+    presence -- no simulation, no training, no draw."""
+
+    def test_parse_touches_no_science_and_projects_empty_views(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import parse_run
+
+        def explode(*args, **kwargs):
+            raise AssertionError("science ran during parse")
+
+        monkeypatch.setattr(inference, "simulate_pairs", explode)
+        monkeypatch.setattr(inference, "NeuralPosterior", explode)
+        monkeypatch.setattr(inference, "train_posterior", explode)
+        parsed = parse_run(npe_spec(), npe_built(), index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        assert dict(parsed.parsed.execution) == {}
+        assert dict(parsed.parsed.resolved) == {}
