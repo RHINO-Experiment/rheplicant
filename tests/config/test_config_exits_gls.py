@@ -509,3 +509,24 @@ class TestGlsGrammar:
         del document["runs"][0]["names"]
         with pytest.raises(ConfigError, match="names: is required"):
             run_document(document)
+
+
+def _explode(*args, **kwargs):
+    raise AssertionError(f"an operator ran during a grammar refusal: {args!r}")
+
+
+class TestRefusalsPrecedeTheOperator:
+    """Plan 4A Task 8: the acknowledgement boolean was judged after the
+    block was built."""
+
+    def test_a_non_bool_acknowledgement_speaks_before_the_block_is_built(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+
+        monkeypatch.setattr(inference, "linear_operator", _explode)
+        monkeypatch.setattr(inference, "iterative_gls", _explode)
+        with pytest.raises(ConfigError,
+                           match="acknowledge_unconverged_covariance: is a "
+                                 "bool"):
+            run_document(gls_document(
+                {"acknowledge_unconverged_covariance": "yes"}))

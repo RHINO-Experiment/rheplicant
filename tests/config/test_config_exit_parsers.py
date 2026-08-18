@@ -40,7 +40,14 @@ from rheplicant.config.sections.exit_support import (
     register,
 )
 from rheplicant.config.sections.runs import _KINDS, RunSpec
-from tests.config.exit_helpers import HOMOSCEDASTIC, ONE_LATENT, conjugate_built
+from tests.config.exit_helpers import (
+    FROZEN,
+    HOMOSCEDASTIC,
+    ONE_LATENT,
+    RADIOMETER,
+    TWO_LATENTS,
+    conjugate_built,
+)
 
 _REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
@@ -88,14 +95,14 @@ class TestEveryDeclaredKindHasOneLiveHandler:
         assert len(PARSERS) == 16
 
     def test_every_builtin_is_transitionally_on_the_legacy_parser(self):
-        """Tasks 8-9 replace the remaining entries; Task 9 owns the gate."""
-        unmigrated = ("conjugate.wiener", "conjugate.gcr", "conjugate.gls",
-                      "condition", "identifiability", "score_directions",
-                      "gradient", "mmodes", "predict", "nuts", "npe")
+        """Task 9 replaces the remaining entries and owns the no-legacy gate."""
+        unmigrated = ("identifiability", "score_directions", "gradient",
+                      "mmodes", "predict", "nuts", "npe")
         for kind in unmigrated:
             assert PARSERS[kind] is _legacy_freeze_parse, kind
         for kind in ("forward", "fisher", "optimize", "plan.estimate",
-                     "plan.sample"):
+                     "plan.sample", "conjugate.wiener", "conjugate.gcr",
+                     "conjugate.gls", "condition"):
             assert PARSERS[kind] is not _legacy_freeze_parse, kind
         handler = handler_for("forward")
         assert isinstance(handler, ExitHandler)
@@ -986,3 +993,272 @@ class TestBaseOptionRefusalsHappenAtParse:
     def test_an_unknown_option_is_swept_at_parse(self, base_configured):
         with pytest.raises(ConfigError, match="does not take"):
             _parse_base("fisher", base_configured, jitters=0.1)
+
+
+# ---------------------------------------------------------------------------
+# Plan 4A Task 8: the four conjugate kinds on explicit parsers.
+
+
+@pytest.fixture(scope="module")
+def conjugate_configured():
+    """One latent ``g``, homoscedastic noise, a named seed for gcr."""
+    return conjugate_built({"kind": "forward"}, seeds={"draw": 7})
+
+
+@pytest.fixture(scope="module")
+def radiometer_configured():
+    """A prediction-dependent sigma: check A27's document shape."""
+    return conjugate_built({"kind": "forward"}, noise=RADIOMETER)
+
+
+@pytest.fixture(scope="module")
+def frozen_configured():
+    """A sigma decided into an array: check A28's document shape."""
+    return conjugate_built({"kind": "forward"}, noise=FROZEN)
+
+
+@pytest.fixture(scope="module")
+def two_latent_configured():
+    """Two latents in one space: the A51 scalar-broadcast refusal's shape."""
+    return conjugate_built({"kind": "forward"}, inference=TWO_LATENTS)
+
+
+def _parse_conjugate(kind, configured, **options):
+    return parse_run(_spec(kind, options=dict(options)), configured,
+                     index=0, layer=_layer())
+
+
+class TestConjugateParsersDoNotBuildOrSolve:
+    """Plan Step 1: parsing a conjugate kind is grammar, never algebra."""
+
+    @pytest.mark.parametrize(
+        "kind,options",
+        [("conjugate.wiener", {"names": ["g"], "width": "none"}),
+         ("conjugate.gcr", {"names": ["g"],
+                            "seed": {"from": "runtime.seeds.draw"}}),
+         ("conjugate.gls", {"names": ["g"]}),
+         ("condition", {"names": ["g"]})],
+    )
+    def test_conjugate_parsers_do_not_build_or_solve(
+            self, kind, options, conjugate_configured, monkeypatch):
+        import rheplicant.inference as inference
+
+        for name in ("linear_operator", "check_linearity", "wiener_solve",
+                     "gcr_sample", "iterative_gls", "condition_estimate",
+                     "fisher_information", "parameter_covariance"):
+            monkeypatch.setattr(inference, name, _explode)
+        parsed = parse_run(_spec(kind, options=dict(options)),
+                           conjugate_configured, index=0, layer=_layer())
+        assert parsed.kind == kind
+        assert isinstance(parsed.parsed.execution, Mapping)
+        assert _is_yaml_safe(parsed.parsed.resolved)
+
+
+class TestConjugateKindsNormalizeTheirDefaults:
+    """The normalized defaults, pinned in BOTH views (plan Step 2)."""
+
+    def test_wiener_carries_names_and_width_alone(self, conjugate_configured):
+        parsed = _parse_conjugate("conjugate.wiener", conjugate_configured,
+                                  names=["g"], width="none")
+        assert _plain(parsed.parsed.resolved) == {"names": ["g"],
+                                                  "width": "none"}
+        assert parsed.parsed.execution["names"] == ("g",)
+
+    def test_gcr_defaults(self, conjugate_configured):
+        parsed = _parse_conjugate(
+            "conjugate.gcr", conjugate_configured, names=["g"],
+            seed={"from": "runtime.seeds.draw"})
+        assert _plain(parsed.parsed.resolved) == {
+            "names": ["g"], "seed": 7, "noise_from": "declared",
+            "n_draws": 1}
+
+    def test_gls_defaults(self, conjugate_configured):
+        parsed = _parse_conjugate("conjugate.gls", conjugate_configured,
+                                  names=["g"])
+        assert _plain(parsed.parsed.resolved) == {
+            "names": ["g"], "acknowledge_unconverged_covariance": False}
+
+    def test_gcr_on_the_gls_route_carries_the_reweight_grammar(
+            self, conjugate_configured):
+        parsed = _parse_conjugate(
+            "conjugate.gcr", conjugate_configured, names=["g"],
+            seed={"from": "runtime.seeds.draw"}, noise_from="gls",
+            reweight_tol=1e-4)
+        assert _plain(parsed.parsed.resolved) == {
+            "names": ["g"], "seed": 7, "noise_from": "gls", "n_draws": 1,
+            "acknowledge_unconverged_covariance": False,
+            "reweight_tol": 1e-4}
+
+    def test_condition_carries_names_alone(self, conjugate_configured):
+        parsed = _parse_conjugate("condition", conjugate_configured,
+                                  names=["g"])
+        assert _plain(parsed.parsed.resolved) == {"names": ["g"]}
+
+    def test_no_live_object_reaches_the_resolved_view(
+            self, conjugate_configured):
+        """No operator, no callable, no sigma array: resolved is YAML-safe."""
+        parsed = _parse_conjugate(
+            "conjugate.wiener", conjugate_configured, names=["g"],
+            width="fisher", prior_std={"g": 1.0}, tol=1e-9, maxiter=None)
+        assert _plain(parsed.parsed.resolved) == {
+            "names": ["g"], "width": "fisher", "prior_std": {"g": 1.0},
+            "tol": 1e-9, "maxiter": None}
+
+
+class TestConjugateOptionRefusalsHappenAtParse:
+    """The family's grammar refusals precede any operator or solve."""
+
+    def test_wiener_needs_a_width(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="width: is required"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"])
+
+    def test_width_draws_is_refused_naming_gcr(self, conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="width: draws draws the posterior"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"], width="draws")
+
+    def test_gcr_needs_a_seed(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="check A29"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"])
+
+    def test_gcr_seed_must_name_an_entry(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="seed must NAME an entry"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"], seed=11)
+
+    def test_noise_from_is_a_two_word_vocabulary(self, conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="noise_from: is declared or gls"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"],
+                             seed={"from": "runtime.seeds.draw"},
+                             noise_from="wiener")
+
+    def test_stale_reweight_knobs_under_declared_are_refused(
+            self, conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="are iterative_gls' own knobs"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"],
+                             seed={"from": "runtime.seeds.draw"},
+                             reweight_tol=1e-4)
+
+    def test_a_non_bool_acknowledgement_is_refused(self,
+                                                   conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="acknowledge_unconverged_covariance: is a "
+                                 "bool"):
+            _parse_conjugate("conjugate.gls", conjugate_configured,
+                             names=["g"],
+                             acknowledge_unconverged_covariance="yes")
+
+    def test_a_bad_solver_knob_is_coerced_at_parse(self,
+                                                   conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="maxiter: is a number; got 'many'"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"], width="none", maxiter="many")
+
+    def test_a_non_whole_n_draws_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="n_draws: is a whole number"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"],
+                             seed={"from": "runtime.seeds.draw"},
+                             n_draws=2.5)
+
+    def test_a_zero_n_draws_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="n_draws: must be >= 1"):
+            _parse_conjugate("conjugate.gcr", conjugate_configured,
+                             names=["g"],
+                             seed={"from": "runtime.seeds.draw"}, n_draws=0)
+
+    def test_names_grammar(self, conjugate_configured):
+        for bad in (7, [], ["g", 3], {"g": 1}):
+            with pytest.raises(ConfigError, match="names:"):
+                _parse_conjugate("conjugate.wiener", conjugate_configured,
+                                 names=bad, width="none")
+
+    def test_a_non_bool_check_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="check: is a bool"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"], width="none", check="no")
+
+    def test_a_prior_mapping_must_cover_the_block(self,
+                                                  conjugate_configured):
+        with pytest.raises(ConfigError, match="block-diagonal"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"], width="none",
+                             prior_std={"ghost": 1.0})
+
+    def test_a_scalar_prior_cannot_broadcast_over_two_latents(
+            self, two_latent_configured):
+        with pytest.raises(ConfigError, match="check A51"):
+            _parse_conjugate("conjugate.wiener", two_latent_configured,
+                             names=["d", "a"], width="none", prior_std=1.0)
+
+    def test_a_negative_prior_std_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="prior_std"):
+            _parse_conjugate("conjugate.wiener", conjugate_configured,
+                             names=["g"], width="none", prior_std=-1.0)
+
+    def test_condition_prior_mean_precedes_the_sweep(
+            self, conjugate_configured):
+        with pytest.raises(ConfigError) as caught:
+            _parse_conjugate("condition", conjugate_configured, names=["g"],
+                             prior_mean={"g": 1.0}, tpyo=1)
+        assert "does not take prior_mean" in str(caught.value)
+        assert "tpyo" not in str(caught.value)
+
+    def test_condition_iterations_are_coerced(self, conjugate_configured):
+        with pytest.raises(ConfigError,
+                           match="iterations: is a number; got 'twelve'"):
+            _parse_conjugate("condition", conjugate_configured, names=["g"],
+                             iterations="twelve")
+
+    def test_a_prediction_dependent_sigma_is_a27_for_wiener(
+            self, radiometer_configured):
+        with pytest.raises(ConfigError, match="check A27"):
+            _parse_conjugate("conjugate.wiener", radiometer_configured,
+                             names=["g"], width="none")
+
+    def test_a_prediction_dependent_sigma_is_a27_for_the_declared_draw(
+            self, radiometer_configured):
+        with pytest.raises(ConfigError) as caught:
+            _parse_conjugate("conjugate.gcr", radiometer_configured,
+                             names=["g"],
+                             seed={"from": "runtime.seeds.draw"})
+        assert "a conjugate draw has no prediction" in str(caught.value)
+
+    def test_a_decided_sigma_is_a28_for_gls(self, frozen_configured):
+        """A28 is statically decidable, but ``_decided_model``'s caller set
+        is pinned whole by an unowned call-graph test
+        (``test_preflight_fitting.py:4553``), so the model-noise refusal stays
+        at execute with its old message -- the plan Step 2 fallback shape."""
+        parsed = _parse_conjugate("conjugate.gls", frozen_configured,
+                                  names=["g"])
+        with pytest.raises(ConfigError) as caught:
+            handler_for("conjugate.gls").execute(parsed, frozen_configured,
+                                                 {})
+        assert "check A28" in str(caught.value)
+        assert "has no fixed point to iterate" in str(caught.value)
+
+    def test_a_decided_sigma_is_a28_on_the_gls_draw_route(
+            self, frozen_configured):
+        parsed = _parse_conjugate("conjugate.gcr", frozen_configured,
+                                  names=["g"],
+                                  seed={"from": "runtime.seeds.draw"},
+                                  noise_from="gls")
+        with pytest.raises(ConfigError) as caught:
+            handler_for("conjugate.gcr").execute(parsed, frozen_configured,
+                                                 {})
+        assert "check A28" in str(caught.value)
+        assert "Drop noise_from: gls" in str(caught.value)
+
+    def test_a_bad_condition_seed_is_refused(self, conjugate_configured):
+        with pytest.raises(ConfigError, match="seed must NAME an entry"):
+            _parse_conjugate("condition", conjugate_configured, names=["g"],
+                             seed=11)

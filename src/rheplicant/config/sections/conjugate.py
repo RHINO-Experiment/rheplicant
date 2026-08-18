@@ -43,18 +43,21 @@ from rheplicant.config.sections.conjugate_support import (
     _conjugate_block,
     _knobs,
     _one_prior,
+    _parsed_opening,
+    _parsed_priors,
     _prior_kwargs,
 )
 from rheplicant.config.sections.exit_support import (
+    ParsedRun,
     _decided_model,
     _decided_sigma,
     _noise,
     _number,
     _space,
     _sweep,
+    parsed_options,
     register,
 )
-from rheplicant.config.sections.runs import RunSpec
 
 # --- One block, so each exit's vocabulary has one place to be read ---------
 
@@ -260,6 +263,22 @@ _A28_GCR_CLAUSES: dict[str, str] = {
 }
 
 
+def _acknowledged(run: Any, where: str) -> bool:
+    """``acknowledge_unconverged_covariance:`` -> the validated bool.
+
+    Module-level for the same reason the ``_a29_*`` refusals are: the parser
+    (Task 8) and :func:`_gls_result` (execute, and the direct callers its
+    unowned tests pin) raise the ONE sentence from the ONE binding.
+    """
+    acknowledged = run.options.get("acknowledge_unconverged_covariance", False)
+    if not isinstance(acknowledged, bool):
+        raise ConfigError(
+            f"{where}: acknowledge_unconverged_covariance: is a bool; got "
+            f"{acknowledged!r}."
+        )
+    return acknowledged
+
+
 def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
                 prior: dict, solve: dict, where: str,
                 clauses: dict[str, str]) -> Any:
@@ -305,12 +324,7 @@ def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
     """
     from rheplicant.inference import iterative_gls
 
-    acknowledged = run.options.get("acknowledge_unconverged_covariance", False)
-    if not isinstance(acknowledged, bool):
-        raise ConfigError(
-            f"{where}: acknowledge_unconverged_covariance: is a bool; got "
-            f"{acknowledged!r}."
-        )
+    acknowledged = _acknowledged(run, where)
     found = iterative_gls(block, observed,
                           noise=_decided_model(run, built, **clauses),
                           **prior, **solve,
@@ -418,6 +432,26 @@ def _gcr_plan(run: Any, *, where: str) -> dict:
                                kind=int, minimum=1)}
 
 
+def _a27_gcr_declared(run: Any, built: Any, where: str) -> None:
+    """``noise_from: declared`` needs a sigma that does not read the draw.
+
+    Module-level and taking ``built`` for plan §2.2's reason: the kind's
+    PARSER (Task 8) raises this before any operator exists, and
+    :func:`_draw_sigma` raises the same sentence at execute for the direct
+    callers its unowned tests pin -- one binding, two call sites.
+    """
+    if getattr(_noise(run, built), "depends_on_prediction", False):
+        raise ConfigError(
+            f"{where}: inference.noise.kind: {built.inference.noise.kind} has "
+            "a sigma that depends on the prediction, and a conjugate draw has "
+            "no prediction to evaluate it at -- the prediction is what it "
+            "draws. Declare noise_from: gls, which runs iterative_gls first "
+            "and draws at the covariance it converges to, or "
+            "inference.noise.kind: radiometer_frozen, which decides one sigma "
+            "array up front (check A27)."
+        )
+
+
 def _draw_sigma(run: Any, built: Any, *, block: Any, observed: Any,
                 prior: dict, solve: dict, noise_from: str,
                 where: str) -> tuple[Any, dict | None]:
@@ -437,16 +471,7 @@ def _draw_sigma(run: Any, built: Any, *, block: Any, observed: Any,
                             prior=prior, solve=solve, where=where,
                             clauses=_A28_GCR_CLAUSES)
         return found.noise_std, _gls_record(found)
-    if getattr(_noise(run, built), "depends_on_prediction", False):
-        raise ConfigError(
-            f"{where}: inference.noise.kind: {built.inference.noise.kind} has "
-            "a sigma that depends on the prediction, and a conjugate draw has "
-            "no prediction to evaluate it at -- the prediction is what it "
-            "draws. Declare noise_from: gls, which runs iterative_gls first "
-            "and draws at the covariance it converges to, or "
-            "inference.noise.kind: radiometer_frozen, which decides one sigma "
-            "array up front (check A27)."
-        )
+    _a27_gcr_declared(run, built, where)
     return _decided_sigma(run, built), None
 
 
@@ -505,19 +530,15 @@ def _gcr_product(run: Any, built: Any, *, block: Any, observed: Any,
     """
     import jax
 
-    from rheplicant.config.draws import _seed_name, seed_for
     from rheplicant.inference import gcr_sample
 
     sigma, gls = _draw_sigma(run, built, block=block, observed=observed,
                              prior=prior, solve=solve,
                              noise_from=plan["noise_from"], where=where)
-    # The NAME is resolved from the run and looked up in built.context, which
-    # is the widened context ConfiguredRun carries; seed_for is what makes the
-    # integer the draw consumes the same integer provenance.json reports.
-    keys = jax.random.split(
-        jax.random.key(seed_for(_seed_name(dict(run.options), where),
-                                built.context)),
-        plan["n_draws"])
+    # The parser resolved the seed's NAME to its reportable integer, so the
+    # keys the draws consume split from the integer provenance.json reports.
+    keys = jax.random.split(jax.random.key(run.options["seed"]),
+                            plan["n_draws"])
     draws, residual = jax.vmap(
         lambda one: gcr_sample(block, observed, noise_std=sigma, key=one,
                                **prior, **solve))(keys)
@@ -531,9 +552,121 @@ def _gcr_product(run: Any, built: Any, *, block: Any, observed: Any,
             "noise_std": sigma, "gls": gls}
 
 
-@register("conjugate.gcr")
-@register("conjugate.wiener")
-def _run_conjugate(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+# --- The four parsers: grammar, defaults, statics -- and no operator --------
+#
+# One parser per kind, in the executors' own refusal order (measured line by
+# line): sweep, per-kind grammar, solver-knob coercion, the shared opening,
+# priors, seed, and the noise-route checks.  Everything numeric -- the
+# operator, the decided sigma array, the solves, the draws -- stays in the
+# executors below, which re-derive it all from the parsed execution view.
+
+
+def _parse_wiener(options, context):
+    spec = context.spec
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _WIENER_KEYS)
+    width = _width(spec, where)
+    normalized = _knobs(spec, _SOLVER_KNOBS)
+    opening, space = _parsed_opening(spec, options, context,
+                                     decides_sigma=True)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"],
+                                     where))
+    normalized["width"] = width
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _parse_gcr(options, context):
+    from rheplicant.config.draws import _seed_name, seed_for
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _GCR_KEYS)
+    plan = _gcr_plan(spec, where=where)
+    normalized = _knobs(spec, _SOLVER_KNOBS)
+    opening, space = _parsed_opening(spec, options, context)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"],
+                                     where))
+    normalized["noise_from"] = plan["noise_from"]
+    normalized["n_draws"] = plan["n_draws"]
+    normalized["seed"] = seed_for(_seed_name(dict(options), where),
+                                  built.context)
+    if plan["noise_from"] == "gls":
+        normalized["acknowledge_unconverged_covariance"] = _acknowledged(
+            spec, where)
+        normalized.update(_knobs(spec, _GLS_KNOB_SPECS))
+    else:
+        _a27_gcr_declared(spec, built, where)
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _parse_gls(options, context):
+    spec = context.spec
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _GLS_KEYS)
+    normalized = _knobs(spec, _SOLVER_KNOBS)
+    opening, space = _parsed_opening(spec, options, context)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"],
+                                     where))
+    normalized["acknowledge_unconverged_covariance"] = _acknowledged(
+        spec, where)
+    normalized.update(_knobs(spec, _GLS_KNOB_SPECS))
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _a51_condition_takes_no_prior_mean(where: str,
+                                       options: Mapping[str, Any]) -> None:
+    """``condition`` refuses ``prior_mean:`` before its sweep, by name.
+
+    Module-level and taking plain data for the family's standing reason
+    (plan §2.2, one binding, two call sites): the kind's PARSER raises it
+    before anything exists, and the executor keeps the same call ahead of
+    its ``_sweep`` so the pre-flight stand-down table
+    (``_TASK3_SPOKEN_FOR``) keeps deriving ``condition: {prior_mean}`` from
+    the executor's own source until Task 10 retires that mirror.
+    """
+    if "prior_mean" in options:
+        raise ConfigError(
+            f"{where}: kind: condition does not take prior_mean: -- kappa is "
+            "the conditioning of A^T N^-1 A + S^-1, which the prior's WIDTH "
+            "sets and its centre does not, and condition_estimate has no "
+            "prior_mean parameter to pass it to. Drop it; prior_std: is the "
+            "knob that moves kappa. To see what the centre does, solve: "
+            "kind: conjugate.wiener takes prior_mean."
+        )
+
+
+def _parse_condition(options, context):
+    from rheplicant.config.draws import _seed_name, seed_for
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    # BEFORE the sweep, exactly as in the executor: the census reads the
+    # membership there, and the reader deserves the bespoke sentence first.
+    _a51_condition_takes_no_prior_mean(where, options)
+    _sweep(spec, _CONDITION_KEYS)
+    opening, space = _parsed_opening(spec, options, context,
+                                     needs_observed=False,
+                                     decides_sigma=True)
+    normalized = dict(opening)
+    normalized.update(_knobs(spec, _CONDITION_KNOBS))
+    if "prior_std" in options:
+        normalized["prior_std"] = _one_prior(
+            spec, where, "prior_std", options["prior_std"],
+            opening["names"], space)
+    if "seed" in options:
+        normalized["seed"] = seed_for(_seed_name(dict(options), where),
+                                      built.context)
+    return parsed_options(normalized, resolved=normalized)
+
+
+@register("conjugate.gcr", parse=_parse_gcr)
+@register("conjugate.wiener", parse=_parse_wiener)
+def _run_conjugate(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """The two conjugate exits that solve the same block: the mean, or a draw.
 
     One executor for both kinds, exactly as ``exits.py``'s ``_run_plan``
@@ -581,8 +714,8 @@ def _run_conjugate(run: RunSpec, built: Any, *, results: Any = None) -> Any:
                            width=plan["width"], where=where)
 
 
-@register("conjugate.gls")
-def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+@register("conjugate.gls", parse=_parse_gls)
+def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: conjugate.gls`` -> a GLSResult whose diagnostics are scalars.
 
     A separate executor rather than a third ``@register`` on
@@ -634,8 +767,8 @@ def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
                           **_gls_record(found))
 
 
-@register("condition")
-def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+@register("condition", parse=_parse_condition)
+def _run_condition(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """kappa for the block a conjugate exit would solve -- and no data at all.
 
     ``condition_estimate`` (linear.py:1337) takes no ``observed`` and no
@@ -667,22 +800,13 @@ def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     """
     import jax
 
-    from rheplicant.config.draws import _seed_name, seed_for
     from rheplicant.inference import condition_estimate
 
     where = f"runs[{run.name!r}]"
     # BEFORE the sweep on purpose: the sweep would fire first with the generic
     # "does not take ['prior_mean']" and the reader would fix the symptom by
     # deleting a key they had good reason to write.
-    if "prior_mean" in run.options:
-        raise ConfigError(
-            f"{where}: kind: condition does not take prior_mean: -- kappa is "
-            "the conditioning of A^T N^-1 A + S^-1, which the prior's WIDTH "
-            "sets and its centre does not, and condition_estimate has no "
-            "prior_mean parameter to pass it to. Drop it; prior_std: is the "
-            "knob that moves kappa. To see what the centre does, solve: "
-            "kind: conjugate.wiener takes prior_mean."
-        )
+    _a51_condition_takes_no_prior_mean(where, run.options)
     _sweep(run, _CONDITION_KEYS)
     # `observed` is None here and is dropped rather than bound: this exit has
     # no parameter to pass it to, and `on:` therefore decides nothing.
@@ -695,12 +819,10 @@ def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     kwargs: dict[str, Any] = _knobs(run, _CONDITION_KNOBS)
     if "prior_std" in run.options:
         kwargs["prior_std"] = _one_prior(run, where, "prior_std",
-                                         run.options["prior_std"], block,
-                                         _space(run, built))
+                                         run.options["prior_std"],
+                                         block.names, _space(run, built))
     if "seed" in run.options:
-        # The NAME is resolved from the run and looked up in built.context, as
-        # _gcr_product does it: seed_for is what makes the integer the estimate
-        # consumes the same integer provenance.json reports.
-        kwargs["key"] = jax.random.key(
-            seed_for(_seed_name(dict(run.options), where), built.context))
+        # The parser resolved the name to its reportable integer, so the key
+        # the estimate consumes is the integer provenance.json reports.
+        kwargs["key"] = jax.random.key(run.options["seed"])
     return condition_estimate(block, noise_std=sigma, **kwargs)
