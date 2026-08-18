@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeAlias
 
+from _rheplicant_bootstrap.frozen import static_isinstance, static_type_name
+
 JsonScalar: TypeAlias = None | bool | int | float | str
 JsonValue: TypeAlias = JsonScalar | Sequence["JsonValue"] | Mapping[str, "JsonValue"]
 Stage: TypeAlias = Literal[
@@ -26,6 +28,37 @@ Stage: TypeAlias = Literal[
 ]
 Status: TypeAlias = Literal["ok", "refused", "error"]
 DimensionDomain: TypeAlias = Literal["config_path", "model_field", "resource_field"]
+UnavailableReason: TypeAlias = Literal[
+    "not_installed",
+    "not_a_git_checkout",
+    "command_failed",
+    "timeout",
+    "no_origin",
+    "not_regular_file",
+    "unreadable",
+    "namespace_package",
+    "extension_module",
+    "generated_module",
+    "no_distribution",
+    "missing_direct_url",
+    "unobserved_executable_io",
+]
+
+UNAVAILABLE_REASONS: tuple[UnavailableReason, ...] = (
+    "not_installed",
+    "not_a_git_checkout",
+    "command_failed",
+    "timeout",
+    "no_origin",
+    "not_regular_file",
+    "unreadable",
+    "namespace_package",
+    "extension_module",
+    "generated_module",
+    "no_distribution",
+    "missing_direct_url",
+    "unobserved_executable_io",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,19 +73,19 @@ class Origin:
     name: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.kind, str):
+        if not static_isinstance(self.kind, str):
             raise ValueError(
-                f"unknown origin kind type: {type(self.kind).__name__}"
+                f"unknown origin kind type: {static_type_name(self.kind)}"
             )
         kind = str.__str__(self.kind)
         if self.name is None:
             name = None
-        elif isinstance(self.name, str):
+        elif static_isinstance(self.name, str):
             name = str.__str__(self.name)
         else:
             raise ValueError(
                 f"origin name must be a string or null; got "
-                f"{type(self.name).__name__}"
+                f"{static_type_name(self.name)}"
             )
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "name", name)
@@ -158,9 +191,11 @@ class DestinationDescriptor:
         domain: DimensionDomain | None = None,
         selector: str | int | None = None,
     ) -> DestinationDescriptor:
-        document_suffix = f"[{segment}]" if isinstance(segment, int) else f".{segment}"
+        document_suffix = (
+            f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
+        )
         chosen = segment if selector is None else selector
-        if isinstance(chosen, int) or chosen == "[]":
+        if static_isinstance(chosen, int) or chosen == "[]":
             selector_suffix = "[]"
         else:
             selector_suffix = f".{chosen}"
@@ -171,7 +206,9 @@ class DestinationDescriptor:
         )
 
     def nested(self, segment: str | int) -> DestinationDescriptor:
-        document_suffix = f"[{segment}]" if isinstance(segment, int) else f".{segment}"
+        document_suffix = (
+            f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
+        )
         return DestinationDescriptor(
             document_path=f"{self.document_path}{document_suffix}",
             domain=self.domain,
@@ -207,4 +244,6 @@ __all__ = [
     "Stage",
     "Status",
     "TraceSink",
+    "UNAVAILABLE_REASONS",
+    "UnavailableReason",
 ]
