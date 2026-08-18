@@ -7,6 +7,9 @@ import struct
 import subprocess
 import sys
 import textwrap
+import traceback
+from array import array
+from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -106,6 +109,237 @@ def test_freeze_evidence_type_checks_do_not_run_metaclass_equality(failure):
     assert HostileMeta.equality_calls == 0
 
 
+@pytest.mark.parametrize(
+    "value",
+    (array("i", (1, 2)), deque((1, 2))),
+    ids=("array", "deque"),
+)
+def test_freeze_evidence_preserves_stdlib_virtual_sequence_compatibility(
+    value,
+):
+    assert _freeze_evidence(value, where="snapshot.document") == (1, 2)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ({1, 2}, frozenset((1, 2)), iter((1, 2))),
+    ids=("set", "frozenset", "generator"),
+)
+def test_freeze_evidence_rejects_unordered_or_streaming_iterables(value):
+    with pytest.raises(ConfigError, match="unsupported evidence leaf type"):
+        _freeze_evidence(value, where="snapshot.document")
+
+
+def test_freeze_evidence_preserves_registered_abc_compatibility_without_class_hooks():
+    class VirtualSequence:
+        class_calls = 0
+
+        @property
+        def __class__(self):
+            type(self).class_calls += 1
+            raise RuntimeError("sequence class descriptor secret")
+
+        def __init__(self):
+            self.values = (1, 2)
+
+        def __getitem__(self, index):
+            return self.values[index]
+
+        def __len__(self):
+            return len(self.values)
+
+    class VirtualMapping:
+        class_calls = 0
+
+        @property
+        def __class__(self):
+            type(self).class_calls += 1
+            raise RuntimeError("mapping class descriptor secret")
+
+        def __init__(self):
+            self.values = {"answer": 42}
+
+        def items(self):
+            return self.values.items()
+
+    Sequence.register(VirtualSequence)
+    Mapping.register(VirtualMapping)
+
+    assert _freeze_evidence(
+        VirtualSequence(), where="snapshot.sequence"
+    ) == (1, 2)
+    assert _freeze_evidence(
+        VirtualMapping(), where="snapshot.mapping"
+    ) == {"answer": 42}
+    assert VirtualSequence.class_calls == 0
+    assert VirtualMapping.class_calls == 0
+
+
+def test_static_abc_lookup_never_runs_an_unrelated_registered_metaclass_hook():
+    class PoisonMeta(type):
+        armed = False
+        subclass_calls = 0
+
+        def __subclasscheck__(cls, subclass):
+            if PoisonMeta.armed:
+                PoisonMeta.subclass_calls += 1
+                raise KeyboardInterrupt("registered poison")
+            return False
+
+    class Poison(metaclass=PoisonMeta):
+        pass
+
+    class Plain:
+        pass
+
+    Sequence.register(Poison)
+    PoisonMeta.armed = True
+    try:
+        assert frozen_module.static_isinstance(Plain(), Sequence) is False
+    finally:
+        PoisonMeta.armed = False
+    assert PoisonMeta.subclass_calls == 0
+
+
+def test_static_protocol_lookup_preserves_registered_base_subclasses():
+    class RegisteredBase:
+        def __init__(self, values):
+            self.values = tuple(values)
+
+        def __getitem__(self, index):
+            return self.values[index]
+
+        def __len__(self):
+            return len(self.values)
+
+    class RegisteredChild(RegisteredBase):
+        pass
+
+    Sequence.register(RegisteredBase)
+
+    assert _freeze_evidence(
+        RegisteredChild((1, 2)), where="snapshot.registered_base"
+    ) == (1, 2)
+
+
+def test_static_protocol_lookup_accepts_unregistered_mapping_and_sequence_ducks():
+    class DuckSequence:
+        def __init__(self):
+            self.values = (1, 2)
+
+        def __getitem__(self, index):
+            return self.values[index]
+
+        def __len__(self):
+            return len(self.values)
+
+    class DuckMapping:
+        def items(self):
+            return {"answer": 42}.items()
+
+    assert _freeze_evidence(
+        DuckSequence(), where="snapshot.duck_sequence"
+    ) == (1, 2)
+    assert _freeze_evidence(
+        DuckMapping(), where="snapshot.duck_mapping"
+    ) == {"answer": 42}
+
+
+@pytest.mark.parametrize("protocol", (Mapping, Sequence))
+def test_static_protocol_lookup_rejects_registry_only_pseudo_protocols(protocol):
+    class RegistryOnly:
+        pass
+
+    protocol.register(RegistryOnly)
+
+    with pytest.raises(ConfigError, match="unsupported evidence leaf type"):
+        _freeze_evidence(RegistryOnly(), where="snapshot.registry_only")
+
+
+@pytest.mark.parametrize("protocol", ("mapping", "sequence"))
+def test_static_protocol_lookup_rejects_noncallable_members(protocol):
+    if protocol == "mapping":
+        class NonCallable:
+            items = None
+    else:
+        class NonCallable:
+            __iter__ = None
+
+            def __getitem__(self, index):
+                return index
+
+            def __len__(self):
+                return 1
+
+    with pytest.raises(ConfigError, match="unsupported evidence leaf type"):
+        _freeze_evidence(NonCallable(), where="snapshot.noncallable")
+
+
+@pytest.mark.parametrize("protocol", ("mapping", "sequence"))
+def test_static_protocol_lookup_wraps_ordinary_traversal_failures(protocol):
+    if protocol == "mapping":
+        class Failing:
+            def items(self):
+                raise ValueError("private mapping failure")
+    else:
+        class Failing:
+            def __iter__(self):
+                raise ValueError("private sequence failure")
+
+            def __getitem__(self, index):
+                raise AssertionError("getitem fallback must not be used")
+
+            def __len__(self):
+                return 1
+
+    with pytest.raises(ConfigError, match="evidence protocol failed") as caught:
+        _freeze_evidence(Failing(), where="snapshot.failing_protocol")
+    assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize("protocol", ("mapping", "sequence"))
+def test_static_protocol_lookup_never_binds_hostile_member_descriptors(protocol):
+    class Descriptor:
+        calls = 0
+
+        def __get__(self, instance, owner):
+            type(self).calls += 1
+            raise KeyboardInterrupt("descriptor secret")
+
+    if protocol == "mapping":
+        class Hostile:
+            items = Descriptor()
+    else:
+        class Hostile:
+            __iter__ = Descriptor()
+
+            def __getitem__(self, index):
+                return index
+
+            def __len__(self):
+                return 1
+
+    with pytest.raises(ConfigError, match="unsupported evidence leaf type"):
+        _freeze_evidence(Hostile(), where="snapshot.hostile_descriptor")
+    assert Descriptor.calls == 0
+
+
+def test_static_protocol_lookup_never_unwraps_hostile_classmethod_descriptors():
+    class Descriptor:
+        calls = 0
+
+        def __get__(self, instance, owner):
+            type(self).calls += 1
+            raise KeyboardInterrupt("nested descriptor secret")
+
+    class Hostile:
+        items = classmethod(Descriptor())
+
+    with pytest.raises(ConfigError, match="unsupported evidence leaf type"):
+        _freeze_evidence(Hostile(), where="snapshot.hostile_classmethod")
+    assert Descriptor.calls == 0
+
+
 def test_freeze_evidence_refuses_cycles_with_its_location():
     """Catches recursive input hanging or overflowing the evidence freezer."""
     recursive = []
@@ -167,6 +401,47 @@ def test_freeze_evidence_canonicalizes_scalar_subclasses_and_mapping_keys():
     assert frozen["key"] == ("text", 2, b"bytes")
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "\ud800",
+        {"\ud800": "value"},
+        {"key": "\ud800"},
+    ),
+)
+def test_freeze_evidence_rejects_non_utf8_string_scalars_and_keys(source):
+    with pytest.raises(ConfigError, match="UTF-8"):
+        _freeze_evidence(source, where="snapshot.document")
+
+
+def test_freeze_evidence_preserves_valid_unicode_text():
+    assert _freeze_evidence(
+        {"café": "U0001f40d"}, where="snapshot.document"
+    ) == {"café": "U0001f40d"}
+
+
+def test_freeze_evidence_validates_each_shared_string_identity_once(monkeypatch):
+    shared_key = "".join(("shared", "-key"))
+    shared_value = "x" * 4096
+    source = tuple(
+        _ItemsMapping(((shared_key, shared_value),)) for _ in range(128)
+    )
+    helper = getattr(frozen_module, "_require_utf8_text", None)
+    assert helper is not None, "shared UTF-8 validation helper is missing"
+    calls = {id(shared_key): 0, id(shared_value): 0}
+
+    def count(value, *, where):
+        if value is shared_key or value is shared_value:
+            calls[id(value)] += 1
+        return helper(value, where=where)
+
+    monkeypatch.setattr(frozen_module, "_require_utf8_text", count)
+    frozen = _freeze_evidence(source, where="snapshot.document")
+
+    assert calls == {id(shared_key): 1, id(shared_value): 1}
+    assert all(item[shared_key] is shared_value for item in frozen)
+
+
 class _ItemsMapping(Mapping):
     """Mapping fixture whose source keys need not be hashable or comparable."""
 
@@ -187,6 +462,72 @@ class _ItemsMapping(Mapping):
 
     def items(self):
         return iter(self._pairs)
+
+
+@pytest.mark.parametrize("route", ("entry", "mapping_key", "leaf", "budget", "depth"))
+def test_freeze_evidence_diagnostics_never_call_metaclass_name_descriptors(
+    route, monkeypatch
+):
+    descriptor_calls = 0
+
+    class HostileMeta(type):
+        @property
+        def __name__(cls):
+            nonlocal descriptor_calls
+            descriptor_calls += 1
+            return "ForgedName"
+
+    class Hostile(metaclass=HostileMeta):
+        pass
+
+    hostile = Hostile()
+    if route == "entry":
+        source = hostile
+    elif route == "mapping_key":
+        source = _ItemsMapping(((hostile, 1),))
+    elif route == "leaf":
+        source = {"leaf": hostile}
+    elif route == "budget":
+        monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 1)
+        source = [hostile]
+    else:
+        monkeypatch.setattr(frozen_module, "_EVIDENCE_DEPTH_LIMIT", 1)
+        source = [hostile]
+
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(source, where="snapshot.document")
+    if "Hostile" not in str(caught.value):
+        pytest.fail(f"static type name missing from {caught.value.args!r}")
+    if descriptor_calls != 0:
+        pytest.fail(f"metaclass __name__ descriptor ran {descriptor_calls} times")
+
+
+@pytest.mark.parametrize("length", (256, 257))
+def test_static_type_names_have_an_exact_bounded_diagnostic_limit(length):
+    huge_type = type("H" * length, (), {})
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(huge_type(), where="snapshot.document")
+    message = str(caught.value)
+    if length == 256:
+        assert "H" * length in message
+    else:
+        assert "unknown" in message
+        assert len(message) < 200
+
+
+def test_static_type_name_rejects_non_utf8_class_metadata(monkeypatch):
+    class NonUtf8Name:
+        def __get__(self, instance, owner):
+            return "\ud800"
+
+    monkeypatch.setitem(
+        frozen_module._TYPE_TEXT_DESCRIPTORS,
+        "__name__",
+        NonUtf8Name(),
+    )
+    with pytest.raises(ConfigError) as caught:
+        _freeze_evidence(object(), where="snapshot.document")
+    assert "unknown" in str(caught.value)
 
 
 class _HostileStr(str):
@@ -514,6 +855,31 @@ def test_freeze_evidence_does_not_catch_process_control_baseexceptions():
         _freeze_evidence(StoppingMapping([]), where="snapshot.document")
 
 
+def test_freeze_evidence_does_not_retain_a_foreign_recursion_cause():
+    render_calls = 0
+
+    class HostileRecursionError(RecursionError):
+        def __str__(self):
+            nonlocal render_calls
+            render_calls += 1
+            raise AssertionError("foreign recursion text must not run")
+
+    def consume():
+        raise HostileRecursionError("private recursion detail")
+
+    with pytest.raises(ConfigError) as caught:
+        frozen_module._freeze_evidence_roots(
+            [True],
+            where="snapshot.document",
+            consume=consume,
+        )
+
+    assert caught.value.__cause__ is None
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert "private recursion detail" not in rendered
+    assert render_calls == 0
+
+
 class _CountedMapping(dict):
     item_visits = 0
 
@@ -713,6 +1079,31 @@ def test_freeze_evidence_strongly_retains_seen_scalar_subclasses(monkeypatch):
     with pytest.raises(ConfigError, match=r"unique node count 5 exceeds limit 4"):
         _freeze_evidence(source, where="snapshot.document")
     assert len({real_id(value) for value in source.sources}) == 4
+
+
+def test_freeze_evidence_scalar_cache_is_strong_under_identity_collisions(
+    monkeypatch,
+):
+    class CollidingText(str):
+        pass
+
+    first = CollidingText("first")
+    second = CollidingText("second")
+    real_id = id
+
+    def colliding_id(value):
+        if value is first or value is second:
+            return 17
+        return real_id(value)
+
+    monkeypatch.setattr(frozen_module, "id", colliding_id, raising=False)
+    frozen = _freeze_evidence(
+        (first, second, first, second),
+        where="snapshot.document",
+    )
+    assert frozen == ("first", "second", "first", "second")
+    assert frozen[0] is frozen[2]
+    assert frozen[1] is frozen[3]
 
 
 class _EphemeralMapping(Mapping):
