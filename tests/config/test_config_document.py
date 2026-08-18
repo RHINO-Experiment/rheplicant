@@ -1,10 +1,18 @@
 """load_document / run_forward: the whole build order, both observation forms."""
 
+import inspect
+
 import jax.numpy as jnp
 import pytest
 
+import rheplicant.config.document as document_module
 from rheplicant.config import ConfigError
 from rheplicant.config.document import ConfiguredRun, load_document, run_forward
+from rheplicant.config.findings import Report
+from rheplicant.config.findings import warn as warn_finding
+from rheplicant.config.preflight import CHECKS as TEXT_CHECKS
+from rheplicant.config.preflight import register as register_text
+from rheplicant.config.sections.runs import RunResult, RunSpec
 
 
 def synthetic_document():
@@ -133,6 +141,61 @@ class TestRunForward:
         one = run_forward(synthetic_document())
         two = run_forward(synthetic_document())
         assert jnp.allclose(one.data, two.data)
+
+
+class TestLaterErrorsCarryTheCompletedReport:
+    """Plan 4A Task 10 (spec §8): after a boundary completes, a later
+    builder/kind-parser ``ConfigError`` carries the accumulated report."""
+
+    def test_a_builder_error_carries_the_completed_passes_report(
+            self, monkeypatch):
+        """Measured before this task: the raised error's ``report`` is None --
+        the warning this document earned is computed and then dropped."""
+        marker = warn_finding("C97", "runtime.seed",
+                              "a note the document earned.")
+        register_text("C97")(lambda document: (marker,))
+
+        def explode(*args, **kwargs):
+            raise ConfigError("the beam is gone.")
+
+        monkeypatch.setattr(document_module, "build_resources", explode)
+        try:
+            with pytest.raises(ConfigError, match="the beam is gone") as got:
+                load_document(synthetic_document())
+        finally:
+            TEXT_CHECKS.pop("C97", None)
+        assert got.value.report is not None
+        assert marker in got.value.report.findings
+
+
+class TestThePublicSurfaceIsUnchanged:
+    """Step 6's constants, recorded before the orchestration refactor."""
+
+    def test_the_wrapper_signatures(self):
+        for fn, names in ((load_document, ("document", "variant", "base_dir")),
+                          (run_forward, ("run", "variant", "base_dir"))):
+            parameters = list(inspect.signature(fn).parameters.values())
+            assert tuple(one.name for one in parameters) == names
+            assert parameters[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            assert all(one.kind is inspect.Parameter.KEYWORD_ONLY
+                       for one in parameters[1:])
+            assert all(one.default is None for one in parameters[1:])
+        from rheplicant.config.sections.runs import run_document
+        parameters = list(inspect.signature(run_document).parameters.values())
+        assert tuple(one.name for one in parameters) == ("document",
+                                                         "base_dir")
+
+    def test_the_tuple_shapes(self):
+        assert ConfiguredRun._fields == (
+            "document", "runtime", "state", "twin", "inference", "resources",
+            "context", "report")
+        assert ConfiguredRun._field_defaults == {"report": Report()}
+        assert RunSpec._fields == ("name", "kind", "variant", "on", "expect",
+                                   "options", "reuse")
+        assert RunSpec._field_defaults == {"reuse": None}
+        assert RunResult._fields == ("name", "kind", "product", "error",
+                                     "variant")
+        assert RunResult._field_defaults == {"variant": None}
 
 
 class TestIngestedDocuments:

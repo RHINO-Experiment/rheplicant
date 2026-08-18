@@ -15,7 +15,6 @@ execute -- executor's decision, recorded in the 2B plan.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
@@ -137,39 +136,25 @@ def parse_runs(section: Any) -> tuple[RunSpec, ...]:
 
 def run_document(document: Mapping, *,
                  base_dir: str | None = None) -> dict[str, RunResult]:
-    """Execute every run a document declares, in order, by name."""
-    from rheplicant.config.document import load_document
-    from rheplicant.config.sections.exits import execute_run
+    """Execute every run a document declares, in order, by name.
+
+    A compatibility wrapper over the orchestration (Plan 4A Task 10): the
+    document is prepared through ``scope="all_layers"`` -- every declared
+    variant validated, every schedule handler-parsed before the first
+    executor -- the base schedule executes in declaration order, and the
+    terminal error, if any, is re-raised exactly as the per-run loop used to
+    raise it.  The return stays a plain ``dict`` keyed by run name.
+    """
+    from rheplicant.config.orchestration import execute_prepared, prepare_document
 
     if not isinstance(document, Mapping):
         raise ConfigError(
             f"A document is a mapping of sections; got "
             f"{type(document).__name__} ({document!r})."
         )
-    runs = parse_runs(document.get("runs"))
-    built: dict[str | None, Any] = {}
-
-    def configured(variant: str | None):
-        if variant not in built:
-            built[variant] = load_document(document, variant=variant,
-                                           base_dir=base_dir)
-        return built[variant]
-
-    # Executors see the accumulation through a read-only view: `reuse_of`
-    # types it as a Mapping, and this is what makes that intent true.  An
-    # executor that wrote here would rewrite an earlier run's recorded
-    # result, or add a key no run declared.
-    #
-    # The view wraps a COPY, not the live dict.  A proxy over the live dict
-    # would keep growing after the executor was handed it, so an executor
-    # that retained the view -- a deferred product closing over it -- would
-    # later see runs that had not executed when it looked.  `reuse_of`
-    # promises a reuse may only look backwards; the copy is what keeps that
-    # promise under retention.  (A caller wanting a mutable copy of the view
-    # takes `dict(view)`: `copy.copy` on a mappingproxy raises about
-    # pickling, which says nothing about what the caller did wrong.)
-    results: dict[str, RunResult] = {}
-    for run in runs:
-        results[run.name] = execute_run(run, configured(run.variant),
-                                        MappingProxyType(dict(results)))
-    return results
+    prepared = prepare_document(document, scope="all_layers",
+                                base_dir=base_dir)
+    record = execute_prepared(prepared)
+    if record.status != "ok":
+        raise record.error
+    return dict(record.results)

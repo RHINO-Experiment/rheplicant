@@ -3,14 +3,14 @@
 Three holes in A1's sweep, measured rather than inferred:
 
 * ``runs[i]`` option keys.  ``runs.py:113-114`` puts every unrecognised key
-  into ``RunSpec.options`` and ``exit_support._sweep`` sweeps them INSIDE the
-  executor.  All sixteen registered executors do sweep -- so this is timing,
-  not absence: measured, four ``forward`` runs with a typo on the last one
-  execute r0, r1 and r2 before the refusal.  The fix reuses each executor's
-  own allowed-key table (thirteen of the sixteen by importing the very object
-  the executor sweeps with) and the executor's own ``_sweep``, so the two
-  cannot drift; ``test_preflight_document.py`` reads the tables back out of
-  the executors' source and compares.
+  into ``RunSpec.options`` and the kind's registered PARSER sweeps them
+  (Tasks 7-9 moved the sweep out of the executor); Task 10's orchestration
+  runs every parse before the first execute, so the cost of a late typo is
+  gone there too -- but a text pass still beats the build, which is the
+  phase this check owns.  The fix reuses each handler's own allowed-key
+  table (thirteen of the sixteen by importing the very object the parser
+  sweeps with), so the two cannot drift; ``test_preflight_document.py``
+  reads the tables back out of the PARSERS' source and compares.
 * An unselected ``variants`` entry.  ``layering.py:41-85`` merges only the
   REQUESTED variant, so SEVEN document-grammar clauses never fire for the
   others: three of ``apply_variant``'s six (of the other three, two are about
@@ -89,14 +89,16 @@ _CAPABILITY_KEYS: dict[str, tuple[str, str]] = {
 #: ``sections/parameters.py``'s own clause unchanged.
 _TASK3_SCOPES_RESERVED = ("per_epoch", "linked")
 
-#: run kind -> the option keys whose OWN executor raises a bespoke refusal
+#: run kind -> the option keys whose OWN handler raises a bespoke refusal
 #: BEFORE its generic key sweep, so this pass must stand down on them.
 #:
-#: ``conjugate.py:580-582`` argues the ordering by name -- the bespoke refusal
-#: runs "BEFORE the sweep on purpose: the sweep would fire first with the
-#: generic 'does not take [...]' and the reader would fix the symptom by
-#: deleting a key they had good reason to write."  Hoisting the generic sweep
-#: in front of it inverts exactly that, in a phase the executor cannot reach.
+#: The bespoke refusals moved with Tasks 7-9's parsers (the call sites are now
+#: the parsers' pre-sweep helpers), and the ordering argument is unchanged --
+#: ``conjugate.py`` argues it by name: the bespoke refusal runs "BEFORE the
+#: sweep on purpose: the sweep would fire first with the generic 'does not
+#: take [...]' and the reader would fix the symptom by deleting a key they had
+#: good reason to write."  Hoisting the generic sweep in front of it inverts
+#: exactly that, in a phase the handler cannot reach.
 #:
 #: **The stand-down is for the whole RUN, not for the key alone, and that is
 #: measured rather than chosen.**  Dropping only the spoken-for key and
@@ -109,12 +111,12 @@ _TASK3_SCOPES_RESERVED = ("per_epoch", "linked")
 #: to prevent.  Measured: the per-key form turns that test red and nothing in
 #: this task's own module notices.
 #:
-#: A skip, not a rewording: the key is still refused, by the executor, with the
-#: message the executor wrote.  What P-1 gives up is only earliness, and only
-#: for a run carrying one of these five keys.
-#: ``test_the_spoken_for_table_is_every_executor_that_raises_first`` derives
-#: this table from the executors' own source and is what makes a sixth such
-#: key a red test rather than a re-broken message.
+#: A skip, not a rewording: the key is still refused, by the handler's parser,
+#: with the message the parser wrote.  What P-1 gives up is only earliness,
+#: and only for a run carrying one of these five keys.
+#: ``test_the_spoken_for_table_is_every_handler_that_raises_first`` derives
+#: this table from the registered parsers' own source and is what makes a
+#: sixth such key a red test rather than a re-broken message.
 _TASK3_SPOKEN_FOR: dict[str, frozenset[str]] = {
     "condition": frozenset({"prior_mean"}),
     "npe": frozenset({"seed"}),
@@ -125,14 +127,15 @@ _TASK3_SPOKEN_FOR: dict[str, frozenset[str]] = {
 
 
 def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
-    """run kind -> the option keys its executor accepts.
+    """run kind -> the option keys its registered parser accepts.
 
-    Thirteen of the sixteen entries ARE the executor module's own object --
+    Thirteen of the sixteen entries ARE the parser module's own object --
     identity, not equality -- so for those drift is not possible, only
-    deletion.  ``forward``, ``fisher`` and ``npe`` write their allowed set as a
-    literal at the ``_sweep`` call site and have no name to import; those three
-    are restated, and ``test_the_table_is_the_executors_own_allowed_sets``
-    reads all sixteen back out of the executors' source and compares.
+    deletion.  ``forward``, ``fisher`` and ``npe`` write their allowed set as
+    a literal at the parser's ``_sweep`` call site and have no name to
+    import; those three are restated, and
+    ``test_the_table_is_the_handlers_own_allowed_sets`` reads all sixteen
+    back out of the registered parsers' source and compares.
     """
     from rheplicant.config.sections.conjugate import (
         _CONDITION_KEYS,
@@ -175,7 +178,7 @@ def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
 
 
 def _task3_run_options_in(layer) -> Iterable[Finding]:
-    """The executor's own sweep, run one phase early, on one layer.
+    """The handler parser's own sweep, run one phase early, on one layer.
 
     A ``runs:`` section ``parse_runs`` cannot read yields nothing here: an
     unknown ``kind:`` is ``parse_runs``' refusal and ``run_document``'s to

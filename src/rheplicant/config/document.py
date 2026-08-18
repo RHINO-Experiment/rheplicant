@@ -18,18 +18,29 @@ capability-reserved keys, five for five.
 
 **FOUR passes run here, and every one of their reports is kept.**  Pre-flight
 and the axes pass inside :func:`_assemble`; the built pass and the post-flight
-pass in :func:`load_document`, the second of them after ``build_inference``
-because its checks evaluate the twin.  Each raises before it warns and each
-concatenates onto ``ConfiguredRun.report``, in run order -- which is the only
-place a ``mode: report`` finding can live, since it is neither a refusal nor a
-warning and every pass used to drop its report on the floor.
+pass in the :func:`_through_built`/:func:`_through_priced` hooks, the second
+of them after ``build_inference`` because its checks evaluate the twin.  Each
+raises before it warns and each concatenates onto ``ConfiguredRun.report``, in
+run order -- which is the only place a ``mode: report`` finding can live,
+since it is neither a refusal nor a warning and every pass used to drop its
+report on the floor.
+
+**Plan 4A Task 10: the four hooks are the per-layer stages of
+:mod:`rheplicant.config.orchestration`.**  :func:`load_document` asks
+``prepare_document(scope="selected")`` for the one layer it has always built;
+``run_document`` prepares all layers and executes the base schedule.  The
+hooks themselves stay here -- the raise/warn pair per pass, in this file, is a
+pinned census (``tests/config/test_config_inflight.py``) -- and the stage
+stays honest: ``_build_with_axes`` is exactly ``_assemble``'s post-preflight
+body, so the helper suites that drive ``_assemble`` read the same build the
+orchestration runs.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
@@ -43,9 +54,16 @@ from rheplicant.config.resources import BuiltResources, build_resources
 from rheplicant.config.sections.compose import build_model
 from rheplicant.config.sections.inference import build_inference
 from rheplicant.config.sections.observation import build_observation
-from rheplicant.config.sections.runtime import RuntimeFacts, build_runtime, state_key
+from rheplicant.config.sections.runtime import (
+    RuntimeFacts,
+    build_runtime,
+    state_key,
+)
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.state import State
+
+if TYPE_CHECKING:
+    from _rheplicant_bootstrap.types import LayerIdentity, TraceSink
 
 __all__ = ["ConfiguredRun", "load_document", "run_forward"]
 
@@ -75,6 +93,52 @@ class ConfiguredRun(NamedTuple):
     #: DECLARATION -- what the document asked for -- and keeping both under
     #: one word is how a reader ends up asserting on the wrong one.
     report: Report = Report()
+
+
+def _attach(report: Report, call, *args, **kwargs):
+    """Run ``call``; if it refuses with a bare ``ConfigError``, attach the
+    completed boundaries' report first.
+
+    The attach is IN PLACE, and that is the contract of spec §8's "preserving
+    args, cause, traceback, and any already attached report": the object the
+    caller catches is the object the builder raised, with its own message,
+    its own ``__cause__`` and its own traceback -- only ``report`` is filled,
+    and only when the builder left it ``None``.  A refusal that already
+    carries a report (a pass's own ``raise_if_refused``) is untouched.
+    """
+    try:
+        return call(*args, **kwargs)
+    except ConfigError as error:
+        if error.report is None:
+            error.report = report
+        raise
+
+
+def _complete_report_boundary(
+    previous: Report,
+    current: Report,
+    *,
+    stage,
+    layer: LayerIdentity | None,
+    trace: TraceSink | None,
+) -> Report:
+    """One boundary's accumulation and trace rows -> the cumulative report.
+
+    The pass has ALREADY returned ``current`` (a callable that raised before
+    returning never reaches here, and appends neither row).  The findings and
+    the boundary are appended to the trace BEFORE the caller's
+    ``raise_if_refused``, because the pass is complete once its report
+    exists -- including when that report then refuses.  The raise and the
+    warning emission stay at the call site: the four hook pairs in this file
+    are a pinned census, and a helper that swallowed them would empty it.
+    """
+    cumulative = Report(findings=previous.findings + current.findings)
+    if trace is not None:
+        trace.record_findings(
+            stage, layer,
+            tuple(dataclasses.asdict(row) for row in current.findings))
+        trace.boundary_completed(stage, layer)
+    return cumulative
 
 
 def _assemble(document: Mapping, *, variant: str | None = None,
@@ -115,32 +179,54 @@ def _assemble(document: Mapping, *, variant: str | None = None,
     report = preflight(doc)
     report.raise_if_refused()
     report.emit_warnings()
-    runtime = build_runtime(doc["runtime"])
-    observation, context = build_observation(doc["observation"],
-                                             runtime=runtime,
-                                             base_dir=base_dir)
+    return _build_with_axes(doc, base_dir=base_dir, previous=report)
+
+
+def _build_with_axes(document: Mapping, *, base_dir: str | None = None,
+                     previous: Report, layer: LayerIdentity | None = None,
+                     trace: TraceSink | None = None) -> ConfiguredRun:
+    """The axes boundary, then every builder through ``build_inference``.
+
+    This is ``_assemble``'s post-preflight body and the orchestration's
+    per-layer build: one function, so the two routes cannot read the document
+    differently.  ``previous`` is the already-completed text pre-flight
+    report; a builder that refuses after the axes boundary has it attached
+    (``_attach``), which is spec §8's rule that a later ``ConfigError``
+    carries the completed boundaries' findings.
+    """
+    runtime = _attach(previous, build_runtime, document["runtime"])
+    observation, context = _attach(previous, build_observation,
+                                   document["observation"],
+                                   runtime=runtime, base_dir=base_dir)
     # P-0.5, and its position is the point: `build_resources` on the next line
     # is the 90.9 % of this function's wall time that a bad time axis or a
     # non-uniform lst_deg has nothing to do with.  Raise before you warn, for
     # the same reason P-1 does; across slots that ordering cannot be global
     # (this pass has already returned when `build_resources` runs) and
     # `inflight/__init__.py` records why that is correct rather than tolerated.
-    axis_report = axes(Axes(document=doc, runtime=runtime,
-                            observation=observation, context=context))
-    axis_report.raise_if_refused()
+    axis_report = _attach(previous, axes, Axes(document=document,
+                                               runtime=runtime,
+                                               observation=observation,
+                                               context=context))
+    cumulative = _complete_report_boundary(previous, axis_report,
+                                           stage="axes", layer=layer,
+                                           trace=trace)
+    axis_report.raise_if_refused(cumulative=cumulative)
     axis_report.emit_warnings()
-    resources = build_resources(doc.get("resources") or {}, context)
+    resources = _attach(cumulative, build_resources,
+                        document.get("resources") or {}, context)
     context = dataclasses.replace(context,
                                   resources=dict(resources.resources),
                                   ingest=observation.ingest)
-    twin = build_model(doc["model"], context,
-                       switch_order=observation.switch_order)
+    twin = _attach(cumulative, build_model, document["model"], context,
+                   switch_order=observation.switch_order)
 
     if observation.ingest is not None:
         from rheplicant.radio.rhino import to_state
 
         source_order = list(observation.switch_order) or ["antenna"]
-        state = to_state(observation.ingest, source_order=source_order)
+        state = _attach(cumulative, to_state, observation.ingest,
+                        source_order=source_order)
         state = state.replace(
             coords=state.coords.replace(
                 pointing=observation.pointing,
@@ -162,18 +248,14 @@ def _assemble(document: Mapping, *, variant: str | None = None,
             key=state_key(runtime),
             meta=observation.meta,
         )
-    inference = build_inference(doc.get("inference"), twin=twin, state=state,
-                                observation=observation, context=context)
+    inference = _attach(cumulative, build_inference, document.get("inference"),
+                        twin=twin, state=state, observation=observation,
+                        context=context)
     # The two reports this function raised on and emitted are KEPT rather
-    # than dropped, and this is the only place they can be: both are locals
-    # of this function, and `load_document` -- which appends the two later
-    # passes -- never sees either.  `Report` has no `+`, no `merge` and no
-    # `extend`; concatenating the tuples is the spelling everywhere.
-    return ConfiguredRun(document=doc, runtime=runtime, state=state,
+    # than dropped: the carried report is the cumulative one, in pass order.
+    return ConfiguredRun(document=document, runtime=runtime, state=state,
                          twin=twin, inference=inference, resources=resources,
-                         context=context,
-                         report=Report(findings=report.findings
-                                       + axis_report.findings))
+                         context=context, report=cumulative)
 
 
 def _carrying(run: ConfiguredRun, found: Report) -> ConfiguredRun:
@@ -182,7 +264,9 @@ def _carrying(run: ConfiguredRun, found: Report) -> ConfiguredRun:
     One binding for the concatenation, because ``Report`` has no ``+``: two
     hand-written ``Report(findings=a.findings + b.findings)`` in one function
     is two chances to write ``found.findings + run.report.findings`` and put
-    a later pass's findings in front of an earlier one's.
+    a later pass's findings in front of an earlier one's.  The staged hooks
+    below use it, and ``tests/config/inflight_helpers.priced_run`` drives it
+    directly.
     """
     return run._replace(
         report=Report(findings=run.report.findings + found.findings))
@@ -193,7 +277,7 @@ def _priced_payload(run: ConfiguredRun) -> Priced:
 
     Here rather than inside ``postflight`` so that ``priced(run)`` mirrors
     ``axes(facts)`` and ``built(run)`` -- an entry point that takes its
-    payload -- and here rather than inline in :func:`load_document` so that
+    payload -- and here rather than inline in :func:`_through_priced` so that
     ``tests/config/inflight_helpers.priced_run`` reaches the SAME reading of
     the document.  A second reading is how "which section the gates come
     from" ends up answered twice and differently.
@@ -209,36 +293,62 @@ def _priced_payload(run: ConfiguredRun) -> Priced:
     return Priced(run=run, gates=gates(section))
 
 
-def load_document(document: Mapping, *, variant: str | None = None,
-                  base_dir: str | None = None) -> ConfiguredRun:
-    """Build the objects a document declares, in the order they feed each other."""
-    run = _assemble(document, variant=variant, base_dir=base_dir)
-    # P-1.5, immediately before the return: after `build_inference`, so one
-    # payload carries the raw twin, the fit twin and the space.  Being late
-    # costs nothing (`build_inference` is 2.4 % of a warm load) and buys
-    # `Built` mirroring `ConfiguredRun` field for field.  **This slot saves no
-    # money** -- the beam is long since read -- and the sentence "before any
-    # beam is analysed" is false about every check registered here.
-    built_report = built(Built(*run))
-    built_report.raise_if_refused()
+def _through_built(run: ConfiguredRun, *, layer: LayerIdentity | None = None,
+                   trace: TraceSink | None = None) -> ConfiguredRun:
+    """The built-pass hook: raise, then warn, then carry the findings.
+
+    P-1.5, immediately before the parse stage and the return: after
+    ``build_inference``, so one payload carries the raw twin, the fit twin
+    and the space.  Being late costs nothing (``build_inference`` is 2.4 % of
+    a warm load) and buys ``Built`` mirroring ``ConfiguredRun`` field for
+    field.  **This slot saves no money** -- the beam is long since read --
+    and the sentence "before any beam is analysed" is false about every check
+    registered here.
+    """
+    built_report = _attach(run.report, built, Built(*run))
+    cumulative = _complete_report_boundary(run.report, built_report,
+                                           stage="built", layer=layer,
+                                           trace=trace)
+    built_report.raise_if_refused(cumulative=cumulative)
     built_report.emit_warnings()
-    run = _carrying(run, built_report)
-    # P-2.5, after `build_inference` and before the return: the checks that
-    # have to RUN the thing -- a forward pass per linear claim, a `jacfwd`
-    # plus an SVD, two Newton solves.  It saves nothing and buys that they
-    # run at all, in this layer's voice, rather than detonating inside a fit.
-    #
-    # **In `load_document` and NOT in `_assemble`, and that is load-bearing.**
-    # `tests/config/inflight_helpers.built_run` calls `_assemble` precisely so
-    # a raising hook cannot hide a slot's refusing half; a `raise_if_refused`
-    # here-but-one-frame-lower re-arms that for every built-slot test and for
-    # every post-flight one.  The receiver is `priced_report` and not `priced`
-    # or `built`, both of which are entry points bound at module scope: a
-    # local of either name shadows the function into an `UnboundLocalError`.
-    priced_report = priced(_priced_payload(run))
-    priced_report.raise_if_refused()
+    return _carrying(run, built_report)
+
+
+def _through_priced(run: ConfiguredRun, *,
+                    layer: LayerIdentity | None = None,
+                    trace: TraceSink | None = None) -> ConfiguredRun:
+    """The post-flight hook: the checks that have to RUN the thing.
+
+    P-2.5, after the parse stage and before the return: a forward pass per
+    linear claim, a ``jacfwd`` plus an SVD, two Newton solves.  It saves
+    nothing and buys that they run at all, in this layer's voice, rather than
+    detonating inside a fit.
+    """
+    priced_report = _attach(run.report, priced, _priced_payload(run))
+    cumulative = _complete_report_boundary(run.report, priced_report,
+                                           stage="postflight", layer=layer,
+                                           trace=trace)
+    priced_report.raise_if_refused(cumulative=cumulative)
     priced_report.emit_warnings()
     return _carrying(run, priced_report)
+
+
+def load_document(document: Mapping, *, variant: str | None = None,
+                  base_dir: str | None = None) -> ConfiguredRun:
+    """Build the objects a document declares, in the order they feed each other.
+
+    The selected layer of the canonical preparation: the text pre-flight fans
+    over every declared layer (an unselected variant's text fault still
+    refuses), the selected layer alone is built, and its effective schedule
+    is handler-parsed once against its build for validation.  Returns only a
+    complete ``ConfiguredRun`` -- there is no partial union and no
+    non-raising replacement API (spec §8).
+    """
+    from rheplicant.config.orchestration import prepare_document
+
+    prepared = prepare_document(document, scope="selected", variant=variant,
+                                base_dir=base_dir)
+    return prepared.layers[0].configured
 
 
 def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,

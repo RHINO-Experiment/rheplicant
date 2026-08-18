@@ -86,17 +86,16 @@ class TestRunDocument:
             run_document(document({"kind": "forward", "n_steps": 3}))
 
     def test_a_text_decidable_refusal_is_not_a_runs_to_expect(self):
-        """``expect: refuse`` captures what ``execute_run`` raises, and P-1
-        does not raise there.
+        """``expect: refuse`` captures what the RUN raises, and a document
+        refusal is not a run's.
 
-        ``configured()`` (``runs.py:154``) calls ``load_document`` OUTSIDE
-        ``execute_run``'s capture (``exits.py:292-297``), so a refusal the
-        pre-flight pass reaches -- here A31, ``observation.data`` under a
-        source model -- comes out of ``run_document`` as a ``ConfigError``
-        rather than as ``results[...].error``.  That is the correct shape:
-        ``expect: refuse`` is for a run that fails when it RUNS, and a
-        document refused before anything runs has no run to expect anything
-        of.
+        The document-level build (``prepare_document``'s boundaries) runs
+        outside any run's capture, so a refusal the pre-flight pass reaches --
+        here A31, ``observation.data`` under a source model -- comes out of
+        ``run_document`` as a ``ConfigError`` rather than as
+        ``results[...].error``.  That is the correct shape: ``expect: refuse``
+        is for a run that fails when it RUNS, and a document refused before
+        anything runs has no run to expect anything of.
 
         This replaces ``test_expect_refuse_captures_the_refusal_as_the_
         product``, which drove exactly this document and asserted the capture.
@@ -112,6 +111,41 @@ class TestRunDocument:
     def test_expect_refuse_that_succeeds_is_the_failure(self):
         with pytest.raises(ConfigError, match="SUCCEEDED"):
             run_document(document({"kind": "forward", "expect": "refuse"}))
+
+
+class TestTheScheduleParsesBeforeAnythingExecutes:
+    def test_run_document_parses_every_run_before_the_first_executor(self):
+        """Plan 4A Task 10: parse and execute are two global phases.
+
+        Measured before this task: ``execute_run`` parsed inside the loop, so
+        the events interleaved (parse, execute, parse, execute) and a later
+        run's invalid options cost every earlier run's execution first.
+        """
+        from rheplicant.config.sections.exit_support import EXECUTORS, PARSERS
+
+        events = []
+        real_parse = PARSERS["forward"]
+        real_execute = EXECUTORS["forward"]
+
+        def parse_spy(options, context):
+            events.append("parse")
+            return real_parse(options, context)
+
+        def execute_spy(parsed, configured, previous):
+            events.append("execute")
+            return real_execute(parsed, configured, previous)
+
+        PARSERS["forward"] = parse_spy
+        EXECUTORS["forward"] = execute_spy
+        try:
+            run_document(document({"name": "a", "kind": "forward"},
+                                  {"name": "b", "kind": "forward"}))
+        finally:
+            PARSERS["forward"] = real_parse
+            EXECUTORS["forward"] = real_execute
+        first_execute = events.index("execute")
+        assert all(event == "parse" for event in events[:first_execute])
+        assert all(event == "execute" for event in events[first_execute:])
 
 
 class TestRequiredness:
