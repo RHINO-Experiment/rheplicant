@@ -74,7 +74,6 @@ from typing import Any
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_over_layers
 
 #: The one route besides ``model:`` that reaches ``build_node_operator``.
 _REPLACE = "inference.twin.replace"
@@ -684,6 +683,4 @@ def _instrument_text(document: Mapping[str, Any]) -> Iterable[Finding]:
     cannot tell -- and a test asserts each id independently through
     ``only(document, ...)``.
     """
-    return _task3_over_layers(
-        document, lambda layer: [finding for rule in _RULES
-                                 for finding in rule(layer)])
+    return [finding for rule in _RULES for finding in rule(document)]

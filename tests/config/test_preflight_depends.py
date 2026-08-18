@@ -977,11 +977,14 @@ HOSTILE_TOKENS = {
         "variants": {"big": {"resources": beam(format=value)}}},
 }
 
-#: The shapes a YAML author can put where a token's value belongs.  The three
-#: unhashable ones are the point: ``_FEATURES.get((token, value))`` is a dict
+#: The supported evidence shapes a YAML author can put where a token's value
+#: belongs.  The unhashable ones are the point:
+#: ``_FEATURES.get((token, value))`` is a dict
 #: lookup on a tuple carrying user text, and ``{'a': 1}`` or ``['x']`` in that
 #: tuple raises ``TypeError: unhashable type`` before any check logic runs.
-HOSTILE_VALUES = (["x"], {"x": 1}, {"x"}, None, 7, True, [["x"]], [{"x": 1}],
+#: YAML sets are tested separately because the evidence boundary rejects them
+#: before any check runs.
+HOSTILE_VALUES = (["x"], {"x": 1}, None, 7, True, [["x"]], [{"x": 1}],
                   (1, 2), 1.5)
 
 
@@ -1036,6 +1039,17 @@ class TestNoHostileDocumentCanAbortA35:
         blocked(monkeypatch, *MODULES)
         report = preflight(preflight_document(**HOSTILE_TOKENS[token](value)))
         assert not [one for one in report.findings if "'A35' RAISED" in one.message]
+
+    @pytest.mark.parametrize("token", sorted(HOSTILE_TOKENS))
+    def test_an_unsupported_set_is_rejected_at_the_evidence_boundary(
+            self, token):
+        """A set is not recursively frozen evidence, so checks never see it."""
+        from rheplicant.config.preflight import preflight
+
+        with pytest.raises(
+                ConfigError,
+                match=r"initial_merge document: unsupported evidence leaf type set"):
+            preflight(preflight_document(**HOSTILE_TOKENS[token]({"x"})))
 
     def test_the_prior_token_reads_no_user_value(self):
         """Why ``prior`` is not in the battery, said rather than left out.

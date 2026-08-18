@@ -13,6 +13,9 @@ import textwrap
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.layering import initial_merge
+from _rheplicant_bootstrap.types import Origin
+from _rheplicant_bootstrap.variants import enumerate_layers_once
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.preflight import CHECKS, preflight
@@ -21,7 +24,6 @@ from rheplicant.config.preflight.document import (
     _CAPABILITY_KEYS,
     _TASK3_SPOKEN_FOR,
     _task3_allowed_run_options,
-    _task3_layers,
 )
 from rheplicant.config.sections import exits  # noqa: F401  -- fills EXECUTORS
 from rheplicant.config.sections.exit_support import EXECUTORS
@@ -42,6 +44,14 @@ _IDS = ("A1.runs", "A1.variants", "A1.horizon", "A38", "A39")
 def _findings(document, check):
     """Every finding ``preflight`` produces for one schema check id."""
     return [f for f in preflight(document).findings if f.check == check]
+
+
+def _layer_prefixes(document) -> list[str]:
+    merged = initial_merge(document, origin=Origin("user"))
+    enumeration = enumerate_layers_once(
+        merged.document, merged.origins, merged.deletions
+    )
+    return [layer.prefix for layer in enumeration.layers]
 
 
 def _beam_entry(name, **horizon):
@@ -355,44 +365,51 @@ class TestUnselectedVariants:
         for the run that selects the variant.  Kills the whole check."""
         found = _findings(preflight_document(
             variants={"sneaky": {"campaign": {}}}), "A1")
-        assert [f.where for f in found] == ["variants.sneaky"]
+        assert [f.where for f in found] == ["variants.sneaky.campaign"]
         assert "capability 4" in found[0].message
 
     def test_the_finding_names_the_offending_variant(self):
         """Shape 1.  Two variants, one bad: a check reporting `variants.good`
         or bare `variants` passes any membership test on the message and sends
         the reader to the wrong block."""
-        found = _findings(preflight_document(variants={
+        document = preflight_document(variants={
             "good": {"model": {"gain": {"gain": {"value": 1.0,
                                                  "unit": "dimensionless"}}}},
-            "bad": {"schema_version": 2}}), "A1")
-        assert [f.where for f in found] == ["variants.bad"]
-        assert "good" not in found[0].message
+            "bad": {"schema_version": 2}})
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variant 'bad' touches 'schema_version'. The version belongs to "
+            "the document; a patch that changes -- or deletes -- how the "
+            "document is read is not a patch."
+        )
+        assert "good" not in str(caught.value)
 
     def test_a_variant_deleting_a_required_section_is_caught(self):
         """`~model: null` is the delete form (layering.py:26-38).  Kills a
         check that only looks at the patch's own keys and never merges."""
         found = _findings(preflight_document(
             variants={"nomodel": {"~model": None}}), "A1")
-        assert [f.where for f in found] == ["variants.nomodel"]
+        assert [f.where for f in found] == ["variants.nomodel.model"]
         assert "missing ['model']" in found[0].message
 
-    @pytest.mark.parametrize("variants", [["a"], [], 0, ""],
-                             ids=["a-list", "an-empty-list", "a-zero",
-                                  "an-empty-string"])
-    def test_a_non_mapping_variants_section_is_reported(self, variants):
-        """apply_variant refuses this, but only when a variant is REQUESTED
-        (layering.py:50-54), so today it never fires at all.
-
-        The three FALSY rows are what kills `if not variants: return` -- a
-        one-character edit from the shipped `if variants is None`, and one
-        that reads as equivalent because `variants: null` and an absent
-        section really are the same thing here (`apply_variant` does
-        `document.get("variants") or {}`).  They are not equivalent for these
-        three, which are non-mappings a document can carry and which the
-        mutant lets through in silence."""
-        found = _findings(preflight_document(variants=variants), "A1")
-        assert [f.where for f in found] == ["variants"]
+    @pytest.mark.parametrize(("variants", "kind"), [
+        (["a"], "tuple"),
+        ([], "tuple"),
+        (0, "int"),
+        ("", "str"),
+        (None, "NoneType"),
+    ], ids=["a-list", "an-empty-list", "a-zero", "an-empty-string",
+            "an-explicit-null"])
+    def test_a_non_mapping_variants_section_is_rejected(self, variants, kind):
+        """Presence is significant: null and omission are not equivalent."""
+        document = preflight_document()
+        document["variants"] = variants
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variants: is a mapping of name -> patch; got " f"{kind}."
+        )
 
     def test_a_legal_variant_is_silent(self):
         """Kills a check that reports every variant it merges."""
@@ -402,17 +419,7 @@ class TestUnselectedVariants:
             "A1") == []
 
     def test_the_interior_of_an_unselected_variant_is_out_of_scope_here(self):
-        """A DECISION pinned, not an oversight.  `_variant_text` runs the
-        document-grammar checks -- apply_variant's four refusals and
-        `_structural`'s five -- on each merged variant.  It does NOT run the
-        model or section checks, because P-1 is defined (§2.1) over one
-        variant-applied document and a check that re-entered the registry per
-        variant would report every base-document finding n+1 times.
-
-        `model.ghost` is therefore silent HERE and is caught the moment the
-        variant is selected, by A2.  If a later plan closes that gap this test
-        goes red, which is the point: the residual is recorded in §6 and this
-        is the assertion that makes deleting the record visible."""
+        """A1 owns grammar only; the pass driver sends A2 over this layer."""
         assert _findings(preflight_document(
             variants={"unused": {"model": {"ghost": {}}}}), "A1") == []
 
@@ -811,7 +818,6 @@ class TestTheVariantRoute:
                                                "into": ["global_signal.depth",
                                                         "gain.gain"]}}}},
          "inference.parameters", "inference.parameters.d-1"),
-        ({"variants": {1: {"campaign": {}}}}, "variants", "variants.1"),
         ({"resources": {"beams": _beam_entry(
             "horn-a", apod_deg={"value": 0.1, "unit": "rad"})}},
          "resources.beams", "resources.beams.horn-a.horizon.apod_deg"),
@@ -828,7 +834,7 @@ class TestTheVariantRoute:
         ({"model": {"band-pass": {"type": "NeuralOperator"}}},
          "model", "model.band-pass.type"),
     ], ids=["a-variant-name", "a-variant-name-carrying-a-key", "a-latent-name",
-            "a-variant-name-yaml-read-as-an-int", "a-beam-name",
+            "a-beam-name",
             "a-latent-name-under-a-capability-key", "a-latent-name-under-scope",
             "a-model-node-name"])
     def test_a_name_the_path_grammar_cannot_spell_does_not_crash_the_pass(
@@ -859,6 +865,28 @@ class TestTheVariantRoute:
                  if f.check in ("A1", "A38", "A39")]
         assert [f.where for f in found] == [where]
         assert named in found[0].message
+
+    @pytest.mark.parametrize("unknown", ["bad-name", ".", "雪！"])
+    def test_a_variant_unknown_top_key_is_cut_back_only_after_attribution(
+            self, unknown):
+        """Keep the raw key until the variant prefix makes a legal path."""
+        found = [
+            finding
+            for finding in preflight(
+                preflight_document(variants={"x": {unknown: {}}})
+            ).findings
+            if finding.check == "A1"
+        ]
+
+        assert [finding.where for finding in found] == ["variants.x"]
+        assert unknown in found[0].message
+
+    def test_a_non_string_variant_name_is_rejected_in_source_order(self):
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document(variants={1: {"campaign": {}}}))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence mapping key type int."
+        )
 
     def test_a_base_finding_is_not_repeated_once_per_variant(self):
         """Kills the obvious implementation of the layer walk.  Three layers
@@ -909,26 +937,23 @@ class TestTheVariantRoute:
         is the base plus EVERY declared variant, this patch's two included."""
         document = preflight_document(variants={
             "a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}})
-        prefixes = [prefix for prefix, _ in _task3_layers(document)]
+        prefixes = _layer_prefixes(document)
         assert prefixes[0] == ""
         assert prefixes[1:] == [f"variants.{name}"
                                 for name in document["variants"]]
         assert {"variants.a", "variants.b"} <= set(prefixes)
 
-    def test_a_variant_apply_variant_refuses_is_dropped_from_the_walk(self):
-        """A patch that cannot be merged has one finding -- `_variant_text`'s
-        -- not four.  Kills a walk that lets apply_variant's ConfigError out
-        of the pass, which §2.3's TRAP says would abort it and hide every
-        later finding.
-
-        Asserted as an ABSENCE, because the merge keeps the base document's own
-        `variants: {unity_gain: ...}` and that layer is walked legitimately;
-        what this test is about is that `chained` is NOT."""
+    def test_a_variant_apply_variant_refuses_is_a_controlled_pass_refusal(self):
+        """The canonical enumerator never drops an invalid declared variant."""
         document = preflight_document(variants={"chained": {"variants": {}}})
-        prefixes = [prefix for prefix, _ in _task3_layers(document)]
-        assert "" in prefixes
-        assert "variants.chained" not in prefixes
-        assert len(_findings(document, "A1")) == 1
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variant 'chained' declares 'variants'. Layering is one level "
+            "deep by design: there is no ordering between variants and no "
+            "variant builds on another, so a comparison's halves cannot "
+            "drift apart through a chain."
+        )
 
 
 class TestASectionThisPassCannotRead:

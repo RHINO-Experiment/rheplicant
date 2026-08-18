@@ -37,11 +37,11 @@ import sys
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_where
 from rheplicant.config.preflight.fitting import _kinds, _latents, _runs
 from rheplicant.config.sections.compose import (
     cal_load_order_problem,
@@ -277,7 +277,7 @@ def _graph_shape(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # `where` kills the pass from outside its per-check `try`.
                 # Unreachable while `cal_loads` is the only FAN node and
                 # registers one class; live the day a second one ships.
-                yield refuse("A7", _task3_where(f"model.{where}"),
+                yield refuse("A7", longest_legal_prefix(f"model.{where}"),
                              f"{problem} (check A7).")
 
 
@@ -794,7 +794,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     continue
                 if cascade:
                     yield refuse(
-                        "A8", _task3_where(f"model.{where}"),
+                        "A8", longest_legal_prefix(f"model.{where}"),
                         f"model.{where}: puts {cls.__name__} at node {node!r} "
                         f"-- the node it declares it must precede -- as stage "
                         f"{index} of a compose: cascade, which applies its "
@@ -815,7 +815,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     # the per-check `try` and kills the whole pass.  Measured
                     # identity on a node id, which is what the single-entry
                     # leg passes it.
-                    "A8", _task3_where(f"model.{where}"),
+                    "A8", longest_legal_prefix(f"model.{where}"),
                     f"model.{where}: puts {cls.__name__} IN the {node!r} "
                     f"slot, so this document declares no {node!r} operator "
                     f"for it to pass through -- it replaced the stage it is "
@@ -831,7 +831,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                        and target not in _t5_downstream(graph, node)]
             if blocked:
                 yield refuse(
-                    "A8", _task3_where(f"model.{where}"),
+                    "A8", longest_legal_prefix(f"model.{where}"),
                     f"model.{where}: places {cls.__name__} at {node!r}, from "
                     f"which {blocked} cannot be reached -- and this document "
                     f"lights {'them' if len(blocked) > 1 else 'it'}, so "
@@ -1470,7 +1470,7 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
     if any(verdict is not False for verdict in verdicts):
         return ()
     where = on_bandpass[0][0]
-    return (refuse("A33", _task3_where(f"{where}.transform"), (
+    return (refuse("A33", longest_legal_prefix(f"{where}.transform"), (
         f"{where} is free into bandpass and this document also frees a "
         "latent into gain. The receiver's bandpass and the gain multiply the "
         "same prediction, so only their PRODUCT is constrained: the fit has "

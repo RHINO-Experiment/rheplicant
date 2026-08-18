@@ -100,9 +100,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_over_layers, _task3_where
 from rheplicant.config.preflight.model import _t4_entries
 from rheplicant.config.resources import resolved_specs
 
@@ -188,7 +188,7 @@ def _b2_spill_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         # name, which is a better sentence than this one.
         if not isinstance(entry, Mapping) or entry.get("engine") != "driftscan":
             continue
-        where = _task3_where(path)
+        where = longest_legal_prefix(path)
         if _B2_CACHED in list(entry.get("optimizations") or []):
             # Leg B pre-empts leg A rather than joining it: on a projector
             # that is BOTH cached and built on a truncated beam, the call
@@ -257,4 +257,4 @@ def _truncated_beam_spill(document: Mapping[str, Any]) -> Iterable[Finding]:
     projector that is both cached and truncated the call raises before any
     fraction is computed.
     """
-    return _task3_over_layers(document, _b2_spill_in)
+    return _b2_spill_in(document)

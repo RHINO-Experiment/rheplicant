@@ -9,6 +9,7 @@ import sys
 import textwrap
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -345,6 +346,136 @@ def test_thaw_does_not_treat_the_interned_empty_tuple_as_an_alias():
     assert mutable["first"] == []
     assert mutable["second"] == []
     assert mutable["first"] is not mutable["second"]
+
+
+def _frozen_concat_type():
+    implementation = getattr(frozen_module, "_FrozenConcat", None)
+    assert implementation is not None, "persistent frozen sequences are missing"
+    return implementation
+
+
+def test_frozen_concat_matches_tuple_sequence_semantics_without_recursion():
+    concat_type = _frozen_concat_type()
+    rows = concat_type((0, 1), ())
+    assert rows.extend(()) is rows
+    expected = [0, 1]
+    for index in range(2_000):
+        rows = rows.extend((index + 2,))
+        expected.append(index + 2)
+
+    assert len(rows) == len(expected)
+    assert tuple(rows) == tuple(expected)
+    assert rows[0] == expected[0]
+    assert rows[-1] == expected[-1]
+    assert rows[2:7] == tuple(expected[2:7])
+    assert rows[::-1] == tuple(expected[::-1])
+    with pytest.raises(AttributeError):
+        rows._suffix = ()
+    with pytest.raises(TypeError):
+        rows[0] = 1
+    with pytest.raises(TypeError):
+        hash(rows)
+
+
+def test_frozen_concat_indices_are_exact_and_do_not_run_hooks():
+    concat_type = _frozen_concat_type()
+    rows = concat_type((1,), (2,))
+
+    class HostileIndex:
+        def __index__(self):
+            raise AssertionError("index hook must not run")
+
+    with pytest.raises(TypeError, match="exact int or slice"):
+        rows[HostileIndex()]
+    with pytest.raises(TypeError, match="exact int or slice"):
+        rows[True]
+    with pytest.raises(TypeError, match="exact int or null"):
+        rows[slice(HostileIndex(), None)]
+    with pytest.raises(TypeError, match="exact int or null"):
+        rows[slice(True, None)]
+
+
+def test_frozen_concat_requires_exact_private_chunks_and_parents():
+    concat_type = _frozen_concat_type()
+
+    class TupleSubclass(tuple):
+        pass
+
+    class ConcatSubclass(concat_type):
+        pass
+
+    subclass = ConcatSubclass((), ())
+    with pytest.raises(ConfigError, match="parent"):
+        concat_type([], ())
+    with pytest.raises(ConfigError, match="parent"):
+        concat_type(TupleSubclass(), ())
+    with pytest.raises(ConfigError, match="parent"):
+        concat_type(subclass, ())
+    with pytest.raises(ConfigError, match="suffix"):
+        concat_type((), TupleSubclass())
+
+
+def test_thaw_materializes_frozen_concat_as_an_alias_preserving_list():
+    concat_type = _frozen_concat_type()
+    shared = MappingProxyType({"values": (1,)})
+    rows = concat_type((shared,), (shared,))
+
+    mutable = thaw(MappingProxyType({"rows": rows, "again": rows}))
+
+    assert type(mutable) is dict
+    assert type(mutable["rows"]) is list
+    assert mutable["rows"] is mutable["again"]
+    assert mutable["rows"][0] is mutable["rows"][1]
+    assert type(mutable["rows"][0]["values"]) is list
+
+
+def test_public_evidence_freezing_materializes_frozen_concat_to_exact_tuple():
+    concat_type = _frozen_concat_type()
+    rows = concat_type((MappingProxyType({"a": (1,)}),), (2,))
+
+    frozen = _freeze_evidence(rows, where="public sequence")
+
+    assert type(frozen) is tuple
+    assert type(frozen[0]) is MappingProxyType
+    assert type(frozen[0]["a"]) is tuple
+    assert frozen == ({"a": (1,)}, 2)
+
+
+def test_frozen_concat_validation_survives_optimized_python():
+    code = r'''
+from _rheplicant_bootstrap.frozen import _FrozenConcat
+
+def outcome(call):
+    try:
+        call()
+    except Exception as exc:
+        print(type(exc).__name__)
+    else:
+        print("accepted")
+
+class TupleSubclass(tuple):
+    pass
+
+class ConcatSubclass(_FrozenConcat):
+    pass
+
+outcome(lambda: _FrozenConcat([], ()))
+outcome(lambda: _FrozenConcat(TupleSubclass(), ()))
+outcome(lambda: _FrozenConcat(ConcatSubclass((), ()), ()))
+outcome(lambda: _FrozenConcat((), TupleSubclass()))
+'''
+    done = subprocess.run(
+        [sys.executable, "-O", "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert done.stdout.splitlines() == [
+        "ConfigError",
+        "ConfigError",
+        "ConfigError",
+        "ConfigError",
+    ]
 
 
 class _HostileProtocolError(Exception):

@@ -16,15 +16,341 @@ from types import (
     MemberDescriptorType,
     ModuleType,
 )
-from typing import TypeAlias
+from typing import TypeAlias, cast
 from weakref import CallableProxyType, ProxyType, ReferenceType
 
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.frozen import freeze_evidence
+from _rheplicant_bootstrap.frozen import _FrozenConcat, freeze_evidence
 from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot
 from _rheplicant_bootstrap.types import Origin
 
 OriginSegment: TypeAlias = str | int
+
+
+def _is_exact_overlay_key(value: object) -> bool:
+    return type(value) is str or type(value) is int
+
+
+def _overlay_keys(
+    mapping: Mapping[OriginSegment, object], *, where: str
+) -> tuple[OriginSegment, ...]:
+    try:
+        keys = tuple(mapping)
+    except Exception:
+        raise ConfigError(f"overlay {where} traversal failed.") from None
+    if any(not _is_exact_overlay_key(key) for key in keys):
+        raise ConfigError(
+            "overlay mapping keys must be exact string or integer values."
+        )
+    return keys
+
+
+def _snapshot_overlay_proxy(
+    mapping: MappingProxyType, *, where: str
+) -> MappingProxyType:
+    """Copy one untrusted proxy traversal before validating its snapshot."""
+    try:
+        iterator = iter(mapping)
+    except Exception:
+        raise ConfigError(f"overlay {where} protocol failed.") from None
+    snapshot: dict[OriginSegment, object] = {}
+    while True:
+        try:
+            key = next(iterator)
+        except StopIteration:
+            break
+        except Exception:
+            raise ConfigError(f"overlay {where} protocol failed.") from None
+        if not _is_exact_overlay_key(key):
+            raise ConfigError(
+                "overlay mapping keys must be exact string or integer values."
+            )
+        if key in snapshot:
+            raise ConfigError(
+                f"overlay {where} traversal emitted a duplicate key."
+            )
+        try:
+            snapshot[key] = mapping[key]
+        except Exception:
+            raise ConfigError(f"overlay {where} protocol failed.") from None
+    return MappingProxyType(snapshot)
+
+
+def _validate_overlay_parts(
+    base: Mapping[OriginSegment, object],
+    delta: MappingProxyType,
+    hidden: frozenset[OriginSegment],
+    end_keys: tuple[OriginSegment, ...],
+    *,
+    validate_base: bool,
+) -> int:
+    if type(base) is not MappingProxyType and type(base) is not _OverlayMapping:
+        raise ConfigError(
+            "overlay base must be an exact mapping proxy or overlay."
+        )
+    if type(delta) is not MappingProxyType:
+        raise ConfigError("overlay delta must be an exact mapping proxy.")
+    if type(hidden) is not frozenset:
+        raise ConfigError("overlay hidden keys must be an exact frozenset.")
+    if type(end_keys) is not tuple:
+        raise ConfigError("overlay end keys must be an exact tuple.")
+    if validate_base and type(base) is MappingProxyType:
+        _overlay_keys(base, where="base")
+    delta_keys = _overlay_keys(delta, where="delta")
+    if any(not _is_exact_overlay_key(key) for key in hidden):
+        raise ConfigError(
+            "overlay mapping keys must be exact string or integer values."
+        )
+    if any(not _is_exact_overlay_key(key) for key in end_keys):
+        raise ConfigError(
+            "overlay mapping keys must be exact string or integer values."
+        )
+    try:
+        if len(set(end_keys)) != len(end_keys):
+            raise ConfigError("overlay end keys must be unique.")
+        end_set = set(end_keys)
+        if any(key not in base for key in hidden):
+            raise ConfigError("overlay hidden keys must exist in the base.")
+        if any(key not in delta for key in end_keys):
+            raise ConfigError("overlay end keys must identify delta values.")
+        for key in end_keys:
+            if key in base and key not in hidden:
+                raise ConfigError(
+                    "overlay end keys must be new or re-added values."
+                )
+        for key in delta_keys:
+            if key in end_set:
+                continue
+            if key not in base or key in hidden:
+                raise ConfigError(
+                    "overlay delta replacements must retain a live base key."
+                )
+        return len(base) - len(hidden) + len(end_keys)
+    except ConfigError:
+        raise
+    except Exception:
+        raise ConfigError("overlay storage protocol failed.") from None
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False, repr=False)
+class _OverlayMapping(Mapping[OriginSegment, object]):
+    """Private immutable mapping overlay with final ``dict`` order."""
+
+    _base: MappingProxyType | _OverlayMapping
+    _delta: MappingProxyType
+    _hidden: frozenset[OriginSegment]
+    _end_keys: tuple[OriginSegment, ...]
+    _length: int
+
+    def __init__(
+        self,
+        base: Mapping[OriginSegment, object],
+        delta: MappingProxyType,
+        hidden: frozenset[OriginSegment],
+        end_keys: tuple[OriginSegment, ...],
+    ) -> None:
+        if type(base) is not MappingProxyType and type(base) is not _OverlayMapping:
+            raise ConfigError(
+                "overlay base must be an exact mapping proxy or overlay."
+            )
+        if type(delta) is not MappingProxyType:
+            raise ConfigError("overlay delta must be an exact mapping proxy.")
+        if type(hidden) is not frozenset:
+            raise ConfigError("overlay hidden keys must be an exact frozenset.")
+        if type(end_keys) is not tuple:
+            raise ConfigError("overlay end keys must be an exact tuple.")
+        canonical_base: MappingProxyType | _OverlayMapping = (
+            _snapshot_overlay_proxy(base, where="base")
+            if type(base) is MappingProxyType
+            else cast(_OverlayMapping, base)
+        )
+        canonical_delta = _snapshot_overlay_proxy(delta, where="delta")
+        length = _validate_overlay_parts(
+            canonical_base,
+            canonical_delta,
+            hidden,
+            end_keys,
+            validate_base=False,
+        )
+        object.__setattr__(self, "_base", canonical_base)
+        object.__setattr__(self, "_delta", canonical_delta)
+        object.__setattr__(self, "_hidden", hidden)
+        object.__setattr__(self, "_end_keys", end_keys)
+        object.__setattr__(self, "_length", length)
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __iter__(self):
+        for key in self._base:
+            if key not in self._hidden:
+                yield key
+        yield from tuple.__iter__(self._end_keys)
+
+    def __getitem__(self, key: OriginSegment) -> object:
+        if not _is_exact_overlay_key(key):
+            raise KeyError("overlay keys are exact strings or integers")
+        if key in self._delta:
+            return self._delta[key]
+        if key in self._hidden:
+            raise KeyError(key)
+        return self._base[key]
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+def _trusted_overlay(
+    base: Mapping[OriginSegment, object],
+    delta: MappingProxyType,
+    hidden: frozenset[OriginSegment],
+    end_keys: tuple[OriginSegment, ...],
+) -> Mapping[OriginSegment, object]:
+    if type(base) is not _OverlayMapping:
+        raise ConfigError("trusted overlay base must be the exact private marker.")
+    if type(delta) is not MappingProxyType:
+        raise ConfigError("overlay delta must be an exact mapping proxy.")
+    if type(hidden) is not frozenset:
+        raise ConfigError("overlay hidden keys must be an exact frozenset.")
+    if type(end_keys) is not tuple:
+        raise ConfigError("overlay end keys must be an exact tuple.")
+    canonical_delta = _snapshot_overlay_proxy(delta, where="delta")
+    if (
+        len(canonical_delta) == 0
+        and len(hidden) == 0
+        and len(end_keys) == 0
+    ):
+        return base
+    length = _validate_overlay_parts(
+        base,
+        canonical_delta,
+        hidden,
+        end_keys,
+        validate_base=False,
+    )
+    overlay = object.__new__(_OverlayMapping)
+    object.__setattr__(overlay, "_base", base)
+    object.__setattr__(overlay, "_delta", canonical_delta)
+    object.__setattr__(overlay, "_hidden", hidden)
+    object.__setattr__(overlay, "_end_keys", end_keys)
+    object.__setattr__(overlay, "_length", length)
+    return overlay
+
+
+def _trusted_overlay_root(
+    base: Mapping[OriginSegment, object],
+) -> _OverlayMapping:
+    if type(base) is not MappingProxyType:
+        raise ConfigError(
+            "trusted overlay root must wrap an exact mapping proxy."
+        )
+    root = object.__new__(_OverlayMapping)
+    object.__setattr__(root, "_base", base)
+    object.__setattr__(root, "_delta", MappingProxyType({}))
+    object.__setattr__(root, "_hidden", frozenset())
+    object.__setattr__(root, "_end_keys", ())
+    object.__setattr__(root, "_length", len(base))
+    return root
+
+
+def _trusted_overlay_omit(
+    base: Mapping[OriginSegment, object], key: OriginSegment
+) -> Mapping[OriginSegment, object]:
+    if not _is_exact_overlay_key(key):
+        raise ConfigError(
+            "trusted overlay omission key must be an exact string or integer."
+        )
+    if type(base) is not _OverlayMapping:
+        raise ConfigError(
+            "trusted overlay omission base must be the exact private marker."
+        )
+    if key not in base:
+        return base
+    return _trusted_overlay(
+        base,
+        MappingProxyType({}),
+        frozenset({key}),
+        (),
+    )
+
+
+class _OverlayBuilder:
+    """Mutable one-merge builder that publishes one immutable overlay."""
+
+    __slots__ = ("_base", "_delta", "_end_keys", "_hidden")
+
+    def __init__(self, base: Mapping[OriginSegment, object]) -> None:
+        if type(base) is not _OverlayMapping:
+            raise ConfigError(
+                "trusted overlay builder base must be the exact private marker."
+            )
+        self._base = base
+        self._delta: dict[OriginSegment, object] = {}
+        self._hidden: set[OriginSegment] = set()
+        self._end_keys: dict[OriginSegment, None] = {}
+
+    def get(self, key: OriginSegment, default: object = None) -> object:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __getitem__(self, key: OriginSegment) -> object:
+        if not _is_exact_overlay_key(key):
+            raise KeyError(
+                "trusted overlay keys must be exact strings or integers."
+            )
+        if key in self._delta:
+            return self._delta[key]
+        if key in self._hidden:
+            raise KeyError(key)
+        return self._base[key]
+
+    def __setitem__(self, key: OriginSegment, value: object) -> None:
+        if not _is_exact_overlay_key(key):
+            raise ConfigError(
+                "trusted overlay keys must be exact strings or integers."
+            )
+        if key in self._delta:
+            self._delta[key] = value
+            return
+        if key in self._hidden:
+            self._delta[key] = value
+            self._end_keys[key] = None
+            return
+        if key in self._base:
+            self._delta[key] = value
+            return
+        self._delta[key] = value
+        self._end_keys[key] = None
+
+    def pop(self, key: OriginSegment, default: object = None) -> object:
+        try:
+            previous = self[key]
+        except KeyError:
+            return default
+        if key in self._delta:
+            del self._delta[key]
+            if key in self._end_keys:
+                del self._end_keys[key]
+                if key in self._base:
+                    self._hidden.add(key)
+            else:
+                self._hidden.add(key)
+        else:
+            self._hidden.add(key)
+        return previous
+
+    def publish(self) -> Mapping[OriginSegment, object]:
+        return _trusted_overlay(
+            self._base,
+            MappingProxyType(dict(self._delta)),
+            frozenset(self._hidden),
+            tuple(self._end_keys),
+        )
+
+
+def _is_frozen_sequence(value: object) -> bool:
+    return type(value) is tuple or type(value) is _FrozenConcat
 
 
 def _canonical_origin(value: object, *, where: str) -> Origin:
@@ -233,6 +559,120 @@ class DeletionRecord:
         object.__setattr__(self, "origin", origin)
 
 
+def _validate_deletion_ledger_chunk(
+    rows: object, *, where: str
+) -> tuple[DeletionRecord, ...]:
+    if type(rows) is not tuple:
+        raise ConfigError(
+            f"canonical deletion ledger {where} must be an exact tuple."
+        )
+    if any(type(row) is not DeletionRecord for row in rows):
+        raise ConfigError(
+            f"canonical deletion ledger {where} must contain exact "
+            "DeletionRecord values."
+        )
+    return rows
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False, repr=False)
+class _DeletionLedger(Sequence[DeletionRecord]):
+    """Persistent private deletion evidence: one shared root plus suffixes."""
+
+    _parent: tuple[DeletionRecord, ...] | _DeletionLedger
+    _suffix: tuple[DeletionRecord, ...]
+    _length: int
+
+    def __init__(
+        self,
+        parent: tuple[DeletionRecord, ...] | _DeletionLedger,
+        suffix: tuple[DeletionRecord, ...],
+    ) -> None:
+        canonical_parent: tuple[DeletionRecord, ...] | _DeletionLedger
+        if type(parent) is tuple:
+            canonical_parent = _validate_deletion_ledger_chunk(
+                parent, where="parent"
+            )
+        elif type(parent) is _DeletionLedger:
+            canonical_parent = parent
+        else:
+            raise ConfigError(
+                "canonical deletion ledger parent must be an exact tuple "
+                "or ledger."
+            )
+        canonical_suffix = _validate_deletion_ledger_chunk(
+            suffix, where="suffix"
+        )
+        object.__setattr__(self, "_parent", canonical_parent)
+        object.__setattr__(self, "_suffix", canonical_suffix)
+        object.__setattr__(
+            self,
+            "_length",
+            len(canonical_parent) + len(canonical_suffix),
+        )
+
+    def extend(
+        self, suffix: tuple[DeletionRecord, ...]
+    ) -> _DeletionLedger:
+        if type(suffix) is tuple and not suffix:
+            return self
+        return _DeletionLedger(self, suffix)
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __iter__(self):
+        pending: list[
+            tuple[DeletionRecord, ...] | _DeletionLedger
+        ] = [self]
+        while pending:
+            current = pending.pop()
+            if type(current) is _DeletionLedger:
+                pending.append(current._suffix)
+                pending.append(current._parent)
+                continue
+            yield from tuple.__iter__(current)
+
+    def __getitem__(self, index: int | slice):
+        if type(index) is slice:
+            if any(
+                bound is not None and type(bound) is not int
+                for bound in (index.start, index.stop, index.step)
+            ):
+                raise TypeError(
+                    "canonical deletion ledger slice bounds must be exact "
+                    "int or null."
+                )
+            return tuple(self)[index]
+        if type(index) is not int:
+            raise TypeError(
+                "canonical deletion ledger indices must be exact int or slice."
+            )
+        position = index
+        if position < 0:
+            position += self._length
+        if position < 0 or position >= self._length:
+            raise IndexError("tuple index out of range")
+        current: tuple[DeletionRecord, ...] | _DeletionLedger = self
+        while type(current) is _DeletionLedger:
+            parent_length = len(current._parent)
+            if position < parent_length:
+                current = current._parent
+                continue
+            return current._suffix[position - parent_length]
+        return tuple.__getitem__(
+            cast(tuple[DeletionRecord, ...], current), position
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not tuple and type(other) is not _DeletionLedger:
+            return NotImplemented
+        if len(self) != len(other):
+            return False
+        return all(left == right for left, right in zip(self, other, strict=True))
+
+    __hash__ = None  # type: ignore[assignment]
+
+
 def _canonicalize_origin_tree(root: OriginNode) -> OriginNode:
     return _detach_origin_tree(root, public_origin_node=False)
 
@@ -272,22 +712,133 @@ class MergeResult:
         object.__setattr__(self, "deletions", deletions)
 
 
+_CANONICAL_FRESH = object()
+_CANONICAL_RUNNING = object()
+_CANONICAL_COMPLETED = object()
+_CANONICAL_FAILED = object()
+_CANONICAL_CONSUMED = object()
+
+
+class _CanonicalVariantDocument(Mapping[str, object]):
+    """Private one-shot bridge from compatibility grammar to origin evidence."""
+
+    __slots__ = ("_name", "_parent", "_patch", "_payload", "_state")
+
+    def __init__(
+        self, parent: MergeResult, name: str, patch: object
+    ) -> None:
+        if type(parent) is not MergeResult:
+            raise ConfigError(
+                "canonical variant parent must be an exact MergeResult."
+            )
+        if type(parent.deletions) is not _DeletionLedger:
+            raise ConfigError(
+                "canonical variant parent must carry the trusted deletion ledger."
+            )
+        if not isinstance(name, str):
+            raise ConfigError("canonical variant name must be a string.")
+        exact_name = str.__str__(name)
+        if not exact_name:
+            raise ConfigError("canonical variant name must be non-empty.")
+        self._parent = parent
+        self._name = exact_name
+        self._patch = patch
+        self._payload: tuple[MergeResult, dict[str, object]] | None = None
+        self._state = _CANONICAL_FRESH
+
+    def __getitem__(self, key: str) -> object:
+        return self._parent.document[key]
+
+    def __iter__(self):
+        return iter(self._parent.document)
+
+    def __len__(self) -> int:
+        return len(self._parent.document)
+
+
+def _canonical_variant_document(
+    parent: MergeResult,
+    name: str,
+    patch: object,
+) -> Mapping[str, object]:
+    return _CanonicalVariantDocument(parent, name, patch)
+
+
+def _take_canonical_variant_result(
+    document: Mapping[str, object],
+    returned: object,
+) -> MergeResult:
+    if type(document) is not _CanonicalVariantDocument:
+        raise ConfigError(
+            "canonical variant result requires the exact private document."
+        )
+    if document._state is _CANONICAL_CONSUMED:
+        raise ConfigError("canonical variant result was already taken.")
+    if (
+        document._state is not _CANONICAL_COMPLETED
+        or document._payload is None
+    ):
+        raise ConfigError("canonical variant result was not produced.")
+    result, expected_return = document._payload
+    if returned is not expected_return:
+        document._payload = None
+        document._state = _CANONICAL_FAILED
+        raise ConfigError("canonical variant return identity did not match.")
+    document._payload = None
+    document._state = _CANONICAL_CONSUMED
+    return result
+
+
 def _trusted_merge_result(
     document: Mapping[str, object],
     origins: OriginNode,
-    deletions: tuple[DeletionRecord, ...],
+    deletions: Sequence[DeletionRecord],
 ) -> MergeResult:
     """Build an internal result from lockstep COW fragments already validated."""
-    assert type(document) is MappingProxyType
-    assert type(origins) is OriginNode
-    assert origins.origin is None
-    assert type(origins.children) is MappingProxyType
-    assert len(document) == len(origins.children)
+    if type(deletions) is not tuple and type(deletions) is not _DeletionLedger:
+        raise ConfigError(
+            "trusted merge deletions must be an exact tuple or ledger."
+        )
+    trusted = type(deletions) is _DeletionLedger
+    allowed_mapping_types = (
+        (_OverlayMapping,)
+        if trusted
+        else (MappingProxyType,)
+    )
+    if not any(type(document) is candidate for candidate in allowed_mapping_types):
+        raise ConfigError("trusted merge document has an invalid exact type.")
+    if type(origins) is not OriginNode or origins.origin is not None:
+        raise ConfigError("trusted merge origins must be an exact root node.")
+    if not any(
+        type(origins.children) is candidate
+        for candidate in allowed_mapping_types
+    ):
+        raise ConfigError(
+            "trusted merge origin children have an invalid exact type."
+        )
+    if len(document) != len(origins.children):
+        raise ConfigError(
+            "trusted merge document and origin roots must have equal length."
+        )
     result = object.__new__(MergeResult)
     object.__setattr__(result, "document", document)
     object.__setattr__(result, "origins", origins)
     object.__setattr__(result, "deletions", deletions)
     return result
+
+
+def _canonical_variant_parent(parent: MergeResult) -> MergeResult:
+    if type(parent) is not MergeResult or type(parent.deletions) is not tuple:
+        raise ConfigError(
+            "canonical variant parent must have exact public merge evidence."
+        )
+    document = _trusted_overlay_root(parent.document)
+    origin_children = _trusted_overlay_root(parent.origins.children)
+    return _trusted_merge_result(
+        document,
+        _trusted_origin_node(None, origin_children),
+        _DeletionLedger(parent.deletions, ()),
+    )
 
 
 def _validate_parallel_origin_tree(
@@ -317,7 +868,7 @@ def _validate_parallel_origin_tree(
             )
 
         is_alias_container = isinstance(value, Mapping) or (
-            isinstance(value, tuple) and tuple.__len__(value) != 0
+            _is_frozen_sequence(value) and len(value) != 0
         )
         if is_alias_container:
             document_identity = id(value)
@@ -357,7 +908,7 @@ def _validate_parallel_origin_tree(
         if isinstance(value, Mapping):
             expected = tuple(value)
             child_values = value
-        elif isinstance(value, tuple):
+        elif _is_frozen_sequence(value):
             expected = tuple(range(len(value)))
             child_values = None
         else:
@@ -405,7 +956,7 @@ def _origin_node(
         memo = {}
     identity = id(value)
     memoized = isinstance(value, Mapping) or (
-        isinstance(value, tuple) and tuple.__len__(value) != 0
+        _is_frozen_sequence(value) and len(value) != 0
     )
     if memoized:
         for source, node in memo.get(identity, ()):
@@ -415,7 +966,7 @@ def _origin_node(
         children = {
             key: _origin_node(item, origin, memo) for key, item in value.items()
         }
-    elif isinstance(value, list | tuple):
+    elif isinstance(value, list | tuple) or type(value) is _FrozenConcat:
         children = {
             index: _origin_node(item, origin, memo)
             for index, item in enumerate(value)
@@ -467,7 +1018,7 @@ def _append_value(
     given: Mapping[object, object],
     origin: Origin,
     context: _MergeContext,
-) -> tuple[tuple[object, ...], OriginNode]:
+) -> tuple[Sequence[object], OriginNode]:
     cache_key = (id(inherited), id(inherited_origin), id(given))
     for (
         cached_inherited,
@@ -493,7 +1044,7 @@ def _append_value(
             f"{key!r}: append is a sequence; got "
             f"{type(appended).__name__} ({appended!r})."
         )
-    if not isinstance(inherited, tuple):
+    if not _is_frozen_sequence(inherited):
         raise ConfigError(
             f"{key!r} is extended with {{append: ...}} but the inherited value "
             f"is {type(inherited).__name__}, not a list."
@@ -504,20 +1055,35 @@ def _append_value(
             (inherited, inherited_origin, given, result)
         )
         return result
-    values = tuple([*inherited, *appended])
-    inherited_children = dict(inherited_origin.children)
+    values: Sequence[object]
+    if context.trusted:
+        if type(inherited) is tuple:
+            values = _FrozenConcat(inherited, appended)
+        else:
+            values = cast(_FrozenConcat, inherited).extend(appended)
+        inherited_children: dict[OriginSegment, OriginNode] | _OverlayBuilder = (
+            _OverlayBuilder(
+                context.overlay_base(inherited_origin.children)
+            )
+        )
+    else:
+        values = tuple([*inherited, *appended])
+        inherited_children = dict(inherited_origin.children)
     offset = len(inherited)
-    inherited_children.update(
-        {
-            offset + index: _origin_node(item, origin, context.origin_nodes)
-            for index, item in enumerate(appended)
-        }
+    for index, item in enumerate(appended):
+        inherited_children[offset + index] = _origin_node(
+            item, origin, context.origin_nodes
+        )
+    origin_children = (
+        inherited_children.publish()
+        if type(inherited_children) is _OverlayBuilder
+        else _frozen_children(inherited_children)
     )
     result = (
         values,
         _trusted_origin_node(
             origin=inherited_origin.origin,
-            children=_frozen_children(inherited_children),
+            children=origin_children,
         ),
     )
     context.appends.setdefault(cache_key, []).append(
@@ -533,10 +1099,17 @@ def _deletion_target(key: str) -> str:
     return target
 
 
-class _MergeContext:
-    __slots__ = ("appends", "fragments", "origin_nodes")
+_ORDINARY_STORAGE = object()
+_TRUSTED_STORAGE = object()
 
-    def __init__(self) -> None:
+
+class _MergeContext:
+    __slots__ = ("appends", "fragments", "origin_nodes", "storage")
+
+    def __init__(self, *, storage: object) -> None:
+        if storage is not _ORDINARY_STORAGE and storage is not _TRUSTED_STORAGE:
+            raise ConfigError("merge storage policy marker is invalid.")
+        self.storage = storage
         self.appends: dict[
             tuple[int, int, int],
             list[
@@ -544,7 +1117,7 @@ class _MergeContext:
                     object,
                     OriginNode,
                     Mapping[object, object],
-                    tuple[tuple[object, ...], OriginNode],
+                    tuple[Sequence[object], OriginNode],
                 ]
             ],
         ] = {}
@@ -566,6 +1139,23 @@ class _MergeContext:
         self.origin_nodes: dict[
             int, list[tuple[object, OriginNode]]
         ] = {}
+
+    @property
+    def trusted(self) -> bool:
+        return self.storage is _TRUSTED_STORAGE
+
+    def overlay_base(
+        self, base: Mapping[OriginSegment, object]
+    ) -> _OverlayMapping:
+        if not self.trusted:
+            raise ConfigError("ordinary merge cannot request trusted storage.")
+        if type(base) is _OverlayMapping:
+            return base
+        if type(base) is MappingProxyType:
+            return _trusted_overlay_root(base)
+        raise ConfigError(
+            "trusted merge base must be an exact mapping proxy or overlay."
+        )
 
 
 def _merge_mapping(
@@ -592,8 +1182,18 @@ def _merge_mapping(
             and cached_patch is patch
         ):
             return cached_result
-    merged = dict(base)
-    children = dict(base_origins.children)
+    if context.trusted:
+        trusted_base = context.overlay_base(base)
+        trusted_children = context.overlay_base(base_origins.children)
+        merged: dict[str, object] | _OverlayBuilder = _OverlayBuilder(
+            trusted_base
+        )
+        children: dict[OriginSegment, OriginNode] | _OverlayBuilder = (
+            _OverlayBuilder(trusted_children)
+        )
+    else:
+        merged = dict(base)
+        children = dict(base_origins.children)
     deletions: list[tuple[OriginSegment, ...]] = []
     for key, value in patch.items():
         if not isinstance(key, str):
@@ -646,11 +1246,21 @@ def _merge_mapping(
             continue
         merged[key] = value
         children[key] = _origin_node(value, origin, context.origin_nodes)
+    merged_document = (
+        cast(_OverlayBuilder, merged).publish()
+        if type(merged) is _OverlayBuilder
+        else MappingProxyType(merged)
+    )
+    merged_children = (
+        cast(_OverlayBuilder, children).publish()
+        if type(children) is _OverlayBuilder
+        else _frozen_children(children)
+    )
     result = (
-        MappingProxyType(merged),
+        cast(Mapping[str, object], merged_document),
         _trusted_origin_node(
             origin=base_origins.origin,
-            children=_frozen_children(children),
+            children=cast(Mapping[OriginSegment, OriginNode], merged_children),
         ),
         tuple(deletions),
     )
@@ -676,6 +1286,15 @@ def merge_with_origins(
             "merge_with_origins: patch is a mapping; got "
             f"{type(patch).__name__}."
         )
+    if type(parent.deletions) is _DeletionLedger and (
+        type(parent.document) is not _OverlayMapping
+        or type(parent.origins) is not OriginNode
+        or parent.origins.origin is not None
+        or type(parent.origins.children) is not _OverlayMapping
+    ):
+        raise ConfigError(
+            "trusted merge parent must carry exact overlay roots."
+        )
     origin = _canonical_origin(origin, where="merge_with_origins origin")
     frozen_patch = freeze_evidence(patch, where="merge_with_origins patch")
     assert isinstance(frozen_patch, Mapping)
@@ -684,14 +1303,26 @@ def merge_with_origins(
         parent.origins,
         frozen_patch,
         origin=origin,
-        context=_MergeContext(),
+        context=_MergeContext(
+            storage=(
+                _TRUSTED_STORAGE
+                if type(parent.deletions) is _DeletionLedger
+                else _ORDINARY_STORAGE
+            )
+        ),
         diagnostic_prefix=(),
     )
-    deletions = (*parent.deletions, *(DeletionRecord(path, origin) for path in relative_deletions))
+    suffix = tuple(
+        DeletionRecord(path, origin) for path in relative_deletions
+    )
+    if type(parent.deletions) is _DeletionLedger:
+        deletions: Sequence[DeletionRecord] = parent.deletions.extend(suffix)
+    else:
+        deletions = (*parent.deletions, *suffix)
     return _trusted_merge_result(
         document=document,
         origins=origins,
-        deletions=tuple(deletions),
+        deletions=deletions,
     )
 
 
@@ -1914,61 +2545,34 @@ def recursive_update(base: Mapping, patch: Mapping) -> dict:
     return merge_extends(patch, base)
 
 
-def apply_variant(document: Mapping, name: str) -> dict:
-    """Return the document with one named one-level variant patch applied."""
-    if not isinstance(document, Mapping):
-        raise ConfigError(
-            "variant document is a mapping; got "
-            f"{type(document).__name__}."
-        )
-    if not isinstance(name, str):
-        raise ConfigError(
-            "variant name is a string; got " f"{type(name).__name__}."
-        )
-    name = str.__str__(name)
+def _apply_variant_mapping_values(
+    mapping: Mapping,
+) -> dict[str, object]:
+    canonical: dict[str, object] = {}
+    for key, value in _mapping_pairs(
+        mapping, failure="apply_variant: mapping traversal failed."
+    ):
+        if not isinstance(key, str):
+            raise ConfigError(
+                "apply_variant: mapping keys are strings; got "
+                f"{type(key).__name__}."
+            )
+        exact_key = str.__str__(key)
+        if exact_key in canonical:
+            raise ConfigError(
+                "apply_variant: mapping keys collide after canonicalization."
+            )
+        canonical[exact_key] = value
+    return canonical
 
-    def mapping_values(mapping: Mapping) -> dict[str, object]:
-        canonical: dict[str, object] = {}
-        for key, value in _mapping_pairs(
-            mapping, failure="apply_variant: mapping traversal failed."
-        ):
-            if not isinstance(key, str):
-                raise ConfigError(
-                    "apply_variant: mapping keys are strings; got "
-                    f"{type(key).__name__}."
-                )
-            exact_key = str.__str__(key)
-            if exact_key in canonical:
-                raise ConfigError(
-                    "apply_variant: mapping keys collide after canonicalization."
-                )
-            canonical[exact_key] = value
-        return canonical
 
-    document_values = mapping_values(document)
-    variants = document_values.get("variants", {})
-    if not isinstance(variants, Mapping):
-        raise ConfigError(
-            f"variants: is a mapping of name -> patch; got "
-            f"{type(variants).__name__}."
-        )
-    variant_values = mapping_values(variants)
-    if not variant_values:
-        raise ConfigError(
-            f"variant {name!r} was requested but this document declares no variants."
-        )
-    if name not in variant_values:
-        raise ConfigError(
-            f"variant {name!r} is not declared; this document declares "
-            f"{sorted(variant_values)}."
-        )
-    patch = variant_values[name]
+def _validated_variant_patch(name: str, patch: object) -> Mapping:
     if not isinstance(patch, Mapping):
         raise ConfigError(
             f"variant {name!r}: the patch is a mapping of sections; got "
             f"{type(patch).__name__}."
         )
-    patch_values = mapping_values(patch)
+    patch_values = _apply_variant_mapping_values(patch)
     for key in ("variants", "~variants"):
         if key in patch_values:
             raise ConfigError(
@@ -1984,7 +2588,71 @@ def apply_variant(document: Mapping, name: str) -> dict:
                 "the document; a patch that changes -- or deletes -- how the "
                 "document is read is not a patch."
             )
+    return patch
+
+
+def _apply_variant_values(document: Mapping, name: str) -> dict:
+    document_values = _apply_variant_mapping_values(document)
+    variants = document_values.get("variants", {})
+    if not isinstance(variants, Mapping):
+        raise ConfigError(
+            f"variants: is a mapping of name -> patch; got "
+            f"{type(variants).__name__}."
+        )
+    variant_values = _apply_variant_mapping_values(variants)
+    if not variant_values:
+        raise ConfigError(
+            f"variant {name!r} was requested but this document declares no variants."
+        )
+    if name not in variant_values:
+        raise ConfigError(
+            f"variant {name!r} is not declared; this document declares "
+            f"{sorted(variant_values)}."
+        )
+    patch = _validated_variant_patch(name, variant_values[name])
     return recursive_update(document, patch)
+
+
+def _apply_canonical_variant(
+    canonical: _CanonicalVariantDocument, name: str
+) -> dict:
+    if canonical._state is not _CANONICAL_FRESH:
+        raise ConfigError("canonical variant document was already used.")
+    canonical._state = _CANONICAL_RUNNING
+    try:
+        if name != canonical._name:
+            raise ConfigError("canonical variant name did not match.")
+        patch = _validated_variant_patch(name, canonical._patch)
+        result = merge_with_origins(
+            canonical._parent,
+            patch,
+            origin=Origin("variant", name),
+        )
+        returned: dict[str, object] = {}
+        canonical._payload = (result, returned)
+        canonical._state = _CANONICAL_COMPLETED
+        return returned
+    finally:
+        if canonical._state is _CANONICAL_RUNNING:
+            canonical._payload = None
+            canonical._state = _CANONICAL_FAILED
+
+
+def apply_variant(document: Mapping, name: str) -> dict:
+    """Return the document with one named one-level variant patch applied."""
+    if not isinstance(document, Mapping):
+        raise ConfigError(
+            "variant document is a mapping; got "
+            f"{type(document).__name__}."
+        )
+    if not isinstance(name, str):
+        raise ConfigError(
+            "variant name is a string; got " f"{type(name).__name__}."
+        )
+    name = str.__str__(name)
+    if type(document) is _CanonicalVariantDocument:
+        return _apply_canonical_variant(document, name)
+    return _apply_variant_values(document, name)
 
 
 def parse_default(raw: object) -> PresetRequest:
@@ -2098,7 +2766,7 @@ def _without_key(result: MergeResult, key: str) -> MergeResult:
     return _trusted_merge_result(
         document=MappingProxyType(document),
         origins=_trusted_origin_node(None, _frozen_children(children)),
-        deletions=tuple(result.deletions),
+        deletions=result.deletions,
     )
 
 
@@ -2125,7 +2793,7 @@ def _replace_key_with_node(
     return _trusted_merge_result(
         document=MappingProxyType(document),
         origins=_trusted_origin_node(None, _frozen_children(children)),
-        deletions=tuple(result.deletions),
+        deletions=result.deletions,
     )
 
 

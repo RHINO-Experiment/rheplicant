@@ -81,7 +81,6 @@ from typing import Any
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_over_layers
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.noise import (
     _A49_HINTS,
@@ -242,50 +241,6 @@ def _a26_rank(node: Any) -> int | None:
     return None
 
 
-def _b6_is_layered(document: Mapping[str, Any]) -> bool:
-    """Can any variant this document declares change ``inference.noise``?
-
-    ``apply_variant`` is ``recursive_update(document, patch)`` and layering is
-    ONE level deep by design (``layering.py``'s own docstring), so a patch
-    whose top level names neither ``inference`` nor ``~inference`` leaves that
-    section exactly as the base wrote it.  Both spellings, because ``~key`` is
-    the delete form and a variant that DELETES ``inference:`` changes what
-    these two checks read as surely as one that rewrites it.
-
-    **This is a cost gate and nothing else**, and it is measured rather than
-    assumed: ``test_the_layer_gate_changes_no_finding`` asserts that the
-    findings are identical to the ungated walk's over a battery that includes
-    both answers, and ``test_the_layer_gate_actually_skips_the_deepcopy``
-    is its anti-vacuity partner.
-
-    Why it exists: ``_task3_over_layers`` deep-copies the whole document once
-    per variant per check that layers, and ``test_config_preflight.py``'s cold
-    budget is the tightest guard in this suite.  Measured on its own 40-run,
-    20-variant document -- whose variants patch ``model:`` alone -- these two
-    checks ungated cost **31 ms against a 50 ms budget** where the same
-    document without them costs 23 ms; gated they cost what the base walk
-    costs and the twin is still guarded.
-    """
-    variants = document.get("variants")
-    if not isinstance(variants, Mapping):
-        return False
-    return any(isinstance(patch, Mapping)
-               and ("inference" in patch or "~inference" in patch)
-               for patch in variants.values())
-
-
-def _b6_over_layers(document, per_layer) -> Iterable[Finding]:
-    """:func:`_task3_over_layers`, skipped when no variant can move the answer.
-
-    3A's walker is CALLED and not re-implemented: when the gate says a variant
-    could change ``inference.noise``, this is exactly ``A1.horizon``'s walk
-    over exactly the same layers, prefixes and de-duplication.
-    """
-    if not _b6_is_layered(document):
-        return per_layer(document)
-    return _task3_over_layers(document, per_layer)
-
-
 def _b6_noise_block(layer: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """``inference.noise``, when the layer holds one that is a mapping.
 
@@ -323,7 +278,7 @@ def _sigma_axis(document) -> Iterable[Finding]:
     pointing at an absent key sends a reader looking for a line that is not
     there.  The message names ``axis:`` twice, so the fix is not lost.
     """
-    return _b6_over_layers(document, _a26_in)
+    return _a26_in(document)
 
 
 def _a49_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
@@ -375,4 +330,4 @@ def _logdet(document) -> Iterable[Finding]:
     that helper speaks for the whole entry; naming the section in the ``where``
     as well would point a reader at a block rather than at a line.
     """
-    return _b6_over_layers(document, _a49_in)
+    return _a49_in(document)

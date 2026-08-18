@@ -23,6 +23,7 @@ which is the ``_number``-vs-``_whole`` divergence on the 2C ledger.
 """
 
 import re
+import sys
 
 import jax.numpy as jnp
 import pytest
@@ -224,7 +225,9 @@ def _model_only(model):
     need those gone, and a merge cannot express a removal, so those tests
     replace the section outright rather than patch it.
     """
-    return {**preflight_document(), "model": dict(model)}
+    document = {**preflight_document(), "model": dict(model)}
+    document["variants"] = {}
+    return document
 
 
 def _t5_one(model, check):
@@ -1027,12 +1030,17 @@ class TestTheGraphChecksInThePass:
 
     def test_a_malformed_model_produces_findings_and_never_raises(self):
         # §2.3's TRAP: a check that raises aborts the pass and hides every
-        # later finding.  None of these specs is a mapping and one node id
-        # is not a string.
+        # later finding.  None of these specs is a mapping.
         model = {"gain": None, "foregrounds": 3, "beam": "type",
-                 "filters": "everything", 4: {}}
+                 "filters": "everything"}
         report = preflight(preflight_document(model=model))
         assert report.refusals()
+
+    def test_a_non_string_model_key_is_rejected_at_the_evidence_boundary(self):
+        with pytest.raises(
+                ConfigError,
+                match=r"initial_merge document: unsupported evidence mapping key type int"):
+            preflight(preflight_document(model={4: {}}))
 
     def test_every_where_is_a_path_into_the_document(self):
         """``Finding.where`` is where the USER types (§3.1, rule 2), and it
@@ -1848,7 +1856,7 @@ class TestDeclaredDataAndSources:
         assert _t5_refused(document, "A31") == []
 
     def test_a_recording_beside_declared_data_keeps_the_sections_own_words(
-            self):
+            self, monkeypatch):
         """``from_file`` and ``data`` together is ``build_observation``'s, and
         it already precedes the beam.
 
@@ -1860,6 +1868,10 @@ class TestDeclaredDataAndSources:
         earlier than the sentence that is right.
         """
         from rheplicant.config.document import load_document
+
+        # This test is about the observation-section conflict, not the live
+        # environment's optional-dependency inventory.
+        monkeypatch.setitem(sys.modules, "h5py", object())
 
         document = {**preflight_document(
             model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
@@ -2081,7 +2093,7 @@ class TestTheReVoicedChecksInThePass:
         reader really does have to fix -- is what disappears.
         """
         document = _with_data(preflight_document(model={
-            "gain": None, "foregrounds": 3, 4: {}, "gian": GAIN,
+            "gain": None, "foregrounds": 3, "gian": GAIN,
             "noise": {"python": "rheplicant.radio:Typo", "name": "t"},
             "bandpass": dict(PY_GAIN, at=["nope"]),
             "emi": dict(PY_GAIN, at=["nope"]),
@@ -2178,10 +2190,13 @@ def _t11_fit(model=None, twin=_ABSENT, runs=None, **inference):
     block = dict(inference)
     if twin is not _ABSENT:
         block["twin"] = twin
-    return preflight_document(model=model or STOCHASTIC_MODEL,
-                              inference=block,
-                              runs=[{"kind": "fisher"}] if runs is None
-                              else runs)
+    document = preflight_document(
+        model=model or STOCHASTIC_MODEL,
+        inference=block,
+        runs=[{"kind": "fisher"}] if runs is None else runs,
+    )
+    document["variants"] = {}
+    return document
 
 
 def _walks(document, segments):

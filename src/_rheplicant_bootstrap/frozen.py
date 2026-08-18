@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
+from typing import cast
 
 from _rheplicant_bootstrap.errors import ConfigError
 
@@ -11,6 +13,85 @@ _EVIDENCE_DEPTH_LIMIT = 100
 _EVIDENCE_NODE_LIMIT = 250_000
 _EVIDENCE_EDGE_LIMIT = 250_000
 _SCALAR_TYPES = (type(None), bool, int, float, str, bytes)
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False, repr=False)
+class _FrozenConcat(Sequence[object]):
+    """Private persistent frozen sequence with a shared prefix."""
+
+    _parent: tuple[object, ...] | _FrozenConcat
+    _suffix: tuple[object, ...]
+    _length: int
+
+    def __init__(
+        self,
+        parent: tuple[object, ...] | _FrozenConcat,
+        suffix: tuple[object, ...],
+    ) -> None:
+        if type(parent) is not tuple and type(parent) is not _FrozenConcat:
+            raise ConfigError(
+                "frozen concat parent must be an exact tuple or concat."
+            )
+        if type(suffix) is not tuple:
+            raise ConfigError("frozen concat suffix must be an exact tuple.")
+        object.__setattr__(self, "_parent", parent)
+        object.__setattr__(self, "_suffix", suffix)
+        object.__setattr__(self, "_length", len(parent) + len(suffix))
+
+    def extend(self, suffix: tuple[object, ...]) -> _FrozenConcat:
+        if type(suffix) is tuple and not suffix:
+            return self
+        return _FrozenConcat(self, suffix)
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __iter__(self):
+        pending: list[tuple[object, ...] | _FrozenConcat] = [self]
+        while pending:
+            current = pending.pop()
+            if type(current) is _FrozenConcat:
+                pending.append(current._suffix)
+                pending.append(current._parent)
+                continue
+            yield from tuple.__iter__(current)
+
+    def __getitem__(self, index: int | slice):
+        if type(index) is slice:
+            if any(
+                bound is not None and type(bound) is not int
+                for bound in (index.start, index.stop, index.step)
+            ):
+                raise TypeError(
+                    "frozen concat slice bounds must be exact int or null."
+                )
+            return tuple(self)[index]
+        if type(index) is not int:
+            raise TypeError(
+                "frozen concat indices must be exact int or slice."
+            )
+        position = index
+        if position < 0:
+            position += self._length
+        if position < 0 or position >= self._length:
+            raise IndexError("tuple index out of range")
+        current: tuple[object, ...] | _FrozenConcat = self
+        while type(current) is _FrozenConcat:
+            parent_length = len(current._parent)
+            if position < parent_length:
+                current = current._parent
+                continue
+            return current._suffix[position - parent_length]
+        return tuple.__getitem__(cast(tuple[object, ...], current), position)
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not tuple and type(other) is not _FrozenConcat:
+            return NotImplemented
+        if len(self) != len(other):
+            return False
+        return all(left == right for left, right in zip(self, other, strict=True))
+
+    __hash__ = None  # type: ignore[assignment]
 
 
 def freeze(value: object) -> object:
@@ -47,6 +128,14 @@ def thaw(value: object) -> object:
                 for key, child in item.items()
             )
             return result
+        if type(item) is _FrozenConcat:
+            cached = completed_value(item)
+            if cached is not None:
+                return cached
+            sequence: list[object] = []
+            remember(item, sequence)
+            sequence.extend(thaw_one(child) for child in item)
+            return sequence
         if isinstance(item, tuple):
             if tuple.__len__(item) == 0:
                 return []

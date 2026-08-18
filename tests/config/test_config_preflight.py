@@ -18,7 +18,6 @@ shape 2C shipped without and paid for.
 """
 
 import ast
-import gc
 import importlib
 import io
 import os
@@ -30,7 +29,6 @@ import sys
 import tarfile
 import time
 import warnings
-import weakref
 from collections.abc import Callable
 from typing import NamedTuple
 
@@ -40,6 +38,9 @@ import rheplicant.config as config_package
 import rheplicant.config.document as document_module
 import rheplicant.config.sections.runtime as runtime_module
 import rheplicant.config.values as values_module
+from _rheplicant_bootstrap.layering import initial_merge
+from _rheplicant_bootstrap.types import Origin
+from _rheplicant_bootstrap.variants import enumerate_layers_once
 from rheplicant.config.document import load_document
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import ConfigWarning, refuse, report, warn
@@ -49,10 +50,6 @@ from rheplicant.config.preflight import (
     _structural,
     preflight,
     register,
-)
-from rheplicant.config.preflight.document import (
-    _task3_build_layers,
-    _task3_layers,
 )
 from rheplicant.config.sections.runs import run_document
 from rheplicant.core.operator import AbstractOperator
@@ -945,8 +942,9 @@ class TestTheRegistry:
 
         assert {slot: fn is _three for slot, fn in CHECKS.items()} == {
             "A20": True, "A21": True, "A23": True}
-        found = preflight(preflight_document()).refusals()
-        assert calls == [1]
+        document = preflight_document()
+        found = preflight(document).refusals()
+        assert calls == [1] * len(_enumeration(document).layers)
         assert [one.check for one in found] == ["A20"]
 
     def test_two_functions_sharing_a_name_are_not_one_function(self, registry):
@@ -1510,8 +1508,10 @@ class TestThePhaseGuard:
             seen.append(float(document["model"]["gain"]["gain"]["value"]))
             return ()
 
-        load_document(preflight_document(), variant="unity_gain")
-        assert seen == [1.0]        # 1.1 is the unpatched value
+        document = preflight_document()
+        load_document(document, variant="unity_gain")
+        assert seen == [1.0] * len(_enumeration(document).layers)
+        assert 1.1 not in seen
 
     def test_run_document_inherits_the_hook_and_adds_none_of_its_own(
             self, registry):
@@ -1537,7 +1537,9 @@ class TestThePhaseGuard:
             {"kind": "forward", "name": "c", "variant": "unity_gain"},
         ])
         run_document(doc)
-        assert len(seen) == 2
+        # ``run_document`` configures two distinct effective documents.  Each
+        # pass fans every check across the base and every declared variant.
+        assert len(seen) == 2 * len(_enumeration(doc).layers)
 
 
 class TestTheCostAndTheBoundary:
@@ -1928,7 +1930,7 @@ class TestTheCostAndTheBoundary:
             "cycle)."
         )
 
-    def test_no_module_here_head_imports_apply_variant(self):
+    def test_no_check_replays_variants_or_references_deleted_walkers(self):
         """The precondition :data:`_COLD_COST_CHILD`'s merge counter rests on,
         which was an unasserted claim in a docstring until a review walked
         through it.
@@ -1962,18 +1964,51 @@ class TestTheCostAndTheBoundary:
         fail-open here.  A reader who assumes both are exhaustive because they
         share a shape would be wrong about this one.
         """
-        offenders = sorted(
-            path.name for path in _preflight_sources()
-            for node in ast.parse(path.read_text()).body
-            if isinstance(node, ast.ImportFrom)
-            and node.module == "rheplicant.config.layering"
-        )
-        assert offenders == [], (
-            f"{offenders} import from rheplicant.config.layering at module "
-            "scope. apply_variant must be imported INSIDE the function that "
-            "calls it, or the merge count in _COLD_COST_CHILD -- the "
-            "instrument that says the layer walk has not regressed -- cannot "
-            "see the merges it makes."
+        deleted = {
+            "_task3_over_layers",
+            "_task3_where",
+            "_task3_layers",
+            "_task3_build_layers",
+            "_task3_forget_layers",
+        }
+
+        def violations(source: str) -> set[str]:
+            found: set[str] = set()
+            for node in ast.walk(ast.parse(source)):
+                if isinstance(node, ast.Name) and node.id in deleted:
+                    found.add(node.id)
+                if isinstance(node, ast.Attribute) and node.attr in deleted:
+                    found.add(node.attr)
+                if isinstance(node, ast.ImportFrom):
+                    found.update(
+                        alias.name for alias in node.names if alias.name in deleted
+                    )
+                if isinstance(node, ast.Call):
+                    called = node.func
+                    if (
+                        isinstance(called, ast.Name)
+                        and called.id == "apply_variant"
+                    ) or (
+                        isinstance(called, ast.Attribute)
+                        and called.attr == "apply_variant"
+                    ):
+                        found.add("apply_variant()")
+            return found
+
+        assert violations(
+            "from x import _task3_layers\n"
+            "def check(d):\n"
+            "    return layering.apply_variant(d, 'x')\n"
+        ) == {"_task3_layers", "apply_variant()"}
+        offenders = {
+            path.name: sorted(found)
+            for path in _preflight_sources()
+            if (found := violations(path.read_text()))
+        }
+        assert offenders == {}, (
+            f"{offenders} retain a deleted layer walker/path helper or replay "
+            "apply_variant inside a check. The pass driver owns the sole "
+            "enumeration and attribution."
         )
 
     @pytest.mark.parametrize(("source", "expected"), [
@@ -2212,10 +2247,10 @@ class TestTheCostAndTheBoundary:
 _COLD_COST_CHILD = '''
 import sys, time
 
-import rheplicant.config.layering as _layering
+import _rheplicant_bootstrap.variants as _variants
 
 _MERGES = []
-_real_apply_variant = _layering.apply_variant
+_real_apply_variant = _variants.apply_variant
 
 
 def _counting_apply_variant(document, name):
@@ -2223,7 +2258,7 @@ def _counting_apply_variant(document, name):
     return _real_apply_variant(document, name)
 
 
-_layering.apply_variant = _counting_apply_variant
+_variants.apply_variant = _counting_apply_variant
 
 from rheplicant.config.preflight import preflight
 from tests.config.preflight_helpers import BASE_MODEL, preflight_document
@@ -2367,6 +2402,7 @@ class TestTheColdCostOnARealDocument:
             "than one per run -- it is not exercising the checks whose cost "
             "this measures"
         )
+        assert result.merges > 0
         assert result.merges == result.variants, (
             f"one pass merged {result.merges} variants for "
             f"{result.variants} declared. apply_variant is a deep merge of "
@@ -2465,46 +2501,34 @@ class TestTheColdCostOnARealDocument:
         )
 
 
-class _WeakDocument(dict):
-    """A document that can be weak-referenced, which a bare ``dict`` cannot.
-
-    Only :class:`TestTheLayerMemo` needs it, and only to ask what the memo
-    keeps alive.
-    """
+def _enumeration(document):
+    merged = initial_merge(document, origin=Origin("user"))
+    return enumerate_layers_once(
+        merged.document, merged.origins, merged.deletions
+    )
 
 
 def _prefixes(document) -> list[str]:
-    """The layer prefixes ``_task3_layers`` answers for ``document``."""
-    return [prefix for prefix, _ in _task3_layers(document)]
+    """The canonical layer prefixes for ``document``."""
+    return [layer.prefix for layer in _enumeration(document).layers]
 
 
-class TestTheLayerMemo:
-    """``_task3_layers`` builds one document's layers once, and no more.
-
-    The cost this buys is :class:`TestTheColdCostOnARealDocument`'s subject --
-    210 deep merges down to 21.  What lives here is the memo's own contract:
-    which documents it answers for, what it keeps alive, and the one thing it
-    deliberately cannot see.
-
-    **These tests are here rather than in ``test_preflight_document.py``
-    because they belong to the cold guard above**, whose flake they exist to
-    have fixed; the memo has no reader other than that guard's number.
-    """
+class TestCanonicalLayerEnumeration:
+    """The pass-scoped canonical enumerator has no cross-pass memo."""
 
     def _document(self, **variants):
         return preflight_document(
             variants={name: {"runtime": {"seed": seed}}
                       for name, seed in variants.items()})
 
-    def test_one_document_is_walked_once(self):
-        """The hit path, at its narrowest: the SAME tuple, not an equal one.
-
-        An equal tuple would mean the merge ran again, which is the whole
-        cost this exists to remove -- so identity is the assertion and
-        equality would pass under the bug.
-        """
+    def test_each_enumeration_returns_a_fresh_frozen_record(self):
         document = self._document(a=1, b=2)
-        assert _task3_layers(document) is _task3_layers(document)
+        first = _enumeration(document)
+        second = _enumeration(document)
+        assert first is not second
+        assert tuple(layer.prefix for layer in first.layers) == tuple(
+            layer.prefix for layer in second.layers
+        )
 
     def test_a_second_document_gets_its_own_layers(self):
         """One entry, and it is replaced rather than shared.
@@ -2520,51 +2544,25 @@ class TestTheLayerMemo:
         assert {"variants.b", "variants.c"} <= set(_prefixes(second))
         assert "variants.a" in _prefixes(first)
 
-    def test_the_memo_keeps_its_document_alive(self):
-        """What the reference buys, stated as the property it actually has.
-
-        ``id()`` is an address, and an address is reused as soon as its object
-        is freed -- so a memo that kept the bare integer could answer a hit for
-        a document that merely landed where the first one used to be.  The
-        entry holds the document itself and the hit path asserts ``is``, so
-        that cannot happen.
-
-        **This test cannot fail if the reference is dropped, and that is worth
-        saying plainly rather than dressing up.**  Layer 0 is ``("", document)``
-        -- the layers hold the document too -- and the memo has ONE entry, so
-        today the address of a cached document is un-recyclable either way.
-        The reference is written down so the guarantee survives a walk that
-        hands out a copy as layer 0, or a memo that ever holds two entries;
-        what this test pins is the reachability the source claims, not a bug
-        it can currently reproduce.
-        """
-        document = _WeakDocument(self._document(a=1))
-        _task3_layers(document)
-        witness = weakref.ref(document)
-        del document
-        gc.collect()
-        assert witness() is not None, (
-            "the layer memo does not keep its document reachable, so its "
-            "id() can be handed to another object while the entry is live"
-        )
-
-    def test_a_mutation_inside_one_pass_is_not_seen_by_the_memo(self):
-        """The limit, pinned so that it is documented rather than discovered.
-
-        The assumption the memo rests on is the one the walk already rested
-        on: a document does not change between two checks of one pass.  Every
-        check reads text, and layer 0 has always been the caller's own object
-        shared by all of them.  Between two calls WITHIN a pass, a mutation is
-        invisible -- and the uncached walk beside it is what makes this a
-        statement about the memo rather than about the walk.
-        """
+    def test_a_fresh_enumeration_reads_a_mutated_document(self):
         document = self._document(a=1)
-        before = _task3_layers(document)
+        before = _prefixes(document)
         document["variants"]["b"] = {"runtime": {"seed": 2}}
-        assert _task3_layers(document) is before
-        assert "variants.b" not in _prefixes(document)
-        assert "variants.b" in [prefix for prefix, _
-                                in _task3_build_layers(document)]
+        assert "variants.b" not in before
+        assert "variants.b" in _prefixes(document)
+
+    def test_an_unused_variant_is_seen_by_every_registered_check(self):
+        """Layer fan-out belongs to the driver, not to selected checks."""
+        document = preflight_document(
+            variants={"unused": {"model": {"ghost": {}}}}
+        )
+        found = [one for one in findings(document)
+                 if one.check == "A2"
+                 and one.where == "variants.unused.model"]
+        assert len(found) == 1
+        assert found[0].message.startswith(
+            "variants.unused: model: 'ghost' is not a node"
+        )
 
     def test_a_document_edited_between_two_passes_is_read_afresh(self):
         """And the limit stops at the pass boundary, which is not optional.
@@ -2582,13 +2580,13 @@ class TestTheLayerMemo:
         to do with this variant.
         """
         document = preflight_document(variants={"v": {"campaign": {"of": 1}}})
-        assert any(finding.where == "variants.v"
+        assert any(finding.where == "variants.v.campaign"
                    for finding in findings(document)), (
             "the variant this test edits earns nothing, so the second read "
             "below could not tell a fresh walk from a stale one"
         )
         del document["variants"]["v"]["campaign"]
-        assert not any(finding.where == "variants.v"
+        assert not any(finding.where == "variants.v.campaign"
                        for finding in findings(document)), (
             "a second pass answered from the first pass's layers: the "
             "document was edited between them and preflight() is supposed to "
@@ -2699,6 +2697,19 @@ _ASSEMBLED_ELSEWHERE: dict[str, str] = {
         "decided array has no fixed point to iterate (check A28). Declare "
         "inference.noise.kind: radiometer to iterate the rule, or run kind: "
         "conjugate.wiener, which is what a decided sigma wants.",
+    )
+}
+
+#: Compatibility diagnostics intentionally hardened by committed Task 3
+#: (``2dc8904``): callback-controlled repr text was removed while the static
+#: sentence and concrete type remain.  These are not Task 4 message moves.
+_TASK3_SAFE_CORRECTIONS: dict[str, str] = {
+    literal: "test_config_preflight.py::"
+             "test_task3_compatibility_diagnostics_keep_static_whole_strings"
+    for literal in (
+        "recursive_update: … is a mapping; got … (…).",
+        "variants: is a mapping of name -> patch; got … (…).",
+        "variant …: the patch is a mapping of sections; got … (…).",
     )
 }
 
@@ -2836,11 +2847,14 @@ class TestNoMovedMessageWasReworded:
         for source in self._base_sources().values():
             base |= _message_texts(source)
         head = set()
-        for path in sorted(
-                (_ROOT / "src" / "rheplicant" / "config").rglob("*.py")):
-            head |= _message_texts(path.read_text())
+        roots = [(_ROOT / "src" / "rheplicant" / "config"),
+                 (_ROOT / "src" / "_rheplicant_bootstrap")]
+        for root in roots:
+            for path in sorted(root.rglob("*.py")):
+                head |= _message_texts(path.read_text())
 
         missing = (base - head - set(_ASSEMBLED_ELSEWHERE)
+                   - set(_TASK3_SAFE_CORRECTIONS)
                    - set(_CORRECTED_BY_PLAN))
         assert missing == set(), (
             f"{len(missing)} message(s) this layer shipped at {_BASE_COMMIT} "
@@ -2867,8 +2881,13 @@ class TestNoMovedMessageWasReworded:
         claims apart would be a loosening rather than a tightening if only
         one of them were still checked here.
         """
-        forgiven = {**_ASSEMBLED_ELSEWHERE, **_CORRECTED_BY_PLAN}
+        forgiven = {
+            **_ASSEMBLED_ELSEWHERE,
+            **_TASK3_SAFE_CORRECTIONS,
+            **_CORRECTED_BY_PLAN,
+        }
         assert len(forgiven) == (len(_ASSEMBLED_ELSEWHERE)
+                                 + len(_TASK3_SAFE_CORRECTIONS)
                                  + len(_CORRECTED_BY_PLAN)), (
             "a literal is forgiven by BOTH lists, so one of the two claims "
             "about it -- 'assembled from clauses' and 'reworded on purpose' "
@@ -2885,6 +2904,23 @@ class TestNoMovedMessageWasReworded:
                 f"{pin} is the only thing standing between this message and "
                 f"a silent rewording, and it does not exist: {literal[:60]}..."
             )
+
+    def test_task3_compatibility_diagnostics_keep_static_whole_strings(self):
+        """Pin Task 3's approved removal of callback-controlled repr text."""
+        from _rheplicant_bootstrap.layering import apply_variant, recursive_update
+
+        cases = (
+            (lambda: recursive_update([], {}),
+             "recursive_update: base is a mapping; got list."),
+            (lambda: apply_variant({"variants": []}, "v"),
+             "variants: is a mapping of name -> patch; got list."),
+            (lambda: apply_variant({"variants": {"v": []}}, "v"),
+             "variant 'v': the patch is a mapping of sections; got list."),
+        )
+        for callback, expected in cases:
+            with pytest.raises(ConfigError) as caught:
+                callback()
+            assert str(caught.value) == expected
 
 
 class TestTheFootImportCannotRot:

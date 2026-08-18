@@ -4,7 +4,9 @@ import equinox as eqx
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap import path_syntax
 from rheplicant.config import ConfigError
+from rheplicant.config import paths as public_paths
 from rheplicant.config.paths import compile_path, parse_path, resolve_path_on
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
@@ -80,6 +82,51 @@ def twin():
 
 
 class TestParsing:
+    def test_the_public_parser_reuses_the_jax_free_step_grammar(self):
+        """Catches a bootstrap/public path grammar drifting into two copies."""
+        assert public_paths._STEP is path_syntax.PATH_STEP
+
+    def test_public_and_bootstrap_paths_both_refuse_an_internal_newline(self):
+        label = "root.a\n.leaf"
+        assert path_syntax.is_legal_path(label) is False
+        with pytest.raises(ConfigError):
+            parse_path(label)
+
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [
+            ("variants.valid.runtime.seed", "variants.valid.runtime.seed"),
+            ("variants.unity-gain.runtime.seed", "variants"),
+            ("variants.slash/name.model", "variants"),
+            ("inference.parameters.d-1.init", "inference.parameters"),
+        ],
+    )
+    def test_longest_legal_prefix_keeps_the_deepest_spellable_path(
+        self, label, expected
+    ):
+        assert path_syntax.longest_legal_prefix(label) == expected
+
+    def test_longest_legal_prefix_visits_each_segment_at_most_once(
+        self, monkeypatch
+    ):
+        """A long suffix after the first bad segment must not cause rescans."""
+        real = path_syntax.PATH_STEP
+        visited: list[str] = []
+
+        class CountingPattern:
+            def fullmatch(self, piece):
+                visited.append(piece)
+                return real.fullmatch(piece)
+
+        monkeypatch.setattr(path_syntax, "PATH_STEP", CountingPattern())
+        legal = ["root", *(f"step{index}" for index in range(256))]
+        label = ".".join(
+            [*legal, "bad-name", *(f"suffix{index}" for index in range(256))]
+        )
+
+        assert path_syntax.longest_legal_prefix(label) == ".".join(legal)
+        assert visited == [*legal, "bad-name"]
+
     def test_a_head_alone(self):
         assert parse_path("gain") == ("gain",)
 

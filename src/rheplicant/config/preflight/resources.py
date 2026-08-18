@@ -68,6 +68,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.kinds.beams import (
     BEAM_FORMATS,
@@ -83,7 +84,6 @@ from rheplicant.config.kinds.projectors import (
     _a48_lst_ref,
 )
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_over_layers, _task3_where
 from rheplicant.config.resources import resolved_specs
 from rheplicant.config.sections.runtime import RuntimeFacts
 
@@ -144,7 +144,7 @@ def _b2_beams_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         # format itself.
         if spec.get("format") not in BEAM_FORMATS:
             continue
-        where = _task3_where(dotted)
+        where = longest_legal_prefix(dotted)
         problem = _a12_normalize(dotted, spec)
         if problem is not None:
             yield refuse("A12", where, problem)
@@ -172,7 +172,7 @@ def _b2_projectors_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         # particular would otherwise pre-empt it on a document writing both.
         if set(_NOT_WRITABLE) & set(spec):
             continue
-        where = _task3_where(dotted)
+        where = longest_legal_prefix(dotted)
         problem = _a12_normalize_beam(dotted, spec)
         if problem is not None:
             yield refuse("A12", where, problem)
@@ -228,7 +228,7 @@ def _beam_keys(document: Mapping[str, Any]) -> Iterable[Finding]:
     :func:`_projector_keys` -- two functions may not both claim bare ``A12``,
     and every ``Finding`` either of them emits carries the bare id anyway.
     """
-    return _task3_over_layers(document, _b2_beams_in)
+    return _b2_beams_in(document)
 
 
 @register("A12.projector", "A44", "A48")
@@ -254,4 +254,4 @@ def _projector_keys(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``engine: matrix`` is exempt from all three -- the matrix branch returns
     before every one of them.
     """
-    return _task3_over_layers(document, _b2_projectors_in)
+    return _b2_projectors_in(document)
