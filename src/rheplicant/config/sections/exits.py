@@ -1,9 +1,16 @@
-"""The exit executors: one function per runs[].kind (schema §4.7.9).
+"""The exit executors: one handler per runs[].kind (schema §4.7.9).
 
-Each executor sweeps its own kind-specific keys, reads what it needs off the
-ConfiguredRun's InferenceBuild, and drives the package's documented entry
-point.  Package refusals -- stochastic stages, priors, shapes -- speak for
-themselves; the config layer adds only what the grammar can see.
+Each base kind's PARSER sweeps the entry's kind-specific keys, validates
+them, and normalizes one selected set of defaults into the two frozen views
+of a ``ParsedOptions`` -- reading only static facts off the configured
+build, never the twin.  The EXECUTOR then reads nothing but the parsed
+execution view and the ConfiguredRun's InferenceBuild, and spends itself on
+the package's documented entry point.  Package refusals -- stochastic
+stages, priors, shapes -- speak for themselves; the config layer adds only
+what the grammar can see.  Every executor keeps its one textual ``_sweep``
+as its first statement: until Task 10 retires the mirror, preflight's P-1
+table derives each kind's allowed keys from that call site, and on a parsed
+run it can only ever fire on a mis-bound registry.
 
 This module holds Plan 2B's five exits and the dispatcher.  The shared
 machinery is in ``exit_support``; the conjugate family and the diagnostics are
@@ -22,6 +29,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
     _PROBE,
     EXECUTORS,
+    ParsedRun,
     _binds,
     _noise,
     _number,
@@ -31,6 +39,7 @@ from rheplicant.config.sections.exit_support import (
     _sweep,
     handler_for,
     parse_run,
+    parsed_options,
     register,
 )
 from rheplicant.config.sections.runs import RunResult, RunSpec
@@ -38,8 +47,14 @@ from rheplicant.config.sections.runs import RunResult, RunSpec
 __all__ = ["execute_run"]
 
 
-@register("forward")
-def _run_forward(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+def _parse_forward(options, context):
+    """``forward`` takes no keys; the sweep is the whole grammar."""
+    _sweep(context.spec, frozenset())
+    return parsed_options(options, resolved=options)
+
+
+@register("forward", parse=_parse_forward)
+def _run_forward(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     _sweep(run, frozenset())
     return built.twin(built.state)
 
@@ -47,10 +62,30 @@ def _run_forward(run: RunSpec, built: Any, *, results: Any = None) -> Any:
 _OPTIMIZE_KEYS = frozenset({"optimizer", "learning_rate", "n_steps", "beta1",
                             "beta2", "eps", "loss"})
 _ADAM_ONLY = ("beta1", "beta2", "eps")
+#: Measured against ``AdamCalibrator``'s own static defaults, so passing them
+#: explicitly is byte-identical to today's omission.
+_ADAM_DEFAULTS = {"beta1": 0.9, "beta2": 0.999, "eps": 1e-8}
 
 
-@register("fisher")
-def _run_fisher(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+def _parse_fisher(options, context):
+    """``space:``/``jitter:`` validated and defaulted; no Fisher math here."""
+    spec = context.spec
+    built = context.configured_run
+    _sweep(spec, frozenset({"space", "jitter"}))
+    _space(spec, built)
+    _noise(spec, built)
+    use_space = options.get("space", False)
+    if not isinstance(use_space, bool):
+        raise ConfigError(f"runs[{spec.name!r}]: space: is a bool; got "
+                          f"{use_space!r}.")
+    jitter = _number(spec, "jitter", options.get("jitter", 0.0),
+                     kind=float, minimum=0.0)
+    normalized = {"space": use_space, "jitter": jitter}
+    return parsed_options(normalized, resolved=normalized)
+
+
+@register("fisher", parse=_parse_fisher)
+def _run_fisher(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     from rheplicant.inference import fisher_information, parameter_covariance
 
     _sweep(run, frozenset({"space", "jitter"}))
@@ -58,16 +93,12 @@ def _run_fisher(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     space = _space(run, built)
     noise = _noise(run, built)
     forward, values = space.forward_fn(inference.fit_twin, built.state)
-    use_space = run.options.get("space", False)
-    if not isinstance(use_space, bool):
-        raise ConfigError(f"runs[{run.name!r}]: space: is a bool; got "
-                          f"{use_space!r}.")
-    fisher = fisher_information(forward, values, noise,
-                                space=space if use_space else None)
-    jitter = _number(run, "jitter", run.options.get("jitter", 0.0),
-                     kind=float, minimum=0.0)
+    fisher = fisher_information(
+        forward, values, noise,
+        space=space if run.options["space"] else None)
     return {"fisher": fisher,
-            "covariance": parameter_covariance(fisher, jitter=jitter)}
+            "covariance": parameter_covariance(
+                fisher, jitter=run.options["jitter"])}
 
 
 def _loss_fn(run: RunSpec) -> Any:
@@ -103,66 +134,92 @@ def _loss_fn(run: RunSpec) -> Any:
     )
 
 
-@register("optimize")
-def _run_optimize(run: RunSpec, built: Any, *, results: Any = None) -> Any:
-    from rheplicant.inference import AdamCalibrator, GradientCalibrator, build_forward_fn
+def _parse_optimize(options, context):
+    """The whole optimize grammar: keys, requireds, routes, loss, defaults.
 
-    _sweep(run, _OPTIMIZE_KEYS)
+    Every refusal below is the one the executor used to raise mid-run, in
+    the same order; the executor is left with the calibrator and the fit.
+    """
+    spec = context.spec
+    built = context.configured_run
+    _sweep(spec, _OPTIMIZE_KEYS)
     inference = built.inference
-    observed = _observed(run, built)
-    optimizer = run.options.get("optimizer")
+    _observed(spec, built)
+    optimizer = options.get("optimizer")
     if optimizer not in ("gradient", "adam"):
         raise ConfigError(
-            f"runs[{run.name!r}]: optimizer: gradient or adam is required; "
+            f"runs[{spec.name!r}]: optimizer: gradient or adam is required; "
             f"got {optimizer!r}. The two are different algorithms behind an "
             "identical .fit."
         )
     for key in ("learning_rate", "n_steps"):
-        if key not in run.options:
+        if key not in options:
             raise ConfigError(
-                f"runs[{run.name!r}]: {key}: is required -- the shipped "
+                f"runs[{spec.name!r}]: {key}: is required -- the shipped "
                 "default (1e-2) sits five orders of magnitude from what a "
                 "real fit has needed (examples/radio_digital_twin.py:112)."
             )
     if optimizer == "gradient":
         for key in _ADAM_ONLY:
-            if key in run.options:
+            if key in options:
                 raise ConfigError(
-                    f"runs[{run.name!r}]: {key}: belongs to optimizer: adam."
+                    f"runs[{spec.name!r}]: {key}: belongs to optimizer: "
+                    "adam."
                 )
-        calibrator = GradientCalibrator(
-            learning_rate=_number(run, "learning_rate",
-                                  run.options["learning_rate"], kind=float),
-            n_steps=_number(run, "n_steps", run.options["n_steps"], kind=int))
-    else:
-        knobs = {key: _number(run, key, run.options[key], kind=float)
-                 for key in _ADAM_ONLY if key in run.options}
-        calibrator = AdamCalibrator(
-            learning_rate=_number(run, "learning_rate",
-                                  run.options["learning_rate"], kind=float),
-            n_steps=_number(run, "n_steps", run.options["n_steps"], kind=int),
-            **knobs)
+    execution = {"optimizer": optimizer}
+    resolved = {"optimizer": optimizer}
+    execution["learning_rate"] = resolved["learning_rate"] = _number(
+        spec, "learning_rate", options["learning_rate"], kind=float)
+    execution["n_steps"] = resolved["n_steps"] = _number(
+        spec, "n_steps", options["n_steps"], kind=int)
+    if optimizer == "adam":
+        for key in _ADAM_ONLY:
+            execution[key] = resolved[key] = _number(
+                spec, key, options.get(key, _ADAM_DEFAULTS[key]), kind=float)
     trainable = inference.trainable
     space = inference.space
     if trainable is not None and space is not None:
         raise ConfigError(
-            f"runs[{run.name!r}]: inference.trainable and "
+            f"runs[{spec.name!r}]: inference.trainable and "
             "inference.parameters are both declared, and optimize cannot "
             "serve two masters -- trainable is the calibrator-only route "
             "(schema §4.7.5); drop one."
         )
-    if trainable is not None:
-        forward, params0 = build_forward_fn(inference.fit_twin, built.state,
-                                            trainable)
-    elif space is not None:
-        forward, params0 = space.forward_fn(inference.fit_twin, built.state)
-    else:
+    if trainable is None and space is None:
         raise ConfigError(
-            f"runs[{run.name!r}]: optimize needs inference.trainable or "
+            f"runs[{spec.name!r}]: optimize needs inference.trainable or "
             "inference.parameters -- something must be free to move."
         )
+    execution["loss"] = _loss_fn(spec)
+    resolved["loss"] = options.get("loss", "mse")
+    return parsed_options(execution, resolved=resolved)
+
+
+@register("optimize", parse=_parse_optimize)
+def _run_optimize(run: ParsedRun, built: Any, previous: Any = None) -> Any:
+    from rheplicant.inference import AdamCalibrator, GradientCalibrator, build_forward_fn
+
+    _sweep(run, _OPTIMIZE_KEYS)
+    inference = built.inference
+    observed = _observed(run, built)
+    options = run.options
+    if options["optimizer"] == "gradient":
+        calibrator = GradientCalibrator(
+            learning_rate=options["learning_rate"],
+            n_steps=options["n_steps"])
+    else:
+        calibrator = AdamCalibrator(
+            learning_rate=options["learning_rate"],
+            n_steps=options["n_steps"], beta1=options["beta1"],
+            beta2=options["beta2"], eps=options["eps"])
+    if inference.trainable is not None:
+        forward, params0 = build_forward_fn(inference.fit_twin, built.state,
+                                            inference.trainable)
+    else:
+        forward, params0 = inference.space.forward_fn(inference.fit_twin,
+                                                      built.state)
     params_fit, losses = calibrator.fit(forward, params0, observed,
-                                        loss_fn=_loss_fn(run))
+                                        loss_fn=options["loss"])
     return {"params": params_fit, "losses": losses}
 
 
@@ -180,6 +237,18 @@ _ESTIMATE_PASSTHROUGH = ("max_iter", "tol", "min_sweeps",
                          "check_identifiability", "solve_tol", "solve_guard")
 _SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability",
                        "solve_tol", "solve_guard")
+#: The parser-injected defaults behind the passthrough tuples, measured
+#: against ``SamplingPlan``'s own signatures (``DEFAULT_MAX_ITER``,
+#: ``DEFAULT_CHI2_TOL``, ``MIN_SWEEPS``, ``CHECK_ONCE``, ``solve_tol=1e-6``,
+#: ``solve_guard=1e-3``; ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an
+#: explicit keyword is byte-identical to today's omission.  A warm start
+#: gets none: its passthrough has always been declared-only.
+_ESTIMATE_DEFAULTS = {"max_iter": 100, "tol": 1e-8, "min_sweeps": 3,
+                      "check_identifiability": "once", "solve_tol": 1e-6,
+                      "solve_guard": 0.001}
+_SAMPLE_DEFAULTS = {"warmup": None, "rhat_max": 1.05,
+                    "check_identifiability": "once", "solve_tol": 1e-6,
+                    "solve_guard": 0.001}
 
 
 def _blocks(where: str, node: Any) -> tuple[Any, ...]:
@@ -233,34 +302,39 @@ def _a29_estimate_takes_no_seed(where: str, options: Mapping[str, Any]) -> None:
         )
 
 
-@register("plan.estimate")
-@register("plan.sample")
-def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
-    import equinox as eqx
-    import jax
+def _parse_plan(options, context):
+    """Both plan kinds' grammar: blocks, knobs, seed, warm start -- no draws.
 
+    One parser for the pair, branching on ``spec.kind`` exactly where the
+    executor used to.  The warm start is validated and normalized here --
+    its ``plan.estimate`` grammar is this same one -- but the estimate
+    itself is scientific execution and stays in the executor.
+    """
     from rheplicant.config.draws import _seed_name, seed_for
-    from rheplicant.inference import SamplingPlan
 
-    estimate = run.kind == "plan.estimate"
-    where = f"runs[{run.name!r}]"
+    spec = context.spec
+    built = context.configured_run
+    estimate = spec.kind == "plan.estimate"
+    where = f"runs[{spec.name!r}]"
     if estimate:
-        _a29_estimate_takes_no_seed(where, run.options)
-    _sweep(run, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
-    inference = built.inference
-    space = _space(run, built)
-    noise = _noise(run, built)
-    observed = _observed(run, built)
-    blocks = _blocks(where, run.options.get("blocks"))
+        _a29_estimate_takes_no_seed(where, options)
+    _sweep(spec, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
+    space = _space(spec, built)
+    _noise(spec, built)
+    _observed(spec, built)
+    execution = {"blocks": _blocks(where, options.get("blocks"))}
+    resolved = {"blocks": options["blocks"]}
     if estimate:
-        return SamplingPlan(space, *blocks).estimate(
-            inference.fit_twin, built.state, observed, noise=noise,
-            **_passthrough(run.options, _ESTIMATE_PASSTHROUGH))
-    if "n_sweeps" not in run.options:
+        for key in _ESTIMATE_PASSTHROUGH:
+            execution[key] = resolved[key] = options.get(
+                key, _ESTIMATE_DEFAULTS[key])
+        return parsed_options(execution, resolved=resolved)
+    if "n_sweeps" not in options:
         raise ConfigError(f"{where}: n_sweeps: is required for plan.sample.")
-    key = jax.random.key(seed_for(_seed_name(dict(run.options), where),
-                                  built.context))
-    warm = run.options.get("warm_start")
+    execution["seed"] = resolved["seed"] = seed_for(
+        _seed_name(dict(options), where), built.context)
+    warm = options.get("warm_start")
+    warm_execution = None
     if warm is not None:
         if not isinstance(warm, dict):
             raise ConfigError(f"{where}: warm_start: is a mapping; got "
@@ -288,18 +362,57 @@ def _run_plan(run: RunSpec, built: Any, *, results: Any = None) -> Any:
                 f"inference.parameters does not declare; it declares "
                 f"{list(space.names)}."
             )
-        warm_blocks = _blocks(f"{where}: warm_start", warm.get("blocks"))
-        est = SamplingPlan(space, *warm_blocks).estimate(
+        warm_execution = {"kind": "plan.estimate",
+                          "blocks": _blocks(f"{where}: warm_start",
+                                            warm.get("blocks")),
+                          "move": tuple(move)}
+        warm_execution.update(_passthrough(warm, _ESTIMATE_PASSTHROUGH))
+    execution["n_sweeps"] = resolved["n_sweeps"] = _number(
+        spec, "n_sweeps", options["n_sweeps"], kind=int)
+    for key in _SAMPLE_PASSTHROUGH:
+        execution[key] = resolved[key] = options.get(
+            key, _SAMPLE_DEFAULTS[key])
+    if warm_execution is not None:
+        execution["warm_start"] = warm_execution
+        resolved["warm_start"] = warm
+    return parsed_options(execution, resolved=resolved)
+
+
+@register("plan.estimate", parse=_parse_plan)
+@register("plan.sample", parse=_parse_plan)
+def _run_plan(run: ParsedRun, built: Any, previous: Any = None) -> Any:
+    import equinox as eqx
+    import jax
+
+    from rheplicant.inference import SamplingPlan
+
+    estimate = run.kind == "plan.estimate"
+    where = f"runs[{run.name!r}]"
+    if estimate:
+        _a29_estimate_takes_no_seed(where, run.options)
+    _sweep(run, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
+    inference = built.inference
+    space = _space(run, built)
+    noise = _noise(run, built)
+    observed = _observed(run, built)
+    options = run.options
+    if estimate:
+        return SamplingPlan(space, *options["blocks"]).estimate(
+            inference.fit_twin, built.state, observed, noise=noise,
+            **_passthrough(options, _ESTIMATE_PASSTHROUGH))
+    key = jax.random.key(options["seed"])
+    warm = options.get("warm_start")
+    if warm is not None:
+        est = SamplingPlan(space, *warm["blocks"]).estimate(
             inference.fit_twin, built.state, observed, noise=noise,
             **_passthrough(warm, _ESTIMATE_PASSTHROUGH))
         space = eqx.tree_at(
-            lambda s: [s.latent(name).init for name in move], space,
-            [est.values[name] for name in move])
-    kwargs = _passthrough(run.options, _SAMPLE_PASSTHROUGH)
-    return SamplingPlan(space, *blocks).sample(
+            lambda s: [s.latent(name).init for name in warm["move"]], space,
+            [est.values[name] for name in warm["move"]])
+    return SamplingPlan(space, *options["blocks"]).sample(
         inference.fit_twin, built.state, observed, noise=noise, key=key,
-        n_sweeps=_number(run, "n_sweeps", run.options["n_sweeps"], kind=int),
-        **kwargs)
+        n_sweeps=options["n_sweeps"],
+        **_passthrough(options, _SAMPLE_PASSTHROUGH))
 
 
 #: The compatibility path has no canonical layer and no schedule position:
@@ -319,9 +432,11 @@ def execute_run(run: RunSpec, built: Any,
 
     The wrapper keeps its exact signature and its legacy unknown-kind
     refusal byte-for-byte, then routes through the registry: parse once,
-    pre-execute, execute.  The ``expect: refuse`` capture wraps the
-    pre-execute/execute pair exactly where the bare executor call sat
-    before, so today's capture scope is unchanged.
+    pre-execute, execute.  The ``expect: refuse`` capture wraps the whole
+    parse/pre-execute/execute triple: the grammar refusals the parser now
+    raises ran INSIDE the bare executor call before the parse/execute
+    split, so wrapping the parse is what preserves today's capture scope,
+    not a widening of it.
     """
     if run.kind not in EXECUTORS:
         raise ConfigError(
@@ -329,13 +444,17 @@ def execute_run(run: RunSpec, built: Any,
             f"kind this layer declares must register one; it knows "
             f"{sorted(EXECUTORS)}."
         )
-    parsed = parse_run(run, built, index=0, layer=_COMPATIBILITY_LAYER)
-    handler = handler_for(run.kind)
     previous = results if results is not None else MappingProxyType({})
+
+    def attempt():
+        parsed = parse_run(run, built, index=0, layer=_COMPATIBILITY_LAYER)
+        handler = handler_for(run.kind)
+        handler.pre_execute(parsed, built, previous)
+        return handler.execute(parsed, built, previous)
+
     if run.expect == "refuse":
         try:
-            handler.pre_execute(parsed, built, previous)
-            handler.execute(parsed, built, previous)
+            attempt()
         except Exception as error:  # noqa: BLE001 -- run-and-capture is the point
             return RunResult(name=run.name, kind=run.kind, product=None,
                              error=error, variant=run.variant)
@@ -344,9 +463,7 @@ def execute_run(run: RunSpec, built: Any,
             "SUCCEEDED -- the assertion this run makes about the design no "
             "longer holds."
         )
-    handler.pre_execute(parsed, built, previous)
-    return RunResult(name=run.name, kind=run.kind,
-                     product=handler.execute(parsed, built, previous),
+    return RunResult(name=run.name, kind=run.kind, product=attempt(),
                      error=None, variant=run.variant)
 
 

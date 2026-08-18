@@ -12,9 +12,10 @@ on a cached copy.
 The leaf modules (``exits``, ``conjugate``, ``diagnostics``) import from here
 and never from each other, so the registration is a one-way import.
 
-TRANSITIONAL until Tasks 7-9: the sixteen built-ins bind with ``parse``
-omitted.  Their parser is then :func:`_legacy_freeze_parse` -- the same
-freeze/YAML-safe snapshot factory explicit parsers call -- and their
+TRANSITIONAL until Tasks 8-9: the eleven conjugate/diagnostics built-ins
+still bind with ``parse`` omitted (Task 7 migrated the five base kinds to
+explicit parsers).  Their parser is then :func:`_legacy_freeze_parse` -- the
+same freeze/YAML-safe snapshot factory explicit parsers call -- and their
 executor keeps today's ``(run, built, *, results=None)`` convention behind
 an adapter that hands it the raw ``RunSpec``.  A registration WITH ``parse=``
 stores its executor unwrapped, and that executor is called
@@ -210,7 +211,7 @@ def parsed_options(
 def _legacy_freeze_parse(
     options: Mapping[str, object], context: RunParseContext
 ) -> ParsedOptions:
-    """The transitional parser every built-in sits on until Tasks 7-9.
+    """The transitional parser the unmigrated built-ins sit on (Tasks 8-9).
 
     Both views are the entry's own options, frozen independently -- the same
     factory an explicit parser calls, so migrating a kind changes WHO calls

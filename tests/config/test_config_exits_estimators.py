@@ -1,8 +1,13 @@
-"""The fisher and optimize exits, end to end from a document."""
+"""The fisher and optimize exits, end to end from a document.
+
+Plan 4A Task 7 adds the phase proof: grammar refusals land at parse, before
+any scientific call, and the executor reads only the parsed execution view.
+"""
 
 import jax
 import pytest
 
+from _rheplicant_bootstrap.variants import LayerRef
 from rheplicant.config import ConfigError
 from rheplicant.config.sections.runs import run_document
 from rheplicant.inference import mean_squared_error
@@ -231,3 +236,54 @@ class TestOptimize:
         assert float(product["losses"][0]) == \
             pytest.approx(0.5 * float(mse["losses"][0]), rel=1e-5)
         assert float(product["losses"][-1]) < float(product["losses"][0])
+
+
+def _explode(*args, **kwargs):
+    raise AssertionError(f"science ran during a grammar refusal: {args!r}")
+
+
+class TestRefusalsPrecedeScience:
+    """A grammar refusal used to wait for the science ahead of it (Task 7)."""
+
+    def test_a_negative_jitter_speaks_before_the_fisher_computation(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+
+        monkeypatch.setattr(inference, "fisher_information", _explode)
+        monkeypatch.setattr(inference, "parameter_covariance", _explode)
+        with pytest.raises(ConfigError, match="jitter: must be >= 0"):
+            run_document(document({"kind": "fisher", "jitter": -1.0}))
+
+    def test_a_non_bool_space_speaks_before_the_fisher_computation(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+
+        monkeypatch.setattr(inference, "fisher_information", _explode)
+        with pytest.raises(ConfigError, match="space: is a bool"):
+            run_document(document({"kind": "fisher", "space": 1}))
+
+
+class TestTheExecutorReadsOnlyTheParsedView:
+    """The plan Step 5 mutation support: poisoning the raw mapping after
+    parse must change neither the product nor the defaults consumed."""
+
+    def test_poisoning_the_raw_options_after_parse_changes_nothing(self):
+        from rheplicant.config.document import load_document
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
+        from rheplicant.config.sections.runs import parse_runs
+
+        doc = document({"kind": "fisher", "jitter": 1.0})
+        built = load_document(doc)
+        (spec,) = parse_runs(doc["runs"])
+        parsed = parse_run(spec, built, index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        baseline = run_document(document({"kind": "fisher", "jitter": 1.0}))
+        expected = float(baseline["fisher"].product["covariance"].sigma("g"))
+
+        spec.options["jitter"] = 1.0e12  # poison AFTER the parse
+        product = handler_for("fisher").execute(parsed, built, {})
+        assert float(product["covariance"].sigma("g")) == expected

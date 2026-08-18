@@ -7,9 +7,16 @@ compatibility ``execute_run`` dispatch byte-identical while the sixteen
 built-ins are transitionally registered with ``_legacy_freeze_parse``.
 Tasks 7-9 replace those entries kind by kind; Task 9 owns the hard
 no-legacy gate.
+
+Plan 4A Task 7 migrates the five base kinds (``forward``, ``fisher``,
+``optimize``, ``plan.estimate``, ``plan.sample``) onto explicit parsers:
+defaults are normalized into both frozen views, every grammar refusal
+precedes science, and the transitional pin below narrows to the eleven
+unmigrated kinds.
 """
 
 import threading
+from collections.abc import Mapping
 
 import pytest
 
@@ -33,6 +40,7 @@ from rheplicant.config.sections.exit_support import (
     register,
 )
 from rheplicant.config.sections.runs import _KINDS, RunSpec
+from tests.config.exit_helpers import HOMOSCEDASTIC, ONE_LATENT, conjugate_built
 
 _REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
@@ -80,9 +88,15 @@ class TestEveryDeclaredKindHasOneLiveHandler:
         assert len(PARSERS) == 16
 
     def test_every_builtin_is_transitionally_on_the_legacy_parser(self):
-        """Tasks 7-9 replace these entries; Task 9 owns the no-legacy gate."""
-        for kind in _KINDS:
+        """Tasks 8-9 replace the remaining entries; Task 9 owns the gate."""
+        unmigrated = ("conjugate.wiener", "conjugate.gcr", "conjugate.gls",
+                      "condition", "identifiability", "score_directions",
+                      "gradient", "mmodes", "predict", "nuts", "npe")
+        for kind in unmigrated:
             assert PARSERS[kind] is _legacy_freeze_parse, kind
+        for kind in ("forward", "fisher", "optimize", "plan.estimate",
+                     "plan.sample"):
+            assert PARSERS[kind] is not _legacy_freeze_parse, kind
         handler = handler_for("forward")
         assert isinstance(handler, ExitHandler)
         assert handler.deferred_checks == ()
@@ -582,6 +596,27 @@ class TestExecuteRunKeepsItsCompatibilitySeams:
             _pop_all("_refuse_pre")
             _pop_all("_refuse_exec")
 
+    def test_expect_refuse_captures_a_parse_error(self):
+        """The parser's refusal is the run's own, so the capture hears it.
+
+        The grammar checks lived INSIDE the executor before the parse/execute
+        split; leaving parse outside the capture would silently narrow the
+        pre-split scope (a refused ``jitter: -1.0`` used to be a recorded
+        ``RunResult.error``, not an aborted document).
+        """
+
+        def parse(options, context):
+            raise ConfigError("runs['run']: a parse-time refusal.")
+
+        register("_refuse_parse", parse=parse)(_execute)
+        try:
+            captured = exits.execute_run(
+                _spec("_refuse_parse", name="p", expect="refuse"), object())
+            assert isinstance(captured.error, ConfigError)
+            assert captured.product is None
+        finally:
+            _pop_all("_refuse_parse")
+
     def test_expect_refuse_still_refuses_a_success(self):
         def parse(options, context):
             return parsed_options(options, resolved=options)
@@ -641,3 +676,313 @@ class TestLegacyRegistrationsKeepTheLegacyDispatch:
             assert isinstance(handler.deferred_checks, tuple)
         finally:
             _pop_all("_legacy2")
+
+
+# ---------------------------------------------------------------------------
+# Plan 4A Task 7: the five base kinds on explicit parsers.
+
+
+def prediction_only_loss(prediction):
+    """The natural mistake, importable from THIS module: one argument."""
+    return (prediction**2).mean()
+
+
+def half_mse(prediction, observed):
+    """A legal two-argument loss, importable from THIS module."""
+    from rheplicant.inference import mean_squared_error
+
+    return 0.5 * mean_squared_error(prediction, observed)
+
+
+@pytest.fixture(scope="module")
+def base_configured():
+    """A real built document for parse tests -- never executed.
+
+    Built by the sanctioned helper (the fixture census forbids a rolled-own
+    builder here): one latent ``g``, a homoscedastic noise, a simulated
+    observation, and the named ``runtime.seeds.sample`` entry
+    ``plan.sample`` resolves at parse.
+    """
+    return conjugate_built({"kind": "forward"}, seeds={"sample": 11})
+
+
+_BASE_OPTIONS = {
+    "forward": {},
+    "fisher": {},
+    "optimize": {"optimizer": "gradient", "learning_rate": 0.1,
+                 "n_steps": 2},
+    "plan.estimate": {"blocks": [{"names": ["g"]}],
+                      "check_identifiability": False},
+    "plan.sample": {"blocks": [{"names": ["g"]}],
+                    "seed": {"from": "runtime.seeds.sample"},
+                    "n_sweeps": 6, "check_identifiability": False},
+}
+
+
+def _explode(*args, **kwargs):
+    raise AssertionError(f"science ran during parse: {args!r} {kwargs!r}")
+
+
+def _science_targets(kind, configured):
+    """The explicit spy table: the calls a base kind's EXECUTOR may make.
+
+    Listed, never discovered (plan Step 1): the twin's ``__call__``, the
+    Jacobian/Fisher/covariance functions, the two calibrators' ``fit``, and
+    ``SamplingPlan.estimate``/``.sample``.  A parser that reaches any of
+    them is execution wearing a parser's name.
+    """
+    import rheplicant.inference as inference
+    from rheplicant.inference import AdamCalibrator, GradientCalibrator, SamplingPlan
+
+    twins = [(type(configured.twin), "__call__"),
+             (type(configured.inference.fit_twin), "__call__")]
+    fisher = [(inference, "fisher_information"),
+              (inference, "parameter_covariance")]
+    fits = [(GradientCalibrator, "fit"), (AdamCalibrator, "fit")]
+    plan = [(SamplingPlan, "estimate"), (SamplingPlan, "sample")]
+    return {
+        "forward": twins,
+        "fisher": twins + fisher,
+        "optimize": twins + fits,
+        "plan.estimate": twins + plan,
+        "plan.sample": twins + plan,
+    }[kind]
+
+
+def _is_yaml_safe(view):
+    if isinstance(view, Mapping):
+        return all(isinstance(key, str) and _is_yaml_safe(value)
+                   for key, value in view.items())
+    if type(view) is tuple:
+        return all(_is_yaml_safe(child) for child in view)
+    return view is None or isinstance(view, (bool, int, float, str))
+
+
+def _plain(view):
+    """A frozen view back as plain dicts/lists, for one ``==`` per test."""
+    if isinstance(view, Mapping):
+        return {key: _plain(value) for key, value in view.items()}
+    if type(view) is tuple:
+        return [_plain(child) for child in view]
+    return view
+
+
+def _parse_base(kind, configured, **overrides):
+    options = dict(_BASE_OPTIONS[kind])
+    options.update(overrides)
+    return parse_run(_spec(kind, options=options), configured, index=0,
+                     layer=_layer())
+
+
+class TestBaseKindParsersDoNotExecuteScience:
+    """Plan Step 1: parsing a base kind never reaches a scientific call."""
+
+    @pytest.mark.parametrize(
+        "kind",
+        ["forward", "fisher", "optimize", "plan.estimate", "plan.sample"],
+    )
+    def test_base_kind_parsers_do_not_execute_science(
+            self, kind, base_configured, monkeypatch):
+        for owner, name in _science_targets(kind, base_configured):
+            monkeypatch.setattr(owner, name, _explode)
+        parsed = parse_run(_spec(kind, options=dict(_BASE_OPTIONS[kind])),
+                           base_configured, index=0, layer=_layer())
+        assert parsed.kind == kind
+        assert isinstance(parsed.parsed.execution, Mapping)
+        assert _is_yaml_safe(parsed.parsed.resolved)
+
+
+class TestBaseKindsNormalizeTheirDefaults:
+    """One selected set of defaults, pinned in BOTH views (plan Step 2)."""
+
+    def test_forward_takes_no_options(self, base_configured):
+        parsed = _parse_base("forward", base_configured)
+        assert _plain(parsed.parsed.execution) == {}
+        assert _plain(parsed.parsed.resolved) == {}
+
+    def test_fisher_defaults(self, base_configured):
+        parsed = _parse_base("fisher", base_configured)
+        assert _plain(parsed.parsed.resolved) == {"space": False,
+                                                  "jitter": 0.0}
+        assert parsed.parsed.execution["space"] is False
+        assert isinstance(parsed.parsed.execution["jitter"], float)
+
+    def test_optimize_adam_defaults(self, base_configured):
+        from rheplicant.inference import mean_squared_error
+
+        parsed = _parse_base("optimize", base_configured,
+                             optimizer="adam", learning_rate=0.05, n_steps=9)
+        assert _plain(parsed.parsed.resolved) == {
+            "optimizer": "adam", "learning_rate": 0.05, "n_steps": 9,
+            "loss": "mse", "beta1": 0.9, "beta2": 0.999, "eps": 1e-8}
+        assert parsed.parsed.execution["loss"] is mean_squared_error
+
+    def test_optimize_gradient_injects_loss_alone(self, base_configured):
+        parsed = _parse_base("optimize", base_configured,
+                             optimizer="gradient", learning_rate=0.05,
+                             n_steps=9)
+        assert _plain(parsed.parsed.resolved) == {
+            "optimizer": "gradient", "learning_rate": 0.05, "n_steps": 9,
+            "loss": "mse"}
+        assert "beta1" not in parsed.parsed.execution
+
+    def test_a_python_loss_projects_its_declaration(self, base_configured):
+        parsed = _parse_base(
+            "optimize", base_configured, optimizer="gradient",
+            learning_rate=0.05, n_steps=9,
+            loss={"python": "tests.config.test_config_exit_parsers"
+                            ":half_mse"})
+        assert _plain(parsed.parsed.resolved)["loss"] == {
+            "python": "tests.config.test_config_exit_parsers:half_mse"}
+        loss = parsed.parsed.execution["loss"]
+        # ``import_target`` re-imports this module under its dotted name, so
+        # the callable is not identity-equal to the attribute pytest sees.
+        assert loss.__name__ == "half_mse"
+        assert loss.__module__.endswith("test_config_exit_parsers")
+
+    def test_plan_estimate_defaults(self, base_configured):
+        parsed = _parse_base("plan.estimate", base_configured)
+        assert _plain(parsed.parsed.resolved) == {
+            "blocks": [{"names": ["g"]}], "check_identifiability": False,
+            "max_iter": 100, "tol": 1e-8, "min_sweeps": 3,
+            "solve_tol": 1e-6, "solve_guard": 0.001}
+        blocks = parsed.parsed.execution["blocks"]
+        assert type(blocks) is tuple and len(blocks) == 1
+
+    def test_plan_sample_defaults_and_the_resolved_seed(
+            self, base_configured):
+        parsed = _parse_base("plan.sample", base_configured)
+        assert _plain(parsed.parsed.resolved) == {
+            "blocks": [{"names": ["g"]}], "seed": 11, "n_sweeps": 6,
+            "check_identifiability": False, "warmup": None,
+            "rhat_max": 1.05, "solve_tol": 1e-6, "solve_guard": 0.001}
+
+    def test_a_warm_start_is_normalized_not_estimated(self, base_configured):
+        parsed = _parse_base(
+            "plan.sample", base_configured,
+            warm_start={"kind": "plan.estimate",
+                        "blocks": [{"names": ["g"]}], "move": ["g"]})
+        warm = parsed.parsed.execution["warm_start"]
+        assert warm["move"] == ("g",)
+        assert type(warm["blocks"]) is tuple
+        assert _plain(parsed.parsed.resolved["warm_start"]) == {
+            "kind": "plan.estimate", "blocks": [{"names": ["g"]}],
+            "move": ["g"]}
+
+
+class TestBaseOptionRefusalsHappenAtParse:
+    """Every grammar refusal the executor used to raise mid-run now precedes
+    science (plan Step 2) -- asserted through ``parse_run`` alone."""
+
+    def test_an_invalid_optimizer_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="gradient or adam is required"):
+            _parse_base("optimize", base_configured, optimizer="bfgs")
+
+    def test_a_loss_of_the_wrong_shape_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="is 'mse' or"):
+            _parse_base("optimize", base_configured, loss=42)
+
+    def test_a_one_argument_python_loss_is_refused_naming_the_signature(
+            self, base_configured):
+        with pytest.raises(ConfigError, match="cannot be called as"):
+            _parse_base(
+                "optimize", base_configured,
+                loss={"python": "tests.config.test_config_exit_parsers"
+                                ":prediction_only_loss"})
+
+    def test_learning_rate_and_n_steps_are_required(self, base_configured):
+        for missing in ("learning_rate", "n_steps"):
+            options = {"optimizer": "gradient", "learning_rate": 0.1,
+                       "n_steps": 2}
+            del options[missing]
+            with pytest.raises(ConfigError, match=missing):
+                parse_run(_spec("optimize", options=options),
+                          base_configured, index=0, layer=_layer())
+
+    def test_an_adam_only_knob_on_gradient_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="belongs to optimizer: adam"):
+            _parse_base("optimize", base_configured, beta1=0.8)
+
+    def test_trainable_and_parameters_together_are_ambiguous(self):
+        configured = conjugate_built(
+            {"kind": "forward"},
+            inference={**ONE_LATENT, "trainable": {"leaves": ["gain.gain"]}})
+        with pytest.raises(ConfigError, match="cannot serve two masters"):
+            _parse_base("optimize", configured)
+
+    def test_a_route_with_nothing_free_to_move_is_refused(self):
+        configured = conjugate_built(
+            {"kind": "forward"},
+            inference={"noise": HOMOSCEDASTIC,
+                       "observed": {"from": "simulation"}})
+        with pytest.raises(ConfigError, match="something must be free"):
+            _parse_base("optimize", configured)
+
+    def test_a_negative_jitter_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="jitter: must be >= 0"):
+            _parse_base("fisher", base_configured, jitter=-1.0)
+
+    def test_a_non_bool_space_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="space: is a bool"):
+            _parse_base("fisher", base_configured, space=1)
+
+    def test_a_malformed_warm_start_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="warm_start: is a mapping"):
+            _parse_base("plan.sample", base_configured, warm_start="warm")
+        with pytest.raises(ConfigError, match="warm_start does not take"):
+            _parse_base("plan.sample", base_configured,
+                        warm_start={"kind": "plan.estimate",
+                                    "blocks": [{"names": ["g"]}],
+                                    "move": ["g"], "tep": 1})
+        with pytest.raises(ConfigError,
+                           match="plan.estimate is the one warm start"):
+            _parse_base("plan.sample", base_configured,
+                        warm_start={"kind": "plan.sample",
+                                    "blocks": [{"names": ["g"]}],
+                                    "move": ["g"]})
+        with pytest.raises(ConfigError, match="warm_start.move: is required"):
+            _parse_base("plan.sample", base_configured,
+                        warm_start={"kind": "plan.estimate",
+                                    "blocks": [{"names": ["g"]}]})
+
+    def test_an_unknown_move_name_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="ghost") as caught:
+            _parse_base("plan.sample", base_configured,
+                        warm_start={"kind": "plan.estimate",
+                                    "blocks": [{"names": ["g"]}],
+                                    "move": ["ghost"]})
+        assert "inference.parameters does not declare" in str(caught.value)
+
+    def test_a_non_whole_count_is_refused(self, base_configured):
+        with pytest.raises(ConfigError, match="n_steps: is a whole number"):
+            _parse_base("optimize", base_configured, n_steps=2.5)
+        with pytest.raises(ConfigError, match="n_sweeps: is a whole number"):
+            _parse_base("plan.sample", base_configured, n_sweeps=6.5)
+
+    def test_a_wrong_seed_is_refused(self, base_configured):
+        options = dict(_BASE_OPTIONS["plan.sample"])
+        del options["seed"]
+        with pytest.raises(ConfigError, match="'seed' is required"):
+            parse_run(_spec("plan.sample", options=options),
+                      base_configured, index=0, layer=_layer())
+        with pytest.raises(ConfigError, match="seed must NAME an entry"):
+            _parse_base("plan.sample", base_configured, seed=11)
+        with pytest.raises(ConfigError, match="must be under"):
+            _parse_base("plan.sample", base_configured,
+                        seed={"from": "elsewhere.sample"})
+
+    def test_the_estimate_seed_refusal_precedes_the_sweep_whole_message(
+            self, base_configured):
+        """A29 ahead of the generic sweep: the precedence is the message."""
+        with pytest.raises(ConfigError) as caught:
+            _parse_base("plan.estimate", base_configured,
+                        seed={"from": "runtime.seeds.sample"})
+        assert str(caught.value) == (
+            "runs['run']: plan.estimate refuses a seed -- the asymmetry is "
+            "the package's own (sample takes key=, estimate has no key "
+            "parameter; check A29). Drop it, or make this run plan.sample."
+        )
+
+    def test_an_unknown_option_is_swept_at_parse(self, base_configured):
+        with pytest.raises(ConfigError, match="does not take"):
+            _parse_base("fisher", base_configured, jitters=0.1)
