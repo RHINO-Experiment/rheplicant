@@ -274,7 +274,7 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
                        label="horizon:")
     mode = horizon.get("mode", "none")
     if mode == "truncate_map":
-        maps, fraction = _truncate(name, maps, horizon)
+        maps, fraction = _truncate(name, maps, horizon, context)
     elif mode not in ("none", "projector_mask"):
         raise ConfigError(
             f"{name}: horizon.mode={mode!r}; it is one of 'none', 'truncate_map', "
@@ -545,10 +545,10 @@ def _normalized(maps, normalize: str):
     return maps / (jnp.sum(maps, axis=1, keepdims=True) * (4.0 * jnp.pi / n_pix))
 
 
-def _truncate(name: str, maps, horizon: dict):
+def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):
     from rheplicant.radio import horizon_truncated_beam
 
-    el_deg = float(horizon.get("el_deg", 90.0))
+    el_deg = float(resolve_value(horizon.get("el_deg", 90.0), context).value)
     if el_deg != 90.0:
         raise ConfigError(
             f"{name}: horizon.el_deg={el_deg}. truncate_map accepts only 90 -- limTOD's "
@@ -557,6 +557,7 @@ def _truncate(name: str, maps, horizon: dict):
             "projector_mask), which applies it in the horizontal frame."
         )
     truncated, fraction = horizon_truncated_beam(
-        np.asarray(maps), el_deg=el_deg, apod_deg=float(horizon.get("apod_deg", 0.0))
+        np.asarray(maps), el_deg=el_deg,
+        apod_deg=float(resolve_value(horizon.get("apod_deg", 0.0), context).value)
     )
     return jnp.asarray(truncated), jnp.asarray(fraction)

@@ -90,10 +90,14 @@ def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
         value = _cast(value, modifiers["dtype"], form)
     if "part" in modifiers:
         value = _part(value, modifiers["part"], was_complex=was_complex)
+        if modifiers["part"] == "angle":
+            modifiers["unit"] = "deg"
     if "scale" in modifiers or "offset" in modifiers:
         value = value * float(modifiers.get("scale", 1.0)) + float(modifiers.get("offset", 0.0))
     if "normalize" in modifiers:
         value = _normalize(value, modifiers["normalize"])
+        if modifiers["normalize"] != "none":
+            modifiers["unit"] = "dimensionless"
     if modifiers.get("column"):
         value = _column(value, form)
     return value

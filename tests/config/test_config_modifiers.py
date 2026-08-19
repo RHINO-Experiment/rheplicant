@@ -99,6 +99,13 @@ class TestScaleAndOffset:
 
 
 class TestPart:
+    def test_angle_emits_canonical_degree_metadata(self, context):
+        got = resolve_value(
+            {"value": 1.0 + 1.0j, "unit": "dimensionless", "part": "angle"},
+            context,
+        )
+        assert got.modifiers["unit"] == "deg"
+
     def test_each_part_of_a_complex_value(self, context):
         """MEASURED, and a departure from the plan's node: {list: [1+2j]} does
         not reach this layer at all -- arrays._list casts the literal to the
@@ -271,6 +278,13 @@ class TestColumn:
 
 
 class TestNormalize:
+    @pytest.mark.parametrize("kind", ["mean1", "pixel_sum", "max1"])
+    def test_normalization_emits_dimensionless_metadata(self, kind, context):
+        got = resolve_value(
+            {"list": [1.0, 2.0], "unit": "K", "normalize": kind}, context
+        )
+        assert got.modifiers["unit"] == "dimensionless"
+
     @pytest.mark.parametrize(
         ("kind", "expected"),
         [

@@ -26,8 +26,9 @@ from typing import Any
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import dimension_of, signature
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.units import convert_to_canonical
+from rheplicant.config.units import canonical_unit, convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
 
 #: ``part:`` inside a ``from_switch_order``. Narrower than the modifier alphabet on
@@ -97,7 +98,25 @@ def _delivered(value: Any, modifiers: dict, form: str) -> ResolvedValue:
 
 @register_form("ref")
 def _ref(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
-    return _delivered(resolve_reference(node["ref"], context), modifiers, "ref")
+    dotted = node["ref"]
+    value = resolve_reference(dotted, context)
+    source = context.dimensions.resource_dimensions.get(dotted)
+    token = modifiers.get("unit")
+    if source is not None and token is not None and signature(token) != source:
+        raise ConfigError(
+            f"ref: {dotted!r} has dimension {source}, but unit {token!r} declares "
+            f"{signature(token)}. A reference cannot relabel its source."
+        )
+    if source is not None and token is None:
+        for candidate in (
+            "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
+            "count", "samples", "bits", "channels", "cycles", "adc_count",
+            "adc_count/K", "Hz/s", "dimensionless/s", "cycles/samples",
+        ):
+            unit = canonical_unit(candidate)
+            if dimension_of(unit) == source:
+                return ResolvedValue(value, unit, "ref", modifiers)
+    return _delivered(value, modifiers, "ref")
 
 
 @register_form("stack")

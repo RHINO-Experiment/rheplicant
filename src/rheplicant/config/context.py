@@ -12,6 +12,14 @@ from typing import Any
 
 import jax
 
+from _rheplicant_bootstrap.types import LayerIdentity, TraceSink
+from rheplicant.config.dimensions import (
+    DimensionEnvironment,
+    bind_resource_dimension,
+    current_dimension_environment,
+    dimension_for,
+)
+from rheplicant.config.errors import ConfigError
 from rheplicant.config.symbols import ShapeScope
 
 
@@ -48,6 +56,11 @@ class ResolutionContext:
     resources: dict[str, Any] = dataclasses.field(default_factory=dict)
     n_source_override: int | None = None
     ingest: Any = None
+    dimensions: DimensionEnvironment = dataclasses.field(
+        default_factory=current_dimension_environment
+    )
+    layer: LayerIdentity = LayerIdentity("base", None)
+    trace: TraceSink | None = None
 
     @property
     def shape_scope(self) -> ShapeScope:
@@ -68,4 +81,21 @@ class ResolutionContext:
 
     def with_resource(self, name: str, value: Any) -> "ResolutionContext":
         """A new context carrying one more constructed resource."""
+        from _rheplicant_bootstrap.types import DestinationDescriptor
+
+        candidates = [name]
+        candidates.extend(
+            f"{name}.{attribute}"
+            for attribute in ("time", "freq", "maps", "sky_fraction")
+            if hasattr(value, attribute)
+        )
+        for dotted in candidates:
+            try:
+                found = dimension_for(
+                    DestinationDescriptor(dotted, "config_path", dotted),
+                    self.dimensions,
+                )
+            except ConfigError:
+                continue
+            bind_resource_dimension(self.dimensions, dotted, found)
         return dataclasses.replace(self, resources={**self.resources, name: value})

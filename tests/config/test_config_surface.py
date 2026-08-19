@@ -344,6 +344,8 @@ class TestThePlan2CSurface:
     #: ``ConfiguredRun.report``.
     SURFACE_3C = ("Gate", "gates")
 
+    SURFACE_4A = ("register_dimension", "register_dimension_formula")
+
     def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(
             self):
         import rheplicant.config as config
@@ -351,7 +353,8 @@ class TestThePlan2CSurface:
         assert sorted(config.__all__) == sorted(self.SURFACE
                                                 + self.SURFACE_3A
                                                 + self.SURFACE_3B
-                                                + self.SURFACE_3C), (
+                                                + self.SURFACE_3C
+                                                + self.SURFACE_4A), (
             "rheplicant.config.__all__ changed. Plan 2C's decision was that "
             "nine new run kinds are document vocabulary rather than public "
             "API, and 2D's that a product received through run_document is "
@@ -2068,6 +2071,11 @@ class TestPlan3CsSurfaceAndItsPage:
         # Execute the claim itself: the most benign ADC this package can
         # build, no linearity decline, no C16 finding, C12 refuses anyway.
         document = unsaturated_linear_case()
+        document["model"]["adc"]["scale"] = {
+            "value": document["model"]["adc"]["scale"],
+            "unit": "adc_count/K",
+        }
+        document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         payload = priced_run(document)
         assert payload.run.report.refusals() == (), (
             "the built pass already refuses this document; the paragraph's "

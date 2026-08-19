@@ -591,7 +591,7 @@ class TestTheMessage:
         )
 
     def test_the_frozen_radiometer_floor_clause_is_pinned_whole(self):
-        """**Kills M36** (``NoiseBuild.frozen["floor_k"]`` never read for
+        """**Kills M36** (``NoiseBuild.frozen["floor"]`` never read for
         ``kind: radiometer_frozen`` -- ``_t6_radiometer_floor`` returns
         ``0.0`` unconditionally): the shipped floor tests
         (``test_a_disagreement_with_a_declared_floor_names_it``) only cover

@@ -64,6 +64,11 @@ from _rheplicant_bootstrap.variants import (
     LayerRef,
     enumerate_layers_once,
 )
+from rheplicant.config.dimensions import (
+    DimensionEnvironment,
+    dimension_environment_for,
+    using_dimension_environment,
+)
 from rheplicant.config.document import (
     ConfiguredRun,
     _attach,
@@ -256,6 +261,7 @@ def run_text_preflight_all_layers(
     canonical: _Canonical,
     *,
     trace: TraceSink | None = None,
+    environments: Mapping[LayerIdentity, DimensionEnvironment] | None = None,
 ) -> Mapping[LayerIdentity, Report]:
     """The text-only pre-flight over every canonical layer, attributed.
 
@@ -282,8 +288,14 @@ def run_text_preflight_all_layers(
                 found = tuple(_variant_text(layer_document))
                 failed_structure = True
         if not failed_structure:
-            found = sweep(CHECKS, layer_document, label=_LABEL,
-                          sections=_SECTIONS).findings
+            environment = (
+                dimension_environment_for(layer_document)
+                if environments is None
+                else environments[layer.identity]
+            )
+            with using_dimension_environment(environment):
+                found = sweep(CHECKS, layer_document, label=_LABEL,
+                              sections=_SECTIONS).findings
         slice_ = attributor.attribute(layer, found)
         slices[layer.identity] = Report(findings=slice_)
         combined.extend(slice_)
@@ -348,6 +360,7 @@ def prepare_layer_through_built(
     previous: Report,
     base_dir: str | None,
     trace: TraceSink | None,
+    dimensions: DimensionEnvironment | None = None,
 ) -> PreparedLayer:
     """One layer through the axes and built boundaries -> its configured run.
 
@@ -356,10 +369,12 @@ def prepare_layer_through_built(
     ``previous`` is the layer's own text pre-flight slice, so the carried
     report accumulates in pass order.
     """
-    configured = _build_with_axes(layer.mutable_document(), base_dir=base_dir,
-                                  previous=previous, layer=layer.identity,
-                                  trace=trace)
-    configured = _through_built(configured, layer=layer.identity, trace=trace)
+    environment = dimensions or dimension_environment_for(layer.mutable_document())
+    with using_dimension_environment(environment):
+        configured = _build_with_axes(layer.mutable_document(), base_dir=base_dir,
+                                      previous=previous, layer=layer.identity,
+                                      trace=trace)
+        configured = _through_built(configured, layer=layer.identity, trace=trace)
     return PreparedLayer(layer=layer, configured=configured,
                          declared_runs=())
 
@@ -558,7 +573,13 @@ def prepare_document(
                                  layer_origins=layer_origins,
                                  layer_deletions=layer_deletions)
     validate_base_variant_targets(canonical)
-    preflight_reports = run_text_preflight_all_layers(canonical, trace=trace)
+    environments = {
+        layer.identity: dimension_environment_for(layer.mutable_document())
+        for layer in canonical.layers
+    }
+    preflight_reports = run_text_preflight_all_layers(
+        canonical, trace=trace, environments=environments
+    )
     selected = select_build_layers(canonical, scope=scope, variant=variant)
     built_layers = tuple(
         prepare_layer_through_built(
@@ -566,6 +587,7 @@ def prepare_document(
             previous=preflight_reports[layer.identity],
             base_dir=base_dir,
             trace=trace,
+            dimensions=environments[layer.identity],
         )
         for layer in selected
     )

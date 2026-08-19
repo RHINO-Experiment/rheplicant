@@ -15,6 +15,7 @@ exactly the ``ref`` graph ``resources`` already is.
 from typing import Any
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import bind_resource_dimension, dimension_of
 from rheplicant.config.resources import register_kind
 from rheplicant.config.values import resolve_value
 
@@ -28,4 +29,10 @@ def build_array(name: str, spec: dict, context: ResolutionContext) -> Any:
     the same way for all six kinds, but this builder has no use for it: the
     value node it resolves does not need to know its own name.
     """
-    return resolve_value(spec, context).value
+    resolved = resolve_value(spec, context)
+    bind_resource_dimension(
+        context.dimensions,
+        name,
+        None if resolved.unit is None else dimension_of(resolved.unit),
+    )
+    return resolved.value

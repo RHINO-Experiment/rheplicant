@@ -469,14 +469,14 @@ def _t6_radiometer_floor(kind: str, weighed: Any) -> float:
     is none. Read off ``weighed.model.floor`` for ``kind: radiometer`` --
     unwrapped the same way :func:`_t6_radiometer_fractional` is, since
     ``flags:`` wraps the same object this reads -- and off
-    ``NoiseBuild.frozen["floor_k"]`` for ``kind: radiometer_frozen`` -- the
+    ``NoiseBuild.frozen["floor"]`` for ``kind: radiometer_frozen`` -- the
     two places :func:`~rheplicant.config.sections.noise.build_noise` puts it,
     mirroring :func:`_t6_radiometer_fractional`'s own split.
     """
     if kind == "radiometer":
         return float(_t6_unwrapped(weighed.model).floor)
     facts = weighed.frozen or {}
-    return float(facts.get("floor_k", 0.0))
+    return float(facts.get("floor", 0.0))
 
 
 def _t6_floor_clause(floor: float) -> str:

@@ -24,6 +24,7 @@ from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys, register_kind
+from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import resolve_value
 from rheplicant.radio import MapSky, PowerLawSkyModel, UniformSkyModel
 
@@ -164,7 +165,16 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
             "would be read as RING: same shape, same statistics, every pixel in the "
             "wrong place. Reorder it before declaring it."
         )
-    maps = jnp.asarray(resolve_value(spec.get("maps", {}), context).value, dtype=context.dtype)
+    resolved_maps = resolve_value(spec.get("maps", {}), context)
+    maps_value = resolved_maps.value
+    if "unit" in spec:
+        if resolved_maps.unit is not None:
+            raise ConfigError(
+                f"{name}: maps declares unit twice -- on maps: and beside it. "
+                "Keep one declaration."
+            )
+        maps_value, _ = convert_to_canonical(maps_value, spec["unit"])
+    maps = jnp.asarray(maps_value, dtype=context.dtype)
     freq = jnp.asarray(resolve_value(spec.get("freq", {}), context).value)
     expected_pix = 12 * nside * nside
     if maps.ndim != 2:

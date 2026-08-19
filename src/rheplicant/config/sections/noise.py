@@ -271,7 +271,7 @@ def build_noise(section: Any, *, observation: ObservationBuild,
         )
     return NoiseBuild(kind=kind,
                       frozen={"source": source, "channel_width_hz": width,
-                              "integration_time_s": tau, "floor_k": floor})
+                              "integration_time_s": tau, "floor": floor})
 
 
 def freeze_sigma(build: NoiseBuild, reference: Any) -> NoiseBuild:
@@ -283,8 +283,8 @@ def freeze_sigma(build: NoiseBuild, reference: Any) -> NoiseBuild:
     """
     facts = build.frozen or {}
     base = jnp.abs(jnp.asarray(reference))
-    if facts.get("floor_k", 0.0) > 0.0:
-        base = jnp.maximum(base, facts["floor_k"])
+    if facts.get("floor", 0.0) > 0.0:
+        base = jnp.maximum(base, facts["floor"])
     fractional = 1.0 / (facts["channel_width_hz"]
                         * facts["integration_time_s"]) ** 0.5
     return build._replace(sigma=base * fractional)

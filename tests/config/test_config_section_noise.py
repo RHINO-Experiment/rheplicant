@@ -195,7 +195,7 @@ class TestFrozen:
     def test_the_facts_land_in_their_own_slots(self):
         assert self.frozen().frozen == {
             "source": "observed", "channel_width_hz": 16.0,
-            "integration_time_s": 1.0, "floor_k": 0.0}
+            "integration_time_s": 1.0, "floor": 0.0}
 
     def test_the_source_is_required_by_name(self):
         with pytest.raises(ConfigError, match="prediction_at_init"):
