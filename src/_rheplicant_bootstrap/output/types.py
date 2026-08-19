@@ -20,6 +20,23 @@ TransactionPhase: TypeAlias = Literal[
 
 
 @dataclass(frozen=True, slots=True)
+class ProductRequest:
+    name: str
+    format: str
+    runs: tuple[str, ...]
+    options: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRequest:
+    rows: tuple[str, ...]
+    columns: tuple[str, ...]
+    reference: str | None
+    relative: tuple[str, ...]
+    formats: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedOutputSection:
     directory: str | None
     clobber: bool
@@ -27,6 +44,8 @@ class ParsedOutputSection:
     write_config: bool
     write_provenance: bool
     write_diagnostics: Literal["json"]
+    products: tuple[ProductRequest, ...] = ()
+    report: ReportRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +58,8 @@ class OutputRequest:
     write_config: bool
     write_provenance: bool
     write_diagnostics: Literal["json"]
+    products: tuple[ProductRequest, ...] = ()
+    report: ReportRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,9 +234,11 @@ __all__ = [
     "OutputPathInspection",
     "OutputRequest",
     "ParsedOutputSection",
+    "ProductRequest",
     "PublicationLease",
     "RecoveryInspection",
     "RecoveryOutcome",
+    "ReportRequest",
     "StdoutMode",
     "TargetIdentity",
     "TransactionHandle",

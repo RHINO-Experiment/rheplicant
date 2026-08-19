@@ -89,11 +89,10 @@ def test_output_defaults_and_accepted_forms(node, expected, source):
 
 
 @pytest.mark.parametrize("path", PLAN4B_PATHS)
-def test_every_plan4b_output_is_refused_by_full_path(path, source):
+def test_every_plan4b_output_is_a_typed_request(path, source):
     document = nested_mapping(path.split("."), True)
-    with pytest.raises(ConfigError) as caught:
-        parse_output_request(document, source=source, command="run")
-    assert str(caught.value) == f"{path}: is reserved for Config Plan 4B"
+    request = parse_output_request(document, source=source, command="run")
+    assert [product.name for product in request.products] == [path.rsplit(".", 1)[1]]
 
 
 @pytest.mark.parametrize("name", ("memory_archive", "posterior_net", "campaign"))

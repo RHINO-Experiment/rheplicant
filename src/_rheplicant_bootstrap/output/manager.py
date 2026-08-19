@@ -31,13 +31,15 @@ from .types import (
     OutputPathInspection,
     OutputRequest,
     ParsedOutputSection,
+    ProductRequest,
     PublicationLease,
     RecoveryInspection,
+    ReportRequest,
     TargetIdentity,
     VerifiedOutputLease,
 )
 
-_OUTPUT_KEYS = ("dir", "clobber", "stdout", "write")
+_OUTPUT_KEYS = ("dir", "clobber", "stdout", "write", "report")
 _WRITE_KEYS = ("config", "provenance", "diagnostics")
 _PLAN4B_WRITE = (
     "arrays",
@@ -64,6 +66,38 @@ _PLAN4B_WRITE = (
     "chains",
 )
 _PLAN4B_TOP = ("memory_archive", "posterior_net", "campaign")
+_PRODUCT_DEFAULT_FORMATS = {
+    "arrays": "npz",
+    "aux": "npz",
+    "taps": "npz",
+    "assembly": "json",
+    "estimates": "npz",
+    "parameters": "npz",
+    "draws": "npz",
+    "losses": "npz",
+    "gradients": "npz",
+    "covariance": "npz",
+    "prediction_bands": "npz",
+    "posterior_predictives": "npz",
+    "identifiability": "json",
+    "scores": "npz",
+    "recovery": "json",
+    "training_history": "npz",
+    "timings": "json",
+    "refusals": "txt",
+    "signal_paths": "svg",
+    "compare": "json",
+    "benchmark": "json",
+    "chains": "npz",
+}
+_PRODUCT_FORMATS = {
+    **{name: (format_,) for name, format_ in _PRODUCT_DEFAULT_FORMATS.items()},
+    "signal_paths": ("svg", "html", "mermaid"),
+    "chains": ("npz", "netcdf"),
+}
+_REPORT_COLUMNS = ("mean", "std", "seconds")
+_REPORT_RELATIVE = ("mean_sigma", "width_ratio")
+_REPORT_FORMATS = ("text", "json")
 _STDOUT = ("none", "summary", "verbose")
 _COMMANDS = ("validate", "run", "script")
 _MARKER_NAME = ".rheplicant-results.json"
@@ -129,6 +163,124 @@ def _required_true(value: object, *, where: str) -> bool:
     return True
 
 
+def _unique_texts(
+    value: object,
+    *,
+    where: str,
+    allowed: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    if type(value) not in (list, tuple) or not value:
+        raise ConfigError(f"{where}: must be a non-empty list of unique strings.")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not static_isinstance(item, str) or not str.__str__(item):
+            raise ConfigError(f"{where}[{index}]: must be a non-empty string.")
+        text = str.__str__(item)
+        if allowed is not None and text not in allowed:
+            raise ConfigError(f"{where}[{index}]: must be one of {list(allowed)}.")
+        if text in result:
+            raise ConfigError(f"{where}: entries must be unique.")
+        result.append(text)
+    return tuple(result)
+
+
+def _product_request(name: str, value: object) -> ProductRequest:
+    where = f"outputs.write.{name}"
+    if static_isinstance(value, bool):
+        if value is not True:
+            raise ConfigError(f"{where}: must be true or a mapping.")
+        raw: dict[str, object] = {}
+    else:
+        allowed = ("format", "runs")
+        if name in ("aux", "taps"):
+            allowed += ("keys",)
+        if name == "signal_paths":
+            allowed += ("themes",)
+        try:
+            raw = _closed_mapping(value, where=where, allowed=allowed)
+        except ConfigError as error:
+            if str(error) == f"{where}: must be a mapping.":
+                raise ConfigError(f"{where}: must be true or a mapping.") from None
+            raise
+
+    raw_format = raw.get("format", _PRODUCT_DEFAULT_FORMATS[name])
+    if (
+        not static_isinstance(raw_format, str)
+        or str.__str__(raw_format) not in _PRODUCT_FORMATS[name]
+    ):
+        raise ConfigError(
+            f"{where}.format: must be one of {list(_PRODUCT_FORMATS[name])}."
+        )
+    format_ = str.__str__(raw_format)
+    runs = ()
+    if "runs" in raw:
+        runs = _unique_texts(raw["runs"], where=f"{where}.runs")
+    options: list[tuple[str, object]] = []
+    if "keys" in raw:
+        options.append(
+            ("keys", _unique_texts(raw["keys"], where=f"{where}.keys"))
+        )
+    if "themes" in raw:
+        options.append(
+            (
+                "themes",
+                _unique_texts(
+                    raw["themes"],
+                    where=f"{where}.themes",
+                    allowed=("light", "dark"),
+                ),
+            )
+        )
+    return ProductRequest(name, format_, runs, tuple(options))
+
+
+def _report_request(value: object) -> ReportRequest:
+    where = "outputs.report"
+    raw = _closed_mapping(
+        value,
+        where=where,
+        allowed=("rows", "columns", "reference", "relative", "format"),
+    )
+    if "rows" not in raw:
+        raise ConfigError("outputs.report.rows: is required.")
+    rows = _unique_texts(raw["rows"], where="outputs.report.rows")
+    columns = _unique_texts(
+        raw.get("columns", list(_REPORT_COLUMNS)),
+        where="outputs.report.columns",
+        allowed=_REPORT_COLUMNS,
+    )
+    reference = raw.get("reference")
+    if reference is not None:
+        if not static_isinstance(reference, str) or not str.__str__(reference):
+            raise ConfigError("outputs.report.reference: must be a non-empty string.")
+        reference = str.__str__(reference)
+        if reference not in rows:
+            raise ConfigError("outputs.report.reference: must name one of outputs.report.rows.")
+    relative: tuple[str, ...] = ()
+    if "relative" in raw:
+        relative = _unique_texts(
+            raw["relative"],
+            where="outputs.report.relative",
+            allowed=_REPORT_RELATIVE,
+        )
+        if reference is None:
+            raise ConfigError("outputs.report.reference: is required for relative columns.")
+    raw_formats = raw.get("format", "text")
+    if static_isinstance(raw_formats, str):
+        formats = _unique_texts(
+            [str.__str__(raw_formats)],
+            where="outputs.report.format",
+            allowed=_REPORT_FORMATS,
+        )
+    else:
+        formats = _unique_texts(
+            raw_formats,
+            where="outputs.report.format",
+            allowed=_REPORT_FORMATS,
+        )
+    return ReportRequest(rows, columns, cast(str | None, reference), relative, formats)
+
+
 def parse_output_grammar(raw_outputs: object) -> ParsedOutputSection:
     """Parse and detach only the raw top-level ``outputs`` value."""
     top_allowed = (*_OUTPUT_KEYS, *_PLAN4B_TOP)
@@ -160,9 +312,11 @@ def parse_output_grammar(raw_outputs: object) -> ParsedOutputSection:
         where="outputs.write",
         allowed=(*_WRITE_KEYS, *_PLAN4B_WRITE),
     )
-    for name in _PLAN4B_WRITE:
-        if name in write:
-            raise ConfigError(f"outputs.write.{name}: is reserved for Config Plan 4B")
+    products = tuple(
+        _product_request(name, value)
+        for name, value in write.items()
+        if name in _PLAN4B_WRITE
+    )
 
     write_config = _required_true(write.get("config", True), where="outputs.write.config")
     write_provenance = _required_true(
@@ -187,6 +341,8 @@ def parse_output_grammar(raw_outputs: object) -> ParsedOutputSection:
         write_config=write_config,
         write_provenance=write_provenance,
         write_diagnostics="json",
+        products=products,
+        report=_report_request(top["report"]) if "report" in top else None,
     )
 
 
@@ -241,6 +397,8 @@ def resolve_output_request(
         write_config=parsed.write_config,
         write_provenance=parsed.write_provenance,
         write_diagnostics=parsed.write_diagnostics,
+        products=parsed.products,
+        report=parsed.report,
     )
 
 
