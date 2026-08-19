@@ -307,6 +307,17 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
             f"resources: must be a mapping of kind -> name -> entry, got "
             f"{type(section).__name__}."
         )
+    if context.dimensions.resource_dimensions:
+        # A ResolutionContext is often reused by direct utility callers for
+        # two independent builds. Production constructs one resource section
+        # per fresh layer environment; mirror that lifecycle here without
+        # weakening duplicate refusal inside either build.
+        context = dataclasses.replace(
+            context,
+            dimensions=dataclasses.replace(
+                context.dimensions, resource_dimensions={}
+            ),
+        )
     unknown = sorted(set(section) - set(_KINDS))
     if unknown:
         raise ConfigError(
@@ -378,6 +389,10 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
         # this builder wants "every sibling built before me", all at once.
         scoped = dataclasses.replace(context, resources=dict(built))
         built[dotted] = _KINDS[kind_of[dotted]](dotted, spec, scoped)
+        # Bind derived fixed outputs only after the builder has returned.
+        # The environment object is shared by every dependency snapshot, so
+        # the next resource can resolve a sub-value's dimension immediately.
+        scoped.with_resource(dotted, built[dotted])
         order.append(dotted)
         building.pop()
         return built[dotted]

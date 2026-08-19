@@ -26,7 +26,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
-from rheplicant.config.dimensions import dimension_of, signature
+from rheplicant.config.dimensions import dimension_of, matching_dimension_rows, signature
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import canonical_unit, convert_to_canonical
 from rheplicant.config.values import ResolvedValue, register_form
@@ -100,6 +100,13 @@ def _delivered(value: Any, modifiers: dict, form: str) -> ResolvedValue:
 def _ref(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
     dotted = node["ref"]
     value = resolve_reference(dotted, context)
+    if dotted not in context.dimensions.resource_dimensions:
+        rows = matching_dimension_rows("config_path", dotted)
+        if any(spec.disposition in ("fixed", "contextual") for _, spec in rows):
+            raise ConfigError(
+                f"ref: {dotted!r} is a fixed/contextual resource output but its "
+                "dimension was not bound after the builder succeeded."
+            )
     source = context.dimensions.resource_dimensions.get(dotted)
     token = modifiers.get("unit")
     if source is not None and token is not None and signature(token) != source:

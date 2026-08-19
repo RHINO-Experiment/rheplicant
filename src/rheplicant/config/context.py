@@ -62,6 +62,24 @@ class ResolutionContext:
     layer: LayerIdentity = LayerIdentity("base", None)
     trace: TraceSink | None = None
 
+    def __post_init__(self) -> None:
+        # Direct utility callers may inject already-existing objects without
+        # a builder boundary. Record those as deliberately unknown rather
+        # than pretending their output dimensions were validated. The real
+        # resource DAG replaces these None entries after each successful
+        # builder through ``with_resource`` below.
+        if self.resources and not self.dimensions.resource_dimensions:
+            for name, value in self.resources.items():
+                for dotted in (
+                    name,
+                    *(
+                        f"{name}.{attribute}"
+                        for attribute in ("time", "freq", "maps", "sky_fraction")
+                        if hasattr(value, attribute)
+                    ),
+                ):
+                    bind_resource_dimension(self.dimensions, dotted, None)
+
     @property
     def shape_scope(self) -> ShapeScope:
         """The extents a shape symbol resolves against, taken off the axes."""
@@ -97,5 +115,15 @@ class ResolutionContext:
                 )
             except ConfigError:
                 continue
-            bind_resource_dimension(self.dimensions, dotted, found)
+            missing = object()
+            existing = self.dimensions.resource_dimensions.get(dotted, missing)
+            if existing is missing:
+                bind_resource_dimension(self.dimensions, dotted, found)
+            elif existing is None:
+                self.dimensions.resource_dimensions[dotted] = found
+            elif existing != found:
+                raise ConfigError(
+                    f"dimensions: resource {dotted!r} was rebound with a "
+                    "different dimension"
+                )
         return dataclasses.replace(self, resources={**self.resources, name: value})

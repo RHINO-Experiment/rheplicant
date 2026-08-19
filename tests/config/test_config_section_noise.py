@@ -1,9 +1,13 @@
 """inference.noise: four kinds, one sigma the likelihood and generator share."""
 
+import dataclasses
+
 import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
+from rheplicant.config.dimensions import DimensionEnvironment, signature
+from rheplicant.config.document import load_document
 from rheplicant.config.sections.noise import (
     build_noise,
     decided_noise,
@@ -13,6 +17,7 @@ from rheplicant.config.sections.noise import (
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
 from tests.config.inference_helpers import context
+from tests.config.preflight_helpers import BASE_MODEL, preflight_document
 
 
 def observation(**time_extras):
@@ -219,6 +224,53 @@ class TestFrozen:
         build = freeze_sigma(self.frozen(floor={"value": 8.0, "unit": "K"}),
                              jnp.asarray([[-100.0, 4.0]]))
         assert float(build.sigma[0, 1]) == pytest.approx(2.0)
+
+    def test_an_adc_prediction_constructs_an_adc_count_floor(self):
+        scoped = dataclasses.replace(
+            context(),
+            dimensions=DimensionEnvironment(
+                prediction_dimension=signature("adc_count")
+            ),
+        )
+        build = build_noise(
+            {
+                "kind": "radiometer_frozen",
+                "source": "observed",
+                "channel_width": {"value": 16.0, "unit": "Hz"},
+                "integration_time": {"value": 1.0, "unit": "s"},
+                "floor": {"value": 8.0, "unit": "adc_count"},
+            },
+            observation=observation(),
+            context=scoped,
+        )
+        assert build.frozen["floor"] == pytest.approx(8.0)
+
+    def test_a_document_with_an_adc_prediction_builds_an_adc_count_floor(self):
+        noise = {
+            "python": "rheplicant.radio.instrument.noise:RadiometerNoiseOperator",
+            "channel_width": {"value": 1.0, "unit": "MHz"},
+            "integration_time": {"value": 2.0, "unit": "s"},
+        }
+        document = preflight_document(
+            model={**BASE_MODEL, "noise": noise,
+                   "adc": {"scale": {"value": 1.0, "unit": "adc_count/K"},
+                           "n_bits": {"value": 12, "unit": "bits"}}},
+        )
+        document["inference"]["noise"] = {
+            "kind": "radiometer",
+            "channel_width": {"value": 1.0, "unit": "MHz"},
+            "integration_time": {"value": 2.0, "unit": "s"},
+            "floor": {"value": 8.0, "unit": "adc_count"},
+            "include_logdet": True,
+        }
+        document["inference"].setdefault("checks", {})["linearity"] = {
+            "mode": "skip",
+            "reason": "ADC makes this integration fixture nonlinear",
+        }
+
+        configured = load_document(document)
+
+        assert configured.inference.noise.model.floor == pytest.approx(8.0)
 
     def test_an_unfrozen_build_refuses_to_decide(self):
         with pytest.raises(ConfigError, match="frozen"):

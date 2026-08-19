@@ -9,6 +9,7 @@ from rheplicant.config.dimensions import (
     register_dimension_formula,
     signature,
 )
+from rheplicant.config.orchestration import prepare_document
 from rheplicant.config.preflight import CHECKS, preflight
 from tests.config.preflight_helpers import BASE_MODEL, preflight_document
 
@@ -17,6 +18,11 @@ from tests.config.preflight_helpers import BASE_MODEL, preflight_document
 class _PluginOperator:
     graph_node = "plugin"
     level: float = 1.0
+
+
+def _build_plugin_resource(name, spec, context):
+    del name, context
+    return spec["level"]
 
 
 def _a9(report):
@@ -89,6 +95,157 @@ def test_plugin_field_and_formula_must_both_be_registered(monkeypatch):
         dimension_module._DIMENSION_REGISTRY.update(saved_dimensions)
         dimension_module._FORMULA_REGISTRY.clear()
         dimension_module._FORMULA_REGISTRY.update(saved_formulas)
+
+
+def test_plugin_defaulted_field_is_checked_even_when_omitted(monkeypatch):
+    from rheplicant.config.preflight import dimensions as check
+
+    qualified = f"{_PluginOperator.__module__}.{_PluginOperator.__qualname__}"
+    saved_dimensions = dict(dimension_module._DIMENSION_REGISTRY)
+    saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
+    monkeypatch.setattr(check, "operator_table", lambda: {"plugin": (_PluginOperator,)})
+    try:
+        register_dimension_formula(
+            "plugin_output",
+            rule="fixed",
+            result=DimensionSpec("fixed", signature("K")),
+            operands=(),
+            producers=(qualified,),
+        )
+        findings = tuple(check._dimensions({"model": {"plugin": {}}}))
+        assert [finding.where for finding in findings] == ["model.plugin.level"]
+    finally:
+        dimension_module._DIMENSION_REGISTRY.clear()
+        dimension_module._DIMENSION_REGISTRY.update(saved_dimensions)
+        dimension_module._FORMULA_REGISTRY.clear()
+        dimension_module._FORMULA_REGISTRY.update(saved_formulas)
+
+
+def test_a9_resolves_config_destinations_from_the_live_registry():
+    from rheplicant.config.preflight import dimensions as check
+
+    saved = dict(dimension_module._DIMENSION_REGISTRY)
+    try:
+        register_dimension(
+            "observation.site.*", domain="config_path", dimension="Hz"
+        )
+        document = {
+            "observation": {
+                "site": {"lat_deg": {"value": 51.0, "unit": "deg"}}
+            }
+        }
+        findings = tuple(check._dimensions(document))
+        assert any(
+            finding.where == "observation.site.lat_deg"
+            and "ambiguous dimension selectors" in finding.message
+            for finding in findings
+        )
+    finally:
+        dimension_module._DIMENSION_REGISTRY.clear()
+        dimension_module._DIMENSION_REGISTRY.update(saved)
+
+
+def test_a9_resolves_plugin_resource_fields_from_the_live_registry():
+    from rheplicant.config import resources
+    from rheplicant.config.preflight import dimensions as check
+
+    qualified = (
+        f"{_build_plugin_resource.__module__}."
+        f"{_build_plugin_resource.__qualname__}.level"
+    )
+    saved_dimensions = dict(dimension_module._DIMENSION_REGISTRY)
+    saved_kinds = dict(resources._KINDS)
+    try:
+        resources.register_kind("plugin_dimension")(_build_plugin_resource)
+        register_dimension(qualified, domain="resource_field", dimension="Hz")
+        findings = tuple(
+            check._dimensions(
+                {
+                    "resources": {
+                        "plugin_dimension": {
+                            "p": {"level": {"value": 1.0, "unit": "K"}}
+                        }
+                    }
+                }
+            )
+        )
+        assert any(
+            finding.where == "resources.plugin_dimension.p.level"
+            for finding in findings
+        )
+    finally:
+        resources._KINDS.clear()
+        resources._KINDS.update(saved_kinds)
+        dimension_module._DIMENSION_REGISTRY.clear()
+        dimension_module._DIMENSION_REGISTRY.update(saved_dimensions)
+
+
+def test_latent_declaration_unit_is_the_authority_over_prior_operands():
+    document = preflight_document()
+    document["inference"]["parameters"]["g"] = {
+        "init": 1.0,
+        "unit": "K",
+        "prior": {
+            "normal": {
+                "loc": {"value": 1.0, "unit": "Hz"},
+                "scale": {"value": 1.0, "unit": "K"},
+            }
+        },
+        "into": "gain.gain",
+    }
+    findings = _a9(preflight(document))
+    assert any(
+        finding.where == "inference.parameters.g.prior.normal.loc"
+        for finding in findings
+    )
+
+
+def test_prior_only_contextual_nodes_infer_the_latent_dimension():
+    environment = dimension_module.dimension_environment_for(
+        {
+            "inference": {
+                "parameters": {
+                    "x": {
+                        "init": 1.0,
+                        "prior": {
+                            "normal": {
+                                "loc": {"value": 1.0, "unit": "K"},
+                                "scale": {"value": 2.0, "unit": "K"},
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    )
+    assert environment.latent_dimensions == {"x": signature("K")}
+
+
+def test_malformed_variant_unit_reaches_attributed_preflight_instead_of_inference():
+    document = preflight_document()
+    document["variants"] = {
+        "bad": {
+            "inference": {
+                "parameters": {
+                    "g": {
+                        "init": {"value": 1.0, "unit": "not_a_unit"},
+                    }
+                }
+            }
+        }
+    }
+    try:
+        prepare_document(document, scope="all_layers")
+    except Exception as error:
+        assert error.report is not None
+        assert any(
+            finding.check == "A9"
+            and finding.where == "variants.bad.inference.parameters.g.init"
+            and "Unknown unit 'not_a_unit'" in finding.message
+            for finding in error.report.findings
+        )
+    else:  # pragma: no cover - the malformed unit must refuse
+        raise AssertionError("malformed variant unit unexpectedly passed")
 
 
 def test_sky_map_sibling_unit_is_validated_instead_of_ignored():

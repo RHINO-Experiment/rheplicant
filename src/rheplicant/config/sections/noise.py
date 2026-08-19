@@ -39,6 +39,7 @@ from typing import Any, NamedTuple
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import dimension_of, signature, signature_token
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.observation import ObservationBuild, _dimensioned
@@ -249,9 +250,22 @@ def build_noise(section: Any, *, observation: ObservationBuild,
                 dimension="time", what="a duration")
     floor = 0.0
     if "floor" in section:
-        floor = float(_dimensioned("inference.noise.floor", section["floor"],
-                                   context, dimension="temperature",
-                                   what="a noise floor").value)
+        resolved_floor = resolve_value(section["floor"], context)
+        expected = context.dimensions.prediction_dimension or signature("K")
+        actual = (
+            None if resolved_floor.unit is None else dimension_of(resolved_floor.unit)
+        )
+        if actual != expected:
+            got = (
+                "no unit"
+                if resolved_floor.unit is None
+                else f"unit {resolved_floor.unit.canonical!r}"
+            )
+            raise ConfigError(
+                f"inference.noise.floor: declares {got}; it is a noise floor and "
+                f"takes the prediction dimension {signature_token(expected)}."
+            )
+        floor = float(resolved_floor.value)
     if kind == "radiometer":
         include = section.get("include_logdet")
         problem = _a49_logdet_problem(kind, section)

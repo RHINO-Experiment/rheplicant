@@ -7,37 +7,29 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from rheplicant.config.dimension_catalog import (
-    CONFIG_CONTEXTUAL,
-    CONFIG_DIMENSIONS,
-    CONFIG_REQUIRED_UNIT,
-    CONFIG_SPECIAL,
-    MODEL_DIMENSIONS,
-    MODEL_FORMULA_BINDINGS,
-    RESOURCE_DIMENSIONS,
-    RESOURCE_SPECIAL,
-)
+from _rheplicant_bootstrap.types import DestinationDescriptor
+from rheplicant.config.dimension_catalog import MODEL_FORMULA_BINDINGS
 from rheplicant.config.dimensions import (
     _FORMULA_REGISTRY,
     DimensionEnvironment,
     DimensionSpec,
     current_dimension_environment,
     dimension_environment_for,
+    dimension_for,
     dimension_of,
-    dimension_spec_for,
+    matching_dimension_rows,
     signature,
     signature_label,
+    signature_token,
 )
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
+from rheplicant.config.resources import _KINDS
 from rheplicant.config.sections.model import operator_table
 from rheplicant.config.units import canonical_unit
 
 _SHORTHAND_UNIT = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\s+(\S+)$")
-_MODEL_TOKENS = dict(MODEL_DIMENSIONS)
-_CONFIG_TOKENS = dict(CONFIG_DIMENSIONS)
-_RESOURCE_TOKENS = dict(RESOURCE_DIMENSIONS)
 
 
 def _qualified(cls: type, field: str | None = None) -> str:
@@ -83,8 +75,8 @@ def _mismatch(
 ) -> Finding | None:
     try:
         actual = dimension_of(canonical_unit(token))
-    except ConfigError:
-        return None  # The value grammar owns unknown/malformed-unit wording.
+    except ConfigError as error:
+        return refuse("A9", where, f"{where}: {error} (check A9).")
     if actual == expected.signature:
         return None
     return refuse(
@@ -152,14 +144,12 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
                 "class in producers (check A9).",
             )
         writable = {field.name for field in dataclasses.fields(cls) if field.init}
-        for field, value in node.items():
-            if field not in writable:
-                continue
+        specs: dict[str, DimensionSpec] = {}
+        for field in sorted(writable):
             selector = f"{class_name}.{field}"
             where = f"model.{node_id}.{field}"
-            try:
-                spec = dimension_spec_for("model_field", selector)
-            except ConfigError:
+            rows = matching_dimension_rows("model_field", selector)
+            if not rows:
                 yield refuse(
                     "A9",
                     where,
@@ -167,36 +157,24 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
                     "must call register_dimension for every writable field (check A9).",
                 )
                 continue
+            if len(rows) != 1:
+                yield refuse(
+                    "A9",
+                    where,
+                    f"{where}: ambiguous dimension selectors match model_field "
+                    f"destination {selector!r} (check A9).",
+                )
+                continue
+            specs[field] = rows[0][1]
+        for field, value in node.items():
+            if field not in writable:
+                continue
+            where = f"model.{node_id}.{field}"
+            spec = specs.get(field)
+            if spec is None:
+                continue
             if spec.disposition == "fixed":
-                expected_token = _MODEL_TOKENS.get(selector)
-                if expected_token is None:
-                    expected_token = next(
-                        (
-                            token
-                            for token in (
-                                "Hz",
-                                "s",
-                                "unix_s",
-                                "K",
-                                "deg",
-                                "m",
-                                "ohm",
-                                "dimensionless",
-                                "count",
-                                "samples",
-                                "bits",
-                                "channels",
-                                "cycles",
-                                "adc_count",
-                                "adc_count/K",
-                                "Hz/s",
-                                "dimensionless/s",
-                                "cycles/samples",
-                            )
-                            if signature(token) == spec.signature
-                        ),
-                        repr(spec.signature),
-                    )
+                expected_token = signature_token(spec.signature)
                 yield from _fixed(
                     where,
                     value,
@@ -226,83 +204,86 @@ def _walk(node: Any, prefix: str = ""):
         yield prefix, node
 
 
-def _path_matches(pattern: str, path: str) -> bool:
-    expression = re.escape(pattern)
-    expression = expression.replace(r"\*", r"[^.\[\]]+")
-    expression = expression.replace(r"\[\]", r"\[\d+\]")
-    return re.fullmatch(expression, path) is not None
+def _rows_problem(
+    where: str,
+    domain: str,
+    selector: str,
+    rows: tuple[tuple[Any, DimensionSpec], ...],
+) -> Finding | None:
+    if len(rows) <= 1:
+        return None
+    return refuse(
+        "A9",
+        where,
+        f"{where}: ambiguous dimension selectors match {domain} destination "
+        f"{selector!r} (check A9).",
+    )
+
+
+def _validate_live_row(
+    where: str,
+    node: Any,
+    domain: str,
+    selector: str,
+    rows: tuple[tuple[Any, DimensionSpec], ...],
+    environment: DimensionEnvironment,
+) -> Iterable[Finding]:
+    problem = _rows_problem(where, domain, selector, rows)
+    if problem is not None:
+        yield problem
+        return
+    if not rows:
+        return
+    spec = rows[0][1]
+    token = _declared_unit(node)
+    if spec.disposition == "fixed":
+        yield from _fixed(
+            where,
+            node,
+            signature_token(spec.signature),
+            required=spec.unit_policy == "required",
+        )
+        return
+    if spec.disposition == "structural":
+        if token is not None:
+            yield refuse(
+                "A9",
+                where,
+                f"{where}: is structural and refuses unit:; remove the unit "
+                "declaration (check A9).",
+            )
+        return
+    if spec.disposition != "contextual" or token is None:
+        return
+    try:
+        expected = dimension_for(
+            DestinationDescriptor(selector, domain, where), environment
+        )
+    except ConfigError as error:
+        yield refuse("A9", where, f"{where}: {error} (check A9).")
+        return
+    if expected is None:
+        return
+    finding = _mismatch(
+        where, node, token, signature_token(expected), DimensionSpec("fixed", expected)
+    )
+    if finding is not None:
+        yield finding
 
 
 def _config(document: Mapping[str, Any], environment: DimensionEnvironment) -> Iterable[Finding]:
     for path, node in _walk(document):
-        for selector, expected_token in CONFIG_DIMENSIONS:
-            if _path_matches(selector, path):
-                yield from _fixed(
-                    path,
-                    node,
-                    expected_token,
-                    required=selector in CONFIG_REQUIRED_UNIT,
-                )
-        for selector, resolver in CONFIG_CONTEXTUAL.items():
-            if not _path_matches(selector, path):
-                continue
-            token = _declared_unit(node)
-            if token is None:
-                continue
-            expected = None
-            if resolver == "prediction":
-                expected = environment.prediction_dimension
-            elif resolver == "model_input":
-                expected = environment.model_input_dimension
-            elif resolver == "latent":
-                names = path.split(".")
-                expected = next(
-                    (
-                        environment.latent_dimensions[name]
-                        for name in names
-                        if name in environment.latent_dimensions
-                    ),
-                    None,
-                )
-            if expected is None:
-                continue
-            try:
-                actual = dimension_of(canonical_unit(token))
-            except ConfigError:
-                continue
-            if actual != expected:
-                yield refuse(
-                    "A9",
-                    path,
-                    f"{path}: unit {token!r} does not match its {resolver} dimension "
-                    f"{signature_label(expected)} (check A9).",
-                )
-        for selector, (disposition, _) in CONFIG_SPECIAL.items():
-            if (
-                disposition == "structural"
-                and _path_matches(selector, path)
-                and _declared_unit(node) is not None
-            ):
-                yield refuse(
-                    "A9",
-                    path,
-                    f"{path}: is structural and refuses unit:; remove the unit "
-                    "declaration (check A9).",
-                )
+        rows = matching_dimension_rows("config_path", path)
+        yield from _validate_live_row(
+            path, node, "config_path", path, rows, environment
+        )
 
 
 def _resource_selectors(kind: str, spec: Mapping[str, Any], path: str):
-    singular = {
-        "arrays": "array",
-        "bases": "basis",
-        "beams": "beam",
-        "projectors": "projector",
-        "s_params": "s_param",
-        "sky_models": "sky_model",
-    }.get(kind)
-    if singular is None:
+    builder = _KINDS.get(kind)
+    if builder is None:
         return
-    root = f"rheplicant.config.kinds.{kind}.build_{singular}"
+    root = f"{builder.__module__}.{builder.__qualname__}"
     discriminant = spec.get("format") or spec.get("kind")
     for field_path, value in _walk(spec):
         relative = field_path
@@ -312,7 +293,9 @@ def _resource_selectors(kind: str, spec: Mapping[str, Any], path: str):
         yield f"{path}.{field_path}", candidates, value
 
 
-def _resources(document: Mapping[str, Any]) -> Iterable[Finding]:
+def _resources(
+    document: Mapping[str, Any], environment: DimensionEnvironment
+) -> Iterable[Finding]:
     resources = document.get("resources")
     if not isinstance(resources, Mapping):
         return
@@ -327,27 +310,35 @@ def _resources(document: Mapping[str, Any]) -> Iterable[Finding]:
                 and spec.get("kind") == "maps"
                 and isinstance(spec.get("unit"), str)
             ):
-                yield from _fixed(
+                selector = (
+                    "rheplicant.config.kinds.sky_models."
+                    "build_sky_model.maps.maps"
+                )
+                rows = matching_dimension_rows("resource_field", selector)
+                yield from _validate_live_row(
                     f"resources.{kind}.{name}.maps",
                     {"value": spec.get("maps"), "unit": spec["unit"]},
-                    "K",
-                    required=False,
+                    "resource_field",
+                    selector,
+                    rows,
+                    environment,
                 )
             for where, candidates, value in _resource_selectors(
                 str(kind), spec, f"resources.{kind}.{name}"
             ):
-                selector = next((one for one in candidates if one in _RESOURCE_TOKENS), None)
-                if selector is not None:
-                    yield from _fixed(where, value, _RESOURCE_TOKENS[selector], required=False)
-                special = next((one for one in candidates if one in RESOURCE_SPECIAL), None)
-                if special is not None and RESOURCE_SPECIAL[special][0] == "structural":
-                    if _declared_unit(value) is not None:
-                        yield refuse(
-                            "A9",
-                            where,
-                            f"{where}: is structural and refuses unit:; remove the unit "
-                            "declaration (check A9).",
-                        )
+                matched = []
+                for candidate in candidates:
+                    matched.extend(matching_dimension_rows("resource_field", candidate))
+                unique = tuple(dict(matched).items())
+                selector = candidates[0]
+                yield from _validate_live_row(
+                    where,
+                    value,
+                    "resource_field",
+                    selector,
+                    unique,
+                    environment,
+                )
 
 
 @register("A9")
@@ -361,4 +352,4 @@ def _dimensions(document: Mapping[str, Any]) -> Iterable[Finding]:
         environment = dimension_environment_for(document)
     yield from _model(document)
     yield from _config(document, environment)
-    yield from _resources(document)
+    yield from _resources(document, environment)

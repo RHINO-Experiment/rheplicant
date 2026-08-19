@@ -70,6 +70,17 @@ def test_signatures_sort_cancel_and_raise_to_integer_powers():
         power(signature("K"), 0.5)
 
 
+def test_direct_signature_construction_is_canonical_and_validated():
+    assert DimensionSignature(
+        (("time", 1), ("frequency", 0), ("time", -1), ("angle", 2)),
+        (("count", 2), ("count", -1), ("samples", 0)),
+    ) == DimensionSignature((("angle", 2),), (("count", 1),))
+    with pytest.raises(ConfigError, match="integer exponent"):
+        DimensionSignature((("temperature", True),))
+    with pytest.raises(ConfigError, match="integer exponent"):
+        DimensionSignature((("temperature", 1.5),))
+
+
 def test_every_accepted_unit_spelling_has_a_signature_and_unit_stays_six_fields():
     assert len(ACCEPTED_UNITS) == 14
     assert len(_ATOMS) == 20
@@ -173,6 +184,212 @@ def test_closed_formula_evaluator_checks_adc(clean_registry):
         evaluate_formula("adc", {"scale": signature("adc_count/K"), "input": signature("Hz")})
 
 
+def test_same_formulas_cover_outer_resource_and_sequence_roles():
+    kelvin = signature("K")
+    assert evaluate_formula("normal", {"loc": kelvin, "scale": kelvin}, result=kelvin) == kelvin
+    assert evaluate_formula("uniform", {"low": kelvin, "high": kelvin}, result=kelvin) == kelvin
+    assert evaluate_formula("stack", {"entry[]": (kelvin, kelvin)}, result=kelvin) == kelvin
+    assert evaluate_formula("ref", {"source": kelvin}, result=kelvin) == kelvin
+    assert evaluate_formula("file", {"snapshot": None}, result=kelvin) == kelvin
+    with pytest.raises(ConfigError, match="shared dimension"):
+        evaluate_formula("ref", {"source": signature("Hz")}, result=kelvin)
+
+
+def test_affine_matrix_basis_and_exp_log_formulas_are_discriminating():
+    kelvin = signature("K")
+    unitless = signature("dimensionless")
+    assert evaluate_formula(
+        "modifier_affine",
+        {"value": kelvin, "scale": unitless, "offset": kelvin},
+        result=kelvin,
+    ) == kelvin
+    assert evaluate_formula(
+        "matmul", {"design": unitless, "coefficient": kelvin}, result=kelvin
+    ) == kelvin
+    assert evaluate_formula(
+        "basis_expand", {"basis": unitless, "coefficient": kelvin}, result=kelvin
+    ) == kelvin
+    assert evaluate_formula("exp_log", {"value": unitless}) == unitless
+    with pytest.raises(ConfigError, match="role 'scale'"):
+        evaluate_formula(
+            "transform_affine",
+            {"value": kelvin, "scale": signature("Hz"), "offset": kelvin},
+            result=kelvin,
+        )
+
+
+def test_fixed_cw_and_radiometer_formulas_assert_every_operand_and_result():
+    assert evaluate_formula(
+        "cw_centre",
+        {
+            "tone_freq": signature("Hz"),
+            "drift_rate": signature("Hz/s"),
+            "time": signature("s"),
+        },
+    ) == signature("Hz")
+    assert evaluate_formula(
+        "radiometer_fraction",
+        {"channel_width": signature("Hz"), "integration_time": signature("s")},
+    ) == signature("dimensionless")
+    with pytest.raises(ConfigError, match="expected"):
+        evaluate_formula(
+            "cw_centre",
+            {
+                "tone_freq": signature("Hz"),
+                "drift_rate": signature("Hz"),
+                "time": signature("s"),
+            },
+        )
+    with pytest.raises(ConfigError, match="result"):
+        evaluate_formula(
+            "radiometer_fraction",
+            {"channel_width": signature("Hz"), "integration_time": signature("s")},
+            result=signature("K"),
+        )
+
+
+def test_rule_specific_registration_and_producer_role_conflicts_are_refused(clean_registry):
+    fixed_k = DimensionSpec("fixed", signature("K"), unit_policy="inherited")
+    fixed_hz = DimensionSpec("fixed", signature("Hz"), unit_policy="inherited")
+    fixed_s = DimensionSpec("fixed", signature("s"), unit_policy="inherited")
+    outer = DimensionSpec("contextual", resolver="outer", unit_policy="inherited")
+    with pytest.raises(ConfigError, match="radiometer.*dimensionless"):
+        register_dimension_formula(
+            "bad_radiometer_result",
+            rule="radiometer",
+            result=fixed_k,
+            operands=(
+                FormulaOperand("channel_width", fixed_hz),
+                FormulaOperand("integration_time", fixed_s),
+            ),
+        )
+    with pytest.raises(ConfigError, match="fixed rule.*fixed result"):
+        register_dimension_formula("bad_fixed_result", rule="fixed", result=outer, operands=())
+    with pytest.raises(ConfigError, match="affine"):
+        register_dimension_formula(
+            "bad_affine_shape",
+            rule="affine",
+            result=outer,
+            operands=(FormulaOperand("value", outer),),
+        )
+    register_dimension_formula(
+        "producer_one",
+        rule="fixed",
+        result=fixed_k,
+        operands=(FormulaOperand("coefficient", fixed_k),),
+        producers=("example.Plugin",),
+    )
+    with pytest.raises(ConfigError, match="producer.*role"):
+        register_dimension_formula(
+            "producer_two",
+            rule="fixed",
+            result=fixed_k,
+            operands=(FormulaOperand("coefficient", fixed_k),),
+            producers=("example.Plugin",),
+        )
+
+
+def test_ordinary_product_formulas_refuse_discrete_quantity_multiplication(clean_registry):
+    outer = DimensionSpec("contextual", resolver="outer", unit_policy="inherited")
+    open_spec = DimensionSpec("open")
+    register_dimension_formula(
+        "illegal_quantity_product",
+        rule="product",
+        result=outer,
+        operands=(FormulaOperand("left", open_spec), FormulaOperand("right", open_spec)),
+    )
+    with pytest.raises(ConfigError, match="quantity"):
+        evaluate_formula(
+            "illegal_quantity_product",
+            {"left": signature("count"), "right": signature("samples")},
+        )
+
+
+def test_environment_uses_bindings_and_plugin_formula_outputs(monkeypatch, clean_registry):
+    import rheplicant.config.dimensions as dimensions
+
+    @dataclasses.dataclass
+    class PluginOperator:
+        graph_node = "adc"
+
+    qualified = f"{PluginOperator.__module__}.{PluginOperator.__qualname__}"
+    register_dimension_formula(
+        "plugin_hz_output",
+        rule="fixed",
+        result=DimensionSpec("fixed", signature("Hz"), unit_policy="inherited"),
+        operands=(),
+        producers=(qualified,),
+    )
+    monkeypatch.setattr(dimensions, "operator_table", lambda: {"adc": (PluginOperator,)})
+    environment = dimensions.dimension_environment_for(
+        {
+            "model": {"adc": {"type": "PluginOperator"}},
+            "inference": {
+                "parameters": {
+                    "frequency": {
+                        "init": 1.0,
+                        "into": "adc.missing",
+                        "unit": "Hz",
+                    }
+                }
+            },
+        }
+    )
+    assert environment.prediction_dimension == signature("Hz")
+    assert environment.latent_dimensions == {"frequency": signature("Hz")}
+
+
+def test_environment_infers_a_latent_from_its_live_model_binding():
+    environment = __import__(
+        "rheplicant.config.dimensions", fromlist=["dimension_environment_for"]
+    ).dimension_environment_for(
+        {
+            "model": {
+                "global_signal": {
+                    "depth": {"value": 0.1, "unit": "K"},
+                    "centre": {"value": 75.0, "unit": "MHz"},
+                    "width": {"value": 10.0, "unit": "MHz"},
+                }
+            },
+            "inference": {
+                "parameters": {
+                    "depth": {"init": 0.1, "into": "global_signal.depth"}
+                }
+            },
+        }
+    )
+    assert environment.latent_dimensions["depth"] == signature("K")
+
+
+def test_environment_applies_parameter_and_longhand_binding_transforms():
+    environment = __import__(
+        "rheplicant.config.dimensions", fromlist=["dimension_environment_for"]
+    ).dimension_environment_for(
+        {
+            "model": {
+                "global_signal": {
+                    "depth": {"value": 0.1, "unit": "K"},
+                    "centre": {"value": 75.0, "unit": "MHz"},
+                    "width": {"value": 10.0, "unit": "MHz"},
+                }
+            },
+            "inference": {
+                "parameters": {
+                    "log_depth": {"init": 0.0, "into": "global_signal.depth", "transform": "exp"},
+                    "depth": {"init": 0.1},
+                },
+                "bindings": [
+                    {"latents": ["depth"], "into": "global_signal.depth"}
+                ],
+            },
+        }
+    )
+    assert environment.latent_dimensions == {
+        "log_depth": signature("dimensionless"),
+        "depth": signature("K"),
+    }
+
+
 def test_resource_dimensions_append_once_and_context_prefix_is_unchanged():
     environment = DimensionEnvironment()
     bind_resource_dimension(environment, "resources.arrays.x", signature("K"))
@@ -207,3 +424,42 @@ def test_fixed_resource_outputs_bind_after_success():
         "resources.bases.design.time": signature("dimensionless"),
         "resources.bases.design.freq": signature("dimensionless"),
     }
+
+
+def test_real_resource_dag_binds_fixed_outputs_before_a_dependent_ref():
+    import jax.numpy as jnp
+
+    from rheplicant.config.resources import build_resources
+
+    context = ResolutionContext(freq=jnp.arange(8.0), time=jnp.arange(6.0))
+    built = build_resources(
+        {
+            "arrays": {"copy": {"ref": "resources.bases.design.time"}},
+            "bases": {
+                "design": {
+                    "time": {"kind": "legendre", "n_basis": 2},
+                    "freq": {"kind": "legendre", "n_basis": 3},
+                }
+            },
+        },
+        context,
+    )
+    assert built.order == ("resources.bases.design", "resources.arrays.copy")
+    assert context.dimensions.resource_dimensions[
+        "resources.bases.design.time"
+    ] == signature("dimensionless")
+    assert context.dimensions.resource_dimensions[
+        "resources.arrays.copy"
+    ] == signature("dimensionless")
+
+
+def test_ref_distinguishes_an_absent_fixed_binding_from_bound_open_unknown():
+    from rheplicant.config.values import resolve_value
+
+    fixed = ResolutionContext(resources={"resources.bases.b": SimpleNamespace(time=1.0)})
+    fixed.dimensions.resource_dimensions.clear()
+    with pytest.raises(ConfigError, match="was not bound"):
+        resolve_value({"ref": "resources.bases.b.time"}, fixed)
+
+    open_unknown = ResolutionContext(resources={"resources.arrays.a": 1.0})
+    assert resolve_value({"ref": "resources.arrays.a"}, open_unknown).value == 1.0

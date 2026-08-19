@@ -19,10 +19,30 @@ PhysicalDimension = tuple[tuple[str, int], ...]
 QuantitySignature = tuple[tuple[str, int], ...]
 
 
+def _canonical_components(
+    items: Sequence[tuple[str, int]],
+) -> tuple[tuple[str, int], ...]:
+    totals: Counter[str] = Counter()
+    for name, exponent in items:
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"dimensions: an atom name is a non-empty string; got {name!r}")
+        if not isinstance(exponent, int) or isinstance(exponent, bool):
+            raise ConfigError(
+                f"dimensions: an integer exponent is required; got {exponent!r} "
+                f"({type(exponent).__name__})."
+            )
+        totals[name] += exponent
+    return tuple(sorted((name, exponent) for name, exponent in totals.items() if exponent))
+
+
 @dataclass(frozen=True, slots=True)
 class DimensionSignature:
     physical: PhysicalDimension
     quantity: QuantitySignature = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "physical", _canonical_components(self.physical))
+        object.__setattr__(self, "quantity", _canonical_components(self.quantity))
 
 
 DimensionDisposition = Literal["fixed", "contextual", "open", "structural"]
@@ -112,7 +132,7 @@ _UNIT_POLICIES = frozenset({"required", "optional", "inherited", "forbidden"})
 
 
 def _normal(items: Mapping[str, int]) -> tuple[tuple[str, int], ...]:
-    return tuple(sorted((name, exponent) for name, exponent in items.items() if exponent))
+    return _canonical_components(tuple(items.items()))
 
 
 def _combine(
@@ -120,7 +140,8 @@ def _combine(
     right: tuple[tuple[str, int], ...],
     factor: int,
 ) -> tuple[tuple[str, int], ...]:
-    merged = Counter(dict(left))
+    merged = Counter()
+    merged.update(dict(left))
     for name, exponent in right:
         merged[name] += factor * exponent
     return _normal(merged)
@@ -277,6 +298,22 @@ def _selector_matches(pattern: str, actual: str) -> bool:
     )
 
 
+def registered_dimension_rows() -> tuple[tuple[DimensionSelector, DimensionSpec], ...]:
+    """A stable snapshot for A9 and independent completeness censuses."""
+    return tuple(_DIMENSION_REGISTRY.items())
+
+
+def matching_dimension_rows(
+    domain: DimensionDomain, selector: str
+) -> tuple[tuple[DimensionSelector, DimensionSpec], ...]:
+    """Every live exact/wildcard row matching one destination."""
+    return tuple(
+        (registered, spec)
+        for registered, spec in _DIMENSION_REGISTRY.items()
+        if registered.domain == domain and _selector_matches(registered.selector, selector)
+    )
+
+
 def dimension_spec_for(
     descriptor_or_domain: DestinationDescriptor | DimensionDomain,
     selector: str | None = None,
@@ -292,11 +329,7 @@ def dimension_spec_for(
             raise TypeError("selector is required with a domain")
         actual = selector
         where = selector
-    matches = [
-        spec
-        for registered, spec in _DIMENSION_REGISTRY.items()
-        if registered.domain == domain and _selector_matches(registered.selector, actual)
-    ]
+    matches = [spec for _, spec in matching_dimension_rows(domain, actual)]
     if not matches:
         raise ConfigError(
             f"dimensions: no dimension selector matches {domain} destination {where!r}"
@@ -378,6 +411,69 @@ def register_formula_checked(registration: FormulaRegistration) -> None:
         registration.producers
     ) != len(set(registration.producers)):
         raise ConfigError("dimensions: formula producers must be non-empty and unique")
+    by_role = {operand.role: operand for operand in registration.operands}
+    if registration.rule == "fixed" and registration.result.disposition != "fixed":
+        raise ConfigError("dimensions: the fixed rule requires a fixed result")
+    if registration.rule == "affine":
+        if set(by_role) != {"value", "scale", "offset"}:
+            raise ConfigError("dimensions: affine requires value, scale, and offset roles")
+        scale = by_role["scale"]
+        if scale.spec.disposition != "fixed" or scale.spec.signature != signature(
+            "dimensionless"
+        ):
+            raise ConfigError("dimensions: affine scale must be fixed dimensionless")
+        if (
+            registration.result.disposition != "contextual"
+            or registration.result.resolver != "outer"
+        ):
+            raise ConfigError("dimensions: affine result must be contextual outer D")
+        for role in ("value", "offset"):
+            spec = by_role[role].spec
+            if spec.disposition != "contextual" or spec.resolver != "outer":
+                raise ConfigError(f"dimensions: affine {role} must be contextual outer D")
+    if registration.rule == "radiometer":
+        expected = {
+            "channel_width": signature("Hz"),
+            "integration_time": signature("s"),
+        }
+        if (
+            registration.result.disposition != "fixed"
+            or registration.result.signature != signature("dimensionless")
+        ):
+            raise ConfigError("dimensions: radiometer requires a fixed dimensionless result")
+        if set(by_role) != set(expected):
+            raise ConfigError(
+                "dimensions: radiometer requires channel_width and integration_time roles"
+            )
+        for role, wanted in expected.items():
+            operand = by_role[role]
+            if (
+                operand.spec.disposition != "fixed"
+                or operand.spec.signature != wanted
+                or operand.exponent != 1
+            ):
+                raise ConfigError(
+                    f"dimensions: radiometer role {role!r} requires {wanted} at exponent 1"
+                )
+    if registration.rule == "product":
+        fixed_signatures = [
+            operand.spec.signature
+            for operand in registration.operands
+            if operand.spec.disposition == "fixed"
+        ]
+        if any(value is not None and value.quantity for value in fixed_signatures):
+            raise ConfigError(
+                "dimensions: ordinary product formulas cannot combine quantity tags"
+            )
+    for existing in _FORMULA_REGISTRY.values():
+        for producer in set(existing.producers) & set(registration.producers):
+            existing_roles = {operand.role: operand.spec for operand in existing.operands}
+            for role in by_role:
+                if role in existing_roles:
+                    raise ConfigError(
+                        f"dimensions: producer {producer!r} role {role!r} is registered "
+                        f"by both {existing.name!r} and {registration.name!r}"
+                    )
     _FORMULA_REGISTRY[registration.name] = registration
 
 
@@ -394,21 +490,28 @@ def register_dimension_formula(
     )
 
 
-def _one(value, role: str) -> DimensionSignature:
+def _one(
+    value: DimensionSignature | None, role: str, spec: DimensionSpec
+) -> DimensionSignature | None:
     if isinstance(value, DimensionSignature):
         return value
+    if value is None and spec.disposition in ("open", "structural"):
+        return None
     raise ConfigError(f"dimensions: formula role {role!r} requires exactly one signature")
 
 
-def _values(value, role: str) -> tuple[DimensionSignature, ...]:
+def _values(value, operand: FormulaOperand) -> tuple[DimensionSignature | None, ...]:
+    role = operand.role
     if role.endswith(("[]", ".*")):
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            return tuple(_one(item, role) for item in value)
+            return tuple(_one(item, role, operand.spec) for item in value)
         raise ConfigError(f"dimensions: formula role {role!r} requires an ordered sequence")
-    return (_one(value, role),)
+    return (_one(value, role, operand.spec),)
 
 
-def _expect(role: str, actual: DimensionSignature, spec: DimensionSpec) -> None:
+def _expect(role: str, actual: DimensionSignature | None, spec: DimensionSpec) -> None:
+    if actual is None:
+        return
     if spec.disposition == "fixed" and actual != spec.signature:
         raise ConfigError(
             f"dimensions: formula role {role!r} has {actual}, expected {spec.signature}"
@@ -417,7 +520,9 @@ def _expect(role: str, actual: DimensionSignature, spec: DimensionSpec) -> None:
 
 def evaluate_formula(
     name: str,
-    values: Mapping[str, DimensionSignature | Sequence[DimensionSignature]],
+    values: Mapping[
+        str, DimensionSignature | None | Sequence[DimensionSignature | None]
+    ],
     *,
     result: DimensionSignature | None = None,
 ) -> DimensionSignature | None:
@@ -431,10 +536,19 @@ def evaluate_formula(
         raise ConfigError(
             f"dimensions: formula {name!r} requires roles {sorted(declared)}; got {sorted(values)}"
         )
+    if (
+        result is not None
+        and formula.result.disposition == "fixed"
+        and result != formula.result.signature
+    ):
+        raise ConfigError(
+            f"dimensions: formula {name!r} result {result} contradicts registered "
+            f"result {formula.result.signature}"
+        )
     resolved_result = formula.result.signature if formula.result.disposition == "fixed" else result
-    expanded: dict[str, tuple[DimensionSignature, ...]] = {}
+    expanded: dict[str, tuple[DimensionSignature | None, ...]] = {}
     for operand in formula.operands:
-        signatures = _values(values[operand.role], operand.role)
+        signatures = _values(values[operand.role], operand)
         for actual in signatures:
             _expect(operand.role, actual, operand.spec)
         expanded[operand.role] = signatures
@@ -442,6 +556,14 @@ def evaluate_formula(
         product = DimensionSignature(())
         for operand in formula.operands:
             for actual in expanded[operand.role]:
+                if actual is None:
+                    raise ConfigError(
+                        f"dimensions: product role {operand.role!r} has unknown dimension"
+                    )
+                if actual.quantity:
+                    raise ConfigError(
+                        "dimensions: ordinary product formulas cannot combine quantity tags"
+                    )
                 product = multiply(product, power(actual, operand.exponent))
         if resolved_result is not None and product != resolved_result:
             raise ConfigError(
@@ -454,6 +576,7 @@ def evaluate_formula(
             for operand in formula.operands
             if operand.spec.disposition == "contextual"
             for actual in expanded[operand.role]
+            if actual is not None
         ]
         if resolved_result is not None:
             peers.append(resolved_result)
@@ -467,6 +590,8 @@ def evaluate_formula(
         if scale != signature("dimensionless"):
             raise ConfigError("dimensions: affine scale must be dimensionless")
         peers = [expanded["value"][0], expanded["offset"][0]]
+        if any(peer is None for peer in peers):
+            raise ConfigError("dimensions: affine value and offset require known dimensions")
         if resolved_result is not None:
             peers.append(resolved_result)
         if any(peer != peers[0] for peer in peers[1:]):
@@ -479,30 +604,244 @@ def evaluate_formula(
     return resolved_result
 
 
+def operator_table() -> dict[str, tuple[type, ...]]:
+    """The live built-in/plugin class table, imported lazily to avoid a cycle."""
+    from rheplicant.config.sections.model import operator_table as live_operator_table
+
+    return live_operator_table()
+
+
+def _selected_class(node_id: str, node: object) -> type | None:
+    choices = operator_table().get(node_id, ())
+    if not isinstance(node, Mapping):
+        return None
+    declared = node.get("type")
+    if declared is None:
+        return choices[0] if len(choices) == 1 else None
+    return next((choice for choice in choices if choice.__name__ == declared), None)
+
+
+def _selected_model_classes(
+    effective_document: Mapping[str, object],
+) -> dict[str, tuple[type, ...]]:
+    model = effective_document.get("model")
+    if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
+        return {}
+    selected: dict[str, tuple[type, ...]] = {}
+    from rheplicant.radio.graph import RADIO_GRAPH
+
+    for node_id, raw in model.items():
+        if node_id not in RADIO_GRAPH.nodes:
+            continue
+        node_spec = RADIO_GRAPH.nodes[node_id]
+        entries: list[object]
+        if node_spec.many and isinstance(raw, list):
+            entries = list(raw)
+        elif node_spec.many and isinstance(raw, Mapping):
+            entries = list(raw.values())
+        elif isinstance(raw, Mapping) and "compose" in raw:
+            stages = raw.get("stages")
+            entries = list(stages) if isinstance(stages, list) else []
+        else:
+            entries = [raw]
+        classes = tuple(
+            cls
+            for entry in entries
+            if (cls := _selected_class(str(node_id), entry)) is not None
+        )
+        if classes:
+            selected[str(node_id)] = classes
+    return selected
+
+
+def _formula_for_class(cls: type) -> FormulaRegistration | None:
+    qualified = f"{cls.__module__}.{cls.__qualname__}"
+    from rheplicant.config.dimension_catalog import MODEL_FORMULA_BINDINGS
+
+    binding = MODEL_FORMULA_BINDINGS.get(qualified)
+    if binding is not None:
+        return _FORMULA_REGISTRY.get(binding.output_formula)
+    plugin = [
+        formula for formula in _FORMULA_REGISTRY.values() if qualified in formula.producers
+    ]
+    return plugin[0] if len(plugin) == 1 else None
+
+
+def _shared(signatures: Sequence[DimensionSignature | None]) -> DimensionSignature | None:
+    known = [value for value in signatures if value is not None]
+    if not known or any(value != known[0] for value in known[1:]):
+        return None
+    return known[0]
+
+
+def _graph_dimensions(
+    selected: Mapping[str, tuple[type, ...]],
+) -> tuple[DimensionSignature | None, DimensionSignature | None]:
+    from rheplicant.radio.graph import RADIO_GRAPH
+
+    outputs: dict[str, DimensionSignature | None] = {}
+    model_input: DimensionSignature | None = None
+    for node_id in RADIO_GRAPH._topo:
+        incoming = _shared([outputs.get(parent) for parent in RADIO_GRAPH._in[node_id]])
+        classes = selected.get(node_id, ())
+        if not classes:
+            outputs[node_id] = incoming
+            continue
+        results: list[DimensionSignature | None] = []
+        for cls in classes:
+            formula = _formula_for_class(cls)
+            if formula is None:
+                results.append(None)
+                continue
+            input_operand = next(
+                (operand for operand in formula.operands if operand.role == "input"), None
+            )
+            operator_input = incoming
+            if operator_input is None and input_operand is not None:
+                if input_operand.spec.disposition == "fixed":
+                    operator_input = input_operand.spec.signature
+            if model_input is None and operator_input is not None:
+                model_input = operator_input
+            if formula.result.disposition == "fixed":
+                results.append(formula.result.signature)
+            else:
+                results.append(operator_input)
+        outputs[node_id] = _shared(results)
+        if model_input is None and RADIO_GRAPH.nodes[node_id].kind == "source":
+            model_input = outputs[node_id]
+    prediction = outputs.get(RADIO_GRAPH.sink)
+    if prediction is None:
+        prediction = next(
+            (
+                outputs[node]
+                for node in reversed(RADIO_GRAPH._topo)
+                if outputs.get(node) is not None
+            ),
+            None,
+        )
+    return model_input, prediction
+
+
+def _safe_signature(token: object) -> DimensionSignature | None:
+    if not isinstance(token, str):
+        return None
+    try:
+        return signature(token)
+    except ConfigError:
+        return None
+
+
+def _node_signature(node: object) -> DimensionSignature | None:
+    if isinstance(node, Mapping):
+        return _safe_signature(node.get("unit"))
+    if isinstance(node, str):
+        parts = node.strip().split(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                float(parts[0])
+            except ValueError:
+                return None
+            return _safe_signature(parts[1])
+    return None
+
+
+def _binding_target_signature(
+    path: object,
+    selected: Mapping[str, tuple[type, ...]],
+    transform: object,
+) -> DimensionSignature | None:
+    if not isinstance(path, str):
+        return None
+    parts = path.split(".")
+    if len(parts) < 2:
+        return None
+    classes = selected.get(parts[0], ())
+    signatures: list[DimensionSignature | None] = []
+    for cls in classes:
+        qualified = f"{cls.__module__}.{cls.__qualname__}.{parts[-1]}"
+        try:
+            spec = dimension_spec_for("model_field", qualified)
+        except ConfigError:
+            continue
+        signatures.append(spec.signature if spec.disposition == "fixed" else None)
+    target = _shared(signatures)
+    name = transform if isinstance(transform, str) else None
+    if isinstance(transform, Mapping) and len(transform) == 1:
+        name = next(iter(transform))
+    if name in ("exp", "log", "log_link_basis", "beam_analysis"):
+        return signature("dimensionless")
+    return target
+
+
+def _latent_signatures(
+    effective_document: Mapping[str, object],
+    selected: Mapping[str, tuple[type, ...]],
+) -> dict[str, DimensionSignature]:
+    inference = effective_document.get("inference")
+    if not isinstance(inference, Mapping):
+        return {}
+    parameters = inference.get("parameters")
+    if not isinstance(parameters, Mapping):
+        return {}
+    candidates: dict[str, list[DimensionSignature]] = {
+        str(name): [] for name in parameters
+    }
+    for name, declaration in parameters.items():
+        if not isinstance(declaration, Mapping):
+            continue
+        found = candidates[str(name)]
+        declared = _safe_signature(declaration.get("unit"))
+        if declared is not None:
+            found.append(declared)
+        for key in ("init", "ref"):
+            value = _node_signature(declaration.get(key))
+            if value is not None:
+                found.append(value)
+        prior = declaration.get("prior")
+        if isinstance(prior, Mapping):
+            for family in ("normal", "uniform", "log_normal"):
+                body = prior.get(family)
+                if isinstance(body, Mapping):
+                    for operand in body.values():
+                        value = _node_signature(operand)
+                        if value is not None:
+                            found.append(value)
+        into = declaration.get("into")
+        paths = (into,) if isinstance(into, str) else into if isinstance(into, list) else ()
+        for path in paths:
+            value = _binding_target_signature(path, selected, declaration.get("transform"))
+            if value is not None:
+                found.append(value)
+    bindings = inference.get("bindings")
+    if isinstance(bindings, list):
+        for binding in bindings:
+            if not isinstance(binding, Mapping):
+                continue
+            names = binding.get("latents")
+            names = (names,) if isinstance(names, str) else names if isinstance(names, list) else ()
+            into = binding.get("into")
+            paths = (into,) if isinstance(into, str) else into if isinstance(into, list) else ()
+            for name in names:
+                if str(name) not in candidates:
+                    continue
+                for path in paths:
+                    value = _binding_target_signature(path, selected, binding.get("transform"))
+                    if value is not None:
+                        candidates[str(name)].append(value)
+    return {name: values[0] for name, values in candidates.items() if values}
+
+
 def dimension_environment_for(
     effective_document: Mapping[str, object],
 ) -> DimensionEnvironment:
-    """Infer declared latent and trunk signatures without I/O."""
-    environment = DimensionEnvironment()
-    inference = effective_document.get("inference")
-    if isinstance(inference, Mapping):
-        parameters = inference.get("parameters")
-        if isinstance(parameters, Mapping):
-            for name, declaration in parameters.items():
-                if not isinstance(declaration, Mapping):
-                    continue
-                for key in ("init", "ref"):
-                    node = declaration.get(key)
-                    if isinstance(node, Mapping) and isinstance(node.get("unit"), str):
-                        environment.latent_dimensions[str(name)] = signature(node["unit"])
-                        break
-    environment.model_input_dimension = signature("K")
-    model = effective_document.get("model")
-    adc = model.get("adc") if isinstance(model, Mapping) else None
-    environment.prediction_dimension = (
-        signature("adc_count") if isinstance(adc, Mapping) else signature("K")
+    """Infer selected graph/plugin, binding, and latent signatures without I/O."""
+    selected = _selected_model_classes(effective_document)
+    model_input, prediction = _graph_dimensions(selected)
+    return DimensionEnvironment(
+        latent_dimensions=_latent_signatures(effective_document, selected),
+        prediction_dimension=prediction,
+        model_input_dimension=model_input,
     )
-    return environment
 
 
 def current_dimension_environment() -> DimensionEnvironment:
@@ -538,4 +877,31 @@ def signature_label(value: DimensionSignature) -> str:
     if len(value.physical) == 1 and not value.quantity:
         name, exponent = value.physical[0]
         return name if exponent == 1 else f"{name}^{exponent}"
+    return repr(value)
+
+
+def signature_token(value: DimensionSignature) -> str:
+    """The accepted canonical spelling for a catalog signature."""
+    for token in (
+        "Hz",
+        "s",
+        "unix_s",
+        "K",
+        "deg",
+        "m",
+        "ohm",
+        "dimensionless",
+        "count",
+        "samples",
+        "bits",
+        "channels",
+        "cycles",
+        "adc_count",
+        "adc_count/K",
+        "Hz/s",
+        "dimensionless/s",
+        "cycles/samples",
+    ):
+        if signature(token) == value:
+            return token
     return repr(value)
