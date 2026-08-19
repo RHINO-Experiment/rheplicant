@@ -8,7 +8,7 @@ below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
-numbered decisions (D1–D52), each with the constraint that forced it. New
+numbered decisions (D1–D53), each with the constraint that forced it. New
 here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
 the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
@@ -1823,6 +1823,25 @@ same descriptor-relative staging, modes, fsyncs, journal, clobber proof, and
 recovery state machine publishes all of them. A materialization refusal emits
 only the ordinary failure audit sibling and never a partial success target.
 There is no second product transaction and no direct destination write.
+
+### D53 — The GUI projects exact YAML and is a local trusted execution surface
+
+The browser owns selection, hover, focus, open tabs and an invalid in-progress
+textarea draft. It owns no scientific configuration. Every accepted form,
+graph or output edit crosses the framework-free document engine and returns a
+new YAML string; validation, previews and jobs are content-bound projections of
+those bytes. This keeps the CLI, generated program and editor on one scientific
+state rather than asking three serializers to agree.
+
+The selected FastAPI + React application ships as one same-origin process with
+immutable in-memory sessions and explicit load/save/job boundaries. Its wheel
+contains the production assets, so running an installed editor requires no
+Node toolchain and cannot silently serve a developer checkout. Loopback is the
+default and a non-loopback bind requires an explicit acknowledgement because
+the process has no authentication, tenant isolation or sandbox. Bounded safe
+YAML parsing protects the parser; it does not make `python:` targets, plugins,
+resource paths, output paths or expensive jobs untrusted. A configuration is
+trusted input to the server account, exactly as it is at the CLI boundary.
 
 ## Known deferred issues
 

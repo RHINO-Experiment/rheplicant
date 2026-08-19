@@ -170,6 +170,9 @@ instrument is another template registered the same way.
 * - validate or run a YAML configuration
   - [Configuration command line](config-cli.md), then the
     [configuration overview](config.md)
+* - edit a YAML configuration in a browser
+  - [YAML configuration editor](config-gui.md) — install, start, workflow and
+    the local-only security boundary
 * - **turn a RHINO recording into a `State`**
   - [Ingestion](ingestion.md) — every other page starts from a `State` that
     already exists; this is where one comes from
@@ -206,6 +209,7 @@ operators
 contracts
 config
 config-cli
+config-gui
 config-values
 config-resources
 config-sections

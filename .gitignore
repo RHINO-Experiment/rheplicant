@@ -55,6 +55,10 @@ docs/superpowers/
 
 # Local reference material (contains unpublished draft; repo is public)
 assets/
+# Plan 5's production frontend uses Vite's conventional ``assets/`` directory.
+# These content-hashed files are wheel inputs, not the unpublished root assets.
+!src/rheplicant/gui/static/assets/
+!src/rheplicant/gui/static/assets/**
 
 # Local reproduction study vs RHINO-TODsim (independent, not part of the package)
 repro-todsim/

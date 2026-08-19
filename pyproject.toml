@@ -97,6 +97,11 @@ uvbeam = ["pyuvdata>=3.0"]
 # these named extras keep the comparison reproducible in the meantime.
 gui-panel = ["panel>=1.9,<2"]
 gui-react = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "httpx2"]
+# The selected Plan 5 editor. ``gui-react`` remains the reproducible spike and
+# includes ``httpx2`` solely for Starlette's test client; the shipped server
+# talks HTTP through uvicorn and does not make that test dependency a runtime
+# requirement.
+gui = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1"]
 docs = [
     "sphinx>=7",
     "myst-parser",
@@ -114,6 +119,7 @@ Changelog = "https://rheplicant.readthedocs.io/en/latest/changelog.html"
 
 [project.scripts]
 rheplicant = "_rheplicant_bootstrap:main"
+rheplicant-gui = "rheplicant.gui.launcher:main"
 
 [dependency-groups]
 dev = [

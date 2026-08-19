@@ -4,7 +4,12 @@ import base64
 import hashlib
 import json
 import os
+import re
+import socket
 import subprocess
+import time
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +81,7 @@ def built_distributions(tmp_path_factory):
 class Install:
     python: Path
     command: Path
+    gui_command: Path
     cwd: Path
     env: dict[str, str]
 
@@ -102,7 +108,12 @@ class Install:
 def fresh_install(tmp_path):
     counter = 0
 
-    def install(source: Path, *, editable: bool = False) -> Install:
+    def install(
+        source: Path,
+        *,
+        editable: bool = False,
+        extras: tuple[str, ...] = (),
+    ) -> Install:
         nonlocal counter
         counter += 1
         root = tmp_path / f"install-{counter}"
@@ -119,12 +130,21 @@ def fresh_install(tmp_path):
         ]
         if editable:
             arguments.append("--editable")
-        arguments.append(os.fspath(source))
+        requirement = os.fspath(source)
+        if extras:
+            requirement += f"[{','.join(extras)}]"
+        arguments.append(requirement)
         _run(arguments)
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)
         env.pop("PYTHONHOME", None)
-        return Install(venv / "bin/python", venv / "bin/rheplicant", cwd, env)
+        return Install(
+            venv / "bin/python",
+            venv / "bin/rheplicant",
+            venv / "bin/rheplicant-gui",
+            cwd,
+            env,
+        )
 
     return install
 
@@ -236,6 +256,15 @@ def test_direct_and_sdist_wheels_have_the_same_closed_file_list(
         assert "rheplicant/config/schemas/provenance-v1.schema.json" in names
         assert "rheplicant/config/schemas/diagnostics-v1.schema.json" in names
         assert "rheplicant/config/schemas/products-v1.schema.json" in names
+        assert "rheplicant/gui/static/index.html" in names
+        assert any(
+            name.startswith("rheplicant/gui/static/assets/") and name.endswith(".js")
+            for name in names
+        )
+        assert any(
+            name.startswith("rheplicant/gui/static/assets/") and name.endswith(".css")
+            for name in names
+        )
         assert any(name.startswith("_rheplicant_bootstrap/") for name in names)
         assert any(name.endswith(".dist-info/entry_points.txt") for name in names)
         assert not any(
@@ -247,6 +276,72 @@ def test_direct_and_sdist_wheels_have_the_same_closed_file_list(
         )
         listings.append(names)
     assert listings[0] == listings[1]
+
+
+def test_fresh_wheel_launches_gui_api_and_static_assets(
+    fresh_install,
+    built_distributions,
+):
+    install = fresh_install(built_distributions["direct-wheel"], extras=("gui",))
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    process = subprocess.Popen(
+        [
+            os.fspath(install.gui_command),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=install.cwd,
+        env=install.env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                with urllib.request.urlopen(base_url + "/", timeout=1) as response:
+                    markup = response.read().decode("utf-8")
+                break
+            except (OSError, urllib.error.URLError):
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    stdout, stderr = process.communicate(timeout=5)
+                    pytest.fail(f"GUI did not start.\nstdout:\n{stdout}\nstderr:\n{stderr}")
+                time.sleep(0.1)
+
+        assert "Rheplicant YAML config editor" in markup
+        asset = re.search(r'src="(/[^"]+\.js)"', markup)
+        assert asset is not None
+        with urllib.request.urlopen(base_url + asset.group(1), timeout=5) as response:
+            assert response.status == 200
+            assert "javascript" in response.headers.get_content_type()
+            assert response.read(1)
+
+        request = urllib.request.Request(
+            base_url + "/api/sessions",
+            data=json.dumps({"yaml_text": "model: {}\nruns: []\n"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.load(response)
+        assert response.status == 201
+        assert payload["document"]["yaml_text"] == "model: {}\nruns: []\n"
+    finally:
+        process.terminate()
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=5)
 
 
 def test_wheel_and_editable_preset_discovery_are_byte_identical(

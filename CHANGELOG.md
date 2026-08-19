@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### A YAML document is now its own browser editor
+
+Config Plan 5 ships the selected FastAPI + React configuration editor as the
+optional `rheplicant[gui]` install and the local `rheplicant-gui` command. The
+wheel carries the built, content-hashed frontend assets; direct and
+sdist-derived wheels have identical listings, and fresh-wheel verification
+launches the real server, creates an API session and fetches the emitted
+JavaScript asset.
+
+YAML remains the sole scientific state. The complete 33-node signal path,
+closed 12-section form catalog, validation ledger, preset diff, four preview
+classes, explicit jobs, all 22 output selectors, report design, recovery state
+and audit links are projections or transformations of exact document bytes.
+Undo/redo, dirty and validation baselines are content-addressed; invalid drafts
+remain editable; job results are bound to the submitted YAML digest; refreshing
+a job cannot replace an in-progress draft.
+
+The launcher binds to loopback by default. It refuses a remote bind without
+`--allow-remote` because the application has no authentication, TLS or
+multi-user isolation. This is deliberately documented as an acknowledgement,
+not a sandbox: safe YAML loading rejects tags and duplicate keys, while named
+plugins, `python:` targets, resource/output paths and execution jobs remain
+trusted capabilities of the server account.
+
 ### A configuration run is now a scientific publication
 
 Config Plan 4B completes the scientific half of the command boundary. All 22

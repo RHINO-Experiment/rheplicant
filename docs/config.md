@@ -4,6 +4,9 @@ Configuration is a declarative route from exact YAML bytes to a validated,
 audited run. Start with the [configuration command line](config-cli.md), then
 use these pages for the document itself:
 
+- [YAML configuration editor](config-gui.md), for the browser projection and
+  its local trusted-execution boundary;
+
 - [values and physical units](config-values.md);
 - [resources and captured inputs](config-resources.md);
 - [observation and model sections](config-sections.md);

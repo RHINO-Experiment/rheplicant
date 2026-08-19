@@ -17,7 +17,8 @@ it carries are the forward model rather than an accessory — and since limTOD
 
 ## Extras
 
-Two of the four name a requirement that is not on PyPI, deliberately: the
+Two of the integration extras name a requirement that is not on PyPI,
+deliberately: the
 package is developed alongside them and pinning a git URL in `pyproject.toml`
 would make this project unpublishable. So the extra records *what is needed*,
 and you install it yourself.
@@ -46,6 +47,14 @@ and you install it yourself.
   - `read_rhino_observation()` — the RHINO HDF5 reader (h5py). The Touchstone
     reader needs none of it, being numpy only
   - `pip install "rheplicant[rhino]"`
+* - `uvbeam`
+  - Read pyuvdata `UVBeam` resources; the beam physics bridge itself comes with
+    limTOD
+  - `pip install "rheplicant[uvbeam]"`
+* - `gui`
+  - The packaged FastAPI + React YAML editor and `rheplicant-gui` launcher
+  - `pip install "rheplicant[gui]"`, then `rheplicant-gui`; see the
+    [editor security and trust boundaries](config-gui.md)
 :::
 
 ## Development

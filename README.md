@@ -141,8 +141,8 @@ uv pip install -e . --group dev
 ```
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
-name are the same: `rheplicant`. Full instructions, the four extras and the
-two-session test split are on the
+name are the same: `rheplicant`. Full instructions, the optional integrations
+and the two-session test split are on the
 [install page](https://rheplicant.readthedocs.io/en/latest/install.html).
 
 Validate and run a configuration through the JAX-safe command boundary:
@@ -159,6 +159,20 @@ input/resolved/provenance/diagnostics audit tree with optional deterministic
 scientific products, reports, and a hashed `products.json` manifest. See the
 [configuration CLI](https://rheplicant.readthedocs.io/en/latest/config-cli.html)
 for stdin, output, clobber, and trusted-plugin rules.
+
+Edit the same YAML-as-truth document in the optional browser application:
+
+```bash
+pip install "rheplicant[gui]"
+rheplicant-gui                    # http://127.0.0.1:8000/
+```
+
+The launcher serves packaged React assets and the FastAPI boundary from one
+local origin. It has no authentication or multi-user isolation and refuses a
+non-loopback bind unless `--allow-remote` is explicit. Read the
+[GUI security and trust boundaries](https://rheplicant.readthedocs.io/en/latest/config-gui.html)
+before exposing it beyond the local machine or executing a document received
+from someone else.
 
 ## Seeing it work
 
@@ -191,7 +205,7 @@ architecture decisions and the changelog, with a sidebar that lists them.
 Build it locally with
 `cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
-Design decisions D1–D52 and the physics roadmap are in
+Design decisions D1–D53 and the physics roadmap are in
 [`DESIGN.md`](https://rheplicant.readthedocs.io/en/latest/design.html); what
 arrived when is in
 [`CHANGELOG.md`](https://rheplicant.readthedocs.io/en/latest/changelog.html).
@@ -199,7 +213,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(9242 tests, 85.1 % coverage, jit+grad+vmap through the full twin; assembly
+(9248 tests, 84.7 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD

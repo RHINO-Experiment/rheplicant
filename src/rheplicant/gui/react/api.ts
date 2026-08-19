@@ -22,6 +22,13 @@ async function request(path: string, init: RequestInit): Promise<EditorSession> 
   return body as EditorSession;
 }
 
+export function createSession(yamlText: string) {
+  return request("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ yaml_text: yamlText }),
+  });
+}
+
 function postRevision(path: string, expectedRevision: number) {
   return request(path, {
     method: "POST",

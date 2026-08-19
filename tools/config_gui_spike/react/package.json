@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b && vite build",
+    "build:production": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.production.config.ts",
     "build:session": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.session.config.ts",
     "dev": "vite",
     "test": "vitest",

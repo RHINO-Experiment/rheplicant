@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ from rheplicant.gui.session import (
     load_session_file,
     load_session_yaml,
     mark_saved,
+    mark_validated,
     new_session,
     redo,
     replace_session_yaml,
@@ -37,6 +38,16 @@ def test_new_session_is_immutable_clean_and_live_preflight_is_current():
     assert session.can_redo is False
     with pytest.raises(FrozenInstanceError):
         session.revision = 1  # type: ignore[misc]
+
+
+def test_validation_staleness_compares_the_exact_content_digest():
+    current = new_session(BASE)
+    stale = replace(current, validated_digest=None)
+
+    assert stale.validation_stale is True
+    refreshed = mark_validated(stale, expected_revision=0)
+    assert refreshed.validation_stale is False
+    assert refreshed.revision == 1
 
 
 def test_edit_undo_redo_and_branch_are_immutable_memory_only_transitions():
