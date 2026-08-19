@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rheplicant.invalid/schemas/products-v1.schema.json",
+  "title": "rheplicant scientific products v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "requests", "files", "omissions"],
+  "properties": {
+    "format_version": {"const": 1},
+    "requests": {"type": "array", "items": {"$ref": "#/$defs/request"}},
+    "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "omissions": {"type": "array", "items": {"$ref": "#/$defs/omission"}}
+  },
+  "$defs": {
+    "selector": {
+      "enum": [
+        "arrays", "aux", "taps", "assembly", "estimates", "parameters",
+        "draws", "losses", "gradients", "covariance", "prediction_bands",
+        "posterior_predictives", "identifiability", "scores", "recovery",
+        "training_history", "timings", "refusals", "signal_paths", "compare",
+        "benchmark", "chains", "report"
+      ]
+    },
+    "format": {"enum": ["npz", "json", "txt", "svg", "html", "mermaid", "netcdf"]},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "jsonValue": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/jsonValue"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/jsonValue"}}
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "format", "runs", "options"],
+      "properties": {
+        "selector": {"$ref": "#/$defs/selector"},
+        "format": {"$ref": "#/$defs/format"},
+        "runs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "options": {"type": "object", "additionalProperties": {"$ref": "#/$defs/jsonValue"}}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "selector", "run", "kind", "format", "sha256", "bytes", "metadata"],
+      "properties": {
+        "relative_path": {"type": "string", "minLength": 1},
+        "selector": {"$ref": "#/$defs/selector"},
+        "run": {"type": ["string", "null"], "minLength": 1},
+        "kind": {"type": ["string", "null"], "minLength": 1},
+        "format": {"$ref": "#/$defs/format"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "metadata": {"type": "object", "additionalProperties": {"$ref": "#/$defs/jsonValue"}}
+      }
+    },
+    "omission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "run", "kind", "reason"],
+      "properties": {
+        "selector": {"$ref": "#/$defs/selector"},
+        "run": {"type": ["string", "null"], "minLength": 1},
+        "kind": {"type": ["string", "null"], "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

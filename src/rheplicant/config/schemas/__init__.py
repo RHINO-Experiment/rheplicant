@@ -1,4 +1,4 @@
-"""Packaged JSON Schemas for Plan 4A audit envelopes."""
+"""Packaged JSON Schemas for audit envelopes and scientific products."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from importlib import resources
 
 from _rheplicant_bootstrap.errors import ConfigError
 
-SCHEMA_NAMES = ("provenance-v1", "diagnostics-v1")
+SCHEMA_NAMES = ("provenance-v1", "diagnostics-v1", "products-v1")
 
 
 def load_schema(name: str) -> dict:
