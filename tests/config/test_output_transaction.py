@@ -11,6 +11,7 @@ import pytest
 import _rheplicant_bootstrap.output.transaction as transaction
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
+    merge_bundle_files,
     serialize_bundle,
 )
 from _rheplicant_bootstrap.audit.types import ArtefactRecord, ArtefactTable
@@ -51,6 +52,16 @@ def bundle(status="ok", *, artefacts=None):
         status=status,
         input_bytes=INPUT,
         resolved=(),
+    )
+
+
+def bundle_with_products(status="ok", *, artefacts=None):
+    return merge_bundle_files(
+        bundle(status, artefacts=artefacts),
+        {
+            "runs/n-666f7277617264/arrays.npz": b"science",
+            "products.json": b"manifest",
+        },
     )
 
 
@@ -204,6 +215,38 @@ def test_stage_bundle_has_exact_modes_bytes_and_events(tmp_path, mask):
         discard_staging(handle, platform)
     finally:
         os.umask(old_mask)
+        close_output_lease(lease)
+
+
+def test_products_share_staging_modes_and_do_not_extend_the_fixed_audit_table(
+    tmp_path,
+):
+    target, platform, lease, _publication, verified = lease_for(tmp_path)
+    candidate = bundle_with_products()
+    try:
+        handle, materialized = stage_bundle(
+            verified,
+            candidate,
+            platform,
+            publication="success",
+        )
+        replace_staged_metadata(handle, candidate, platform)
+        publish_success(handle, platform)
+        assert (target / "runs/n-666f7277617264/arrays.npz").read_bytes() == b"science"
+        assert (target / "products.json").read_bytes() == b"manifest"
+        assert stat.S_IMODE((target / "runs").stat().st_mode) == 0o700
+        assert stat.S_IMODE(
+            (target / "runs/n-666f7277617264/arrays.npz").stat().st_mode
+        ) == 0o600
+        assert {row.slot for row in materialized} == {
+            "lock",
+            "journal",
+            "input",
+            "provenance",
+            "diagnostics",
+            "marker",
+        }
+    finally:
         close_output_lease(lease)
 
 

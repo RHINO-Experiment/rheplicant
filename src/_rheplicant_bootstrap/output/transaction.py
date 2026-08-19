@@ -407,10 +407,13 @@ def _bundle_rows(bundle: AuditBundle) -> tuple[tuple[str, bytes], ...]:
     if type(bundle) is not AuditBundle or not isinstance(bundle.files, Mapping):
         raise ConfigError("transaction staging requires an exact AuditBundle.")
     rows = tuple(bundle.files.items())
-    expected = ["config.input.yaml"]
-    expected.extend(row.relative_path for row in bundle.resolved)
-    expected.extend(("provenance.json", "diagnostics.json"))
-    if [name for name, _payload in rows] != expected:
+    prefix = ["config.input.yaml"]
+    prefix.extend(row.relative_path for row in bundle.resolved)
+    names = [name for name, _payload in rows]
+    if (
+        names[: len(prefix)] != prefix
+        or names[-2:] != ["provenance.json", "diagnostics.json"]
+    ):
         raise ConfigError("audit bundle file order or paths are inconsistent.")
     if any(type(name) is not str or type(payload) is not bytes for name, payload in rows):
         raise ConfigError("audit bundle files must be exact text/bytes pairs.")
@@ -612,7 +615,7 @@ def _materialization_for_file(
     bundle: AuditBundle,
     relative: str,
     payload: bytes,
-) -> ArtefactMaterialization:
+) -> ArtefactMaterialization | None:
     if relative == "config.input.yaml":
         return ArtefactMaterialization(
             "input", None, relative, len(payload), hashlib.sha256(payload).hexdigest()
@@ -632,7 +635,7 @@ def _materialization_for_file(
                 len(payload),
                 hashlib.sha256(payload).hexdigest(),
             )
-    raise ConfigError(f"bundle file {relative!r} has no artefact slot.")
+    return None
 
 
 def stage_bundle(
@@ -763,11 +766,17 @@ def stage_bundle(
         _advance_journal(lease, platform, journal)
         for relative, payload in rows:
             row = _materialization_for_file(candidate, relative, payload)
+            on_complete = None
+            if row is not None:
+                def record_materialization(row=row) -> None:
+                    materialized.append(row)
+
+                on_complete = record_materialization
             _ensure_relative_file(
                 staging_fd,
                 relative,
                 payload,
-                on_complete=lambda row=row: materialized.append(row),
+                on_complete=on_complete,
             )
         _ensure_relative_file(
             staging_fd,

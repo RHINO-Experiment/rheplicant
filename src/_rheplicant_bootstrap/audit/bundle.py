@@ -28,6 +28,46 @@ class AuditBundle:
     files: Mapping[str, bytes]
 
 
+def _validate_file_pair(relative_path: object, payload: object) -> None:
+    if type(relative_path) is not str or type(payload) is not bytes:
+        raise ConfigError("bundle files must be exact text/bytes pairs.")
+    try:
+        relative_path.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ConfigError("bundle file path must be valid UTF-8 text.") from None
+    if relative_path.startswith("/") or "\0" in relative_path or "\\" in relative_path:
+        raise ConfigError("bundle file path is not a portable relative path.")
+    parts = relative_path.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise ConfigError("bundle file path is not a portable relative path.")
+
+
+def merge_bundle_files(
+    bundle: AuditBundle,
+    additional: Mapping[str, bytes],
+) -> AuditBundle:
+    """Insert detached files before the two fixed audit metadata files."""
+    validate_serialized_bundle(bundle)
+    if not isinstance(additional, Mapping):
+        raise ConfigError("additional bundle files must be a mapping.")
+    rows = tuple(bundle.files.items())
+    files = dict(rows[:-2])
+    try:
+        additional_rows = tuple(additional.items())
+    except Exception:
+        raise ConfigError("additional bundle file traversal failed.") from None
+    for relative_path, payload in additional_rows:
+        _validate_file_pair(relative_path, payload)
+        if relative_path in files or relative_path in ("provenance.json", "diagnostics.json"):
+            raise ConfigError(f"bundle file path {relative_path!r} is reserved or duplicated.")
+        files[relative_path] = payload
+    files["provenance.json"] = bundle.provenance
+    files["diagnostics.json"] = bundle.diagnostics
+    merged = dataclasses.replace(bundle, files=MappingProxyType(files))
+    validate_serialized_bundle(merged)
+    return merged
+
+
 def candidate_serialization_snapshot(snapshot: AuditSnapshot) -> AuditSnapshot:
     """Purely append a candidate document-level serialization boundary."""
     if type(snapshot) is not AuditSnapshot:
@@ -202,6 +242,8 @@ def validate_serialized_bundle(bundle: AuditBundle) -> None:
     if provenance["artefacts"] != diagnostics["artefacts"]:
         raise ConfigError("serialized audit artefact tables disagree.")
     rows = tuple(bundle.files.items())
+    for relative_path, payload in rows:
+        _validate_file_pair(relative_path, payload)
     if not rows or rows[0] != ("config.input.yaml", bundle.input):
         raise ConfigError("serialized audit bundle has inconsistent input bytes.")
     if rows[-2:] != (
@@ -214,6 +256,7 @@ def validate_serialized_bundle(bundle: AuditBundle) -> None:
 __all__ = [
     "AuditBundle",
     "candidate_serialization_snapshot",
+    "merge_bundle_files",
     "serialize_bundle",
     "terminal_reserialization_snapshot",
     "validate_serialized_bundle",

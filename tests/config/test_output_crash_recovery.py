@@ -24,7 +24,7 @@ from _rheplicant_bootstrap.output.transaction import (
 )
 from tests.config.test_output_paths import SafePlatform
 from tests.config.test_output_preflight import run_request
-from tests.config.test_output_transaction import bundle, lease_for
+from tests.config.test_output_transaction import bundle, bundle_with_products, lease_for
 
 
 def _complete_fresh(target, platform, verified, candidate):
@@ -120,6 +120,35 @@ def test_interruption_reports_every_completed_materialization(tmp_path):
                 stage_bundle(verified, bundle(), platform, publication="success")
         slots = [row.slot for row in caught.value.state.unreported_materializations]
         assert slots == ["lock", "journal", "input"]
+    finally:
+        close_output_lease(lease)
+
+
+def test_product_write_interruption_is_recovered_without_a_partial_target(tmp_path):
+    target, platform, lease, _publication, verified = lease_for(tmp_path)
+    candidate = bundle_with_products()
+    product_written = False
+
+    def fail_after_product_write(event):
+        nonlocal product_written
+        staging = tuple(tmp_path.glob(".rheplicant-stage-*"))
+        if not staging:
+            return
+        product = staging[0] / "runs/n-666f7277617264/arrays.npz"
+        if event.label == "write" and product.exists():
+            product_written = True
+            raise OSError("injected after scientific product write")
+
+    try:
+        with observe_persistence(fail_after_product_write):
+            with pytest.raises(TransactionInterrupted):
+                stage_bundle(verified, candidate, platform, publication="success")
+        assert product_written is True
+        assert not target.exists()
+        outcome = recover_transaction(lease, platform)
+        assert outcome.action == "cleaned_preparing"
+        assert not target.exists()
+        assert not tuple(tmp_path.glob(".rheplicant-stage-*"))
     finally:
         close_output_lease(lease)
 

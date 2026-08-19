@@ -14,6 +14,7 @@ import _rheplicant_bootstrap.audit.software as audit_software
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
+    merge_bundle_files,
     serialize_bundle,
     terminal_reserialization_snapshot,
     validate_serialized_bundle,
@@ -203,6 +204,73 @@ def test_serialized_bundle_validation_refuses_noncanonical_or_disagreeing_metada
         validate_serialized_bundle(
             dataclasses.replace(bundle, diagnostics=forged, files=files)
         )
+
+
+def test_scientific_files_are_inserted_before_the_two_fixed_metadata_files():
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    merged = merge_bundle_files(
+        bundle,
+        {
+            "runs/n-666f7277617264/arrays.npz": b"science",
+            "products.json": b"manifest",
+        },
+    )
+    assert tuple(merged.files) == (
+        "config.input.yaml",
+        "runs/n-666f7277617264/arrays.npz",
+        "products.json",
+        "provenance.json",
+        "diagnostics.json",
+    )
+    assert tuple(bundle.files) == (
+        "config.input.yaml",
+        "provenance.json",
+        "diagnostics.json",
+    )
+    validate_serialized_bundle(merged)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "config.input.yaml",
+        "provenance.json",
+        "diagnostics.json",
+        "/absolute",
+        "../escape",
+        "bad//path",
+        "bad\\path",
+        "nul\0path",
+    ),
+)
+def test_scientific_file_merge_refuses_reserved_or_nonportable_paths(path):
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    with pytest.raises(ConfigError, match="bundle file"):
+        merge_bundle_files(bundle, {path: b"science"})
+
+
+def test_scientific_file_merge_requires_exact_immutable_pairs():
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    with pytest.raises(ConfigError, match="exact text/bytes"):
+        merge_bundle_files(bundle, {"products.json": bytearray(b"mutable")})
 
 
 def test_serialization_boundary_is_exactly_one_final_document_row():

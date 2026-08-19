@@ -15,6 +15,7 @@ from typing import Literal, TextIO, cast
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
+    merge_bundle_files,
     serialize_bundle,
     terminal_reserialization_snapshot,
 )
@@ -230,6 +231,7 @@ def _publish_transaction(
     variant_names: Sequence[str],
     component_limit: int,
     platform: OutputPlatform,
+    additional_files: Mapping[str, bytes] | None = None,
 ) -> str:
     candidate, already_serialized = _candidate(trace)
     resolved = _resolved(
@@ -244,6 +246,8 @@ def _publish_transaction(
         input_bytes=input_bytes,
         resolved=resolved,
     )
+    if additional_files is not None:
+        initial = merge_bundle_files(initial, additional_files)
     try:
         handle, materialized = stage_bundle(
             authorization,
@@ -267,6 +271,8 @@ def _publish_transaction(
             input_bytes=input_bytes,
             resolved=final_resolved,
         )
+        if additional_files is not None:
+            final = merge_bundle_files(final, additional_files)
         replace_staged_metadata(handle, final, platform)
         if not already_serialized:
             trace.boundary_completed("serialization")
@@ -637,6 +643,39 @@ def dispatch_request(
                 platform=chosen_platform,
                 stderr=stderr,
             )
+        additional_files: dict[str, bytes] | None = None
+        if request.products or request.report is not None:
+            try:
+                scientific = orchestration.build_product_bundle(
+                    execution,
+                    requests=request.products,
+                    report=request.report,
+                    component_limit=publication.component_limit,
+                )
+                additional_files = {
+                    row.relative_path: row.payload for row in scientific.files
+                }
+                if len(additional_files) != len(scientific.files):
+                    raise ConfigError("scientific product paths are duplicated.")
+                if "products.json" in additional_files:
+                    raise ConfigError("scientific product path 'products.json' is reserved.")
+                additional_files["products.json"] = scientific.manifest
+            except Exception as original:
+                failure_status = (
+                    "refused" if isinstance(original, ConfigError) else "error"
+                )
+                _publish_failure_once(
+                    original,
+                    status=failure_status,
+                    publication=publication,
+                    lease=lease,
+                    trace=trace,
+                    prepared=prepared,
+                    run_names=run_names,
+                    variant_names=variant_names,
+                    platform=chosen_platform,
+                    stderr=stderr,
+                )
         try:
             path = _publish_transaction(
                 verified,
@@ -648,6 +687,7 @@ def dispatch_request(
                 variant_names=variant_names,
                 component_limit=publication.component_limit,
                 platform=chosen_platform,
+                additional_files=additional_files,
             )
         except Exception as transaction_error:
             _publish_error_after_transaction_failure(

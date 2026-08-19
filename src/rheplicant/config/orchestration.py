@@ -45,7 +45,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from _rheplicant_bootstrap.capture import (
     CapturedInput,
@@ -59,6 +59,7 @@ from _rheplicant_bootstrap.layering import (
     initial_merge,
     origins_at,
 )
+from _rheplicant_bootstrap.output import ProductRequest, ReportRequest
 from _rheplicant_bootstrap.path_syntax import PATH_STEP
 from _rheplicant_bootstrap.types import (
     CompletedBoundary,
@@ -109,12 +110,16 @@ from rheplicant.config.sections.exit_support import (
 )
 from rheplicant.config.sections.runs import RunResult, parse_runs
 
+if TYPE_CHECKING:
+    from rheplicant.config.products import ProductBundle
+
 __all__ = [
     "ExecutionRecord",
     "PreparedDocument",
     "PreparedLayer",
     "RunExecution",
     "base_parsed_schedule",
+    "build_product_bundle",
     "canonical_layers",
     "complete_all_postflight",
     "deletions_for",
@@ -170,6 +175,24 @@ class ExecutionRecord:
     status: Status
     error: BaseException | None
     completed_boundaries: Sequence[CompletedBoundary]
+
+
+def build_product_bundle(
+    execution: ExecutionRecord,
+    *,
+    requests: Sequence[ProductRequest],
+    report: ReportRequest | None,
+    component_limit: int,
+) -> ProductBundle:
+    """Materialize detached scientific bytes through the public orchestration seam."""
+    from rheplicant.config.products import build_product_bundle as assemble
+
+    return assemble(
+        execution,
+        requests=requests,
+        report=report,
+        component_limit=component_limit,
+    )
 
 
 @dataclass(frozen=True, slots=True)
