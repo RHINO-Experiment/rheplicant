@@ -24,6 +24,7 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.symbols import resolve_shape
 from rheplicant.config.units import convert_to_canonical
@@ -133,16 +134,25 @@ def _resolve_operand(
 ) -> Any:
     from rheplicant.config.values import resolve_operand
 
-    if node is None:
+    defaulted = node is None
+    if defaulted:
         node = default
-    return resolve_operand(
+    resolved = resolve_operand(
         node,
         context,
         parent=target,
         segment=segment,
         formula=formula,
         role=role,
-    ).value
+    )
+    if target is not None:
+        record_resolved_delivery(
+            context,
+            target.destination.nested(segment),
+            resolved.unit,
+            defaulted=defaulted,
+        )
+    return resolved.value
 
 
 def _draw(

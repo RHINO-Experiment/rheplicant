@@ -19,6 +19,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
@@ -67,11 +68,10 @@ def _operand(name: str, node: Any, context: ResolutionContext) -> Any:
     pieces = name.split(".")
     pieces[2] = "*"
     selector = ".".join(pieces)
-    return resolve_value(
-        node,
-        context,
-        destination=DestinationDescriptor(name, "config_path", selector),
-    ).value
+    destination = DestinationDescriptor(name, "config_path", selector)
+    resolved = resolve_value(node, context, destination=destination)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return resolved.value
 
 
 def _parse_prior(name: str, spec: Any, init: jnp.ndarray,
@@ -174,16 +174,16 @@ def parse_latents(section: Any,
                 f"{where}: init: is required -- it is the authority on the "
                 "latent's shape and dtype (Latent.init, parameters.py:210)."
             )
+        init_destination = DestinationDescriptor(
+            f"{where}.init", "config_path", "inference.parameters.*.init"
+        )
         resolved = resolve_value(
             spec["init"],
             context,
-            destination=DestinationDescriptor(
-                f"{where}.init",
-                "config_path",
-                "inference.parameters.*.init",
-            ),
+            destination=init_destination,
         )
         init = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, init_destination, resolved.unit)
         written_unit = resolved.modifiers.get("unit")
         unit = spec.get("unit")
         if unit is not None and written_unit is not None \
@@ -212,16 +212,16 @@ def parse_latents(section: Any,
             raise ConfigError(f"{where}.latex: is a string; got {latex!r}.")
         ref = spec.get("ref")
         if ref is not None:
-            ref = jnp.asarray(resolve_value(
-                                  ref,
-                                  context,
-                                  destination=DestinationDescriptor(
-                                      f"{where}.ref",
-                                      "config_path",
-                                      "inference.parameters.*.ref",
-                                  ),
-                              ).value,
-                              dtype=context.dtype)
+            ref_destination = DestinationDescriptor(
+                f"{where}.ref", "config_path", "inference.parameters.*.ref"
+            )
+            resolved_ref = resolve_value(
+                ref, context, destination=ref_destination
+            )
+            ref = jnp.asarray(resolved_ref.value, dtype=context.dtype)
+            record_resolved_delivery(
+                context, ref_destination, resolved_ref.unit
+            )
         parsed[name] = ParsedLatent(
             latent=Latent(name, init=init,
                           prior=_parse_prior(name, spec.get("prior"), init,

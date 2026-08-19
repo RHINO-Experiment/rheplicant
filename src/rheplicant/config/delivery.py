@@ -42,7 +42,9 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor, Origin
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import DimensionSignature, dimension_for, dimension_of
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.units import Unit, canonical_unit
 from rheplicant.core.frozen import FrozenMapping
 
 #: The values ``as:`` may take, and what each claims about the destination.
@@ -191,6 +193,62 @@ def origin_for_delivery(
     if origin is None:
         raise ConfigError(f"audit: no origin for {destination.document_path!r}")
     return origin
+
+
+_CANONICAL_AUDIT_UNITS = (
+    "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
+    "count", "samples", "bits", "channels", "cycles", "adc_count",
+    "Hz/s", "adc_count/K", "dimensionless/s", "cycles/samples",
+)
+_EXPECTED_FROM_DESTINATION = object()
+
+
+def canonical_unit_for_delivery(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    explicit: Unit | None,
+    *,
+    expected: DimensionSignature | None | object = _EXPECTED_FROM_DESTINATION,
+) -> str | None:
+    """The canonical unit a destination receives, including implicit A9 units."""
+    if explicit is not None:
+        return explicit.canonical
+    signature = (
+        dimension_for(destination, context.dimensions)
+        if expected is _EXPECTED_FROM_DESTINATION
+        else expected
+    )
+    if signature is None:
+        return None
+    for token in _CANONICAL_AUDIT_UNITS:
+        unit = canonical_unit(token)
+        if dimension_of(unit) == signature:
+            return unit.canonical
+    raise ConfigError(
+        f"audit: no canonical unit represents {destination.document_path!r}"
+    )
+
+
+def record_resolved_delivery(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    unit: Unit | None,
+    *,
+    defaulted: bool = False,
+    expected: DimensionSignature | None | object = _EXPECTED_FROM_DESTINATION,
+) -> None:
+    """Record a non-model value at the point its typed owner accepts it."""
+    if context.trace is None:
+        return
+    context.trace.record_delivery(
+        context.layer,
+        destination,
+        dtype=context.dtype,
+        origin=origin_for_delivery(context, destination, defaulted=defaulted),
+        unit=canonical_unit_for_delivery(
+            context, destination, unit, expected=expected
+        ),
+    )
 
 
 def deliver_checked(

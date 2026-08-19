@@ -22,6 +22,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
@@ -72,11 +73,8 @@ def _dimensioned(where: str, node: Any, context: ResolutionContext, *,
                  dimension: str, what: str):
     """Resolve a value node and refuse it by MEANING: the declared unit's
     dimension must be ``dimension``."""
-    resolved = resolve_value(
-        node,
-        context,
-        destination=DestinationDescriptor(where, "config_path", where),
-    )
+    destination = DestinationDescriptor(where, "config_path", where)
+    resolved = resolve_value(node, context, destination=destination)
     unit = resolved.unit
     if unit is None or unit.dimension != dimension:
         got = ("no unit" if unit is None
@@ -85,6 +83,7 @@ def _dimensioned(where: str, node: Any, context: ResolutionContext, *,
             f"{where}: declares {got}; it is {what} and takes a {dimension} "
             "unit."
         )
+    record_resolved_delivery(context, destination, resolved.unit)
     return resolved
 
 
@@ -222,18 +221,14 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
             dtype=context.dtype)
     extra: dict[str, Any] = {}
     for key, node in (spec.get("extra") or {}).items():
-        extra[key] = jnp.asarray(
-            resolve_value(
-                node,
-                context,
-                destination=DestinationDescriptor(
-                    f"observation.environment.extra.{key}",
-                    "config_path",
-                    "observation.environment.extra.*",
-                ),
-            ).value,
-            dtype=context.dtype,
+        destination = DestinationDescriptor(
+            f"observation.environment.extra.{key}",
+            "config_path",
+            "observation.environment.extra.*",
         )
+        resolved = resolve_value(node, context, destination=destination)
+        extra[key] = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
     return Environment(temperature=temperature, humidity=humidity, extra=extra)
 
 
@@ -253,17 +248,12 @@ def _extra(spec: Any, context: ResolutionContext) -> dict[str, Any]:
                 "switch indices, the cal_loads order and the gamma_src rows "
                 "cannot disagree."
             )
-        out[key] = jnp.asarray(
-            resolve_value(
-                node,
-                context,
-                destination=DestinationDescriptor(
-                    f"observation.extra.{key}",
-                    "config_path",
-                    "observation.extra.*",
-                ),
-            ).value
+        destination = DestinationDescriptor(
+            f"observation.extra.{key}", "config_path", "observation.extra.*"
         )
+        resolved = resolve_value(node, context, destination=destination)
+        out[key] = jnp.asarray(resolved.value)
+        record_resolved_delivery(context, destination, resolved.unit)
     return out
 
 
@@ -278,17 +268,13 @@ def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
     check_unknown_keys("observation.aux", dict(spec), _AUX_KEYS, label="aux:")
     out: dict[str, Any] = {}
     if "flags" in spec:
-        flags = jnp.asarray(
-            resolve_value(
-                spec["flags"],
-                context,
-                destination=DestinationDescriptor(
-                    "observation.aux.flags",
-                    "config_path",
-                    "observation.aux.flags",
-                ),
-            ).value
+        destination = DestinationDescriptor(
+            "observation.aux.flags",
+            "config_path",
+            "observation.aux.flags",
         )
+        resolved = resolve_value(spec["flags"], context, destination=destination)
+        flags = jnp.asarray(resolved.value)
         if flags.dtype != jnp.bool_:
             # The array forms cast to the run dtype (`_finish`), so a document
             # writes 0/1; exact 0/1 casts to bool, anything else is refused.
@@ -304,6 +290,7 @@ def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
                 f"observation.aux.flags: is (n_time, n_freq) = "
                 f"({n_time}, {n_freq}); got {tuple(flags.shape)}."
             )
+        record_resolved_delivery(context, destination, resolved.unit)
         out["flags"] = flags
     return out
 
@@ -311,20 +298,17 @@ def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
 def _data(node: Any, context: ResolutionContext, *, n_time: int, n_freq: int):
     if node is None:
         return None
-    data = jnp.asarray(
-        resolve_value(
-            node,
-            context,
-            destination=DestinationDescriptor(
-                "observation.data", "config_path", "observation.data"
-            ),
-        ).value
+    destination = DestinationDescriptor(
+        "observation.data", "config_path", "observation.data"
     )
+    resolved = resolve_value(node, context, destination=destination)
+    data = jnp.asarray(resolved.value)
     if data.shape != (n_time, n_freq):
         raise ConfigError(
             f"observation.data: is (n_time, n_freq) = ({n_time}, {n_freq}); "
             f"got {tuple(data.shape)}."
         )
+    record_resolved_delivery(context, destination, resolved.unit)
     return data
 
 

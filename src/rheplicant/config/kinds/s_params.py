@@ -36,6 +36,7 @@ import numpy as np
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.derive import register_derivation
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import register_reader
@@ -118,18 +119,21 @@ def _dimensioned(
     rather than silently treated as fifty ohms.
     """
     kind = spec["kind"]
+    destination = DestinationDescriptor(
+        f"{name}.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.s_params.build_s_param.{kind}.{key}",
+    )
     resolved = resolve_value(
         spec[key],
         context,
-        destination=DestinationDescriptor(
-            f"{name}.{key}",
-            "resource_field",
-            f"rheplicant.config.kinds.s_params.build_s_param.{kind}.{key}",
-        ),
+        destination=destination,
     )
     if resolved.unit is not None and resolved.unit.canonical != unit:
         raise ConfigError(f"{name}: {key} must be {what}, got {resolved.unit.canonical!r}.")
-    return float(resolved.value)
+    value = float(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return value
 
 
 @register_kind("s_params")

@@ -16,6 +16,7 @@ from typing import Any
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.dimensions import bind_resource_dimension, dimension_of
 from rheplicant.config.resources import register_kind
 from rheplicant.config.values import resolve_value
@@ -30,18 +31,20 @@ def build_array(name: str, spec: dict, context: ResolutionContext) -> Any:
     the same way for all six kinds, but this builder has no use for it: the
     value node it resolves does not need to know its own name.
     """
+    destination = DestinationDescriptor(
+        name,
+        "resource_field",
+        "rheplicant.config.kinds.arrays.build_array.value",
+    )
     resolved = resolve_value(
         spec,
         context,
-        destination=DestinationDescriptor(
-            name,
-            "resource_field",
-            "rheplicant.config.kinds.arrays.build_array.value",
-        ),
+        destination=destination,
     )
     bind_resource_dimension(
         context.dimensions,
         name,
         None if resolved.unit is None else dimension_of(resolved.unit),
     )
+    record_resolved_delivery(context, destination, resolved.unit)
     return resolved.value

@@ -76,6 +76,7 @@ from typing import Any
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import ResolutionTarget, ResolvedValue, register_form
@@ -211,12 +212,27 @@ def _python(
             "{file: ...} was read or passed through as a dict."
         )
 
+    argument_targets = {}
+    if resolution_target is not None:
+        for name, spec in args.items():
+            argument_targets[name] = resolution_target.operand(
+                spec,
+                f"args.{name}",
+                formula="python",
+                role="args.*",
+                environment=context.dimensions,
+                destination=DestinationDescriptor(
+                    f"python.args.{name}", "config_path", "python.args.*"
+                ),
+            )
+
     # Import AFTER the node has been checked, deliberately. Importing a module
     # runs its body, so a node this layer is going to refuse anyway must be
     # refused before it can have that effect.
     attribute = import_target(target)
-    keywords = {
-        name: resolve_operand(
+    keywords = {}
+    for name, spec in args.items():
+        resolved = resolve_operand(
             spec,
             context,
             parent=resolution_target,
@@ -226,9 +242,14 @@ def _python(
             destination=DestinationDescriptor(
                 f"python.args.{name}", "config_path", "python.args.*"
             ),
-        ).value
-        for name, spec in args.items()
-    }
+        )
+        keywords[name] = resolved.value
+        if resolution_target is not None:
+            record_resolved_delivery(
+                context,
+                argument_targets[name].destination,
+                resolved.unit,
+            )
     keywords.update(literal)
     # Presence of the KEY, not truth of its value: `args: {}` is how a document
     # spells a call that takes no arguments, and it is the only spelling there

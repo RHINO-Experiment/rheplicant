@@ -40,6 +40,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.dimensions import dimension_of, signature, signature_token
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
@@ -158,15 +159,16 @@ class NoiseBuild(NamedTuple):
 
 
 def _noise_value(key: str, node: Any, context: ResolutionContext):
-    return resolve_value(
+    destination = DestinationDescriptor(
+        f"inference.noise.{key}", "config_path", f"inference.noise.{key}"
+    )
+    resolved = resolve_value(
         node,
         context,
-        destination=DestinationDescriptor(
-            f"inference.noise.{key}",
-            "config_path",
-            f"inference.noise.{key}",
-        ),
+        destination=destination,
     )
+    record_resolved_delivery(context, destination, resolved.unit)
+    return resolved
 
 
 def _fact(where: str, node: Any, observation: ObservationBuild,

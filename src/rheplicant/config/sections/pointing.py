@@ -21,6 +21,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.observation import SiteFacts, _dimensioned
@@ -113,14 +114,15 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
     if "from_file" in spec:
         check_unknown_keys("observation.pointing", dict(spec),
                            frozenset({"from_file"}), label="lst:")
+        destination = DestinationDescriptor(
+            "observation.pointing.lst.from_file",
+            "config_path",
+            "observation.pointing.lst.from_file",
+        )
         resolved = resolve_value(
             {"file": dict(spec["from_file"])},
             context,
-            destination=DestinationDescriptor(
-                "observation.pointing.lst.from_file",
-                "config_path",
-                "observation.pointing.lst.from_file",
-            ),
+            destination=destination,
         )
         if resolved.unit is not None and resolved.unit.dimension != "angle":
             raise ConfigError(
@@ -133,6 +135,7 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
                 f"pointing.lst.from_file: is (n_time,) = ({n_time},); got "
                 f"{tuple(lst.shape)}."
             )
+        record_resolved_delivery(context, destination, resolved.unit)
         return lst
     mode = spec.get("mode")
     if mode == "uniform_turn":

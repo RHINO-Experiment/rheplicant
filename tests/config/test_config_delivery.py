@@ -23,12 +23,14 @@ from rheplicant.config.delivery import (
     origin_for_delivery,
 )
 from rheplicant.config.orchestration import _origin_lookup_for
+from rheplicant.config.sections.model import build_node_operator
 from rheplicant.core.frozen import FrozenMapping
 from rheplicant.core.operator import SnapshotOperator
 from rheplicant.radio.backend.flagging import MomentRFIFlaggingOperator
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
+from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 
 
 class TestReadingTheFieldMetadata:
@@ -125,6 +127,36 @@ class TestDeliveryOrigin:
         )
         lookup = _origin_lookup_for(merged.document, merged.origins)
         assert lookup("model.adc.scale") == Origin("variant", "cold")
+
+    def test_bare_optional_model_value_records_catalogued_canonical_unit(self):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        context = ResolutionContext(
+            trace=trace,
+            origin_lookup=lambda path: Origin("user"),
+        )
+        operator = build_node_operator(
+            "global_signal",
+            {
+                "depth": 0.5,
+                "centre": {"value": 75, "unit": "MHz"},
+                "width": {"value": 5, "unit": "MHz"},
+            },
+            context,
+        )
+        assert isinstance(operator, GlobalSignalOperator)
+        depth = next(
+            facts
+            for _, destination, facts in trace.deliveries
+            if destination.document_path == "model.global_signal.depth"
+        )
+        assert depth["unit"] == "K"
 
 
 class TestTracedDeliveryForcesAFloatingDtype:

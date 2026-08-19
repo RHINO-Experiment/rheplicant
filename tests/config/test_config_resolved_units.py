@@ -76,6 +76,89 @@ def test_stack_operands_inherit_the_outer_unit():
     assert jnp.array_equal(resolved.value, jnp.asarray([1.0, 2.0]))
 
 
+def test_full_retains_the_outer_destination_unit():
+    resolved = resolve_value(
+        {"full": {"shape": [2], "value": 3.0}, "unit": "K"},
+        ResolutionContext(),
+        destination=_kelvin_destination(),
+    )
+    assert resolved.unit.canonical == "K"
+    assert jnp.array_equal(resolved.value, jnp.asarray([3.0, 3.0]))
+
+
+def test_uniform_operands_inherit_outer_unit_and_refuse_a_mismatch():
+    context = ResolutionContext(seed=1, seeds={"draw": 2})
+    resolved = resolve_value(
+        {
+            "uniform": {
+                "shape": [],
+                "seed": {"from": "runtime.seeds.draw"},
+                "low": 1,
+                "high": 2,
+            },
+            "unit": "K",
+        },
+        context,
+        destination=_kelvin_destination(),
+    )
+    assert resolved.unit.canonical == "K"
+    with pytest.raises(ConfigError, match="uniform.high"):
+        resolve_value(
+            {
+                "uniform": {
+                    "shape": [],
+                    "seed": {"from": "runtime.seeds.draw"},
+                    "low": 1,
+                    "high": {"value": 2, "unit": "Hz"},
+                },
+                "unit": "K",
+            },
+            context,
+            destination=_kelvin_destination(),
+        )
+
+
+def test_fixed_derivation_keeps_its_destination_dimension():
+    destination = DestinationDescriptor(
+        "observation.freq.grid", "config_path", "observation.freq.grid"
+    )
+    context = ResolutionContext(freq=jnp.asarray([1.0, 3.0, 5.0]))
+    resolved = resolve_value(
+        {"from": "channel_spacing"}, context, destination=destination
+    )
+    assert resolved.unit.canonical == "Hz"
+
+
+def test_nested_run_target_has_concrete_path_and_patterned_selector():
+    from rheplicant.config.values import make_resolution_target
+
+    destination = DestinationDescriptor(
+        "runs[3].at.g", "config_path", "runs[].at.*"
+    )
+    context = ResolutionContext(
+        dimensions=DimensionEnvironment(latent_dimensions={"g": signature("K")})
+    )
+    target = make_resolution_target(2.0, destination, context.dimensions)
+    assert target.destination.document_path == "runs[3].at.g"
+    assert target.destination.selector == "runs[].at.*"
+    assert target.expected == signature("K")
+
+
+def test_required_unit_refuses_before_a_file_path_is_opened(tmp_path):
+    missing = tmp_path / "must-not-open.npy"
+    required = DestinationDescriptor(
+        "model.adc.scale",
+        "model_field",
+        "rheplicant.radio.instrument.adc.ADCOperator.scale",
+    )
+    with pytest.raises(ConfigError, match="requires unit"):
+        resolve_value(
+            {"file": {"path": str(missing), "format": "npy"}},
+            ResolutionContext(),
+            destination=required,
+        )
+
+
 def test_reference_dimension_is_checked_against_its_destination():
     source = jnp.asarray([1.0])
     context = ResolutionContext(

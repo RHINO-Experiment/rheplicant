@@ -19,6 +19,7 @@ axes under their own keys is the only protection there is.
 from typing import Any
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.units import canonical_unit
@@ -143,14 +144,19 @@ def _basis_fit(
         raise ConfigError(
             f"basis_fit: {reference['ref']!r} is {type(basis).__name__}, not SeparableBasis."
         )
-    field = resolve_operand(
+    resolved = resolve_operand(
         spec["field"],
         context,
         parent=target,
         segment="basis_fit.field",
         formula="basis_fit",
         role="field",
-    ).value
+    )
+    field = resolved.value
+    if target is not None:
+        record_resolved_delivery(
+            context, target.destination.nested("basis_fit.field"), resolved.unit
+        )
     # canonical_unit(), not convert_to_canonical(): this only LABELS the fit's
     # result, it does not scale it. That is safe only because every token in
     # ACCEPTED_UNITS is today an identity conversion (factor 1, offset 0) --

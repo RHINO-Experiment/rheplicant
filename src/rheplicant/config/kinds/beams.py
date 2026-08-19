@@ -41,6 +41,7 @@ import numpy as np
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import resolve_file_path
 from rheplicant.config.hatch import import_target
@@ -293,23 +294,23 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
             raise ConfigError(f"{name}: format: cst requires a directory of per-frequency exports.")
         if context.freq is None:
             raise ConfigError(f"{name}: format: cst needs observation.freq.grid to sample onto.")
+        destination = DestinationDescriptor(
+            f"{name}.phi0_deg",
+            "resource_field",
+            "rheplicant.config.kinds.beams.build_beam.cst.phi0_deg",
+        )
+        resolved = resolve_value(
+            spec["phi0_deg"], context, destination=destination
+        )
+        phi0_deg = float(resolved.value)
+        record_resolved_delivery(context, destination, resolved.unit)
         return jnp.asarray(
             cst_beam_maps(
                 resolve_file_path(directory, context),
                 np.asarray(context.freq),
                 nside=nside,
                 suffix=spec.get("suffix", ".txt"),
-                phi0_deg=float(
-                    resolve_value(
-                        spec["phi0_deg"],
-                        context,
-                        destination=DestinationDescriptor(
-                            f"{name}.phi0_deg",
-                            "resource_field",
-                            "rheplicant.config.kinds.beams.build_beam.cst.phi0_deg",
-                        ),
-                    ).value
-                ),
+                phi0_deg=phi0_deg,
                 phi_sense=spec["phi_sense"],
             ),
             dtype=context.dtype,
@@ -326,33 +327,27 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
         node = {"file": {"path": spec["path"], "format": fmt}}
         if "key" in spec:
             node["file"]["key"] = spec["key"]
-        return jnp.asarray(
-            resolve_value(
-                node,
-                context,
-                destination=DestinationDescriptor(
-                    f"{name}.maps",
-                    "resource_field",
-                    f"rheplicant.config.kinds.beams.build_beam.{fmt}.maps",
-                ),
-            ).value,
-            dtype=context.dtype,
+        destination = DestinationDescriptor(
+            f"{name}.maps",
+            "resource_field",
+            f"rheplicant.config.kinds.beams.build_beam.{fmt}.maps",
         )
+        resolved = resolve_value(node, context, destination=destination)
+        maps = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+        return maps
     if fmt == "inline":
         if "maps" not in spec:
             raise ConfigError(f"{name}: format: inline requires a 'maps' value node.")
-        return jnp.asarray(
-            resolve_value(
-                spec["maps"],
-                context,
-                destination=DestinationDescriptor(
-                    f"{name}.maps",
-                    "resource_field",
-                    "rheplicant.config.kinds.beams.build_beam.inline.maps",
-                ),
-            ).value,
-            dtype=context.dtype,
+        destination = DestinationDescriptor(
+            f"{name}.maps",
+            "resource_field",
+            "rheplicant.config.kinds.beams.build_beam.inline.maps",
         )
+        resolved = resolve_value(spec["maps"], context, destination=destination)
+        maps = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+        return maps
     if fmt == "python":
         if "python" not in spec:
             raise ConfigError(
@@ -380,19 +375,33 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
                 "resolved through the value grammar and literal values are forwarded "
                 "untouched, so one argument cannot be both."
             )
-        factory = import_target(spec["python"])
-        arguments = {
-            key: resolve_value(
+        from rheplicant.config.values import make_resolution_target
+
+        for key, value in args.items():
+            make_resolution_target(
                 value,
-                context,
-                destination=DestinationDescriptor(
+                DestinationDescriptor(
                     f"{name}.args.{key}",
                     "resource_field",
                     "rheplicant.config.kinds.beams.build_beam.python.args.*",
                 ),
-            ).value
-            for key, value in args.items()
-        }
+                context.dimensions,
+            )
+        factory = import_target(spec["python"])
+        arguments = {}
+        for key, value in args.items():
+            destination = DestinationDescriptor(
+                f"{name}.args.{key}",
+                "resource_field",
+                "rheplicant.config.kinds.beams.build_beam.python.args.*",
+            )
+            resolved = resolve_value(
+                value,
+                context,
+                destination=destination,
+            )
+            arguments[key] = resolved.value
+            record_resolved_delivery(context, destination, resolved.unit)
         arguments.update(literal)
         return jnp.asarray(factory(**arguments), dtype=context.dtype)
     return _gaussian(name, spec, context, nside)
@@ -512,17 +521,14 @@ def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int)
     maps = np.atleast_2d(np.asarray(raw))
     if order == "nested":
         maps = np.stack([hp.reorder(row, n2r=True) for row in maps])
-    freq = np.asarray(
-        resolve_value(
-            spec["freq"],
-            context,
-            destination=DestinationDescriptor(
-                f"{name}.freq",
-                "resource_field",
-                "rheplicant.config.kinds.beams.build_beam.healpix.freq",
-            ),
-        ).value
+    destination = DestinationDescriptor(
+        f"{name}.freq",
+        "resource_field",
+        "rheplicant.config.kinds.beams.build_beam.healpix.freq",
     )
+    resolved = resolve_value(spec["freq"], context, destination=destination)
+    freq = np.asarray(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
     if freq.ndim != 1 or freq.shape[0] != maps.shape[0]:
         raise ConfigError(
             f"{name}: freq declares {tuple(freq.shape)} while the file carries "
@@ -557,17 +563,14 @@ def _gaussian(name: str, spec: dict, context: ResolutionContext, nside: int):
             "widths for one beam have no defined relationship here, and none is a beam."
         )
     width_key = "fwhm_deg" if "fwhm_deg" in spec else "sigma_deg"
-    sigma_deg = jnp.asarray(
-        resolve_value(
-            spec[width_key],
-            context,
-            destination=DestinationDescriptor(
-                f"{name}.{width_key}",
-                "resource_field",
-                f"rheplicant.config.kinds.beams.build_beam.gaussian.{width_key}",
-            ),
-        ).value
+    destination = DestinationDescriptor(
+        f"{name}.{width_key}",
+        "resource_field",
+        f"rheplicant.config.kinds.beams.build_beam.gaussian.{width_key}",
     )
+    resolved = resolve_value(spec[width_key], context, destination=destination)
+    sigma_deg = jnp.asarray(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
     if width_key == "fwhm_deg":
         sigma_deg = sigma_deg / 2.3548200450309493
     n_freq = 1 if context.freq is None else int(context.freq.shape[0])
@@ -615,17 +618,18 @@ def _horizon_angle(
     default: float,
     context: ResolutionContext,
 ) -> float:
-    return float(
-        resolve_value(
-            horizon.get(key, default),
-            context,
-            destination=DestinationDescriptor(
-                f"{name}.horizon.{key}",
-                "resource_field",
-                f"rheplicant.config.kinds.beams.build_beam.horizon.{key}",
-            ),
-        ).value
+    defaulted = key not in horizon
+    destination = DestinationDescriptor(
+        f"{name}.horizon.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.beams.build_beam.horizon.{key}",
     )
+    resolved = resolve_value(horizon.get(key, default), context, destination=destination)
+    value = float(resolved.value)
+    record_resolved_delivery(
+        context, destination, resolved.unit, defaulted=defaulted
+    )
+    return value
 
 
 def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):

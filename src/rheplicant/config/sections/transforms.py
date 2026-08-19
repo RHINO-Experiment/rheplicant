@@ -20,6 +20,8 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
+from rheplicant.config.dimensions import dimension_for
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
 from rheplicant.config.paths import (
@@ -48,10 +50,18 @@ def _formula_parent(
 
     registration = dimensions._FORMULA_REGISTRY[formula]
     document_path = where.rsplit(".", 1)[0]
+    selector = (
+        "inference.parameters.*.init"
+        if document_path.startswith("inference.parameters.")
+        else document_path
+    )
+    destination = DestinationDescriptor(document_path, "config_path", selector)
     return ResolutionTarget(
-        DestinationDescriptor(document_path, "config_path", document_path),
+        destination,
         registration.result,
-        registration.result.signature,
+        dimension_for(destination, context.dimensions)
+        if selector == "inference.parameters.*.init"
+        else registration.result.signature,
         None,
         formula_name=formula,
     )
@@ -64,19 +74,34 @@ def _operand(
     *,
     formula: str,
     role: str,
+    defaulted: bool = False,
 ) -> Any:
     if isinstance(node, bool) or not isinstance(node, (int, float, Mapping)):
         raise ConfigError(f"{where}: is a number or a value node; got {node!r}.")
-    return jnp.asarray(
-        resolve_operand(
-            node,
-            context,
-            parent=_formula_parent(where, formula, context),
-            segment=where.rsplit(".", 1)[-1],
-            formula=formula,
-            role=role,
-        ).value
+    parent = _formula_parent(where, formula, context)
+    segment = where.rsplit(".", 1)[-1]
+    operand_target = parent.operand(
+        node,
+        segment,
+        formula=formula,
+        role=role,
+        environment=context.dimensions,
     )
+    resolved = resolve_operand(
+        node,
+        context,
+        parent=parent,
+        segment=segment,
+        formula=formula,
+        role=role,
+    )
+    value = jnp.asarray(resolved.value)
+    record_resolved_delivery(
+        context, operand_target.destination, resolved.unit,
+        defaulted=defaulted,
+        expected=operand_target.expected,
+    )
+    return value
 
 
 def _whole(where: str, value: Any, minimum: int) -> int:
@@ -245,11 +270,11 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
                            label="affine:")
         scale = _operand(
             f"{where}.affine.scale", body.get("scale", 1.0), context,
-            formula="transform_affine", role="scale",
+            formula="transform_affine", role="scale", defaulted="scale" not in body,
         )
         offset = _operand(
             f"{where}.affine.offset", body.get("offset", 0.0), context,
-            formula="transform_affine", role="offset",
+            formula="transform_affine", role="offset", defaulted="offset" not in body,
         )
         return (lambda v, _s=scale, _o=offset: _s * v + _o), "broadcast"
     if head == "matmul":
@@ -259,15 +284,28 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
             raise ConfigError(f"{where}.matmul: requires design: -- a value "
                               "node for the design matrix.")
         design_where = f"{where}.matmul.design"
-        design = jnp.asarray(
-            resolve_operand(
-                body["design"],
-                context,
-                parent=_formula_parent(design_where, "matmul", context),
-                segment="design",
-                formula="matmul",
-                role="design",
-            ).value
+        parent = _formula_parent(design_where, "matmul", context)
+        operand_target = parent.operand(
+            body["design"],
+            "design",
+            formula="matmul",
+            role="design",
+            environment=context.dimensions,
+        )
+        resolved = resolve_operand(
+            body["design"],
+            context,
+            parent=parent,
+            segment="design",
+            formula="matmul",
+            role="design",
+        )
+        design = jnp.asarray(resolved.value)
+        record_resolved_delivery(
+            context,
+            operand_target.destination,
+            resolved.unit,
+            expected=operand_target.expected,
         )
         return (lambda c, _d=design: _d @ c), "broadcast"
     if head == "log_link_basis":

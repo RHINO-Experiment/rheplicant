@@ -15,6 +15,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.values import resolve_value
@@ -98,17 +99,15 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
                 "switching: cycle: from_file requires index: -- a value node "
                 "holding the (n_time,) integer switch states."
             )
-        index = jnp.asarray(
-            resolve_value(
-                spec["index"],
-                context,
-                destination=DestinationDescriptor(
-                    "observation.switching.index",
-                    "config_path",
-                    "observation.switching.index",
-                ),
-            ).value
+        index_destination = DestinationDescriptor(
+            "observation.switching.index",
+            "config_path",
+            "observation.switching.index",
         )
+        resolved_index = resolve_value(
+            spec["index"], context, destination=index_destination
+        )
+        index = jnp.asarray(resolved_index.value)
         if index.shape != (n_time,):
             raise ConfigError(
                 f"switching.index: is (n_time,) = ({n_time},); got "
@@ -128,17 +127,21 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
                 f"switching.index: values run {low}..{high} but the order "
                 f"declares {n_source} positions (0..{n_source - 1})."
             )
+        record_resolved_delivery(
+            context, index_destination, resolved_index.unit
+        )
         return SwitchingBuild(order=order, receiver_input=index)
 
     dwell_node = spec.get("dwell", 1)
+    dwell_destination = DestinationDescriptor(
+        "observation.switching.dwell",
+        "config_path",
+        "observation.switching.dwell",
+    )
     resolved = resolve_value(
         dwell_node,
         context,
-        destination=DestinationDescriptor(
-            "observation.switching.dwell",
-            "config_path",
-            "observation.switching.dwell",
-        ),
+        destination=dwell_destination,
     )
     if resolved.unit is not None and resolved.unit.canonical != "samples":
         raise ConfigError(
@@ -152,4 +155,7 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
             f"{dwell!r}."
         )
     index = (jnp.arange(n_time, dtype=jnp.int32) // int(dwell)) % n_source
+    record_resolved_delivery(
+        context, dwell_destination, resolved.unit, defaulted="dwell" not in spec
+    )
     return SwitchingBuild(order=order, receiver_input=index)

@@ -54,6 +54,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.sections.exit_support import (
@@ -272,18 +273,15 @@ def _at_values(run: RunSpec, built: Any, space: Any) -> dict[str, Any]:
     # float64 document gets float64 overrides rather than whatever the value
     # node happened to resolve to.
     context = built.context
-    return {name: jnp.asarray(
-                resolve_value(
-                    node,
-                    context,
-                    destination=DestinationDescriptor(
-                        f"runs[{run.index}].at.{name}",
-                        "config_path",
-                        "runs[].at.*",
-                    ),
-                ).value,
-                dtype=context.dtype)
-            for name, node in at.items()}
+    values = {}
+    for name, node in at.items():
+        destination = DestinationDescriptor(
+            f"runs[{run.index}].at.{name}", "config_path", "runs[].at.*"
+        )
+        resolved = resolve_value(node, context, destination=destination)
+        values[name] = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+    return values
 
 
 def _bounded_rtol(run: RunSpec) -> float:

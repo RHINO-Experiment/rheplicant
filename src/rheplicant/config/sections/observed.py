@@ -21,6 +21,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.draws import _seed_name, seed_for
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
@@ -132,16 +133,12 @@ def _realise(
         if "sigma" not in spec:
             raise ConfigError(f"{where}: kind: homoscedastic requires "
                               "sigma: -- the scatter that goes INTO the data.")
-        sigma = jnp.asarray(resolve_value(
-                                spec["sigma"],
-                                context,
-                                destination=DestinationDescriptor(
-                                    f"{where}.sigma",
-                                    "config_path",
-                                    f"{selector}.sigma",
-                                ),
-                            ).value,
-                            dtype=context.dtype)
+        destination = DestinationDescriptor(
+            f"{where}.sigma", "config_path", f"{selector}.sigma"
+        )
+        resolved = resolve_value(spec["sigma"], context, destination=destination)
+        sigma = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
         return (HomoscedasticNoise(sigma).realise(prediction, key=key),
                 seed, kind)
     if kind == "radiometer":
@@ -192,15 +189,14 @@ def _one(
     if "file" in spec:
         check_unknown_keys(where, dict(spec), frozenset({"file"}),
                            label="the file form")
-        data = jnp.asarray(resolve_value(
-                               {"file": dict(spec["file"])},
-                               context,
-                               destination=DestinationDescriptor(
-                                   f"{document_path}.file",
-                                   "config_path",
-                                   f"{selector}.file",
-                               ),
-                           ).value)
+        destination = DestinationDescriptor(
+            f"{document_path}.file", "config_path", f"{selector}.file"
+        )
+        resolved = resolve_value(
+            {"file": dict(spec["file"])}, context, destination=destination
+        )
+        data = jnp.asarray(resolved.value)
+        record_resolved_delivery(context, destination, resolved.unit)
         wanted = _predicted_shape(fit_twin, space, state)
         if tuple(data.shape) != wanted:
             grids = _shape(context)
@@ -244,16 +240,12 @@ def _one(
                 f"{where}.at: {latent!r} is not a declared latent; "
                 f"inference.parameters declares {list(space.names)}."
             )
-        at_values[latent] = jnp.asarray(resolve_value(
-                                            node,
-                                            context,
-                                            destination=DestinationDescriptor(
-                                                f"{document_path}.at.{latent}",
-                                                "config_path",
-                                                f"{selector}.at.*",
-                                            ),
-                                        ).value,
-                                        dtype=context.dtype)
+        destination = DestinationDescriptor(
+            f"{document_path}.at.{latent}", "config_path", f"{selector}.at.*"
+        )
+        resolved = resolve_value(node, context, destination=destination)
+        at_values[latent] = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
     if space is not None:
         values = dict(space.initial_values())
         values.update(at_values)

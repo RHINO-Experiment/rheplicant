@@ -69,6 +69,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.inflight import Axes, register_axes
@@ -177,7 +178,9 @@ def _static_number(
     value = resolved.value
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return None
-    return float(value)
+    converted = float(value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return converted
 
 
 # ---------------------------------------------------------------------------

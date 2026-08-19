@@ -9,6 +9,7 @@ both could be tested against neither.
 """
 
 import dataclasses
+import inspect
 import re
 from collections.abc import Callable
 from typing import Any, NamedTuple
@@ -124,8 +125,15 @@ def _declared_unit(node: object) -> str | None:
         match = _SHORTHAND.match(node)
         return None if match is None else match.group("unit")
     if isinstance(node, dict):
-        token = node.get("unit")
-        return token if isinstance(token, str) else None
+        if "unit" not in node:
+            return None
+        token = node["unit"]
+        if not isinstance(token, str):
+            raise ConfigError(
+                f"dimensions: unit modifier is a string; got {token!r} "
+                f"({type(token).__name__})"
+            )
+        return token
     return None
 
 
@@ -243,7 +251,8 @@ def resolve_value(
     """
     target = (
         make_resolution_target(node, destination, context.dimensions)
-        if destination is not None else None
+        if destination is not None
+        else None
     )
     return resolve_registered_form(node, context, target)
 
@@ -413,8 +422,15 @@ def register_form(
         # The compatibility adapter makes every registered resolver obey the
         # destination-aware four-argument protocol while preserving external
         # third-party forms written for the historical three arguments.
+        try:
+            inspect.signature(fn).bind_partial(None, None, None, None)
+        except TypeError:
+            takes_target = False
+        else:
+            takes_target = True
+
         def _with_target(node, context, modifiers, target):
-            if _takes_target(fn):
+            if takes_target:
                 return fn(node, context, modifiers, target)
             return fn(node, context, modifiers)
 
@@ -423,14 +439,6 @@ def register_form(
         return fn
 
     return _register
-
-
-def _takes_target(fn: Callable[..., Any]) -> bool:
-    """Whether a form opted into the four-argument resolver protocol."""
-    import inspect
-
-    return len(inspect.signature(fn).parameters) >= 4
-
 
 # Imported for its side effect, at the very bottom and nowhere else: the one
 # place a circular import is deliberate and safe, because `arrays` imports only

@@ -28,6 +28,7 @@ from collections.abc import Callable
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.registry import LiveNames
 from rheplicant.config.units import canonical_unit
@@ -194,16 +195,19 @@ def _unit_mean_free(node, context, modifiers, target):
 
     if "bandpass" not in node:
         raise ConfigError("unit_mean_free: 'bandpass' is required and is itself a value node.")
-    bandpass = jnp.asarray(
-        resolve_operand(
-            node["bandpass"],
-            context,
-            parent=target,
-            segment="bandpass",
-            formula="unit_mean_free",
-            role="bandpass",
-        ).value
+    resolved = resolve_operand(
+        node["bandpass"],
+        context,
+        parent=target,
+        segment="bandpass",
+        formula="unit_mean_free",
+        role="bandpass",
     )
+    bandpass = jnp.asarray(resolved.value)
+    if target is not None:
+        record_resolved_delivery(
+            context, target.destination.nested("bandpass"), resolved.unit
+        )
     with _package_guard(
         "unit_mean_free",
         f"The document controls the bandpass: node, which resolved to shape "

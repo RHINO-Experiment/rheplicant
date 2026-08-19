@@ -36,6 +36,7 @@ import jax.numpy as jnp
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.derive import register_derivation
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.kinds.beams import _require_healpy
@@ -202,18 +203,21 @@ def _angle(
 ) -> float:
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for this engine.")
+    destination = DestinationDescriptor(
+        f"{name}.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.projectors.build_projector.{engine}.{key}",
+    )
     resolved = resolve_value(
         spec[key],
         context,
-        destination=DestinationDescriptor(
-            f"{name}.{key}",
-            "resource_field",
-            f"rheplicant.config.kinds.projectors.build_projector.{engine}.{key}",
-        ),
+        destination=destination,
     )
     if resolved.unit is not None and resolved.unit.canonical != "deg":
         raise ConfigError(f"{name}: {key} must be an angle, got {resolved.unit.canonical!r}.")
-    return float(resolved.value)
+    value = float(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return value
 
 
 @register_kind("projectors")
@@ -256,20 +260,17 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
         check_unknown_keys(name, spec, _ENGINE_KEYS["matrix"], label="engine: matrix")
         _require(name, spec, "matrix", "matrix",
                  "the (n_data, n_pix) projection matrix as a value node")
-        return MatrixProjector(
-            matrix=jnp.asarray(
-                resolve_value(
-                    spec["matrix"],
-                    context,
-                    destination=DestinationDescriptor(
-                        f"{name}.matrix",
-                        "resource_field",
-                        "rheplicant.config.kinds.projectors.build_projector.matrix.matrix",
-                    ),
-                ).value,
-                dtype=context.dtype,
-            )
+        matrix_destination = DestinationDescriptor(
+            f"{name}.matrix",
+            "resource_field",
+            "rheplicant.config.kinds.projectors.build_projector.matrix.matrix",
         )
+        resolved = resolve_value(
+            spec["matrix"], context, destination=matrix_destination
+        )
+        matrix = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, matrix_destination, resolved.unit)
+        return MatrixProjector(matrix=matrix)
 
     # A12's projector half and A44, in the order they were written in. Both
     # are the pre-flight pass's rows now (preflight/resources.py) and both are
@@ -305,17 +306,16 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
 
     beam_alms = None
     if "beam_alms" in spec:
-        beam_alms = jnp.asarray(
-            resolve_value(
-                spec["beam_alms"],
-                context,
-                destination=DestinationDescriptor(
-                    f"{name}.beam_alms",
-                    "resource_field",
-                    "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
-                ),
-            ).value
+        alms_destination = DestinationDescriptor(
+            f"{name}.beam_alms",
+            "resource_field",
+            "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
         )
+        resolved = resolve_value(
+            spec["beam_alms"], context, destination=alms_destination
+        )
+        beam_alms = jnp.asarray(resolved.value)
+        record_resolved_delivery(context, alms_destination, resolved.unit)
     if engine == "general_pointing":
         check_unknown_keys(
             name, spec, _ENGINE_KEYS["general_pointing"], label="engine: general_pointing"

@@ -3,7 +3,9 @@
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config import ConfigError
+from rheplicant.config import files as files_module
 from rheplicant.config import values as values_module
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.values import VALUE_FORMS, ResolvedValue, register_form, resolve_value
@@ -148,6 +150,45 @@ class TestTheDispatcher:
         assert seen["node"] == {"zeros": [4], "unit": "K"}
         assert seen["ctx"] is context
         assert seen["modifiers"] == {"unit": "K"}
+
+    def test_a_historical_resolver_with_a_keyword_only_option_stays_compatible(
+        self, monkeypatch, context
+    ):
+        monkeypatch.setattr(values_module, "_RESOLVERS", dict(values_module._RESOLVERS))
+
+        @register_form("zeros")
+        def _resolver(node, ctx, modifiers, *, unrelated=True):
+            assert unrelated is True
+            return ResolvedValue(float(node["zeros"][0]), None, "zeros", modifiers)
+
+        resolved = resolve_value({"zeros": [3]}, context)
+        assert resolved.value == pytest.approx(3.0)
+
+    def test_a_malformed_unit_is_refused_before_a_file_reader_runs(
+        self, monkeypatch, context, tmp_path
+    ):
+        seen = []
+        monkeypatch.setattr(files_module, "_READERS", dict(files_module._READERS))
+        files_module._READERS["unit_probe"] = (
+            lambda path, spec: seen.append(path) or [1.0],
+            frozenset(),
+            True,
+        )
+        path = tmp_path / "value.probe"
+        path.write_text("probe")
+        destination = DestinationDescriptor(
+            "observation.freq.grid", "config_path", "observation.freq.grid"
+        )
+        with pytest.raises(ConfigError, match="unit"):
+            resolve_value(
+                {
+                    "file": {"path": str(path), "format": "unit_probe"},
+                    "unit": 7,
+                },
+                context,
+                destination=destination,
+            )
+        assert seen == []
 
 
 class TestTheContextIsAValue:

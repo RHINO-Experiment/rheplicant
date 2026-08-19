@@ -26,6 +26,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.dimensions import dimension_of, matching_dimension_rows, signature
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import canonical_unit, convert_to_canonical
@@ -173,19 +174,23 @@ def _stack(
     onward = modifiers
     if mine:
         onward = {key: value for key, value in modifiers.items() if key != "axis"}
-    parts = [
-        jnp.asarray(
-            resolve_operand(
-                entry,
-                context,
-                parent=target,
-                segment=f"stack[{index}]",
-                formula="stack",
-                role="entry[]",
-            ).value
+    parts = []
+    for index, entry in enumerate(entries):
+        resolved = resolve_operand(
+            entry,
+            context,
+            parent=target,
+            segment=f"stack[{index}]",
+            formula="stack",
+            role="entry[]",
         )
-        for index, entry in enumerate(entries)
-    ]
+        parts.append(jnp.asarray(resolved.value))
+        if target is not None:
+            record_resolved_delivery(
+                context,
+                target.destination.nested(f"stack[{index}]"),
+                resolved.unit,
+            )
     return _delivered(jnp.stack(parts, axis=axis), onward, "stack")
 
 

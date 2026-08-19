@@ -3,7 +3,9 @@
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config import ConfigError
+from rheplicant.config import hatch as hatch_module
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.values import resolve_value
 
@@ -71,6 +73,31 @@ class TestTheHatch:
             context,
         )
         assert dict(got.value) == {"a": [1, 2], "b": "left as written"}
+
+    def test_every_argument_target_is_validated_before_import(
+        self, context, monkeypatch
+    ):
+        imported = []
+        monkeypatch.setattr(
+            hatch_module,
+            "import_target",
+            lambda target: imported.append(target) or (lambda **kwargs: kwargs),
+        )
+        destination = DestinationDescriptor(
+            "model.global_signal.depth",
+            "model_field",
+            "rheplicant.radio.sky.global_signal.GlobalSignalOperator.depth",
+        )
+        with pytest.raises(ConfigError, match="unit"):
+            resolve_value(
+                {
+                    "python": "probe.module:factory",
+                    "args": {"bad": {"value": 1.0, "unit": 7}},
+                },
+                context,
+                destination=destination,
+            )
+        assert imported == []
 
 
 class TestWhetherItCalls:

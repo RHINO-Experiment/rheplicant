@@ -27,7 +27,12 @@ from typing import Any
 
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
-from rheplicant.config.delivery import deliver, field_specs, origin_for_delivery
+from rheplicant.config.delivery import (
+    canonical_unit_for_delivery,
+    deliver,
+    field_specs,
+    origin_for_delivery,
+)
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import register_reader
 from rheplicant.config.hatch import import_target
@@ -154,7 +159,7 @@ def _field_value(node_id: str, cls: type, name: str, node: Any,
         context.trace.record_delivery(
             context.layer, destination, dtype=context.dtype,
             origin=origin_for_delivery(context, destination),
-            unit=None if resolved.unit is None else resolved.unit.canonical,
+            unit=canonical_unit_for_delivery(context, destination, resolved.unit),
         )
     return delivered
 
