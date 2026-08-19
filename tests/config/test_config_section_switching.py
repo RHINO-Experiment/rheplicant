@@ -1,4 +1,4 @@
-"""observation.switching -> coords.extra['receiver_input'] + the order."""
+"""Addressed observation.switching -> coords.extra['receiver_input'] + order."""
 
 import jax.numpy as jnp
 import numpy as np

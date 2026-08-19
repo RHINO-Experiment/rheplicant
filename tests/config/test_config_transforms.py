@@ -1,4 +1,4 @@
-"""The transform registry, and bindings -> ParameterSpace."""
+"""The formula-addressed transform registry, and bindings -> ParameterSpace."""
 
 import sys
 

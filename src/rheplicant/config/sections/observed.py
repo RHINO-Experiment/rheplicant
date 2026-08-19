@@ -19,6 +19,7 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.draws import _seed_name, seed_for
 from rheplicant.config.errors import ConfigError
@@ -98,9 +99,16 @@ def _predicted_shape(fit_twin: Any, space: Any, state: Any) -> tuple[int, ...]:
     return tuple(jax.eval_shape(predict, fit_twin, state).shape)
 
 
-def _realise(name: str, spec: Any, prediction: Any, *, noise: Any,
-             observation: Any, context: ResolutionContext):
-    where = f"inference.observed.{name}.realise"
+def _realise(
+    where: str,
+    selector: str,
+    spec: Any,
+    prediction: Any,
+    *,
+    noise: Any,
+    observation: Any,
+    context: ResolutionContext,
+):
     if spec is None:
         return prediction, None, None
     if not isinstance(spec, Mapping):
@@ -124,7 +132,15 @@ def _realise(name: str, spec: Any, prediction: Any, *, noise: Any,
         if "sigma" not in spec:
             raise ConfigError(f"{where}: kind: homoscedastic requires "
                               "sigma: -- the scatter that goes INTO the data.")
-        sigma = jnp.asarray(resolve_value(spec["sigma"], context).value,
+        sigma = jnp.asarray(resolve_value(
+                                spec["sigma"],
+                                context,
+                                destination=DestinationDescriptor(
+                                    f"{where}.sigma",
+                                    "config_path",
+                                    f"{selector}.sigma",
+                                ),
+                            ).value,
                             dtype=context.dtype)
         return (HomoscedasticNoise(sigma).realise(prediction, key=key),
                 seed, kind)
@@ -158,15 +174,33 @@ def _realise(name: str, spec: Any, prediction: Any, *, noise: Any,
     return noise.model.realise(prediction, key=key), seed, kind
 
 
-def _one(name: str, spec: Mapping, *, twin: Any, fit_twin: Any, space: Any,
-         noise: Any, state: Any, observation: Any,
-         context: ResolutionContext):
+def _one(
+    name: str,
+    spec: Mapping,
+    *,
+    document_path: str,
+    selector: str,
+    twin: Any,
+    fit_twin: Any,
+    space: Any,
+    noise: Any,
+    state: Any,
+    observation: Any,
+    context: ResolutionContext,
+):
     where = f"inference.observed.{name}"
     if "file" in spec:
         check_unknown_keys(where, dict(spec), frozenset({"file"}),
                            label="the file form")
-        data = jnp.asarray(resolve_value({"file": dict(spec["file"])},
-                                         context).value)
+        data = jnp.asarray(resolve_value(
+                               {"file": dict(spec["file"])},
+                               context,
+                               destination=DestinationDescriptor(
+                                   f"{document_path}.file",
+                                   "config_path",
+                                   f"{selector}.file",
+                               ),
+                           ).value)
         wanted = _predicted_shape(fit_twin, space, state)
         if tuple(data.shape) != wanted:
             grids = _shape(context)
@@ -210,7 +244,15 @@ def _one(name: str, spec: Mapping, *, twin: Any, fit_twin: Any, space: Any,
                 f"{where}.at: {latent!r} is not a declared latent; "
                 f"inference.parameters declares {list(space.names)}."
             )
-        at_values[latent] = jnp.asarray(resolve_value(node, context).value,
+        at_values[latent] = jnp.asarray(resolve_value(
+                                            node,
+                                            context,
+                                            destination=DestinationDescriptor(
+                                                f"{document_path}.at.{latent}",
+                                                "config_path",
+                                                f"{selector}.at.*",
+                                            ),
+                                        ).value,
                                         dtype=context.dtype)
     if space is not None:
         values = dict(space.initial_values())
@@ -219,7 +261,10 @@ def _one(name: str, spec: Mapping, *, twin: Any, fit_twin: Any, space: Any,
     else:
         bound = base
     prediction = bound(state).data
-    data, seed, kind = _realise(name, spec.get("realise"), prediction,
+    data, seed, kind = _realise(
+                                f"{document_path}.realise",
+                                f"{selector}.realise",
+                                spec.get("realise"), prediction,
                                 noise=noise, observation=observation,
                                 context=context)
     return data, at_values, {"from": "simulation", "twin": choice,
@@ -237,8 +282,10 @@ def build_observed(section: Any, *, twin: Any, fit_twin: Any, space: Any,
                           f"{section!r}.")
     if "from" in section or "file" in section:
         named: dict[str, Mapping] = {"primary": section}
+        destinations = {"primary": ("inference.observed", "inference.observed")}
     else:
         named = {}
+        destinations = {}
         for name, spec in section.items():
             if not isinstance(name, str) or name in _FORM_KEYS:
                 raise ConfigError(
@@ -253,6 +300,9 @@ def build_observed(section: Any, *, twin: Any, fit_twin: Any, space: Any,
                     f"or {{file: {{...}}}}; got {spec!r}."
                 )
             named[name] = spec
+            destinations[name] = (
+                f"inference.observed.{name}", "inference.observed.*"
+            )
         if not named:
             raise ConfigError("inference.observed: declares no observation.")
     entries: dict[str, Any] = {}
@@ -260,7 +310,10 @@ def build_observed(section: Any, *, twin: Any, fit_twin: Any, space: Any,
     records: dict[str, dict[str, Any]] = {}
     for name, spec in named.items():
         entries[name], at[name], records[name] = _one(
-            name, spec, twin=twin, fit_twin=fit_twin, space=space,
+            name, spec,
+            document_path=destinations[name][0],
+            selector=destinations[name][1],
+            twin=twin, fit_twin=fit_twin, space=space,
             noise=noise, state=state, observation=observation,
             context=context)
     if "primary" in entries:

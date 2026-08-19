@@ -1,6 +1,8 @@
 """C18, the numeric half -- the sigma that drew the data and the sigma that
 weighs it, made to agree.
 
+The floor here is a normalized consumer, not another resolution producer.
+
 ``tests/config/test_preflight_gated.py`` is ``C18.kind``'s file: the two-word
 family check, decided from the document's text alone, before the beam is
 read. This is the OTHER slot sharing the same bare id -- the numeric

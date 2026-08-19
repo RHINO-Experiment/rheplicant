@@ -1,4 +1,4 @@
-"""Forms 5 and 7: reading a named object back, and stacking by name."""
+"""Forms 5 and 7: dimension-aware references and destination-preserving stacks."""
 
 import dataclasses
 import types

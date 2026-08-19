@@ -84,7 +84,7 @@ class TestKinds:
     def test_an_explicit_fact_in_the_wrong_dimension_is_refused(self):
         # A width in seconds converts cleanly through resolve_value, so only
         # the dimension check can tell it from a bandwidth.
-        with pytest.raises(ConfigError, match="bandwidth"):
+        with pytest.raises(ConfigError, match="dimensions"):
             build_noise({"kind": "radiometer",
                          "channel_width": {"value": 2.0, "unit": "s"},
                          "integration_time": {"value": 2.0, "unit": "s"},

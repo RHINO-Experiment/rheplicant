@@ -1,4 +1,4 @@
-"""Form 8: python:, its arguments, and the cost it states."""
+"""Form 8: python:, its destination-addressed arguments, and the cost it states."""
 
 import jax.numpy as jnp
 import pytest

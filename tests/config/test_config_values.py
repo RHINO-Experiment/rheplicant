@@ -1,4 +1,4 @@
-"""The form dispatcher, and form 1: a scalar with its unit."""
+"""The destination-aware form dispatcher, and form 1: a scalar with its unit."""
 
 import jax.numpy as jnp
 import pytest

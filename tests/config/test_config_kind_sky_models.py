@@ -1,4 +1,4 @@
-"""resources.sky_models: four kinds, and the grid a MapSky is pinned to."""
+"""resources.sky_models: addressed kinds, and the grid a MapSky is pinned to."""
 
 import jax.numpy as jnp
 import pytest

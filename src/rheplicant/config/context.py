@@ -8,11 +8,13 @@ detectable rather than an infinite recursion.
 """
 
 import dataclasses
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import jax
 
-from _rheplicant_bootstrap.types import LayerIdentity, TraceSink
+from _rheplicant_bootstrap.types import LayerIdentity, OriginLookup, TraceSink
 from rheplicant.config.dimensions import (
     DimensionEnvironment,
     bind_resource_dimension,
@@ -21,6 +23,36 @@ from rheplicant.config.dimensions import (
 )
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.symbols import ShapeScope
+
+_ACTIVE_LAYER: ContextVar[LayerIdentity | None] = ContextVar(
+    "rheplicant_resolution_layer", default=None
+)
+_ACTIVE_TRACE: ContextVar[TraceSink | None] = ContextVar(
+    "rheplicant_resolution_trace", default=None
+)
+_ACTIVE_ORIGIN_LOOKUP: ContextVar[OriginLookup | None] = ContextVar(
+    "rheplicant_resolution_origin_lookup", default=None
+)
+
+
+@contextmanager
+def using_resolution_audit(
+    layer: LayerIdentity, trace: TraceSink | None, origin_lookup: OriginLookup | None
+):
+    """Give every context created during one layer its audit authority."""
+    layer_token = _ACTIVE_LAYER.set(layer)
+    trace_token = _ACTIVE_TRACE.set(trace)
+    origin_token = _ACTIVE_ORIGIN_LOOKUP.set(origin_lookup)
+    try:
+        yield
+    finally:
+        _ACTIVE_ORIGIN_LOOKUP.reset(origin_token)
+        _ACTIVE_TRACE.reset(trace_token)
+        _ACTIVE_LAYER.reset(layer_token)
+
+
+def _active_layer() -> LayerIdentity:
+    return _ACTIVE_LAYER.get() or LayerIdentity("base", None)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -59,8 +91,11 @@ class ResolutionContext:
     dimensions: DimensionEnvironment = dataclasses.field(
         default_factory=current_dimension_environment
     )
-    layer: LayerIdentity = LayerIdentity("base", None)
-    trace: TraceSink | None = None
+    layer: LayerIdentity = dataclasses.field(default_factory=_active_layer)
+    trace: TraceSink | None = dataclasses.field(default_factory=_ACTIVE_TRACE.get)
+    origin_lookup: OriginLookup | None = dataclasses.field(
+        default_factory=_ACTIVE_ORIGIN_LOOKUP.get
+    )
 
     @property
     def shape_scope(self) -> ShapeScope:

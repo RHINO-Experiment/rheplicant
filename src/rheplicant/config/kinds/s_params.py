@@ -34,6 +34,7 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.derive import register_derivation
 from rheplicant.config.errors import ConfigError
@@ -41,7 +42,12 @@ from rheplicant.config.files import register_reader
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.units import canonical_unit
-from rheplicant.config.values import ResolvedValue, resolve_value
+from rheplicant.config.values import (
+    ResolutionTarget,
+    ResolvedValue,
+    resolve_operand,
+    resolve_value,
+)
 
 S_PARAM_KINDS: tuple[str, ...] = ("touchstone", "termination", "cable")
 COMPONENTS: tuple[str, ...] = ("s11", "s12", "s21", "s22")
@@ -111,7 +117,16 @@ def _dimensioned(
     right one, so that ``{value: 50, unit: "K"}`` on ``z0:`` is refused
     rather than silently treated as fifty ohms.
     """
-    resolved = resolve_value(spec[key], context)
+    kind = spec["kind"]
+    resolved = resolve_value(
+        spec[key],
+        context,
+        destination=DestinationDescriptor(
+            f"{name}.{key}",
+            "resource_field",
+            f"rheplicant.config.kinds.s_params.build_s_param.{kind}.{key}",
+        ),
+    )
     if resolved.unit is not None and resolved.unit.canonical != unit:
         raise ConfigError(f"{name}: {key} must be {what}, got {resolved.unit.canonical!r}.")
     return float(resolved.value)
@@ -166,7 +181,15 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
     # in this package goes through, rather than a private reach into
     # files._READERS that bypassed the hash check and the format's own
     # unknown-key sweep.
-    touchstone = resolve_value({"file": file_spec}, context).value
+    touchstone = resolve_value(
+        {"file": file_spec},
+        context,
+        destination=DestinationDescriptor(
+            f"{name}.file",
+            "resource_field",
+            "rheplicant.config.kinds.s_params.build_s_param.touchstone.file",
+        ),
+    ).value
     if spec.get("onto", "freq") != "freq":
         raise ConfigError(
             f"{name}: onto={spec.get('onto')!r}; the only grid to interpolate onto is "
@@ -260,7 +283,12 @@ def _cable(name: str, spec: dict, context: ResolutionContext, cal):
 @register_derivation(
     "interpolate_onto", frozenset({"of", "onto", "component", "allow_extrapolation"})
 )
-def _interpolate_onto(node, context, modifiers) -> ResolvedValue:
+def _interpolate_onto(
+    node,
+    context,
+    modifiers,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     """``radio/touchstone.py:580`` ``interpolate_onto``, into Plan 1A's table.
 
     ``of:`` is resolved through the value grammar itself -- ``resolve_value``
@@ -284,7 +312,19 @@ def _interpolate_onto(node, context, modifiers) -> ResolvedValue:
             "reads one from disk; {ref: resources.s_params.<name>} reads one back "
             "if that resource holds one."
         )
-    source = resolve_value(node["of"], context).value
+    source = resolve_operand(
+        node["of"],
+        context,
+        parent=target,
+        segment="of",
+        formula="interpolate_onto",
+        role="of",
+        destination=DestinationDescriptor(
+            "interpolate_onto.of",
+            "resource_field",
+            "rheplicant.config.kinds.s_params.build_s_param.touchstone.file",
+        ),
+    ).value
     if not isinstance(source, Touchstone):
         raise ConfigError(
             f"interpolate_onto: 'of' resolved to a {type(source).__name__}, not a "

@@ -51,11 +51,14 @@ from _rheplicant_bootstrap.layering import (
     DeletionRecord,
     OriginNode,
     initial_merge,
+    origins_at,
 )
+from _rheplicant_bootstrap.path_syntax import PATH_STEP
 from _rheplicant_bootstrap.types import (
     CompletedBoundary,
     LayerIdentity,
     Origin,
+    OriginLookup,
     Status,
     TraceSink,
 )
@@ -64,6 +67,7 @@ from _rheplicant_bootstrap.variants import (
     LayerRef,
     enumerate_layers_once,
 )
+from rheplicant.config.context import using_resolution_audit
 from rheplicant.config.dimensions import (
     DimensionEnvironment,
     dimension_environment_for,
@@ -368,6 +372,50 @@ def deletions_for(
     return deletions[layer.identity]
 
 
+def _document_path_segments(document_path: str) -> tuple[str | int, ...]:
+    segments: list[str | int] = []
+    for piece in document_path.split("."):
+        match = PATH_STEP.fullmatch(piece)
+        if match is None:
+            return ()
+        name = match.group("name")
+        index = match.group("index")
+        if name is not None:
+            segments.append(name)
+        if index is not None:
+            segments.append(int(index))
+    return tuple(segments)
+
+
+def _origin_lookup_for(
+    document: Mapping[str, object], origins: OriginNode
+) -> OriginLookup:
+    """Bind concrete value paths to the authority of their payload form."""
+    from rheplicant.config.values import VALUE_FORMS
+
+    def lookup(document_path: str, /) -> Origin | None:
+        segments = _document_path_segments(document_path)
+        if not segments:
+            return None
+        value: object = document
+        try:
+            for segment in segments:
+                value = value[segment]  # type: ignore[index]
+        except (KeyError, IndexError, TypeError):
+            return None
+        authority = segments
+        if isinstance(value, Mapping):
+            forms = [key for key in value if key in VALUE_FORMS]
+            if len(forms) == 1:
+                authority = (*segments, forms[0])
+        try:
+            return origins_at(origins, authority)
+        except ConfigError:
+            return None
+
+    return lookup
+
+
 def prepare_layer_through_built(
     layer: LayerRef,
     *,
@@ -375,6 +423,7 @@ def prepare_layer_through_built(
     base_dir: str | None,
     trace: TraceSink | None,
     dimensions: DimensionEnvironment | None = None,
+    origins: OriginNode | None = None,
 ) -> PreparedLayer:
     """One layer through the axes and built boundaries -> its configured run.
 
@@ -384,7 +433,14 @@ def prepare_layer_through_built(
     report accumulates in pass order.
     """
     environment = dimensions or dimension_environment_for(layer.mutable_document())
-    with using_dimension_environment(environment):
+    origin_lookup = (
+        None
+        if origins is None
+        else _origin_lookup_for(layer.mutable_document(), origins)
+    )
+    with using_dimension_environment(environment), using_resolution_audit(
+        layer.identity, trace, origin_lookup
+    ):
         configured = _build_with_axes(layer.mutable_document(), base_dir=base_dir,
                                       previous=previous, layer=layer.identity,
                                       trace=trace)
@@ -602,6 +658,7 @@ def prepare_document(
             base_dir=base_dir,
             trace=trace,
             dimensions=environments[layer.identity],
+            origins=origins_for(layer, canonical.origins),
         )
         for layer in selected
     )

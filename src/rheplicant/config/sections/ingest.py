@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import register_reader
@@ -153,7 +154,13 @@ def parse_from_file(spec: Any, context: ResolutionContext):
         )
     if "path" not in spec:
         raise ConfigError("observation.from_file: requires path:.")
-    resolved = resolve_value({"file": dict(spec)}, context)
+    resolved = resolve_value(
+        {"file": dict(spec)},
+        context,
+        destination=DestinationDescriptor(
+            "observation.from_file", "config_path", "observation.from_file"
+        ),
+    )
     record = {
         "from_file/path": resolved.modifiers["_path"],
         "from_file/sha256": resolved.modifiers["_sha256"],

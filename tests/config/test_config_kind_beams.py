@@ -1,4 +1,4 @@
-"""resources.beams: eight formats, two required declarations, and one sub-value."""
+"""resources.beams: addressed formats, required declarations, and one sub-value."""
 
 import dataclasses
 

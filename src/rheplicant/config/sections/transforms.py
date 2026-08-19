@@ -18,6 +18,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
@@ -29,7 +30,7 @@ from rheplicant.config.paths import (
 )
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.resources import check_unknown_keys
-from rheplicant.config.values import resolve_value
+from rheplicant.config.values import ResolutionTarget, resolve_operand
 from rheplicant.core.errors import ParameterSpaceError
 
 __all__ = ["build_space", "parse_transform"]
@@ -40,12 +41,42 @@ _MAPPING = ("affine", "matmul", "log_link_basis", "basis_expand",
 _BINDING_KEYS = frozenset({"latents", "into", "transform", "fan"})
 
 
-def _operand(where: str, node: Any, context: ResolutionContext) -> Any:
+def _formula_parent(
+    where: str, formula: str, context: ResolutionContext
+) -> ResolutionTarget:
+    from rheplicant.config import dimensions
+
+    registration = dimensions._FORMULA_REGISTRY[formula]
+    document_path = where.rsplit(".", 1)[0]
+    return ResolutionTarget(
+        DestinationDescriptor(document_path, "config_path", document_path),
+        registration.result,
+        registration.result.signature,
+        None,
+        formula_name=formula,
+    )
+
+
+def _operand(
+    where: str,
+    node: Any,
+    context: ResolutionContext,
+    *,
+    formula: str,
+    role: str,
+) -> Any:
     if isinstance(node, bool) or not isinstance(node, (int, float, Mapping)):
         raise ConfigError(f"{where}: is a number or a value node; got {node!r}.")
-    if isinstance(node, (int, float)):
-        return float(node)
-    return jnp.asarray(resolve_value(node, context).value)
+    return jnp.asarray(
+        resolve_operand(
+            node,
+            context,
+            parent=_formula_parent(where, formula, context),
+            segment=where.rsplit(".", 1)[-1],
+            formula=formula,
+            role=role,
+        ).value
+    )
 
 
 def _whole(where: str, value: Any, minimum: int) -> int:
@@ -212,10 +243,14 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
     if head == "affine":
         check_unknown_keys(where, dict(body), frozenset({"scale", "offset"}),
                            label="affine:")
-        scale = _operand(f"{where}.affine.scale", body.get("scale", 1.0),
-                         context)
-        offset = _operand(f"{where}.affine.offset", body.get("offset", 0.0),
-                          context)
+        scale = _operand(
+            f"{where}.affine.scale", body.get("scale", 1.0), context,
+            formula="transform_affine", role="scale",
+        )
+        offset = _operand(
+            f"{where}.affine.offset", body.get("offset", 0.0), context,
+            formula="transform_affine", role="offset",
+        )
         return (lambda v, _s=scale, _o=offset: _s * v + _o), "broadcast"
     if head == "matmul":
         check_unknown_keys(where, dict(body), frozenset({"design"}),
@@ -223,7 +258,17 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
         if "design" not in body:
             raise ConfigError(f"{where}.matmul: requires design: -- a value "
                               "node for the design matrix.")
-        design = jnp.asarray(resolve_value(body["design"], context).value)
+        design_where = f"{where}.matmul.design"
+        design = jnp.asarray(
+            resolve_operand(
+                body["design"],
+                context,
+                parent=_formula_parent(design_where, "matmul", context),
+                segment="design",
+                formula="matmul",
+                role="design",
+            ).value
+        )
         return (lambda c, _d=design: _d @ c), "broadcast"
     if head == "log_link_basis":
         from rheplicant.core.basis import basis_matrix

@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.gating import CHECK_NAMES, MODES, check_gates
@@ -247,7 +248,15 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                 f"inference.parameters declares "
                 f"{sorted(parsed) if parsed else []}."
             )
-        truth[name] = jnp.asarray(resolve_value(node, context).value,
+        truth[name] = jnp.asarray(resolve_value(
+                                      node,
+                                      context,
+                                      destination=DestinationDescriptor(
+                                          f"inference.truth.{name}",
+                                          "config_path",
+                                          "inference.truth.*",
+                                      ),
+                                  ).value,
                                   dtype=context.dtype)
         omitted.pop(name, None)
     return InferenceBuild(fit_twin=fit_twin, space=space, noise=noise,

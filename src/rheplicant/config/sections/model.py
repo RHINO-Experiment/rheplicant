@@ -25,8 +25,9 @@ import inspect
 from collections.abc import Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
-from rheplicant.config.delivery import deliver, field_specs
+from rheplicant.config.delivery import deliver, field_specs, origin_for_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import register_reader
 from rheplicant.config.hatch import import_target
@@ -122,6 +123,10 @@ def _pick_class(node_id: str, classes: tuple[type, ...], spec: Mapping) -> type:
 
 def _field_value(node_id: str, cls: type, name: str, node: Any,
                  context: ResolutionContext) -> Any:
+    destination = DestinationDescriptor(
+        f"model.{node_id}.{name}", "model_field",
+        f"{cls.__module__}.{cls.__qualname__}.{name}",
+    )
     if name in _object_fields(cls):
         if not isinstance(node, Mapping) or set(node) != {"ref"}:
             raise ConfigError(
@@ -138,12 +143,20 @@ def _field_value(node_id: str, cls: type, name: str, node: Any,
         # and lets deliver()'s static_str/static_other rules judge the fit.
         resolved = ResolvedValue(node, None, "scalar", {})
     else:
-        resolved = resolve_value(node, context)
+        resolved = resolve_value(node, context, destination=destination)
     if resolved.unit is not None:
         check_field_name_unit(name, resolved.unit)
-    return deliver(resolved.value, field_specs(cls)[name],
-                   dtype=context.dtype, source=resolved.source,
-                   declared_as=resolved.modifiers.get("as"))
+    delivered = deliver(resolved.value, field_specs(cls)[name],
+                        dtype=context.dtype, source=resolved.source,
+                        declared_as=resolved.modifiers.get("as"),
+                        destination=destination)
+    if context.trace is not None:
+        context.trace.record_delivery(
+            context.layer, destination, dtype=context.dtype,
+            origin=origin_for_delivery(context, destination),
+            unit=None if resolved.unit is None else resolved.unit.canonical,
+        )
+    return delivered
 
 
 def _construct(node_id: str, cls: type, spec: Mapping,
@@ -203,8 +216,15 @@ def _c7_beam_spill(ref: str, projector: Any, t_ground: Any,
         return BeamSpillOperator.from_projector(projector, t_ground=t_ground)
     except StateValidationError as exc:
         try:
-            resolve_value({"from": "horizon_fraction",
-                           "projector": {"ref": ref}}, context)
+            resolve_value(
+                {"from": "horizon_fraction", "projector": {"ref": ref}},
+                context,
+                destination=DestinationDescriptor(
+                    "model.beam_spill.sky_fraction",
+                    "model_field",
+                    "rheplicant.radio.instrument.beam_spill.BeamSpillOperator.sky_fraction",
+                ),
+            )
         except ConfigError as better:
             raise ConfigError(
                 f"model.beam_spill.projector: {better}"
@@ -335,7 +355,15 @@ def _apply_eqx_leaves(node_id: str, spec: Any, operator,
                                  "_template": operator}
     if "sha256" in spec:
         file_spec["sha256"] = spec["sha256"]
-    return resolve_value({"file": file_spec}, context).value
+    return resolve_value(
+        {"file": file_spec},
+        context,
+        destination=DestinationDescriptor(
+            f"model.{node_id}.eqx_leaves",
+            "config_path",
+            "model.*.eqx_leaves",
+        ),
+    ).value
 
 
 @register_reader("eqx_leaves", frozenset({"_template"}), array=False)

@@ -1,4 +1,4 @@
-"""resources.bases, and the basis_fit value form."""
+"""resources.bases, and the destination-preserving basis_fit value form."""
 
 import jax.numpy as jnp
 import pytest

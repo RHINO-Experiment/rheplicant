@@ -1,4 +1,4 @@
-"""observation.pointing -> Coordinates.pointing / coords.extra entries."""
+"""Addressed observation.pointing -> Coordinates.pointing / coords.extra entries."""
 
 import jax.numpy as jnp
 import numpy as np

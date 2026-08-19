@@ -19,6 +19,7 @@ from typing import Any, NamedTuple
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
@@ -112,7 +113,15 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
     if "from_file" in spec:
         check_unknown_keys("observation.pointing", dict(spec),
                            frozenset({"from_file"}), label="lst:")
-        resolved = resolve_value({"file": dict(spec["from_file"])}, context)
+        resolved = resolve_value(
+            {"file": dict(spec["from_file"])},
+            context,
+            destination=DestinationDescriptor(
+                "observation.pointing.lst.from_file",
+                "config_path",
+                "observation.pointing.lst.from_file",
+            ),
+        )
         if resolved.unit is not None and resolved.unit.dimension != "angle":
             raise ConfigError(
                 f"pointing.lst.from_file: declares unit "
@@ -139,7 +148,9 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
             )
         lst0 = 0.0
         if "lst0_deg" in spec:
-            lst0 = _angle("pointing.lst.lst0_deg", spec["lst0_deg"], context)
+            lst0 = _angle(
+                "observation.pointing.lst.lst0_deg", spec["lst0_deg"], context
+            )
         from rheplicant.radio import DriftScanProjector
 
         return DriftScanProjector.uniform_lst_grid(n_time, lst0)
@@ -226,9 +237,9 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
                 f"observation.pointing: materialise entries are "
                 f"{list(_MATERIALISE)}; got {materialise!r}."
             )
-        az = _angle("pointing.az_deg", spec.get("az_deg", 0.0), context) \
+        az = _angle("observation.pointing.az_deg", spec.get("az_deg", 0.0), context) \
             if "az_deg" in spec else 0.0
-        el = _angle("pointing.el_deg", spec["el_deg"], context) \
+        el = _angle("observation.pointing.el_deg", spec["el_deg"], context) \
             if "el_deg" in spec else 90.0
         pointing = None
         if "pointing" in materialise:
@@ -237,7 +248,7 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
         if "selfrot_deg" in keys:
             selfrot = 0.0
             if "selfrot_deg" in spec:
-                selfrot = _angle("pointing.selfrot_deg", spec["selfrot_deg"],
+                selfrot = _angle("observation.pointing.selfrot_deg", spec["selfrot_deg"],
                                  context)
             extra["selfrot_deg"] = jnp.broadcast_to(
                 jnp.asarray(selfrot, dtype=context.dtype), (n_time,))
@@ -252,7 +263,7 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
             "observation.pointing: mode: tracked requires table: -- a value "
             "node of shape (n_time, 2), az/el in degrees."
         )
-    resolved = _dimensioned("pointing.table", spec["table"], context,
+    resolved = _dimensioned("observation.pointing.table", spec["table"], context,
                             dimension="angle", what="the az/el track")
     table = jnp.asarray(resolved.value, dtype=context.dtype)
     if table.shape != (n_time, 2):
@@ -274,7 +285,7 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
                                 epoch_unix_s=epoch_unix_s, site=site)
     if "selfrot_deg" in keys:
         selfrot = jnp.asarray(
-            _dimensioned("pointing.selfrot", spec["selfrot"], context,
+            _dimensioned("observation.pointing.selfrot", spec["selfrot"], context,
                          dimension="angle", what="the self-rotation track"
                          ).value, dtype=context.dtype)
         if selfrot.shape != (n_time,):

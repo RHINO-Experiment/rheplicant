@@ -1,4 +1,4 @@
-"""resources.s_params: three kinds, and the component a 1-port file cannot give."""
+"""resources.s_params: addressed kinds, and the component a 1-port file cannot give."""
 
 import dataclasses
 

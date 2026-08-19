@@ -17,6 +17,7 @@ from typing import Any, NamedTuple
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
@@ -63,7 +64,14 @@ def _operand(name: str, node: Any, context: ResolutionContext) -> Any:
         )
     if isinstance(node, (int, float)):
         return float(node)
-    return resolve_value(node, context).value
+    pieces = name.split(".")
+    pieces[2] = "*"
+    selector = ".".join(pieces)
+    return resolve_value(
+        node,
+        context,
+        destination=DestinationDescriptor(name, "config_path", selector),
+    ).value
 
 
 def _parse_prior(name: str, spec: Any, init: jnp.ndarray,
@@ -77,7 +85,15 @@ def _parse_prior(name: str, spec: Any, init: jnp.ndarray,
     body = dict(spec)
     body.pop("unit", None)
     if "python" in body:
-        return resolve_value(dict(spec), context).value
+        return resolve_value(
+            dict(spec),
+            context,
+            destination=DestinationDescriptor(
+                f"{where}.python",
+                "config_path",
+                "inference.parameters.*.prior.python",
+            ),
+        ).value
     families = sorted(set(body) & set(_PRIOR_FAMILIES))
     if len(families) != 1 or set(body) - set(_PRIOR_FAMILIES):
         raise ConfigError(
@@ -158,7 +174,15 @@ def parse_latents(section: Any,
                 f"{where}: init: is required -- it is the authority on the "
                 "latent's shape and dtype (Latent.init, parameters.py:210)."
             )
-        resolved = resolve_value(spec["init"], context)
+        resolved = resolve_value(
+            spec["init"],
+            context,
+            destination=DestinationDescriptor(
+                f"{where}.init",
+                "config_path",
+                "inference.parameters.*.init",
+            ),
+        )
         init = jnp.asarray(resolved.value, dtype=context.dtype)
         written_unit = resolved.modifiers.get("unit")
         unit = spec.get("unit")
@@ -188,7 +212,15 @@ def parse_latents(section: Any,
             raise ConfigError(f"{where}.latex: is a string; got {latex!r}.")
         ref = spec.get("ref")
         if ref is not None:
-            ref = jnp.asarray(resolve_value(ref, context).value,
+            ref = jnp.asarray(resolve_value(
+                                  ref,
+                                  context,
+                                  destination=DestinationDescriptor(
+                                      f"{where}.ref",
+                                      "config_path",
+                                      "inference.parameters.*.ref",
+                                  ),
+                              ).value,
                               dtype=context.dtype)
         parsed[name] = ParsedLatent(
             latent=Latent(name, init=init,

@@ -38,6 +38,7 @@ from typing import Any, NamedTuple
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.dimensions import dimension_of, signature, signature_token
 from rheplicant.config.errors import ConfigError
@@ -156,6 +157,18 @@ class NoiseBuild(NamedTuple):
     by_observation: dict[str, Any] | None = None
 
 
+def _noise_value(key: str, node: Any, context: ResolutionContext):
+    return resolve_value(
+        node,
+        context,
+        destination=DestinationDescriptor(
+            f"inference.noise.{key}",
+            "config_path",
+            f"inference.noise.{key}",
+        ),
+    )
+
+
 def _fact(where: str, node: Any, observation: ObservationBuild,
           attribute: str, declared_at: str, context: ResolutionContext,
           dimension: str, what: str) -> float:
@@ -214,7 +227,7 @@ def build_noise(section: Any, *, observation: ObservationBuild,
         if "sigma" not in section:
             raise ConfigError("inference.noise: kind: homoscedastic requires "
                               "sigma: -- a value node.")
-        sigma = jnp.asarray(resolve_value(section["sigma"], context).value,
+        sigma = jnp.asarray(_noise_value("sigma", section["sigma"], context).value,
                             dtype=context.dtype)
         axis = section.get("axis", "none")
         if axis not in ("none", "time", "freq"):
@@ -250,7 +263,7 @@ def build_noise(section: Any, *, observation: ObservationBuild,
                 dimension="time", what="a duration")
     floor = 0.0
     if "floor" in section:
-        resolved_floor = resolve_value(section["floor"], context)
+        resolved_floor = _noise_value("floor", section["floor"], context)
         expected = context.dimensions.prediction_dimension or signature("K")
         actual = (
             None if resolved_floor.unit is None else dimension_of(resolved_floor.unit)

@@ -1,4 +1,4 @@
-"""inference.observed: simulation, file, several observations, and the seed."""
+"""inference.observed: concrete named destinations, simulation, files, and seeds."""
 
 import re
 from unittest import mock

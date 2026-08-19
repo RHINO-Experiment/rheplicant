@@ -1,6 +1,9 @@
 """C18, the numeric half: the sigma that drew the data and the sigma that
 weighs it, made to agree.
 
+This slot consumes the already-normalized floor; it is intentionally not a
+twenty-third value resolver producer in Task 12's destination census.
+
 D-C17, the handover's own words: *"a run can carry two sigmas... nothing in
 the package keeps them equal, and if they drift the fit is weighted by a
 number that did not generate the data -- finite, correctly shaped, wrong, and

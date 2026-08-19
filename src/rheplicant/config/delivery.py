@@ -40,6 +40,8 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor, Origin
+from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.core.frozen import FrozenMapping
 
@@ -168,6 +170,37 @@ def deliver(
     dtype: str,
     source: str = "scalar",
     declared_as: str | None = None,
+    destination: DestinationDescriptor | None = None,
+) -> Any:
+    """Public compatibility wrapper for destination-aware delivery."""
+    return deliver_checked(
+        value, spec, dtype=dtype, source=source, declared_as=declared_as,
+        destination=destination,
+    )
+
+
+def origin_for_delivery(
+    context: ResolutionContext, destination: DestinationDescriptor, *, defaulted: bool = False
+) -> Origin:
+    """Find the payload authority exactly; never fabricate a user origin."""
+    if defaulted:
+        return Origin("rheplicant-default")
+    if context.origin_lookup is None:
+        raise ConfigError(f"audit: no origin lookup for {destination.document_path!r}")
+    origin = context.origin_lookup(destination.document_path)
+    if origin is None:
+        raise ConfigError(f"audit: no origin for {destination.document_path!r}")
+    return origin
+
+
+def deliver_checked(
+    value: Any,
+    spec: FieldSpec,
+    *,
+    dtype: str,
+    source: str = "scalar",
+    declared_as: str | None = None,
+    destination: DestinationDescriptor | None = None,
 ) -> Any:
     """Coerce a resolved value into what ``spec``'s field will accept.
 

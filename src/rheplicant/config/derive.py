@@ -31,7 +31,12 @@ from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.registry import LiveNames
 from rheplicant.config.units import canonical_unit
-from rheplicant.config.values import VALUE_MODIFIERS, ResolvedValue, register_form
+from rheplicant.config.values import (
+    VALUE_MODIFIERS,
+    ResolutionTarget,
+    ResolvedValue,
+    register_form,
+)
 
 #: name -> (function, accepted argument keys, keys routed to the function so
 #: it may refuse them by name). Paired deliberately: a derivation added to one
@@ -125,7 +130,7 @@ def _median_gap(axis, *, name: str, axis_name: str):
 
 
 @register_derivation("channel_spacing", frozenset({"times"}))
-def _channel_spacing(node, context, modifiers):
+def _channel_spacing(node, context, modifiers, target):
     gap = _median_gap(context.freq, name="channel_spacing", axis_name="frequency")
     return ResolvedValue(
         gap * float(node.get("times", 1.0)), canonical_unit("Hz"), "from", modifiers
@@ -133,7 +138,7 @@ def _channel_spacing(node, context, modifiers):
 
 
 @register_derivation("sample_cadence", frozenset({"times"}))
-def _sample_cadence(node, context, modifiers):
+def _sample_cadence(node, context, modifiers, target):
     gap = _median_gap(context.time, name="sample_cadence", axis_name="time")
     return ResolvedValue(
         gap * float(node.get("times", 1.0)), canonical_unit("s"), "from", modifiers
@@ -141,7 +146,7 @@ def _sample_cadence(node, context, modifiers):
 
 
 @register_derivation("basis_matrix", frozenset({"kind", "n_basis", "axis"}), frozenset({"n"}))
-def _basis_matrix(node, context, modifiers):
+def _basis_matrix(node, context, modifiers, target):
     from rheplicant.core.basis import basis_matrix
 
     if "n" in node:
@@ -174,7 +179,7 @@ def _basis_matrix(node, context, modifiers):
 
 
 @register_derivation("unit_mean_free", frozenset({"bandpass"}))
-def _unit_mean_free(node, context, modifiers):
+def _unit_mean_free(node, context, modifiers, target):
     """``receiver.py:103``: ``(bandpass / mean(bandpass))[:-1]``.
 
     The result is one element SHORTER than the bandpass it came from, and that
@@ -184,12 +189,21 @@ def _unit_mean_free(node, context, modifiers):
     quietly restored the length would hand the gain and the bandpass back the
     exactly-null direction the coordinate exists to remove.
     """
-    from rheplicant.config.values import resolve_value
+    from rheplicant.config.values import resolve_operand
     from rheplicant.radio.instrument.receiver import unit_mean_free
 
     if "bandpass" not in node:
         raise ConfigError("unit_mean_free: 'bandpass' is required and is itself a value node.")
-    bandpass = jnp.asarray(resolve_value(node["bandpass"], context).value)
+    bandpass = jnp.asarray(
+        resolve_operand(
+            node["bandpass"],
+            context,
+            parent=target,
+            segment="bandpass",
+            formula="unit_mean_free",
+            role="bandpass",
+        ).value
+    )
     with _package_guard(
         "unit_mean_free",
         f"The document controls the bandpass: node, which resolved to shape "
@@ -200,7 +214,12 @@ def _unit_mean_free(node, context, modifiers):
 
 
 @register_form("from", arguments=None)
-def _from(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _from(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     name = node["from"]
     entry = _DERIVATIONS.get(name)
     if entry is None:
@@ -217,4 +236,4 @@ def _from(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedVa
         raise ConfigError(
             f"Derivation {name!r} does not take {unknown}; its arguments are {sorted(arguments)}."
         )
-    return fn(node, context, modifiers)
+    return fn(node, context, modifiers, target)

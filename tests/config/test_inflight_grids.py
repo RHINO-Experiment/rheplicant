@@ -8,6 +8,8 @@ the wave-1 branches register checks that run on these same documents, so an
 exact set is a merge hazard and not a property; the property each test carries
 is the whole-message pin beside it.
 
+The static value route is also one of Task 12's destination-censused producers.
+
 The discriminating documents in this module are narrow ones, and that is
 measured rather than stylistic.  On RHINO's own 60-85 MHz band schema §6's
 A13 ceiling and ``calibration.py``'s differ by only 14 %, and on a band with

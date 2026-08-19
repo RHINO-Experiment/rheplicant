@@ -1,4 +1,4 @@
-"""resources.arrays: composition by naming, which is why there is no expression language."""
+"""resources.arrays: a named, destination-addressed value without expressions."""
 
 import jax.numpy as jnp
 import pytest

@@ -20,6 +20,7 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
@@ -48,7 +49,19 @@ _ALLOWED_KEYS: dict[str, frozenset[str]] = {
 def _traced(spec: dict, key: str, context: ResolutionContext, name: str):
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for kind={spec.get('kind')!r}.")
-    return jnp.asarray(resolve_value(spec[key], context).value, dtype=context.dtype)
+    kind = spec["kind"]
+    return jnp.asarray(
+        resolve_value(
+            spec[key],
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.{key}",
+                "resource_field",
+                f"rheplicant.config.kinds.sky_models.build_sky_model.{kind}.{key}",
+            ),
+        ).value,
+        dtype=context.dtype,
+    )
 
 
 def _static_int(spec: dict, key: str, name: str) -> int:
@@ -67,7 +80,16 @@ def _static_int(spec: dict, key: str, name: str) -> int:
 def _static_float(spec: dict, key: str, context: ResolutionContext, name: str) -> float:
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for kind={spec.get('kind')!r}.")
-    resolved = resolve_value(spec[key], context)
+    kind = spec["kind"]
+    resolved = resolve_value(
+        spec[key],
+        context,
+        destination=DestinationDescriptor(
+            f"{name}.{key}",
+            "resource_field",
+            f"rheplicant.config.kinds.sky_models.build_sky_model.{kind}.{key}",
+        ),
+    )
     if resolved.source != "scalar":
         raise ConfigError(
             f"{name}: {key} is a static field and this value is a {resolved.source!r} "
@@ -148,7 +170,18 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "untouched, so one argument cannot be both."
             )
         factory = import_target(target)
-        arguments = {key: resolve_value(value, context).value for key, value in args.items()}
+        arguments = {
+            key: resolve_value(
+                value,
+                context,
+                destination=DestinationDescriptor(
+                    f"{name}.args.{key}",
+                    "resource_field",
+                    "rheplicant.config.kinds.sky_models.build_sky_model.python.args.*",
+                ),
+            ).value
+            for key, value in args.items()
+        }
         arguments.update(literal)
         return factory(**arguments)
     return _build_maps(name, spec, context)
@@ -165,7 +198,15 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
             "would be read as RING: same shape, same statistics, every pixel in the "
             "wrong place. Reorder it before declaring it."
         )
-    resolved_maps = resolve_value(spec.get("maps", {}), context)
+    resolved_maps = resolve_value(
+        spec.get("maps", {}),
+        context,
+        destination=DestinationDescriptor(
+            f"{name}.maps",
+            "resource_field",
+            "rheplicant.config.kinds.sky_models.build_sky_model.maps.maps",
+        ),
+    )
     maps_value = resolved_maps.value
     if "unit" in spec:
         if resolved_maps.unit is not None:
@@ -175,7 +216,17 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
             )
         maps_value, _ = convert_to_canonical(maps_value, spec["unit"])
     maps = jnp.asarray(maps_value, dtype=context.dtype)
-    freq = jnp.asarray(resolve_value(spec.get("freq", {}), context).value)
+    freq = jnp.asarray(
+        resolve_value(
+            spec.get("freq", {}),
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.freq",
+                "resource_field",
+                "rheplicant.config.kinds.sky_models.build_sky_model.maps.freq",
+            ),
+        ).value
+    )
     expected_pix = 12 * nside * nside
     if maps.ndim != 2:
         raise ConfigError(

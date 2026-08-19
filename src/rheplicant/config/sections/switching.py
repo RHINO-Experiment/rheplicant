@@ -13,6 +13,7 @@ from typing import Any, NamedTuple
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
@@ -97,7 +98,17 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
                 "switching: cycle: from_file requires index: -- a value node "
                 "holding the (n_time,) integer switch states."
             )
-        index = jnp.asarray(resolve_value(spec["index"], context).value)
+        index = jnp.asarray(
+            resolve_value(
+                spec["index"],
+                context,
+                destination=DestinationDescriptor(
+                    "observation.switching.index",
+                    "config_path",
+                    "observation.switching.index",
+                ),
+            ).value
+        )
         if index.shape != (n_time,):
             raise ConfigError(
                 f"switching.index: is (n_time,) = ({n_time},); got "
@@ -120,7 +131,15 @@ def compile_switching(spec: Any, context: ResolutionContext, *,
         return SwitchingBuild(order=order, receiver_input=index)
 
     dwell_node = spec.get("dwell", 1)
-    resolved = resolve_value(dwell_node, context)
+    resolved = resolve_value(
+        dwell_node,
+        context,
+        destination=DestinationDescriptor(
+            "observation.switching.dwell",
+            "config_path",
+            "observation.switching.dwell",
+        ),
+    )
     if resolved.unit is not None and resolved.unit.canonical != "samples":
         raise ConfigError(
             f"switching.dwell: is a sample count (unit: samples); got unit "

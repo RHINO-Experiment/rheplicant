@@ -22,7 +22,11 @@ from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.units import canonical_unit
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.values import (
+    ResolutionTarget,
+    ResolvedValue,
+    register_form,
+)
 from rheplicant.core.basis import BASIS_KINDS, SeparableBasis, basis_matrix
 
 
@@ -98,7 +102,12 @@ def build_basis(name: str, spec: dict, context: ResolutionContext) -> SeparableB
 
 
 @register_form("basis_fit")
-def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _basis_fit(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     """Least-squares coefficients of a field on a named basis.
 
     ``SeparableBasis.fit`` is the package's own solver (``core/basis.py:381``),
@@ -106,7 +115,7 @@ def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> Resol
     would have to be given to reproduce the field.
     """
     from rheplicant.config.refs import resolve_reference
-    from rheplicant.config.values import resolve_value
+    from rheplicant.config.values import resolve_operand
 
     spec = node["basis_fit"]
     # The three checks below used to be one combined refusal; split so a
@@ -134,7 +143,14 @@ def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> Resol
         raise ConfigError(
             f"basis_fit: {reference['ref']!r} is {type(basis).__name__}, not SeparableBasis."
         )
-    field = resolve_value(spec["field"], context).value
+    field = resolve_operand(
+        spec["field"],
+        context,
+        parent=target,
+        segment="basis_fit.field",
+        formula="basis_fit",
+        role="field",
+    ).value
     # canonical_unit(), not convert_to_canonical(): this only LABELS the fit's
     # result, it does not scale it. That is safe only because every token in
     # ACCEPTED_UNITS is today an identity conversion (factor 1, offset 0) --

@@ -1,4 +1,4 @@
-"""inference.parameters: the latent grammar, and the priors that broadcast."""
+"""inference.parameters: addressed latents and priors that inherit dimensions."""
 
 import jax.numpy as jnp
 import pytest
