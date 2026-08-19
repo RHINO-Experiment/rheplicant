@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from .test_document import BASE
 
@@ -139,3 +140,84 @@ def test_unknown_session_is_404_and_payloads_are_closed(client):
         json={"expected_revision": 0, "surprise": True},
     )
     assert response.status_code == 422
+
+
+def test_graph_editor_routes_commit_many_order_compose_placement_and_snapshot(client):
+    document = """\
+model:
+  gain: {type: GainOperator, gain: 1.0}
+  flagging: {type: FlaggingOperator, threshold: 4.0}
+  filters:
+    - {type: FourierBandFilter, name: first}
+    - {type: SkySpaceFilter, name: second}
+variants:
+  alternate:
+    model: {}
+runs: []
+"""
+    created = client.post("/api/sessions", json={"yaml_text": document}).json()
+    session_id = created["session_id"]
+
+    many = client.put(
+        f"/api/sessions/{session_id}/nodes/filters/many",
+        json={
+            "expected_revision": 0,
+            "entries": [
+                {"type": "FourierBandFilter", "name": "first"},
+                {"type": "SkySpaceFilter", "name": "second"},
+                {"type": "DelayFilter", "name": "third"},
+            ],
+            "variant": None,
+        },
+    )
+    assert many.status_code == 200
+
+    moved = client.post(
+        f"/api/sessions/{session_id}/nodes/filters/move",
+        json={"expected_revision": 1, "from_index": 2, "to_index": 0},
+    )
+    assert moved.status_code == 200
+    assert [
+        item["name"]
+        for item in yaml.safe_load(moved.json()["document"]["yaml_text"])["model"]["filters"]
+    ] == ["third", "first", "second"]
+
+    composed = client.put(
+        f"/api/sessions/{session_id}/nodes/gain/compose",
+        json={
+            "expected_revision": 2,
+            "compose": "cascade",
+            "stages": [
+                {"name": "lna", "type": "GainOperator", "gain": 0.5},
+                {"name": "post", "type": "GainOperator", "gain": 2.0},
+            ],
+        },
+    )
+    assert composed.status_code == 200
+
+    placed = client.put(
+        f"/api/sessions/{session_id}/nodes/cw_tone/placement",
+        json={
+            "expected_revision": 3,
+            "at": ["noise", "emi"],
+            "settings": {"python": "pkg:Tone", "amplitude": 1.0},
+        },
+    )
+    assert placed.status_code == 200
+    placed_model = yaml.safe_load(placed.json()["document"]["yaml_text"])["model"]
+    assert placed_model["emi"]["at"] == ["noise", "emi"]
+
+    snapped = client.put(
+        f"/api/sessions/{session_id}/nodes/flagging/snapshot-before",
+        json={"expected_revision": 4, "snapshot_name": "raw"},
+    )
+    assert snapped.status_code == 200
+    snapped_document = yaml.safe_load(snapped.json()["document"]["yaml_text"])
+    assert snapped_document["model"]["flagging"]["snapshot_before"] == "raw"
+    assert snapped_document["outputs"]["write"]["aux"]["keys"] == ["snapshot/raw"]
+
+    conflict = client.post(
+        f"/api/sessions/{session_id}/nodes/filters/move",
+        json={"expected_revision": 2, "from_index": 0, "to_index": 1},
+    )
+    assert conflict.status_code == 409

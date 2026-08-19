@@ -23,12 +23,17 @@ from rheplicant.gui.document import EditorSnapshot, set_node, snapshot
 from rheplicant.gui.session import (
     EditorSession,
     RevisionConflict,
+    compose_session_node,
+    edit_session_many_node,
     edit_session_node,
     load_session_yaml,
     mark_saved,
+    move_session_node_instance,
     new_session,
+    place_session_node,
     redo,
     replace_session_yaml,
+    set_session_snapshot_before,
     undo,
 )
 
@@ -43,7 +48,8 @@ class YamlPayload(_ClosedModel):
 
 class NodeEditPayload(YamlPayload):
     enabled: bool
-    settings: dict[str, object] | None = None
+    settings: dict[str, object] | list[dict[str, object]] | None = None
+    variant: str | None = None
 
 
 class RevisionPayload(_ClosedModel):
@@ -56,7 +62,36 @@ class SessionYamlPayload(RevisionPayload):
 
 class SessionNodeEditPayload(RevisionPayload):
     enabled: bool
-    settings: dict[str, object] | None = None
+    settings: dict[str, object] | list[dict[str, object]] | None = None
+    variant: str | None = None
+
+
+class SessionManyPayload(RevisionPayload):
+    entries: dict[str, object] | list[dict[str, object]]
+    variant: str | None = None
+
+
+class SessionMovePayload(RevisionPayload):
+    from_index: int
+    to_index: int
+    variant: str | None = None
+
+
+class SessionComposePayload(RevisionPayload):
+    compose: str
+    stages: list[dict[str, object]]
+    variant: str | None = None
+
+
+class SessionPlacementPayload(RevisionPayload):
+    at: str | list[str]
+    settings: dict[str, object]
+    variant: str | None = None
+
+
+class SessionSnapshotPayload(RevisionPayload):
+    snapshot_name: str
+    variant: str | None = None
 
 
 class SessionStore:
@@ -158,6 +193,7 @@ def create_app(
                     node_id,
                     enabled=payload.enabled,
                     settings=payload.settings,
+                    variant=payload.variant,
                 )
             )
         except ConfigError as error:
@@ -208,6 +244,100 @@ def create_app(
                 enabled=payload.enabled,
                 settings=payload.settings,
                 expected_revision=payload.expected_revision,
+                variant=payload.variant,
+            ),
+        )
+
+    @app.put("/api/sessions/{session_id}/nodes/{node_id}/many")
+    def edit_session_many_route(
+        session_id: str,
+        node_id: str,
+        payload: SessionManyPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: edit_session_many_node(
+                current,
+                node_id,
+                payload.entries,
+                expected_revision=payload.expected_revision,
+                variant=payload.variant,
+            ),
+        )
+
+    @app.post("/api/sessions/{session_id}/nodes/{node_id}/move")
+    def move_session_node_route(
+        session_id: str,
+        node_id: str,
+        payload: SessionMovePayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: move_session_node_instance(
+                current,
+                node_id,
+                payload.from_index,
+                payload.to_index,
+                expected_revision=payload.expected_revision,
+                variant=payload.variant,
+            ),
+        )
+
+    @app.put("/api/sessions/{session_id}/nodes/{node_id}/compose")
+    def compose_session_node_route(
+        session_id: str,
+        node_id: str,
+        payload: SessionComposePayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: compose_session_node(
+                current,
+                node_id,
+                payload.compose,
+                payload.stages,
+                expected_revision=payload.expected_revision,
+                variant=payload.variant,
+            ),
+        )
+
+    @app.put("/api/sessions/{session_id}/nodes/{node_id}/placement")
+    def place_session_node_route(
+        session_id: str,
+        node_id: str,
+        payload: SessionPlacementPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: place_session_node(
+                current,
+                node_id,
+                payload.at,
+                payload.settings,
+                expected_revision=payload.expected_revision,
+                variant=payload.variant,
+            ),
+        )
+
+    @app.put("/api/sessions/{session_id}/nodes/{node_id}/snapshot-before")
+    def snapshot_session_node_route(
+        session_id: str,
+        node_id: str,
+        payload: SessionSnapshotPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: set_session_snapshot_before(
+                current,
+                node_id,
+                payload.snapshot_name,
+                expected_revision=payload.expected_revision,
+                variant=payload.variant,
             ),
         )
 

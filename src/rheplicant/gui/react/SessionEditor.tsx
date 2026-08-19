@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { ConfigForms } from "./ConfigForms";
+import { GraphEditor } from "./GraphEditor";
 import type { EditorSession, SessionTransport } from "./types";
 
 type ReadFile = (file: File) => Promise<string>;
@@ -134,9 +135,12 @@ export function SessionEditor({
         <button disabled={busy} onClick={save}>Save YAML</button>
       </nav>
 
-      <section aria-label="Signal path projection">
-        <div dangerouslySetInnerHTML={{ __html: session.document.svg }} />
-      </section>
+      <GraphEditor
+        session={session}
+        transport={transport}
+        disabled={busy}
+        onAccept={(next, message) => accept(next, message)}
+      />
 
       <ConfigForms forms={session.document.forms} />
 

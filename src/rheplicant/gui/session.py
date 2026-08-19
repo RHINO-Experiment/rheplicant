@@ -9,13 +9,21 @@ functions at the foot of this module.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 
 from _rheplicant_bootstrap.errors import ConfigError
-from rheplicant.gui.document import replace_yaml, set_node
+from rheplicant.gui.document import (
+    compose_node,
+    move_node_instance,
+    place_node,
+    replace_yaml,
+    set_many_node,
+    set_node,
+    set_snapshot_before,
+)
 
 
 class RevisionConflict(ConfigError):
@@ -113,7 +121,8 @@ def edit_session_node(
     *,
     enabled: bool,
     expected_revision: int,
-    settings: Mapping[str, object] | None = None,
+    settings: object | None = None,
+    variant: str | None = None,
 ) -> EditorSession:
     """Commit one graph-node transformation against the current YAML."""
     _expect(session, expected_revision)
@@ -122,6 +131,103 @@ def edit_session_node(
         node_id,
         enabled=enabled,
         settings=settings,
+        variant=variant,
+    )
+    return _commit(session, found.yaml_text)
+
+
+def edit_session_many_node(
+    session: EditorSession,
+    node_id: str,
+    entries: object,
+    *,
+    expected_revision: int,
+    variant: str | None = None,
+) -> EditorSession:
+    """Commit one whole SUM/CHAIN/FAN configuration."""
+    _expect(session, expected_revision)
+    found = set_many_node(session.yaml_text, node_id, entries, variant=variant)
+    return _commit(session, found.yaml_text)
+
+
+def move_session_node_instance(
+    session: EditorSession,
+    node_id: str,
+    from_index: int,
+    to_index: int,
+    *,
+    expected_revision: int,
+    variant: str | None = None,
+) -> EditorSession:
+    """Commit one ordered list move."""
+    _expect(session, expected_revision)
+    found = move_node_instance(
+        session.yaml_text,
+        node_id,
+        from_index,
+        to_index,
+        variant=variant,
+    )
+    return _commit(session, found.yaml_text)
+
+
+def compose_session_node(
+    session: EditorSession,
+    node_id: str,
+    compose: str,
+    stages: Sequence[Mapping[str, object]],
+    *,
+    expected_revision: int,
+    variant: str | None = None,
+) -> EditorSession:
+    """Commit an ordered multi-stage composition at one node."""
+    _expect(session, expected_revision)
+    found = compose_node(
+        session.yaml_text,
+        node_id,
+        compose,
+        stages,
+        variant=variant,
+    )
+    return _commit(session, found.yaml_text)
+
+
+def place_session_node(
+    session: EditorSession,
+    node_id: str,
+    at: str | Sequence[str],
+    settings: Mapping[str, object],
+    *,
+    expected_revision: int,
+    variant: str | None = None,
+) -> EditorSession:
+    """Commit a custom operator placement or region."""
+    _expect(session, expected_revision)
+    found = place_node(
+        session.yaml_text,
+        node_id,
+        at,
+        settings,
+        variant=variant,
+    )
+    return _commit(session, found.yaml_text)
+
+
+def set_session_snapshot_before(
+    session: EditorSession,
+    node_id: str,
+    snapshot_name: str,
+    *,
+    expected_revision: int,
+    variant: str | None = None,
+) -> EditorSession:
+    """Commit the processing snapshot and its aux-product request together."""
+    _expect(session, expected_revision)
+    found = set_snapshot_before(
+        session.yaml_text,
+        node_id,
+        snapshot_name,
+        variant=variant,
     )
     return _commit(session, found.yaml_text)
 
@@ -233,16 +339,21 @@ def save_session_file(
 
 
 __all__ = [
+    "compose_session_node",
     "EditorSession",
     "RevisionConflict",
+    "edit_session_many_node",
     "edit_session_node",
     "load_session_file",
     "load_session_yaml",
     "mark_saved",
     "mark_validated",
+    "move_session_node_instance",
     "new_session",
+    "place_session_node",
     "redo",
     "replace_session_yaml",
     "save_session_file",
+    "set_session_snapshot_before",
     "undo",
 ]

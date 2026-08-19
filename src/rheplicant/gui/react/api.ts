@@ -19,6 +19,10 @@ function postRevision(path: string, expectedRevision: number) {
   });
 }
 
+function nodePath(sessionId: string, nodeId: string, suffix = "") {
+  return `/api/sessions/${encodeURIComponent(sessionId)}/nodes/${encodeURIComponent(nodeId)}${suffix}`;
+}
+
 export const sessionTransport: SessionTransport = {
   replaceYaml(sessionId, yamlText, expectedRevision) {
     return request(`/api/sessions/${encodeURIComponent(sessionId)}/yaml`, {
@@ -55,5 +59,72 @@ export const sessionTransport: SessionTransport = {
       `/api/sessions/${encodeURIComponent(sessionId)}/save`,
       expectedRevision,
     );
+  },
+  editNode(sessionId, nodeId, enabled, settings, expectedRevision, variant) {
+    return request(nodePath(sessionId, nodeId), {
+      method: "PATCH",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        enabled,
+        settings,
+        variant,
+      }),
+    });
+  },
+  moveNodeInstance(
+    sessionId,
+    nodeId,
+    fromIndex,
+    toIndex,
+    expectedRevision,
+    variant,
+  ) {
+    return request(nodePath(sessionId, nodeId, "/move"), {
+      method: "POST",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        from_index: fromIndex,
+        to_index: toIndex,
+        variant,
+      }),
+    });
+  },
+  composeNode(sessionId, nodeId, compose, stages, expectedRevision, variant) {
+    return request(nodePath(sessionId, nodeId, "/compose"), {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        compose,
+        stages,
+        variant,
+      }),
+    });
+  },
+  placeNode(sessionId, nodeId, at, settings, expectedRevision, variant) {
+    return request(nodePath(sessionId, nodeId, "/placement"), {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        at,
+        settings,
+        variant,
+      }),
+    });
+  },
+  setSnapshotBefore(
+    sessionId,
+    nodeId,
+    snapshotName,
+    expectedRevision,
+    variant,
+  ) {
+    return request(nodePath(sessionId, nodeId, "/snapshot-before"), {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        snapshot_name: snapshotName,
+        variant,
+      }),
+    });
   },
 };

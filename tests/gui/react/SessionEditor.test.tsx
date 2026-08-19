@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionEditor } from "../../../src/rheplicant/gui/react/SessionEditor";
 import type {
   EditorSession,
+  GraphDiagram,
   SessionTransport,
 } from "../../../src/rheplicant/gui/react/types";
 
@@ -13,6 +14,27 @@ const YAML = "model:\n  gain:\n    type: GainOperator\n    gain: 1.0\n";
 const EDITED = YAML.replace("1.0", "1.25");
 const SVG = '<svg><g data-node-id="gain" role="button"><text>gain</text></g></svg>';
 const FORMS = { sections: [], missing_required: [] };
+const DIAGRAM: GraphDiagram = {
+  name: "base",
+  svg: SVG,
+  nodes: [],
+  walk_order: [],
+  counts: { lit: 0, skipped: 0, reserved: 0, instances: 0, materialized: 0 },
+  changed_nodes: [],
+};
+
+function documentState(yamlText = YAML) {
+  return {
+    yaml_text: yamlText,
+    svg: SVG,
+    nodes: [],
+    walk_order: [],
+    forms: FORMS,
+    base_diagram: DIAGRAM,
+    backend_diagram: { ...DIAGRAM, name: "backend" },
+    variant_diagrams: [],
+  };
+}
 
 function state(overrides: Partial<EditorSession> = {}): EditorSession {
   return {
@@ -22,7 +44,7 @@ function state(overrides: Partial<EditorSession> = {}): EditorSession {
     validation_stale: true,
     can_undo: false,
     can_redo: false,
-    document: { yaml_text: YAML, svg: SVG, nodes: [], walk_order: [], forms: FORMS },
+    document: documentState(),
     ...overrides,
   };
 }
@@ -46,7 +68,19 @@ function candidate(initial = state()) {
     document: { ...initial.document, yaml_text: yamlText },
   }));
   const save = vi.fn(async () => state({ revision: initial.revision + 1 }));
-  const transport: SessionTransport = { replaceYaml, undo, redo, load, save };
+  const unchanged = vi.fn(async () => initial);
+  const transport: SessionTransport = {
+    replaceYaml,
+    undo,
+    redo,
+    load,
+    save,
+    editNode: unchanged,
+    moveNodeInstance: unchanged,
+    composeNode: unchanged,
+    placeNode: unchanged,
+    setSnapshotBefore: unchanged,
+  };
   return { transport, replaceYaml, undo, redo, load, save };
 }
 
@@ -72,7 +106,7 @@ describe("durable React editor session", () => {
       revision: 1,
       dirty: true,
       can_undo: true,
-      document: { yaml_text: EDITED, svg: SVG, nodes: [], walk_order: [], forms: FORMS },
+      document: documentState(EDITED),
     });
     const { transport, undo, redo } = candidate(initial);
     render(<SessionEditor initial={initial} transport={transport} />);

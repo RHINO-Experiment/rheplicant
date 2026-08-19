@@ -3,10 +3,49 @@ export interface NodeCard {
   label: string;
   kind: "source" | "transform" | "junction" | "selector";
   description: string;
+  explanation: string;
   editable: boolean;
   reserved: boolean;
   many: boolean;
+  segment: "forward" | "processing";
   lit: boolean;
+  count: number;
+  configuration:
+    | "single"
+    | "sum"
+    | "fan"
+    | "chain"
+    | "compose"
+    | "region"
+    | "reserved"
+    | "junction"
+    | "selector";
+  settings: unknown;
+  instances: NodeInstance[];
+  stage_names: string[];
+}
+
+export interface NodeInstance {
+  instance_id: string;
+  label: string;
+  settings: unknown;
+}
+
+export interface GraphCounts {
+  lit: number;
+  skipped: number;
+  reserved: number;
+  instances: number;
+  materialized: number;
+}
+
+export interface GraphDiagram {
+  name: string;
+  svg: string;
+  nodes: NodeCard[];
+  walk_order: string[];
+  counts: GraphCounts;
+  changed_nodes: string[];
 }
 
 export interface EditorSnapshot {
@@ -15,6 +54,9 @@ export interface EditorSnapshot {
   nodes: NodeCard[];
   walk_order: string[];
   forms: FormProjection;
+  base_diagram: GraphDiagram;
+  backend_diagram: GraphDiagram;
+  variant_diagrams: GraphDiagram[];
 }
 
 export interface ProjectedWidget {
@@ -71,4 +113,43 @@ export interface SessionTransport {
     expectedRevision: number,
   ): Promise<EditorSession>;
   save(sessionId: string, expectedRevision: number): Promise<EditorSession>;
+  editNode(
+    sessionId: string,
+    nodeId: string,
+    enabled: boolean,
+    settings: unknown,
+    expectedRevision: number,
+    variant: string | null,
+  ): Promise<EditorSession>;
+  moveNodeInstance(
+    sessionId: string,
+    nodeId: string,
+    fromIndex: number,
+    toIndex: number,
+    expectedRevision: number,
+    variant: string | null,
+  ): Promise<EditorSession>;
+  composeNode(
+    sessionId: string,
+    nodeId: string,
+    compose: "cascade" | "sum",
+    stages: Record<string, unknown>[],
+    expectedRevision: number,
+    variant: string | null,
+  ): Promise<EditorSession>;
+  placeNode(
+    sessionId: string,
+    nodeId: string,
+    at: string | string[],
+    settings: Record<string, unknown>,
+    expectedRevision: number,
+    variant: string | null,
+  ): Promise<EditorSession>;
+  setSnapshotBefore(
+    sessionId: string,
+    nodeId: string,
+    snapshotName: string,
+    expectedRevision: number,
+    variant: string | null,
+  ): Promise<EditorSession>;
 }
