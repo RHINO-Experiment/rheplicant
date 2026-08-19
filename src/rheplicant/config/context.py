@@ -14,6 +14,7 @@ from typing import Any
 
 import jax
 
+from _rheplicant_bootstrap.capture import CaptureService
 from _rheplicant_bootstrap.types import LayerIdentity, OriginLookup, TraceSink
 from rheplicant.config.dimensions import (
     DimensionEnvironment,
@@ -33,19 +34,27 @@ _ACTIVE_TRACE: ContextVar[TraceSink | None] = ContextVar(
 _ACTIVE_ORIGIN_LOOKUP: ContextVar[OriginLookup | None] = ContextVar(
     "rheplicant_resolution_origin_lookup", default=None
 )
+_ACTIVE_CAPTURE: ContextVar[CaptureService | None] = ContextVar(
+    "rheplicant_resolution_capture", default=None
+)
 
 
 @contextmanager
 def using_resolution_audit(
-    layer: LayerIdentity, trace: TraceSink | None, origin_lookup: OriginLookup | None
+    layer: LayerIdentity,
+    trace: TraceSink | None,
+    origin_lookup: OriginLookup | None,
+    capture: CaptureService | None = None,
 ):
     """Give every context created during one layer its audit authority."""
     layer_token = _ACTIVE_LAYER.set(layer)
     trace_token = _ACTIVE_TRACE.set(trace)
     origin_token = _ACTIVE_ORIGIN_LOOKUP.set(origin_lookup)
+    capture_token = _ACTIVE_CAPTURE.set(capture)
     try:
         yield
     finally:
+        _ACTIVE_CAPTURE.reset(capture_token)
         _ACTIVE_ORIGIN_LOOKUP.reset(origin_token)
         _ACTIVE_TRACE.reset(trace_token)
         _ACTIVE_LAYER.reset(layer_token)
@@ -95,6 +104,9 @@ class ResolutionContext:
     trace: TraceSink | None = dataclasses.field(default_factory=_ACTIVE_TRACE.get)
     origin_lookup: OriginLookup | None = dataclasses.field(
         default_factory=_ACTIVE_ORIGIN_LOOKUP.get
+    )
+    capture: CaptureService | None = dataclasses.field(
+        default_factory=_ACTIVE_CAPTURE.get
     )
 
     @property

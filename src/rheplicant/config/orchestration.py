@@ -40,12 +40,18 @@ the concrete ``AuditTrace``.
 from __future__ import annotations
 
 import dataclasses
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
+from _rheplicant_bootstrap.capture import (
+    CapturedInput,
+    CaptureService,
+    captured_input_json,
+)
 from _rheplicant_bootstrap.errors import DirtError
 from _rheplicant_bootstrap.layering import (
     DeletionRecord,
@@ -424,6 +430,7 @@ def prepare_layer_through_built(
     trace: TraceSink | None,
     dimensions: DimensionEnvironment | None = None,
     origins: OriginNode | None = None,
+    capture: CaptureService | None = None,
 ) -> PreparedLayer:
     """One layer through the axes and built boundaries -> its configured run.
 
@@ -439,7 +446,7 @@ def prepare_layer_through_built(
         else _origin_lookup_for(layer.mutable_document(), origins)
     )
     with using_dimension_environment(environment), using_resolution_audit(
-        layer.identity, trace, origin_lookup
+        layer.identity, trace, origin_lookup, capture
     ):
         configured = _build_with_axes(layer.mutable_document(), base_dir=base_dir,
                                       previous=previous, layer=layer.identity,
@@ -604,7 +611,7 @@ def complete_all_postflight(
     return tuple(completed)
 
 
-def prepare_document(
+def _prepare_document_with_capture(
     document: Mapping[str, object],
     *,
     scope: Literal["selected", "all_layers"],
@@ -615,6 +622,7 @@ def prepare_document(
     layer_deletions: Mapping[LayerIdentity, Sequence[DeletionRecord]]
     | None = None,
     trace: TraceSink | None = None,
+    capture: CaptureService,
 ) -> PreparedDocument:
     """Prepare a document through every validation boundary -> the layers.
 
@@ -659,6 +667,7 @@ def prepare_document(
             trace=trace,
             dimensions=environments[layer.identity],
             origins=origins_for(layer, canonical.origins),
+            capture=capture,
         )
         for layer in selected
     )
@@ -671,6 +680,56 @@ def prepare_document(
         parsed_layers, execution_runs=execution_runs, trace=trace,
         origins=canonical.origins, deletions=canonical.deletions)
     return PreparedDocument(completed_layers, execution_runs)
+
+
+def prepare_document(
+    document: Mapping[str, object],
+    *,
+    scope: Literal["selected", "all_layers"],
+    variant: str | None = None,
+    base_dir: str | None = None,
+    layers: Sequence[LayerRef] | None = None,
+    layer_origins: Mapping[LayerIdentity, OriginNode] | None = None,
+    layer_deletions: Mapping[LayerIdentity, Sequence[DeletionRecord]]
+    | None = None,
+    trace: TraceSink | None = None,
+    capture: CaptureService | None = None,
+) -> PreparedDocument:
+    """Prepare through every boundary with one invocation-owned capture root."""
+
+    if capture is not None:
+        return _prepare_document_with_capture(
+            document,
+            scope=scope,
+            variant=variant,
+            base_dir=base_dir,
+            layers=layers,
+            layer_origins=layer_origins,
+            layer_deletions=layer_deletions,
+            trace=trace,
+            capture=capture,
+        )
+
+    def on_verified(layer: LayerIdentity, row: CapturedInput) -> None:
+        if trace is not None:
+            trace.record_input(layer, captured_input_json(row))
+
+    root = tempfile.mkdtemp(prefix="rheplicant-capture-")
+    service = CaptureService(root, on_verified=on_verified)
+    try:
+        return _prepare_document_with_capture(
+            document,
+            scope=scope,
+            variant=variant,
+            base_dir=base_dir,
+            layers=layers,
+            layer_origins=layer_origins,
+            layer_deletions=layer_deletions,
+            trace=trace,
+            capture=service,
+        )
+    finally:
+        service.close()
 
 
 def execute_one_parsed(

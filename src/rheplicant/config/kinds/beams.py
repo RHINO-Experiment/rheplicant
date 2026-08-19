@@ -34,16 +34,22 @@ CST meridian, is the fact its file cannot state. ``healpix`` still needs
 
 import dataclasses
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.capture import manifest_entry, register_capture_route
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.files import resolve_file_path
+from rheplicant.config.files import (
+    consume_captured_directory,
+    consume_captured_file,
+    resolve_file_path,
+)
 from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.values import resolve_value
@@ -68,7 +74,13 @@ RAW_ARRAY_FORMATS: tuple[str, ...] = (
     "python",
 )
 
-_COMMON_FORMAT_KEYS: frozenset[str] = frozenset({"format", "nside", "normalize", "horizon"})
+register_capture_route("cst", owner="resources.beams:cst")
+register_capture_route("uvbeam", owner="resources.beams:uvbeam")
+register_capture_route("healpix", owner="resources.beams:healpix")
+
+_COMMON_FORMAT_KEYS: frozenset[str] = frozenset(
+    {"format", "nside", "normalize", "horizon", "sha256"}
+)
 #: format -> every key that format's builder reads, common keys always
 #: included. Checked by :func:`check_unknown_keys`, right after the
 #: phi0_deg/phi_sense/frame gate below settles which of THOSE three keys
@@ -304,17 +316,35 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
         )
         phi0_deg = float(resolved.value)
         record_resolved_delivery(context, destination, resolved.unit)
-        return jnp.asarray(
-            cst_beam_maps(
-                resolve_file_path(directory, context),
+        source = resolve_file_path(directory, context)
+        suffix = spec.get("suffix", ".txt")
+
+        def enumerate_cst(root: Path):
+            return tuple(
+                manifest_entry(root, path, path.relative_to(root).as_posix())
+                for path in sorted(root.rglob(f"*{suffix}"))
+                if path.is_file()
+            )
+
+        maps = consume_captured_directory(
+            source,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.directory", "config_path", "resources.beams.*.directory"
+            ),
+            format="cst",
+            enumerate_manifest=enumerate_cst,
+            reader=lambda snapshot: cst_beam_maps(
+                snapshot,
                 np.asarray(context.freq),
                 nside=nside,
-                suffix=spec.get("suffix", ".txt"),
+                suffix=suffix,
                 phi0_deg=phi0_deg,
                 phi_sense=spec["phi_sense"],
             ),
-            dtype=context.dtype,
+            declared_sha256=spec.get("sha256"),
         )
+        return jnp.asarray(maps, dtype=context.dtype)
     if fmt == "uvbeam":
         return _uvbeam_maps(name, spec, context, nside)
     if fmt == "healpix":
@@ -440,12 +470,26 @@ def _uvbeam_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
             f"{name}: format: uvbeam needs observation.freq.grid to sample onto."
         )
     path = resolve_file_path(spec["path"], context)
-    try:
-        uvb = pyuvdata.UVBeam.from_file(path)
+
+    def read(snapshot: Path):
+        uvb = pyuvdata.UVBeam.from_file(snapshot)
         rows = [
             uvbeam_to_healpix_maps(uvb, freq_MHz=float(f) / 1e6, nside=nside)
             for f in np.asarray(context.freq)
         ]
+        return np.stack(rows)
+
+    try:
+        rows = consume_captured_file(
+            path,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.path", "config_path", "resources.beams.*.path"
+            ),
+            format="uvbeam",
+            reader=read,
+            declared_sha256=spec.get("sha256"),
+        )
     except ConfigError:
         raise
     except Exception as exc:
@@ -455,7 +499,7 @@ def _uvbeam_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
             "(pyuvdata interpolates, it does not extrapolate), and the beam must "
             "cover a regular (az, za) grid over the full azimuth range."
         ) from exc
-    return jnp.asarray(np.stack(rows), dtype=context.dtype)
+    return jnp.asarray(rows, dtype=context.dtype)
 
 
 def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
@@ -490,8 +534,21 @@ def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int)
     if order not in ("ring", "nested"):
         raise ConfigError(f"{name}: order={order!r}; it is 'ring' or 'nested'.")
     path = resolve_file_path(spec["path"], context)
+
+    def read(snapshot: Path):
+        return hp.read_map(snapshot, field=None, nest=None, h=True)
+
     try:
-        raw, header = hp.read_map(path, field=None, nest=None, h=True)
+        raw, header = consume_captured_file(
+            path,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.path", "config_path", "resources.beams.*.path"
+            ),
+            format="healpix",
+            reader=read,
+            declared_sha256=spec.get("sha256"),
+        )
     except ConfigError:
         raise
     except Exception as exc:
