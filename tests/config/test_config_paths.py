@@ -489,7 +489,8 @@ def shared_projector_run():
                    "projector": {"ref": "resources.projectors.p"}},
                "filters": [{"type": "SkySpaceFilter",
                             "projector": {"ref": "resources.projectors.p"},
-                            "regularization": 1e-3}]})
+                            "regularization": {"value": 1e-3,
+                                               "unit": "dimensionless"}}]})
     return load_document(document)
 
 

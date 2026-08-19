@@ -929,7 +929,9 @@ class TestTheTwins:
         """Both register at node ``flagging`` and only one needs anything."""
         del monkeypatch
         document = preflight_document(
-            model={"flagging": {"type": "FlaggingOperator", "threshold": 3.0}})
+            model={"flagging": {"type": "FlaggingOperator",
+                                "threshold": {"value": 3.0,
+                                               "unit": "adc_count"}}})
         assert "A35" not in ids(document)
 
     def test_the_nuts_exit_and_the_npe_one_are_not_one(self, monkeypatch):
@@ -1268,6 +1270,8 @@ class TestApplyingTheAdvice:
         from rheplicant.config import load_document
 
         document = preflight_document(
-            model={"flagging": {"type": "FlaggingOperator", "threshold": 3.0}})
+            model={"flagging": {"type": "FlaggingOperator",
+                                "threshold": {"value": 3.0,
+                                               "unit": "adc_count"}}})
         assert "A35" not in ids(document)
         load_document(document)

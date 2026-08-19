@@ -156,7 +156,8 @@ MOVED = [
             "gain": GAIN},
      "model.filters: 3 classes register at this node (['FourierBandFilter', "
      "'SiderealFilter', 'SkySpaceFilter']); type: is required."),
-    ("A7", {"flagging": {"threshold": 3.0}, "gain": GAIN},
+    ("A7", {"flagging": {"threshold": {"value": 3.0,
+                                         "unit": "adc_count"}}, "gain": GAIN},
      "model.flagging: 2 classes register at this node (['FlaggingOperator', "
      "'MomentRFIFlaggingOperator']); type: is required."),
     ("A32", {"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN},

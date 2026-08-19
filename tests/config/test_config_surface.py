@@ -2071,10 +2071,6 @@ class TestPlan3CsSurfaceAndItsPage:
         # Execute the claim itself: the most benign ADC this package can
         # build, no linearity decline, no C16 finding, C12 refuses anyway.
         document = unsaturated_linear_case()
-        document["model"]["adc"]["scale"] = {
-            "value": document["model"]["adc"]["scale"],
-            "unit": "adc_count/K",
-        }
         document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         payload = priced_run(document)
         assert payload.run.report.refusals() == (), (

@@ -160,7 +160,8 @@ bound upstream of it is refused by `linearity` at the defaults above, whether
 or not the converter actually saturates.** `check_linearity` probes each
 `linear: true` claim at `(1e-3, 1, 1e3)` times the latent's own scale, and a
 converter that clips nothing at `1x` still clips hard at `1000x`. Measured on
-the most benign ADC this package can build (`model.adc: {scale: 1.0, n_bits:
+the most benign ADC this package can build (`model.adc: {scale: {value: 1.0,
+unit: adc_count/K}, n_bits:
 12}`, achieved peak `12.116166 adc_count` against a `2048 adc_count` clip
 limit — the real forward pass clips *nothing*): `linearity` still refuses,
 departure `5.32e+00` at the `1000x` probe against `rtol=1.19e-03`, with the

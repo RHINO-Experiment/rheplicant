@@ -72,18 +72,16 @@ from tests.config.preflight_helpers import (
 
 
 def test_t5_likelihood_noise_agrees_with_t5_model_noise():
-    """MINOR 6 (Plan 3C fix round): ``T5_LIKELIHOOD_NOISE`` is DERIVED from
-    ``T5_MODEL_NOISE``'s own ``sigma`` at import
-    (``preflight_helpers.py:653-654``: ``{"kind": "homoscedastic", "sigma":
-    dict(T5_MODEL_NOISE["sigma"])}``) so ``t5_case``'s two pinned sides can
-    never independently drift -- but nothing asserted that the derivation
-    actually held.  A future edit that replaced the ``dict(...)`` copy with a
-    literal sigma of its own would silently reopen exactly the C18
-    disagreement ``t5_case``'s own docstring says every C16 document is built
-    to avoid.  This guards the DERIVATION, not a literal: it must still pass
-    whatever number ``T5_MODEL_NOISE["sigma"]`` carries.
+    """The two T5 noise declarations share a value but name different trunks.
+
+    ``T5_MODEL_NOISE`` is upstream Kelvin noise; the likelihood consumes the
+    ADC output and therefore declares ``adc_count``.  Guard the numerical
+    derivation and the intentional unit conversion independently.
     """
-    assert T5_LIKELIHOOD_NOISE["sigma"] == T5_MODEL_NOISE["sigma"]
+    assert T5_LIKELIHOOD_NOISE["sigma"]["value"] == \
+        T5_MODEL_NOISE["sigma"]["value"]
+    assert T5_LIKELIHOOD_NOISE["sigma"]["unit"] == "adc_count"
+    assert T5_MODEL_NOISE["sigma"]["unit"] == "K"
     assert T5_LIKELIHOOD_NOISE["kind"] == "homoscedastic"
 
 
@@ -128,9 +126,9 @@ COMPOSED_ADC = {
     "compose": "cascade",
     "stages": [
         {"name": "first", "type": "ADCOperator",
-         "scale": {"value": 1e6, "unit": "dimensionless"}, "n_bits": 12},
+         "scale": {"value": 1e6, "unit": "adc_count/K"}, "n_bits": 12},
         {"name": "second", "type": "ADCOperator",
-         "scale": {"value": 1.0, "unit": "dimensionless"}, "n_bits": 12},
+         "scale": {"value": 1.0, "unit": "adc_count/K"}, "n_bits": 12},
     ],
 }
 
