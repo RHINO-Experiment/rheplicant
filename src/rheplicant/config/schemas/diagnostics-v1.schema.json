@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rheplicant.invalid/schemas/diagnostics-v1.schema.json",
+  "title": "rheplicant diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "status",
+    "completed_boundaries",
+    "findings",
+    "error",
+    "gates",
+    "deferred_validations",
+    "runs",
+    "artefacts"
+  ],
+  "properties": {
+    "format_version": {"const": 1},
+    "status": {"enum": ["ok", "refused", "error"]},
+    "completed_boundaries": {"type": "array", "items": {"$ref": "#/$defs/boundary"}},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "error": {"anyOf": [{"$ref": "#/$defs/error"}, {"type": "null"}]},
+    "gates": {"type": "array", "items": {"$ref": "#/$defs/gate"}},
+    "deferred_validations": {"type": "array", "items": {"$ref": "#/$defs/deferred"}},
+    "runs": {"type": "array", "items": {"$ref": "#/$defs/run"}},
+    "artefacts": {"$ref": "#/$defs/artefactTable"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reason": {
+      "enum": [
+        "metadata_envelope",
+        "transaction_not_reached",
+        "boundary_not_reached",
+        "layer_not_complete",
+        "not_applicable_to_status"
+      ]
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {"enum": ["base", "variant"]},
+        "name": {"type": ["string", "null"]}
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "layer"],
+      "properties": {
+        "stage": {
+          "enum": [
+            "source",
+            "raw_process_entry",
+            "preset_layering",
+            "effective_process_entry",
+            "output_preflight",
+            "runtime",
+            "plugins",
+            "preflight",
+            "axes",
+            "built",
+            "run_parse",
+            "postflight",
+            "execution",
+            "serialization"
+          ]
+        },
+        "layer": {"anyOf": [{"$ref": "#/$defs/layer"}, {"type": "null"}]}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check", "severity", "where", "message"],
+      "properties": {
+        "check": {"type": "string"},
+        "severity": {"enum": ["refuse", "warn", "report"]},
+        "where": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exception_type", "message"],
+      "properties": {
+        "exception_type": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "name", "schema_id", "declared_mode", "effective_state", "reason"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "name": {"type": "string"},
+        "schema_id": {"type": "string"},
+        "declared_mode": {"type": "string"},
+        "effective_state": {"type": "string"},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "name", "kind", "variant"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "variant": {"type": ["string", "null"]}
+      }
+    },
+    "deferred": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "descriptor", "checks"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "descriptor": {"$ref": "#/$defs/descriptor"},
+        "checks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer", "index", "name", "kind", "variant", "status", "wall_time_ns",
+        "exception_type", "exception_message", "capture_scope", "is_dirt_error", "phases"
+      ],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "index": {"type": "integer", "minimum": 0},
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "variant": {"type": ["string", "null"]},
+        "status": {"enum": ["ok", "expected_refusal", "refused", "error"]},
+        "wall_time_ns": {"type": "integer", "minimum": 0},
+        "exception_type": {"type": ["string", "null"]},
+        "exception_message": {"type": ["string", "null"]},
+        "capture_scope": {"enum": ["arbitrary_exception", null]},
+        "is_dirt_error": {"type": ["boolean", "null"]},
+        "phases": {"type": "array", "maxItems": 0}
+      }
+    },
+    "artefactRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "written", "bytes", "sha256", "reason"],
+      "properties": {
+        "relative_path": {"type": "string"},
+        "written": {"type": "boolean"},
+        "bytes": {"type": ["integer", "null"], "minimum": 0},
+        "sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "reason": {"anyOf": [{"$ref": "#/$defs/reason"}, {"type": "null"}]}
+      }
+    },
+    "artefactTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marker", "lock", "journal", "input", "resolved_base", "resolved_variants", "provenance", "diagnostics"],
+      "properties": {
+        "marker": {"$ref": "#/$defs/artefactRecord"},
+        "lock": {"$ref": "#/$defs/artefactRecord"},
+        "journal": {"$ref": "#/$defs/artefactRecord"},
+        "input": {"$ref": "#/$defs/artefactRecord"},
+        "resolved_base": {"$ref": "#/$defs/artefactRecord"},
+        "resolved_variants": {"type": "array", "items": {"$ref": "#/$defs/artefactRecord"}},
+        "provenance": {"$ref": "#/$defs/artefactRecord"},
+        "diagnostics": {"$ref": "#/$defs/artefactRecord"}
+      }
+    }
+  }
+}

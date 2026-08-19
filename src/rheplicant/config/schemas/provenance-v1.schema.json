@@ -1,0 +1,434 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rheplicant.invalid/schemas/provenance-v1.schema.json",
+  "title": "rheplicant provenance v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "status",
+    "completed_boundaries",
+    "bootstrap",
+    "software",
+    "runtime",
+    "inputs",
+    "plugins",
+    "python_targets",
+    "seeds",
+    "variants",
+    "resources",
+    "runs",
+    "path_encodings",
+    "artefacts"
+  ],
+  "properties": {
+    "format_version": {"const": 1},
+    "status": {"enum": ["ok", "refused", "error"]},
+    "completed_boundaries": {"type": "array", "items": {"$ref": "#/$defs/boundary"}},
+    "bootstrap": {"anyOf": [{"$ref": "#/$defs/bootstrap"}, {"type": "null"}]},
+    "software": {"anyOf": [{"$ref": "#/$defs/software"}, {"type": "null"}]},
+    "runtime": {"anyOf": [{"$ref": "#/$defs/runtime"}, {"type": "null"}]},
+    "inputs": {"type": "array", "items": {"$ref": "#/$defs/input"}},
+    "plugins": {"type": "array", "items": {"$ref": "#/$defs/plugin"}},
+    "python_targets": {"type": "array", "items": {"$ref": "#/$defs/pythonTarget"}},
+    "seeds": {"type": "array", "items": {"$ref": "#/$defs/seed"}},
+    "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
+    "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "runs": {"type": "array", "items": {"$ref": "#/$defs/run"}},
+    "path_encodings": {"type": "array", "items": {"$ref": "#/$defs/pathEncoding"}},
+    "artefacts": {"$ref": "#/$defs/artefactTable"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reason": {
+      "enum": [
+        "metadata_envelope",
+        "transaction_not_reached",
+        "boundary_not_reached",
+        "layer_not_complete",
+        "not_applicable_to_status"
+      ]
+    },
+    "unavailableReason": {
+      "enum": [
+        "not_installed",
+        "not_a_git_checkout",
+        "command_failed",
+        "timeout",
+        "no_origin",
+        "not_regular_file",
+        "unreadable",
+        "namespace_package",
+        "extension_module",
+        "generated_module",
+        "no_distribution",
+        "missing_direct_url",
+        "unobserved_executable_io"
+      ]
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {"enum": ["base", "variant"]},
+        "name": {"type": ["string", "null"]}
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "layer"],
+      "properties": {
+        "stage": {
+          "enum": [
+            "source",
+            "raw_process_entry",
+            "preset_layering",
+            "effective_process_entry",
+            "output_preflight",
+            "runtime",
+            "plugins",
+            "preflight",
+            "axes",
+            "built",
+            "run_parse",
+            "postflight",
+            "execution",
+            "serialization"
+          ]
+        },
+        "layer": {"anyOf": [{"$ref": "#/$defs/layer"}, {"type": "null"}]}
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "launch_mode",
+        "input_sha256",
+        "presets",
+        "source_name",
+        "source_path",
+        "source_realpath",
+        "base_dir"
+      ],
+      "properties": {
+        "protocol_version": {"type": "integer", "minimum": 1},
+        "launch_mode": {"enum": ["cli", "embedded"]},
+        "input_sha256": {"$ref": "#/$defs/sha256"},
+        "presets": {"type": "array", "items": {"type": "string"}},
+        "source_name": {"type": "string"},
+        "source_path": {"type": "string"},
+        "source_realpath": {"type": ["string", "null"]},
+        "base_dir": {"type": "string"}
+      }
+    },
+    "projectSoftware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "version_reason",
+        "source_root",
+        "source_root_reason",
+        "git_commit",
+        "git_commit_reason",
+        "dirty",
+        "dirty_reason",
+        "tracked_diff_sha256",
+        "tracked_diff_sha256_reason"
+      ],
+      "properties": {
+        "version": {"type": ["string", "null"]},
+        "version_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "source_root": {"type": ["string", "null"]},
+        "source_root_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "git_commit": {"type": ["string", "null"]},
+        "git_commit_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "dirty": {"type": ["boolean", "null"]},
+        "dirty_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "tracked_diff_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "tracked_diff_sha256_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]}
+      }
+    },
+    "versionFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "reason"],
+      "properties": {
+        "version": {"type": ["string", "null"]},
+        "reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]}
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jax", "jaxlib", "equinox", "numpy", "numpyro"],
+      "properties": {
+        "jax": {"$ref": "#/$defs/versionFact"},
+        "jaxlib": {"$ref": "#/$defs/versionFact"},
+        "equinox": {"$ref": "#/$defs/versionFact"},
+        "numpy": {"$ref": "#/$defs/versionFact"},
+        "numpyro": {"$ref": "#/$defs/versionFact"}
+      }
+    },
+    "pythonSoftware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "implementation", "executable"],
+      "properties": {
+        "version": {"type": "string"},
+        "implementation": {"type": "string"},
+        "executable": {"type": "string"}
+      }
+    },
+    "hostSoftware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "release", "machine"],
+      "properties": {
+        "system": {"type": "string"},
+        "release": {"type": "string"},
+        "machine": {"type": "string"}
+      }
+    },
+    "software": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rheplicant", "dependencies", "python", "host"],
+      "properties": {
+        "rheplicant": {"$ref": "#/$defs/projectSoftware"},
+        "dependencies": {"$ref": "#/$defs/dependencies"},
+        "python": {"$ref": "#/$defs/pythonSoftware"},
+        "host": {"$ref": "#/$defs/hostSoftware"}
+      }
+    },
+    "runtimeRequested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jax_enable_x64", "platform"],
+      "properties": {
+        "jax_enable_x64": {"type": "boolean"},
+        "platform": {"enum": ["auto", "cpu", "gpu", "tpu"]}
+      }
+    },
+    "runtimeActual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jax_enable_x64", "backend"],
+      "properties": {
+        "jax_enable_x64": {"type": "boolean"},
+        "backend": {"type": "string"}
+      }
+    },
+    "runtimePrior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jax_enable_x64", "jax_platforms"],
+      "properties": {
+        "jax_enable_x64": {"type": ["string", "null"]},
+        "jax_platforms": {"type": ["string", "null"]}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "actual", "prior_environment"],
+      "properties": {
+        "requested": {"$ref": "#/$defs/runtimeRequested"},
+        "actual": {"$ref": "#/$defs/runtimeActual"},
+        "prior_environment": {"$ref": "#/$defs/runtimePrior"}
+      }
+    },
+    "captureMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "path", "realpath", "sha256"],
+      "properties": {
+        "relative_path": {"type": "string"},
+        "path": {"type": "string"},
+        "realpath": {"type": "string"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "document_path", "path", "realpath", "format", "kind", "sha256", "members"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "document_path": {"type": "string"},
+        "path": {"type": "string"},
+        "realpath": {"type": "string"},
+        "format": {"type": "string"},
+        "kind": {"enum": ["file", "directory"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/captureMember"}}
+      }
+    },
+    "jsonObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "patternProperties": {".*": {"$ref": "#/$defs/jsonValue"}}
+    },
+    "jsonValue": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/jsonValue"}},
+        {"$ref": "#/$defs/jsonObject"}
+      ]
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "version_reason", "direct_url", "direct_url_reason"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": ["string", "null"]},
+        "version_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "direct_url": {"anyOf": [{"$ref": "#/$defs/jsonObject"}, {"type": "null"}]},
+        "direct_url_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]}
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "already_imported", "origin", "origin_reason", "loader_type",
+        "loader_type_reason", "resolved_path", "resolved_path_reason", "distributions",
+        "distributions_reason", "code_hash", "code_hash_reason", "unobserved_io"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "already_imported": {"type": "boolean"},
+        "origin": {"type": ["string", "null"]},
+        "origin_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "loader_type": {"type": ["string", "null"]},
+        "loader_type_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "resolved_path": {"type": ["string", "null"]},
+        "resolved_path_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "distributions": {"type": "array", "items": {"$ref": "#/$defs/distribution"}},
+        "distributions_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "code_hash": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "code_hash_reason": {"anyOf": [{"$ref": "#/$defs/unavailableReason"}, {"type": "null"}]},
+        "unobserved_io": {"const": true}
+      }
+    },
+    "pythonTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "document_path", "target", "code_hash", "unobserved_io"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "document_path": {"type": "string"},
+        "target": {"type": "string"},
+        "code_hash": {"type": "null"},
+        "unobserved_io": {"const": true}
+      }
+    },
+    "intMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "patternProperties": {".*": {"type": "integer", "minimum": 0}}
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "patternProperties": {".*": {"type": "string"}}
+    },
+    "seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "root", "named"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "root": {"type": ["integer", "null"], "minimum": 0},
+        "named": {"$ref": "#/$defs/intMap"}
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "encoded_name", "status", "resolved_sha256"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "encoded_name": {"type": ["string", "null"]},
+        "status": {"enum": ["ok", "refused", "error", "not_reached"]},
+        "resolved_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "build_order", "shared_objects"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "build_order": {"type": "array", "items": {"type": "string"}},
+        "shared_objects": {"$ref": "#/$defs/stringMap"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer", "index", "name", "kind", "variant", "status", "wall_time_ns"],
+      "properties": {
+        "layer": {"$ref": "#/$defs/layer"},
+        "index": {"type": "integer", "minimum": 0},
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "variant": {"type": ["string", "null"]},
+        "status": {"enum": ["ok", "expected_refusal", "refused", "error"]},
+        "wall_time_ns": {"type": "integer", "minimum": 0}
+      }
+    },
+    "pathEncoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "document_name", "encoded_name"],
+      "properties": {
+        "kind": {"enum": ["run", "variant"]},
+        "document_name": {"type": "string"},
+        "encoded_name": {"type": "string"}
+      }
+    },
+    "artefactRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "written", "bytes", "sha256", "reason"],
+      "properties": {
+        "relative_path": {"type": "string"},
+        "written": {"type": "boolean"},
+        "bytes": {"type": ["integer", "null"], "minimum": 0},
+        "sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "reason": {"anyOf": [{"$ref": "#/$defs/reason"}, {"type": "null"}]}
+      }
+    },
+    "artefactTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marker", "lock", "journal", "input", "resolved_base", "resolved_variants", "provenance", "diagnostics"],
+      "properties": {
+        "marker": {"$ref": "#/$defs/artefactRecord"},
+        "lock": {"$ref": "#/$defs/artefactRecord"},
+        "journal": {"$ref": "#/$defs/artefactRecord"},
+        "input": {"$ref": "#/$defs/artefactRecord"},
+        "resolved_base": {"$ref": "#/$defs/artefactRecord"},
+        "resolved_variants": {"type": "array", "items": {"$ref": "#/$defs/artefactRecord"}},
+        "provenance": {"$ref": "#/$defs/artefactRecord"},
+        "diagnostics": {"$ref": "#/$defs/artefactRecord"}
+      }
+    }
+  }
+}
