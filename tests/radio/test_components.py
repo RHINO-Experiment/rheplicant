@@ -132,6 +132,8 @@ class TestEnvironmentComponents:
 class TestInstrumentComponents:
     def test_noise_wave_linear_in_parameters(self, data_state):
         """The GCR-critical property: output is linear in (T_unc, T_cos, T_sin, T_rx)."""
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         assert data_state.coords.freq.shape[0] == N_FREQ
 
         def build(t_unc, t_cos, t_sin, t_rx):
@@ -162,6 +164,8 @@ class TestInstrumentComponents:
         survives as a special case of the real model rather than an assumption
         it makes.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         op = NoiseWaveOperator(
             t_unc=jnp.array(0.0), t_cos=jnp.array(0.0), t_sin=jnp.array(0.0),
             t_rx=jnp.array(0.0),
