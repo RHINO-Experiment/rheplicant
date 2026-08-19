@@ -17,7 +17,11 @@ from tests.config.test_config_cli import document
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UV = "uv"
 PRESET = PROJECT_ROOT / "src/rheplicant/config/presets/rhino_v1.yaml"
-SCHEMAS = ("provenance-v1.schema.json", "diagnostics-v1.schema.json")
+SCHEMAS = (
+    "provenance-v1.schema.json",
+    "diagnostics-v1.schema.json",
+    "products-v1.schema.json",
+)
 
 
 def _run(arguments, *, cwd=PROJECT_ROOT, env=None):
@@ -137,7 +141,11 @@ snapshot = read_installed_preset("rhino_v1")
 spec = importlib.util.find_spec("rheplicant")
 root = Path(tuple(spec.submodule_search_locations)[0])
 schemas = {}
-for name in ("provenance-v1.schema.json", "diagnostics-v1.schema.json"):
+for name in (
+    "provenance-v1.schema.json",
+    "diagnostics-v1.schema.json",
+    "products-v1.schema.json",
+):
     schemas[name] = base64.b64encode(
         (root / "config" / "schemas" / name).read_bytes()
     ).decode("ascii")
@@ -156,8 +164,10 @@ def test_installed_wheel_exposes_cli_presets_schemas_and_scripts(
 ):
     install = fresh_install(built_distributions[artifact])
     config = tmp_path / f"{artifact}.yaml"
-    target = tmp_path / f"{artifact}-results"
-    config.write_text(yaml.safe_dump(document(output=target), sort_keys=False))
+    target = tmp_path / f"{artifact}-generated-results"
+    value = document(output=target)
+    value["outputs"]["write"] = {"arrays": True, "assembly": True}
+    config.write_text(yaml.safe_dump(value, sort_keys=False))
 
     clean = install.python_run(
         "import sys, _rheplicant_bootstrap; "
@@ -188,6 +198,22 @@ def test_installed_wheel_exposes_cli_presets_schemas_and_scripts(
     )
     assert executed.returncode == 0, executed.stderr
     assert (target / "config.input.yaml").read_bytes() == config.read_bytes()
+    generated_manifest = (target / "products.json").read_bytes()
+    generated_arrays = (target / "runs/n-666f7277617264/arrays.npz").read_bytes()
+    generated_assembly = (target / "layers/base/assembly.json").read_bytes()
+
+    direct_target = tmp_path / f"{artifact}-direct-results"
+    direct_config = tmp_path / f"{artifact}-direct.yaml"
+    direct_value = document(output=direct_target)
+    direct_value["outputs"]["write"] = {"arrays": True, "assembly": True}
+    direct_config.write_text(yaml.safe_dump(direct_value, sort_keys=False))
+    direct = install.run(["run", str(direct_config)])
+    assert direct.returncode == 0, direct.stderr
+    assert (direct_target / "products.json").read_bytes() == generated_manifest
+    assert (
+        direct_target / "runs/n-666f7277617264/arrays.npz"
+    ).read_bytes() == generated_arrays
+    assert (direct_target / "layers/base/assembly.json").read_bytes() == generated_assembly
 
     resources = _resource_probe(install)
     expected = PRESET.read_bytes()
@@ -209,6 +235,7 @@ def test_direct_and_sdist_wheels_have_the_same_closed_file_list(
         assert "rheplicant/config/presets/rhino_v1.yaml" in names
         assert "rheplicant/config/schemas/provenance-v1.schema.json" in names
         assert "rheplicant/config/schemas/diagnostics-v1.schema.json" in names
+        assert "rheplicant/config/schemas/products-v1.schema.json" in names
         assert any(name.startswith("_rheplicant_bootstrap/") for name in names)
         assert any(name.endswith(".dist-info/entry_points.txt") for name in names)
         assert not any(

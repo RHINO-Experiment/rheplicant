@@ -86,7 +86,7 @@ class TestEveryDeclaredKindHasOneLiveHandler:
     Importing ``exits`` registers the leaf modules as an import side effect,
     which is exactly the wiring that rots in silence: a kind with an executor
     but no parser would pass the old set comparison and fail Task 10's
-    orchestration.  ``_KINDS`` remains the declared 16-kind source
+    orchestration.  ``_KINDS`` remains the declared 18-kind source
     (plan §1.7).
     """
 
@@ -94,7 +94,7 @@ class TestEveryDeclaredKindHasOneLiveHandler:
         assert exits is not None  # importing exits registers the leaf modules
         assert set(_KINDS) == set(PARSERS) == set(PRE_EXECUTORS)
         assert set(_KINDS) == set(EXECUTORS) == set(DEFERRED_CHECKS)
-        assert len(PARSERS) == 16
+        assert len(PARSERS) == 18
 
     def test_no_builtin_handler_uses_the_legacy_parser_after_task_9(self):
         """The identity half of Task 9's hard gate; the matrix is below."""
@@ -1687,7 +1687,7 @@ class TestNoKindDelegatesToTheLegacyParser:
     pass with a parser that FORWARDS to the legacy one, so the legacy parser
     is patched to raise and every kind is parsed."""
 
-    def test_all_sixteen_kinds_parse_with_the_legacy_parser_raising(
+    def test_all_eighteen_kinds_parse_with_the_legacy_parser_raising(
             self, base_configured, conjugate_configured, nuts_configured,
             npe_configured, mmodes_configured, monkeypatch):
         import rheplicant.config.sections.exit_support as support
@@ -1726,6 +1726,11 @@ class TestNoKindDelegatesToTheLegacyParser:
                       "seed": {"from": "runtime.seeds.chain"}},
                      nuts_configured),
             "npe": ({}, npe_configured),
+            "compare": ({"of": ["left", "right"], "metric": "rms",
+                         "tolerance": 0.0}, base_configured),
+            "benchmark": ({"variants": ["base"], "repeats": 1,
+                           "warmup": 0, "metrics": ["wall_time"]},
+                          base_configured),
         }
         assert set(cases) == set(_KINDS)
         for kind, (options, configured) in cases.items():

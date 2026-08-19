@@ -8,7 +8,7 @@ Three holes in A1's sweep, measured rather than inferred:
   runs every parse before the first execute, so the cost of a late typo is
   gone there too -- but a text pass still beats the build, which is the
   phase this check owns.  The fix reuses each handler's own allowed-key
-  table (thirteen of the sixteen by importing the very object the parser
+  table (fifteen of the eighteen by importing the very object the parser
   sweeps with), so the two cannot drift; ``test_preflight_document.py``
   reads the tables back out of the PARSERS' source and compares.
 * An unselected ``variants`` entry.  ``layering.py:41-85`` merges only the
@@ -129,14 +129,16 @@ _TASK3_SPOKEN_FOR: dict[str, frozenset[str]] = {
 def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
     """run kind -> the option keys its registered parser accepts.
 
-    Thirteen of the sixteen entries ARE the parser module's own object --
+    Fifteen of the eighteen entries ARE the parser module's own object --
     identity, not equality -- so for those drift is not possible, only
     deletion.  ``forward``, ``fisher`` and ``npe`` write their allowed set as
     a literal at the parser's ``_sweep`` call site and have no name to
     import; those three are restated, and
-    ``test_the_table_is_the_handlers_own_allowed_sets`` reads all sixteen
+    ``test_the_table_is_the_handlers_own_allowed_sets`` reads all eighteen
     back out of the registered parsers' source and compares.
     """
+    from rheplicant.config.sections.benchmark import _BENCHMARK_KEYS
+    from rheplicant.config.sections.comparison import _COMPARE_KEYS
     from rheplicant.config.sections.conjugate import (
         _CONDITION_KEYS,
         _GCR_KEYS,
@@ -174,6 +176,8 @@ def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
         "mmodes": _MMODES_KEYS,
         "predict": _PREDICT_KEYS,
         "nuts": _NUTS_KEYS,
+        "compare": _COMPARE_KEYS,
+        "benchmark": _BENCHMARK_KEYS,
     }
 
 

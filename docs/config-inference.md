@@ -384,9 +384,45 @@ worth reading twice before quoting a width from a thinned multi-chain product:
 what comes back is the end of one chain, which is what was asked for and is not
 what "the last 50 draws of the posterior" usually means.
 
-`compare` and `benchmark` arrive with Plan 4. Consuming any of these products
-from `outputs:` is Plan 4's too — for now a product is what `run_document`
-hands back.
+### Cross-run comparison and variant benchmarks
+
+- `compare` — consumes exactly two earlier successful run products. The two
+numeric pytrees must have the same structure, mapping keys, shapes, and dtype
+classes. A tolerance miss is a successful, serializable comparison whose
+`passed` field is false; missing runs or incompatible products are refusals.
+
+```yaml
+runs:
+  - {name: base_prediction, kind: forward}
+  - {name: repeated_prediction, kind: forward}
+  - name: agreement
+    kind: compare
+    of: [base_prediction, repeated_prediction]
+    metric: max_rel_diff       # max_rel_diff | rms | max_abs
+    tolerance: 1.0e-10
+```
+
+- `benchmark` — evaluates named prepared layers rather than prior runs. `repeats`
+defaults to 5, `warmup` to 1, and `metrics` to `[wall_time]`. Warmups are
+blocked but excluded; measured JAX results are blocked before timing stops.
+Raw samples plus minimum/median/mean are retained. `peak_memory` is labelled
+`python_traced_bytes`: it is tracemalloc's Python allocation peak, not device
+memory.
+
+```yaml
+runs:
+  - name: layer_cost
+    kind: benchmark
+    variants: [base, unity_gain]
+    repeats: 5
+    warmup: 1
+    metrics: [wall_time, peak_memory]
+```
+
+Both result kinds can be published with `outputs.write.compare: true` or
+`outputs.write.benchmark: true`. All other scientific output selectors,
+including posterior chains, estimates, recovery records, prediction bands and
+reports, are documented on the [configuration CLI page](config-cli.md#scientific-products).
 
 ## A complete document
 

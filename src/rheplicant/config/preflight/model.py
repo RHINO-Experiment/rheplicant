@@ -920,7 +920,9 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: pins ``_KINDS`` by MEMBERSHIP and is what makes the day a genuinely
 #: non-fitting kind ships a day someone looks; its failure message is the
 #: instruction to classify the new one.
-_A30_NOT_FITTING: frozenset[str] = frozenset({"forward", "mmodes"})
+_A30_NOT_FITTING: frozenset[str] = frozenset(
+    {"forward", "mmodes", "compare", "benchmark"}
+)
 
 def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
     """The declared kinds whose exit A30 is actually about, sorted.
@@ -934,8 +936,8 @@ def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
 
     **A kind ``runs._KINDS`` does not contain is not an exit.**  Measured,
     ``runs: [{kind: banana}]`` earned A30 the sentence *"This document
-    declares kind: banana, and every exit but forward and mmodes closes the
-    fit twin over ONE template state"* -- a claim about the closure behaviour
+    declares kind: banana, and these fitting exits close the fit twin over
+    ONE template state"* -- a claim about the closure behaviour
     of a kind that does not exist.  ``parse_runs`` (``runs.py:87-90``) names
     the real fault, and on the ``load_document`` path nothing names it at
     all, which makes an invented claim worse rather than harmless.  §3.2 (e)
@@ -1273,7 +1275,7 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
             f"{site} puts {operator} at node {node_id!r}, which draws its own "
             f"randomness -- {operator} declares {RANDOMNESS!r} in requires "
             "-- and inference.twin.without: does not drop it. This document "
-            f"declares {named}, and every exit but forward and mmodes closes "
+            f"declares {named}, and these fitting exits close "
             "the fit twin over ONE template state, so that draw would be the "
             "SAME realisation added to every prediction alike: a bias that is "
             "exactly affine and full rank, which is why no shape check, no "

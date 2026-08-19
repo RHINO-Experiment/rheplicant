@@ -2740,7 +2740,7 @@ _TASK3_SAFE_CORRECTIONS: dict[str, str] = {
 #: false about its own contents, which is the shape of defect this whole class
 #: exists to catch.
 #:
-#: One entry, and its authority is written down rather than assumed: Plan 3B
+#: Each entry's authority is written down rather than assumed. Plan 3B
 #: §0.2 C-10 rules that ``sections/observed.py`` compared a file's shape
 #: against the GRIDS while citing "check C11", and names Task 8 as the fixer.
 #: Measured with ``averaging: {n_chunk: 4}`` on (16, 8) grids -- prediction
@@ -2754,6 +2754,11 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
     + ". Exactly -- broadcast-compatible is the dangerous case (check C11).":
         "test_config_section_observed.py::"
         "test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right",
+    "arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
+        "test_config_exit_support.py::test_compare_and_benchmark_are_both_live",
+    _HOLE + ": kind: " + _HOLE
+    + " arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
+        "test_config_exit_support.py::test_compare_and_benchmark_are_both_live",
 }
 
 
@@ -2771,11 +2776,12 @@ class TestNoMovedMessageWasReworded:
     rewritten from substrings to full equality on the NEW words, and the
     whole suite stayed green.  3A's §2.3 designated exactly four messages
     CORRECTED (A39's) and called a fifth a stop-and-ask; Plan 3B §0.2 C-10
-    designates a **fifth**, C11's, naming Task 8 as its fixer and the defect
-    it repairs (a shape compared against the grids while the sentence claims
-    to be about the prediction).  So the standing count is **A39's four plus
-    C11, and a SIXTH is a stop-and-ask.**  The five are not interchangeable
-    and are not in one list: A28's three live in
+    then designated C11's, naming Task 8 as its fixer and the defect it
+    repairs (a shape compared against the grids while the sentence claims
+    to be about the prediction). Plan 4B retires the two harvested forms of
+    the final kind-deferral sentence when ``compare`` and ``benchmark`` become
+    live. The corrections are not interchangeable and are not in one list:
+    A28's three live in
     :data:`_ASSEMBLED_ELSEWHERE` because they became clauses, C11's lives in
     :data:`_CORRECTED_BY_PLAN` because it was reworded on purpose, and each
     entry names the equality pin on the sentence that replaced it.
@@ -2876,10 +2882,10 @@ class TestNoMovedMessageWasReworded:
                    - set(_CORRECTED_BY_PLAN))
         assert missing == set(), (
             f"{len(missing)} message(s) this layer shipped at {_BASE_COMMIT} "
-            "are gone. A MOVED check keeps its message verbatim. Five are "
-            "designated CORRECTED so far -- A39's four (3A §2.3) and C11's "
-            "(3B §0.2 C-10) -- so a SIXTH is a stop-and-ask. If a plan names "
-            "yours, add it to _CORRECTED_BY_PLAN with the test that pins the "
+            "are gone. A MOVED check keeps its message verbatim. The known "
+            "corrections are enumerated above; any other change is a "
+            "stop-and-ask. If a plan names yours, add it to "
+            "_CORRECTED_BY_PLAN with the test that pins the "
             "replacement by EQUALITY; if the sentence is merely assembled "
             "from clauses now rather than written out, add it to "
             "_ASSEMBLED_ELSEWHERE the same way. The two are different claims "

@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### A configuration run is now a scientific publication
+
+Config Plan 4B completes the scientific half of the command boundary. All 22
+reserved `outputs.write` selectors now parse as typed requests: arrays, aux,
+taps, assemblies, estimates, parameters, draws, losses, gradients,
+covariances, prediction products, diagnostics, recovery records, histories,
+timings, captured refusals, signal paths, comparisons, benchmarks, and chains.
+An explicit incompatible run is refused; an unfiltered selector records honest
+omissions and must still emit at least one compatible file.
+
+Numeric products use deterministic pickle-free NPZ, records use canonical
+finite JSON, and optional NetCDF chains never silently fall back. Canonical
+`products.json`, validated against the new packaged strict
+`products-v1.schema.json`, binds every file to its byte count, SHA-256 digest,
+format, kind, selector, and metadata. Reports in JSON or text read only prior
+results and timings. `aux` and `taps` read returned state rather than rerunning
+the twin; assembly and signal-path files read prepared layers.
+
+Two run kinds join the live parser/pre-executor/executor/deferred registries.
+`compare` checks the structure, keys, shapes, and dtype classes of exactly two
+earlier products before reducing `max_rel_diff`, `rms`, or `max_abs`; a
+tolerance miss is data (`passed: false`), not a failed run. `benchmark` runs
+named prepared variants, blocks JAX work, excludes warmups, retains raw
+samples, and distinguishes wall nanoseconds from Python-traced peak bytes.
+
+Scientific bytes do not get a weaker publication route. They are materialized
+after successful execution, inserted into the existing audit bundle before
+the first staging write, and published by the same descriptor-safe journalled
+transaction as configuration and metadata. Crash recovery, exact modes,
+clobber proof, CLI/generated-program parity, and failure siblings therefore
+cover the entire product tree; `validate` remains read-only and does no
+scientific execution or materialization.
+
 ### The checks that cost something, and the gate that decides whether to pay
 
 Plan 3C: a fourth validation pass for the checks that cannot be decided

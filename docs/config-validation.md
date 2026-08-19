@@ -414,8 +414,9 @@ both, so C18 is last. Write the bullets in that order and keep them in it;
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction
-  alike. `kind: forward` and `kind: mmodes` keep the node — neither closes over
-  a fit twin — and every other kind cannot. Fix:
+  alike. `kind: forward`, `kind: mmodes`, `kind: compare`, and
+  `kind: benchmark` keep the node — none closes a fit twin over a parameter
+  template — while fitting kinds cannot. Fix:
   `inference.twin: {without: [noise]}`.
 - **A33** — `b` is free into `bandpass` and `g` is free into `gain`. The two
   multiply the same prediction, so only their product is constrained and the

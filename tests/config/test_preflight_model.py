@@ -2158,7 +2158,7 @@ A30_MESSAGE = (
     "model.noise puts NoiseOperator at node 'noise', which draws its own "
     "randomness -- NoiseOperator declares 'key' in requires -- and "
     "inference.twin.without: does not drop it. This document declares "
-    "kind: fisher, and every exit but forward and mmodes closes the fit twin "
+    "kind: fisher, and these fitting exits close the fit twin "
     "over ONE template state, so that draw would be the SAME realisation "
     "added to every prediction alike: a bias that is exactly affine and full "
     "rank, which is why no shape check, no linearity check and no rank test "
@@ -2327,12 +2327,13 @@ class TestTheStochasticFitTwin:
         assert "A30" not in preflight(
             _t11_fit(twin=None, runs=[{"kind": "forward"}])).checks()
 
-    def test_mmodes_is_not_a_fitting_exit_either(self):
-        # Kills: _A30_NOT_FITTING == {"forward"}.  _run_mmodes
-        # (diagnostics.py:594-660) expands a projector against a sky and
-        # closes over no twin at all.
-        assert "A30" not in preflight(
-            _t11_fit(twin=None, runs=[{"kind": "mmodes"}])).checks()
+    def test_the_other_non_fitting_exits_do_not_earn_a30(self):
+        # _run_mmodes expands a projector against a sky; compare consumes
+        # prior products; benchmark evaluates prepared-layer forward calls.
+        # None closes a ParameterSpace over built.inference.fit_twin.
+        for kind in ("mmodes", "compare", "benchmark"):
+            assert "A30" not in preflight(
+                _t11_fit(twin=None, runs=[{"kind": kind}])).checks()
 
     def test_a_forward_run_beside_a_fitting_one_is_still_refused(self):
         # Kills: the condition read off the FIRST run, or the complement test
@@ -2685,7 +2686,8 @@ class TestTheStochasticFitTwin:
 
         assert frozenset(_KINDS) == frozenset({
             "condition", "conjugate.gcr", "conjugate.gls", "conjugate.wiener",
-            "fisher", "forward", "gradient", "identifiability", "mmodes",
+            "benchmark", "compare", "fisher", "forward", "gradient",
+            "identifiability", "mmodes",
             "npe", "nuts", "optimize", "plan.estimate", "plan.sample",
             "predict", "score_directions",
         }), (
@@ -3598,7 +3600,7 @@ class TestWhichRunsA30IsAbout:
 
     def test_a_kind_the_run_grammar_does_not_offer_earns_nothing(self):
         """A30's message claimed *"This document declares kind: banana, and
-        every exit but forward and mmodes closes the fit twin over ONE
+        these fitting exits close the fit twin over ONE
         template state"* -- a claim about the closure behaviour of a kind that
         does not exist.
 
@@ -3613,7 +3615,8 @@ class TestWhichRunsA30IsAbout:
         {"forward", "fisher", "optimize", "plan.estimate", "plan.sample",
          "nuts", "npe", "conjugate.gls", "conjugate.wiener", "conjugate.gcr",
          "identifiability", "score_directions", "predict", "mmodes",
-         "condition", "gradient"} - {"forward", "mmodes"}))
+         "condition", "gradient", "compare", "benchmark"}
+        - {"forward", "mmodes", "compare", "benchmark"}))
     def test_every_fitting_kind_the_enum_declares_still_earns_it(self, kind):
         """ANTI-VACUITY on the narrowing: intersecting with ``runs._KINDS``
         must not drop a kind that IS declared.

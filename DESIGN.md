@@ -8,7 +8,7 @@ below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
-numbered decisions (D1–D47), each with the constraint that forced it. New
+numbered decisions (D1–D52), each with the constraint that forced it. New
 here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
 the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
@@ -29,7 +29,7 @@ Contents: [Layering](#layering) ·
 [D12 inference layer](#d12--bayesian-bridge-uncertainty-propagation-neural-surrogates) ·
 [D13 atmosphere entries](#d13--atmosphere-is-an-equivalent-entry-pair-not-a-trunk-stage) ·
 [D14 parameter spaces](#d14--parameter-spaces-what-is-inferred-vs-how-it-enters) ·
-[D37–D47 config entry and audit](#d37--config-plan-4a-records-the-run-plan-4b-records-scientific-products) ·
+[D37–D52 config entry and scientific products](#d37--audit-facts-and-scientific-products-have-separate-schemas) ·
 [Element taxonomy → modules](#element-taxonomy--module-map) ·
 [Physics roadmap](#roadmap-physics-to-port-into-the-placeholder-contracts)
 
@@ -1684,14 +1684,14 @@ remaining questions:
 D35 is the sharpest instance: it rejects the convenient option specifically
 because the failure it guards against has no numerical symptom at all.
 
-### D37 — Config Plan 4A records the run; Plan 4B records scientific products
+### D37 — Audit facts and scientific products have separate schemas
 
 Plan 4A owns document entry, validation, execution status, and the mandatory
-input/resolved/provenance/diagnostics audit tree. Arrays, estimates, draws,
-losses, gradients, comparisons, and benchmarks remain Plan 4B. Refusing those
-write keys now is preferable to accepting a document whose requested product
-is silently absent. Revisit only when each product has its own typed,
-crash-safe materializer and schema.
+input/resolved/provenance/diagnostics audit tree. Plan 4B adds scientific
+products without widening either fixed audit schema: its files are described
+by `products.json` and `products-v1.schema.json`. Keeping the tables separate
+means adding a scientific selector cannot silently change what an old audit
+consumer thinks was materialized.
 
 ### D38 — The console bootstrap is physically JAX-free until runtime is chosen
 
@@ -1775,6 +1775,54 @@ old one, giving both writers apparent exclusivity. One adapter and one owning
 lease cover recovery, A34, staging, publication, and terminal recovery; an
 ordinary terminal I/O failure is recovered before the one permitted error
 sibling attempt.
+
+### D48 — A product request names a semantic product, not an object key
+
+The 22 `outputs.write` selectors compile to immutable requests and a typed
+`(run kind, selector)` extractor registry. Extractors read known result types;
+they never guess from whatever dictionary keys happen to be present. An
+explicitly named incompatible run is refused. An unfiltered request records
+truthful omissions and succeeds only if at least one compatible run emits a
+file. This keeps broad requests useful without turning a spelling error into
+an empty success.
+
+### D49 — Scientific bytes are deterministic, finite, and self-describing
+
+Numeric products use deterministic, pickle-free NPZ; records use canonical
+finite JSON; text and signal-path renderings use UTF-8. Optional NetCDF chains
+exist only when the writer imports, with no format fallback. Every emitted file
+has a portable encoded path, byte count, SHA-256 digest, selector, format, and
+metadata row in canonical `products.json`, which is checked against the strict
+packaged schema before publication.
+
+### D50 — Product extraction never reruns the science
+
+`aux` and `taps` read the `State.aux` already returned by a forward run;
+reports read prior execution results and recorded timings; recovery combines
+recorded truth with the estimator or posterior moments already present.
+Assembly and signal-path products use prepared layer assemblies. Missing
+truth, zero uncertainty, or an unavailable statistic becomes an explicit
+omission or refusal, never a second execution or non-finite JSON.
+
+### D51 — Comparison failures and benchmark measurements remain data
+
+`compare` requires two earlier successful, structurally identical numeric
+products and checks mapping keys, shapes, and dtype classes before reducing
+`max_rel_diff`, `rms`, or `max_abs`. Missing tolerance is not an exception:
+the serializable result says `passed: false`. `benchmark` runs named prepared
+variants, blocks JAX results before stopping the clock, excludes warmups, and
+retains raw samples; its memory metric is explicitly Python-traced peak bytes,
+not device memory.
+
+### D52 — Scientific files share the one recoverable publication transaction
+
+Product and report bytes are built only after successful execution and before
+the first staging write. They are inserted between resolved configuration and
+the two final audit metadata files in the existing `AuditBundle.files`; the
+same descriptor-relative staging, modes, fsyncs, journal, clobber proof, and
+recovery state machine publishes all of them. A materialization refusal emits
+only the ordinary failure audit sibling and never a partial success target.
+There is no second product transaction and no direct destination write.
 
 ## Known deferred issues
 

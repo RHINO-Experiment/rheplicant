@@ -219,7 +219,7 @@ class TestRunOptionKeys:
 
     def test_the_table_is_the_handlers_own_allowed_sets(self):
         """The anti-drift guard, and the reason this task did not restate
-        sixteen key lists.  It reads each registered parser's ONE
+        eighteen key lists.  It reads each registered parser's ONE
         ``_sweep(spec, X)`` call out of its source, resolves X in that
         module's globals -- binding the ``drawing``/``estimate`` flags, which
         are ``spec.kind == "<literal>"`` and so are decidable from the kind
@@ -232,13 +232,13 @@ class TestRunOptionKeys:
         for kind in sorted(PARSERS):
             assert table[kind] == _swept_by(kind), kind
 
-    def test_thirteen_of_the_sixteen_entries_are_the_handlers_own_object(self):
-        """Not equality -- identity.  Thirteen kinds bind their allowed set to
+    def test_fifteen_of_the_eighteen_entries_are_the_handlers_own_object(self):
+        """Not equality -- identity.  Fifteen kinds bind their allowed set to
         a module-level name this table imports, so the two CANNOT drift.  The
         other three (``forward``, ``fisher``, ``npe``) write theirs as a
         literal at the parser's ``_sweep`` call site and have no name to
         import; they are restated, and the test above is what holds them.  The
-        count is asserted so that turning a fourteenth into a literal is a red
+        count is asserted so that turning a sixteenth into a literal is a red
         test rather than a silent loss of the identity guarantee."""
         table = _task3_allowed_run_options()
         by_name = 0
@@ -246,7 +246,7 @@ class TestRunOptionKeys:
             module = sys.modules[fn.__module__]
             if any(value is table[kind] for value in vars(module).values()):
                 by_name += 1
-        assert by_name == 13
+        assert by_name == 15
 
     def test_a_key_its_executor_refuses_by_name_is_left_to_that_executor(self):
         """`condition` + `prior_mean:` is the shape `conjugate.py:580-582`

@@ -23,7 +23,7 @@ variant. Every run kind parses its options before any run executes. Validation
 does not create an output parent, lock, journal, result, or failure directory.
 
 `run` performs the same preparation, executes the base schedule in declaration
-order, and publishes the mandatory audit tree. A file named `config.yaml`
+order, and publishes the audit tree plus any requested scientific products. A file named `config.yaml`
 defaults to `config.results/`; an explicit relative `outputs.dir` is resolved
 against the config file's directory. `run -` needs an explicit `outputs.dir`.
 
@@ -62,7 +62,7 @@ runs:
 The remaining observation, beam-orientation, and model facts still have to be
 declared; `defaults: [rhino_v1]` alone is not a runnable observation.
 
-## Audit trees and the 4A boundary
+## Audit and scientific output trees
 
 A successful run publishes:
 
@@ -72,6 +72,10 @@ config.results/
 ├── config.input.yaml
 ├── config.resolved.yaml
 ├── variants/<encoded-name>/config.resolved.yaml
+├── products.json                         # when a product/report is requested
+├── runs/<encoded-run>/arrays.npz         # example run product
+├── layers/base/assembly.json             # example layer product
+├── report.txt                            # optional report
 ├── provenance.json
 └── diagnostics.json
 ```
@@ -83,11 +87,62 @@ every resolved layer that actually completed. No later boundary or file is
 claimed. An ambiguity during recovery preserves every named path and starts no
 second transaction.
 
-Plan 4A writes only the input, resolved documents, provenance, diagnostics,
-and transaction metadata. `outputs.write.config`, `provenance`, and
-`diagnostics` are mandatory and cannot be false. Scientific products,
-posterior draws, estimates, arrays, comparisons, and benchmarks are the Plan
-4B boundary and are refused here rather than silently ignored.
+`outputs.write.config`, `provenance`, and `diagnostics` are mandatory and
+cannot be false. Product files and `products.json` join those bytes inside the
+same recoverable transaction; materialization finishes before staging and
+never writes directly to the destination. Product refusal therefore leaves no
+partial success directory. `validate` parses the same requests but executes
+and materializes none of them.
+
+## Scientific products
+
+Each scientific key under `outputs.write` is either `true` (its default format,
+all compatible executed runs) or a closed mapping. `false` is an error rather
+than a silent no-op. Every mapping accepts `format:` and `runs:`; `aux` and
+`taps` additionally accept `keys:`, while `signal_paths` accepts `themes:`
+(`light` or `dark`). Run and variant names are UTF-8 encoded before they become
+path components; raw names never enter the output path.
+
+```yaml
+outputs:
+  dir: results/night-1
+  write:
+    arrays: true
+    parameters: {runs: [fit]}
+    taps: {runs: [simulate], keys: [before_adc, after_adc]}
+    signal_paths: {format: svg, themes: [light, dark]}
+    chains: {format: netcdf, runs: [posterior]}
+  report:
+    rows: [fit, posterior]
+    columns: [mean, std, seconds]
+    reference: posterior
+    relative: [mean_sigma, width_ratio]
+    format: [json, text]
+```
+
+The selectors and default formats are:
+
+| Default | Selectors |
+|---|---|
+| NPZ | `arrays`, `aux`, `taps`, `estimates`, `parameters`, `draws`, `losses`, `gradients`, `covariance`, `prediction_bands`, `posterior_predictives`, `scores`, `training_history`, `chains` |
+| JSON | `assembly`, `identifiability`, `recovery`, `timings`, `compare`, `benchmark` |
+| text | `refusals` |
+| SVG | `signal_paths` (also `html` or `mermaid`) |
+
+`chains` may instead request `netcdf`; that spelling is refused if the optional
+writer is unavailable and never falls back to NPZ. An explicitly filtered run
+that cannot produce a selector is refused. Without `runs:`, compatible runs
+are emitted, incompatible ones appear as omissions in `products.json`, and the
+request is refused if no run can produce it. `assembly` and `signal_paths` are
+per prepared layer and do not accept run filters. `timings` reads recorded wall
+times, `refusals` reads captured `expect: refuse` outcomes, and neither reruns a
+run. Likewise, a report reads only prior results and timings.
+
+`products.json` is canonical JSON validated against the packaged strict
+`products-v1.schema.json`. It records each request, every truthful omission,
+and every file's relative path, selector, run kind, format, byte count, SHA-256
+digest, and metadata. Numeric archives are deterministic NPZ without object
+dtype or pickle; JSON records reject non-finite numbers.
 
 ## Trusted executable code
 

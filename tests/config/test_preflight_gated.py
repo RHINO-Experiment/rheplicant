@@ -561,10 +561,14 @@ class TestTheKindNoneWarning:
         assert found.where == "model.noise"
 
     def test_it_stands_down_on_a_forward_only_document(self):
-        """``_A30_NOT_FITTING`` is ``{'forward', 'mmodes'}`` -- 3A's, imported
-        and never re-derived.  The base document's run is ``kind: forward``,
-        so nothing here fits and there is nothing to weigh."""
-        assert _T2C_NOT_FITTING == frozenset({"forward", "mmodes"})
+        """The shared non-fitting set includes 4B's cross-run exits too.
+
+        The base document's run is ``kind: forward``, so nothing here fits
+        and there is nothing to weigh.
+        """
+        assert _T2C_NOT_FITTING == frozenset(
+            {"forward", "mmodes", "compare", "benchmark"}
+        )
         assert mine(sigma_document(MODEL_NOISE, None)) == frozenset()
 
     def test_an_explicit_kind_none_is_the_same_cell(self):
@@ -619,7 +623,7 @@ class TestTheKindNoneWarning:
     def test_a_kind_the_run_grammar_does_not_know_is_not_a_fit(self):
         """**Measured, and it corrects P14's own arithmetic.**  P14 predicts
         that ``exit_helpers.diagnostic_document()`` trips this WARN, because
-        ``_A30_NOT_FITTING`` is ``{'forward', 'mmodes'}`` and its run kind is
+        ``_A30_NOT_FITTING`` holds the four non-fitting exits and its run kind is
         neither.  It does not: its run is ``kind: diagnostics.identifiability``
         and ``sections/runs._KINDS`` holds ``identifiability``, so
         ``_a30_exits`` -- which intersects with that closed enum -- answers

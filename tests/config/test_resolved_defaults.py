@@ -29,6 +29,7 @@ PRODUCER_FILES = (
     "kinds/projectors.py",
     "kinds/s_params.py",
     "kinds/sky_models.py",
+    "sections/benchmark.py",
     "sections/compose.py",
     "sections/conjugate.py",
     "sections/conjugate_support.py",
@@ -68,6 +69,7 @@ EXPECTED_ROUTES = {
     "kinds/projectors.py": {"use_default"},
     "kinds/s_params.py": {"use_default"},
     "kinds/sky_models.py": {"use_default", "python_target"},
+    "sections/benchmark.py": {"use_default"},
     "sections/compose.py": {"use_default"},
     "sections/conjugate.py": {"use_default"},
     "sections/conjugate_support.py": {"use_default"},
@@ -150,6 +152,11 @@ EXPECTED_DEFAULT_PATHS = {
         "'resources.sky_models[].order'",
         "'resources.sky_models[].maps'",
         "'resources.sky_models[].freq'",
+    ),
+    "sections/benchmark.py": (
+        "'runs[].options.repeats'",
+        "'runs[].options.warmup'",
+        "'runs[].options.metrics'",
     ),
     "sections/compose.py": ("'model.kind'",),
     "sections/conjugate.py": (
