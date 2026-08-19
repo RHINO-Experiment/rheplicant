@@ -26,7 +26,7 @@ _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
           "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
           "identifiability", "score_directions", "gradient", "mmodes",
-          "predict", "nuts", "npe")
+          "predict", "nuts", "npe", "compare")
 # Plan 2C's and Plan 2D's own deferral tuples are GONE rather than emptied:
 # `predict` was 2C's last member and `npe` was 2D's, and an empty one would
 # leave `if kind in ()` in `_one` below -- dead, green and forever, and read
@@ -34,7 +34,7 @@ _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
 # either, so that `grep -rn <that name> src` stays the check it was meant to
 # be.  A deferral tuple a LATER plan adds must be named `_KINDS_*`: the
 # disjointness guard discovers its tables by that prefix.
-_KINDS_PLAN4 = ("compare", "benchmark")
+_KINDS_PLAN4 = ("benchmark",)
 
 
 class RunSpec(NamedTuple):

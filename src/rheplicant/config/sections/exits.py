@@ -568,4 +568,10 @@ def execute_run(run: RunSpec, built: Any, results: Any = None) -> RunResult:
 # at the foot rather than the head because they import the shared support
 # this module also imports; the completeness test in
 # tests/config/test_config_exit_support.py is what keeps it from rotting.
-from rheplicant.config.sections import conjugate, diagnostics, npe, nuts  # noqa: E402,F401
+from rheplicant.config.sections import (  # noqa: E402,F401
+    comparison,
+    conjugate,
+    diagnostics,
+    npe,
+    nuts,
+)

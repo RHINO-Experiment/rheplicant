@@ -426,11 +426,14 @@ class TestTheDeferredKindsNameTheirPlan:
     left by prefix, so it needs no edit here.
     """
 
-    def test_compare_and_benchmark_are_plan_4(self):
-        assert _KINDS_PLAN4 == ("compare", "benchmark")
+    def test_benchmark_is_the_last_plan_4_deferral(self):
+        assert _KINDS_PLAN4 == ("benchmark",)
         for kind in _KINDS_PLAN4:
             with pytest.raises(ConfigError, match="Plan 4"):
                 parse_runs([{"kind": kind}])
+        assert parse_runs(
+            [{"kind": "compare", "of": ["a", "b"], "metric": "rms", "tolerance": 0.0}]
+        )[0].kind == "compare"
 
     def test_nuts_and_npe_have_left_and_the_tuple_has_gone_with_them(self):
         assert not hasattr(runs_module, "_KINDS_2D"), (

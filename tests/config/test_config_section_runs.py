@@ -36,10 +36,12 @@ class TestGrammar:
         for kind in ("nuts", "npe"):
             assert parse_runs([{"kind": kind}])[0].kind == kind
 
-    def test_compare_and_benchmark_are_plan_4(self):
-        for kind in ("compare", "benchmark"):
-            with pytest.raises(ConfigError, match="Plan 4"):
-                parse_runs([{"kind": kind}])
+    def test_compare_is_live_and_benchmark_is_still_deferred(self):
+        assert parse_runs(
+            [{"kind": "compare", "of": ["left", "right"], "metric": "rms", "tolerance": 0.0}]
+        )[0].kind == "compare"
+        with pytest.raises(ConfigError, match="Plan 4"):
+            parse_runs([{"kind": "benchmark"}])
 
     def test_reuse_is_a_name_on_the_spec(self):
         (run,) = parse_runs([{"kind": "forward", "reuse": "earlier"}])
