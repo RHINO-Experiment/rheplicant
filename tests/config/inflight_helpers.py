@@ -30,6 +30,7 @@ refusal really does stop the load -- calls ``load_document`` under
 import time
 
 import numpy as np
+from coverage import Coverage
 
 from rheplicant.config.document import _assemble, _carrying, _priced_payload
 from rheplicant.config.findings import Finding
@@ -49,18 +50,30 @@ def best_ms(call, repeats: int = 100) -> float:
     3 % (``axes`` on the worked document: 0.0132 ms best, 0.0135 ms median),
     so nothing is given up by taking it.
 
+    Coverage tracing is paused only around the timed calls.  Its line-event
+    overhead is instrumentation rather than the pass's cost and, measured on
+    the all-checks grid, changes 0.15 ms into 1.40 ms.  The ordinary call each
+    cost test makes before this helper still contributes coverage.
+
     It lives here rather than in one test module because three of them time
     these passes, and a review of Task 1a found every cost bound in the first
     of them unable to fail -- a *thousandfold* slowdown of the shared
     ``sweep`` left the suite at exit 0, at margins up to x30077.  One helper
     is what lets the three agree on how the number is taken.
     """
-    samples = []
-    for _ in range(repeats):
-        started = time.perf_counter()
-        call()
-        samples.append((time.perf_counter() - started) * 1e3)
-    return min(samples)
+    active_coverage = Coverage.current()
+    if active_coverage is not None:
+        active_coverage.stop()
+    try:
+        samples = []
+        for _ in range(repeats):
+            started = time.perf_counter()
+            call()
+            samples.append((time.perf_counter() - started) * 1e3)
+        return min(samples)
+    finally:
+        if active_coverage is not None:
+            active_coverage.start()
 
 
 def axis_facts(document, *, base_dir=None) -> Axes:
