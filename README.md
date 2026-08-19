@@ -145,6 +145,20 @@ name are the same: `rheplicant`. Full instructions, the four extras and the
 two-session test split are on the
 [install page](https://rheplicant.readthedocs.io/en/latest/install.html).
 
+Validate and run a configuration through the JAX-safe command boundary:
+
+```bash
+rheplicant validate observation.yaml
+rheplicant run observation.yaml
+rheplicant script observation.yaml -o run-observation.py
+```
+
+The CLI validates every variant and every run parser before execution, embeds
+exact source/preset bytes in generated programs, and publishes a recoverable
+input/resolved/provenance/diagnostics audit tree. See the
+[configuration CLI](https://rheplicant.readthedocs.io/en/latest/config-cli.html)
+for stdin, output, clobber, and trusted-plugin rules.
+
 ## Seeing it work
 
 The snippet above is the whole shape of it: provide operators, let the graph
@@ -176,7 +190,7 @@ architecture decisions and the changelog, with a sidebar that lists them.
 Build it locally with
 `cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
-Design decisions D1–D36 and the physics roadmap are in
+Design decisions D1–D47 and the physics roadmap are in
 [`DESIGN.md`](https://rheplicant.readthedocs.io/en/latest/design.html); what
 arrived when is in
 [`CHANGELOG.md`](https://rheplicant.readthedocs.io/en/latest/changelog.html).
@@ -184,7 +198,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(7836 tests, 90.6 % coverage, jit+grad+vmap through the full twin; assembly
+(8966 tests, 85.5 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD

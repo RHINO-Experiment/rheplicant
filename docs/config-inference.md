@@ -10,6 +10,13 @@ from rheplicant.config import run_document
 results = run_document(document)   # {run name: RunResult}, declaration order
 ```
 
+The [configuration CLI](config-cli.md) uses the same orchestration with a
+parse-before-execute guarantee: the base and every variant complete text,
+axes, built, run-parser, and post-flight validation before the first base run
+executes. Kind-specific options are parsed exactly once. A check recorded as
+deferred is completed at its declared built/post-flight boundary, never
+rediscovered by an executor after earlier runs have already changed state.
+
 ## The fit twin
 
 `inference.twin` repairs the model twin rather than redeclaring it:

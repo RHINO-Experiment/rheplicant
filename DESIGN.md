@@ -8,7 +8,7 @@ below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
-numbered decisions (D1–D13), each with the constraint that forced it. New
+numbered decisions (D1–D47), each with the constraint that forced it. New
 here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
 the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
@@ -29,6 +29,7 @@ Contents: [Layering](#layering) ·
 [D12 inference layer](#d12--bayesian-bridge-uncertainty-propagation-neural-surrogates) ·
 [D13 atmosphere entries](#d13--atmosphere-is-an-equivalent-entry-pair-not-a-trunk-stage) ·
 [D14 parameter spaces](#d14--parameter-spaces-what-is-inferred-vs-how-it-enters) ·
+[D37–D47 config entry and audit](#d37--config-plan-4a-records-the-run-plan-4b-records-scientific-products) ·
 [Element taxonomy → modules](#element-taxonomy--module-map) ·
 [Physics roadmap](#roadmap-physics-to-port-into-the-placeholder-contracts)
 
@@ -1682,6 +1683,98 @@ remaining questions:
 
 D35 is the sharpest instance: it rejects the convenient option specifically
 because the failure it guards against has no numerical symptom at all.
+
+### D37 — Config Plan 4A records the run; Plan 4B records scientific products
+
+Plan 4A owns document entry, validation, execution status, and the mandatory
+input/resolved/provenance/diagnostics audit tree. Arrays, estimates, draws,
+losses, gradients, comparisons, and benchmarks remain Plan 4B. Refusing those
+write keys now is preferable to accepting a document whose requested product
+is silently absent. Revisit only when each product has its own typed,
+crash-safe materializer and schema.
+
+### D38 — The console bootstrap is physically JAX-free until runtime is chosen
+
+`_rheplicant_bootstrap` reads exact bytes, layers presets, preflights output,
+and records audit facts without importing `rheplicant`, JAX, or jaxlib. The
+sole first main-package import is the callback passed to `establish_runtime`
+after process-global x64/platform environment state is installed. A convenient
+top-level import would make the document's runtime declaration arrive too late
+to be true.
+
+### D39 — YAML and presets are exact-byte inputs, not reconstructed mappings
+
+The source is consumed once with bounded safe YAML loading and duplicate-key
+refusal. A selected package preset keeps its original bytes, digest, resource,
+and expanded-node count; generated programs embed those snapshots rather than
+adopting whatever preset a later installation happens to provide. This makes
+the recorded input the input that actually ran.
+
+### D40 — Named plugin and Python targets are trusted, but never called pure
+
+Executable extensions are an explicit trust boundary. Validation guarantees
+that RHEPLICANT/bootstrap/output code performs no output mutation, while one
+fixed warning and `unobserved_io: true` state that named code may do private
+I/O the trace cannot observe. A sandbox claim would be false; silently
+omitting the warning would be worse.
+
+### D41 — Every exit has one parser before any exit executes
+
+Raw run options become immutable parsed execution/resolved views exactly once.
+All selected layers and all declared schedules parse before execution begins,
+so an error in the last variant cannot arrive after earlier runs already spent
+time or produced state. Compatibility registries remain, but built-in
+executors do not reparse their raw mappings.
+
+### D42 — A9 dimensional compatibility is a registry-wide delivery invariant
+
+Every production value delivery names its destination and consults the one
+dimension registry. Units are checked at the model/resource field that will
+consume the value, not guessed from the spelling at its source. A missing
+registry row is itself a refusal: accepting one new field without a dimension
+would reopen the exact route A9 exists to close.
+
+### D43 — Declarative files are captured once before readers consume them
+
+A regular input is streamed into a private mode-0600 snapshot while hashing;
+directories use a verified manifest/tree snapshot. Readers consume only that
+capture. Hashing an original and reopening it would let provenance describe
+one inode while computation reads another, even when both reads individually
+succeed.
+
+### D44 — Resolved YAML is deterministic evidence, not a debug dump
+
+Each completed layer records its effective document, parallel origin tree,
+deletions, defaults, parsed schedule, and decisions. A dedicated serializer
+uses the closed name codec and canonical scalar rules; it never calls
+`yaml.dump` on live scientific objects. A later variant refusal therefore
+still preserves the complete base document it actually earned.
+
+### D45 — Partial audit envelopes say only what completed
+
+The append-only trace marks a boundary only after it succeeds. Refused/error
+envelopes retain earlier findings, parsed rows, run outcomes, and resolved
+layers while leaving future artefacts explicitly unwritten with a closed
+reason. Serialization consumes a detached candidate and contributes exactly
+one final boundary only after final staged metadata is durable.
+
+### D46 — Output publication is a descriptor-safe recoverable transaction
+
+The output manager walks without following symlinks, proves ancestor rename
+protection and access/default ACLs, checks atomic no-replace capability without
+writing, and budgets the real leased filesystem `NAME_MAX` before mutation.
+Recovery runs before A34 clobber authorization. Journalled staging, metadata
+replacement, parent fsyncs, and no-replace publication make interruption
+recoverable; ambiguity preserves every path and permits no second transaction.
+
+### D47 — Per-target locks persist because lock identity is the exclusion
+
+The mode-0600 sibling lock is never unlinked on close. Unlinking would allow a
+second process to create and lock a new inode while the first still holds the
+old one, giving both writers apparent exclusivity. One adapter and one owning
+lease cover recovery, A34, staging, publication, and terminal recovery; an
+ordinary terminal I/O failure is recovered before the one permitted error
+sibling attempt.
 
 ## Known deferred issues
 

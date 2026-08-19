@@ -167,6 +167,9 @@ instrument is another template registered the same way.
 * - simulate an instrument
   - [The canonical signal path](signal-path.md), then
     [the operator catalog](operators.md)
+* - validate or run a YAML configuration
+  - [Configuration command line](config-cli.md), then the
+    [configuration overview](config.md)
 * - **turn a RHINO recording into a `State`**
   - [Ingestion](ingestion.md) — every other page starts from a `State` that
     already exists; this is where one comes from
@@ -201,6 +204,8 @@ ingestion
 signal-path
 operators
 contracts
+config
+config-cli
 config-values
 config-resources
 config-sections
