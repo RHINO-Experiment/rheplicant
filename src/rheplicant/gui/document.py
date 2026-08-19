@@ -19,6 +19,7 @@ from _rheplicant_bootstrap.layering import apply_variant
 from _rheplicant_bootstrap.yaml import safe_load_document
 from rheplicant.core.graph import SignalGraph
 from rheplicant.gui.forms import FormProjection, project_forms
+from rheplicant.gui.validation import ValidationProjection, validate_document
 from rheplicant.radio.graph import RADIO_GRAPH
 
 _COMPOSITION_KINDS = frozenset(("junction", "selector"))
@@ -35,8 +36,6 @@ _PROCESSING_GRAPH = SignalGraph(
         if source in _PROCESSING_NODES and target in _PROCESSING_NODES
     ),
 )
-
-
 @dataclass(frozen=True, slots=True)
 class NodeInstance:
     """One ordered instance at a ``many`` node."""
@@ -86,8 +85,6 @@ class NodeCard:
     settings: object | None
     instances: tuple[NodeInstance, ...]
     stage_names: tuple[str, ...]
-
-
 @dataclass(frozen=True, slots=True)
 class GraphDiagram:
     """One base, backend, or resolved-variant graph projection."""
@@ -98,8 +95,6 @@ class GraphDiagram:
     walk_order: tuple[str, ...]
     counts: GraphCounts
     changed_nodes: tuple[str, ...] = ()
-
-
 @dataclass(frozen=True, slots=True)
 class EditorSnapshot:
     """The complete, serializable result of one document transition."""
@@ -109,6 +104,7 @@ class EditorSnapshot:
     nodes: tuple[NodeCard, ...]
     walk_order: tuple[str, ...]
     forms: FormProjection
+    validation: ValidationProjection
     base_diagram: GraphDiagram
     backend_diagram: GraphDiagram
     variant_diagrams: tuple[GraphDiagram, ...]
@@ -418,12 +414,14 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
     model = _model(document)
     base = _diagram("base", model, RADIO_GRAPH)
     backend = _diagram("backend", model, _PROCESSING_GRAPH)
+    forms = project_forms(document)
     return EditorSnapshot(
         yaml_text=yaml_text,
         svg=base.svg,
         nodes=base.nodes,
         walk_order=base.walk_order,
-        forms=project_forms(document),
+        forms=forms,
+        validation=validate_document(yaml_text, document, forms),
         base_diagram=base,
         backend_diagram=backend,
         variant_diagrams=_variant_diagrams(document, model),

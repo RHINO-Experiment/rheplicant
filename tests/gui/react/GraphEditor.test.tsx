@@ -106,6 +106,13 @@ function state(): EditorSession {
       nodes: base.nodes,
       walk_order: base.walk_order,
       forms: { sections: [], missing_required: [] },
+      validation: {
+        findings: [],
+        section_badges: [],
+        selected_presets: [],
+        preset_changes: [],
+        run_blocked: false,
+      },
       base_diagram: base,
       backend_diagram: backend,
       variant_diagrams: [variant],

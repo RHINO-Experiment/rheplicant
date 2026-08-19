@@ -1,7 +1,8 @@
-import type { FormProjection, ProjectedWidget } from "./types";
+import type { FormProjection, ProjectedWidget, SectionBadge } from "./types";
 
 interface Props {
   forms: FormProjection;
+  badges?: SectionBadge[];
 }
 
 function deliveryLabel(delivery: string | null) {
@@ -29,16 +30,27 @@ function Widget({ widget }: { widget: ProjectedWidget }) {
   );
 }
 
-export function ConfigForms({ forms }: Props) {
+export function ConfigForms({ forms, badges = [] }: Props) {
   return (
     <section aria-label="Schema-projected forms">
       <nav aria-label="Configuration sections">
         {forms.sections.map((section) => {
-          const incomplete = section.widgets.filter((widget) => widget.must_decide).length;
+          const badge = badges.find((candidate) => candidate.section_id === section.section_id);
+          const incomplete = badge?.incomplete
+            ?? section.widgets.filter((widget) => widget.must_decide).length;
+          const labels = [
+            incomplete > 0 ? `${incomplete} incomplete` : null,
+            badge && badge.refuse > 0 ? `${badge.refuse} refuse` : null,
+            badge && badge.warn > 0 ? `${badge.warn} warn` : null,
+            badge && badge.report > 0 ? `${badge.report} report` : null,
+            badge && badge.preset_changes > 0
+              ? `${badge.preset_changes} preset changes`
+              : null,
+          ].filter((label): label is string => label !== null);
           return (
             <button key={section.section_id} type="button" disabled={section.disabled}>
               {section.label}
-              {incomplete > 0 && ` — ${incomplete} incomplete`}
+              {labels.length > 0 && ` — ${labels.join(" · ")}`}
             </button>
           );
         })}

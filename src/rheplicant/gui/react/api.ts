@@ -1,5 +1,12 @@
 import type { EditorSession, SessionTransport } from "./types";
 
+export class RequestError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "RequestError";
+  }
+}
+
 async function request(path: string, init: RequestInit): Promise<EditorSession> {
   const response = await fetch(path, {
     ...init,
@@ -7,7 +14,10 @@ async function request(path: string, init: RequestInit): Promise<EditorSession> 
   });
   const body = await response.json();
   if (!response.ok) {
-    throw new Error(body.detail ?? `Request failed with status ${response.status}`);
+    throw new RequestError(
+      response.status,
+      body.detail ?? `Request failed with status ${response.status}`,
+    );
   }
   return body as EditorSession;
 }

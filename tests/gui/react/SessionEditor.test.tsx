@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionEditor } from "../../../src/rheplicant/gui/react/SessionEditor";
+import { RequestError } from "../../../src/rheplicant/gui/react/api";
 import type {
   EditorSession,
   GraphDiagram,
@@ -14,6 +15,13 @@ const YAML = "model:\n  gain:\n    type: GainOperator\n    gain: 1.0\n";
 const EDITED = YAML.replace("1.0", "1.25");
 const SVG = '<svg><g data-node-id="gain" role="button"><text>gain</text></g></svg>';
 const FORMS = { sections: [], missing_required: [] };
+const VALIDATION = {
+  findings: [],
+  section_badges: [],
+  selected_presets: [],
+  preset_changes: [],
+  run_blocked: false,
+};
 const DIAGRAM: GraphDiagram = {
   name: "base",
   svg: SVG,
@@ -30,6 +38,7 @@ function documentState(yamlText = YAML) {
     nodes: [],
     walk_order: [],
     forms: FORMS,
+    validation: VALIDATION,
     base_diagram: DIAGRAM,
     backend_diagram: { ...DIAGRAM, name: "backend" },
     variant_diagrams: [],
@@ -41,7 +50,7 @@ function state(overrides: Partial<EditorSession> = {}): EditorSession {
     session_id: "session-1",
     revision: 0,
     dirty: false,
-    validation_stale: true,
+    validation_stale: false,
     can_undo: false,
     can_redo: false,
     document: documentState(),
@@ -90,7 +99,7 @@ describe("durable React editor session", () => {
     render(<SessionEditor initial={state()} transport={transport} />);
 
     expect(screen.getByText("Saved")).toBeInTheDocument();
-    expect(screen.getByText("Validation stale")).toBeInTheDocument();
+    expect(screen.getByText("Validation current")).toBeInTheDocument();
     const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
     fireEvent.change(mirror, { target: { value: EDITED } });
     fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
@@ -167,7 +176,10 @@ describe("durable React editor session", () => {
   it("surfaces a revision conflict without overwriting the current YAML", async () => {
     const { transport, replaceYaml } = candidate();
     replaceYaml.mockRejectedValueOnce(
-      new Error("Editor command expected revision 0, but the current revision is 1."),
+      new RequestError(
+        409,
+        "Editor command expected revision 0, but the current revision is 1.",
+      ),
     );
     render(<SessionEditor initial={state()} transport={transport} />);
     const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
@@ -177,5 +189,89 @@ describe("durable React editor session", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("current revision is 1");
     expect(mirror).toHaveValue(EDITED);
     expect(screen.getByText("Revision 0")).toBeInTheDocument();
+    expect(screen.queryByRole("alert", { name: "YAML parse diagnostic" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps invalid YAML editable, reports the parse failure, and retains the last good projection", async () => {
+    const { transport, replaceYaml } = candidate();
+    replaceYaml.mockRejectedValueOnce(
+      new RequestError(422, "GUI document: expected the node content"),
+    );
+    render(<SessionEditor initial={state()} transport={transport} />);
+    const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
+
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+    fireEvent.change(mirror, { target: { value: "model: [" } });
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
+
+    expect(await screen.findByRole("alert", { name: "YAML parse diagnostic" }))
+      .toHaveTextContent("expected the node content");
+    expect(mirror).toHaveValue("model: [");
+    expect(screen.getAllByText("gain").length).toBeGreaterThan(0);
+    expect(screen.getByText("Revision 0")).toBeInTheDocument();
+    fireEvent.change(mirror, { target: { value: "model: [still editing" } });
+    expect(mirror).toHaveValue("model: [still editing");
+  });
+
+  it("renders every finding, preset difference, section badge, and refusal Run gate", () => {
+    const validation = {
+      findings: [
+        {
+          check: "A2",
+          severity: "refuse" as const,
+          where: "variants.bad.model",
+          message: "unknown model node",
+          attribution: "variant:bad",
+        },
+        {
+          check: "A7",
+          severity: "warn" as const,
+          where: "runs[0]",
+          message: "suspicious run",
+          attribution: "base",
+        },
+        {
+          check: "C20",
+          severity: "report" as const,
+          where: "inference",
+          message: "recorded fact",
+          attribution: "base",
+        },
+      ],
+      section_badges: [
+        {
+          section_id: "variants",
+          incomplete: 0,
+          refuse: 1,
+          warn: 0,
+          report: 0,
+          preset_changes: 0,
+        },
+      ],
+      selected_presets: ["rhino_v1"],
+      preset_changes: [
+        {
+          path: "runtime.jax_enable_x64",
+          kind: "changed" as const,
+          preset_value: true,
+          document_value: false,
+        },
+      ],
+      run_blocked: true,
+    };
+    render(<SessionEditor initial={state({
+      document: { ...documentState(), validation },
+    })} transport={candidate().transport} />);
+
+    const ledger = screen.getByRole("region", { name: "Pre-flight finding ledger" });
+    expect(ledger).toHaveTextContent("unknown model node");
+    expect(ledger).toHaveTextContent("suspicious run");
+    expect(ledger).toHaveTextContent("recorded fact");
+    expect(ledger).toHaveTextContent("variant:bad");
+    expect(screen.getByRole("region", { name: "Diff against preset" }))
+      .toHaveTextContent("runtime.jax_enable_x64");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

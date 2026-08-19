@@ -102,4 +102,21 @@ describe("schema-projected config forms", () => {
     expect(screen.getByText("Reserved for capability 4 (streaming evidence)."))
       .toBeInTheDocument();
   });
+
+  it("renders completeness, pre-flight severity, and preset-diff section badges", () => {
+    render(<ConfigForms forms={forms} badges={[
+      {
+        section_id: "beam",
+        incomplete: 1,
+        refuse: 2,
+        warn: 1,
+        report: 0,
+        preset_changes: 3,
+      },
+    ]} />);
+
+    expect(screen.getByRole("button", { name: /Beam/ })).toHaveTextContent(
+      "1 incomplete · 2 refuse · 1 warn · 3 preset changes",
+    );
+  });
 });

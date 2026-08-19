@@ -12,7 +12,6 @@ from rheplicant.gui.session import (
     load_session_file,
     load_session_yaml,
     mark_saved,
-    mark_validated,
     new_session,
     redo,
     replace_session_yaml,
@@ -26,14 +25,14 @@ EDITED = BASE.replace("gain: 1.0", "gain: 1.25")
 SECOND_EDIT = BASE.replace("gain: 1.0", "gain: 1.5")
 
 
-def test_new_session_is_immutable_clean_and_validation_stale():
+def test_new_session_is_immutable_clean_and_live_preflight_is_current():
     session = new_session(BASE)
 
     assert session.yaml_text == BASE
     assert session.history == (BASE,)
     assert session.revision == 0
     assert session.dirty is False
-    assert session.validation_stale is True
+    assert session.validation_stale is False
     assert session.can_undo is False
     assert session.can_redo is False
     with pytest.raises(FrozenInstanceError):
@@ -97,41 +96,38 @@ def test_node_edit_uses_the_current_yaml_and_preserves_noop_revision():
     assert noop is edited
 
 
-def test_saved_and_validated_states_follow_exact_yaml_across_history():
+def test_saved_and_live_preflight_states_follow_exact_yaml_across_history():
     original = new_session(BASE)
-    validated = mark_validated(original, expected_revision=0)
-    changed = replace_session_yaml(validated, EDITED, expected_revision=1)
+    changed = replace_session_yaml(original, EDITED, expected_revision=0)
 
-    assert validated.validation_stale is False
     assert changed.dirty is True
-    assert changed.validation_stale is True
+    assert changed.validation_stale is False
 
-    saved = mark_saved(changed, expected_revision=2)
-    assert saved.revision == 3
+    saved = mark_saved(changed, expected_revision=1)
+    assert saved.revision == 2
     assert saved.dirty is False
-    assert saved.validation_stale is True
+    assert saved.validation_stale is False
 
-    back = undo(saved, expected_revision=3)
+    back = undo(saved, expected_revision=2)
     assert back.yaml_text == BASE
     assert back.dirty is True
     assert back.validation_stale is False
 
-    forward = redo(back, expected_revision=4)
+    forward = redo(back, expected_revision=3)
     assert forward.yaml_text == EDITED
     assert forward.dirty is False
-    assert forward.validation_stale is True
+    assert forward.validation_stale is False
 
 
-def test_explicit_load_is_clean_resets_history_and_invalidates_validation():
+def test_explicit_load_is_clean_resets_history_and_runs_live_preflight():
     changed = replace_session_yaml(new_session(BASE), EDITED, expected_revision=0)
-    validated = mark_validated(changed, expected_revision=1)
-    loaded = load_session_yaml(validated, SECOND_EDIT, expected_revision=2)
+    loaded = load_session_yaml(changed, SECOND_EDIT, expected_revision=1)
 
     assert loaded.yaml_text == SECOND_EDIT
     assert loaded.history == (SECOND_EDIT,)
-    assert loaded.revision == 3
+    assert loaded.revision == 2
     assert loaded.dirty is False
-    assert loaded.validation_stale is True
+    assert loaded.validation_stale is False
     assert loaded.can_undo is False
     assert loaded.can_redo is False
 

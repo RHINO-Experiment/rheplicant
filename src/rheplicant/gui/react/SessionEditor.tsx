@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import { ConfigForms } from "./ConfigForms";
 import { GraphEditor } from "./GraphEditor";
+import { ValidationLedger } from "./ValidationLedger";
+import { RequestError } from "./api";
 import type { EditorSession, SessionTransport } from "./types";
 
 type ReadFile = (file: File) => Promise<string>;
@@ -36,11 +38,14 @@ export function SessionEditor({
   const [session, setSession] = useState(initial);
   const [yamlDraft, setYamlDraft] = useState(initial.document.yaml_text);
   const [status, setStatus] = useState("Ready");
+  const [yamlDiagnostic, setYamlDiagnostic] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const pendingYaml = yamlDraft !== session.document.yaml_text;
 
   function accept(next: EditorSession, message: string) {
     setSession(next);
     setYamlDraft(next.document.yaml_text);
+    setYamlDiagnostic(null);
     setStatus(message);
   }
 
@@ -91,6 +96,28 @@ export function SessionEditor({
     }
   }
 
+  async function applyYamlDraft() {
+    setBusy(true);
+    try {
+      accept(
+        await transport.replaceYaml(
+          session.session_id,
+          yamlDraft,
+          session.revision,
+        ),
+        "YAML edit applied",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof RequestError && error.status === 422) {
+        setYamlDiagnostic(message);
+      }
+      setStatus(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main>
       <header>
@@ -105,7 +132,7 @@ export function SessionEditor({
 
       <nav aria-label="History and file actions">
         <button
-          disabled={busy || !session.can_undo}
+          disabled={busy || pendingYaml || !session.can_undo}
           onClick={() => run(
             () => transport.undo(session.session_id, session.revision),
             "Undid YAML edit",
@@ -114,7 +141,7 @@ export function SessionEditor({
           Undo
         </button>
         <button
-          disabled={busy || !session.can_redo}
+          disabled={busy || pendingYaml || !session.can_redo}
           onClick={() => run(
             () => transport.redo(session.session_id, session.revision),
             "Redid YAML edit",
@@ -132,38 +159,47 @@ export function SessionEditor({
             onChange={load}
           />
         </label>
-        <button disabled={busy} onClick={save}>Save YAML</button>
+        <button disabled={busy || pendingYaml} onClick={save}>Save YAML</button>
+        <button
+          disabled={busy || pendingYaml || session.document.validation.run_blocked}
+        >
+          Run
+        </button>
       </nav>
 
       <GraphEditor
         session={session}
         transport={transport}
-        disabled={busy}
+        disabled={busy || pendingYaml}
         onAccept={(next, message) => accept(next, message)}
       />
 
-      <ConfigForms forms={session.document.forms} />
+      <ConfigForms
+        forms={session.document.forms}
+        badges={session.document.validation.section_badges}
+      />
+
+      <ValidationLedger validation={session.document.validation} />
 
       <section aria-label="YAML source of truth">
         <textarea
           aria-label="YAML source of truth"
           value={yamlDraft}
           disabled={busy}
-          onChange={(event) => setYamlDraft(event.target.value)}
+          onChange={(event) => {
+            setYamlDraft(event.target.value);
+            setYamlDiagnostic(null);
+          }}
         />
         <button
           disabled={busy || yamlDraft === session.document.yaml_text}
-          onClick={() => run(
-            () => transport.replaceYaml(
-              session.session_id,
-              yamlDraft,
-              session.revision,
-            ),
-            "YAML edit applied",
-          )}
+          onClick={applyYamlDraft}
         >
           Apply YAML edit
         </button>
+        {yamlDiagnostic && (
+          <p role="alert" aria-label="YAML parse diagnostic">{yamlDiagnostic}</p>
+        )}
       </section>
       <p role="status">{status}</p>
     </main>

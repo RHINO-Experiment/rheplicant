@@ -54,6 +54,7 @@ export interface EditorSnapshot {
   nodes: NodeCard[];
   walk_order: string[];
   forms: FormProjection;
+  validation: ValidationProjection;
   base_diagram: GraphDiagram;
   backend_diagram: GraphDiagram;
   variant_diagrams: GraphDiagram[];
@@ -87,6 +88,38 @@ export interface ProjectedSection {
 export interface FormProjection {
   sections: ProjectedSection[];
   missing_required: string[];
+}
+
+export interface LedgerFinding {
+  check: string;
+  severity: "refuse" | "warn" | "report";
+  where: string;
+  message: string;
+  attribution: string;
+}
+
+export interface PresetChange {
+  path: string;
+  kind: "added" | "changed" | "removed";
+  preset_value: unknown;
+  document_value: unknown;
+}
+
+export interface SectionBadge {
+  section_id: string;
+  incomplete: number;
+  refuse: number;
+  warn: number;
+  report: number;
+  preset_changes: number;
+}
+
+export interface ValidationProjection {
+  findings: LedgerFinding[];
+  section_badges: SectionBadge[];
+  selected_presets: string[];
+  preset_changes: PresetChange[];
+  run_blocked: boolean;
 }
 
 export interface EditorSession {

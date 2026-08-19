@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
+from tests.config.preflight_helpers import preflight_document
+
 from .test_document import BASE
 
 
@@ -28,7 +30,8 @@ def test_session_routes_expose_projection_and_durable_state(client):
 
     assert created["revision"] == 0
     assert created["dirty"] is False
-    assert created["validation_stale"] is True
+    assert created["validation_stale"] is False
+    assert created["document"]["validation"]["run_blocked"] is True
     assert created["can_undo"] is False
     assert len(created["document"]["nodes"]) == 33
     assert len(created["document"]["forms"]["sections"]) == 12
@@ -69,7 +72,7 @@ def test_yaml_node_undo_and_redo_routes_are_revision_checked(client):
     assert undone.status_code == 200
     assert undone.json()["document"]["yaml_text"] == BASE
     assert undone.json()["can_redo"] is True
-    assert undone.json()["validation_stale"] is True
+    assert undone.json()["validation_stale"] is False
 
     redone = client.post(
         f"/api/sessions/{session_id}/redo",
@@ -77,7 +80,7 @@ def test_yaml_node_undo_and_redo_routes_are_revision_checked(client):
     )
     assert redone.status_code == 200
     assert redone.json()["revision"] == 3
-    assert redone.json()["validation_stale"] is True
+    assert redone.json()["validation_stale"] is False
 
 
 def test_load_and_save_are_distinct_explicit_user_actions(client):
@@ -105,7 +108,7 @@ def test_load_and_save_are_distinct_explicit_user_actions(client):
     ).json()
     assert loaded["document"]["yaml_text"] == loaded_yaml
     assert loaded["dirty"] is False
-    assert loaded["validation_stale"] is True
+    assert loaded["validation_stale"] is False
     assert loaded["can_undo"] is False
 
 
@@ -128,6 +131,28 @@ def test_session_route_refusals_do_not_overwrite_the_current_document(client):
     fetched = client.get(f"/api/sessions/{session_id}").json()
     assert fetched["revision"] == 0
     assert fetched["document"]["yaml_text"] == BASE
+
+
+def test_api_serializes_the_complete_attributed_ledger_and_preset_diff(client):
+    document = preflight_document(
+        defaults=["rhino_v1"],
+        model={"ghost": {}},
+        variants={"bad": {"model": {"phantom": {}}}},
+    )
+    response = client.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    )
+
+    assert response.status_code == 201
+    validation = response.json()["document"]["validation"]
+    assert [(row["check"], row["attribution"]) for row in validation["findings"]] == [
+        ("A2", "base"),
+        ("A2", "variant:bad"),
+    ]
+    assert validation["selected_presets"] == ["rhino_v1"]
+    assert validation["preset_changes"]
+    assert validation["run_blocked"] is True
 
 
 def test_unknown_session_is_404_and_payloads_are_closed(client):

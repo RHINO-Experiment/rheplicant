@@ -190,9 +190,12 @@ class TestTheLayerBoundaryIsMechanical:
     def test_no_config_module_is_imported_by_core_radio_or_inference(self):
         """The other direction is guarded by tests/core/test_layering.py for
         core. Nothing below config may reach up into it; the GUI is above the
-        config layer and gets one explicit catalog gateway."""
+        config layer and gets explicit catalog and live-validation gateways."""
         src = pathlib.Path(rheplicant.__file__).parent
-        allowed_clients = {pathlib.Path("gui/form_catalog.py")}
+        allowed_clients = {
+            pathlib.Path("gui/form_catalog.py"),
+            pathlib.Path("gui/validation.py"),
+        }
         offenders = [
             str(path.relative_to(src))
             for path in src.rglob("*.py")

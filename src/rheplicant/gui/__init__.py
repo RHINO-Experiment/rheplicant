@@ -48,6 +48,13 @@ from rheplicant.gui.session import (
     set_session_snapshot_before,
     undo,
 )
+from rheplicant.gui.validation import (
+    LedgerFinding,
+    PresetChange,
+    SectionBadge,
+    ValidationProjection,
+    validate_document,
+)
 
 __all__ = [
     "EditorSnapshot",
@@ -58,14 +65,18 @@ __all__ = [
     "FormRule",
     "GraphCounts",
     "GraphDiagram",
+    "LedgerFinding",
     "NodeCard",
     "NodeInstance",
     "ProjectedSection",
     "ProjectedWidget",
+    "PresetChange",
     "RevisionConflict",
     "SectionMetadata",
+    "SectionBadge",
     "SourceRef",
     "WidgetMetadata",
+    "ValidationProjection",
     "assert_catalog_closed",
     "compose_node",
     "compose_session_node",
@@ -91,5 +102,6 @@ __all__ = [
     "set_snapshot_before",
     "snapshot",
     "undo",
+    "validate_document",
     "widget_catalog",
 ]

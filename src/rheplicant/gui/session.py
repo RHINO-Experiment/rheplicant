@@ -89,6 +89,7 @@ def _commit(session: EditorSession, yaml_text: str) -> EditorSession:
         history=(*session.history[: session.cursor + 1], yaml_text),
         cursor=session.cursor + 1,
         revision=session.revision + 1,
+        validated_digest=_digest(yaml_text),
     )
 
 
@@ -100,7 +101,7 @@ def new_session(yaml_text: str) -> EditorSession:
         cursor=0,
         revision=0,
         saved_digest=_digest(found.yaml_text),
-        validated_digest=None,
+        validated_digest=_digest(found.yaml_text),
     )
 
 
@@ -237,10 +238,13 @@ def undo(session: EditorSession, *, expected_revision: int) -> EditorSession:
     _expect(session, expected_revision)
     if not session.can_undo:
         raise ConfigError("Nothing to undo in this editor session.")
+    yaml_text = session.history[session.cursor - 1]
+    replace_yaml(yaml_text)
     return replace(
         session,
         cursor=session.cursor - 1,
         revision=session.revision + 1,
+        validated_digest=_digest(yaml_text),
     )
 
 
@@ -249,10 +253,13 @@ def redo(session: EditorSession, *, expected_revision: int) -> EditorSession:
     _expect(session, expected_revision)
     if not session.can_redo:
         raise ConfigError("Nothing to redo in this editor session.")
+    yaml_text = session.history[session.cursor + 1]
+    replace_yaml(yaml_text)
     return replace(
         session,
         cursor=session.cursor + 1,
         revision=session.revision + 1,
+        validated_digest=_digest(yaml_text),
     )
 
 
@@ -296,7 +303,7 @@ def load_session_yaml(
         cursor=0,
         revision=session.revision + 1,
         saved_digest=_digest(found.yaml_text),
-        validated_digest=None,
+        validated_digest=_digest(found.yaml_text),
     )
 
 
