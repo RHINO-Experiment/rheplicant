@@ -63,8 +63,9 @@ def best_ms(call, repeats: int = 100) -> float:
     is what lets the three agree on how the number is taken.
     """
     active_coverage = Coverage.current()
-    if active_coverage is not None:
-        active_coverage.stop()
+    collector = active_coverage._collector if active_coverage is not None else None
+    if collector is not None:
+        collector.pause()
     try:
         samples = []
         for _ in range(repeats):
@@ -73,8 +74,8 @@ def best_ms(call, repeats: int = 100) -> float:
             samples.append((time.process_time() - started) * 1e3)
         return min(samples)
     finally:
-        if active_coverage is not None:
-            active_coverage.start()
+        if collector is not None:
+            collector.resume()
 
 
 def axis_facts(document, *, base_dir=None) -> Axes:
