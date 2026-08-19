@@ -27,7 +27,7 @@ def _array(value: object, *, where: str) -> np.ndarray:
         raise ConfigError(f"{where} is not a numeric array.") from None
     if array.dtype.hasobject or array.dtype.kind not in "biufc":
         raise ConfigError(f"{where} is not a numeric non-object array.")
-    return np.ascontiguousarray(array)
+    return np.array(array, copy=True, order="C")
 
 
 def numeric_leaves(value: object) -> dict[str, np.ndarray]:
@@ -138,6 +138,32 @@ def _mapping_arrays(kind: str, *fields: str) -> Callable:
     return extract
 
 
+def _flat_matrix_arrays(value: object, *, name: str) -> dict[str, object]:
+    matrix = getattr(value, "matrix", None)
+    if matrix is None:
+        raise ConfigError(f"{name} product is not a FlatMatrix.")
+    return {name: matrix}
+
+
+def _fisher_arrays(product: object, _configured: object, _options: Mapping[str, object]):
+    return _npz(
+        {
+            **_flat_matrix_arrays(_field(product, "fisher", "fisher"), name="fisher"),
+            **_flat_matrix_arrays(
+                _field(product, "covariance", "fisher"), name="covariance"
+            ),
+        }
+    )
+
+
+def _fisher_covariance(product: object, _configured: object, _options: Mapping[str, object]):
+    return _npz(
+        _flat_matrix_arrays(
+            _field(product, "covariance", "fisher"), name="covariance"
+        )
+    )
+
+
 def _mapping_field(kind: str, field: str) -> Callable:
     def extract(product: object, _configured: object, _options: Mapping[str, object]):
         return _npz(_field(product, field, kind))
@@ -243,14 +269,18 @@ def _prediction_bands(product: object, _configured: object, _options: Mapping[st
 
 
 def _wiener_covariance(product: object, _configured: object, _options: Mapping[str, object]):
-    return _npz(_field(product, "covariance", "conjugate.wiener"))
+    return _npz(
+        _flat_matrix_arrays(
+            _field(product, "covariance", "conjugate.wiener"), name="covariance"
+        )
+    )
 
 
 def _wiener_arrays(product: object, _configured: object, _options: Mapping[str, object]):
     mapping = _fixed_mapping(product, "conjugate.wiener")
     values = {"mean": _field(mapping, "mean", "conjugate.wiener")}
     if "covariance" in mapping:
-        values["covariance"] = mapping["covariance"]
+        values["covariance"] = mapping["covariance"].matrix
     values["residual"] = _field(mapping, "residual", "conjugate.wiener")
     return _npz(values)
 
@@ -288,6 +318,27 @@ def _npe_arrays(product: object, _configured: object, _options: Mapping[str, obj
     )
 
 
+def _compare_record(product: object, _configured: object, _options: Mapping[str, object]):
+    return ExtractedProduct("json", dict(product._asdict()))
+
+
+def _benchmark_record(product: object, _configured: object, _options: Mapping[str, object]):
+    variants = []
+    for variant in product.variants:
+        metrics = {
+            name: {
+                "samples": list(metric.samples),
+                "minimum": metric.minimum,
+                "median": metric.median,
+                "mean": metric.mean,
+                "unit": metric.unit,
+            }
+            for name, metric in variant.metrics.items()
+        }
+        variants.append({"name": variant.name, "metrics": metrics})
+    return ExtractedProduct("json", {"variants": variants})
+
+
 RUN_KIND_SELECTORS = {
     "forward": ("arrays", "aux", "taps"),
     "fisher": ("arrays", "covariance"),
@@ -305,6 +356,8 @@ RUN_KIND_SELECTORS = {
     "predict": ("arrays", "prediction_bands", "posterior_predictives"),
     "nuts": ("arrays", "draws", "parameters", "chains", "recovery"),
     "npe": ("arrays", "draws", "parameters", "chains", "training_history", "recovery"),
+    "compare": ("compare",),
+    "benchmark": ("benchmark",),
 }
 
 
@@ -312,8 +365,8 @@ EXTRACTOR_REGISTRY: dict[tuple[str, str], Callable] = {
     ("forward", "arrays"): _forward_arrays,
     ("forward", "aux"): _forward_aux,
     ("forward", "taps"): _forward_taps,
-    ("fisher", "arrays"): _mapping_arrays("fisher", "fisher", "covariance"),
-    ("fisher", "covariance"): _mapping_field("fisher", "covariance"),
+    ("fisher", "arrays"): _fisher_arrays,
+    ("fisher", "covariance"): _fisher_covariance,
     ("optimize", "arrays"): _mapping_arrays("optimize", "params", "losses"),
     ("optimize", "parameters"): _mapping_field("optimize", "params"),
     ("optimize", "losses"): _losses,
@@ -355,6 +408,8 @@ EXTRACTOR_REGISTRY: dict[tuple[str, str], Callable] = {
     ("npe", "parameters"): _posterior_parameters,
     ("npe", "chains"): _attribute_field("samples"),
     ("npe", "training_history"): _npe_history,
+    ("compare", "compare"): _compare_record,
+    ("benchmark", "benchmark"): _benchmark_record,
 }
 
 

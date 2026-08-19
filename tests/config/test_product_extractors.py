@@ -30,6 +30,8 @@ RUN_KINDS = (
     "predict",
     "nuts",
     "npe",
+    "compare",
+    "benchmark",
 )
 
 
@@ -113,6 +115,23 @@ def test_semantic_extractors_do_not_guess_mapping_keys():
         "gradient", "gradients", {"twin.gain": np.array([3.0])}, configured()
     )
     assert tuple(gradient.value) == ("mapping/n-7477696e2e6761696e",)
+
+
+def test_fisher_covariance_serializes_the_matrix_not_its_live_treedef():
+    product = {
+        "fisher": SimpleNamespace(matrix=np.eye(2), structure=object(), kind="fisher"),
+        "covariance": SimpleNamespace(
+            matrix=np.eye(2) * 2,
+            structure=object(),
+            kind="covariance",
+        ),
+    }
+    extracted = extract_run_payload("fisher", "covariance", product, configured())
+    assert tuple(extracted.value) == ("mapping/n-636f76617269616e6365",)
+    np.testing.assert_array_equal(
+        extracted.value["mapping/n-636f76617269616e6365"],
+        np.eye(2) * 2,
+    )
 
 
 @pytest.mark.parametrize("kind", ("plan.sample", "nuts", "npe"))

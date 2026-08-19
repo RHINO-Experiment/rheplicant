@@ -1,5 +1,6 @@
 """Deterministic scientific product containers."""
 
+from .bundle import build_product_bundle
 from .extractors import (
     EXTRACTOR_REGISTRY,
     RUN_KIND_SELECTORS,
@@ -25,6 +26,7 @@ __all__ = [
     "ProductFile",
     "ProductOmission",
     "build_product_manifest",
+    "build_product_bundle",
     "extract_run_payload",
     "numeric_leaves",
     "validate_product_bundle",

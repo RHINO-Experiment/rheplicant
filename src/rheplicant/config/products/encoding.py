@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import os
 import zipfile
@@ -74,7 +75,7 @@ def deterministic_npz(
             raise ConfigError(f"NPZ value {key!r} cannot be converted to an array.") from None
         if array.dtype.hasobject or array.dtype.kind not in "biufc":
             raise ConfigError(f"NPZ value {key!r} must have a numeric non-object dtype.")
-        arrays[key] = np.ascontiguousarray(array)
+        arrays[key] = np.array(array, copy=True, order="C")
 
     archive_buffer = io.BytesIO()
     metadata: dict[str, dict[str, object]] = {}
@@ -92,8 +93,57 @@ def deterministic_npz(
     return archive_buffer.getvalue(), metadata
 
 
+def deterministic_netcdf(
+    values: Mapping[str, object],
+) -> tuple[bytes, dict[str, dict[str, object]]]:
+    """Encode real numeric chains as deterministic NetCDF3 when SciPy exists."""
+    if importlib.util.find_spec("scipy") is None:
+        raise ConfigError(
+            "outputs.write.chains.format: netcdf needs an installed NetCDF writer; "
+            "use format: npz or install scipy."
+        )
+    from scipy.io import netcdf_file
+
+    if not isinstance(values, Mapping) or not values:
+        raise ConfigError("NetCDF chains must contain at least one named array.")
+    arrays: list[tuple[str, np.ndarray]] = []
+    for raw_key, value in values.items():
+        key = _array_key(raw_key)
+        array = np.asarray(value)
+        if array.dtype.hasobject or array.dtype.kind not in "biuf":
+            raise ConfigError(f"NetCDF chain {key!r} must have a real numeric dtype.")
+        if array.dtype.kind in "iu" and array.dtype.itemsize > 4:
+            raise ConfigError(
+                f"NetCDF3 cannot represent {array.dtype} chain {key!r}; use format: npz."
+            )
+        arrays.append((key, np.array(array, copy=True, order="C")))
+    arrays.sort(key=lambda row: row[0])
+    buffer = io.BytesIO()
+    metadata: dict[str, dict[str, object]] = {}
+    with netcdf_file(buffer, mode="w", version=2) as dataset:
+        for index, (key, array) in enumerate(arrays):
+            dimensions: list[str] = []
+            for axis, size in enumerate(array.shape):
+                name = f"d{index}_{axis}"
+                dataset.createDimension(name, int(size))
+                dimensions.append(name)
+            variable_name = "v_" + key.encode("utf-8").hex()
+            typecode = "b" if array.dtype.kind == "b" else array.dtype.char
+            variable = dataset.createVariable(variable_name, typecode, tuple(dimensions))
+            variable[:] = array.astype(variable.data.dtype, copy=False)
+            metadata[key] = {
+                "dtype": str(array.dtype),
+                "shape": list(array.shape),
+                "variable": variable_name,
+            }
+        dataset.flush()
+        payload = buffer.getvalue()
+    return payload, metadata
+
+
 __all__ = [
     "canonical_product_json",
     "deterministic_npz",
+    "deterministic_netcdf",
     "validate_relative_product_path",
 ]

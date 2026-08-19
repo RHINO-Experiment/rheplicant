@@ -173,6 +173,7 @@ def validate_product_bundle(bundle: ProductBundle, *, component_limit: int) -> N
         )
         if _request_record(request) != row:
             raise ConfigError("scientific product manifest has an invalid request row.")
+    requested_selectors = {row["selector"] for row in value["requests"]}
     for row in value["omissions"]:
         if type(row) is not dict or set(row) != {"selector", "run", "kind", "reason"}:
             raise ConfigError("scientific product manifest has an invalid omission row.")
@@ -184,6 +185,10 @@ def validate_product_bundle(bundle: ProductBundle, *, component_limit: int) -> N
     ]
     if value["files"] != expected:
         raise ConfigError("scientific product manifest disagrees with product payloads.")
+    if any(row["selector"] not in requested_selectors for row in value["files"]):
+        raise ConfigError("scientific product manifest contains an unrequested file.")
+    if any(row["selector"] not in requested_selectors for row in value["omissions"]):
+        raise ConfigError("scientific product manifest contains an unrequested omission.")
     paths = [file.relative_path for file in bundle.files]
     if len(paths) != len(set(paths)):
         raise ConfigError("duplicate product path in scientific product bundle.")
