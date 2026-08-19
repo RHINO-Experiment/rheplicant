@@ -1,0 +1,58 @@
+"""JAX-free output grammar, descriptor preflight, and publication contracts."""
+
+from .manager import (
+    acquire_output_lease,
+    close_output_lease,
+    inspect_output_path,
+    parse_output_grammar,
+    parse_output_request,
+    resolve_output_request,
+    verify_a34_under_lease,
+    verify_publication_under_lease,
+)
+from .platform import OutputPlatform, platform_adapter
+from .types import (
+    AccessInspection,
+    AncestorEntryInspection,
+    OutputLease,
+    OutputMarker,
+    OutputPathInspection,
+    OutputRequest,
+    ParsedOutputSection,
+    PublicationLease,
+    RecoveryInspection,
+    RecoveryOutcome,
+    TargetIdentity,
+    TransactionHandle,
+    TransactionInterruptionState,
+    TransactionJournal,
+    VerifiedOutputLease,
+)
+
+__all__ = [
+    "AccessInspection",
+    "AncestorEntryInspection",
+    "OutputLease",
+    "OutputMarker",
+    "OutputPathInspection",
+    "OutputPlatform",
+    "OutputRequest",
+    "ParsedOutputSection",
+    "PublicationLease",
+    "RecoveryInspection",
+    "RecoveryOutcome",
+    "TargetIdentity",
+    "TransactionHandle",
+    "TransactionInterruptionState",
+    "TransactionJournal",
+    "VerifiedOutputLease",
+    "acquire_output_lease",
+    "close_output_lease",
+    "inspect_output_path",
+    "parse_output_grammar",
+    "parse_output_request",
+    "platform_adapter",
+    "resolve_output_request",
+    "verify_a34_under_lease",
+    "verify_publication_under_lease",
+]
