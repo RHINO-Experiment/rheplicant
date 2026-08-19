@@ -363,6 +363,19 @@ class TestCompositionSymbols:
         # one shape distinguished by its contents.
         assert svg.count("<circle") == 1 + 2  # the sum, plus the switch's terminals
 
+    def test_svg_exposes_stable_node_identity_and_slot_accessibility(self, both):
+        """A GUI consumes the renderer's ids; it must not recover them from labels."""
+        svg = both.to_svg()
+        for node_id, spec in both.nodes.items():
+            assert svg.count(f'data-node-id="{node_id}"') == 1
+            assert f'data-node-kind="{spec.kind}"' in svg
+        assert svg.count('role="button"') == 4
+        assert svg.count('tabindex="0"') == 4
+        assert 'data-node-id="sum" aria-disabled="true"' in svg
+        assert 'data-node-id="switch" aria-disabled="true"' in svg
+        assert "source node p" in svg
+        assert "junction node sum" in svg
+
     def test_svg_symbols_are_smaller_than_a_box_and_the_wire_reaches_them(self, both):
         """The wire must arrive AT the symbol, not stop where a box would end."""
         from rheplicant.core.render import _NODE_H, _SUM_R, _SW_R, _half_height

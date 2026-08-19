@@ -29,6 +29,8 @@ docs/signal-path-*.svg
 signal_path.html
 
 # Tooling caches
+node_modules/
+*.tsbuildinfo
 .pytest_cache/
 .ruff_cache/
 .coverage

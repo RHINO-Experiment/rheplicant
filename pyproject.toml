@@ -91,6 +91,12 @@ rhino = ["h5py"]
 # Python >= 3.11, the floor this package already declares:
 #   uv pip install -e ".[uvbeam]"
 uvbeam = ["pyuvdata>=3.0"]
+# Plan 5's two-candidate spike keeps both web stacks optional: neither the
+# scientific package nor the JAX-free command boundary imports them.  The
+# selected stack will become the documented ``gui`` extra after the spike;
+# these named extras keep the comparison reproducible in the meantime.
+gui-panel = ["panel>=1.9,<2"]
+gui-react = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "httpx2"]
 docs = [
     "sphinx>=7",
     "myst-parser",

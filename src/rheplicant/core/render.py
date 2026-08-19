@@ -237,6 +237,10 @@ def signal_path_svg(
         )
     for nid, spec in graph.nodes.items():
         x, y = centers[nid]
+        escaped_id = _html.escape(nid, quote=True)
+        escaped_kind = _html.escape(spec.kind, quote=True)
+        description = f": {spec.doc}" if spec.doc else ""
+        title_text = _html.escape(f"{spec.kind} node {nid}{description}")
         if spec.kind in ("junction", "selector"):
             # Wire furniture: the composition symbols carry the WIRE's colour,
             # never a node colour, and light up with the wire that runs through
@@ -248,8 +252,9 @@ def signal_path_svg(
             # wire drawn through it, which is the one thing it must not do.
             draw = _sum_symbol if spec.kind == "junction" else _switch_symbol
             parts.append(
-                f'<g class="{"lit" if on else "dim"}">'
-                f"<title>{_html.escape(nid)}</title>"
+                f'<g class="{"lit" if on else "dim"}" data-node-id="{escaped_id}" '
+                f'aria-disabled="true" data-node-kind="{escaped_kind}">'
+                f"<title>{title_text}; this composition node is not an operator slot.</title>"
                 f'{draw(x, y, pal["lit"] if on else pal["wire"], 1.6 if on else 1.1)}</g>'
             )
             continue
@@ -266,7 +271,9 @@ def signal_path_svg(
         label = _html.escape(text_label)
         dash = ' stroke-dasharray="5 4"' if spec.reserved else ""
         parts.append(
-            f'<g class="{state}"><rect x="{x - _NODE_W / 2:.0f}" '
+            f'<g class="{state}" data-node-id="{escaped_id}" role="button" tabindex="0" '
+            f'data-node-kind="{escaped_kind}" aria-label="Edit {escaped_id}">'
+            f'<title>{title_text}</title><rect x="{x - _NODE_W / 2:.0f}" '
             f'y="{y - _NODE_H / 2:.0f}" width="{_NODE_W}" height="{_NODE_H}" '
             f'rx="8" fill="{fill}" stroke="{border}" stroke-width="{border_w}"{dash}/>'
             f'<text x="{x:.0f}" y="{y:.0f}" text-anchor="middle" '
