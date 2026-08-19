@@ -1,0 +1,13 @@
+"null": null  # from user
+"true": true  # from user
+"false": false  # from user
+"positive": 12  # from user
+"negative": -3  # from user
+"zero": 0.0  # from user
+"negative_zero": -0.0  # from user
+"ordinary": 1.25  # from user
+"exponent": 1.0e100  # from user
+"unicode": "雪"  # from user
+"escaped": "line\n\"x\""  # from user
+"empty_mapping": {}  # from user
+"empty_sequence": []  # from user
