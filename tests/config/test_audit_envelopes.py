@@ -16,6 +16,7 @@ from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
     serialize_bundle,
     terminal_reserialization_snapshot,
+    validate_serialized_bundle,
 )
 from _rheplicant_bootstrap.audit.diagnostics import (
     CAPTURE_SCOPES,
@@ -180,6 +181,28 @@ def test_bundle_does_not_reacquire_software(monkeypatch):
         input_bytes=INPUT,
         resolved=(),
     )
+
+
+def test_serialized_bundle_validation_refuses_noncanonical_or_disagreeing_metadata():
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    validate_serialized_bundle(bundle)
+    with pytest.raises(ConfigError, match="not JSON"):
+        validate_serialized_bundle(dataclasses.replace(bundle, provenance=b"{"))
+    diagnostics = json.loads(bundle.diagnostics)
+    diagnostics["status"] = "refused"
+    forged = canonical_json_bytes(diagnostics)
+    files = dict(bundle.files)
+    files["diagnostics.json"] = forged
+    with pytest.raises(ConfigError, match="statuses disagree"):
+        validate_serialized_bundle(
+            dataclasses.replace(bundle, diagnostics=forged, files=files)
+        )
 
 
 def test_serialization_boundary_is_exactly_one_final_document_row():

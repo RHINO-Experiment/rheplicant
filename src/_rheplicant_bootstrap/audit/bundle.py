@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -13,9 +14,9 @@ from _rheplicant_bootstrap.audit.types import AuditSnapshot, ResolvedLayerRecord
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.types import CompletedBoundary, Status
 
-from .diagnostics import build_diagnostics
+from .diagnostics import DIAGNOSTICS_KEYS, build_diagnostics
 from .json import canonical_json_bytes
-from .provenance import artefact_table, build_provenance
+from .provenance import PROVENANCE_KEYS, artefact_table, build_provenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,9 +177,44 @@ def serialize_bundle(
     )
 
 
+def validate_serialized_bundle(bundle: AuditBundle) -> None:
+    """Validate detached bundle bytes before a transaction writes them."""
+    if type(bundle) is not AuditBundle or not isinstance(bundle.files, Mapping):
+        raise ConfigError("serialized audit bundle is not exact.")
+    try:
+        provenance = json.loads(bundle.provenance)
+        diagnostics = json.loads(bundle.diagnostics)
+    except (UnicodeError, json.JSONDecodeError):
+        raise ConfigError("serialized audit metadata is not JSON.") from None
+    if (
+        type(provenance) is not dict
+        or tuple(provenance) != tuple(sorted(PROVENANCE_KEYS))
+        or type(diagnostics) is not dict
+        or tuple(diagnostics) != tuple(sorted(DIAGNOSTICS_KEYS))
+    ):
+        raise ConfigError("serialized audit metadata has the wrong top-level fields.")
+    if canonical_json_bytes(provenance) != bundle.provenance:
+        raise ConfigError("serialized provenance is not canonical JSON.")
+    if canonical_json_bytes(diagnostics) != bundle.diagnostics:
+        raise ConfigError("serialized diagnostics is not canonical JSON.")
+    if provenance["status"] != diagnostics["status"]:
+        raise ConfigError("serialized audit metadata statuses disagree.")
+    if provenance["artefacts"] != diagnostics["artefacts"]:
+        raise ConfigError("serialized audit artefact tables disagree.")
+    rows = tuple(bundle.files.items())
+    if not rows or rows[0] != ("config.input.yaml", bundle.input):
+        raise ConfigError("serialized audit bundle has inconsistent input bytes.")
+    if rows[-2:] != (
+        ("provenance.json", bundle.provenance),
+        ("diagnostics.json", bundle.diagnostics),
+    ):
+        raise ConfigError("serialized audit bundle has inconsistent metadata bytes.")
+
+
 __all__ = [
     "AuditBundle",
     "candidate_serialization_snapshot",
     "serialize_bundle",
     "terminal_reserialization_snapshot",
+    "validate_serialized_bundle",
 ]

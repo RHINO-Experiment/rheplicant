@@ -82,6 +82,15 @@ _LEASE_PLATFORMS: dict[int, int] = {}
 _INSPECTION_PLATFORMS: dict[int, int] = {}
 
 
+def _failure_budget_names(target_name: str) -> tuple[str, str]:
+    stamp = "99999999T999999.999999Z"
+    process = os.getpid()
+    return (
+        f"{target_name}.refused-{stamp}-{process}",
+        f"{target_name}.error-{stamp}-{process}",
+    )
+
+
 def _mapping(value: object, *, where: str) -> Mapping[object, object]:
     if not static_isinstance(value, Mapping):
         raise ConfigError(f"{where}: must be a mapping.")
@@ -372,7 +381,15 @@ def inspect_output_path(
         nearest = current_path
         access = platform.inspect_access(current_fd, current_path)
         limit = _component_limit(current_fd)
-        require_component_budget((*missing, target_name, *internal_names(absolute)), limit)
+        require_component_budget(
+            (
+                *missing,
+                target_name,
+                *internal_names(absolute),
+                *_failure_budget_names(target_name),
+            ),
+            limit,
+        )
         if missing:
             target = TargetIdentity(False, None, None, None)
             recovery = RecoveryInspection(False, (), False, None)
@@ -487,7 +504,12 @@ def acquire_output_lease(
         if limit != inspection.component_limit:
             raise ConfigError("output filesystem NAME_MAX changed after inspection.")
         require_component_budget(
-            (*inspection.missing_components, inspection.target_name, *internal_names(absolute)),
+            (
+                *inspection.missing_components,
+                inspection.target_name,
+                *internal_names(absolute),
+                *_failure_budget_names(inspection.target_name),
+            ),
             limit,
         )
         for component in inspection.missing_components:
