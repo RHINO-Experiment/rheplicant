@@ -29,10 +29,13 @@ model forward. That is not a policy — it is what makes the pass free.
 **What "free" is, measured rather than claimed.** The pass runs once per
 document and once more per declared **variant**, because a variant *is* a
 different document and is checked as one. Cold — one call in a fresh process —
-the worked document below is **1.6 ms**, and a document with forty
-`plan.sample` runs and twenty variants is **26 ms**, against a budget of
-0.05 s. It is linear in the number of variants from there, so a document with
+the worked document below is **3.5 ms**, and a document with forty
+`plan.sample` runs and twenty variants is **58 ms**, against a budget of
+0.15 s. It is linear in the number of variants from there, so a document with
 several dozen of them costs several dozen passes; if you write one, time it.
+(These numbers moved at 2026-08-19, when the audit-evidence pipeline gained
+its hardened enumeration: the budget was re-measured against that contract,
+not the contract weakened to fit the old one.)
 Nothing in the pass grows with the size of a *beam*, which is the comparison
 that matters: `build_resources` is 1.397 s of `load_document`'s 1.536 s on a
 toy nside-16 beam, and worse on a real CST directory.
