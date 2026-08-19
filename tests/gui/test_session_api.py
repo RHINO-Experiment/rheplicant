@@ -30,6 +30,8 @@ def test_session_routes_expose_projection_and_durable_state(client):
     assert created["validation_stale"] is True
     assert created["can_undo"] is False
     assert len(created["document"]["nodes"]) == 33
+    assert len(created["document"]["forms"]["sections"]) == 12
+    assert created["document"]["forms"]["sections"][-1]["disabled"] is True
 
     fetched = client.get(f"/api/sessions/{created['session_id']}")
     assert fetched.status_code == 200

@@ -15,6 +15,7 @@ import yaml
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.yaml import safe_load_document
+from rheplicant.gui.forms import FormProjection, project_forms
 from rheplicant.radio.graph import RADIO_GRAPH
 
 _COMPOSITION_KINDS = frozenset(("junction", "selector"))
@@ -42,6 +43,7 @@ class EditorSnapshot:
     svg: str
     nodes: tuple[NodeCard, ...]
     walk_order: tuple[str, ...]
+    forms: FormProjection
 
 
 def _load(yaml_text: str) -> Mapping[str, object]:
@@ -130,6 +132,7 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
         svg=RADIO_GRAPH.to_svg(lit=lit, title="Rheplicant config signal path"),
         nodes=nodes,
         walk_order=RADIO_GRAPH._topo,
+        forms=project_forms(document),
     )
 
 
@@ -187,6 +190,7 @@ def set_node(
 
 __all__ = [
     "EditorSnapshot",
+    "FormProjection",
     "NodeCard",
     "replace_yaml",
     "set_node",

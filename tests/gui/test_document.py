@@ -31,6 +31,21 @@ def test_snapshot_is_framework_free_and_uses_the_live_graph_contract():
     assert tuple(node.node_id for node in found.nodes) == RADIO_GRAPH._topo
     assert tuple(node.node_id for node in found.nodes if node.lit) == ("gain",)
     assert all(isinstance(node, NodeCard) for node in found.nodes)
+    assert tuple(section.section_id for section in found.forms.sections) == (
+        "runtime",
+        "observation",
+        "resources",
+        "sky",
+        "beam",
+        "instrument",
+        "backend",
+        "variants",
+        "inference",
+        "runs",
+        "outputs",
+        "campaign",
+    )
+    assert "schema_version" in found.forms.missing_required
     assert dataclasses.is_dataclass(found)
     with pytest.raises(dataclasses.FrozenInstanceError):
         found.yaml_text = "model: {}\n"  # type: ignore[misc]

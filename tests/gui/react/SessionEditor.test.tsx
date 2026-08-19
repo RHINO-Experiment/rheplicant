@@ -12,6 +12,7 @@ afterEach(cleanup);
 const YAML = "model:\n  gain:\n    type: GainOperator\n    gain: 1.0\n";
 const EDITED = YAML.replace("1.0", "1.25");
 const SVG = '<svg><g data-node-id="gain" role="button"><text>gain</text></g></svg>';
+const FORMS = { sections: [], missing_required: [] };
 
 function state(overrides: Partial<EditorSession> = {}): EditorSession {
   return {
@@ -21,7 +22,7 @@ function state(overrides: Partial<EditorSession> = {}): EditorSession {
     validation_stale: true,
     can_undo: false,
     can_redo: false,
-    document: { yaml_text: YAML, svg: SVG, nodes: [], walk_order: [] },
+    document: { yaml_text: YAML, svg: SVG, nodes: [], walk_order: [], forms: FORMS },
     ...overrides,
   };
 }
@@ -71,7 +72,7 @@ describe("durable React editor session", () => {
       revision: 1,
       dirty: true,
       can_undo: true,
-      document: { yaml_text: EDITED, svg: SVG, nodes: [], walk_order: [] },
+      document: { yaml_text: EDITED, svg: SVG, nodes: [], walk_order: [], forms: FORMS },
     });
     const { transport, undo, redo } = candidate(initial);
     render(<SessionEditor initial={initial} transport={transport} />);

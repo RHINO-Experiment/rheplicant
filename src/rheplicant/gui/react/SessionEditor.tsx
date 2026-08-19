@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { ConfigForms } from "./ConfigForms";
 import type { EditorSession, SessionTransport } from "./types";
 
 type ReadFile = (file: File) => Promise<string>;
@@ -136,6 +137,8 @@ export function SessionEditor({
       <section aria-label="Signal path projection">
         <div dangerouslySetInnerHTML={{ __html: session.document.svg }} />
       </section>
+
+      <ConfigForms forms={session.document.forms} />
 
       <section aria-label="YAML source of truth">
         <textarea

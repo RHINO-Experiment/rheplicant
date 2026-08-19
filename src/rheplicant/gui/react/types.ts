@@ -14,6 +14,37 @@ export interface EditorSnapshot {
   svg: string;
   nodes: NodeCard[];
   walk_order: string[];
+  forms: FormProjection;
+}
+
+export interface ProjectedWidget {
+  path: string;
+  path_pattern: string;
+  label: string;
+  widget: string;
+  choices: string[];
+  visible: boolean;
+  present: boolean;
+  must_decide: boolean;
+  value: unknown;
+  dimension: string | null;
+  unit_policy: string | null;
+  delivery: string | null;
+  disabled: boolean;
+  reason: string | null;
+}
+
+export interface ProjectedSection {
+  section_id: string;
+  label: string;
+  disabled: boolean;
+  reason: string | null;
+  widgets: ProjectedWidget[];
+}
+
+export interface FormProjection {
+  sections: ProjectedSection[];
+  missing_required: string[];
 }
 
 export interface EditorSession {
