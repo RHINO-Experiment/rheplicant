@@ -194,7 +194,7 @@ BANDPASS = {"bandpass": {"value": [1.0] * 8, "unit": "dimensionless"}}
 #: Written under a ``bandpass:`` key it lands at ``adc``, which is what makes
 #: it the document where a key and its operator's node come furthest apart.
 ADC = {"python": "rheplicant.radio:ADCOperator", "n_bits": 8,
-       "scale": {"value": 1.0, "unit": "dimensionless"}}
+       "scale": {"value": 1.0, "unit": "adc_count/K"}}
 SKY = {"amplitude": {"value": 10.0, "unit": "K"}}
 DATA = {"zeros": ["n_time", "n_freq"]}
 NOISE_STAGE = {"type": "NoiseOperator", "sigma": SIGMA}

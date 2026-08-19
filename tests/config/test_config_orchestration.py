@@ -96,6 +96,7 @@ class _Trace:
         self.parsed_runs = []
         self.outcomes = []
         self.frozen = []
+        self.deliveries = []
 
     def record_findings(self, stage, layer, findings):
         self.events.append(("findings", stage, layer))
@@ -112,6 +113,10 @@ class _Trace:
     def record_run_outcome(self, layer, row):
         self.events.append(("outcome", layer))
         self.outcomes.append((layer, row))
+
+    def record_delivery(self, layer, destination, **facts):
+        self.events.append(("delivery", layer, destination))
+        self.deliveries.append((layer, destination, facts))
 
     def freeze_layer(self, layer, row):
         self.events.append(("freeze", layer))
