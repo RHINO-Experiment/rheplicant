@@ -43,12 +43,13 @@ from rheplicant.config.sections.runtime import build_runtime
 def best_ms(call, repeats: int = 100) -> float:
     """The FASTEST of ``repeats`` runs of ``call``, in milliseconds.
 
-    **The minimum and not the median**, and that is what makes a bound set
-    NEAR the measurement safe: contention from fifteen sibling ``-n 16``
-    workers can only ADD time, so it moves the median and the maximum and
-    leaves the best case alone.  Measured on an idle machine the two agree to
-    3 % (``axes`` on the worked document: 0.0132 ms best, 0.0135 ms median),
-    so nothing is given up by taking it.
+    **The minimum and not the median**, and measured with process CPU time.
+    Fifteen sibling ``-n 16`` workers can keep a process descheduled throughout
+    every short repeat, which made the wall-clock minimum 1.49 ms for a
+    0.15 ms call.  CPU time excludes that scheduler delay while retaining the
+    work this process actually performs.  Measured on an idle machine the
+    minimum and median agree to 3 % (``axes`` on the worked document: 0.0132 ms
+    best, 0.0135 ms median), so nothing is given up by taking the minimum.
 
     Coverage tracing is paused only around the timed calls.  Its line-event
     overhead is instrumentation rather than the pass's cost and, measured on
@@ -67,9 +68,9 @@ def best_ms(call, repeats: int = 100) -> float:
     try:
         samples = []
         for _ in range(repeats):
-            started = time.perf_counter()
+            started = time.process_time()
             call()
-            samples.append((time.perf_counter() - started) * 1e3)
+            samples.append((time.process_time() - started) * 1e3)
         return min(samples)
     finally:
         if active_coverage is not None:
