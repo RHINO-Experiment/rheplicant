@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   EditorSession,
@@ -29,23 +29,88 @@ const SignalCanvas = memo(function SignalCanvas({
   label,
   onSelect,
 }: CanvasProps) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const interactive = onSelect !== undefined;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const buttons = Array.from(
+      canvas.querySelectorAll<SVGElement>('[data-node-id][role="button"]'),
+    );
+    if (!interactive) {
+      buttons.forEach((button) => {
+        button.setAttribute("tabindex", "-1");
+        button.setAttribute("aria-disabled", "true");
+      });
+      return;
+    }
+    const active = buttons.find((button) => button.getAttribute("tabindex") === "0")
+      ?? buttons[0];
+    buttons.forEach((button) => {
+      const selected = button === active;
+      button.setAttribute("tabindex", selected ? "0" : "-1");
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+  }, [diagram.svg, interactive]);
+
   function select(target: EventTarget | null) {
-    const nodeId = nodeElement(target)?.getAttribute("data-node-id");
+    const selected = nodeElement(target);
+    const nodeId = selected?.getAttribute("data-node-id");
+    const canvas = canvasRef.current;
+    if (selected && canvas && interactive) {
+      canvas.querySelectorAll('[data-node-id][role="button"]').forEach((button) => {
+        const active = button === selected;
+        button.setAttribute("tabindex", active ? "0" : "-1");
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
     if (nodeId) onSelect?.(nodeId);
   }
 
   function keyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    if (!nodeElement(event.target)) return;
+    if (!interactive) return;
+    const current = nodeElement(event.target);
+    if (!current) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      select(event.target);
+      return;
+    }
+    const movement = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+    if (!movement.includes(event.key)) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const byId = new Map(
+      Array.from(canvas.querySelectorAll<SVGElement>('[data-node-id][role="button"]'))
+        .map((button) => [button.getAttribute("data-node-id"), button]),
+    );
+    const ordered = diagram.walk_order.flatMap((nodeId) => {
+      const button = byId.get(nodeId);
+      return button ? [button] : [];
+    });
+    if (ordered.length === 0) return;
+    const currentIndex = Math.max(0, ordered.indexOf(current as SVGElement));
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? ordered.length - 1
+        : event.key === "ArrowRight" || event.key === "ArrowDown"
+          ? (currentIndex + 1) % ordered.length
+          : (currentIndex - 1 + ordered.length) % ordered.length;
     event.preventDefault();
-    select(event.target);
+    const next = ordered[nextIndex];
+    ordered.forEach((button) => button.setAttribute("tabindex", button === next ? "0" : "-1"));
+    next.focus();
+    select(next);
   }
 
   return (
     <div
+      ref={canvasRef}
       aria-label={label}
-      onClick={(event) => select(event.target)}
-      onKeyDown={keyDown}
+      onClick={interactive ? (event) => select(event.target) : undefined}
+      onKeyDown={interactive ? keyDown : undefined}
       dangerouslySetInnerHTML={{ __html: diagram.svg }}
     />
   );
@@ -84,6 +149,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
   const [regionText, setRegionText] = useState("");
   const [snapshotName, setSnapshotName] = useState("raw");
   const [status, setStatus] = useState("Graph ready");
+  const [statusError, setStatusError] = useState(false);
 
   const diagram = activeVariant === null
     ? session.document.base_diagram
@@ -116,14 +182,16 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
       const next = await action();
       onAccept(next, message);
       setStatus(message);
+      setStatusError(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     }
   }
 
-  function select(nodeId: string) {
+  const select = useCallback((nodeId: string) => {
     setSelectedId(nodeId);
-  }
+  }, []);
 
   function applyNode() {
     if (!selected) return;
@@ -132,6 +200,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
       settings = parseSettings(settingsText);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
       return;
     }
     void run(
@@ -185,6 +254,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     }
   }
 
@@ -207,6 +277,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     }
   }
 
@@ -229,7 +300,11 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
         </label>
       </header>
 
-      <SignalCanvas diagram={diagram} label="Signal path diagram" onSelect={select} />
+      <SignalCanvas
+        diagram={diagram}
+        label="Signal path diagram"
+        onSelect={select}
+      />
       <p>{countLine(diagram)}</p>
 
       {selected && (
@@ -390,7 +465,13 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
           </article>
         ))}
       </section>
-      <p aria-live="polite">{status}</p>
+      <p
+        role={statusError ? "alert" : undefined}
+        aria-live={statusError ? "assertive" : "polite"}
+        className={statusError ? "error-surface" : undefined}
+      >
+        {status}
+      </p>
     </section>
   );
 }

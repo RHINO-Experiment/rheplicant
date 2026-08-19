@@ -42,6 +42,32 @@ const PREVIEWS = {
   },
   declared_run_kinds: ["forward"],
 };
+const OUTPUTS = {
+  requested_yaml: YAML,
+  resolved_yaml: YAML,
+  resolution_note: "Preset-merged preview.",
+  target_path: "/rheplicant-gui/session.results",
+  state: "ready_new" as const,
+  state_message: "The target is absent and ready for a new run.",
+  clobber: false,
+  declared_runs: ["forward"],
+  products: [],
+  report: {
+    enabled: false,
+    rows: [],
+    columns: ["mean", "std", "seconds"],
+    reference: null,
+    relative: [],
+    formats: ["text"],
+    expected_paths: [],
+  },
+  audit_paths: [
+    "config.input.yaml",
+    "config.resolved.yaml",
+    "provenance.json",
+    "diagnostics.json",
+  ],
+};
 const DIAGRAM: GraphDiagram = {
   name: "base",
   svg: SVG,
@@ -74,6 +100,7 @@ function state(overrides: Partial<EditorSession> = {}): EditorSession {
     validation_stale: false,
     can_undo: false,
     can_redo: false,
+    outputs: OUTPUTS,
     jobs: [],
     document: documentState(),
     ...overrides,
@@ -192,7 +219,7 @@ describe("durable React editor session", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Save YAML" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("download refused");
+    expect(await screen.findByRole("alert")).toHaveTextContent("download refused");
     expect(save).not.toHaveBeenCalled();
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
@@ -210,7 +237,7 @@ describe("durable React editor session", () => {
     fireEvent.change(mirror, { target: { value: EDITED } });
     fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("current revision is 1");
+    expect(await screen.findByRole("alert")).toHaveTextContent("current revision is 1");
     expect(mirror).toHaveValue(EDITED);
     expect(screen.getByText("Revision 0")).toBeInTheDocument();
     expect(screen.queryByRole("alert", { name: "YAML parse diagnostic" }))
@@ -297,5 +324,37 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("region", { name: "Diff against preset" }))
       .toHaveTextContent("runtime.jax_enable_x64");
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("refreshes terminal jobs without erasing an in-progress YAML draft", async () => {
+    const initial = state({
+      jobs: [{
+        job_id: "job-1",
+        session_id: "session-1",
+        kind: "run",
+        revision: 0,
+        yaml_digest: "abc",
+        status: "running",
+        result: null,
+        message: null,
+        stale: false,
+      }],
+    });
+    const refreshed = state({
+      jobs: [{ ...initial.jobs[0], status: "succeeded", result: { exit_code: 0 } }],
+    });
+    const candidateApi = candidate(initial);
+    const refresh = vi.fn(async () => refreshed);
+    candidateApi.transport.refresh = refresh;
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+
+    const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
+    fireEvent.change(mirror, { target: { value: EDITED } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith("session-1"));
+    expect(mirror).toHaveValue(EDITED);
+    expect(screen.getByRole("region", { name: "Explicit jobs" }))
+      .toHaveTextContent("succeeded");
   });
 });

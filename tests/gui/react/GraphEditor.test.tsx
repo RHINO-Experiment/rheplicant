@@ -212,6 +212,10 @@ describe("graph-guided instrument editor", () => {
     expect(within(comparison).getByText("Base")).toBeInTheDocument();
     expect(within(comparison).getByText("low_gain")).toBeInTheDocument();
     expect(within(comparison).getByText("Changed nodes: gain")).toBeInTheDocument();
+    const comparisonNode = comparison.querySelector('[data-node-id="gain"]')!;
+    expect(comparisonNode).toHaveAttribute("tabindex", "-1");
+    fireEvent.click(comparisonNode);
+    expect(comparisonNode).toHaveAttribute("tabindex", "-1");
   });
 
   it("authors ordered compose and at-region edits through their document routes", () => {
@@ -268,5 +272,26 @@ describe("graph-guided instrument editor", () => {
       4,
       "low_gain",
     );
+  });
+
+  it("uses a roving focus stop and traverses editable nodes in graph order", () => {
+    const initial = state();
+    render(<GraphEditor session={initial} transport={transport()} onAccept={vi.fn()} />);
+    const canvas = screen.getByLabelText("Signal path diagram");
+    const gain = canvas.querySelector('[data-node-id="gain"]') as SVGElement;
+    const flagging = canvas.querySelector('[data-node-id="flagging"]') as SVGElement;
+    const filters = canvas.querySelector('[data-node-id="filters"]') as SVGElement;
+
+    expect(gain).toHaveAttribute("tabindex", "0");
+    expect(flagging).toHaveAttribute("tabindex", "-1");
+    gain.focus();
+    fireEvent.keyDown(gain, { key: "ArrowRight" });
+    expect(flagging).toHaveAttribute("tabindex", "0");
+    expect(gain).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("heading", { name: "flagging" })).toBeInTheDocument();
+    fireEvent.keyDown(flagging, { key: "End" });
+    expect(filters).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(filters, { key: "Home" });
+    expect(gain).toHaveAttribute("tabindex", "0");
   });
 });

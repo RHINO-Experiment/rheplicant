@@ -34,6 +34,11 @@ function nodePath(sessionId: string, nodeId: string, suffix = "") {
 }
 
 export const sessionTransport: SessionTransport = {
+  refresh(sessionId) {
+    return request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+    });
+  },
   replaceYaml(sessionId, yamlText, expectedRevision) {
     return request(`/api/sessions/${encodeURIComponent(sessionId)}/yaml`, {
       method: "PUT",
@@ -134,6 +139,54 @@ export const sessionTransport: SessionTransport = {
         expected_revision: expectedRevision,
         snapshot_name: snapshotName,
         variant,
+      }),
+    });
+  },
+  setOutputProduct(
+    sessionId,
+    name,
+    enabled,
+    format,
+    runs,
+    keys,
+    themes,
+    expectedRevision,
+  ) {
+    return request(
+      `/api/sessions/${encodeURIComponent(sessionId)}/outputs/products/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          enabled,
+          format,
+          runs,
+          keys,
+          themes,
+        }),
+      },
+    );
+  },
+  setOutputReport(
+    sessionId,
+    enabled,
+    rows,
+    columns,
+    reference,
+    relative,
+    formats,
+    expectedRevision,
+  ) {
+    return request(`/api/sessions/${encodeURIComponent(sessionId)}/outputs/report`, {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        enabled,
+        rows,
+        columns,
+        reference,
+        relative,
+        formats,
       }),
     });
   },

@@ -1,7 +1,10 @@
 import { useState } from "react";
 
+import "./editor.css";
+
 import { ConfigForms } from "./ConfigForms";
 import { GraphEditor } from "./GraphEditor";
+import { OutputWorkflow } from "./OutputWorkflow";
 import { PreviewPanel } from "./PreviewPanel";
 import { ValidationLedger } from "./ValidationLedger";
 import { RequestError } from "./api";
@@ -39,6 +42,7 @@ export function SessionEditor({
   const [session, setSession] = useState(initial);
   const [yamlDraft, setYamlDraft] = useState(initial.document.yaml_text);
   const [status, setStatus] = useState("Ready");
+  const [statusError, setStatusError] = useState(false);
   const [yamlDiagnostic, setYamlDiagnostic] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pendingYaml = yamlDraft !== session.document.yaml_text;
@@ -48,6 +52,7 @@ export function SessionEditor({
     setYamlDraft(next.document.yaml_text);
     setYamlDiagnostic(null);
     setStatus(message);
+    setStatusError(false);
   }
 
   async function run(
@@ -59,6 +64,7 @@ export function SessionEditor({
       accept(await action(), message);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     } finally {
       setBusy(false);
     }
@@ -76,6 +82,7 @@ export function SessionEditor({
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     } finally {
       event.target.value = "";
       setBusy(false);
@@ -92,6 +99,7 @@ export function SessionEditor({
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
     } finally {
       setBusy(false);
     }
@@ -114,6 +122,7 @@ export function SessionEditor({
         setYamlDiagnostic(message);
       }
       setStatus(message);
+      setStatusError(true);
     } finally {
       setBusy(false);
     }
@@ -126,8 +135,22 @@ export function SessionEditor({
     );
   }
 
+  async function refreshJobs() {
+    setBusy(true);
+    try {
+      setSession(await transport.refresh(session.session_id));
+      setStatus("Job state refreshed");
+      setStatusError(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setStatusError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <main>
+    <main className="rheplicant-editor">
       <header>
         <h1>Rheplicant config editor</h1>
         <p>YAML is the sole scientific state; controls are projections.</p>
@@ -168,6 +191,7 @@ export function SessionEditor({
           />
         </label>
         <button disabled={busy || pendingYaml} onClick={save}>Save YAML</button>
+        <button disabled={busy} onClick={refreshJobs}>Refresh jobs</button>
       </nav>
 
       <GraphEditor
@@ -180,6 +204,13 @@ export function SessionEditor({
       <ConfigForms
         forms={session.document.forms}
         badges={session.document.validation.section_badges}
+      />
+
+      <OutputWorkflow
+        session={session}
+        transport={transport}
+        disabled={busy || pendingYaml}
+        onAccept={(next, message) => accept(next, message)}
       />
 
       <ValidationLedger validation={session.document.validation} />
@@ -195,6 +226,8 @@ export function SessionEditor({
       <section aria-label="YAML source of truth">
         <textarea
           aria-label="YAML source of truth"
+          aria-invalid={yamlDiagnostic !== null}
+          aria-describedby={yamlDiagnostic ? "yaml-diagnostic" : undefined}
           value={yamlDraft}
           disabled={busy}
           onChange={(event) => {
@@ -209,10 +242,14 @@ export function SessionEditor({
           Apply YAML edit
         </button>
         {yamlDiagnostic && (
-          <p role="alert" aria-label="YAML parse diagnostic">{yamlDiagnostic}</p>
+          <p id="yaml-diagnostic" role="alert" aria-label="YAML parse diagnostic" className="error-surface">
+            {yamlDiagnostic}
+          </p>
         )}
       </section>
-      <p role="status">{status}</p>
+      <p role={statusError ? "alert" : "status"} className={statusError ? "error-surface" : undefined}>
+        {status}
+      </p>
     </main>
   );
 }

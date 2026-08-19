@@ -172,8 +172,53 @@ export interface EditorSession {
   validation_stale: boolean;
   can_undo: boolean;
   can_redo: boolean;
+  outputs: OutputProjection;
   jobs: JobProjection[];
   document: EditorSnapshot;
+}
+
+export type OutputState =
+  | "ready_new"
+  | "blocked_existing"
+  | "blocked_foreign"
+  | "replace_owned"
+  | "ambiguous_recovery"
+  | "blocked_unsafe"
+  | "unavailable";
+
+export interface OutputProductProjection {
+  name: string;
+  enabled: boolean;
+  format: string;
+  formats: string[];
+  runs: string[];
+  keys: string[];
+  themes: string[];
+  expected_paths: string[];
+}
+
+export interface OutputReportProjection {
+  enabled: boolean;
+  rows: string[];
+  columns: string[];
+  reference: string | null;
+  relative: string[];
+  formats: string[];
+  expected_paths: string[];
+}
+
+export interface OutputProjection {
+  requested_yaml: string;
+  resolved_yaml: string;
+  resolution_note: string;
+  target_path: string | null;
+  state: OutputState;
+  state_message: string;
+  clobber: boolean;
+  declared_runs: string[];
+  products: OutputProductProjection[];
+  report: OutputReportProjection;
+  audit_paths: string[];
 }
 
 export type JobKind =
@@ -196,6 +241,7 @@ export interface JobProjection {
 }
 
 export interface SessionTransport {
+  refresh(sessionId: string): Promise<EditorSession>;
   replaceYaml(
     sessionId: string,
     yamlText: string,
@@ -247,6 +293,26 @@ export interface SessionTransport {
     snapshotName: string,
     expectedRevision: number,
     variant: string | null,
+  ): Promise<EditorSession>;
+  setOutputProduct(
+    sessionId: string,
+    name: string,
+    enabled: boolean,
+    format: string,
+    runs: string[],
+    keys: string[],
+    themes: string[],
+    expectedRevision: number,
+  ): Promise<EditorSession>;
+  setOutputReport(
+    sessionId: string,
+    enabled: boolean,
+    rows: string[],
+    columns: string[],
+    reference: string | null,
+    relative: string[],
+    formats: string[],
+    expectedRevision: number,
   ): Promise<EditorSession>;
   submitJob(
     sessionId: string,

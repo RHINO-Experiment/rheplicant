@@ -24,6 +24,7 @@ from rheplicant.gui.document import (
     set_node,
     set_snapshot_before,
 )
+from rheplicant.gui.outputs import set_output_product, set_output_report
 
 
 class RevisionConflict(ConfigError):
@@ -233,6 +234,56 @@ def set_session_snapshot_before(
     return _commit(session, found.yaml_text)
 
 
+def set_session_output_product(
+    session: EditorSession,
+    name: str,
+    *,
+    enabled: bool,
+    expected_revision: int,
+    format: str | None = None,
+    runs: Sequence[str] = (),
+    keys: Sequence[str] = (),
+    themes: Sequence[str] = (),
+) -> EditorSession:
+    """Commit one closed scientific-product request."""
+    _expect(session, expected_revision)
+    yaml_text = set_output_product(
+        session.yaml_text,
+        name,
+        enabled=enabled,
+        format=format,
+        runs=runs,
+        keys=keys,
+        themes=themes,
+    )
+    return _commit(session, yaml_text)
+
+
+def set_session_output_report(
+    session: EditorSession,
+    *,
+    enabled: bool,
+    expected_revision: int,
+    rows: Sequence[str] = (),
+    columns: Sequence[str] = ("mean", "std", "seconds"),
+    reference: str | None = None,
+    relative: Sequence[str] = (),
+    formats: Sequence[str] = ("text",),
+) -> EditorSession:
+    """Commit or remove the deterministic report-table request."""
+    _expect(session, expected_revision)
+    yaml_text = set_output_report(
+        session.yaml_text,
+        enabled=enabled,
+        rows=rows,
+        columns=columns,
+        reference=reference,
+        relative=relative,
+        formats=formats,
+    )
+    return _commit(session, yaml_text)
+
+
 def undo(session: EditorSession, *, expected_revision: int) -> EditorSession:
     """Move one position back without discarding redo history."""
     _expect(session, expected_revision)
@@ -361,6 +412,8 @@ __all__ = [
     "redo",
     "replace_session_yaml",
     "save_session_file",
+    "set_session_output_product",
+    "set_session_output_report",
     "set_session_snapshot_before",
     "undo",
 ]

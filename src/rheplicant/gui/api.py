@@ -9,19 +9,20 @@ testable without FastAPI, a browser, or file IO.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from _rheplicant_bootstrap.errors import ConfigError
 from rheplicant.gui.document import EditorSnapshot, set_node, snapshot
 from rheplicant.gui.jobs import JobKind, JobRunner, JobStore, execute_job, yaml_digest
+from rheplicant.gui.outputs import project_output_workflow, read_audit_artifact
 from rheplicant.gui.session import (
     EditorSession,
     RevisionConflict,
@@ -35,6 +36,8 @@ from rheplicant.gui.session import (
     place_session_node,
     redo,
     replace_session_yaml,
+    set_session_output_product,
+    set_session_output_report,
     set_session_snapshot_before,
     undo,
 )
@@ -98,6 +101,23 @@ class SessionPlacementPayload(RevisionPayload):
 class SessionSnapshotPayload(RevisionPayload):
     snapshot_name: str
     variant: str | None = None
+
+
+class SessionOutputProductPayload(RevisionPayload):
+    enabled: bool
+    format: str | None = None
+    runs: list[str] = Field(default_factory=list)
+    keys: list[str] = Field(default_factory=list)
+    themes: list[str] = Field(default_factory=list)
+
+
+class SessionOutputReportPayload(RevisionPayload):
+    enabled: bool
+    rows: list[str] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=lambda: ["mean", "std", "seconds"])
+    reference: str | None = None
+    relative: list[str] = Field(default_factory=list)
+    formats: list[str] = Field(default_factory=lambda: ["text"])
 
 
 class SessionStore:
@@ -178,6 +198,7 @@ def _session_body(
             dataclasses.asdict(row)
             for row in store.jobs.project(session_id, yaml_digest(session.yaml_text))
         ],
+        "outputs": dataclasses.asdict(project_output_workflow(session.yaml_text)),
         "document": _snapshot_body(snapshot(session.yaml_text)),
     }
 
@@ -381,6 +402,47 @@ def create_app(
             ),
         )
 
+    @app.put("/api/sessions/{session_id}/outputs/products/{product_name}")
+    def output_product_route(
+        session_id: str,
+        product_name: str,
+        payload: SessionOutputProductPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: set_session_output_product(
+                current,
+                product_name,
+                enabled=payload.enabled,
+                format=payload.format,
+                runs=payload.runs,
+                keys=payload.keys,
+                themes=payload.themes,
+                expected_revision=payload.expected_revision,
+            ),
+        )
+
+    @app.put("/api/sessions/{session_id}/outputs/report")
+    def output_report_route(
+        session_id: str,
+        payload: SessionOutputReportPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: set_session_output_report(
+                current,
+                enabled=payload.enabled,
+                rows=payload.rows,
+                columns=payload.columns,
+                reference=payload.reference,
+                relative=payload.relative,
+                formats=payload.formats,
+                expected_revision=payload.expected_revision,
+            ),
+        )
+
     @app.post("/api/sessions/{session_id}/undo")
     def undo_route(
         session_id: str,
@@ -459,6 +521,52 @@ def create_app(
         body = _session_body(store, session_id, session)
         background_tasks.add_task(store.jobs.run, job_id, job_runner)
         return body
+
+    @app.get("/api/sessions/{session_id}/jobs/{job_id}/artifacts/{artifact_name}")
+    def audit_artifact_route(
+        session_id: str,
+        job_id: str,
+        artifact_name: str,
+    ) -> Response:
+        try:
+            job = store.jobs.get(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Job {job_id!r} does not exist.") from None
+        if job.session_id != session_id:
+            raise HTTPException(status_code=404, detail=f"Job {job_id!r} does not exist.")
+        result = job.result
+        output = result.get("output") if isinstance(result, Mapping) else None
+        if not isinstance(output, Mapping):
+            raise HTTPException(status_code=409, detail="The job has no completed audit bundle.")
+        target = output.get("target_path")
+        marker_id = output.get("marker_id")
+        target_device = output.get("target_device")
+        target_inode = output.get("target_inode")
+        files = output.get("audit_files")
+        if (
+            not isinstance(target, str)
+            or not isinstance(marker_id, str)
+            or type(target_device) is not int
+            or type(target_inode) is not int
+            or isinstance(files, str | bytes)
+            or not isinstance(files, Sequence)
+            or artifact_name not in files
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The audit artefact is not available for this job.",
+            )
+        try:
+            artifact = read_audit_artifact(
+                target,
+                marker_id,
+                artifact_name,
+                target_device=target_device,
+                target_inode=target_inode,
+            )
+        except ConfigError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return Response(content=artifact.payload, media_type=artifact.media_type)
 
     if frontend_dir is not None:
         root = frontend_dir.resolve()

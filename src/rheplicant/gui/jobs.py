@@ -116,9 +116,11 @@ class JobStore:
                 message=str(error),
             )
         except Exception as error:  # noqa: BLE001 -- the job records terminal errors
+            output = getattr(error, "gui_output", None)
             finished = replace(
                 running,
                 status="error",
+                result=None if output is None else {"output": output},
                 message=f"{type(error).__name__}: {error}",
             )
         else:
@@ -145,11 +147,26 @@ def _plain(value: object) -> object:
 
 
 def _error_result(error: ConfigError) -> object | None:
+    output = getattr(error, "gui_output", None)
     report = getattr(error, "report", None)
     findings = getattr(report, "findings", None)
     if findings is None:
-        return None
-    return {"findings": [_finding(row, "unknown") for row in findings]}
+        return None if output is None else {"output": output}
+    result = {"findings": [_finding(row, "unknown") for row in findings]}
+    if output is not None:
+        result["output"] = output
+    return result
+
+
+def _failure_audit(stderr: str) -> dict[str, object] | None:
+    from rheplicant.gui.outputs import output_summary_at_path
+
+    for line in reversed(stderr.splitlines()):
+        for prefix in ("refused audit: ", "error audit: "):
+            if line.startswith(prefix):
+                summary = output_summary_at_path(line.removeprefix(prefix))
+                return summary if summary.get("marker_id") is not None else None
+    return None
 
 
 def _document(yaml_text: str) -> dict[str, object]:
@@ -339,9 +356,20 @@ def execute_job(
         "stderr": stderr.getvalue(),
     }
     if exit_code == 2:
-        raise ConfigError(stderr.getvalue().strip() or f"{kind} job was refused.")
+        error = ConfigError(stderr.getvalue().strip() or f"{kind} job was refused.")
+        output = _failure_audit(stderr.getvalue())
+        if output is not None:
+            error.gui_output = output
+        raise error
     if exit_code != 0:
-        raise RuntimeError(stderr.getvalue().strip() or f"{kind} job failed.")
+        error = RuntimeError(stderr.getvalue().strip() or f"{kind} job failed.")
+        output = _failure_audit(stderr.getvalue())
+        if output is not None:
+            error.gui_output = output
+        raise error
+    from rheplicant.gui.outputs import completed_output_summary
+
+    result["output"] = completed_output_summary(yaml_text)
     return result
 
 

@@ -161,3 +161,37 @@ def test_complex_taps_are_summarised_by_magnitude_without_losing_the_dtype():
         "maximum": 13.0,
         "mean": 9.0,
     }
+
+
+def test_refused_job_retains_its_published_audit_bundle_links(tmp_path):
+    import json
+
+    target = tmp_path / "result.refused"
+    target.mkdir(mode=0o700)
+    marker_id = "12345678-1234-4123-8123-123456789abc"
+    marker = target / ".rheplicant-results.json"
+    marker.write_text(
+        json.dumps({"format_version": 1, "run_directory_id": marker_id}),
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+    resolved = target / "config.resolved.yaml"
+    resolved.write_text("schema_version: 1\n", encoding="utf-8")
+    resolved.chmod(0o600)
+
+    def dispatcher(_command, _source, *, stdout, stderr):
+        stderr.write(f"refused: priced refusal\nrefused audit: {target}\n")
+        return 2
+
+    store = JobStore(id_factory=lambda: "job-refused")
+    row = store.submit("session-1", "run", 0, YAML)
+    store.run(
+        row.job_id,
+        lambda kind, text: execute_job(kind, text, dispatcher=dispatcher),
+    )
+
+    finished = store.get(row.job_id)
+    assert finished.status == "refused"
+    assert finished.result["output"]["target_path"] == str(target)
+    assert finished.result["output"]["marker_id"] == marker_id
+    assert finished.result["output"]["audit_files"] == ["config.resolved.yaml"]

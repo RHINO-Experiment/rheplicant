@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 import yaml
 
@@ -359,3 +361,121 @@ def test_text_refusal_blocks_every_execution_job_but_not_the_free_projection(cli
     fetched = client.get(f"/api/sessions/{session_id}").json()
     assert len(fetched["document"]["nodes"]) == 33
     assert fetched["jobs"] == []
+
+
+def test_output_product_and_report_routes_are_revision_checked(client):
+    created = create_session(client)
+    session_id = created["session_id"]
+    assert len(created["outputs"]["products"]) == 22
+    assert created["outputs"]["requested_yaml"] == BASE
+
+    product = client.put(
+        f"/api/sessions/{session_id}/outputs/products/chains",
+        json={
+            "expected_revision": 0,
+            "enabled": True,
+            "format": "netcdf",
+            "runs": ["forward"],
+            "keys": [],
+            "themes": [],
+        },
+    )
+    assert product.status_code == 200
+    assert product.json()["revision"] == 1
+    selected = next(
+        row for row in product.json()["outputs"]["products"] if row["name"] == "chains"
+    )
+    assert selected["enabled"] is True
+    assert selected["format"] == "netcdf"
+    assert selected["runs"] == ["forward"]
+
+    report = client.put(
+        f"/api/sessions/{session_id}/outputs/report",
+        json={
+            "expected_revision": 1,
+            "enabled": True,
+            "rows": ["forward"],
+            "columns": ["seconds"],
+            "reference": None,
+            "relative": [],
+            "formats": ["json"],
+        },
+    )
+    assert report.status_code == 200
+    assert report.json()["outputs"]["report"]["rows"] == ["forward"]
+
+    conflict = client.put(
+        f"/api/sessions/{session_id}/outputs/products/arrays",
+        json={
+            "expected_revision": 0,
+            "enabled": True,
+            "format": "npz",
+            "runs": [],
+            "keys": [],
+            "themes": [],
+        },
+    )
+    assert conflict.status_code == 409
+
+
+def test_completed_job_audit_link_is_identity_bound(tmp_path):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import create_app
+
+    target = tmp_path / "result"
+    target.mkdir(mode=0o700)
+    marker_id = "12345678-1234-4123-8123-123456789abc"
+    marker = target / ".rheplicant-results.json"
+    marker.write_text(
+        '{"format_version":1,"run_directory_id":"' + marker_id + '"}\n',
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+    resolved = target / "config.resolved.yaml"
+    resolved.write_text("schema_version: 1\n", encoding="utf-8")
+    resolved.chmod(0o600)
+    identity = target.stat()
+
+    def runner(_kind, _yaml_text):
+        return {
+            "output": {
+                "target_path": str(target),
+                "marker_id": marker_id,
+                "target_device": identity.st_dev,
+                "target_inode": identity.st_ino,
+                "audit_files": ["config.resolved.yaml"],
+            }
+        }
+
+    browser = TestClient(create_app(job_runner=runner))
+    document = preflight_document(variants={})
+    created = browser.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+    submitted = browser.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 0, "kind": "run"},
+    ).json()
+    job_id = submitted["jobs"][0]["job_id"]
+    refreshed = browser.get(f"/api/sessions/{session_id}").json()
+    assert refreshed["jobs"][0]["status"] == "succeeded"
+
+    link = browser.get(
+        f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
+    )
+    assert link.status_code == 200
+    assert link.content == b"schema_version: 1\n"
+
+    replaced = {
+        "format_version": 1,
+        "run_directory_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    }
+    marker.write_text(json.dumps(replaced), encoding="utf-8")
+    assert browser.get(
+        f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
+    ).status_code == 409
