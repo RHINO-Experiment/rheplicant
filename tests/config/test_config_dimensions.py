@@ -429,12 +429,13 @@ def test_resource_dimensions_append_once_and_context_prefix_is_unchanged():
     with pytest.raises(ConfigError, match="bound more than once"):
         bind_resource_dimension(environment, "resources.arrays.x", signature("K"))
     fields = tuple(field.name for field in dataclasses.fields(ResolutionContext))
-    assert fields[-5:] == (
+    assert fields[-6:] == (
         "dimensions",
         "layer",
         "trace",
         "origin_lookup",
         "capture",
+        "audit",
     )
 
 

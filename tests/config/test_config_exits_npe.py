@@ -244,19 +244,13 @@ class TestTheEstimator:
         assert _estimator(npe_spec(), built, built.inference.npe,
                           thetas, data).net.width_size == 9
 
-    def test_an_undeclared_knob_gets_the_packages_own_default(self):
-        # min_scale is the key NPE_SECTION deliberately does not write, so
-        # this is the standing rule -- config keys never restate package
-        # defaults -- observed arriving rather than asserted in prose.  The
-        # second assertion is what keeps it honest: if a later edit adds
-        # min_scale to NPE_SECTION, this test would otherwise keep passing
-        # while proving nothing.
+    def test_an_undeclared_knob_is_materialized_as_the_package_default(self):
         built = npe_built(npe={"bank": {"n_simulations": 8}})
         _, thetas, data = self._pairs(built)
         estimator = _estimator(npe_spec(), built, built.inference.npe,
                                thetas, data)
         assert estimator.min_scale == MIN_SCALE
-        assert "min_scale" not in built.inference.npe.create
+        assert built.inference.npe.create["min_scale"] == MIN_SCALE
 
     def test_a_declared_min_scale_is_forwarded_and_not_dropped(self):
         # The other leg, and it is not optional.  min_scale is the one

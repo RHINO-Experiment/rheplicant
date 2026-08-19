@@ -1053,11 +1053,17 @@ class TestConjugateParsersDoNotBuildOrSolve:
 class TestConjugateKindsNormalizeTheirDefaults:
     """The normalized defaults, pinned in BOTH views (plan Step 2)."""
 
-    def test_wiener_carries_names_and_width_alone(self, conjugate_configured):
+    def test_wiener_carries_executed_defaults(self, conjugate_configured):
         parsed = _parse_conjugate("conjugate.wiener", conjugate_configured,
                                   names=["g"], width="none")
-        assert _plain(parsed.parsed.resolved) == {"names": ["g"],
-                                                  "width": "none"}
+        assert _plain(parsed.parsed.resolved) == {
+            "tol": 1e-6,
+            "maxiter": None,
+            "require_convergence": 1e-3,
+            "check": True,
+            "names": ["g"],
+            "width": "none",
+        }
         assert parsed.parsed.execution["names"] == ("g",)
 
     def test_gcr_defaults(self, conjugate_configured):
@@ -1065,14 +1071,29 @@ class TestConjugateKindsNormalizeTheirDefaults:
             "conjugate.gcr", conjugate_configured, names=["g"],
             seed={"from": "runtime.seeds.draw"})
         assert _plain(parsed.parsed.resolved) == {
-            "names": ["g"], "seed": 7, "noise_from": "declared",
-            "n_draws": 1}
+            "tol": 1e-6,
+            "maxiter": None,
+            "require_convergence": 1e-3,
+            "check": True,
+            "names": ["g"],
+            "seed": 7,
+            "noise_from": "declared",
+            "n_draws": 1,
+        }
 
     def test_gls_defaults(self, conjugate_configured):
         parsed = _parse_conjugate("conjugate.gls", conjugate_configured,
                                   names=["g"])
         assert _plain(parsed.parsed.resolved) == {
-            "names": ["g"], "acknowledge_unconverged_covariance": False}
+            "tol": 1e-6,
+            "maxiter": None,
+            "require_convergence": 1e-3,
+            "check": True,
+            "names": ["g"],
+            "acknowledge_unconverged_covariance": False,
+            "min_reweights": 5,
+            "max_reweights": 100,
+        }
 
     def test_gcr_on_the_gls_route_carries_the_reweight_grammar(
             self, conjugate_configured):
@@ -1081,14 +1102,28 @@ class TestConjugateKindsNormalizeTheirDefaults:
             seed={"from": "runtime.seeds.draw"}, noise_from="gls",
             reweight_tol=1e-4)
         assert _plain(parsed.parsed.resolved) == {
-            "names": ["g"], "seed": 7, "noise_from": "gls", "n_draws": 1,
+            "tol": 1e-6,
+            "maxiter": None,
+            "require_convergence": 1e-3,
+            "check": True,
+            "names": ["g"],
+            "seed": 7,
+            "noise_from": "gls",
+            "n_draws": 1,
             "acknowledge_unconverged_covariance": False,
-            "reweight_tol": 1e-4}
+            "reweight_tol": 1e-4,
+            "min_reweights": 5,
+            "max_reweights": 100,
+        }
 
-    def test_condition_carries_names_alone(self, conjugate_configured):
+    def test_condition_carries_executed_defaults(self, conjugate_configured):
         parsed = _parse_conjugate("condition", conjugate_configured,
                                   names=["g"])
-        assert _plain(parsed.parsed.resolved) == {"names": ["g"]}
+        assert _plain(parsed.parsed.resolved) == {
+            "check": True,
+            "names": ["g"],
+            "iterations": 12,
+        }
 
     def test_no_live_object_reaches_the_resolved_view(
             self, conjugate_configured):
@@ -1098,7 +1133,8 @@ class TestConjugateKindsNormalizeTheirDefaults:
             width="fisher", prior_std={"g": 1.0}, tol=1e-9, maxiter=None)
         assert _plain(parsed.parsed.resolved) == {
             "names": ["g"], "width": "fisher", "prior_std": {"g": 1.0},
-            "tol": 1e-9, "maxiter": None}
+            "tol": 1e-9, "maxiter": None, "require_convergence": 1e-3,
+            "check": True}
 
 
 class TestConjugateOptionRefusalsHappenAtParse:

@@ -245,20 +245,25 @@ class TestTheSectionParses:
         assert spec.train["eps"] == pytest.approx(1.0e-8)
         assert spec.sample["n_draws"] == 100
 
-    def test_a_key_the_document_did_not_declare_is_absent_not_defaulted(self):
-        # The standing rule, as a test rather than a sentence. An
-        # implementation that wrote spec.create["n_components"] = 4 would be
-        # restating the package's default -- and 4 is the value the package
-        # itself says over-fits (npe.py:349-351), so the restatement would
-        # also be the wrong recommendation frozen into the layer.
+    def test_omitted_keys_receive_the_executed_package_defaults(self):
         spec = parsed(create={"width": 32})
-        assert set(spec.create) == {"seed", "width"}
-        assert set(spec.train) == {"seed"}
-        for absent in _CREATE_OPTIONS:
-            if absent != "width":
-                assert absent not in spec.create
-        for absent in _TRAIN_OPTIONS:
-            assert absent not in spec.train
+        assert spec.create == {
+            "seed": {"from": "runtime.seeds.npe_create"},
+            "n_components": 4,
+            "width": 32,
+            "depth": 3,
+            "min_scale": 1e-3,
+        }
+        assert spec.train == {
+            "seed": {"from": "runtime.seeds.npe_train"},
+            "n_steps": 3000,
+            "batch_size": 256,
+            "learning_rate": 1e-3,
+            "validation_fraction": 0.1,
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "eps": 1e-8,
+        }
 
     def test_counts_arrive_as_ints_and_rates_as_floats(self):
         # int(2) and 2.0 reach a package call identically; 2 and 2.5 do not,
