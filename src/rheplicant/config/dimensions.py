@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Literal, TypeAlias
 
 from _rheplicant_bootstrap.types import DestinationDescriptor, DimensionDomain
@@ -644,18 +646,94 @@ def operator_table() -> dict[str, tuple[type, ...]]:
     return live_operator_table()
 
 
-def _selected_class(node_id: str, node: object) -> type | None:
+def _constructible_operator_class(value: object) -> type | None:
+    """A class the model builder can hand to its dataclass field delivery."""
+    from rheplicant.core.operator import AbstractOperator
+
+    return (
+        value
+        if isinstance(value, type)
+        and issubclass(value, AbstractOperator)
+        and dataclasses.is_dataclass(value)
+        else None
+    )
+
+
+def _loaded_operator_target(
+    target: object,
+) -> type | None:
+    """Resolve an already-loaded ``python:`` operator without importing code."""
+    if (
+        not isinstance(target, str)
+        or target.count(":") != 1
+        or not all(target.split(":"))
+    ):
+        return None
+    module_name, attribute = target.split(":")
+    module = sys.modules.get(module_name)
+    if not isinstance(module, ModuleType):
+        return None
+    selected = vars(module).get(attribute)
+    return _constructible_operator_class(selected)
+
+
+def _pipeline_stage_specs(model: Mapping[str, object]) -> tuple[Mapping, ...]:
+    """Stages reached by ``_build_pipeline``, or none before its own refusal."""
+    from rheplicant.config.sections.compose import (
+        pipeline_shape_problem,
+        stage_shape_problem,
+    )
+
+    if pipeline_shape_problem(model) is not None:
+        return ()
+    stages = model.get("stages")
+    assert isinstance(stages, list)
+    if any(
+        stage_shape_problem(f"stages[{index}]", stage) is not None
+        for index, stage in enumerate(stages)
+    ):
+        return ()
+    return tuple(stages)
+
+
+def _compose_stage_specs(
+    spec: Mapping[str, object], node_kind: str, node_id: str
+) -> tuple[Mapping, ...]:
+    """Stages reached by ``_compose``, after all of its earlier pure gates."""
+    from rheplicant.config.sections.compose import (
+        compose_shape_problem,
+        stage_shape_problem,
+    )
+
+    if compose_shape_problem(node_id, spec, node_kind) is not None:
+        return ()
+    stages = spec.get("stages")
+    assert isinstance(stages, list)
+    if any(
+        stage_shape_problem(f"{node_id}.stages[{index}]", stage) is not None
+        for index, stage in enumerate(stages)
+    ):
+        return ()
+    return tuple(stages)
+
+
+def _selected_class(
+    node_id: str | None,
+    node: object,
+    table: Mapping[str, Sequence[type]],
+) -> type | None:
     if not isinstance(node, Mapping):
         return None
     if "python" in node:
-        from rheplicant.config.hatch import import_target
-
-        try:
-            selected = import_target(node["python"])
-        except ConfigError:
+        return _loaded_operator_target(node["python"])
+    if node_id is None:
+        declared = node.get("type")
+        if not isinstance(declared, str):
             return None
-        return selected if isinstance(selected, type) else None
-    choices = operator_table().get(node_id, ())
+        import rheplicant.radio as radio
+
+        return _constructible_operator_class(vars(radio).get(declared))
+    choices = table.get(node_id, ())
     declared = node.get("type")
     if declared is None:
         return choices[0] if len(choices) == 1 else None
@@ -664,35 +742,80 @@ def _selected_class(node_id: str, node: object) -> type | None:
 
 def _selected_model_classes(
     effective_document: Mapping[str, object],
-) -> dict[str, tuple[type, ...]]:
+    *,
+    table: Mapping[str, Sequence[type]] | None = None,
+) -> tuple[dict[str, tuple[type, ...]], bool]:
+    """Return selected classes and whether a declared graph node is unreadable."""
     model = effective_document.get("model")
-    if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
-        return {}
+    if not isinstance(model, Mapping):
+        return {}, True
+    live_table = operator_table() if table is None else table
     selected: dict[str, tuple[type, ...]] = {}
+    kind = model.get("kind", "graph")
+    if kind == "pipeline":
+        stages = _pipeline_stage_specs(model)
+        incomplete = not stages
+        for stage in stages:
+            name = stage["name"]
+            cls = _selected_class(None, stage, live_table)
+            if cls is not None:
+                selected[str(name)] = (cls,)
+            else:
+                incomplete = True
+        return selected, incomplete
+    if kind != "graph":
+        return {}, True
+    from rheplicant.config.sections.compose import many_shape_problem, node_specs
     from rheplicant.radio.graph import RADIO_GRAPH
 
-    for node_id, raw in model.items():
+    incomplete = False
+    for node_id, raw in node_specs(model).items():
         if node_id not in RADIO_GRAPH.nodes:
+            incomplete = True
             continue
         node_spec = RADIO_GRAPH.nodes[node_id]
         entries: list[object]
-        if node_spec.many and isinstance(raw, list):
-            entries = list(raw)
-        elif node_spec.many and isinstance(raw, Mapping):
-            entries = list(raw.values())
+        if node_spec.many:
+            if many_shape_problem(str(node_id), raw, many=True) is not None:
+                incomplete = True
+                continue
+            if isinstance(raw, Mapping):
+                entries = list(raw.values())
+            else:
+                assert isinstance(raw, list)
+                entries = list(raw)
         elif isinstance(raw, Mapping) and "compose" in raw:
-            stages = raw.get("stages")
-            entries = list(stages) if isinstance(stages, list) else []
+            entries = list(
+                _compose_stage_specs(raw, node_spec.kind, str(node_id))
+            )
+            if not entries:
+                incomplete = True
+                continue
         else:
             entries = [raw]
-        classes = tuple(
-            cls
-            for entry in entries
-            if (cls := _selected_class(str(node_id), entry)) is not None
-        )
+        classes_list: list[type] = []
+        for raw_entry in entries:
+            cls = _selected_class(str(node_id), raw_entry, live_table)
+            if cls is None:
+                incomplete = True
+                continue
+            classes_list.append(cls)
+            if _formula_for_class(cls) is None:
+                incomplete = True
+        classes = tuple(classes_list)
         if classes:
             selected[str(node_id)] = classes
-    return selected
+    return selected, incomplete
+
+
+def _plugin_formulas_for_class(cls: type) -> tuple[FormulaRegistration, ...]:
+    """Every live formula naming an unbound plugin class as its producer."""
+    qualified = f"{cls.__module__}.{cls.__qualname__}"
+    return tuple(
+        formula
+        for formula in _FORMULA_REGISTRY.values()
+        if qualified in formula.producers
+    )
 
 
 def _formula_for_class(cls: type) -> FormulaRegistration | None:
@@ -702,9 +825,7 @@ def _formula_for_class(cls: type) -> FormulaRegistration | None:
     binding = MODEL_FORMULA_BINDINGS.get(qualified)
     if binding is not None:
         return _FORMULA_REGISTRY.get(binding.output_formula)
-    plugin = [
-        formula for formula in _FORMULA_REGISTRY.values() if qualified in formula.producers
-    ]
+    plugin = _plugin_formulas_for_class(cls)
     return plugin[0] if len(plugin) == 1 else None
 
 
@@ -713,6 +834,31 @@ def _shared(signatures: Sequence[DimensionSignature | None]) -> DimensionSignatu
     if not known or any(value != known[0] for value in known[1:]):
         return None
     return known[0]
+
+
+def _operator_dimensions(
+    cls: type, incoming: DimensionSignature | None
+) -> tuple[DimensionSignature | None, DimensionSignature | None]:
+    """One live output formula applied to one operator's incoming dimension."""
+    formula = _formula_for_class(cls)
+    if formula is None:
+        return None, None
+    input_operand = next(
+        (operand for operand in formula.operands if operand.role == "input"), None
+    )
+    operator_input = incoming
+    if (
+        operator_input is None
+        and input_operand is not None
+        and input_operand.spec.disposition == "fixed"
+    ):
+        operator_input = input_operand.spec.signature
+    output = (
+        formula.result.signature
+        if formula.result.disposition == "fixed"
+        else operator_input
+    )
+    return operator_input, output
 
 
 def _graph_dimensions(
@@ -730,23 +876,10 @@ def _graph_dimensions(
             continue
         results: list[DimensionSignature | None] = []
         for cls in classes:
-            formula = _formula_for_class(cls)
-            if formula is None:
-                results.append(None)
-                continue
-            input_operand = next(
-                (operand for operand in formula.operands if operand.role == "input"), None
-            )
-            operator_input = incoming
-            if operator_input is None and input_operand is not None:
-                if input_operand.spec.disposition == "fixed":
-                    operator_input = input_operand.spec.signature
+            operator_input, output = _operator_dimensions(cls, incoming)
             if model_input is None and operator_input is not None:
                 model_input = operator_input
-            if formula.result.disposition == "fixed":
-                results.append(formula.result.signature)
-            else:
-                results.append(operator_input)
+            results.append(output)
         outputs[node_id] = _shared(results)
         if model_input is None and RADIO_GRAPH.nodes[node_id].kind == "source":
             model_input = outputs[node_id]
@@ -761,6 +894,27 @@ def _graph_dimensions(
             None,
         )
     return model_input, prediction
+
+
+def _pipeline_dimensions(
+    model: Mapping[str, object], table: Mapping[str, Sequence[type]]
+) -> tuple[DimensionSignature | None, DimensionSignature | None]:
+    """Infer dimensions by applying live formulas in real pipeline order."""
+    stages = _pipeline_stage_specs(model)
+    if not stages:
+        return None, None
+    model_input: DimensionSignature | None = None
+    current: DimensionSignature | None = None
+    for entry in stages:
+        cls = _selected_class(None, entry, table)
+        if cls is None:
+            return None, None
+        operator_input, current = _operator_dimensions(cls, current)
+        if model_input is None:
+            model_input = operator_input if operator_input is not None else current
+        if current is None:
+            return model_input, None
+    return model_input, current
 
 
 def _safe_signature(token: object) -> DimensionSignature | None:
@@ -876,8 +1030,17 @@ def dimension_environment_and_conflicts_for(
     effective_document: Mapping[str, object],
 ) -> tuple[DimensionEnvironment, dict[str, tuple[DimensionSignature, ...]]]:
     """Infer one document's environment and conflicting latent evidence once."""
-    selected = _selected_model_classes(effective_document)
-    model_input, prediction = _graph_dimensions(selected)
+    table = operator_table()
+    selected, incomplete = _selected_model_classes(
+        effective_document, table=table
+    )
+    model = effective_document.get("model")
+    if isinstance(model, Mapping) and model.get("kind", "graph") == "pipeline":
+        model_input, prediction = _pipeline_dimensions(model, table)
+    elif incomplete:
+        model_input, prediction = None, None
+    else:
+        model_input, prediction = _graph_dimensions(selected)
     candidates = _latent_candidates(effective_document, selected)
     environment = DimensionEnvironment(
         latent_dimensions={
@@ -935,6 +1098,8 @@ def bind_resource_dimension(
 
 def signature_label(value: DimensionSignature) -> str:
     """Compact human label used by A9 diagnostics."""
+    if not value.physical and not value.quantity:
+        return "dimensionless"
     if value.quantity and not value.physical and len(value.quantity) == 1:
         name, exponent = value.quantity[0]
         return name if exponent == 1 else f"{name}^{exponent}"

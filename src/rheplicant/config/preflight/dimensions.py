@@ -7,12 +7,18 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.dimension_catalog import MODEL_FORMULA_BINDINGS
 from rheplicant.config.dimensions import (
     _FORMULA_REGISTRY,
     DimensionEnvironment,
     DimensionSpec,
+    _compose_stage_specs,
+    _constructible_operator_class,
+    _loaded_operator_target,
+    _pipeline_stage_specs,
+    _plugin_formulas_for_class,
     current_dimension_environment,
     dimension_environment_and_conflicts_for,
     dimension_for,
@@ -23,7 +29,6 @@ from rheplicant.config.dimensions import (
 )
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
-from rheplicant.config.hatch import import_target
 from rheplicant.config.preflight import register
 from rheplicant.config.resources import _KINDS
 from rheplicant.config.sections.model import operator_table
@@ -32,19 +37,31 @@ from rheplicant.config.units import canonical_unit
 _SHORTHAND_UNIT = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\s+(\S+)$")
 
 
+def _refuse(where: str, message: str) -> Finding:
+    """Keep the full user spelling in the message and a legal path in ``where``."""
+    return refuse("A9", longest_legal_prefix(where), message)
+
+
 def _qualified(cls: type, field: str | None = None) -> str:
     base = f"{cls.__module__}.{cls.__qualname__}"
     return base if field is None else f"{base}.{field}"
 
 
-def _selected_class(node_id: str, node: Mapping[str, Any]) -> type | None:
+def _selected_class(
+    node_id: str | None,
+    node: Mapping[str, Any],
+    table: Mapping[str, tuple[type, ...]],
+) -> type | None:
     if "python" in node:
-        try:
-            selected = import_target(node["python"])
-        except ConfigError:
+        return _loaded_operator_target(node["python"])
+    if node_id is None:
+        declared = node.get("type")
+        if not isinstance(declared, str):
             return None
-        return selected if isinstance(selected, type) else None
-    classes = operator_table().get(node_id, ())
+        import rheplicant.radio as radio
+
+        return _constructible_operator_class(vars(radio).get(declared))
+    classes = table.get(node_id, ())
     declared = node.get("type")
     if declared is None:
         return classes[0] if len(classes) == 1 else None
@@ -82,11 +99,10 @@ def _mismatch(
     try:
         actual = dimension_of(canonical_unit(token))
     except ConfigError as error:
-        return refuse("A9", where, f"{where}: {error} (check A9).")
+        return _refuse(where, f"{where}: {error} (check A9).")
     if actual == expected.signature:
         return None
-    return refuse(
-        "A9",
+    return _refuse(
         where,
         f"{where}: unit {token!r} has dimension {signature_label(actual)}, but this "
         f"destination requires {expected_token}. Use {{value: {_raw_value(node)!r}, "
@@ -95,8 +111,7 @@ def _mismatch(
 
 
 def _required(where: str, expected_token: str) -> Finding:
-    return refuse(
-        "A9",
+    return _refuse(
         where,
         f"{where}: requires an explicit unit declaring {expected_token}; this field "
         f"has no unit in its source definition. Use {{value: <number>, unit: "
@@ -128,47 +143,120 @@ def _fixed(
         yield finding
 
 
-def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
+def _operator_entries(
+    document: Mapping[str, Any],
+    table: Mapping[str, tuple[type, ...]],
+) -> Iterable[tuple[str, str | None, Any]]:
+    """Every raw spec that the real model/twin builders construct.
+
+    The graph leg delegates its four shapes to the preflight model reader
+    shared with the build contract: a normal node, each list/FAN member, and
+    each compose stage.  Pipeline stages have no graph node and select their
+    exported class directly.  ``twin.replace`` reaches the same single-node
+    builder as a graph entry, at its own document path.
+    """
     model = document.get("model")
-    if not isinstance(model, Mapping):
+    if isinstance(model, Mapping):
+        kind = model.get("kind", "graph")
+        if kind == "pipeline":
+            for index, entry in enumerate(_pipeline_stage_specs(model)):
+                yield f"model.stages[{index}]", None, entry
+        elif kind == "graph":
+            from rheplicant.config.preflight.model import (
+                _nodes,
+                _t4_entries,
+                _t4_graph,
+            )
+            from rheplicant.config.sections.compose import many_shape_problem
+
+            graph = _t4_graph()
+            nodes = _nodes(document)
+            for node_id, spec in nodes.items():
+                node = graph.nodes.get(node_id)
+                if node is None:
+                    continue
+                if node.many and many_shape_problem(
+                    str(node_id), spec, many=True
+                ) is not None:
+                    continue
+                if isinstance(spec, Mapping) and "compose" in spec:
+                    if not _compose_stage_specs(
+                        spec, node.kind, str(node_id)
+                    ):
+                        continue
+                for relative, entry in _t4_entries(
+                    str(node_id), spec, many=bool(node.many)
+                ):
+                    yield f"model.{relative}", str(node_id), entry
+            # A live plugin table can expose an additional node before the
+            # graph's separate placement check accepts it.  Keep A9's plugin
+            # completeness contract independent of that check, as it was for
+            # the original single-entry walk.
+            for node_id, spec in nodes.items():
+                if node_id not in graph.nodes and str(node_id) in table:
+                    yield f"model.{node_id}", str(node_id), spec
+
+    if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
         return
-    for node_id, node in model.items():
-        if not isinstance(node, Mapping) or "compose" in node:
+    inference = document.get("inference")
+    twin = inference.get("twin") if isinstance(inference, Mapping) else None
+    replace = twin.get("replace") if isinstance(twin, Mapping) else None
+    if isinstance(replace, Mapping):
+        for node_id, entry in replace.items():
+            yield f"inference.twin.replace.{node_id}", str(node_id), entry
+
+
+def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
+    table = operator_table()
+    for where, node_id, node in _operator_entries(document, table):
+        if not isinstance(node, Mapping):
             continue
-        cls = _selected_class(str(node_id), node)
+        cls = _selected_class(node_id, node, table)
         if cls is None:
             continue
         class_name = _qualified(cls)
-        has_formula = class_name in MODEL_FORMULA_BINDINGS or any(
-            class_name in formula.producers for formula in _FORMULA_REGISTRY.values()
+        binding = MODEL_FORMULA_BINDINGS.get(class_name)
+        plugin_formulas = (
+            () if binding is not None else _plugin_formulas_for_class(cls)
         )
-        if not has_formula:
-            yield refuse(
-                "A9",
-                f"model.{node_id}",
-                f"model.{node_id}: {class_name} has no registered dimension formula; "
+        missing_formula = (
+            not all(name in _FORMULA_REGISTRY for name in binding.formulas)
+            if binding is not None
+            else not plugin_formulas
+        )
+        if missing_formula:
+            yield _refuse(
+                where,
+                f"{where}: {class_name} has no registered dimension formula; "
                 "the plugin must call register_dimension_formula with this concrete "
                 "class in producers (check A9).",
+            )
+        elif len(plugin_formulas) > 1:
+            names = [formula.name for formula in plugin_formulas]
+            yield _refuse(
+                where,
+                f"{where}: {class_name} has ambiguous output formula registrations "
+                f"{names}; a plugin class producer must uniquely identify its output "
+                "formula. Auxiliary formulas must name their actual helper producer "
+                "(or wait for a future explicit operator-formula binding) (check A9).",
             )
         writable = {field.name for field in dataclasses.fields(cls) if field.init}
         specs: dict[str, DimensionSpec] = {}
         for field in sorted(writable):
             selector = f"{class_name}.{field}"
-            where = f"model.{node_id}.{field}"
+            field_where = f"{where}.{field}"
             rows = matching_dimension_rows("model_field", selector)
             if not rows:
-                yield refuse(
-                    "A9",
-                    where,
-                    f"{where}: {selector} has no dimension catalog row; the plugin "
+                yield _refuse(
+                    field_where,
+                    f"{field_where}: {selector} has no dimension catalog row; the plugin "
                     "must call register_dimension for every writable field (check A9).",
                 )
                 continue
             if len(rows) != 1:
-                yield refuse(
-                    "A9",
-                    where,
-                    f"{where}: ambiguous dimension selectors match model_field "
+                yield _refuse(
+                    field_where,
+                    f"{field_where}: ambiguous dimension selectors match model_field "
                     f"destination {selector!r} (check A9).",
                 )
                 continue
@@ -176,24 +264,23 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
         for field, value in node.items():
             if field not in writable:
                 continue
-            where = f"model.{node_id}.{field}"
+            field_where = f"{where}.{field}"
             spec = specs.get(field)
             if spec is None:
                 continue
             if spec.disposition == "fixed":
                 expected_token = signature_token(spec.signature)
                 yield from _fixed(
-                    where,
+                    field_where,
                     value,
                     expected_token,
                     spec,
                     required=spec.unit_policy == "required",
                 )
             elif spec.disposition == "structural" and _declared_unit(value) is not None:
-                yield refuse(
-                    "A9",
-                    where,
-                    f"{where}: is structural and refuses unit:; remove the unit "
+                yield _refuse(
+                    field_where,
+                    f"{field_where}: is structural and refuses unit:; remove the unit "
                     "declaration (check A9).",
                 )
 
@@ -220,8 +307,7 @@ def _rows_problem(
 ) -> Finding | None:
     if len(rows) <= 1:
         return None
-    return refuse(
-        "A9",
+    return _refuse(
         where,
         f"{where}: ambiguous dimension selectors match {domain} destination "
         f"{selector!r} (check A9).",
@@ -255,8 +341,7 @@ def _validate_live_row(
         return
     if spec.disposition == "structural":
         if token is not None:
-            yield refuse(
-                "A9",
+            yield _refuse(
                 where,
                 f"{where}: is structural and refuses unit:; remove the unit "
                 "declaration (check A9).",
@@ -269,7 +354,7 @@ def _validate_live_row(
             DestinationDescriptor(selector, domain, where), environment
         )
     except ConfigError as error:
-        yield refuse("A9", where, f"{where}: {error} (check A9).")
+        yield _refuse(where, f"{where}: {error} (check A9).")
         return
     if expected is None:
         return
@@ -363,8 +448,7 @@ def _dimensions(document: Mapping[str, Any]) -> Iterable[Finding]:
     for name, signatures in conflicts.items():
         labels = ", ".join(signature_label(value) for value in signatures)
         where = f"inference.parameters.{name}"
-        yield refuse(
-            "A9",
+        yield _refuse(
             where,
             f"{where}: conflicting dimension evidence declares {labels}; "
             "the declaration, prior, and binding must agree (check A9).",

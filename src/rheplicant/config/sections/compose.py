@@ -19,8 +19,10 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.paths import refuse_misaddressed_region
 from rheplicant.config.sections.model import build_node_operator
 
-__all__ = ["build_model", "cal_load_order_problem", "double_count_problem",
-           "many_shape_problem", "node_placement_problems", "node_specs"]
+__all__ = ["build_model", "cal_load_order_problem", "compose_shape_problem",
+           "double_count_problem", "many_shape_problem",
+           "node_placement_problems", "node_specs", "pipeline_shape_problem",
+           "stage_shape_problem"]
 
 _SECTION_KEYS = frozenset({"kind", "acknowledge_double_count"})
 _COMPOSE_KEYS = frozenset({"compose", "stages"})
@@ -134,6 +136,71 @@ def many_shape_problem(node_id: str, spec: Any, *, many: bool) -> str | None:
     return None
 
 
+def stage_shape_problem(label: str, spec: Any) -> str | None:
+    """Return the builder's first refusal for one named stage, if any."""
+    if not isinstance(spec, Mapping) or not isinstance(spec.get("name"), str):
+        return (
+            f"model.{label}: every stage is a mapping with a name: -- the "
+            f"path grammar addresses stages by it; got {spec!r}."
+        )
+    return None
+
+
+def pipeline_shape_problem(section: Mapping) -> str | None:
+    """Return the pure refusal before a pipeline starts building stages."""
+    unknown = sorted(set(section) - {"kind", "stages"})
+    if unknown:
+        return (
+            "model: kind: pipeline takes stages: and nothing else; got "
+            f"{unknown} too."
+        )
+    stages = section.get("stages")
+    if not isinstance(stages, list) or not stages:
+        return (
+            "model: kind: pipeline requires stages: -- a non-empty list of "
+            "named stage specs."
+        )
+    return None
+
+
+def compose_shape_problem(
+    node_id: str,
+    spec: Mapping,
+    node_kind: str,
+) -> str | None:
+    """Return the pure refusal before a composition starts building stages."""
+    unknown = sorted(set(spec) - _COMPOSE_KEYS)
+    if unknown:
+        return (
+            f"model.{node_id}: compose: takes stages: and nothing else; got "
+            f"{unknown} too."
+        )
+    how = spec["compose"]
+    if how not in ("cascade", "sum"):
+        return (
+            f"model.{node_id}: compose: is 'cascade' or 'sum'; got {how!r}."
+        )
+    if how == "cascade" and node_kind == "source":
+        return (
+            f"model.{node_id}: compose: cascade chains transforms, and this "
+            "is a source node -- sources add, they do not chain; use "
+            "compose: sum."
+        )
+    if how == "sum" and node_kind != "source":
+        return (
+            f"model.{node_id}: compose: sum adds source contributions, and "
+            "this is a transform node -- transforms chain; use "
+            "compose: cascade."
+        )
+    stages = spec.get("stages")
+    if not isinstance(stages, list) or len(stages) < 2:
+        return (
+            f"model.{node_id}: compose: takes stages: -- a list of at least "
+            "two named stage specs."
+        )
+    return None
+
+
 def cal_load_order_problem(spec: Mapping,
                            switch_order: tuple[str, ...]) -> str | None:
     """Check A14's late leg: the FAN labels ARE ``switching.order[1:]``.
@@ -190,11 +257,9 @@ def _stage_operator(label: str, spec: Any, context: ResolutionContext,
     """One ``stages:`` entry -> its operator."""
     from rheplicant.config.sections.model import _construct
 
-    if not isinstance(spec, Mapping) or not isinstance(spec.get("name"), str):
-        raise ConfigError(
-            f"model.{label}: every stage is a mapping with a name: -- the "
-            f"path grammar addresses stages by it; got {spec!r}."
-        )
+    problem = stage_shape_problem(label, spec)
+    if problem is not None:
+        raise ConfigError(problem)
     spec = {key: value for key, value in spec.items() if key != "name"}
     if node_id is not None:
         return build_node_operator(node_id, spec, context)
@@ -227,35 +292,12 @@ def _compose(node_id: str, spec: Mapping, context: ResolutionContext,
     from rheplicant.core.graph import At
     from rheplicant.core.pipeline import Pipeline
 
-    unknown = sorted(set(spec) - _COMPOSE_KEYS)
-    if unknown:
-        raise ConfigError(
-            f"model.{node_id}: compose: takes stages: and nothing else; got "
-            f"{unknown} too."
-        )
+    problem = compose_shape_problem(node_id, spec, node_kind)
+    if problem is not None:
+        raise ConfigError(problem)
     how = spec["compose"]
-    if how not in ("cascade", "sum"):
-        raise ConfigError(
-            f"model.{node_id}: compose: is 'cascade' or 'sum'; got {how!r}."
-        )
-    if how == "cascade" and node_kind == "source":
-        raise ConfigError(
-            f"model.{node_id}: compose: cascade chains transforms, and this "
-            "is a source node -- sources add, they do not chain; use "
-            "compose: sum."
-        )
-    if how == "sum" and node_kind != "source":
-        raise ConfigError(
-            f"model.{node_id}: compose: sum adds source contributions, and "
-            "this is a transform node -- transforms chain; use "
-            "compose: cascade."
-        )
     stages = spec.get("stages")
-    if not isinstance(stages, list) or len(stages) < 2:
-        raise ConfigError(
-            f"model.{node_id}: compose: takes stages: -- a list of at least "
-            "two named stage specs."
-        )
+    assert isinstance(stages, list)
     names = [entry.get("name") if isinstance(entry, Mapping) else None
              for entry in stages]
     operators = [
@@ -348,18 +390,11 @@ def _many(node_id: str, spec: Any, context: ResolutionContext,
 def _build_pipeline(section: Mapping, context: ResolutionContext):
     from rheplicant.core.pipeline import Pipeline
 
-    unknown = sorted(set(section) - {"kind", "stages"})
-    if unknown:
-        raise ConfigError(
-            f"model: kind: pipeline takes stages: and nothing else; got "
-            f"{unknown} too."
-        )
+    problem = pipeline_shape_problem(section)
+    if problem is not None:
+        raise ConfigError(problem)
     stages = section.get("stages")
-    if not isinstance(stages, list) or not stages:
-        raise ConfigError(
-            "model: kind: pipeline requires stages: -- a non-empty list of "
-            "named stage specs."
-        )
+    assert isinstance(stages, list)
     names = [entry.get("name") if isinstance(entry, Mapping) else None
              for entry in stages]
     operators = [

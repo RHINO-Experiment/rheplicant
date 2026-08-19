@@ -15,6 +15,7 @@ from rheplicant.config.dimensions import (
     DimensionSpec,
     FormulaOperand,
     bind_resource_dimension,
+    dimension_environment_for,
     dimension_for,
     divide,
     evaluate_formula,
@@ -23,6 +24,7 @@ from rheplicant.config.dimensions import (
     register_dimension,
     register_dimension_formula,
     signature,
+    signature_label,
 )
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import _ATOMS, ACCEPTED_UNITS, Unit
@@ -48,6 +50,10 @@ def test_dimensionless_is_the_physical_identity():
     kelvin = signature("K")
     assert multiply(identity, kelvin) == kelvin
     assert multiply(kelvin, identity) == kelvin
+
+
+def test_dimensionless_signature_has_the_canonical_human_label():
+    assert signature_label(signature("dimensionless")) == "dimensionless"
 
 
 def test_discrete_meaning_is_orthogonal_to_physics():
@@ -337,6 +343,32 @@ def test_environment_uses_bindings_and_plugin_formula_outputs(monkeypatch, clean
     )
     assert environment.prediction_dimension == signature("Hz")
     assert environment.latent_dimensions == {"frequency": signature("Hz")}
+
+
+def test_pipeline_environment_follows_stage_order_through_live_formulas():
+    environment = dimension_environment_for(
+        {
+            "model": {
+                "kind": "pipeline",
+                "stages": [
+                    {
+                        "name": "sky",
+                        "type": "SkyOperator",
+                        "amplitude": {"value": 10.0, "unit": "K"},
+                    },
+                    {
+                        "name": "adc",
+                        "type": "ADCOperator",
+                        "scale": {"value": 1.0, "unit": "adc_count/K"},
+                        "n_bits": {"value": 12, "unit": "bits"},
+                    },
+                ],
+            }
+        }
+    )
+
+    assert environment.model_input_dimension == signature("K")
+    assert environment.prediction_dimension == signature("adc_count")
 
 
 def test_environment_infers_a_latent_from_its_live_model_binding():
