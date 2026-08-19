@@ -307,17 +307,6 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
             f"resources: must be a mapping of kind -> name -> entry, got "
             f"{type(section).__name__}."
         )
-    if context.dimensions.resource_dimensions:
-        # A ResolutionContext is often reused by direct utility callers for
-        # two independent builds. Production constructs one resource section
-        # per fresh layer environment; mirror that lifecycle here without
-        # weakening duplicate refusal inside either build.
-        context = dataclasses.replace(
-            context,
-            dimensions=dataclasses.replace(
-                context.dimensions, resource_dimensions={}
-            ),
-        )
     unknown = sorted(set(section) - set(_KINDS))
     if unknown:
         raise ConfigError(

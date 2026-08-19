@@ -612,9 +612,17 @@ def operator_table() -> dict[str, tuple[type, ...]]:
 
 
 def _selected_class(node_id: str, node: object) -> type | None:
-    choices = operator_table().get(node_id, ())
     if not isinstance(node, Mapping):
         return None
+    if "python" in node:
+        from rheplicant.config.hatch import import_target
+
+        try:
+            selected = import_target(node["python"])
+        except ConfigError:
+            return None
+        return selected if isinstance(selected, type) else None
+    choices = operator_table().get(node_id, ())
     declared = node.get("type")
     if declared is None:
         return choices[0] if len(choices) == 1 else None
@@ -773,10 +781,10 @@ def _binding_target_signature(
     return target
 
 
-def _latent_signatures(
+def _latent_candidates(
     effective_document: Mapping[str, object],
     selected: Mapping[str, tuple[type, ...]],
-) -> dict[str, DimensionSignature]:
+) -> dict[str, list[DimensionSignature]]:
     inference = effective_document.get("inference")
     if not isinstance(inference, Mapping):
         return {}
@@ -828,20 +836,43 @@ def _latent_signatures(
                     value = _binding_target_signature(path, selected, binding.get("transform"))
                     if value is not None:
                         candidates[str(name)].append(value)
-    return {name: values[0] for name, values in candidates.items() if values}
+    return candidates
+
+
+def dimension_environment_and_conflicts_for(
+    effective_document: Mapping[str, object],
+) -> tuple[DimensionEnvironment, dict[str, tuple[DimensionSignature, ...]]]:
+    """Infer one document's environment and conflicting latent evidence once."""
+    selected = _selected_model_classes(effective_document)
+    model_input, prediction = _graph_dimensions(selected)
+    candidates = _latent_candidates(effective_document, selected)
+    environment = DimensionEnvironment(
+        latent_dimensions={
+            name: values[0] for name, values in candidates.items() if values
+        },
+        prediction_dimension=prediction,
+        model_input_dimension=model_input,
+    )
+    conflicts = {
+        name: tuple(dict.fromkeys(values))
+        for name, values in candidates.items()
+        if len(set(values)) > 1
+    }
+    return environment, conflicts
+
+
+def latent_dimension_conflicts_for(
+    effective_document: Mapping[str, object],
+) -> dict[str, tuple[DimensionSignature, ...]]:
+    """Latents whose declarations, priors, and bindings disagree."""
+    return dimension_environment_and_conflicts_for(effective_document)[1]
 
 
 def dimension_environment_for(
     effective_document: Mapping[str, object],
 ) -> DimensionEnvironment:
     """Infer selected graph/plugin, binding, and latent signatures without I/O."""
-    selected = _selected_model_classes(effective_document)
-    model_input, prediction = _graph_dimensions(selected)
-    return DimensionEnvironment(
-        latent_dimensions=_latent_signatures(effective_document, selected),
-        prediction_dimension=prediction,
-        model_input_dimension=model_input,
-    )
+    return dimension_environment_and_conflicts_for(effective_document)[0]
 
 
 def current_dimension_environment() -> DimensionEnvironment:

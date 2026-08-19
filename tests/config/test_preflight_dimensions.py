@@ -2,6 +2,8 @@
 
 import dataclasses
 
+import equinox as eqx
+
 from rheplicant.config import dimensions as dimension_module
 from rheplicant.config.dimensions import (
     DimensionSpec,
@@ -11,6 +13,7 @@ from rheplicant.config.dimensions import (
 )
 from rheplicant.config.orchestration import prepare_document
 from rheplicant.config.preflight import CHECKS, preflight
+from rheplicant.core.operator import AbstractOperator
 from tests.config.preflight_helpers import BASE_MODEL, preflight_document
 
 
@@ -18,6 +21,14 @@ from tests.config.preflight_helpers import BASE_MODEL, preflight_document
 class _PluginOperator:
     graph_node = "plugin"
     level: float = 1.0
+
+
+class _PythonPluginOperator(AbstractOperator):
+    graph_node = "gain"
+    level: float = eqx.field(static=True, default=1.0)
+
+    def __call__(self, state):
+        return state
 
 
 def _build_plugin_resource(name, spec, context):
@@ -121,6 +132,72 @@ def test_plugin_defaulted_field_is_checked_even_when_omitted(monkeypatch):
         dimension_module._FORMULA_REGISTRY.update(saved_formulas)
 
 
+def test_compound_plugin_signature_is_compared_without_string_round_trip(monkeypatch):
+    from rheplicant.config.preflight import dimensions as check
+
+    qualified = f"{_PluginOperator.__module__}.{_PluginOperator.__qualname__}"
+    saved_dimensions = dict(dimension_module._DIMENSION_REGISTRY)
+    saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
+    monkeypatch.setattr(check, "operator_table", lambda: {"plugin": (_PluginOperator,)})
+    try:
+        register_dimension(
+            f"{qualified}.level", domain="model_field", dimension="K/s"
+        )
+        register_dimension_formula(
+            "compound_plugin_output",
+            rule="fixed",
+            result=DimensionSpec("fixed", signature("K/s")),
+            operands=(),
+            producers=(qualified,),
+        )
+        document = {
+            "model": {"plugin": {"level": {"value": 1.0, "unit": "K/s"}}}
+        }
+        assert not tuple(check._dimensions(document))
+
+        document["model"]["plugin"]["level"]["unit"] = "K"
+        (finding,) = tuple(check._dimensions(document))
+        assert finding.where == "model.plugin.level"
+        assert "destination requires" in finding.message
+    finally:
+        dimension_module._DIMENSION_REGISTRY.clear()
+        dimension_module._DIMENSION_REGISTRY.update(saved_dimensions)
+        dimension_module._FORMULA_REGISTRY.clear()
+        dimension_module._FORMULA_REGISTRY.update(saved_formulas)
+
+
+def test_python_plugin_omitted_default_field_runs_completeness():
+    from rheplicant.config.preflight import dimensions as check
+
+    qualified = (
+        f"{_PythonPluginOperator.__module__}.{_PythonPluginOperator.__qualname__}"
+    )
+    saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
+    try:
+        register_dimension_formula(
+            "python_plugin_output",
+            rule="fixed",
+            result=DimensionSpec("fixed", signature("K")),
+            operands=(),
+            producers=(qualified,),
+        )
+        document = {
+            "model": {
+                "gain": {
+                    "python": (
+                        f"{_PythonPluginOperator.__module__}:"
+                        f"{_PythonPluginOperator.__qualname__}"
+                    )
+                }
+            }
+        }
+        findings = tuple(check._dimensions(document))
+        assert [finding.where for finding in findings] == ["model.gain.level"]
+    finally:
+        dimension_module._FORMULA_REGISTRY.clear()
+        dimension_module._FORMULA_REGISTRY.update(saved_formulas)
+
+
 def test_a9_resolves_config_destinations_from_the_live_registry():
     from rheplicant.config.preflight import dimensions as check
 
@@ -198,6 +275,30 @@ def test_latent_declaration_unit_is_the_authority_over_prior_operands():
         finding.where == "inference.parameters.g.prior.normal.loc"
         for finding in findings
     )
+
+
+def test_latent_declaration_prior_and_binding_must_agree():
+    document = preflight_document()
+    document["inference"]["parameters"]["g"] = {
+        "init": {"value": 1.0, "unit": "K"},
+        "unit": "K",
+        "prior": {
+            "normal": {
+                "loc": {"value": 1.0, "unit": "K"},
+                "scale": {"value": 1.0, "unit": "K"},
+            }
+        },
+        "into": "gain.gain",
+    }
+    findings = _a9(preflight(document))
+    assert any(
+        finding.where == "inference.parameters.g"
+        and "conflicting dimension evidence" in finding.message
+        for finding in findings
+    )
+
+    document["inference"]["parameters"]["g"]["into"] = "global_signal.depth"
+    assert not _a9(preflight(document))
 
 
 def test_prior_only_contextual_nodes_infer_the_latent_dimension():

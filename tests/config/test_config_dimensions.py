@@ -454,12 +454,24 @@ def test_real_resource_dag_binds_fixed_outputs_before_a_dependent_ref():
 
 
 def test_ref_distinguishes_an_absent_fixed_binding_from_bound_open_unknown():
-    from rheplicant.config.values import resolve_value
+    import dataclasses
 
-    fixed = ResolutionContext(resources={"resources.bases.b": SimpleNamespace(time=1.0)})
-    fixed.dimensions.resource_dimensions.clear()
+    from rheplicant.config.document import load_document
+    from rheplicant.config.values import resolve_value
+    from tests.config.preflight_helpers import preflight_document
+
+    production = load_document(preflight_document(resources=None)).context
+    fixed = dataclasses.replace(
+        production,
+        resources={"resources.bases.b": SimpleNamespace(time=1.0)},
+    )
     with pytest.raises(ConfigError, match="was not bound"):
         resolve_value({"ref": "resources.bases.b.time"}, fixed)
 
-    open_unknown = ResolutionContext(resources={"resources.arrays.a": 1.0})
+    open_unknown = dataclasses.replace(
+        production, resources={"resources.arrays.a": 1.0}
+    )
+    bind_resource_dimension(
+        open_unknown.dimensions, "resources.arrays.a", None
+    )
     assert resolve_value({"ref": "resources.arrays.a"}, open_unknown).value == 1.0

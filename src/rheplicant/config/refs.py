@@ -100,7 +100,11 @@ def _delivered(value: Any, modifiers: dict, form: str) -> ResolvedValue:
 def _ref(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
     dotted = node["ref"]
     value = resolve_reference(dotted, context)
-    if dotted not in context.dimensions.resource_dimensions:
+    document_environment = (
+        context.dimensions.prediction_dimension is not None
+        or context.dimensions.model_input_dimension is not None
+    )
+    if document_environment and dotted not in context.dimensions.resource_dimensions:
         rows = matching_dimension_rows("config_path", dotted)
         if any(spec.disposition in ("fixed", "contextual") for _, spec in rows):
             raise ConfigError(

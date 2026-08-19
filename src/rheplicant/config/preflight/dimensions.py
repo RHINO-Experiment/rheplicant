@@ -14,16 +14,16 @@ from rheplicant.config.dimensions import (
     DimensionEnvironment,
     DimensionSpec,
     current_dimension_environment,
-    dimension_environment_for,
+    dimension_environment_and_conflicts_for,
     dimension_for,
     dimension_of,
     matching_dimension_rows,
-    signature,
     signature_label,
     signature_token,
 )
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
+from rheplicant.config.hatch import import_target
 from rheplicant.config.preflight import register
 from rheplicant.config.resources import _KINDS
 from rheplicant.config.sections.model import operator_table
@@ -38,6 +38,12 @@ def _qualified(cls: type, field: str | None = None) -> str:
 
 
 def _selected_class(node_id: str, node: Mapping[str, Any]) -> type | None:
+    if "python" in node:
+        try:
+            selected = import_target(node["python"])
+        except ConfigError:
+            return None
+        return selected if isinstance(selected, type) else None
     classes = operator_table().get(node_id, ())
     declared = node.get("type")
     if declared is None:
@@ -102,6 +108,7 @@ def _fixed(
     where: str,
     node: Any,
     expected_token: str,
+    expected: DimensionSpec,
     *,
     required: bool,
 ) -> Iterable[Finding]:
@@ -115,7 +122,7 @@ def _fixed(
         node,
         token,
         expected_token,
-        DimensionSpec("fixed", signature(expected_token)),
+        expected,
     )
     if finding is not None:
         yield finding
@@ -126,7 +133,7 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
     if not isinstance(model, Mapping):
         return
     for node_id, node in model.items():
-        if not isinstance(node, Mapping) or any(key in node for key in ("compose", "python")):
+        if not isinstance(node, Mapping) or "compose" in node:
             continue
         cls = _selected_class(str(node_id), node)
         if cls is None:
@@ -179,6 +186,7 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
                     where,
                     value,
                     expected_token,
+                    spec,
                     required=spec.unit_policy == "required",
                 )
             elif spec.disposition == "structural" and _declared_unit(value) is not None:
@@ -241,6 +249,7 @@ def _validate_live_row(
             where,
             node,
             signature_token(spec.signature),
+            spec,
             required=spec.unit_policy == "required",
         )
         return
@@ -344,12 +353,22 @@ def _resources(
 @register("A9")
 def _dimensions(document: Mapping[str, Any]) -> Iterable[Finding]:
     environment = current_dimension_environment()
+    inferred, conflicts = dimension_environment_and_conflicts_for(document)
     if (
         environment.prediction_dimension is None
         and environment.model_input_dimension is None
         and not environment.latent_dimensions
     ):
-        environment = dimension_environment_for(document)
+        environment = inferred
+    for name, signatures in conflicts.items():
+        labels = ", ".join(signature_label(value) for value in signatures)
+        where = f"inference.parameters.{name}"
+        yield refuse(
+            "A9",
+            where,
+            f"{where}: conflicting dimension evidence declares {labels}; "
+            "the declaration, prior, and binding must agree (check A9).",
+        )
     yield from _model(document)
     yield from _config(document, environment)
     yield from _resources(document, environment)
