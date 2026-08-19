@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/*": ["node_modules/@types/react/*"]
+    },
+    "typeRoots": ["node_modules/@types"]
+  },
+  "include": [
+    "../../../src/rheplicant/gui/react"
+  ]
+}
