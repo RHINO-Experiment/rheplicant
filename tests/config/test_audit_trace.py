@@ -82,6 +82,7 @@ def test_record_and_snapshot_field_contracts():
     assert all(dataclasses.fields(row)[0].name == "layer" for row in layer_rows)
     assert tuple(field.name for field in dataclasses.fields(AuditSnapshot)) == (
         "bootstrap",
+        "software",
         "completed_boundaries",
         "defaults",
         "deliveries",
@@ -130,6 +131,15 @@ def test_trace_freezes_at_append_and_snapshot_is_detached():
     trace.record_default(layer, "model.y", 2)
     assert len(first.defaults) == 1
     assert len(trace.snapshot().defaults) == 2
+
+
+def test_software_facts_bind_once_and_are_detached(trace):
+    row = {"rheplicant": {"version": "1"}}
+    trace.record_software(row)
+    row["rheplicant"]["version"] = "changed"
+    assert trace.snapshot().software["rheplicant"]["version"] == "1"
+    with pytest.raises(ConfigError, match="already recorded"):
+        trace.record_software({})
 
 
 def test_boundaries_are_ordered_unique_completions():

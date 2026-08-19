@@ -199,6 +199,7 @@ class ErrorRecord:
 @dataclass(frozen=True, slots=True)
 class AuditSnapshot:
     bootstrap: Mapping[str, JsonValue] | None
+    software: Mapping[str, JsonValue] | None
     completed_boundaries: Sequence[CompletedBoundary]
     defaults: Sequence[DefaultRecord]
     deliveries: Sequence[DeliveryRecord]

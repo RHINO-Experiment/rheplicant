@@ -424,6 +424,7 @@ class AuditTrace:
         self._resolved: list[ResolvedLayerRecord] = []
         self._encodings: list[PathEncoding] = []
         self._bootstrap: Mapping[str, JsonValue] | None = None
+        self._software: Mapping[str, JsonValue] | None = None
         self._runtime: Mapping[str, JsonValue] | None = None
         self._error: ErrorRecord | None = None
         self._artefacts: ArtefactTable | None = None
@@ -806,6 +807,16 @@ class AuditTrace:
                 raise ConfigError("runtime facts are already recorded.")
             self._runtime = frozen
 
+    def record_software(self, row: Mapping[str, JsonValue]) -> None:
+        """Bind one detached software acquisition row before serialization."""
+        frozen = _freeze_json(row, where="software")
+        if not static_isinstance(frozen, Mapping):
+            raise ConfigError("software facts must be a mapping.")
+        with self._lock:
+            if self._software is not None:
+                raise ConfigError("software facts are already recorded.")
+            self._software = cast(Mapping[str, JsonValue], frozen)
+
     @staticmethod
     def _plugin_value_reason(item: Mapping[str, object], field: str, *, where: str) -> None:
         value = item[field]
@@ -995,6 +1006,7 @@ class AuditTrace:
         with self._lock:
             return AuditSnapshot(
                 bootstrap=self._bootstrap,
+                software=self._software,
                 completed_boundaries=tuple(self._boundaries),
                 defaults=tuple(self._defaults),
                 deliveries=tuple(self._deliveries),
