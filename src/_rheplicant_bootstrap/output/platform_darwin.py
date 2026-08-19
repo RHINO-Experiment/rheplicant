@@ -53,6 +53,11 @@ class DarwinOutputPlatform:
         handle = self._acl_get_fd(directory_fd, _ACL_TYPE_EXTENDED)
         if not handle:
             error = ctypes.get_errno()
+            # Darwin reports ENOENT when an inode has no extended ACL.  That
+            # is the ordinary, trivially protected case rather than an
+            # inability to inspect the descriptor.
+            if error == errno.ENOENT:
+                return True, True, None
             return False, False, f"cannot verify access control: acl_get_fd_np errno {error}"
         try:
             entry = ctypes.c_void_p()

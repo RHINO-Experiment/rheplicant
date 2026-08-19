@@ -79,3 +79,5 @@ def test_darwin_adapter_reads_access_metadata_from_fd(tmp_path):
         os.close(fd)
     assert inspection.owner_uid == os.geteuid()
     assert inspection.parent_path == "diagnostic-only"
+    assert inspection.reliable is True
+    assert inspection.access_acl_is_trivial is True
