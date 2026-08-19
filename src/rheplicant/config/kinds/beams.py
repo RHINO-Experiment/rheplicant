@@ -278,21 +278,27 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
         )
     maps = _normalized(maps, normalize)
     fraction = jnp.ones((maps.shape[0],), dtype=maps.dtype)
-    horizon = spec.get("horizon") or {}
+    horizon = (
+        spec.get("horizon")
+        if "horizon" in spec
+        else context.use_default("resources.beams[].horizon", {})
+    ) or {}
     if not isinstance(horizon, dict):
         raise ConfigError(
             f"{name}: horizon: is a mapping (mode, el_deg, apod_deg); got "
             f"{type(horizon).__name__} ({horizon!r})."
         )
-    check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}),
-                       label="horizon:")
-    mode = horizon.get("mode", "none")
+    check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}), label="horizon:")
+    mode = (
+        horizon["mode"]
+        if "mode" in horizon
+        else context.use_default("resources.beams[].horizon.mode", "none")
+    )
     if mode == "truncate_map":
         maps, fraction = _truncate(name, maps, horizon, context)
     elif mode not in ("none", "projector_mask"):
         raise ConfigError(
-            f"{name}: horizon.mode={mode!r}; it is one of 'none', 'truncate_map', "
-            "'projector_mask'."
+            f"{name}: horizon.mode={mode!r}; it is one of 'none', 'truncate_map', 'projector_mask'."
         )
     return Beam(maps=maps, sky_fraction=fraction, nside=nside, normalize=normalize)
 
@@ -311,13 +317,15 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
             "resource_field",
             "rheplicant.config.kinds.beams.build_beam.cst.phi0_deg",
         )
-        resolved = resolve_value(
-            spec["phi0_deg"], context, destination=destination
-        )
+        resolved = resolve_value(spec["phi0_deg"], context, destination=destination)
         phi0_deg = float(resolved.value)
         record_resolved_delivery(context, destination, resolved.unit)
         source = resolve_file_path(directory, context)
-        suffix = spec.get("suffix", ".txt")
+        suffix = (
+            spec["suffix"]
+            if "suffix" in spec
+            else context.use_default("resources.beams[].suffix", ".txt")
+        )
 
         def enumerate_cst(root: Path):
             return tuple(
@@ -381,8 +389,7 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
     if fmt == "python":
         if "python" not in spec:
             raise ConfigError(
-                f"{name}: format: python requires a 'python:' target "
-                "('pkg.mod:callable')."
+                f"{name}: format: python requires a 'python:' target ('pkg.mod:callable')."
             )
         args = spec.get("args", {})
         literal = spec.get("literal", {})
@@ -417,6 +424,8 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
                 ),
                 context.dimensions,
             )
+        if context.audit is not None:
+            context.audit.python_target(f"{name}.python", spec["python"])
         factory = import_target(spec["python"])
         arguments = {}
         for key, value in args.items():
@@ -466,9 +475,7 @@ def _uvbeam_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
     if "path" not in spec:
         raise ConfigError(f"{name}: format: uvbeam requires a 'path'.")
     if context.freq is None:
-        raise ConfigError(
-            f"{name}: format: uvbeam needs observation.freq.grid to sample onto."
-        )
+        raise ConfigError(f"{name}: format: uvbeam needs observation.freq.grid to sample onto.")
     path = resolve_file_path(spec["path"], context)
 
     def read(snapshot: Path):
@@ -681,11 +688,15 @@ def _horizon_angle(
         "resource_field",
         f"rheplicant.config.kinds.beams.build_beam.horizon.{key}",
     )
-    resolved = resolve_value(horizon.get(key, default), context, destination=destination)
+    if key in horizon:
+        node = horizon[key]
+    elif key == "el_deg":
+        node = context.use_default("resources.beams[].horizon.el_deg", default)
+    else:
+        node = context.use_default("resources.beams[].horizon.apod_deg", default)
+    resolved = resolve_value(node, context, destination=destination)
     value = float(resolved.value)
-    record_resolved_delivery(
-        context, destination, resolved.unit, defaulted=defaulted
-    )
+    record_resolved_delivery(context, destination, resolved.unit, defaulted=defaulted)
     return value
 
 
@@ -701,7 +712,8 @@ def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):
             "projector_mask), which applies it in the horizontal frame."
         )
     truncated, fraction = horizon_truncated_beam(
-        np.asarray(maps), el_deg=el_deg,
-        apod_deg=_horizon_angle(name, horizon, "apod_deg", 0.0, context)
+        np.asarray(maps),
+        el_deg=el_deg,
+        apod_deg=_horizon_angle(name, horizon, "apod_deg", 0.0, context),
     )
     return jnp.asarray(truncated), jnp.asarray(fraction)

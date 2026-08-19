@@ -109,8 +109,7 @@ def import_target(target: str) -> Any:
     except AttributeError as exc:
         offered = sorted(name for name in dir(module) if not name.startswith("_"))
         raise ConfigError(
-            f"python: {module_name!r} has no attribute {attribute!r}. It offers "
-            f"{offered}."
+            f"python: {module_name!r} has no attribute {attribute!r}. It offers {offered}."
         ) from exc
 
 
@@ -229,6 +228,11 @@ def _python(
     # Import AFTER the node has been checked, deliberately. Importing a module
     # runs its body, so a node this layer is going to refuse anyway must be
     # refused before it can have that effect.
+    if context.audit is not None:
+        document_path = (
+            "python" if resolution_target is None else resolution_target.destination.document_path
+        )
+        context.audit.python_target(document_path, target)
     attribute = import_target(target)
     keywords = {}
     for name, spec in args.items():

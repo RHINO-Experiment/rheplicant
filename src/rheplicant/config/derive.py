@@ -133,17 +133,23 @@ def _median_gap(axis, *, name: str, axis_name: str):
 @register_derivation("channel_spacing", frozenset({"times"}))
 def _channel_spacing(node, context, modifiers, target):
     gap = _median_gap(context.freq, name="channel_spacing", axis_name="frequency")
-    return ResolvedValue(
-        gap * float(node.get("times", 1.0)), canonical_unit("Hz"), "from", modifiers
+    times = (
+        node["times"]
+        if "times" in node
+        else context.use_default("value.from.channel_spacing.times", 1.0)
     )
+    return ResolvedValue(gap * float(times), canonical_unit("Hz"), "from", modifiers)
 
 
 @register_derivation("sample_cadence", frozenset({"times"}))
 def _sample_cadence(node, context, modifiers, target):
     gap = _median_gap(context.time, name="sample_cadence", axis_name="time")
-    return ResolvedValue(
-        gap * float(node.get("times", 1.0)), canonical_unit("s"), "from", modifiers
+    times = (
+        node["times"]
+        if "times" in node
+        else context.use_default("value.from.sample_cadence.times", 1.0)
     )
+    return ResolvedValue(gap * float(times), canonical_unit("s"), "from", modifiers)
 
 
 @register_derivation("basis_matrix", frozenset({"kind", "n_basis", "axis"}), frozenset({"n"}))
@@ -205,9 +211,7 @@ def _unit_mean_free(node, context, modifiers, target):
     )
     bandpass = jnp.asarray(resolved.value)
     if target is not None:
-        record_resolved_delivery(
-            context, target.destination.nested("bandpass"), resolved.unit
-        )
+        record_resolved_delivery(context, target.destination.nested("bandpass"), resolved.unit)
     with _package_guard(
         "unit_mean_free",
         f"The document controls the bandpass: node, which resolved to shape "

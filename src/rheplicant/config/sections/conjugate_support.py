@@ -64,6 +64,15 @@ _DECIDES_SIGMA_HERE = frozenset({"conjugate.wiener", "condition"})
 _SOLVER_KNOBS = (("tol", float, 0.0, False),
                  ("maxiter", int, 1, True),
                  ("require_convergence", float, 0.0, True))
+_KNOB_DEFAULTS = {
+    "tol": 1e-6,
+    "maxiter": None,
+    "require_convergence": 1e-3,
+    "reweight_tol": None,
+    "min_reweights": 5,
+    "max_reweights": 100,
+    "iterations": 12,
+}
 #: The same three, as names: the CG knobs every conjugate SOLVE forwards.
 #: Derived rather than retyped so the two can never drift.
 _SOLVE_PASSTHROUGH = tuple(key for key, _cast, _floor, _null in _SOLVER_KNOBS)
@@ -203,7 +212,12 @@ def _prior_kwargs(run: Any, built: Any, block: Any,
             for key in ("prior_std", "prior_mean") if key in run.options}
 
 
-def _knobs(run: Any, specs: tuple) -> dict[str, Any]:
+def _knobs(
+    run: Any,
+    specs: tuple,
+    *,
+    context: Any | None = None,
+) -> dict[str, Any]:
     """The knobs among ``specs`` this document declared, coerced.
 
     A knob the document omits is omitted from the call, so the package's own
@@ -217,9 +231,21 @@ def _knobs(run: Any, specs: tuple) -> dict[str, Any]:
     """
     resolved: dict[str, Any] = {}
     for key, cast, floor, nullable in specs:
-        if key not in run.options:
-            continue                  # the package's own default stands
-        value = run.options[key]
+        if key in run.options:
+            value = run.options[key]
+        elif context is not None:
+            value = context.configured_run.context.use_default(
+                f"runs[].options.{key}",
+                _KNOB_DEFAULTS[key],
+            )
+            if key == "reweight_tol" and value is None:
+                # ``None`` is the package's omission sentinel and derives a
+                # tolerance from ``tol``.  It is recorded in resolved YAML,
+                # but not inserted into the parser view because an explicit
+                # document ``reweight_tol: null`` remains invalid.
+                continue
+        else:
+            continue
         if value is None and nullable:
             resolved[key] = None      # "no cap" / "no guard", as the package
             continue                  # spells them
@@ -263,6 +289,11 @@ def _parsed_opening(spec: Any, options: Mapping, context: Any, *,
         if not isinstance(check, bool):
             raise ConfigError(f"{where}: check: is a bool; got {check!r}.")
         normalized["check"] = check
+    else:
+        normalized["check"] = built.context.use_default(
+            "runs[].options.check",
+            True,
+        )
     normalized["names"] = _selected(spec, where)
     return normalized, space
 

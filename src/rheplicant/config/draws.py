@@ -136,7 +136,14 @@ def _resolve_operand(
 
     defaulted = node is None
     if defaulted:
-        node = default
+        if role == "loc":
+            node = context.use_default("value.normal.loc", default)
+        elif role == "scale":
+            node = context.use_default("value.normal.scale", default)
+        elif role == "low":
+            node = context.use_default("value.uniform.low", default)
+        else:
+            node = context.use_default("value.uniform.high", default)
     resolved = resolve_operand(
         node,
         context,
@@ -180,22 +187,42 @@ def _draw(
     )
     if form == "normal":
         loc = _resolve_operand(
-            spec.get("loc"), context, target,
-            segment="normal.loc", formula="normal", role="loc", default=0.0,
+            spec.get("loc"),
+            context,
+            target,
+            segment="normal.loc",
+            formula="normal",
+            role="loc",
+            default=0.0,
         )
         scale = _resolve_operand(
-            spec.get("scale"), context, target,
-            segment="normal.scale", formula="normal", role="scale", default=1.0,
+            spec.get("scale"),
+            context,
+            target,
+            segment="normal.scale",
+            formula="normal",
+            role="scale",
+            default=1.0,
         )
         array = loc + scale * jax.random.normal(key, shape, dtype=context.dtype)
     else:
         low = _resolve_operand(
-            spec.get("low"), context, target,
-            segment="uniform.low", formula="uniform", role="low", default=0.0,
+            spec.get("low"),
+            context,
+            target,
+            segment="uniform.low",
+            formula="uniform",
+            role="low",
+            default=0.0,
         )
         high = _resolve_operand(
-            spec.get("high"), context, target,
-            segment="uniform.high", formula="uniform", role="high", default=1.0,
+            spec.get("high"),
+            context,
+            target,
+            segment="uniform.high",
+            formula="uniform",
+            role="high",
+            default=1.0,
         )
         array = jax.random.uniform(key, shape, dtype=context.dtype, minval=low, maxval=high)
     # Rebuilt rather than mutated, and on both branches: check A41's report

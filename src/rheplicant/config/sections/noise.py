@@ -47,16 +47,17 @@ from rheplicant.config.resources import check_unknown_keys
 from rheplicant.config.sections.observation import ObservationBuild, _dimensioned
 from rheplicant.config.values import resolve_value
 
-__all__ = ["NoiseBuild", "build_noise", "decided_noise", "freeze_sigma",
-           "freeze_sigmas"]
+__all__ = ["NoiseBuild", "build_noise", "decided_noise", "freeze_sigma", "freeze_sigmas"]
 
 _KIND_KEYS = {
     "none": frozenset({"kind"}),
     "homoscedastic": frozenset({"kind", "sigma", "axis", "flags"}),
-    "radiometer": frozenset({"kind", "channel_width", "integration_time",
-                             "floor", "include_logdet", "flags"}),
-    "radiometer_frozen": frozenset({"kind", "source", "channel_width",
-                                    "integration_time", "floor"}),
+    "radiometer": frozenset(
+        {"kind", "channel_width", "integration_time", "floor", "include_logdet", "flags"}
+    ),
+    "radiometer_frozen": frozenset(
+        {"kind", "source", "channel_width", "integration_time", "floor"}
+    ),
 }
 
 #: A49's REFUSED direction, as :func:`check_unknown_keys` says it.  A
@@ -65,10 +66,12 @@ _KIND_KEYS = {
 #: same dict: written twice, the sentence would be bound twice and the two
 #: copies would drift with nothing measuring it.
 _A49_HINTS = {
-    "include_logdet": ("include_logdet is required exactly when the sigma "
-                       "depends on the prediction (kind: radiometer) and "
-                       "refused otherwise -- for a constant sigma it changes "
-                       "nothing (A49)"),
+    "include_logdet": (
+        "include_logdet is required exactly when the sigma "
+        "depends on the prediction (kind: radiometer) and "
+        "refused otherwise -- for a constant sigma it changes "
+        "nothing (A49)"
+    ),
 }
 
 
@@ -104,9 +107,11 @@ def _a26_sigma_axis_problem(*, rank: int | None, axis: Any) -> str | None:
         return None
     if rank != 1 or axis != "none":
         return None
-    return ("inference.noise.sigma: is 1-D, and a 1-D sigma reads "
-            "equally well along either axis of (n_time, n_freq) "
-            "data; declare axis: time or axis: freq (check A26).")
+    return (
+        "inference.noise.sigma: is 1-D, and a 1-D sigma reads "
+        "equally well along either axis of (n_time, n_freq) "
+        "data; declare axis: time or axis: freq (check A26)."
+    )
 
 
 def _a49_logdet_problem(kind: Any, section: Mapping[str, Any]) -> str | None:
@@ -128,11 +133,13 @@ def _a49_logdet_problem(kind: Any, section: Mapping[str, Any]) -> str | None:
         return None
     if isinstance(section.get("include_logdet"), bool):
         return None
-    return ("inference.noise.include_logdet: is required for a "
-            "prediction-dependent noise model and has no default. False "
-            "is the documented GLS variant -- a DIFFERENT estimator, "
-            "biased high by (1 + f^2) (inference/noise.py:56-68) -- and "
-            "a lost declaration comes back True with no error.")
+    return (
+        "inference.noise.include_logdet: is required for a "
+        "prediction-dependent noise model and has no default. False "
+        "is the documented GLS variant -- a DIFFERENT estimator, "
+        "biased high by (1 + f^2) (inference/noise.py:56-68) -- and "
+        "a lost declaration comes back True with no error."
+    )
 
 
 class NoiseBuild(NamedTuple):
@@ -171,9 +178,16 @@ def _noise_value(key: str, node: Any, context: ResolutionContext):
     return resolved
 
 
-def _fact(where: str, node: Any, observation: ObservationBuild,
-          attribute: str, declared_at: str, context: ResolutionContext,
-          dimension: str, what: str) -> float:
+def _fact(
+    where: str,
+    node: Any,
+    observation: ObservationBuild,
+    attribute: str,
+    declared_at: str,
+    context: ResolutionContext,
+    dimension: str,
+    what: str,
+) -> float:
     if isinstance(node, Mapping) and dict(node) == {"from": "observation"}:
         value = getattr(observation, attribute)
         if value is None:
@@ -182,12 +196,10 @@ def _fact(where: str, node: Any, observation: ObservationBuild,
                 "this document does not declare it."
             )
         return float(value)
-    return float(_dimensioned(where, node, context, dimension=dimension,
-                              what=what).value)
+    return float(_dimensioned(where, node, context, dimension=dimension, what=what).value)
 
 
-def _wrap_flags(where: str, node: Any, observation: ObservationBuild,
-                model: Any) -> Any:
+def _wrap_flags(where: str, node: Any, observation: ObservationBuild, model: Any) -> Any:
     from rheplicant.inference import FlaggedNoise
 
     if not (isinstance(node, Mapping) and dict(node) == {"from": "observation"}):
@@ -204,37 +216,42 @@ def _wrap_flags(where: str, node: Any, observation: ObservationBuild,
     return FlaggedNoise(model, flags)
 
 
-def build_noise(section: Any, *, observation: ObservationBuild,
-                context: ResolutionContext) -> NoiseBuild:
+def build_noise(
+    section: Any, *, observation: ObservationBuild, context: ResolutionContext
+) -> NoiseBuild:
     """``inference.noise`` -> a :class:`NoiseBuild` (sigma still undecided
     for ``radiometer_frozen`` -- see :func:`freeze_sigma`)."""
     from rheplicant.inference import HomoscedasticNoise, RadiometerNoise
 
     if section is None:
+        if context is not None:
+            context.use_default("inference.noise", {"kind": "none"})
         return NoiseBuild(kind="none")
     if not isinstance(section, Mapping):
-        raise ConfigError(f"inference.noise: is a mapping with kind:; got "
-                          f"{section!r}.")
+        raise ConfigError(f"inference.noise: is a mapping with kind:; got {section!r}.")
     kind = section.get("kind")
     if kind not in _KIND_KEYS:
-        raise ConfigError(
-            f"inference.noise.kind: {kind!r} is not one of "
-            f"{sorted(_KIND_KEYS)}."
-        )
-    check_unknown_keys("inference.noise", dict(section), _KIND_KEYS[kind],
-                       label=f"kind: {kind}", hints=_A49_HINTS)
+        raise ConfigError(f"inference.noise.kind: {kind!r} is not one of {sorted(_KIND_KEYS)}.")
+    check_unknown_keys(
+        "inference.noise", dict(section), _KIND_KEYS[kind], label=f"kind: {kind}", hints=_A49_HINTS
+    )
     if kind == "none":
         return NoiseBuild(kind="none")
     if kind == "homoscedastic":
         if "sigma" not in section:
-            raise ConfigError("inference.noise: kind: homoscedastic requires "
-                              "sigma: -- a value node.")
-        sigma = jnp.asarray(_noise_value("sigma", section["sigma"], context).value,
-                            dtype=context.dtype)
-        axis = section.get("axis", "none")
+            raise ConfigError(
+                "inference.noise: kind: homoscedastic requires sigma: -- a value node."
+            )
+        sigma = jnp.asarray(
+            _noise_value("sigma", section["sigma"], context).value, dtype=context.dtype
+        )
+        axis = (
+            section["axis"]
+            if "axis" in section
+            else context.use_default("inference.noise.axis", "none")
+        )
         if axis not in ("none", "time", "freq"):
-            raise ConfigError(f"inference.noise.axis: is none, time or freq; "
-                              f"got {axis!r}.")
+            raise ConfigError(f"inference.noise.axis: is none, time or freq; got {axis!r}.")
         # The second opinion, on the RESOLVED rank: `preflight/noise.py` asked
         # the same function what the document's text says, and a `{ref:}` or
         # `{file:}` sigma is one it had to stand down on.
@@ -250,26 +267,43 @@ def build_noise(section: Any, *, observation: ObservationBuild,
             )
         model: Any = HomoscedasticNoise(sigma)
         if "flags" in section:
-            model = _wrap_flags("inference.noise", section["flags"],
-                                observation, model)
+            model = _wrap_flags("inference.noise", section["flags"], observation, model)
         return NoiseBuild(kind=kind, model=model)
-    width = _fact("inference.noise.channel_width",
-                  section.get("channel_width", {"from": "observation"}),
-                  observation, "channel_width_hz",
-                  "observation.time.channel_width", context,
-                  dimension="frequency", what="a bandwidth")
-    tau = _fact("inference.noise.integration_time",
-                section.get("integration_time", {"from": "observation"}),
-                observation, "integration_time_s",
-                "observation.time.integration_time", context,
-                dimension="time", what="a duration")
-    floor = 0.0
+    width_node = (
+        section["channel_width"]
+        if "channel_width" in section
+        else context.use_default("inference.noise.channel_width", {"from": "observation"})
+    )
+    width = _fact(
+        "inference.noise.channel_width",
+        width_node,
+        observation,
+        "channel_width_hz",
+        "observation.time.channel_width",
+        context,
+        dimension="frequency",
+        what="a bandwidth",
+    )
+    tau_node = (
+        section["integration_time"]
+        if "integration_time" in section
+        else context.use_default("inference.noise.integration_time", {"from": "observation"})
+    )
+    tau = _fact(
+        "inference.noise.integration_time",
+        tau_node,
+        observation,
+        "integration_time_s",
+        "observation.time.integration_time",
+        context,
+        dimension="time",
+        what="a duration",
+    )
+    floor = context.use_default("inference.noise.floor", 0.0) if "floor" not in section else 0.0
     if "floor" in section:
         resolved_floor = _noise_value("floor", section["floor"], context)
         expected = context.dimensions.prediction_dimension or signature("K")
-        actual = (
-            None if resolved_floor.unit is None else dimension_of(resolved_floor.unit)
-        )
+        actual = None if resolved_floor.unit is None else dimension_of(resolved_floor.unit)
         if actual != expected:
             got = (
                 "no unit"
@@ -288,8 +322,7 @@ def build_noise(section: Any, *, observation: ObservationBuild,
             raise ConfigError(problem)
         model = RadiometerNoise(width, tau, floor)
         if "flags" in section:
-            model = _wrap_flags("inference.noise", section["flags"],
-                                observation, model)
+            model = _wrap_flags("inference.noise", section["flags"], observation, model)
         return NoiseBuild(kind=kind, model=model, include_logdet=include)
     source = section.get("source")
     if source not in ("observed", "prediction_at_init"):
@@ -298,9 +331,15 @@ def build_noise(section: Any, *, observation: ObservationBuild,
             "from 'observed' or 'prediction_at_init'; got "
             f"{source!r}."
         )
-    return NoiseBuild(kind=kind,
-                      frozen={"source": source, "channel_width_hz": width,
-                              "integration_time_s": tau, "floor": floor})
+    return NoiseBuild(
+        kind=kind,
+        frozen={
+            "source": source,
+            "channel_width_hz": width,
+            "integration_time_s": tau,
+            "floor": floor,
+        },
+    )
 
 
 def freeze_sigma(build: NoiseBuild, reference: Any) -> NoiseBuild:
@@ -314,13 +353,11 @@ def freeze_sigma(build: NoiseBuild, reference: Any) -> NoiseBuild:
     base = jnp.abs(jnp.asarray(reference))
     if facts.get("floor", 0.0) > 0.0:
         base = jnp.maximum(base, facts["floor"])
-    fractional = 1.0 / (facts["channel_width_hz"]
-                        * facts["integration_time_s"]) ** 0.5
+    fractional = 1.0 / (facts["channel_width_hz"] * facts["integration_time_s"]) ** 0.5
     return build._replace(sigma=base * fractional)
 
 
-def freeze_sigmas(build: NoiseBuild, references: Mapping[str, Any], *,
-                  primary: str) -> NoiseBuild:
+def freeze_sigmas(build: NoiseBuild, references: Mapping[str, Any], *, primary: str) -> NoiseBuild:
     """One frozen sigma per observation, and the primary's as the default.
 
     ``source: observed`` decides the sigma FROM the data, so a document with
@@ -337,8 +374,7 @@ def freeze_sigmas(build: NoiseBuild, references: Mapping[str, Any], *,
     called once per reference rather than reimplemented: a floor that
     clipped in one function and not the other is the shape this avoids.
     """
-    sigmas = {name: freeze_sigma(build, reference).sigma
-              for name, reference in references.items()}
+    sigmas = {name: freeze_sigma(build, reference).sigma for name, reference in references.items()}
     return build._replace(sigma=sigmas[primary], by_observation=sigmas)
 
 

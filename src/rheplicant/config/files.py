@@ -342,9 +342,12 @@ def _refuse_healpix(spec: dict) -> None:
 
 @register_form("file")
 def _file(node, context, modifiers, target):
-    spec = node["file"]
-    if not isinstance(spec, dict):
-        raise ConfigError(f"file: expects a mapping, got {type(spec).__name__} ({spec!r}).")
+    raw_spec = node["file"]
+    if not isinstance(raw_spec, dict):
+        raise ConfigError(
+            f"file: expects a mapping, got {type(raw_spec).__name__} ({raw_spec!r})."
+        )
+    spec = dict(raw_spec)
     for required in ("path", "format"):
         if required not in spec:
             raise ConfigError(
@@ -383,12 +386,28 @@ def _file(node, context, modifiers, target):
             f"sha256 it takes {sorted(extra)}."
         )
 
-    path = resolve_file_path(spec["path"], context)
     destination = (
         target.destination
         if target is not None
         else DestinationDescriptor("file", "config_path", "file")
     )
+    if fmt == "txt" and "skiprows" not in spec:
+        spec["skiprows"] = context.use_default(
+            f"{destination.document_path}.file.skiprows",
+            0,
+        )
+    if fmt == "csv":
+        if "delimiter" not in spec:
+            spec["delimiter"] = context.use_default(
+                f"{destination.document_path}.file.delimiter",
+                ",",
+            )
+        if "columns" not in spec:
+            spec["columns"] = context.use_default(
+                f"{destination.document_path}.file.columns",
+                None,
+            )
+    path = resolve_file_path(spec["path"], context)
 
     def read_snapshot(snapshot: pathlib.Path):
         result = _read(
@@ -425,7 +444,11 @@ def _file(node, context, modifiers, target):
             )
         return ResolvedValue(result, None, "file", carried)
 
-    unit_token = modifiers.get("unit")
+    unit_token = (
+        modifiers["unit"]
+        if "unit" in modifiers
+        else context.use_default(f"{destination.document_path}.unit", None)
+    )
     if unit_token is None:
         return ResolvedValue(result, None, "file", carried)
     converted, unit = convert_to_canonical(result, unit_token)

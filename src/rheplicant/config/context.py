@@ -10,7 +10,7 @@ detectable rather than an infinite recursion.
 import dataclasses
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, TypeVar, cast
 
 import jax
 
@@ -23,6 +23,10 @@ from rheplicant.config.dimensions import (
     dimension_for,
 )
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.resolution_audit import (
+    ResolutionAudit,
+    ResolutionAuditSink,
+)
 from rheplicant.config.symbols import ShapeScope
 
 _ACTIVE_LAYER: ContextVar[LayerIdentity | None] = ContextVar(
@@ -37,6 +41,8 @@ _ACTIVE_ORIGIN_LOOKUP: ContextVar[OriginLookup | None] = ContextVar(
 _ACTIVE_CAPTURE: ContextVar[CaptureService | None] = ContextVar(
     "rheplicant_resolution_capture", default=None
 )
+
+T = TypeVar("T")
 
 
 @contextmanager
@@ -62,6 +68,26 @@ def using_resolution_audit(
 
 def _active_layer() -> LayerIdentity:
     return _ACTIVE_LAYER.get() or LayerIdentity("base", None)
+
+
+def _active_audit() -> ResolutionAudit | None:
+    trace = _ACTIVE_TRACE.get()
+    required = (
+        "record_resource",
+        "record_seed",
+        "record_gate",
+        "record_python_target",
+        "record_deletion",
+        "snapshot",
+    )
+    if trace is None or any(not callable(getattr(trace, method, None)) for method in required):
+        return None
+    return ResolutionAudit(_active_layer(), cast(ResolutionAuditSink, trace))
+
+
+def current_resolution_audit() -> ResolutionAudit | None:
+    """Return the current layer audit during document construction."""
+    return _active_audit()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,9 +131,8 @@ class ResolutionContext:
     origin_lookup: OriginLookup | None = dataclasses.field(
         default_factory=_ACTIVE_ORIGIN_LOOKUP.get
     )
-    capture: CaptureService | None = dataclasses.field(
-        default_factory=_ACTIVE_CAPTURE.get
-    )
+    capture: CaptureService | None = dataclasses.field(default_factory=_ACTIVE_CAPTURE.get)
+    audit: ResolutionAudit | None = dataclasses.field(default_factory=_active_audit)
 
     @property
     def shape_scope(self) -> ShapeScope:
@@ -125,6 +150,12 @@ class ResolutionContext:
                 if name.startswith(("resources.beams.", "resources.projectors."))
             ),
         )
+
+    def use_default(self, path: str, value: T) -> T:
+        """Return one chosen default and record it when this load is audited."""
+        if self.audit is None:
+            return value
+        return self.audit.use_default(path, value)
 
     def with_resource(self, name: str, value: Any) -> "ResolutionContext":
         """A new context carrying one more constructed resource."""
@@ -152,7 +183,6 @@ class ResolutionContext:
                 self.dimensions.resource_dimensions[dotted] = found
             elif existing != found:
                 raise ConfigError(
-                    f"dimensions: resource {dotted!r} was rebound with a "
-                    "different dimension"
+                    f"dimensions: resource {dotted!r} was rebound with a different dimension"
                 )
         return dataclasses.replace(self, resources={**self.resources, name: value})

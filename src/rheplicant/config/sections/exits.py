@@ -59,8 +59,9 @@ def _run_forward(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     return built.twin(built.state)
 
 
-_OPTIMIZE_KEYS = frozenset({"optimizer", "learning_rate", "n_steps", "beta1",
-                            "beta2", "eps", "loss"})
+_OPTIMIZE_KEYS = frozenset(
+    {"optimizer", "learning_rate", "n_steps", "beta1", "beta2", "eps", "loss"}
+)
 _ADAM_ONLY = ("beta1", "beta2", "eps")
 #: Measured against ``AdamCalibrator``'s own static defaults, so passing them
 #: explicitly is byte-identical to today's omission.
@@ -74,12 +75,19 @@ def _parse_fisher(options, context):
     _sweep(spec, frozenset({"space", "jitter"}))
     _space(spec, built)
     _noise(spec, built)
-    use_space = options.get("space", False)
+    use_space = (
+        options["space"]
+        if "space" in options
+        else built.context.use_default("runs[].options.space", False)
+    )
     if not isinstance(use_space, bool):
-        raise ConfigError(f"runs[{spec.name!r}]: space: is a bool; got "
-                          f"{use_space!r}.")
-    jitter = _number(spec, "jitter", options.get("jitter", 0.0),
-                     kind=float, minimum=0.0)
+        raise ConfigError(f"runs[{spec.name!r}]: space: is a bool; got {use_space!r}.")
+    jitter_node = (
+        options["jitter"]
+        if "jitter" in options
+        else built.context.use_default("runs[].options.jitter", 0.0)
+    )
+    jitter = _number(spec, "jitter", jitter_node, kind=float, minimum=0.0)
     normalized = {"space": use_space, "jitter": jitter}
     return parsed_options(normalized, resolved=normalized)
 
@@ -94,11 +102,12 @@ def _run_fisher(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     noise = _noise(run, built)
     forward, values = space.forward_fn(inference.fit_twin, built.state)
     fisher = fisher_information(
-        forward, values, noise,
-        space=space if run.options["space"] else None)
-    return {"fisher": fisher,
-            "covariance": parameter_covariance(
-                fisher, jitter=run.options["jitter"])}
+        forward, values, noise, space=space if run.options["space"] else None
+    )
+    return {
+        "fisher": fisher,
+        "covariance": parameter_covariance(fisher, jitter=run.options["jitter"]),
+    }
 
 
 def _loss_fn(run: RunSpec) -> Any:
@@ -128,10 +137,7 @@ def _loss_fn(run: RunSpec) -> Any:
                 "the first."
             )
         return scoring
-    raise ConfigError(
-        f"runs[{run.name!r}]: loss: is 'mse' or {{python: 'mod:fn'}}; got "
-        f"{loss!r}."
-    )
+    raise ConfigError(f"runs[{run.name!r}]: loss: is 'mse' or {{python: 'mod:fn'}}; got {loss!r}.")
 
 
 def _parse_optimize(options, context):
@@ -162,20 +168,26 @@ def _parse_optimize(options, context):
     if optimizer == "gradient":
         for key in _ADAM_ONLY:
             if key in options:
-                raise ConfigError(
-                    f"runs[{spec.name!r}]: {key}: belongs to optimizer: "
-                    "adam."
-                )
+                raise ConfigError(f"runs[{spec.name!r}]: {key}: belongs to optimizer: adam.")
     execution = {"optimizer": optimizer}
     resolved = {"optimizer": optimizer}
     execution["learning_rate"] = resolved["learning_rate"] = _number(
-        spec, "learning_rate", options["learning_rate"], kind=float)
+        spec, "learning_rate", options["learning_rate"], kind=float
+    )
     execution["n_steps"] = resolved["n_steps"] = _number(
-        spec, "n_steps", options["n_steps"], kind=int)
+        spec, "n_steps", options["n_steps"], kind=int
+    )
     if optimizer == "adam":
         for key in _ADAM_ONLY:
-            execution[key] = resolved[key] = _number(
-                spec, key, options.get(key, _ADAM_DEFAULTS[key]), kind=float)
+            if key in options:
+                node = options[key]
+            elif key == "beta1":
+                node = built.context.use_default("runs[].options.beta1", 0.9)
+            elif key == "beta2":
+                node = built.context.use_default("runs[].options.beta2", 0.999)
+            else:
+                node = built.context.use_default("runs[].options.eps", 1e-8)
+            execution[key] = resolved[key] = _number(spec, key, node, kind=float)
     trainable = inference.trainable
     space = inference.space
     if trainable is not None and space is not None:
@@ -191,7 +203,11 @@ def _parse_optimize(options, context):
             "inference.parameters -- something must be free to move."
         )
     execution["loss"] = _loss_fn(spec)
-    resolved["loss"] = options.get("loss", "mse")
+    resolved["loss"] = (
+        options["loss"]
+        if "loss" in options
+        else built.context.use_default("runs[].options.loss", "mse")
+    )
     return parsed_options(execution, resolved=resolved)
 
 
@@ -205,63 +221,115 @@ def _run_optimize(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     options = run.options
     if options["optimizer"] == "gradient":
         calibrator = GradientCalibrator(
-            learning_rate=options["learning_rate"],
-            n_steps=options["n_steps"])
+            learning_rate=options["learning_rate"], n_steps=options["n_steps"]
+        )
     else:
         calibrator = AdamCalibrator(
             learning_rate=options["learning_rate"],
-            n_steps=options["n_steps"], beta1=options["beta1"],
-            beta2=options["beta2"], eps=options["eps"])
+            n_steps=options["n_steps"],
+            beta1=options["beta1"],
+            beta2=options["beta2"],
+            eps=options["eps"],
+        )
     if inference.trainable is not None:
-        forward, params0 = build_forward_fn(inference.fit_twin, built.state,
-                                            inference.trainable)
+        forward, params0 = build_forward_fn(inference.fit_twin, built.state, inference.trainable)
     else:
-        forward, params0 = inference.space.forward_fn(inference.fit_twin,
-                                                      built.state)
-    params_fit, losses = calibrator.fit(forward, params0, observed,
-                                        loss_fn=options["loss"])
+        forward, params0 = inference.space.forward_fn(inference.fit_twin, built.state)
+    params_fit, losses = calibrator.fit(forward, params0, observed, loss_fn=options["loss"])
     return {"params": params_fit, "losses": losses}
 
 
 _BLOCK_KEYS = frozenset({"names", "steps", "engine", "learning_rate"})
-_ESTIMATE_KEYS = frozenset({"blocks", "max_iter", "tol", "min_sweeps",
-                            "check_identifiability", "solve_tol",
-                            "solve_guard"})
-_SAMPLE_KEYS = frozenset({"blocks", "seed", "n_sweeps", "warmup", "rhat_max",
-                          "warm_start", "check_identifiability", "solve_tol",
-                          "solve_guard"})
-_WARM_KEYS = frozenset({"kind", "blocks", "max_iter", "tol", "min_sweeps",
-                        "move", "check_identifiability", "solve_tol",
-                        "solve_guard"})
-_ESTIMATE_PASSTHROUGH = ("max_iter", "tol", "min_sweeps",
-                         "check_identifiability", "solve_tol", "solve_guard")
-_SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability",
-                       "solve_tol", "solve_guard")
+_ESTIMATE_KEYS = frozenset(
+    {"blocks", "max_iter", "tol", "min_sweeps", "check_identifiability", "solve_tol", "solve_guard"}
+)
+_SAMPLE_KEYS = frozenset(
+    {
+        "blocks",
+        "seed",
+        "n_sweeps",
+        "warmup",
+        "rhat_max",
+        "warm_start",
+        "check_identifiability",
+        "solve_tol",
+        "solve_guard",
+    }
+)
+_WARM_KEYS = frozenset(
+    {
+        "kind",
+        "blocks",
+        "max_iter",
+        "tol",
+        "min_sweeps",
+        "move",
+        "check_identifiability",
+        "solve_tol",
+        "solve_guard",
+    }
+)
+_ESTIMATE_PASSTHROUGH = (
+    "max_iter",
+    "tol",
+    "min_sweeps",
+    "check_identifiability",
+    "solve_tol",
+    "solve_guard",
+)
+_SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability", "solve_tol", "solve_guard")
 #: The parser-injected defaults behind the passthrough tuples, measured
 #: against ``SamplingPlan``'s own signatures (``DEFAULT_MAX_ITER``,
 #: ``DEFAULT_CHI2_TOL``, ``MIN_SWEEPS``, ``CHECK_ONCE``, ``solve_tol=1e-6``,
 #: ``solve_guard=1e-3``; ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an
 #: explicit keyword is byte-identical to today's omission.  A warm start
 #: gets none: its passthrough has always been declared-only.
-_ESTIMATE_DEFAULTS = {"max_iter": 100, "tol": 1e-8, "min_sweeps": 3,
-                      "check_identifiability": "once", "solve_tol": 1e-6,
-                      "solve_guard": 0.001}
-_SAMPLE_DEFAULTS = {"warmup": None, "rhat_max": 1.05,
-                    "check_identifiability": "once", "solve_tol": 1e-6,
-                    "solve_guard": 0.001}
+_ESTIMATE_DEFAULTS = {
+    "max_iter": 100,
+    "tol": 1e-8,
+    "min_sweeps": 3,
+    "check_identifiability": "once",
+    "solve_tol": 1e-6,
+    "solve_guard": 0.001,
+}
+_SAMPLE_DEFAULTS = {
+    "warmup": None,
+    "rhat_max": 1.05,
+    "check_identifiability": "once",
+    "solve_tol": 1e-6,
+    "solve_guard": 0.001,
+}
+
+
+def _plan_default(built, key, value):
+    if key == "max_iter":
+        return built.context.use_default("runs[].options.max_iter", value)
+    if key == "tol":
+        return built.context.use_default("runs[].options.tol", value)
+    if key == "min_sweeps":
+        return built.context.use_default("runs[].options.min_sweeps", value)
+    if key == "check_identifiability":
+        return built.context.use_default("runs[].options.check_identifiability", value)
+    if key == "solve_tol":
+        return built.context.use_default("runs[].options.solve_tol", value)
+    if key == "solve_guard":
+        return built.context.use_default("runs[].options.solve_guard", value)
+    if key == "warmup":
+        return built.context.use_default("runs[].options.warmup", value)
+    if key == "rhat_max":
+        return built.context.use_default("runs[].options.rhat_max", value)
+    raise AssertionError(f"unknown plan default {key!r}")
 
 
 def _blocks(where: str, node: Any) -> tuple[Any, ...]:
     from rheplicant.inference import Block
 
     if not isinstance(node, list) or not node:
-        raise ConfigError(f"{where}: blocks: is a non-empty list of block "
-                          f"mappings; got {node!r}.")
+        raise ConfigError(f"{where}: blocks: is a non-empty list of block mappings; got {node!r}.")
     built = []
     for index, entry in enumerate(node):
         if not isinstance(entry, dict):
-            raise ConfigError(f"{where}: blocks[{index}] is a mapping; got "
-                              f"{entry!r}.")
+            raise ConfigError(f"{where}: blocks[{index}] is a mapping; got {entry!r}.")
         unknown = sorted(set(entry) - _BLOCK_KEYS)
         if unknown:
             raise ConfigError(
@@ -269,13 +337,17 @@ def _blocks(where: str, node: Any) -> tuple[Any, ...]:
                 f"takes {sorted(_BLOCK_KEYS)}."
             )
         names = entry.get("names")
-        if not isinstance(names, list) or not names or not all(
-                isinstance(name, str) for name in names):
-            raise ConfigError(f"{where}: blocks[{index}].names is a "
-                              f"non-empty list of latent names; got "
-                              f"{entry.get('names')!r}.")
-        knobs = {key: entry[key] for key in ("steps", "engine",
-                                             "learning_rate") if key in entry}
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(isinstance(name, str) for name in names)
+        ):
+            raise ConfigError(
+                f"{where}: blocks[{index}].names is a "
+                f"non-empty list of latent names; got "
+                f"{entry.get('names')!r}."
+            )
+        knobs = {key: entry[key] for key in ("steps", "engine", "learning_rate") if key in entry}
         built.append(Block(*names, **knobs))
     return tuple(built)
 
@@ -326,31 +398,36 @@ def _parse_plan(options, context):
     resolved = {"blocks": options["blocks"]}
     if estimate:
         for key in _ESTIMATE_PASSTHROUGH:
-            execution[key] = resolved[key] = options.get(
-                key, _ESTIMATE_DEFAULTS[key])
+            if key in options:
+                value = options[key]
+            else:
+                value = _plan_default(built, key, _ESTIMATE_DEFAULTS[key])
+            execution[key] = resolved[key] = value
         return parsed_options(execution, resolved=resolved)
     if "n_sweeps" not in options:
         raise ConfigError(f"{where}: n_sweeps: is required for plan.sample.")
-    execution["seed"] = resolved["seed"] = seed_for(
-        _seed_name(dict(options), where), built.context)
+    execution["seed"] = resolved["seed"] = seed_for(_seed_name(dict(options), where), built.context)
     warm = options.get("warm_start")
     warm_execution = None
     if warm is not None:
         if not isinstance(warm, dict):
-            raise ConfigError(f"{where}: warm_start: is a mapping; got "
-                              f"{warm!r}.")
+            raise ConfigError(f"{where}: warm_start: is a mapping; got {warm!r}.")
         unknown = sorted(set(warm) - _WARM_KEYS)
         if unknown:
-            raise ConfigError(f"{where}: warm_start does not take "
-                              f"{unknown}; it takes {sorted(_WARM_KEYS)}.")
+            raise ConfigError(
+                f"{where}: warm_start does not take {unknown}; it takes {sorted(_WARM_KEYS)}."
+            )
         if warm.get("kind") != "plan.estimate":
             raise ConfigError(
                 f"{where}: warm_start.kind: plan.estimate is the one warm "
                 f"start there is; got {warm.get('kind')!r}."
             )
         move = warm.get("move")
-        if not isinstance(move, list) or not move or not all(
-                isinstance(name, str) for name in move):
+        if (
+            not isinstance(move, list)
+            or not move
+            or not all(isinstance(name, str) for name in move)
+        ):
             raise ConfigError(
                 f"{where}: warm_start.move: is required -- the latents "
                 "whose inits the warm start moves; the rest stay declared."
@@ -362,16 +439,21 @@ def _parse_plan(options, context):
                 f"inference.parameters does not declare; it declares "
                 f"{list(space.names)}."
             )
-        warm_execution = {"kind": "plan.estimate",
-                          "blocks": _blocks(f"{where}: warm_start",
-                                            warm.get("blocks")),
-                          "move": tuple(move)}
+        warm_execution = {
+            "kind": "plan.estimate",
+            "blocks": _blocks(f"{where}: warm_start", warm.get("blocks")),
+            "move": tuple(move),
+        }
         warm_execution.update(_passthrough(warm, _ESTIMATE_PASSTHROUGH))
     execution["n_sweeps"] = resolved["n_sweeps"] = _number(
-        spec, "n_sweeps", options["n_sweeps"], kind=int)
+        spec, "n_sweeps", options["n_sweeps"], kind=int
+    )
     for key in _SAMPLE_PASSTHROUGH:
-        execution[key] = resolved[key] = options.get(
-            key, _SAMPLE_DEFAULTS[key])
+        if key in options:
+            value = options[key]
+        else:
+            value = _plan_default(built, key, _SAMPLE_DEFAULTS[key])
+        execution[key] = resolved[key] = value
     if warm_execution is not None:
         execution["warm_start"] = warm_execution
         resolved["warm_start"] = warm
@@ -398,21 +480,36 @@ def _run_plan(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     options = run.options
     if estimate:
         return SamplingPlan(space, *options["blocks"]).estimate(
-            inference.fit_twin, built.state, observed, noise=noise,
-            **_passthrough(options, _ESTIMATE_PASSTHROUGH))
+            inference.fit_twin,
+            built.state,
+            observed,
+            noise=noise,
+            **_passthrough(options, _ESTIMATE_PASSTHROUGH),
+        )
     key = jax.random.key(options["seed"])
     warm = options.get("warm_start")
     if warm is not None:
         est = SamplingPlan(space, *warm["blocks"]).estimate(
-            inference.fit_twin, built.state, observed, noise=noise,
-            **_passthrough(warm, _ESTIMATE_PASSTHROUGH))
+            inference.fit_twin,
+            built.state,
+            observed,
+            noise=noise,
+            **_passthrough(warm, _ESTIMATE_PASSTHROUGH),
+        )
         space = eqx.tree_at(
-            lambda s: [s.latent(name).init for name in warm["move"]], space,
-            [est.values[name] for name in warm["move"]])
+            lambda s: [s.latent(name).init for name in warm["move"]],
+            space,
+            [est.values[name] for name in warm["move"]],
+        )
     return SamplingPlan(space, *options["blocks"]).sample(
-        inference.fit_twin, built.state, observed, noise=noise, key=key,
+        inference.fit_twin,
+        built.state,
+        observed,
+        noise=noise,
+        key=key,
         n_sweeps=options["n_sweeps"],
-        **_passthrough(options, _SAMPLE_PASSTHROUGH))
+        **_passthrough(options, _SAMPLE_PASSTHROUGH),
+    )
 
 
 #: The compatibility path has no canonical layer and no schedule position:
@@ -422,12 +519,10 @@ def _run_plan(run: ParsedRun, built: Any, previous: Any = None) -> Any:
 #: than ``built.document`` -- freezing a caller's document here would cost a
 #: deep evidence pass per run and could refuse programmatic documents the
 #: layer accepts today, neither of which the compatibility wrapper may do.
-_COMPATIBILITY_LAYER = LayerRef(kind="base", name=None, prefix="",
-                                document={}, declared_runs=None)
+_COMPATIBILITY_LAYER = LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None)
 
 
-def execute_run(run: RunSpec, built: Any,
-                results: Any = None) -> RunResult:
+def execute_run(run: RunSpec, built: Any, results: Any = None) -> RunResult:
     """One run entry against its ConfiguredRun -> a RunResult.
 
     The wrapper keeps its exact signature and its legacy unknown-kind
@@ -456,15 +551,17 @@ def execute_run(run: RunSpec, built: Any,
         try:
             attempt()
         except Exception as error:  # noqa: BLE001 -- run-and-capture is the point
-            return RunResult(name=run.name, kind=run.kind, product=None,
-                             error=error, variant=run.variant)
+            return RunResult(
+                name=run.name, kind=run.kind, product=None, error=error, variant=run.variant
+            )
         raise ConfigError(
             f"runs[{run.name!r}]: expect: refuse, and kind: {run.kind} "
             "SUCCEEDED -- the assertion this run makes about the design no "
             "longer holds."
         )
-    return RunResult(name=run.name, kind=run.kind, product=attempt(),
-                     error=None, variant=run.variant)
+    return RunResult(
+        name=run.name, kind=run.kind, product=attempt(), error=None, variant=run.variant
+    )
 
 
 # Importing the leaf modules is what registers their kinds.  The import sits

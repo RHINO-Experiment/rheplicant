@@ -96,8 +96,10 @@ def _parse_identifiability(options, context):
         execution["at"] = _at_values(spec, built, space)
         resolved["at"] = options["at"]
     execution["rtol"] = resolved["rtol"] = (
-        _bounded_rtol(spec) if "rtol" in options
-        else _IDENTIFIABILITY_DEFAULTS["rtol"])
+        _bounded_rtol(spec)
+        if "rtol" in options
+        else built.context.use_default("runs[].options.rtol", 1e-8)
+    )
     return parsed_options(execution, resolved=resolved)
 
 
@@ -118,8 +120,7 @@ def _parse_score_directions(options, context):
 
 
 @register("identifiability", parse=_parse_identifiability)
-def _run_identifiability(run: ParsedRun, built: Any,
-                         previous: Any = None) -> Any:
+def _run_identifiability(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: identifiability`` -> the package's IdentifiabilityReport.
 
     The report holds numpy arrays and Python ints and cannot be jitted
@@ -140,13 +141,11 @@ def _run_identifiability(run: ParsedRun, built: Any,
         kwargs["at"] = options["at"]
     # Keyword-only, all three.  Positional is a TypeError here and legal one
     # module away, which is exactly why this call names every argument.
-    return identifiability(_space(run, built), built.inference.fit_twin,
-                           built.state, **kwargs)
+    return identifiability(_space(run, built), built.inference.fit_twin, built.state, **kwargs)
 
 
 @register("score_directions", parse=_parse_score_directions)
-def _run_score_directions(run: ParsedRun, built: Any,
-                          previous: Any = None) -> Any:
+def _run_score_directions(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: score_directions`` -> ``{latent: (size, n_data)}``.
 
     Returned exactly as the package built it.  The order is the caller's,
@@ -163,8 +162,7 @@ def _run_score_directions(run: ParsedRun, built: Any,
         kwargs["names"] = options["names"]
     if options.get("at"):
         kwargs["at"] = options["at"]
-    return score_directions(_space(run, built), built.inference.fit_twin,
-                            built.state, **kwargs)
+    return score_directions(_space(run, built), built.inference.fit_twin, built.state, **kwargs)
 
 
 def _names(run: RunSpec) -> tuple[str, ...] | None:
@@ -202,8 +200,7 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
     if "names" not in run.options:
         return None
     names = run.options["names"]
-    if not isinstance(names, list) or not names or not all(
-            isinstance(name, str) for name in names):
+    if not isinstance(names, list) or not names or not all(isinstance(name, str) for name in names):
         raise ConfigError(
             f"runs[{run.name!r}]: names: is a non-empty list of latent names "
             f"-- [g] for a block of one; got {names!r}."
@@ -348,12 +345,14 @@ def _chi2(run: RunSpec, built: Any) -> Any:
     observed = _observed(run, built)
     build = built.inference.noise
     if build.model is None:
+
         def frozen_chi2(prediction: Any) -> Any:
             return jnp.sum(((observed - prediction) / noise) ** 2)
 
         return frozen_chi2
-    declared = ({} if build.include_logdet is None
-                else {"include_logdet": bool(build.include_logdet)})
+    declared = (
+        {} if build.include_logdet is None else {"include_logdet": bool(build.include_logdet)}
+    )
     likelihood = NoiseModelLikelihood(noise=noise, **declared)
 
     def chi2(prediction: Any) -> Any:
@@ -366,7 +365,7 @@ def _sum_squares(run: RunSpec, built: Any) -> Any:
     """``sum prediction^2`` -- pure in the prediction, reading no data."""
 
     def sum_squares(prediction: Any) -> Any:
-        return jnp.sum(prediction ** 2)
+        return jnp.sum(prediction**2)
 
     return sum_squares
 
@@ -401,10 +400,7 @@ def _mse(run: RunSpec, built: Any) -> Any:
 # see this plan's Executor's note -- so this table IS the definition.  Each
 # entry takes (run, built) and returns a closure over the prediction alone,
 # so an objective that reads no data never reaches for inference.observed.
-_OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse,
-               "sum_squares": _sum_squares}
-
-
+_OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse, "sum_squares": _sum_squares}
 
 
 def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
@@ -508,12 +504,8 @@ def _of_paths(run: RunSpec) -> tuple[str, ...]:
             "leaves this gradient differentiates."
         )
     paths = [of] if isinstance(of, str) else of
-    if (not isinstance(paths, list) or not paths
-            or not all(isinstance(path, str) for path in paths)):
-        raise ConfigError(
-            f"{where}: of: is a path or a non-empty list of paths; got "
-            f"{of!r}."
-        )
+    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) for path in paths):
+        raise ConfigError(f"{where}: of: is a path or a non-empty list of paths; got {of!r}.")
     repeated = sorted({path for path in paths if paths.count(path) > 1})
     if repeated:
         raise ConfigError(
@@ -590,8 +582,7 @@ def _run_gradient(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     space = built.inference.space
     twin = built.inference.fit_twin
     if space is not None:
-        twin = space.bind(twin, {**space.initial_values(),
-                                 **options.get("at", {})})
+        twin = space.bind(twin, {**space.initial_values(), **options.get("at", {})})
     paths = options["of"]
     selectors = [resolve_path_on(path, twin).selector for path in paths]
     spec = jax.tree.map(lambda _: False, twin)
@@ -600,8 +591,7 @@ def _run_gradient(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     forward, params0 = build_forward_fn(twin, built.state, spec)
     objective = options["objective"]
     grads = jax.grad(lambda params: objective(forward(params)))(params0)
-    return {path: selector(grads)
-            for path, selector in zip(paths, selectors, strict=True)}
+    return {path: selector(grads) for path, selector in zip(paths, selectors, strict=True)}
 
 
 # --- kind: mmodes ----------------------------------------------------------
@@ -758,9 +748,9 @@ _PREDICT_KEYS = frozenset({"n_draw"})
 _DRAW_SOURCES = {
     "plan.sample": "plan.sample discards its warmup before returning",
     "nuts": "get_samples() returns the post-warmup draws alone -- "
-            "num_samples x num_chains, after any thinning:, is the chain",
+    "num_samples x num_chains, after any thinning:, is the chain",
     "npe": "npe drew exactly the inference.npe.sample.n_draws: it was "
-           "asked for and has no warmup to recover",
+    "asked for and has no warmup to recover",
 }
 
 
@@ -805,8 +795,7 @@ def _parse_predict(options, context):
     _space(spec, context.configured_run)
     normalized: dict[str, Any] = {}
     if "n_draw" in options:
-        normalized["n_draw"] = _number(spec, "n_draw", options["n_draw"],
-                                       kind=int, minimum=1)
+        normalized["n_draw"] = _number(spec, "n_draw", options["n_draw"], kind=int, minimum=1)
     return parsed_options(normalized, resolved=normalized)
 
 
@@ -837,8 +826,7 @@ def _predict_pre_execute(parsed_run, configured_run, previous_results):
         return
     if earlier.kind in _DRAW_SOURCES:
         available = earlier.product.n_draw
-        if ("n_draw" in parsed_run.options
-                and parsed_run.options["n_draw"] > available):
+        if "n_draw" in parsed_run.options and parsed_run.options["n_draw"] > available:
             raise ConfigError(
                 f"{where}: n_draw: {parsed_run.options['n_draw']} exceeds "
                 f"the {available} draws reuse: {parsed_run.reuse!r} kept -- "
@@ -854,9 +842,12 @@ def _predict_pre_execute(parsed_run, configured_run, previous_results):
     )
 
 
-@register("predict", parse=_parse_predict,
-          pre_execute=_predict_pre_execute,
-          deferred_checks=_PREDICT_DEFERRED)
+@register(
+    "predict",
+    parse=_parse_predict,
+    pre_execute=_predict_pre_execute,
+    deferred_checks=_PREDICT_DEFERRED,
+)
 def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: predict`` -- an earlier run's product, pushed through the model.
 
@@ -911,10 +902,8 @@ def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     if earlier.kind == "fisher":
         from rheplicant.inference import propagate_covariance
 
-        forward, values = space.forward_fn(built.inference.fit_twin,
-                                           built.state)
-        return propagate_covariance(forward, values,
-                                    earlier.product["covariance"])
+        forward, values = space.forward_fn(built.inference.fit_twin, built.state)
+        return propagate_covariance(forward, values, earlier.product["covariance"])
     if earlier.kind in _DRAW_SOURCES:
         from rheplicant.inference import predict_from_samples
 
@@ -925,10 +914,8 @@ def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
         # warmup -- two discarded theirs and npe never had one -- but the
         # leading kept draws are still the ones nearest the declared init,
         # and the tail is the part a thinning is meant to keep.
-        samples = {name: stack[-keep:]
-                   for name, stack in draws.samples.items()}
-        return predict_from_samples(built.inference.fit_twin, built.state,
-                                    space, samples)
+        samples = {name: stack[-keep:] for name, stack in draws.samples.items()}
+        return predict_from_samples(built.inference.fit_twin, built.state, space, samples)
     raise TypeError(
         "predict.execute reached a product pre_execute has already refused "
         "-- the registry runs pre_execute first; this is wiring, not a "

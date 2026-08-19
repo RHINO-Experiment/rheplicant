@@ -26,11 +26,28 @@ from rheplicant.config.values import resolve_value
 
 __all__ = ["ParsedLatent", "parse_latents"]
 
-_LATENT_KEYS = frozenset({"init", "prior", "linear", "scope", "support",
-                          "hyper", "into", "transform", "fan", "ref", "unit",
-                          "latex", "renames"})
-_PRIOR_FAMILIES = {"normal": ("loc", "scale"), "uniform": ("low", "high"),
-                   "log_normal": ("loc", "scale")}
+_LATENT_KEYS = frozenset(
+    {
+        "init",
+        "prior",
+        "linear",
+        "scope",
+        "support",
+        "hyper",
+        "into",
+        "transform",
+        "fan",
+        "ref",
+        "unit",
+        "latex",
+        "renames",
+    }
+)
+_PRIOR_FAMILIES = {
+    "normal": ("loc", "scale"),
+    "uniform": ("low", "high"),
+    "log_normal": ("loc", "scale"),
+}
 _FAN_MODES = ("broadcast", "distribute")
 
 
@@ -52,17 +69,14 @@ def _require_numpyro(where: str):
         import numpyro.distributions as dist
     except ImportError as exc:
         raise ConfigError(
-            f"{where}: declaring a prior needs numpyro: "
-            "pip install 'rheplicant[numpyro]'."
+            f"{where}: declaring a prior needs numpyro: pip install 'rheplicant[numpyro]'."
         ) from exc
     return dist
 
 
 def _operand(name: str, node: Any, context: ResolutionContext) -> Any:
     if isinstance(node, bool) or not isinstance(node, (int, float, Mapping)):
-        raise ConfigError(
-            f"{name}: is a number or a value node; got {node!r}."
-        )
+        raise ConfigError(f"{name}: is a number or a value node; got {node!r}.")
     if isinstance(node, (int, float)):
         return float(node)
     pieces = name.split(".")
@@ -74,14 +88,12 @@ def _operand(name: str, node: Any, context: ResolutionContext) -> Any:
     return resolved.value
 
 
-def _parse_prior(name: str, spec: Any, init: jnp.ndarray,
-                 context: ResolutionContext) -> Any:
+def _parse_prior(name: str, spec: Any, init: jnp.ndarray, context: ResolutionContext) -> Any:
     if spec is None:
         return None
     where = f"inference.parameters.{name}.prior"
     if not isinstance(spec, Mapping):
-        raise ConfigError(f"{where}: is a mapping naming one family; "
-                          f"got {spec!r}.")
+        raise ConfigError(f"{where}: is a mapping naming one family; got {spec!r}.")
     body = dict(spec)
     body.pop("unit", None)
     if "python" in body:
@@ -110,10 +122,8 @@ def _parse_prior(name: str, spec: Any, init: jnp.ndarray,
             f"{sorted(args) if isinstance(args, Mapping) else args!r}."
         )
     dist = _require_numpyro(where)
-    operands = [_operand(f"{where}.{family}.{key}", args[key], context)
-                for key in wanted]
-    builder = {"normal": dist.Normal, "uniform": dist.Uniform,
-               "log_normal": dist.LogNormal}[family]
+    operands = [_operand(f"{where}.{family}.{key}", args[key], context) for key in wanted]
+    builder = {"normal": dist.Normal, "uniform": dist.Uniform, "log_normal": dist.LogNormal}[family]
     built = builder(*operands)
     shape = jnp.shape(init)
     if tuple(built.shape()) != shape:
@@ -132,38 +142,36 @@ def _names(name: str, node: Any, what: str) -> tuple[str, ...]:
         return ()
     if isinstance(node, str):
         return (node,)
-    if isinstance(node, (list, tuple)) and all(
-            isinstance(entry, str) for entry in node):
+    if isinstance(node, (list, tuple)) and all(isinstance(entry, str) for entry in node):
         return tuple(node)
-    raise ConfigError(f"{name}: {what} is a string or a list of strings; "
-                      f"got {node!r}.")
+    raise ConfigError(f"{name}: {what} is a string or a list of strings; got {node!r}.")
 
 
-def parse_latents(section: Any,
-                  context: ResolutionContext) -> dict[str, ParsedLatent]:
+def parse_latents(section: Any, context: ResolutionContext) -> dict[str, ParsedLatent]:
     """``inference.parameters`` -> ``{name: ParsedLatent}``, declaration order."""
     from rheplicant.inference import Latent
 
-    if not isinstance(section, Mapping) or not all(
-            isinstance(key, str) for key in section):
+    if not isinstance(section, Mapping) or not all(isinstance(key, str) for key in section):
         raise ConfigError(
-            "inference.parameters: is a mapping of latent name -> spec; got "
-            f"{section!r}."
+            f"inference.parameters: is a mapping of latent name -> spec; got {section!r}."
         )
     parsed: dict[str, ParsedLatent] = {}
     for name, spec in section.items():
         where = f"inference.parameters.{name}"
         if not isinstance(spec, Mapping):
             raise ConfigError(f"{where}: is a mapping; got {spec!r}.")
-        for reserved, capability in (("support", "capability 4"),
-                                     ("hyper", "capability 4")):
+        for reserved, capability in (("support", "capability 4"), ("hyper", "capability 4")):
             if reserved in spec:
                 raise ConfigError(
                     f"{where}.{reserved}: is reserved with {capability} "
                     "(schema §8.2) and refused in v1."
                 )
         check_unknown_keys(where, dict(spec), _LATENT_KEYS, label="a latent:")
-        scope = spec.get("scope", "global")
+        scope = (
+            spec["scope"]
+            if "scope" in spec
+            else context.use_default("inference.parameters[].scope", "global")
+        )
         if scope != "global":
             raise ConfigError(
                 f"{where}.scope: {scope!r} is reserved with capability 4 "
@@ -186,8 +194,7 @@ def parse_latents(section: Any,
         record_resolved_delivery(context, init_destination, resolved.unit)
         written_unit = resolved.modifiers.get("unit")
         unit = spec.get("unit")
-        if unit is not None and written_unit is not None \
-                and unit != written_unit:
+        if unit is not None and written_unit is not None and unit != written_unit:
             raise ConfigError(
                 f"{where}: unit: {unit!r} conflicts with init's own declared "
                 f"unit {written_unit!r}; a latent has one unit."
@@ -197,16 +204,19 @@ def parse_latents(section: Any,
                 f"{where}: an all-zero init makes check_linearity's probe "
                 "scales and the gradient step absolute rather than relative "
                 "(both fall back to 1.0).",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
-        linear = spec.get("linear", False)
+        linear = (
+            spec["linear"]
+            if "linear" in spec
+            else context.use_default("inference.parameters[].linear", False)
+        )
         if not isinstance(linear, bool):
             raise ConfigError(f"{where}.linear: is a bool; got {linear!r}.")
         fan = spec.get("fan")
         if fan is not None and fan not in _FAN_MODES:
-            raise ConfigError(
-                f"{where}.fan: {fan!r} is not one of {list(_FAN_MODES)}."
-            )
+            raise ConfigError(f"{where}.fan: {fan!r} is not one of {list(_FAN_MODES)}.")
         latex = spec.get("latex")
         if latex is not None and not isinstance(latex, str):
             raise ConfigError(f"{where}.latex: is a string; got {latex!r}.")
@@ -215,18 +225,16 @@ def parse_latents(section: Any,
             ref_destination = DestinationDescriptor(
                 f"{where}.ref", "config_path", "inference.parameters.*.ref"
             )
-            resolved_ref = resolve_value(
-                ref, context, destination=ref_destination
-            )
+            resolved_ref = resolve_value(ref, context, destination=ref_destination)
             ref = jnp.asarray(resolved_ref.value, dtype=context.dtype)
-            record_resolved_delivery(
-                context, ref_destination, resolved_ref.unit
-            )
+            record_resolved_delivery(context, ref_destination, resolved_ref.unit)
         parsed[name] = ParsedLatent(
-            latent=Latent(name, init=init,
-                          prior=_parse_prior(name, spec.get("prior"), init,
-                                             context),
-                          linear=linear),
+            latent=Latent(
+                name,
+                init=init,
+                prior=_parse_prior(name, spec.get("prior"), init, context),
+                linear=linear,
+            ),
             into=_names(where, spec.get("into"), "into:") or None,
             transform=spec.get("transform"),
             fan=fan,

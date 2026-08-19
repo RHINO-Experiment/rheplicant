@@ -110,13 +110,23 @@ class ResolutionTarget:
     formula_role: str = "result"
 
     def operand(
-        self, node: object, segment: str | int, *, formula: str, role: str,
+        self,
+        node: object,
+        segment: str | int,
+        *,
+        formula: str,
+        role: str,
         environment: DimensionEnvironment,
         destination: DestinationDescriptor | None = None,
     ) -> "ResolutionTarget":
         return target_for_formula_operand(
-            self, node=node, segment=segment, formula=formula, role=role,
-            environment=environment, destination=destination,
+            self,
+            node=node,
+            segment=segment,
+            formula=formula,
+            role=role,
+            environment=environment,
+            destination=destination,
         )
 
 
@@ -130,8 +140,7 @@ def _declared_unit(node: object) -> str | None:
         token = node["unit"]
         if not isinstance(token, str):
             raise ConfigError(
-                f"dimensions: unit modifier is a string; got {token!r} "
-                f"({type(token).__name__})"
+                f"dimensions: unit modifier is a string; got {token!r} ({type(token).__name__})"
             )
         return token
     return None
@@ -160,14 +169,17 @@ def make_resolution_target(
 ) -> ResolutionTarget:
     spec = dimension_spec_for(destination)
     expected = dimension_for(destination, environment)
-    return validate_declared_unit(
-        node, ResolutionTarget(destination, spec, expected, None)
-    )
+    return validate_declared_unit(node, ResolutionTarget(destination, spec, expected, None))
 
 
 def target_for_formula_operand(
-    parent: ResolutionTarget, *, node: object, segment: str | int, formula: str,
-    role: str, environment: DimensionEnvironment,
+    parent: ResolutionTarget,
+    *,
+    node: object,
+    segment: str | int,
+    formula: str,
+    role: str,
+    environment: DimensionEnvironment,
     destination: DestinationDescriptor | None,
 ) -> ResolutionTarget:
     from rheplicant.config import dimensions
@@ -176,9 +188,7 @@ def target_for_formula_operand(
         registration = dimensions._FORMULA_REGISTRY[formula]
     except KeyError as error:
         raise ConfigError(f"dimensions: no formula named {formula!r}") from error
-    matches = [
-        candidate for candidate in registration.operands if candidate.role == role
-    ]
+    matches = [candidate for candidate in registration.operands if candidate.role == role]
     if len(matches) != 1:
         raise ConfigError(f"dimensions: formula {formula}.{role} is not registered")
     operand = matches[0]
@@ -235,7 +245,9 @@ def target_for_formula_operand(
 
 
 def resolve_value(
-    node: Any, context: ResolutionContext, *,
+    node: Any,
+    context: ResolutionContext,
+    *,
     destination: DestinationDescriptor | None = None,
 ) -> ResolvedValue:
     """Resolve one value node.
@@ -258,21 +270,32 @@ def resolve_value(
 
 
 def resolve_operand(
-    node: object, context: ResolutionContext, parent: ResolutionTarget, *,
-    segment: str | int, formula: str, role: str,
+    node: object,
+    context: ResolutionContext,
+    parent: ResolutionTarget,
+    *,
+    segment: str | int,
+    formula: str,
+    role: str,
     destination: DestinationDescriptor | None = None,
 ) -> ResolvedValue:
     if parent is None:  # compatibility for direct utility form calls
         return resolve_registered_form(node, context, None)
     target = parent.operand(
-        node, segment, formula=formula, role=role,
-        environment=context.dimensions, destination=destination,
+        node,
+        segment,
+        formula=formula,
+        role=role,
+        environment=context.dimensions,
+        destination=destination,
     )
     return resolve_registered_form(node, context, target)
 
 
 def resolve_registered_form(
-    node: Any, context: ResolutionContext, target: ResolutionTarget | None,
+    node: Any,
+    context: ResolutionContext,
+    target: ResolutionTarget | None,
 ) -> ResolvedValue:
     """The sole value-form dispatcher, after destination validation."""
     # MEASURED: this branch is redundant today -- bool IS int in Python, so a
@@ -361,7 +384,12 @@ def resolve_registered_form(
     # document declared. The resolver's own `modifiers` dict is read back off
     # `resolved` rather than reused, because a form may have added to it.
     return resolved._replace(
-        value=apply_modifiers(resolved.value, resolved.modifiers, form=resolved.source)
+        value=apply_modifiers(
+            resolved.value,
+            resolved.modifiers,
+            form=resolved.source,
+            context=context,
+        )
     )
 
 
@@ -439,6 +467,7 @@ def register_form(
         return fn
 
     return _register
+
 
 # Imported for its side effect, at the very bottom and nowhere else: the one
 # place a circular import is deliberate and safe, because `arrays` imports only

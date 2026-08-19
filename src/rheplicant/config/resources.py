@@ -91,9 +91,7 @@ def check_unknown_keys(
             tail += " " + applicable
     if note:
         tail += " " + note
-    raise ConfigError(
-        f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}.{tail}"
-    )
+    raise ConfigError(f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}.{tail}")
 
 
 class BuiltResources(NamedTuple):
@@ -163,7 +161,7 @@ def _resolved_spec(
     if dotted in done:
         return done[dotted]
     if dotted in chain:
-        loop = chain[chain.index(dotted):] + [dotted]
+        loop = chain[chain.index(dotted) :] + [dotted]
         raise ConfigError(
             "resources: these entries extend each other in a loop: "
             + " -> ".join(loop)
@@ -304,8 +302,7 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     """
     if not isinstance(section, dict):
         raise ConfigError(
-            f"resources: must be a mapping of kind -> name -> entry, got "
-            f"{type(section).__name__}."
+            f"resources: must be a mapping of kind -> name -> entry, got {type(section).__name__}."
         )
     unknown = sorted(set(section) - set(_KINDS))
     if unknown:
@@ -360,7 +357,7 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
         if dotted in built:
             return built[dotted]
         if dotted in building:
-            loop = building[building.index(dotted):] + [dotted]
+            loop = building[building.index(dotted) :] + [dotted]
             raise ConfigError(
                 "resources: these entries reference each other in a loop: "
                 + " -> ".join(loop)
@@ -393,6 +390,9 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     for dotted, value in built.items():
         groups.setdefault(id(value), set()).add(dotted)
     shared = tuple(frozenset(names) for names in groups.values() if len(names) > 1)
+    if context.audit is not None:
+        shared_objects = {name: sorted(names)[0] for names in shared for name in sorted(names)}
+        context.audit.resource(order, shared_objects)
     return BuiltResources(built, shared, tuple(order))
 
 

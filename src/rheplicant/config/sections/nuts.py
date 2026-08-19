@@ -107,12 +107,19 @@ __all__ = ["NutsProduct"]
 
 #: EVERY key ``kind: nuts`` sweeps.  ONE frozenset, grown to this shape by
 #: Tasks 4, 5 and 6 rather than three unioned at call time.
-_NUTS_KEYS = frozenset({
-    "num_warmup", "num_samples", "seed",
-    "init",
-    "num_chains", "chain_method", "thinning",
-    "target_accept_prob", "progress_bar",
-})
+_NUTS_KEYS = frozenset(
+    {
+        "num_warmup",
+        "num_samples",
+        "seed",
+        "init",
+        "num_chains",
+        "chain_method",
+        "thinning",
+        "target_accept_prob",
+        "progress_bar",
+    }
+)
 
 #: The knobs that ride on ``MCMC(...)``.  ``target_accept_prob`` is NOT here
 #: -- it is ``NUTS``'s (plan §2.4) -- and a table that carried it would
@@ -138,9 +145,14 @@ _INITS = ("declared", "ref")
 #: keyword is byte-identical to an omission.  ``init:`` is this layer's own
 #: default (``_init_choice``), and ``num_warmup``/``num_samples`` have no
 #: package default to inject: they stay required.
-_NUTS_DEFAULTS = {"init": "declared", "num_chains": 1,
-                  "chain_method": "parallel", "thinning": 1,
-                  "progress_bar": True, "target_accept_prob": 0.8}
+_NUTS_DEFAULTS = {
+    "init": "declared",
+    "num_chains": 1,
+    "chain_method": "parallel",
+    "thinning": 1,
+    "progress_bar": True,
+    "target_accept_prob": 0.8,
+}
 
 
 class NutsProduct(NamedTuple):
@@ -236,8 +248,7 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     import numpyro
 
     refs = built.inference.refs or {}
-    return numpyro.infer.init_to_value(
-        values={name: refs[name] for name in space.names})
+    return numpyro.infer.init_to_value(values={name: refs[name] for name in space.names})
 
 
 def _parse_nuts(options, context):
@@ -260,10 +271,8 @@ def _parse_nuts(options, context):
     if "target_accept_prob" in options:
         # minimum=0.0 and NO upper bound: 1.0 as a ceiling would be this
         # layer restating numpyro's parametrisation, and 2.0 just runs.
-        _number(spec, "target_accept_prob", options["target_accept_prob"],
-                kind=float, minimum=0.0)
-    if "progress_bar" in options and not isinstance(
-            options["progress_bar"], bool):
+        _number(spec, "target_accept_prob", options["target_accept_prob"], kind=float, minimum=0.0)
+    if "progress_bar" in options and not isinstance(options["progress_bar"], bool):
         raise ConfigError(
             f"{where}: progress_bar: is true or false; got "
             f"{options['progress_bar']!r}. Every non-empty string is "
@@ -273,8 +282,7 @@ def _parse_nuts(options, context):
     # numpyro's own three words -- see _run_nuts' note.  A LOCAL, so the
     # module docstring's reserved-name list stays exhaustive.
     methods = ("parallel", "sequential", "vectorized")
-    if ("chain_method" in options
-            and options["chain_method"] not in methods):
+    if "chain_method" in options and options["chain_method"] not in methods:
         raise ConfigError(
             f"{where}: chain_method: {options['chain_method']!r} is not "
             f"one of numpyro's {', '.join(methods)}. parallel needs one "
@@ -290,22 +298,32 @@ def _parse_nuts(options, context):
                 "for, and a chain length invented here would be a number "
                 "nobody wrote down."
             )
-    normalized = {key: _number(spec, key, options[key], kind=int, minimum=1)
-                  for key in _COUNTS}
+    normalized = {key: _number(spec, key, options[key], kind=int, minimum=1) for key in _COUNTS}
     # Presence and form, then the resolved integer in BOTH views -- the
     # freeze turns a declaration mapping into a proxy ``_seed_name`` would
     # refuse, so the executor reads the int and builds the key itself.
-    normalized["seed"] = seed_for(_seed_name(dict(options), where),
-                                  built.context)
+    normalized["seed"] = seed_for(_seed_name(dict(options), where), built.context)
     space = _sampled_space(spec, built, route="nuts")
     _observed(spec, built)
     # _noise, never _decided_sigma: see the module docstring.  The call is
     # for its refusal alone; the rule itself is execute's.
     _noise(spec, built)
     normalized["init"] = _init_choice(spec, built, space)
-    for key in ("num_chains", "chain_method", "thinning", "progress_bar",
-                "target_accept_prob"):
-        normalized[key] = options.get(key, _NUTS_DEFAULTS[key])
+    if "init" not in options:
+        built.context.use_default("runs[].options.init", "declared")
+    for key in ("num_chains", "chain_method", "thinning", "progress_bar", "target_accept_prob"):
+        if key in options:
+            normalized[key] = options[key]
+        elif key == "num_chains":
+            normalized[key] = built.context.use_default("runs[].options.num_chains", 1)
+        elif key == "chain_method":
+            normalized[key] = built.context.use_default("runs[].options.chain_method", "parallel")
+        elif key == "thinning":
+            normalized[key] = built.context.use_default("runs[].options.thinning", 1)
+        elif key == "progress_bar":
+            normalized[key] = built.context.use_default("runs[].options.progress_bar", True)
+        else:
+            normalized[key] = built.context.use_default("runs[].options.target_accept_prob", 0.8)
     return parsed_options(normalized, resolved=normalized)
 
 
@@ -333,10 +351,10 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     if "target_accept_prob" in run.options:
         # minimum=0.0 and NO upper bound: 1.0 as a ceiling would be this layer
         # restating numpyro's parametrisation, and 2.0 measurably just runs.
-        _number(run, "target_accept_prob", run.options["target_accept_prob"],
-                kind=float, minimum=0.0)
-    if "progress_bar" in run.options and not isinstance(
-            run.options["progress_bar"], bool):
+        _number(
+            run, "target_accept_prob", run.options["target_accept_prob"], kind=float, minimum=0.0
+        )
+    if "progress_bar" in run.options and not isinstance(run.options["progress_bar"], bool):
         # The fifth knob of this commit, and the one `_number` cannot check.
         # Every non-empty string is truthy, so `progress_bar: "false"` printed
         # the bar the document asked to be rid of and said nothing (measured).
@@ -362,8 +380,7 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     # and `chain_method` alone leaked -- a hole closed on one route and left
     # open on its twin, by the commit that closed it for the other four.
     methods = ("parallel", "sequential", "vectorized")
-    if ("chain_method" in run.options
-            and run.options["chain_method"] not in methods):
+    if "chain_method" in run.options and run.options["chain_method"] not in methods:
         raise ConfigError(
             f"{where}: chain_method: {run.options['chain_method']!r} is not "
             f"one of numpyro's {', '.join(methods)}. parallel needs one "
@@ -379,21 +396,20 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
                 "for, and a chain length invented here would be a number "
                 "nobody wrote down."
             )
-    counts = {key: _number(run, key, run.options[key], kind=int, minimum=1)
-              for key in _COUNTS}
+    counts = {key: _number(run, key, run.options[key], kind=int, minimum=1) for key in _COUNTS}
     space = _sampled_space(run, built, route="nuts")
     observed = _observed(run, built)
     # _noise, never _decided_sigma: see the module docstring.
-    model = to_numpyro_model(built.inference.fit_twin, built.state, space,
-                             _noise(run, built))
+    model = to_numpyro_model(built.inference.fit_twin, built.state, space, _noise(run, built))
     # init_strategy on the KERNEL, and never on MCMC: passing it to neither
     # object is the difference between a posterior and noise, not a tuning
     # knob.  Which strategy the document asked for is _init_strategy's.
     kernel = numpyro.infer.NUTS(
-        model, init_strategy=_init_strategy(run, built, space),
-        **_passthrough(run.options, _NUTS_KERNEL_KEYS))
-    mcmc = numpyro.infer.MCMC(kernel, **counts,
-                              **_passthrough(run.options, _MCMC_KEYS))
+        model,
+        init_strategy=_init_strategy(run, built, space),
+        **_passthrough(run.options, _NUTS_KERNEL_KEYS),
+    )
+    mcmc = numpyro.infer.MCMC(kernel, **counts, **_passthrough(run.options, _MCMC_KEYS))
     # `observed=` by keyword.  The model is a one-parameter closure, so the
     # positional form binds identically today; the keyword is what survives a
     # to_numpyro_model that grows a second parameter.
@@ -427,14 +443,16 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
             "product as .divergences and is not a refusal, because the "
             "number at which it becomes fatal is a judgement this layer has "
             "no basis for.",
-            UserWarning, stacklevel=2,
+            UserWarning,
+            stacklevel=2,
         )
     return NutsProduct(
         samples=samples,
         n_draw=int(samples[space.names[0]].shape[0]),
         n_chain=int(mcmc.num_chains),
-        diagnostics={name: {"r_hat": float(row["r_hat"]),
-                            "n_eff": float(row["n_eff"])}
-                     for name, row in table.items()},
+        diagnostics={
+            name: {"r_hat": float(row["r_hat"]), "n_eff": float(row["n_eff"])}
+            for name, row in table.items()
+        },
         divergences=divergences,
     )

@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.resolution_audit import ResolutionAudit
 
 __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 
@@ -71,7 +72,12 @@ class RunResult(NamedTuple):
     variant: str | None = None
 
 
-def _one(index: int, entry: Any, several: bool) -> RunSpec:
+def _one(
+    index: int,
+    entry: Any,
+    several: bool,
+    audit: ResolutionAudit | None,
+) -> RunSpec:
     where = f"runs[{index}]"
     if not isinstance(entry, Mapping):
         raise ConfigError(f"{where}: is a mapping; got {entry!r}.")
@@ -88,7 +94,11 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
             f"{where}: kind: {kind!r} is not an exit; this layer runs "
             f"{list(_KINDS)}."
         )
-    reuse = entry.get("reuse")
+    reuse = (
+        entry["reuse"]
+        if "reuse" in entry
+        else None if audit is None else audit.use_default("runs[].reuse", None)
+    )
     if reuse is not None and not isinstance(reuse, str):
         raise ConfigError(f"{where}: reuse: is an earlier run's name; got "
                           f"{reuse!r}.")
@@ -99,13 +109,27 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
         )
     if name is not None and not isinstance(name, str):
         raise ConfigError(f"{where}: name: is a string; got {name!r}.")
-    variant = entry.get("variant")
+    if name is None and audit is not None:
+        name = audit.use_default("runs[].name", kind)
+    variant = (
+        entry["variant"]
+        if "variant" in entry
+        else None if audit is None else audit.use_default("runs[].variant", None)
+    )
     if variant is not None and not isinstance(variant, str):
         raise ConfigError(f"{where}: variant: is a name; got {variant!r}.")
-    on = entry.get("on", "primary")
+    on = (
+        entry["on"]
+        if "on" in entry
+        else "primary" if audit is None else audit.use_default("runs[].on", "primary")
+    )
     if not isinstance(on, str):
         raise ConfigError(f"{where}: on: is an observed name; got {on!r}.")
-    expect = entry.get("expect", "ok")
+    expect = (
+        entry["expect"]
+        if "expect" in entry
+        else "ok" if audit is None else audit.use_default("runs[].expect", "ok")
+    )
     if expect not in ("ok", "refuse"):
         raise ConfigError(f"{where}: expect: is ok or refuse; got "
                           f"{expect!r}.")
@@ -116,7 +140,11 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
                    reuse=reuse)
 
 
-def parse_runs(section: Any) -> tuple[RunSpec, ...]:
+def parse_runs(
+    section: Any,
+    *,
+    audit: ResolutionAudit | None = None,
+) -> tuple[RunSpec, ...]:
     """``runs:`` -> parsed entries, names resolved and unique."""
     if isinstance(section, Mapping):
         section = [section]
@@ -125,7 +153,7 @@ def parse_runs(section: Any) -> tuple[RunSpec, ...]:
             "runs: is a list of exits (or one exit mapping); got "
             f"{section!r}."
         )
-    parsed = tuple(_one(index, entry, len(section) > 1)
+    parsed = tuple(_one(index, entry, len(section) > 1, audit)
                    for index, entry in enumerate(section))
     names = [run.name for run in parsed]
     for name in names:

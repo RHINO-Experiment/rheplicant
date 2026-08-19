@@ -33,8 +33,7 @@ __all__ = ["PointingBuild", "compile_pointing", "pointing_extra_keys"]
 _MODES = ("none", "drift", "tracked", "baked")
 _KEYS = {
     "none": frozenset({"mode"}),
-    "drift": frozenset({"mode", "az_deg", "el_deg", "selfrot_deg",
-                        "materialise", "lst"}),
+    "drift": frozenset({"mode", "az_deg", "el_deg", "selfrot_deg", "materialise", "lst"}),
     "tracked": frozenset({"mode", "table", "lst", "selfrot"}),
     "baked": frozenset({"mode", "provenance"}),
 }
@@ -98,12 +97,10 @@ def pointing_extra_keys(spec: Any) -> frozenset[str]:
 
 
 def _angle(where: str, node: Any, context: ResolutionContext) -> float:
-    return float(_dimensioned(where, node, context, dimension="angle",
-                              what="an angle").value)
+    return float(_dimensioned(where, node, context, dimension="angle", what="an angle").value)
 
 
-def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
-         site: SiteFacts):
+def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s, site: SiteFacts):
     n_time = int(time_s.shape[0])
     if not isinstance(spec, Mapping) or not spec:
         raise ConfigError(
@@ -112,8 +109,9 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
             "format: ...}}."
         )
     if "from_file" in spec:
-        check_unknown_keys("observation.pointing", dict(spec),
-                           frozenset({"from_file"}), label="lst:")
+        check_unknown_keys(
+            "observation.pointing", dict(spec), frozenset({"from_file"}), label="lst:"
+        )
         destination = DestinationDescriptor(
             "observation.pointing.lst.from_file",
             "config_path",
@@ -132,40 +130,46 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
         lst = jnp.asarray(resolved.value)
         if lst.shape != (n_time,):
             raise ConfigError(
-                f"pointing.lst.from_file: is (n_time,) = ({n_time},); got "
-                f"{tuple(lst.shape)}."
+                f"pointing.lst.from_file: is (n_time,) = ({n_time},); got {tuple(lst.shape)}."
             )
         record_resolved_delivery(context, destination, resolved.unit)
         return lst
     mode = spec.get("mode")
     if mode == "uniform_turn":
-        check_unknown_keys("observation.pointing", dict(spec),
-                           _LST_KEYS["uniform_turn"], label="lst:")
-        declared = resolve_extent(spec.get("n_time", "n_time"),
-                                  context.shape_scope)
+        check_unknown_keys(
+            "observation.pointing", dict(spec), _LST_KEYS["uniform_turn"], label="lst:"
+        )
+        declared = resolve_extent(
+            spec["n_time"]
+            if "n_time" in spec
+            else context.use_default("observation.pointing.lst.n_time", "n_time"),
+            context.shape_scope,
+        )
         if declared != n_time:
             raise ConfigError(
                 f"pointing.lst: n_time is {declared} but the run's time grid "
                 f"has {n_time} samples -- a uniform turn is defined over the "
                 "run's own axis."
             )
-        lst0 = 0.0
         if "lst0_deg" in spec:
-            lst0 = _angle(
-                "observation.pointing.lst.lst0_deg", spec["lst0_deg"], context
-            )
+            lst0 = _angle("observation.pointing.lst.lst0_deg", spec["lst0_deg"], context)
+        else:
+            lst0 = context.use_default("observation.pointing.lst.lst0_deg", 0.0)
         from rheplicant.radio import DriftScanProjector
 
         return DriftScanProjector.uniform_lst_grid(n_time, lst0)
     if mode == "from_site":
-        check_unknown_keys("observation.pointing", dict(spec),
-                           _LST_KEYS["from_site"], label="lst:")
-        missing = [key for key, value in (
-            ("site.lat_deg", site.lat_deg),
-            ("site.lon_deg", site.lon_deg),
-            ("site.alt_m", site.alt_m),
-            ("time.epoch", epoch_unix_s),
-        ) if value is None]
+        check_unknown_keys("observation.pointing", dict(spec), _LST_KEYS["from_site"], label="lst:")
+        missing = [
+            key
+            for key, value in (
+                ("site.lat_deg", site.lat_deg),
+                ("site.lon_deg", site.lon_deg),
+                ("site.alt_m", site.alt_m),
+                ("time.epoch", epoch_unix_s),
+            )
+            if value is None
+        ]
         if missing:
             raise ConfigError(
                 "pointing.lst: mode: from_site computes LSTs from the site "
@@ -174,31 +178,35 @@ def _lst(spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s,
             )
         from rheplicant.radio.site import lst_grid_deg
 
-        return jnp.asarray(lst_grid_deg(
-            lat_deg=site.lat_deg, lon_deg=site.lon_deg, alt_m=site.alt_m,
-            time_s=time_s, epoch_unix_s=epoch_unix_s))
+        return jnp.asarray(
+            lst_grid_deg(
+                lat_deg=site.lat_deg,
+                lon_deg=site.lon_deg,
+                alt_m=site.alt_m,
+                time_s=time_s,
+                epoch_unix_s=epoch_unix_s,
+            )
+        )
     raise ConfigError(
         f"pointing.lst: mode is 'uniform_turn' or 'from_site' (or write "
         f"from_file: instead); got {mode!r}."
     )
 
 
-def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
-                     epoch_unix_s, site: SiteFacts) -> PointingBuild:
+def compile_pointing(
+    spec: Any, context: ResolutionContext, *, time_s, epoch_unix_s, site: SiteFacts
+) -> PointingBuild:
     """Compile the pointing section against the run's own time axis."""
     if spec is None:
-        spec = {"mode": "none"}
+        spec = context.use_default("observation.pointing", {"mode": "none"})
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.pointing: is a mapping; got {type(spec).__name__}."
-        )
-    mode = spec.get("mode", "none")
+        raise ConfigError(f"observation.pointing: is a mapping; got {type(spec).__name__}.")
+    mode = (
+        spec["mode"] if "mode" in spec else context.use_default("observation.pointing.mode", "none")
+    )
     if mode not in _MODES:
-        raise ConfigError(
-            f"observation.pointing: mode is one of {list(_MODES)}; got {mode!r}."
-        )
-    check_unknown_keys("observation.pointing", dict(spec), _KEYS[mode],
-                       label=f"mode: {mode}")
+        raise ConfigError(f"observation.pointing: mode is one of {list(_MODES)}; got {mode!r}.")
+    check_unknown_keys("observation.pointing", dict(spec), _KEYS[mode], label=f"mode: {mode}")
     n_time = int(time_s.shape[0])
 
     if mode == "none":
@@ -213,9 +221,10 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
                 "who built it and for what site is the ONLY record there is."
             )
         return PointingBuild(
-            pointing=None, extra={},
-            provenance={f"pointing/{key}": value
-                        for key, value in provenance.items()})
+            pointing=None,
+            extra={},
+            provenance={f"pointing/{key}": value for key, value in provenance.items()},
+        )
 
     extra: dict[str, Any] = {}
     # The single binding: which keys get written is :func:`pointing_extra_keys`'
@@ -234,30 +243,38 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
                 "a cross-engine comparison simulated."
             )
         materialise = spec["materialise"]
-        if (not isinstance(materialise, list)
-                or any(entry not in _MATERIALISE for entry in materialise)):
+        if not isinstance(materialise, list) or any(
+            entry not in _MATERIALISE for entry in materialise
+        ):
             raise ConfigError(
                 f"observation.pointing: materialise entries are "
                 f"{list(_MATERIALISE)}; got {materialise!r}."
             )
-        az = _angle("observation.pointing.az_deg", spec.get("az_deg", 0.0), context) \
-            if "az_deg" in spec else 0.0
-        el = _angle("observation.pointing.el_deg", spec["el_deg"], context) \
-            if "el_deg" in spec else 90.0
+        az = (
+            _angle("observation.pointing.az_deg", spec["az_deg"], context)
+            if "az_deg" in spec
+            else context.use_default("observation.pointing.az_deg", 0.0)
+        )
+        el = (
+            _angle("observation.pointing.el_deg", spec["el_deg"], context)
+            if "el_deg" in spec
+            else context.use_default("observation.pointing.el_deg", 90.0)
+        )
         pointing = None
         if "pointing" in materialise:
-            pointing = jnp.broadcast_to(
-                jnp.asarray([az, el], dtype=context.dtype), (n_time, 2))
+            pointing = jnp.broadcast_to(jnp.asarray([az, el], dtype=context.dtype), (n_time, 2))
         if "selfrot_deg" in keys:
-            selfrot = 0.0
             if "selfrot_deg" in spec:
-                selfrot = _angle("observation.pointing.selfrot_deg", spec["selfrot_deg"],
-                                 context)
+                selfrot = _angle("observation.pointing.selfrot_deg", spec["selfrot_deg"], context)
+            else:
+                selfrot = context.use_default("observation.pointing.selfrot_deg", 0.0)
             extra["selfrot_deg"] = jnp.broadcast_to(
-                jnp.asarray(selfrot, dtype=context.dtype), (n_time,))
+                jnp.asarray(selfrot, dtype=context.dtype), (n_time,)
+            )
         if "lst_deg" in keys:
-            extra["lst_deg"] = _lst(spec["lst"], context, time_s=time_s,
-                                    epoch_unix_s=epoch_unix_s, site=site)
+            extra["lst_deg"] = _lst(
+                spec["lst"], context, time_s=time_s, epoch_unix_s=epoch_unix_s, site=site
+            )
         return PointingBuild(pointing=pointing, extra=extra, provenance={})
 
     # mode == "tracked"
@@ -266,13 +283,17 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
             "observation.pointing: mode: tracked requires table: -- a value "
             "node of shape (n_time, 2), az/el in degrees."
         )
-    resolved = _dimensioned("observation.pointing.table", spec["table"], context,
-                            dimension="angle", what="the az/el track")
+    resolved = _dimensioned(
+        "observation.pointing.table",
+        spec["table"],
+        context,
+        dimension="angle",
+        what="the az/el track",
+    )
     table = jnp.asarray(resolved.value, dtype=context.dtype)
     if table.shape != (n_time, 2):
         raise ConfigError(
-            f"pointing.table: is (n_time, 2) = ({n_time}, 2); got "
-            f"{tuple(table.shape)}."
+            f"pointing.table: is (n_time, 2) = ({n_time}, 2); got {tuple(table.shape)}."
         )
     if "lst" not in spec:
         raise ConfigError(
@@ -284,17 +305,23 @@ def compile_pointing(spec: Any, context: ResolutionContext, *, time_s,
     # makes it certain -- and it is read rather than assumed so that this
     # branch has one source of truth like the drift branch does.
     if "lst_deg" in keys:
-        extra["lst_deg"] = _lst(spec["lst"], context, time_s=time_s,
-                                epoch_unix_s=epoch_unix_s, site=site)
+        extra["lst_deg"] = _lst(
+            spec["lst"], context, time_s=time_s, epoch_unix_s=epoch_unix_s, site=site
+        )
     if "selfrot_deg" in keys:
         selfrot = jnp.asarray(
-            _dimensioned("observation.pointing.selfrot", spec["selfrot"], context,
-                         dimension="angle", what="the self-rotation track"
-                         ).value, dtype=context.dtype)
+            _dimensioned(
+                "observation.pointing.selfrot",
+                spec["selfrot"],
+                context,
+                dimension="angle",
+                what="the self-rotation track",
+            ).value,
+            dtype=context.dtype,
+        )
         if selfrot.shape != (n_time,):
             raise ConfigError(
-                f"pointing.selfrot: is (n_time,) = ({n_time},); got "
-                f"{tuple(selfrot.shape)}."
+                f"pointing.selfrot: is (n_time,) = ({n_time},); got {tuple(selfrot.shape)}."
             )
         extra["selfrot_deg"] = selfrot
     return PointingBuild(pointing=table, extra=extra, provenance={})

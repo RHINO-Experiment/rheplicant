@@ -21,6 +21,7 @@ the declaration).
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from collections.abc import Mapping
 from typing import Any
@@ -29,6 +30,7 @@ from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.delivery import (
     canonical_unit_for_delivery,
+    declared_or_inferred_mode,
     deliver,
     field_specs,
     origin_for_delivery,
@@ -37,6 +39,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import register_reader
 from rheplicant.config.hatch import import_target
 from rheplicant.config.refs import resolve_reference
+from rheplicant.config.resolution_audit import to_json_value
 from rheplicant.config.units import check_field_name_unit
 from rheplicant.config.values import ResolvedValue, resolve_value
 from rheplicant.core.errors import StateValidationError
@@ -59,9 +62,12 @@ def operator_table() -> dict[str, tuple[type, ...]]:
     table: dict[str, list[type]] = {}
     for name in radio.__all__:
         obj = getattr(radio, name)
-        if (isinstance(obj, type) and issubclass(obj, AbstractOperator)
-                and not inspect.isabstract(obj)
-                and getattr(obj, "graph_node", None)):
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, AbstractOperator)
+            and not inspect.isabstract(obj)
+            and getattr(obj, "graph_node", None)
+        ):
             table.setdefault(obj.graph_node, []).append(obj)
     return {node: tuple(classes) for node, classes in table.items()}
 
@@ -77,8 +83,7 @@ def _object_fields(cls: type) -> frozenset[str]:
     return frozenset()
 
 
-def ambiguous_class_problem(node_id: str, classes: tuple[type, ...],
-                            spec: Mapping) -> str | None:
+def ambiguous_class_problem(node_id: str, classes: tuple[type, ...], spec: Mapping) -> str | None:
     """Check A7: the node registers more than one class and the spec picks none.
 
     One binding, two callers: :func:`_pick_class` below, and
@@ -101,8 +106,10 @@ def ambiguous_class_problem(node_id: str, classes: tuple[type, ...],
     if len(classes) == 1 or spec.get("type") is not None:
         return None
     names = [cls.__name__ for cls in classes]
-    return (f"model.{node_id}: {len(classes)} classes register at this node "
-            f"({names}); type: is required.")
+    return (
+        f"model.{node_id}: {len(classes)} classes register at this node "
+        f"({names}); type: is required."
+    )
 
 
 def _pick_class(node_id: str, classes: tuple[type, ...], spec: Mapping) -> type:
@@ -126,10 +133,10 @@ def _pick_class(node_id: str, classes: tuple[type, ...], spec: Mapping) -> type:
     )
 
 
-def _field_value(node_id: str, cls: type, name: str, node: Any,
-                 context: ResolutionContext) -> Any:
+def _field_value(node_id: str, cls: type, name: str, node: Any, context: ResolutionContext) -> Any:
     destination = DestinationDescriptor(
-        f"model.{node_id}.{name}", "model_field",
+        f"model.{node_id}.{name}",
+        "model_field",
         f"{cls.__module__}.{cls.__qualname__}.{name}",
     )
     if name in _object_fields(cls):
@@ -151,21 +158,32 @@ def _field_value(node_id: str, cls: type, name: str, node: Any,
         resolved = resolve_value(node, context, destination=destination)
     if resolved.unit is not None:
         check_field_name_unit(name, resolved.unit)
-    delivered = deliver(resolved.value, field_specs(cls)[name],
-                        dtype=context.dtype, source=resolved.source,
-                        declared_as=resolved.modifiers.get("as"),
-                        destination=destination)
+    field = field_specs(cls)[name]
+    delivered = deliver(
+        resolved.value,
+        field,
+        dtype=context.dtype,
+        source=resolved.source,
+        declared_as=declared_or_inferred_mode(
+            context,
+            destination,
+            field,
+            resolved.modifiers.get("as"),
+        ),
+        destination=destination,
+    )
     if context.trace is not None:
         context.trace.record_delivery(
-            context.layer, destination, dtype=context.dtype,
+            context.layer,
+            destination,
+            dtype=context.dtype,
             origin=origin_for_delivery(context, destination),
             unit=canonical_unit_for_delivery(context, destination, resolved.unit),
         )
     return delivered
 
 
-def _construct(node_id: str, cls: type, spec: Mapping,
-               context: ResolutionContext):
+def _construct(node_id: str, cls: type, spec: Mapping, context: ResolutionContext):
     specs = field_specs(cls)
     unknown = sorted(set(spec) - set(specs) - _NODE_KEYS)
     if unknown:
@@ -173,23 +191,37 @@ def _construct(node_id: str, cls: type, spec: Mapping,
             f"model.{node_id}: {cls.__name__} does not take {unknown}; its "
             f"fields are {sorted(specs)}."
         )
-    missing = sorted(name for name, field in specs.items()
-                     if field.required and name not in spec)
+    missing = sorted(name for name, field in specs.items() if field.required and name not in spec)
     if missing:
-        raise ConfigError(
-            f"model.{node_id}: {cls.__name__} requires {missing}."
-        )
-    kwargs = {name: _field_value(node_id, cls, name, node, context)
-              for name, node in spec.items() if name in specs}
+        raise ConfigError(f"model.{node_id}: {cls.__name__} requires {missing}.")
+    kwargs = {
+        name: _field_value(node_id, cls, name, node, context)
+        for name, node in spec.items()
+        if name in specs
+    }
+    declared_fields = {field.name: field for field in dataclasses.fields(cls)}
+    for name, field in specs.items():
+        if name in kwargs or field.required:
+            continue
+        declared = declared_fields[name]
+        if declared.default is not dataclasses.MISSING:
+            chosen = declared.default
+        elif declared.default_factory is not dataclasses.MISSING:
+            chosen = declared.default_factory()
+        else:  # pragma: no cover - FieldSpec.required already proved this
+            continue
+        try:
+            to_json_value(chosen)
+        except ConfigError:
+            continue
+        kwargs[name] = context.use_default(f"model.{node_id}.{name}", chosen)
     operator = cls(**kwargs)
     if "eqx_leaves" in spec:
-        operator = _apply_eqx_leaves(node_id, spec["eqx_leaves"], operator,
-                                     context)
+        operator = _apply_eqx_leaves(node_id, spec["eqx_leaves"], operator, context)
     return operator
 
 
-def _c7_beam_spill(ref: str, projector: Any, t_ground: Any,
-                   context: ResolutionContext):
+def _c7_beam_spill(ref: str, projector: Any, t_ground: Any, context: ResolutionContext):
     """``model.beam_spill: {from: projector}``, refused in this layer's voice.
 
     The above-horizon fraction has two routes into a document and only one of
@@ -231,9 +263,7 @@ def _c7_beam_spill(ref: str, projector: Any, t_ground: Any,
                 ),
             )
         except ConfigError as better:
-            raise ConfigError(
-                f"model.beam_spill.projector: {better}"
-            ) from better
+            raise ConfigError(f"model.beam_spill.projector: {better}") from better
         except Exception:  # noqa: BLE001 - measured: a bare AttributeError
             # The value-node route answers a projector with no
             # `horizon_fraction()` with an AttributeError, which is not a
@@ -256,9 +286,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
             )
         for key in ("projector", "t_ground"):
             if key not in spec:
-                raise ConfigError(
-                    f"model.beam_spill: from: projector requires {key}:."
-                )
+                raise ConfigError(f"model.beam_spill: from: projector requires {key}:.")
         node = spec["projector"]
         if not isinstance(node, Mapping) or set(node) != {"ref"}:
             raise ConfigError(
@@ -266,8 +294,9 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
                 f"resources.projectors.<name>}}; got {node!r}."
             )
         projector = resolve_reference(node["ref"], context)
-        t_ground = _field_value("beam_spill", BeamSpillOperator, "t_ground",
-                                spec["t_ground"], context)
+        t_ground = _field_value(
+            "beam_spill", BeamSpillOperator, "t_ground", spec["t_ground"], context
+        )
         return _c7_beam_spill(node["ref"], projector, t_ground, context)
     if node_id == "t_sys_extra" and route == "basis":
         from rheplicant.radio import BasisTemperatureOperator
@@ -280,18 +309,16 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
             )
         for key in ("basis", "coeff"):
             if key not in spec:
-                raise ConfigError(
-                    f"model.t_sys_extra: from: basis requires {key}:."
-                )
+                raise ConfigError(f"model.t_sys_extra: from: basis requires {key}:.")
         node = spec["basis"]
         if not isinstance(node, Mapping) or set(node) != {"ref"}:
             raise ConfigError(
-                f"model.t_sys_extra.basis: is {{ref: resources.bases.<name>}}; "
-                f"got {node!r}."
+                f"model.t_sys_extra.basis: is {{ref: resources.bases.<name>}}; got {node!r}."
             )
         basis = resolve_reference(node["ref"], context)
-        coeff = _field_value("t_sys_extra", BasisTemperatureOperator, "coeff",
-                             spec["coeff"], context)
+        coeff = _field_value(
+            "t_sys_extra", BasisTemperatureOperator, "coeff", spec["coeff"], context
+        )
         return BasisTemperatureOperator.from_basis(basis, coeff)
     if node_id == "cal_loads" and route == "thermistors":
         unknown = sorted(set(spec) - {"from", "label"})
@@ -331,6 +358,8 @@ def _python_operator(node_id: str, spec: Mapping, context: ResolutionContext):
             f"model.{node_id}: python: and type: together say two things "
             "about which class this is -- write one."
         )
+    if context.audit is not None:
+        context.audit.python_target(f"model.{node_id}.python", spec["python"])
     target = import_target(spec["python"])
     if not (isinstance(target, type) and issubclass(target, AbstractOperator)):
         raise ConfigError(
@@ -342,8 +371,7 @@ def _python_operator(node_id: str, spec: Mapping, context: ResolutionContext):
     return _construct(node_id, target, remaining, context)
 
 
-def _apply_eqx_leaves(node_id: str, spec: Any, operator,
-                      context: ResolutionContext):
+def _apply_eqx_leaves(node_id: str, spec: Any, operator, context: ResolutionContext):
     if not isinstance(spec, Mapping) or "path" not in spec:
         raise ConfigError(
             f"model.{node_id}.eqx_leaves: is {{path: ..., sha256: ...}} -- "
@@ -353,11 +381,13 @@ def _apply_eqx_leaves(node_id: str, spec: Any, operator,
     unknown = sorted(set(spec) - {"path", "sha256"})
     if unknown:
         raise ConfigError(
-            f"model.{node_id}.eqx_leaves: does not take {unknown}; it takes "
-            "path and sha256."
+            f"model.{node_id}.eqx_leaves: does not take {unknown}; it takes path and sha256."
         )
-    file_spec: dict[str, Any] = {"path": spec["path"], "format": "eqx_leaves",
-                                 "_template": operator}
+    file_spec: dict[str, Any] = {
+        "path": spec["path"],
+        "format": "eqx_leaves",
+        "_template": operator,
+    }
     if "sha256" in spec:
         file_spec["sha256"] = spec["sha256"]
     return resolve_value(
@@ -396,8 +426,7 @@ def _read_eqx_leaves(path, spec: dict):
     return eqx.tree_deserialise_leaves(path, like=template)
 
 
-def build_node_operator(node_id: str, spec: Any,
-                        context: ResolutionContext):
+def build_node_operator(node_id: str, spec: Any, context: ResolutionContext):
     """One node spec -> one operator (composition keys already stripped)."""
     if not isinstance(spec, Mapping):
         raise ConfigError(

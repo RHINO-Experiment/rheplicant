@@ -150,6 +150,21 @@ def mode_of(spec: FieldSpec) -> str:
     return "static_other"
 
 
+def declared_or_inferred_mode(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    spec: FieldSpec,
+    declared: str | None,
+) -> str | None:
+    """Return the exact mode delivery consumes, recording an omitted one."""
+    if declared is not None:
+        return declared
+    return context.use_default(
+        f"{destination.document_path}.as",
+        mode_of(spec),
+    )
+
+
 def _refuse_array_form(spec: FieldSpec, source: str) -> None:
     raise ConfigError(
         f"Field {spec.name!r} is static -- equinox puts it in the treedef, where it "

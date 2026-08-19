@@ -38,9 +38,20 @@ from rheplicant.config.values import resolve_value
 
 __all__ = ["CheckSpec", "InferenceBuild", "build_inference"]
 
-_INFERENCE_KEYS = frozenset({"twin", "observed", "parameters", "bindings",
-                             "joint_prior", "trainable", "noise", "truth",
-                             "checks", "npe"})
+_INFERENCE_KEYS = frozenset(
+    {
+        "twin",
+        "observed",
+        "parameters",
+        "bindings",
+        "joint_prior",
+        "trainable",
+        "noise",
+        "truth",
+        "checks",
+        "npe",
+    }
+)
 #: The check names and the four mode words, ONE binding each, in
 #: :mod:`rheplicant.config.gating` -- where ``preflight/gated.py`` can reach
 #: them without importing this module and the builders behind it.  Kept under
@@ -106,11 +117,12 @@ def _checks(section: Any) -> dict[str, CheckSpec]:
     parsed: dict[str, CheckSpec] = {}
     for name, spec in section.items():
         rtol = spec.get("rtol")
-        parsed[name] = CheckSpec(mode=spec.get("mode"),
-                                 report=bool(spec.get("report", False)),
-                                 reason=spec.get("reason"),
-                                 rtol=float(rtol) if rtol is not None
-                                 else None)
+        parsed[name] = CheckSpec(
+            mode=spec.get("mode"),
+            report=bool(spec.get("report", False)),
+            reason=spec.get("reason"),
+            rtol=float(rtol) if rtol is not None else None,
+        )
     return parsed
 
 
@@ -121,14 +133,11 @@ def _trainable(section: Any, fit_twin: Any) -> Any:
     import jax
 
     if not isinstance(section, Mapping):
-        raise ConfigError(f"inference.trainable: is a mapping; got "
-                          f"{section!r}.")
-    check_unknown_keys("inference.trainable", dict(section), _TRAINABLE_KEYS,
-                       label="trainable:")
+        raise ConfigError(f"inference.trainable: is a mapping; got {section!r}.")
+    check_unknown_keys("inference.trainable", dict(section), _TRAINABLE_KEYS, label="trainable:")
     everything = section.get("all", False)
     if not isinstance(everything, bool):
-        raise ConfigError(f"inference.trainable.all: is a bool; got "
-                          f"{everything!r}.")
+        raise ConfigError(f"inference.trainable.all: is a bool; got {everything!r}.")
     nodes = tuple(section.get("nodes") or ())
     leaves = tuple(section.get("leaves") or ())
     if everything:
@@ -140,23 +149,21 @@ def _trainable(section: Any, fit_twin: Any) -> Any:
             )
         return eqx.is_inexact_array
     if not nodes and not leaves:
-        raise ConfigError(
-            "inference.trainable: declares nothing -- all: true, nodes: or "
-            "leaves:."
-        )
+        raise ConfigError("inference.trainable: declares nothing -- all: true, nodes: or leaves:.")
     spec = jax.tree.map(lambda _: False, fit_twin)
     for node in nodes:
         sub = fit_twin[node]
-        spec = eqx.tree_at(lambda p, _n=node: p[_n], spec,
-                           replace=jax.tree.map(eqx.is_inexact_array, sub))
+        spec = eqx.tree_at(
+            lambda p, _n=node: p[_n], spec, replace=jax.tree.map(eqx.is_inexact_array, sub)
+        )
     for path in leaves:
-        spec = eqx.tree_at(resolve_path_on(path, fit_twin).selector, spec,
-                           replace=True)
+        spec = eqx.tree_at(resolve_path_on(path, fit_twin).selector, spec, replace=True)
     return spec
 
 
-def _derive_truth(parsed: Any, observed: ObservedBuild | None, twin: Any,
-                  fit_twin: Any) -> tuple[dict, dict]:
+def _derive_truth(
+    parsed: Any, observed: ObservedBuild | None, twin: Any, fit_twin: Any
+) -> tuple[dict, dict]:
     truth: dict[str, Any] = {}
     omitted: dict[str, str] = {}
     if parsed is None:
@@ -170,37 +177,42 @@ def _derive_truth(parsed: Any, observed: ObservedBuild | None, twin: Any,
     for name, entry in parsed.items():
         if name in at:
             truth[name] = at[name]
-        elif entry.into and len(entry.into) == 1 and entry.transform in (
-                None, "identity"):
+        elif entry.into and len(entry.into) == 1 and entry.transform in (None, "identity"):
             truth[name] = resolve_path_on(entry.into[0], base).leaf
         elif entry.into and entry.transform in (None, "identity"):
-            omitted[name] = ("one latent feeds several leaves; no single "
-                             "leaf holds its truth; declare observed.at or "
-                             "truth:")
+            omitted[name] = (
+                "one latent feeds several leaves; no single "
+                "leaf holds its truth; declare observed.at or "
+                "truth:"
+            )
         elif entry.into:
-            omitted[name] = ("reached through transform "
-                             f"{entry.transform!r}, which is not invertible "
-                             "from the leaf; declare observed.at or truth:")
+            omitted[name] = (
+                "reached through transform "
+                f"{entry.transform!r}, which is not invertible "
+                "from the leaf; declare observed.at or truth:"
+            )
         else:
-            omitted[name] = ("bound through inference.bindings; declare "
-                             "observed.at or truth:")
+            omitted[name] = "bound through inference.bindings; declare observed.at or truth:"
     return truth, omitted
 
 
-def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
-                    context: ResolutionContext) -> InferenceBuild:
+def build_inference(
+    section: Any, *, twin: Any, state: Any, observation: Any, context: ResolutionContext
+) -> InferenceBuild:
     """``inference:`` -> an :class:`InferenceBuild`; absent -> the defaults."""
     if section is None:
-        section = {}
+        section = {} if context is None else context.use_default("inference", {})
     if not isinstance(section, Mapping):
-        raise ConfigError(f"inference: is a mapping of subsections; got "
-                          f"{section!r}.")
-    check_unknown_keys("inference", dict(section), _INFERENCE_KEYS,
-                       label="inference:")
+        raise ConfigError(f"inference: is a mapping of subsections; got {section!r}.")
+    check_unknown_keys("inference", dict(section), _INFERENCE_KEYS, label="inference:")
     npe = parse_npe(section["npe"], context) if "npe" in section else None
-    fit_twin, replaced = build_fit_twin(section.get("twin"), twin, context)
-    parsed = (parse_latents(section["parameters"], context)
-              if "parameters" in section else None)
+    twin_section = (
+        section["twin"]
+        if "twin" in section
+        else None if context is None else context.use_default("inference.twin", None)
+    )
+    fit_twin, replaced = build_fit_twin(twin_section, twin, context)
+    parsed = parse_latents(section["parameters"], context) if "parameters" in section else None
     bindings = section.get("bindings")
     if bindings is not None and not isinstance(bindings, (list, tuple)):
         raise ConfigError(
@@ -208,21 +220,31 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
             f"{type(bindings).__name__} ({bindings!r}). A single binding "
             "still takes its dash."
         )
-    space = build_space(parsed, bindings,
-                        section.get("joint_prior"), fit_twin=fit_twin,
-                        replaced=replaced, context=context)
+    space = build_space(
+        parsed,
+        bindings,
+        section.get("joint_prior"),
+        fit_twin=fit_twin,
+        replaced=replaced,
+        context=context,
+    )
     # The first moment both the space and the fit twin exist, and BEFORE the
     # two builders below that run a real forward pass (`build_noise`'s
     # `source: prediction_at_init` and `build_observed`'s simulation branch).
     # A space that does not fit its twin is refused here rather than after
     # the layer has paid for a prediction it is about to throw away.
     _c17_validate_space(space, fit_twin, parsed, bindings)
-    noise = build_noise(section.get("noise"), observation=observation,
-                        context=context)
-    observed = build_observed(section.get("observed"), twin=twin,
-                              fit_twin=fit_twin, space=space, noise=noise,
-                              state=state, observation=observation,
-                              context=context)
+    noise = build_noise(section.get("noise"), observation=observation, context=context)
+    observed = build_observed(
+        section.get("observed"),
+        twin=twin,
+        fit_twin=fit_twin,
+        space=space,
+        noise=noise,
+        state=state,
+        observation=observation,
+        context=context,
+    )
     if noise.frozen is not None:
         if noise.frozen["source"] == "observed":
             if observed is None or observed.primary is None:
@@ -231,15 +253,17 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
                     "from the primary observed data, and this document "
                     "declares none (or several with no primary)."
                 )
-            noise = freeze_sigmas(noise, observed.entries,
-                                  primary=observed.primary)
+            noise = freeze_sigmas(noise, observed.entries, primary=observed.primary)
         else:
             # source: prediction_at_init reads the TWIN, not the data, so it
             # is ONE sigma however many observations the document declares
             # and there is nothing per-observation to fan.  Fanning it would
             # move the sigma onto the data behind the document's back.
-            bound = (space.bind(fit_twin, dict(space.initial_values()))
-                     if space is not None else fit_twin)
+            bound = (
+                space.bind(fit_twin, dict(space.initial_values()))
+                if space is not None
+                else fit_twin
+            )
             noise = freeze_sigma(noise, bound(state).data)
     truth, omitted = _derive_truth(parsed, observed, twin, fit_twin)
     for name, node in (section.get("truth") or {}).items():
@@ -256,13 +280,16 @@ def build_inference(section: Any, *, twin: Any, state: Any, observation: Any,
         truth[name] = jnp.asarray(resolved.value, dtype=context.dtype)
         record_resolved_delivery(context, destination, resolved.unit)
         omitted.pop(name, None)
-    return InferenceBuild(fit_twin=fit_twin, space=space, noise=noise,
-                          observed=observed, truth=truth,
-                          truth_omitted=omitted, checks=_checks(
-                              section.get("checks")),
-                          trainable=_trainable(section.get("trainable"),
-                                               fit_twin),
-                          replaced=replaced, npe=npe,
-                          refs={name: entry.ref
-                                for name, entry in (parsed or {}).items()
-                                if entry.ref is not None})
+    return InferenceBuild(
+        fit_twin=fit_twin,
+        space=space,
+        noise=noise,
+        observed=observed,
+        truth=truth,
+        truth_omitted=omitted,
+        checks=_checks(section.get("checks")),
+        trainable=_trainable(section.get("trainable"), fit_twin),
+        replaced=replaced,
+        npe=npe,
+        refs={name: entry.ref for name, entry in (parsed or {}).items() if entry.ref is not None},
+    )

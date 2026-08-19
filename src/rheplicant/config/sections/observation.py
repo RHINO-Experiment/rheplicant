@@ -125,14 +125,26 @@ def _time_facts(spec: Any, context: ResolutionContext):
             "observation.time.epoch", spec["epoch"], context,
             dimension="time_epoch",
             what="an absolute moment (declare unit: unix_s)").value)
+    else:
+        epoch = context.use_default("observation.time.epoch", None)
     if "integration_time" in spec:
         integration = float(_dimensioned(
             "observation.time.integration_time", spec["integration_time"],
             context, dimension="time", what="a duration").value)
+    else:
+        integration = context.use_default(
+            "observation.time.integration_time",
+            None,
+        )
     if "channel_width" in spec:
         width = float(_dimensioned(
             "observation.time.channel_width", spec["channel_width"], context,
             dimension="frequency", what="a bandwidth").value)
+    else:
+        width = context.use_default(
+            "observation.time.channel_width",
+            None,
+        )
     return time_s, epoch, integration, width
 
 
@@ -156,9 +168,12 @@ def _hashable(key: str, value: Any) -> Any:
     return value
 
 
-def _meta(spec: Any) -> dict[str, Any]:
+def _meta(
+    spec: Any,
+    context: ResolutionContext | None = None,
+) -> dict[str, Any]:
     if spec is None:
-        return {}
+        return {} if context is None else context.use_default("observation.meta", {})
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"observation.meta: is a mapping; got {type(spec).__name__}."
@@ -173,7 +188,7 @@ def _meta(spec: Any) -> dict[str, Any]:
 
 def _site(spec: Any, context: ResolutionContext) -> SiteFacts:
     if spec is None:
-        return SiteFacts(None, None, None)
+        spec = context.use_default("observation.site", {})
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"observation.site: is a mapping; got {type(spec).__name__}."
@@ -185,17 +200,21 @@ def _site(spec: Any, context: ResolutionContext) -> SiteFacts:
         ("lon_deg", "angle", "the site longitude, east positive"),
         ("alt_m", "length", "the site altitude"),
     ):
-        values[key] = None
         if key in spec:
             values[key] = float(_dimensioned(
                 f"observation.site.{key}", spec[key], context,
                 dimension=dimension, what=what).value)
+        else:
+            values[key] = context.use_default(
+                f"observation.site.{key}",
+                None,
+            )
     return SiteFacts(**values)
 
 
 def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
     if spec is None:
-        return None
+        return context.use_default("observation.environment", None)
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"observation.environment: is a mapping; got {type(spec).__name__}."
@@ -209,6 +228,11 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
                          spec["temperature"], context,
                          dimension="temperature", what="a temperature").value,
             dtype=context.dtype)
+    else:
+        temperature = context.use_default(
+            "observation.environment.temperature",
+            None,
+        )
     if "humidity" in spec:
         # The source states no unit for Environment.humidity, so the config
         # must declare one (schema §4.1.1): relative humidity is
@@ -219,8 +243,18 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
                          what="relative humidity (declare unit: "
                               "dimensionless)").value,
             dtype=context.dtype)
+    else:
+        humidity = context.use_default(
+            "observation.environment.humidity",
+            None,
+        )
     extra: dict[str, Any] = {}
-    for key, node in (spec.get("extra") or {}).items():
+    extra_spec = (
+        spec["extra"]
+        if "extra" in spec
+        else context.use_default("observation.environment.extra", {})
+    )
+    for key, node in (extra_spec or {}).items():
         destination = DestinationDescriptor(
             f"observation.environment.extra.{key}",
             "config_path",
@@ -234,7 +268,7 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
 
 def _extra(spec: Any, context: ResolutionContext) -> dict[str, Any]:
     if spec is None:
-        return {}
+        return context.use_default("observation.extra", {})
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"observation.extra: is a mapping; got {type(spec).__name__}."
@@ -260,7 +294,7 @@ def _extra(spec: Any, context: ResolutionContext) -> dict[str, Any]:
 def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
          n_freq: int) -> dict[str, Any]:
     if spec is None:
-        return {}
+        return context.use_default("observation.aux", {})
     if not isinstance(spec, Mapping):
         raise ConfigError(
             f"observation.aux: is a mapping; got {type(spec).__name__}."
@@ -338,7 +372,7 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
         seeds=dict(runtime.seeds))
 
     ingest = None
-    meta = _meta(section.get("meta"))
+    meta = _meta(section.get("meta"), bootstrap)
     if "from_file" in section:
         for key, why in (
             ("freq", "the recording carries the frequency axis"),
@@ -372,6 +406,7 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
             switching = SwitchingBuild(
                 order=declared_order(switching_spec), receiver_input=None)
         else:
+            bootstrap.use_default("observation.switching", {"order": []})
             switching = SwitchingBuild(order=(), receiver_input=None)
         data = None
         aux: dict[str, Any] = {}
@@ -391,7 +426,12 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
     if "from_file" not in section:
         aux = _aux(section.get("aux"), grid_context, n_time=n_time,
                    n_freq=n_freq)
-        data = _data(section.get("data"), grid_context, n_time=n_time,
+        data_node = (
+            section["data"]
+            if "data" in section
+            else grid_context.use_default("observation.data", None)
+        )
+        data = _data(data_node, grid_context, n_time=n_time,
                      n_freq=n_freq)
         switching = compile_switching(section.get("switching"), grid_context,
                                       n_time=n_time)

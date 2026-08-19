@@ -163,5 +163,14 @@ def _basis_fit(
     # refs._delivered() is where an actual conversion happens for other forms.
     # If a non-identity unit is ever added to the table, this line must switch
     # to converting the field (or the fitted coefficients) through it too.
-    unit = canonical_unit(modifiers["unit"]) if "unit" in modifiers else None
+    if "unit" in modifiers:
+        unit_token = modifiers["unit"]
+    elif target is None:
+        unit_token = None
+    else:
+        unit_token = context.use_default(
+            f"{target.destination.document_path}.unit",
+            None,
+        )
+    unit = canonical_unit(unit_token) if unit_token is not None else None
     return ResolvedValue(basis.fit(field), unit, "basis_fit", modifiers)

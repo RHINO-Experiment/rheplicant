@@ -156,7 +156,10 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
     from rheplicant.radio.touchstone import interpolate_onto
 
     check_unknown_keys(
-        name, spec, _TOUCHSTONE_KEYS, label="kind: touchstone",
+        name,
+        spec,
+        _TOUCHSTONE_KEYS,
+        label="kind: touchstone",
         hints={
             "z0": (
                 "z0 belongs to kind: termination and nowhere else: Touchstone.z0 is "
@@ -165,7 +168,11 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
             )
         },
     )
-    component = spec.get("component", "s11")
+    component = (
+        spec["component"]
+        if "component" in spec
+        else context.use_default("resources.s_params[].component", "s11")
+    )
     if component not in COMPONENTS:
         raise ConfigError(
             f"{name}: component={component!r}; a Touchstone file carries "
@@ -173,7 +180,8 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
             "freq S11 S21 S12 S22 -- the second pair is S21, not S12."
         )
     file_spec = dict(spec.get("file") or {})
-    file_spec.setdefault("format", "touchstone")
+    if "format" not in file_spec:
+        file_spec["format"] = context.use_default("resources.s_params[].file.format", "touchstone")
     if "flipped" in spec:
         file_spec["flipped"] = spec["flipped"]
     if "path" not in file_spec:
@@ -194,7 +202,10 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
             "rheplicant.config.kinds.s_params.build_s_param.touchstone.file",
         ),
     ).value
-    if spec.get("onto", "freq") != "freq":
+    onto = (
+        spec["onto"] if "onto" in spec else context.use_default("resources.s_params[].onto", "freq")
+    )
+    if onto != "freq":
         raise ConfigError(
             f"{name}: onto={spec.get('onto')!r}; the only grid to interpolate onto is "
             "'freq', the run's own frequency axis."
@@ -206,7 +217,11 @@ def _from_touchstone(name: str, spec: dict, context: ResolutionContext):
             np.asarray(context.freq),
             touchstone,
             component=component,
-            allow_extrapolation=bool(spec.get("allow_extrapolation", False)),
+            allow_extrapolation=bool(
+                spec["allow_extrapolation"]
+                if "allow_extrapolation" in spec
+                else context.use_default("resources.s_params[].allow_extrapolation", False)
+            ),
         )
     )
 
@@ -216,9 +231,7 @@ def _termination(name: str, spec: dict, context: ResolutionContext, cal):
 
     kind = spec.get("termination")
     if kind not in TERMINATIONS:
-        raise ConfigError(
-            f"{name}: termination={kind!r}; they are {list(TERMINATIONS)}."
-        )
+        raise ConfigError(f"{name}: termination={kind!r}; they are {list(TERMINATIONS)}.")
     if context.freq is None:
         raise ConfigError(
             f"{name}: kind: termination needs observation.freq.grid. n: defaults to "
@@ -240,7 +253,10 @@ def _termination(name: str, spec: dict, context: ResolutionContext, cal):
     # different names bridged right here.
     arguments = {
         "kind": kind,
-        "n_freq": resolve_extent(spec.get("n", "n_freq"), context.shape_scope),
+        "n_freq": resolve_extent(
+            spec["n"] if "n" in spec else context.use_default("resources.s_params[].n", "n_freq"),
+            context.shape_scope,
+        ),
     }
     if "z0" in spec:
         arguments["z0"] = _dimensioned(spec, "z0", context, name, "ohm", "an impedance (ohm)")
@@ -267,11 +283,13 @@ def _cable(name: str, spec: dict, context: ResolutionContext, cal):
     # written for every cable.
     velocity_factor = (
         _dimensioned(spec, "velocity_factor", context, name, "dimensionless", "dimensionless")
-        if "velocity_factor" in spec else 1.0
+        if "velocity_factor" in spec
+        else context.use_default("resources.s_params[].velocity_factor", 1.0)
     )
     loss = (
         _dimensioned(spec, "loss", context, name, "dimensionless", "dimensionless")
-        if "loss" in spec else 1.0
+        if "loss" in spec
+        else context.use_default("resources.s_params[].loss", 1.0)
     )
     return jnp.asarray(
         cal.cable_gamma(
@@ -340,15 +358,30 @@ def _interpolate_onto(
             "s_params always resolves to the already-interpolated array, not the "
             "raw sweep it came from."
         )
-    if node.get("onto", "freq") != "freq":
+    onto = (
+        node["onto"]
+        if "onto" in node
+        else context.use_default("value.from.interpolate_onto.onto", "freq")
+    )
+    if onto != "freq":
         raise ConfigError("interpolate_onto: 'onto' is 'freq', the run's own axis.")
     return ResolvedValue(
         jnp.asarray(
             interpolate_onto(
                 np.asarray(context.freq),
                 source,
-                component=node.get("component", "s11"),
-                allow_extrapolation=bool(node.get("allow_extrapolation", False)),
+                component=(
+                    node["component"]
+                    if "component" in node
+                    else context.use_default("value.from.interpolate_onto.component", "s11")
+                ),
+                allow_extrapolation=bool(
+                    node["allow_extrapolation"]
+                    if "allow_extrapolation" in node
+                    else context.use_default(
+                        "value.from.interpolate_onto.allow_extrapolation", False
+                    )
+                ),
             )
         ),
         canonical_unit("dimensionless"),

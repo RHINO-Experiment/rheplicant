@@ -36,7 +36,7 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.noise import decided_noise
 
 if TYPE_CHECKING:
-    from _rheplicant_bootstrap.types import JsonValue, TraceSink
+    from _rheplicant_bootstrap.types import JsonValue, LayerIdentity, TraceSink
     from _rheplicant_bootstrap.variants import LayerRef
     from rheplicant.config.document import ConfiguredRun
     from rheplicant.config.sections.runs import RunResult, RunSpec
@@ -83,7 +83,6 @@ class RunParseContext:
     spec: RunSpec
     configured_run: ConfiguredRun
 
-
 @dataclass(frozen=True, slots=True)
 class ParsedRun:
     """A ``RunSpec`` after its kind's parser: the spec, plus the two frozen
@@ -93,6 +92,12 @@ class ParsedRun:
     layer: LayerRef
     spec: RunSpec
     parsed: ParsedOptions
+    declaration_layer: LayerIdentity | None = None
+
+    @property
+    def audit_layer(self) -> LayerIdentity:
+        """Layer whose schedule declared this run, distinct from its target."""
+        return self.layer.identity if self.declaration_layer is None else self.declaration_layer
 
     @property
     def name(self) -> str:
@@ -380,6 +385,7 @@ def parse_run(
     index: int,
     layer: LayerRef,
     trace: TraceSink | None = None,
+    declaration_layer: LayerIdentity | None = None,
 ) -> ParsedRun:
     """Parse one declared run through its current handler -> a ``ParsedRun``.
 
@@ -399,14 +405,21 @@ def parse_run(
             f"exit parser for {spec.kind!r} returned "
             f"{type(parsed).__name__}, not ParsedOptions."
         )
-    run = ParsedRun(index=index, layer=layer, spec=spec, parsed=parsed)
+    run = ParsedRun(
+        index=index,
+        layer=layer,
+        spec=spec,
+        parsed=parsed,
+        declaration_layer=declaration_layer,
+    )
     if trace is not None:
-        trace.record_parsed_run(layer.identity, {
+        audit_row = {
             "descriptor": {"index": index, "name": spec.name,
                            "kind": spec.kind, "variant": spec.variant},
             "resolved_options": parsed.resolved,
             "deferred_checks": handler.deferred_checks,
-        })
+        }
+        trace.record_parsed_run(run.audit_layer, audit_row)
     return run
 
 

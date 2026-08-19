@@ -134,14 +134,15 @@ _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
 #: iterate"* is a conjugate sentence reaching a third caller -- the same defect
 #: as the two clauses below, one fragment further along.
 _A28_NPE_CLAUSES: dict[str, str] = {
-    "wants": ("SIMULATES a bank of (theta, data) pairs and draws the noise "
-              "for each one"),
+    "wants": ("SIMULATES a bank of (theta, data) pairs and draws the noise for each one"),
     "reads": "a RULE",
     "because": "is not a rule",
-    "instead": ("Declare inference.noise.kind: radiometer or homoscedastic "
-                "-- either is a rule simulate_pairs can draw from. There is "
-                "no amortized-posterior exit that takes a decided array, so "
-                "the sigma is what has to change."),
+    "instead": (
+        "Declare inference.noise.kind: radiometer or homoscedastic "
+        "-- either is a rule simulate_pairs can draw from. There is "
+        "no amortized-posterior exit that takes a decided array, so "
+        "the sigma is what has to change."
+    ),
 }
 
 #: The optional knobs of each call, IN THE PACKAGE'S OWN PARAMETER NAMES and
@@ -150,8 +151,30 @@ _A28_NPE_CLAUSES: dict[str, str] = {
 #: its call is a TypeError at the first run; the mechanical test in
 #: ``test_config_section_npe.py`` is what makes that impossible to ship.
 _CREATE_OPTIONS = ("n_components", "width", "depth", "min_scale")
-_TRAIN_OPTIONS = ("n_steps", "batch_size", "learning_rate",
-                  "validation_fraction", "beta1", "beta2", "eps")
+_TRAIN_OPTIONS = (
+    "n_steps",
+    "batch_size",
+    "learning_rate",
+    "validation_fraction",
+    "beta1",
+    "beta2",
+    "eps",
+)
+_CREATE_DEFAULTS = {
+    "n_components": 4,
+    "width": 64,
+    "depth": 3,
+    "min_scale": 1e-3,
+}
+_TRAIN_DEFAULTS = {
+    "n_steps": 3000,
+    "batch_size": 256,
+    "learning_rate": 1e-3,
+    "validation_fraction": 0.1,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "eps": 1e-8,
+}
 
 _BANK_KEYS = frozenset({"n_simulations", "seed"})
 _CREATE_KEYS = frozenset(_CREATE_OPTIONS) | frozenset({"seed"})
@@ -167,16 +190,20 @@ _TRANSLATED = {"seed": "key", "n_draws": "n_samples"}
 #: ship: see the task's Executor's note.  Refused BY NAME rather than as a
 #: stray key, because the schema is the document a reader trusts.
 _BANK_HINTS = {
-    "cache": ("cache: names a file the bank is written to and read back "
-              "from; file outputs are Plan 4's (outputs, provenance, the "
-              "CLI) and nothing in this layer reads a cache, so a document "
-              "that declared one would name a file no run ever writes."),
+    "cache": (
+        "cache: names a file the bank is written to and read back "
+        "from; file outputs are Plan 4's (outputs, provenance, the "
+        "CLI) and nothing in this layer reads a cache, so a document "
+        "that declared one would name a file no run ever writes."
+    ),
 }
 
 _CREATE_HINTS = {
-    "width_size": ("the config key is width:, because create() takes width= "
-                   "and passes it to equinox as width_size= itself "
-                   "(npe.py:216)."),
+    "width_size": (
+        "the config key is width:, because create() takes width= "
+        "and passes it to equinox as width_size= itself "
+        "(npe.py:216)."
+    ),
 }
 
 
@@ -259,8 +286,9 @@ def _subsection(section: Mapping, name: str) -> dict:
     return dict(spec)
 
 
-def _seeded(where: str, spec: dict, keys: frozenset[str], label: str,
-            hints: dict | None = None) -> dict:
+def _seeded(
+    where: str, spec: dict, keys: frozenset[str], label: str, hints: dict | None = None
+) -> dict:
     """Sweep the subsection's keys and check its seed DECLARATION.
 
     ``_seed_name`` is called for its refusals and its answer is thrown away:
@@ -285,10 +313,13 @@ def _bank(spec: dict) -> dict:
     where = "inference.npe.bank"
     parsed = _seeded(where, spec, _BANK_KEYS, "the bank", _BANK_HINTS)
     parsed["n_simulations"] = _count(
-        where, spec, "n_simulations",
+        where,
+        spec,
+        "n_simulations",
         "simulate_pairs takes it keyword-only with no default (npe.py:72), "
         "and the size of the bank is very nearly the whole cost of an npe "
-        "run, so there is no number worth guessing on a document's behalf.")
+        "run, so there is no number worth guessing on a document's behalf.",
+    )
     return parsed
 
 
@@ -296,15 +327,18 @@ def _sample(spec: dict) -> dict:
     where = "inference.npe.sample"
     parsed = _seeded(where, spec, _SAMPLE_KEYS, "the draw")
     parsed["n_draws"] = _count(
-        where, spec, "n_draws",
+        where,
+        spec,
+        "n_draws",
         "NeuralPosterior.sample takes n_samples positionally with no "
         "default (npe.py:257). The config key is n_draws, the word "
         "conjugate.gcr already uses for the same quantity, and the "
-        "executor is what translates it.")
+        "executor is what translates it.",
+    )
     return parsed
 
 
-def _create(spec: dict) -> dict:
+def _create(spec: dict, context: Any | None = None) -> dict:
     where = "inference.npe.create"
     parsed = _seeded(where, spec, _CREATE_KEYS, "the estimator", _CREATE_HINTS)
     for key in ("n_components", "width"):
@@ -319,12 +353,17 @@ def _create(spec: dict) -> dict:
         # depth: 0 IS legal and means one linear layer (measured).
         parsed["depth"] = _whole(f"{where}.depth", spec["depth"], 0)
     if "min_scale" in spec:
-        parsed["min_scale"] = _positive(f"{where}.min_scale",
-                                        spec["min_scale"])
+        parsed["min_scale"] = _positive(f"{where}.min_scale", spec["min_scale"])
+    for key in _CREATE_OPTIONS:
+        if key not in parsed and context is not None:
+            parsed[key] = context.use_default(
+                f"inference.npe.create.{key}",
+                _CREATE_DEFAULTS[key],
+            )
     return parsed
 
 
-def _train(spec: dict) -> dict:
+def _train(spec: dict, context: Any | None = None) -> dict:
     where = "inference.npe.train"
     parsed = _seeded(where, spec, _TRAIN_KEYS, "training")
     for key in ("n_steps", "batch_size"):
@@ -336,6 +375,12 @@ def _train(spec: dict) -> dict:
     for key in ("validation_fraction", "beta1", "beta2"):
         if key in spec:
             parsed[key] = _fraction(f"{where}.{key}", spec[key])
+    for key in _TRAIN_OPTIONS:
+        if key not in parsed and context is not None:
+            parsed[key] = context.use_default(
+                f"inference.npe.train.{key}",
+                _TRAIN_DEFAULTS[key],
+            )
     return parsed
 
 
@@ -382,9 +427,7 @@ def _embed(node: Any) -> Any:
                 "else."
             )
         return embedding
-    raise ConfigError(
-        f"{where}: is 'ravel' or {{python: 'mod:fn'}}; got {node!r}."
-    )
+    raise ConfigError(f"{where}: is 'ravel' or {{python: 'mod:fn'}}; got {node!r}.")
 
 
 def parse_npe(section: Any, context: Any) -> NpeSpec:
@@ -405,13 +448,21 @@ def parse_npe(section: Any, context: Any) -> NpeSpec:
             "inference.npe: is a mapping with bank:, embed:, create:, "
             f"train: and sample:; got {section!r}."
         )
-    check_unknown_keys("inference.npe", dict(section), _NPE_KEYS,
-                       label="the npe section")
-    return NpeSpec(bank=_bank(_subsection(section, "bank")),
-                   embed=_embed(section.get("embed")),
-                   create=_create(_subsection(section, "create")),
-                   train=_train(_subsection(section, "train")),
-                   sample=_sample(_subsection(section, "sample")))
+    check_unknown_keys("inference.npe", dict(section), _NPE_KEYS, label="the npe section")
+    embed_node = (
+        section["embed"]
+        if "embed" in section
+        else context.use_default("inference.npe.embed", "ravel")
+    )
+    if isinstance(embed_node, Mapping) and "python" in embed_node and context.audit is not None:
+        context.audit.python_target("inference.npe.embed.python", embed_node["python"])
+    return NpeSpec(
+        bank=_bank(_subsection(section, "bank")),
+        embed=_embed(embed_node),
+        create=_create(_subsection(section, "create"), context),
+        train=_train(_subsection(section, "train"), context),
+        sample=_sample(_subsection(section, "sample")),
+    )
 
 
 # --- The kind: npe exit (Tasks 7 and 8) -------------------------------------
@@ -489,7 +540,9 @@ def _simulate_bank(run: Any, built: Any, spec: Any) -> tuple:
 
     space = _sampled_space(run, built, route="npe")
     thetas, data = simulate_pairs(
-        built.inference.fit_twin, built.state, space,
+        built.inference.fit_twin,
+        built.state,
+        space,
         noise=_decided_model(run, built, **_A28_NPE_CLAUSES),
         key=_draw_key(run, "inference.npe.bank", built, spec.bank),
         n_simulations=spec.bank["n_simulations"],
@@ -529,7 +582,8 @@ def _estimator(run: Any, built: Any, spec: Any, thetas: Any, data: Any) -> Any:
     from rheplicant.inference import NeuralPosterior
 
     return NeuralPosterior.create(
-        thetas, data,
+        thetas,
+        data,
         key=_draw_key(run, "inference.npe.create", built, spec.create),
         embed=spec.embed,
         **_passthrough(spec.create, _CREATE_OPTIONS),
@@ -632,7 +686,9 @@ def _run_npe(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     spec = _npe_spec(run, built)
     space, thetas, data = _simulate_bank(run, built, spec)
     trained, history = train_posterior(
-        _estimator(run, built, spec, thetas, data), thetas, data,
+        _estimator(run, built, spec, thetas, data),
+        thetas,
+        data,
         key=_draw_key(run, "inference.npe.train", built, spec.train),
         **_passthrough(spec.train, _TRAIN_OPTIONS),
     )

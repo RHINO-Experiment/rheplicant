@@ -25,8 +25,9 @@ __all__ = ["build_fit_twin"]
 _TWIN_KEYS = frozenset({"without", "replace"})
 
 
-def build_fit_twin(section: Any, twin: Any,
-                   context: ResolutionContext) -> tuple[Any, tuple[str, ...]]:
+def build_fit_twin(
+    section: Any, twin: Any, context: ResolutionContext
+) -> tuple[Any, tuple[str, ...]]:
     """``inference.twin`` -> ``(repaired twin, replaced node ids)``.
 
     The replaced ids come back so the space builder can refuse a binding into
@@ -41,8 +42,7 @@ def build_fit_twin(section: Any, twin: Any,
             f"inference.twin: is a mapping with without: and/or replace:; "
             f"got {type(section).__name__} ({section!r})."
         )
-    check_unknown_keys("inference.twin", dict(section), _TWIN_KEYS,
-                       label="twin:")
+    check_unknown_keys("inference.twin", dict(section), _TWIN_KEYS, label="twin:")
     if not hasattr(twin, "without"):
         raise ConfigError(
             "inference.twin: repairs a graph assembly, and this model is "
@@ -50,21 +50,22 @@ def build_fit_twin(section: Any, twin: Any,
             "not repaired: declare the fit pipeline as its own variant."
         )
     repaired = twin
-    without = section.get("without", [])
+    without = (
+        section["without"]
+        if "without" in section
+        else context.use_default("inference.twin.without", [])
+    )
     if not isinstance(without, (list, tuple)) or not all(
-            isinstance(node_id, str) for node_id in without):
-        raise ConfigError(
-            f"inference.twin.without: is a list of node ids; got {without!r}."
-        )
+        isinstance(node_id, str) for node_id in without
+    ):
+        raise ConfigError(f"inference.twin.without: is a list of node ids; got {without!r}.")
     for node_id in without:
         repaired = repaired.without(node_id)
     replace = section.get("replace") or {}
     if not isinstance(replace, Mapping):
         raise ConfigError(
-            "inference.twin.replace: is a mapping of node id -> node spec; "
-            f"got {replace!r}."
+            f"inference.twin.replace: is a mapping of node id -> node spec; got {replace!r}."
         )
     for node_id, spec in replace.items():
-        repaired = repaired.replace_node(
-            node_id, build_node_operator(node_id, spec, context))
+        repaired = repaired.replace_node(node_id, build_node_operator(node_id, spec, context))
     return repaired, tuple(replace)

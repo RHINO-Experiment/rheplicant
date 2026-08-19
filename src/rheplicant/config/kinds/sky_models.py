@@ -121,7 +121,10 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
         )
     if kind == "gdsm":
         check_unknown_keys(
-            name, spec, _ALLOWED_KEYS[kind], label="kind: gdsm",
+            name,
+            spec,
+            _ALLOWED_KEYS[kind],
+            label="kind: gdsm",
             note=(
                 "The sky IS the GSM16 model evaluated on the run's own frequency "
                 "grid -- there is no amplitude to scale and no grid to declare, "
@@ -182,6 +185,8 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
                 ),
                 context.dimensions,
             )
+        if context.audit is not None:
+            context.audit.python_target(f"{name}.python", target)
         factory = import_target(target)
         arguments = {}
         for key, value in args.items():
@@ -204,7 +209,11 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
 
 def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
     nside = _static_int(spec, "nside", name)
-    order = spec.get("order", "ring")
+    order = (
+        spec["order"]
+        if "order" in spec
+        else context.use_default("resources.sky_models[].order", "ring")
+    )
     if order != "ring":
         raise ConfigError(
             f"{name}: order={order!r}. This package reads HEALPix RING throughout -- "
@@ -218,8 +227,11 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
         "resource_field",
         "rheplicant.config.kinds.sky_models.build_sky_model.maps.maps",
     )
+    maps_node = (
+        spec["maps"] if "maps" in spec else context.use_default("resources.sky_models[].maps", {})
+    )
     resolved_maps = resolve_value(
-        spec.get("maps", {}),
+        maps_node,
         context,
         destination=maps_destination,
     )
@@ -227,8 +239,7 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
     if "unit" in spec:
         if resolved_maps.unit is not None:
             raise ConfigError(
-                f"{name}: maps declares unit twice -- on maps: and beside it. "
-                "Keep one declaration."
+                f"{name}: maps declares unit twice -- on maps: and beside it. Keep one declaration."
             )
         maps_value, maps_unit = convert_to_canonical(maps_value, spec["unit"])
     else:
@@ -240,9 +251,10 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
         "resource_field",
         "rheplicant.config.kinds.sky_models.build_sky_model.maps.freq",
     )
-    resolved_freq = resolve_value(
-        spec.get("freq", {}), context, destination=freq_destination
+    freq_node = (
+        spec["freq"] if "freq" in spec else context.use_default("resources.sky_models[].freq", {})
     )
+    resolved_freq = resolve_value(freq_node, context, destination=freq_destination)
     freq = jnp.asarray(resolved_freq.value)
     record_resolved_delivery(context, freq_destination, resolved_freq.unit)
     expected_pix = 12 * nside * nside
@@ -333,5 +345,6 @@ def _build_gdsm(name: str, spec: dict, context: ResolutionContext) -> MapSky:
     # what dtype is requested here -- but it is the one thing enforcing the
     # run's own dtype once x64 is enabled, or if pygdsm's own return dtype ever
     # changes, so it stays rather than being deleted as apparently-dead code.
-    return MapSky(maps=jnp.asarray(np.stack(rows), dtype=context.dtype),
-                  freq=jnp.asarray(context.freq))
+    return MapSky(
+        maps=jnp.asarray(np.stack(rows), dtype=context.dtype), freq=jnp.asarray(context.freq)
+    )

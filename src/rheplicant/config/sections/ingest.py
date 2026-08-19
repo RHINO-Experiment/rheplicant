@@ -115,7 +115,7 @@ def _read_rhino_hdf5(path, spec: dict):
     kwargs: dict[str, Any] = {"freq_unit": str(spec["freq_unit"])}
     if "thermistor_columns" in spec:
         columns = spec["thermistor_columns"]
-        if (not isinstance(columns, Mapping)
+        if columns is not None and (not isinstance(columns, Mapping)
                 or not all(isinstance(k, str) for k in columns)
                 or any(isinstance(v, bool) or not isinstance(v, int)
                        for v in columns.values())):
@@ -123,7 +123,9 @@ def _read_rhino_hdf5(path, spec: dict):
                 "from_file: thermistor_columns is a mapping of switch label "
                 f"-> integer column of /temperatures; got {columns!r}."
             )
-        kwargs["thermistor_columns"] = dict(columns)
+        kwargs["thermistor_columns"] = (
+            None if columns is None else dict(columns)
+        )
     if "settle_seconds" in spec:
         kwargs["settle_seconds"] = _seconds(spec["settle_seconds"],
                                             "settle_seconds")
@@ -144,18 +146,34 @@ def parse_from_file(spec: Any, context: ResolutionContext):
         raise ConfigError(
             f"observation.from_file: is a mapping; got {type(spec).__name__}."
         )
-    check_unknown_keys("observation.from_file", dict(spec), _FROM_FILE_KEYS,
+    declared = dict(spec)
+    check_unknown_keys("observation.from_file", declared, _FROM_FILE_KEYS,
                        label="from_file:")
-    fmt = spec.get("format")
+    fmt = declared.get("format")
     if fmt != RHINO_FORMAT:
         raise ConfigError(
             f"observation.from_file: format is 'rhino_hdf5' (the one "
             f"ingestion format this layer reads); got {fmt!r}."
         )
-    if "path" not in spec:
+    if "path" not in declared:
         raise ConfigError("observation.from_file: requires path:.")
+    if "thermistor_columns" not in declared:
+        declared["thermistor_columns"] = context.use_default(
+            "observation.from_file.thermistor_columns",
+            None,
+        )
+    if "settle_seconds" not in declared:
+        declared["settle_seconds"] = context.use_default(
+            "observation.from_file.settle_seconds",
+            5.0,
+        )
+    if "thermistor_unit" not in declared:
+        declared["thermistor_unit"] = context.use_default(
+            "observation.from_file.thermistor_unit",
+            "celsius",
+        )
     resolved = resolve_value(
-        {"file": dict(spec)},
+        {"file": declared},
         context,
         destination=DestinationDescriptor(
             "observation.from_file", "config_path", "observation.from_file"

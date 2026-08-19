@@ -18,6 +18,7 @@ import jax
 
 from _rheplicant_bootstrap.process import parse_runtime
 from _rheplicant_bootstrap.runtime import PriorEnvironment, RuntimeSession
+from rheplicant.config.context import current_resolution_audit
 
 __all__ = ["RuntimeFacts", "build_runtime", "state_key"]
 
@@ -39,6 +40,17 @@ class RuntimeFacts(NamedTuple):
 def build_runtime(section: Mapping) -> RuntimeFacts:
     """Check and normalise the ``runtime:`` section."""
     spec = parse_runtime(section)
+    audit = current_resolution_audit()
+    if audit is not None:
+        if "jax_enable_x64" not in section:
+            audit.use_default("runtime.jax_enable_x64", False)
+        if "platform" not in section:
+            audit.use_default("runtime.platform", "auto")
+        if "seed" not in section:
+            audit.use_default("runtime.seed", None)
+        if "seeds" not in section:
+            audit.use_default("runtime.seeds", {})
+        audit.seed(spec.seed, spec.seeds)
     RuntimeSession(
         spec,
         PriorEnvironment(
