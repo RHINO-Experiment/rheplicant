@@ -135,14 +135,15 @@ def _complete_report_boundary(
     cumulative = Report(findings=previous.findings + current.findings)
     if trace is not None:
         trace.record_findings(
-            stage, layer,
-            tuple(dataclasses.asdict(row) for row in current.findings))
+            stage, layer, tuple(dataclasses.asdict(row) for row in current.findings)
+        )
         trace.boundary_completed(stage, layer)
     return cumulative
 
 
-def _assemble(document: Mapping, *, variant: str | None = None,
-              base_dir: str | None = None) -> ConfiguredRun:
+def _assemble(
+    document: Mapping, *, variant: str | None = None, base_dir: str | None = None
+) -> ConfiguredRun:
     """:func:`load_document`'s body WITHOUT the built or the post-flight hook.
 
     Variants, the pre-flight pass, the axes hook, and every builder through
@@ -166,8 +167,7 @@ def _assemble(document: Mapping, *, variant: str | None = None,
     """
     if not isinstance(document, Mapping):
         raise ConfigError(
-            f"A document is a mapping of sections; got "
-            f"{type(document).__name__} ({document!r})."
+            f"A document is a mapping of sections; got {type(document).__name__} ({document!r})."
         )
     doc = dict(document)
     if variant is not None:
@@ -182,9 +182,14 @@ def _assemble(document: Mapping, *, variant: str | None = None,
     return _build_with_axes(doc, base_dir=base_dir, previous=report)
 
 
-def _build_with_axes(document: Mapping, *, base_dir: str | None = None,
-                     previous: Report, layer: LayerIdentity | None = None,
-                     trace: TraceSink | None = None) -> ConfiguredRun:
+def _build_with_axes(
+    document: Mapping,
+    *,
+    base_dir: str | None = None,
+    previous: Report,
+    layer: LayerIdentity | None = None,
+    trace: TraceSink | None = None,
+) -> ConfiguredRun:
     """The axes boundary, then every builder through ``build_inference``.
 
     This is ``_assemble``'s post-preflight body and the orchestration's
@@ -195,38 +200,38 @@ def _build_with_axes(document: Mapping, *, base_dir: str | None = None,
     carries the completed boundaries' findings.
     """
     runtime = _attach(previous, build_runtime, document["runtime"])
-    observation, context = _attach(previous, build_observation,
-                                   document["observation"],
-                                   runtime=runtime, base_dir=base_dir)
+    observation, context = _attach(
+        previous, build_observation, document["observation"], runtime=runtime, base_dir=base_dir
+    )
     # P-0.5, and its position is the point: `build_resources` on the next line
     # is the 90.9 % of this function's wall time that a bad time axis or a
     # non-uniform lst_deg has nothing to do with.  Raise before you warn, for
     # the same reason P-1 does; across slots that ordering cannot be global
     # (this pass has already returned when `build_resources` runs) and
     # `inflight/__init__.py` records why that is correct rather than tolerated.
-    axis_report = _attach(previous, axes, Axes(document=document,
-                                               runtime=runtime,
-                                               observation=observation,
-                                               context=context))
-    cumulative = _complete_report_boundary(previous, axis_report,
-                                           stage="axes", layer=layer,
-                                           trace=trace)
+    axis_report = _attach(
+        previous,
+        axes,
+        Axes(document=document, runtime=runtime, observation=observation, context=context),
+    )
+    cumulative = _complete_report_boundary(
+        previous, axis_report, stage="axes", layer=layer, trace=trace
+    )
     axis_report.raise_if_refused(cumulative=cumulative)
     axis_report.emit_warnings()
-    resources = _attach(cumulative, build_resources,
-                        document.get("resources") or {}, context)
-    context = dataclasses.replace(context,
-                                  resources=dict(resources.resources),
-                                  ingest=observation.ingest)
-    twin = _attach(cumulative, build_model, document["model"], context,
-                   switch_order=observation.switch_order)
+    resources = _attach(cumulative, build_resources, document.get("resources") or {}, context)
+    context = dataclasses.replace(
+        context, resources=dict(resources.resources), ingest=observation.ingest
+    )
+    twin = _attach(
+        cumulative, build_model, document["model"], context, switch_order=observation.switch_order
+    )
 
     if observation.ingest is not None:
         from rheplicant.radio.rhino import to_state
 
         source_order = list(observation.switch_order) or ["antenna"]
-        state = _attach(cumulative, to_state, observation.ingest,
-                        source_order=source_order)
+        state = _attach(cumulative, to_state, observation.ingest, source_order=source_order)
         state = state.replace(
             coords=state.coords.replace(
                 pointing=observation.pointing,
@@ -239,23 +244,38 @@ def _build_with_axes(document: Mapping, *, base_dir: str | None = None,
     else:
         state = State(
             data=observation.data,
-            coords=Coordinates(time=observation.time_s,
-                               freq=observation.freq_hz,
-                               pointing=observation.pointing,
-                               extra=observation.extra),
+            coords=Coordinates(
+                time=observation.time_s,
+                freq=observation.freq_hz,
+                pointing=observation.pointing,
+                extra=observation.extra,
+            ),
             env=observation.env,
             aux=observation.aux,
             key=state_key(runtime),
             meta=observation.meta,
         )
-    inference = _attach(cumulative, build_inference, document.get("inference"),
-                        twin=twin, state=state, observation=observation,
-                        context=context)
+    inference = _attach(
+        cumulative,
+        build_inference,
+        document.get("inference"),
+        twin=twin,
+        state=state,
+        observation=observation,
+        context=context,
+    )
     # The two reports this function raised on and emitted are KEPT rather
     # than dropped: the carried report is the cumulative one, in pass order.
-    return ConfiguredRun(document=document, runtime=runtime, state=state,
-                         twin=twin, inference=inference, resources=resources,
-                         context=context, report=cumulative)
+    return ConfiguredRun(
+        document=document,
+        runtime=runtime,
+        state=state,
+        twin=twin,
+        inference=inference,
+        resources=resources,
+        context=context,
+        report=cumulative,
+    )
 
 
 def _carrying(run: ConfiguredRun, found: Report) -> ConfiguredRun:
@@ -268,8 +288,7 @@ def _carrying(run: ConfiguredRun, found: Report) -> ConfiguredRun:
     below use it, and ``tests/config/inflight_helpers.priced_run`` drives it
     directly.
     """
-    return run._replace(
-        report=Report(findings=run.report.findings + found.findings))
+    return run._replace(report=Report(findings=run.report.findings + found.findings))
 
 
 def _priced_payload(run: ConfiguredRun) -> Priced:
@@ -290,11 +309,12 @@ def _priced_payload(run: ConfiguredRun) -> Priced:
     """
     declared = run.document.get("inference")
     section = declared.get("checks") if isinstance(declared, Mapping) else None
-    return Priced(run=run, gates=gates(section))
+    return Priced(run=run, gates=gates(section, audit=run.context.audit))
 
 
-def _through_built(run: ConfiguredRun, *, layer: LayerIdentity | None = None,
-                   trace: TraceSink | None = None) -> ConfiguredRun:
+def _through_built(
+    run: ConfiguredRun, *, layer: LayerIdentity | None = None, trace: TraceSink | None = None
+) -> ConfiguredRun:
     """The built-pass hook: raise, then warn, then carry the findings.
 
     P-1.5, immediately before the parse stage and the return: after
@@ -306,17 +326,17 @@ def _through_built(run: ConfiguredRun, *, layer: LayerIdentity | None = None,
     registered here.
     """
     built_report = _attach(run.report, built, Built(*run))
-    cumulative = _complete_report_boundary(run.report, built_report,
-                                           stage="built", layer=layer,
-                                           trace=trace)
+    cumulative = _complete_report_boundary(
+        run.report, built_report, stage="built", layer=layer, trace=trace
+    )
     built_report.raise_if_refused(cumulative=cumulative)
     built_report.emit_warnings()
     return _carrying(run, built_report)
 
 
-def _through_priced(run: ConfiguredRun, *,
-                    layer: LayerIdentity | None = None,
-                    trace: TraceSink | None = None) -> ConfiguredRun:
+def _through_priced(
+    run: ConfiguredRun, *, layer: LayerIdentity | None = None, trace: TraceSink | None = None
+) -> ConfiguredRun:
     """The post-flight hook: the checks that have to RUN the thing.
 
     P-2.5, after the parse stage and before the return: a forward pass per
@@ -325,16 +345,17 @@ def _through_priced(run: ConfiguredRun, *,
     detonating inside a fit.
     """
     priced_report = _attach(run.report, priced, _priced_payload(run))
-    cumulative = _complete_report_boundary(run.report, priced_report,
-                                           stage="postflight", layer=layer,
-                                           trace=trace)
+    cumulative = _complete_report_boundary(
+        run.report, priced_report, stage="postflight", layer=layer, trace=trace
+    )
     priced_report.raise_if_refused(cumulative=cumulative)
     priced_report.emit_warnings()
     return _carrying(run, priced_report)
 
 
-def load_document(document: Mapping, *, variant: str | None = None,
-                  base_dir: str | None = None) -> ConfiguredRun:
+def load_document(
+    document: Mapping, *, variant: str | None = None, base_dir: str | None = None
+) -> ConfiguredRun:
     """Build the objects a document declares, in the order they feed each other.
 
     The selected layer of the canonical preparation: the text pre-flight fans
@@ -346,13 +367,13 @@ def load_document(document: Mapping, *, variant: str | None = None,
     """
     from rheplicant.config.orchestration import prepare_document
 
-    prepared = prepare_document(document, scope="selected", variant=variant,
-                                base_dir=base_dir)
+    prepared = prepare_document(document, scope="selected", variant=variant, base_dir=base_dir)
     return prepared.layers[0].configured
 
 
-def run_forward(run: ConfiguredRun | Mapping, *, variant: str | None = None,
-                base_dir: str | None = None) -> State:
+def run_forward(
+    run: ConfiguredRun | Mapping, *, variant: str | None = None, base_dir: str | None = None
+) -> State:
     """Evaluate the twin on the state -- 2A's one exit.
 
     Plain evaluation, deliberately: jit is the caller's choice
