@@ -968,6 +968,11 @@ def execute_one_parsed(
             "enumerations."
         )
     configured = prepared_layer.configured
+    handler_context: object = configured
+    if parsed.kind == "benchmark":
+        from rheplicant.config.sections.benchmark import BenchmarkContext
+
+        handler_context = BenchmarkContext(configured=configured, layers=tuple(prepared.layers))
     result = None
     error = None
     status: Status = "ok"
@@ -987,8 +992,8 @@ def execute_one_parsed(
     elif parsed.expect == "refuse":
         handler = handler_for(parsed.kind)
         try:
-            handler.pre_execute(parsed, configured, prior)
-            product = handler.execute(parsed, configured, prior)
+            handler.pre_execute(parsed, handler_context, prior)
+            product = handler.execute(parsed, handler_context, prior)
         except Exception as captured_error:  # noqa: BLE001 -- run-and-capture
             # is the point
             result = RunResult(
@@ -1009,8 +1014,8 @@ def execute_one_parsed(
     else:
         handler = handler_for(parsed.kind)
         try:
-            handler.pre_execute(parsed, configured, prior)
-            product = handler.execute(parsed, configured, prior)
+            handler.pre_execute(parsed, handler_context, prior)
+            product = handler.execute(parsed, handler_context, prior)
         except ConfigError as caught:
             error = caught
             status = "refused"

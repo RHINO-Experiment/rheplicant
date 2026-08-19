@@ -569,6 +569,7 @@ def execute_run(run: RunSpec, built: Any, results: Any = None) -> RunResult:
 # this module also imports; the completeness test in
 # tests/config/test_config_exit_support.py is what keeps it from rotting.
 from rheplicant.config.sections import (  # noqa: E402,F401
+    benchmark,
     comparison,
     conjugate,
     diagnostics,

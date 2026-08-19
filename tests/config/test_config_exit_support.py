@@ -23,7 +23,6 @@ from rheplicant.config.sections.exit_support import (
 from rheplicant.config.sections.observed import ObservedBuild
 from rheplicant.config.sections.runs import (
     _KINDS,
-    _KINDS_PLAN4,
     RunResult,
     RunSpec,
     parse_runs,
@@ -83,7 +82,7 @@ class TestTheRegistryIsComplete:
         """
         tables = {name: getattr(runs_module, name) for name in vars(runs_module)
                   if name.startswith("_KINDS")}
-        assert "_KINDS" in tables and len(tables) >= 2, sorted(tables)
+        assert tuple(tables) == ("_KINDS",), sorted(tables)
         assert "_KINDS_2C" not in tables, "predict was its last member"
         names = sorted(tables)
         for i, left in enumerate(names):
@@ -416,7 +415,7 @@ class TestTheObservationFan:
 
 
 class TestTheDeferredKindsNameTheirPlan:
-    """One deferral tuple is left, and it names its plan.
+    """Plan 4B retires the final kind deferral tuple.
 
     ``_KINDS_2C`` went when ``predict`` shipped and ``_KINDS_2D`` when ``npe``
     did -- both DELETED rather than emptied, because ``_one`` tests the
@@ -426,14 +425,12 @@ class TestTheDeferredKindsNameTheirPlan:
     left by prefix, so it needs no edit here.
     """
 
-    def test_benchmark_is_the_last_plan_4_deferral(self):
-        assert _KINDS_PLAN4 == ("benchmark",)
-        for kind in _KINDS_PLAN4:
-            with pytest.raises(ConfigError, match="Plan 4"):
-                parse_runs([{"kind": kind}])
+    def test_compare_and_benchmark_are_both_live(self):
+        assert not hasattr(runs_module, "_KINDS_PLAN4")
         assert parse_runs(
             [{"kind": "compare", "of": ["a", "b"], "metric": "rms", "tolerance": 0.0}]
         )[0].kind == "compare"
+        assert parse_runs([{"kind": "benchmark", "variants": ["base"]}])[0].kind == "benchmark"
 
     def test_nuts_and_npe_have_left_and_the_tuple_has_gone_with_them(self):
         assert not hasattr(runs_module, "_KINDS_2D"), (

@@ -26,15 +26,13 @@ _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
           "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
           "identifiability", "score_directions", "gradient", "mmodes",
-          "predict", "nuts", "npe", "compare")
+          "predict", "nuts", "npe", "compare", "benchmark")
 # Plan 2C's and Plan 2D's own deferral tuples are GONE rather than emptied:
 # `predict` was 2C's last member and `npe` was 2D's, and an empty one would
 # leave `if kind in ()` in `_one` below -- dead, green and forever, and read
 # by the next author as a kind still owed.  Neither name is written here
 # either, so that `grep -rn <that name> src` stays the check it was meant to
-# be.  A deferral tuple a LATER plan adds must be named `_KINDS_*`: the
-# disjointness guard discovers its tables by that prefix.
-_KINDS_PLAN4 = ("benchmark",)
+# be.  Plan 4B has now retired the final deferral tuple too.
 
 
 class RunSpec(NamedTuple):
@@ -84,11 +82,6 @@ def _one(
     kind = entry.get("kind")
     if kind is None:
         raise ConfigError(f"{where}: kind: is required.")
-    if kind in _KINDS_PLAN4:
-        raise ConfigError(
-            f"{where}: kind: {kind} arrives with Plan 4 (D-C16), with the "
-            "outputs that make it reportable."
-        )
     if kind not in _KINDS:
         raise ConfigError(
             f"{where}: kind: {kind!r} is not an exit; this layer runs "
