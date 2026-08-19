@@ -120,8 +120,22 @@ _ATOM_SIGNATURES = {
 
 _DIMENSION_REGISTRY: dict[DimensionSelector, DimensionSpec] = {}
 _FORMULA_REGISTRY: dict[str, FormulaRegistration] = {}
+
+
+@dataclass(slots=True)
+class _RegistrySnapshot:
+    rows: tuple[tuple[DimensionSelector, DimensionSpec], ...]
+    matches: dict[
+        tuple[DimensionDomain, str],
+        tuple[tuple[DimensionSelector, DimensionSpec], ...],
+    ] = dataclasses.field(default_factory=dict)
+
+
 _ACTIVE_ENVIRONMENT: ContextVar[DimensionEnvironment | None] = ContextVar(
     "rheplicant_dimension_environment", default=None
+)
+_ACTIVE_REGISTRY_SNAPSHOT: ContextVar[_RegistrySnapshot | None] = ContextVar(
+    "rheplicant_dimension_registry_snapshot", default=None
 )
 
 _SEGMENT = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\[\])?|\*)\Z")
@@ -300,18 +314,37 @@ def _selector_matches(pattern: str, actual: str) -> bool:
 
 def registered_dimension_rows() -> tuple[tuple[DimensionSelector, DimensionSpec], ...]:
     """A stable snapshot for A9 and independent completeness censuses."""
-    return tuple(_DIMENSION_REGISTRY.items())
+    active = _ACTIVE_REGISTRY_SNAPSHOT.get()
+    return tuple(_DIMENSION_REGISTRY.items()) if active is None else active.rows
 
 
 def matching_dimension_rows(
     domain: DimensionDomain, selector: str
 ) -> tuple[tuple[DimensionSelector, DimensionSpec], ...]:
     """Every live exact/wildcard row matching one destination."""
-    return tuple(
+    active = _ACTIVE_REGISTRY_SNAPSHOT.get()
+    key = (domain, selector)
+    if active is not None and key in active.matches:
+        return active.matches[key]
+    rows = tuple(
         (registered, spec)
-        for registered, spec in _DIMENSION_REGISTRY.items()
+        for registered, spec in registered_dimension_rows()
         if registered.domain == domain and _selector_matches(registered.selector, selector)
     )
+    if active is not None:
+        active.matches[key] = rows
+    return rows
+
+
+@contextmanager
+def using_dimension_registry_snapshot():
+    """Bound selector matching to one isolated preflight-pass snapshot."""
+    snapshot = _RegistrySnapshot(tuple(_DIMENSION_REGISTRY.items()))
+    token = _ACTIVE_REGISTRY_SNAPSHOT.set(snapshot)
+    try:
+        yield
+    finally:
+        _ACTIVE_REGISTRY_SNAPSHOT.reset(token)
 
 
 def dimension_spec_for(

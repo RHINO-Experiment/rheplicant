@@ -178,6 +178,13 @@ def preflight(document: Mapping[str, Any]) -> Report:
     ``_document_checks`` is bound by that foot import and resolved at call
     time, so using it keeps the guard's only evidence the foot import itself.
     """
+    from rheplicant.config.dimensions import using_dimension_registry_snapshot
+
+    with using_dimension_registry_snapshot():
+        return _preflight_with_registry_snapshot(document)
+
+
+def _preflight_with_registry_snapshot(document: Mapping[str, Any]) -> Report:
     _structural(document)
     merged = initial_merge(document, origin=Origin("user"))
     enumeration = enumerate_layers_once(

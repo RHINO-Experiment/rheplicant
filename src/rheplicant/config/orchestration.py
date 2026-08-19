@@ -68,6 +68,7 @@ from rheplicant.config.dimensions import (
     DimensionEnvironment,
     dimension_environment_for,
     using_dimension_environment,
+    using_dimension_registry_snapshot,
 )
 from rheplicant.config.document import (
     ConfiguredRun,
@@ -258,6 +259,19 @@ def validate_base_variant_targets(canonical: _Canonical) -> None:
 
 
 def run_text_preflight_all_layers(
+    canonical: _Canonical,
+    *,
+    trace: TraceSink | None = None,
+    environments: Mapping[LayerIdentity, DimensionEnvironment] | None = None,
+) -> Mapping[LayerIdentity, Report]:
+    """Run one isolated, pass-scoped text preflight over canonical layers."""
+    with using_dimension_registry_snapshot():
+        return _run_text_preflight_all_layers(
+            canonical, trace=trace, environments=environments
+        )
+
+
+def _run_text_preflight_all_layers(
     canonical: _Canonical,
     *,
     trace: TraceSink | None = None,

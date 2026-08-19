@@ -1,6 +1,7 @@
 """A9 checks declarations before construction or I/O."""
 
 import dataclasses
+from collections import Counter
 
 import equinox as eqx
 
@@ -216,6 +217,41 @@ def test_a9_resolves_config_destinations_from_the_live_registry():
             finding.where == "observation.site.lat_deg"
             and "ambiguous dimension selectors" in finding.message
             for finding in findings
+        )
+    finally:
+        dimension_module._DIMENSION_REGISTRY.clear()
+        dimension_module._DIMENSION_REGISTRY.update(saved)
+
+
+def test_multilayer_preflight_evaluates_each_selector_match_once(monkeypatch):
+    document = preflight_document()
+    document["variants"] = {
+        "higher_gain": {
+            "model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}
+        },
+        "lower_gain": {
+            "model": {"gain": {"gain": {"value": 0.5, "unit": "dimensionless"}}}
+        },
+    }
+    calls = Counter()
+    selector_matches = dimension_module._selector_matches
+
+    def counted(pattern, actual):
+        calls[(pattern, actual)] += 1
+        return selector_matches(pattern, actual)
+
+    monkeypatch.setattr(dimension_module, "_selector_matches", counted)
+    assert not _a9(preflight(document))
+    assert calls
+    assert max(calls.values()) == 1
+
+    saved = dict(dimension_module._DIMENSION_REGISTRY)
+    try:
+        register_dimension("observation.freq.*", domain="config_path", dimension="Hz")
+        assert any(
+            finding.where.endswith("observation.freq.grid")
+            and "ambiguous dimension selectors" in finding.message
+            for finding in _a9(preflight(document))
         )
     finally:
         dimension_module._DIMENSION_REGISTRY.clear()
