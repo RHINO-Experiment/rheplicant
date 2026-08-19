@@ -1,4 +1,4 @@
-import type { EditorSession, SessionTransport } from "./types";
+import type { EditorSession, JobKind, SessionTransport } from "./types";
 
 export class RequestError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -134,6 +134,15 @@ export const sessionTransport: SessionTransport = {
         expected_revision: expectedRevision,
         snapshot_name: snapshotName,
         variant,
+      }),
+    });
+  },
+  submitJob(sessionId, kind: JobKind, expectedRevision) {
+    return request(`/api/sessions/${encodeURIComponent(sessionId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        kind,
       }),
     });
   },

@@ -19,6 +19,7 @@ from _rheplicant_bootstrap.layering import apply_variant
 from _rheplicant_bootstrap.yaml import safe_load_document
 from rheplicant.core.graph import SignalGraph
 from rheplicant.gui.forms import FormProjection, project_forms
+from rheplicant.gui.previews import PreviewProjection, project_previews
 from rheplicant.gui.validation import ValidationProjection, validate_document
 from rheplicant.radio.graph import RADIO_GRAPH
 
@@ -104,6 +105,7 @@ class EditorSnapshot:
     nodes: tuple[NodeCard, ...]
     walk_order: tuple[str, ...]
     forms: FormProjection
+    previews: PreviewProjection
     validation: ValidationProjection
     base_diagram: GraphDiagram
     backend_diagram: GraphDiagram
@@ -374,8 +376,6 @@ def _diagram(
         counts=_graph_counts(graph, nodes),
         changed_nodes=changed_nodes,
     )
-
-
 _MISSING = object()
 
 
@@ -421,6 +421,7 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
         nodes=base.nodes,
         walk_order=base.walk_order,
         forms=forms,
+        previews=project_previews(document),
         validation=validate_document(yaml_text, document, forms),
         base_diagram=base,
         backend_diagram=backend,

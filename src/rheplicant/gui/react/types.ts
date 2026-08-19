@@ -54,10 +54,53 @@ export interface EditorSnapshot {
   nodes: NodeCard[];
   walk_order: string[];
   forms: FormProjection;
+  previews: PreviewProjection;
   validation: ValidationProjection;
   base_diagram: GraphDiagram;
   backend_diagram: GraphDiagram;
   variant_diagrams: GraphDiagram[];
+}
+
+export interface PreviewClass {
+  preview_id: "graph" | "axes_shapes" | "validate" | "forward";
+  label: string;
+  cadence: "continuous" | "explicit";
+  priced: boolean;
+  description: string;
+}
+
+export interface AxisPreview {
+  axis: "time" | "freq";
+  first: number[];
+  last: number[];
+  count: number;
+  spacing: number | null;
+  unit: string | null;
+  precision_ratio: number | null;
+  precision_ok: boolean | null;
+}
+
+export interface ShapePreview {
+  symbol: string;
+  value: number;
+}
+
+export interface ForwardCost {
+  label: string;
+  estimated_milliseconds: number | null;
+  estimated_peak_megabytes: number | null;
+  n_freq: number | null;
+  nside: number | null;
+  lmax: number | null;
+  optimizations: string[];
+}
+
+export interface PreviewProjection {
+  classes: PreviewClass[];
+  axes: AxisPreview[];
+  shapes: ShapePreview[];
+  forward_cost: ForwardCost;
+  declared_run_kinds: string[];
 }
 
 export interface ProjectedWidget {
@@ -129,7 +172,27 @@ export interface EditorSession {
   validation_stale: boolean;
   can_undo: boolean;
   can_redo: boolean;
+  jobs: JobProjection[];
   document: EditorSnapshot;
+}
+
+export type JobKind =
+  | "validate"
+  | "preview_forward"
+  | "run"
+  | "compare"
+  | "benchmark";
+
+export interface JobProjection {
+  job_id: string;
+  session_id: string;
+  kind: JobKind;
+  revision: number;
+  yaml_digest: string;
+  status: "queued" | "running" | "succeeded" | "refused" | "error";
+  result: unknown;
+  message: string | null;
+  stale: boolean;
 }
 
 export interface SessionTransport {
@@ -184,5 +247,10 @@ export interface SessionTransport {
     snapshotName: string,
     expectedRevision: number,
     variant: string | null,
+  ): Promise<EditorSession>;
+  submitJob(
+    sessionId: string,
+    kind: JobKind,
+    expectedRevision: number,
   ): Promise<EditorSession>;
 }

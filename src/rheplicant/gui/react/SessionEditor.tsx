@@ -2,9 +2,10 @@ import { useState } from "react";
 
 import { ConfigForms } from "./ConfigForms";
 import { GraphEditor } from "./GraphEditor";
+import { PreviewPanel } from "./PreviewPanel";
 import { ValidationLedger } from "./ValidationLedger";
 import { RequestError } from "./api";
-import type { EditorSession, SessionTransport } from "./types";
+import type { EditorSession, JobKind, SessionTransport } from "./types";
 
 type ReadFile = (file: File) => Promise<string>;
 type SaveFile = (yamlText: string) => Promise<void> | void;
@@ -118,6 +119,13 @@ export function SessionEditor({
     }
   }
 
+  function submitJob(kind: JobKind) {
+    void run(
+      () => transport.submitJob(session.session_id, kind, session.revision),
+      `${kind === "preview_forward" ? "Forward preview" : kind} job submitted`,
+    );
+  }
+
   return (
     <main>
       <header>
@@ -160,11 +168,6 @@ export function SessionEditor({
           />
         </label>
         <button disabled={busy || pendingYaml} onClick={save}>Save YAML</button>
-        <button
-          disabled={busy || pendingYaml || session.document.validation.run_blocked}
-        >
-          Run
-        </button>
       </nav>
 
       <GraphEditor
@@ -180,6 +183,14 @@ export function SessionEditor({
       />
 
       <ValidationLedger validation={session.document.validation} />
+
+      <PreviewPanel
+        previews={session.document.previews}
+        jobs={session.jobs}
+        disabled={busy || pendingYaml}
+        blocked={session.document.validation.run_blocked}
+        onSubmit={submitJob}
+      />
 
       <section aria-label="YAML source of truth">
         <textarea

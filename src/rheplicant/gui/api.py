@@ -12,14 +12,16 @@ import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
+from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from _rheplicant_bootstrap.errors import ConfigError
 from rheplicant.gui.document import EditorSnapshot, set_node, snapshot
+from rheplicant.gui.jobs import JobKind, JobRunner, JobStore, execute_job, yaml_digest
 from rheplicant.gui.session import (
     EditorSession,
     RevisionConflict,
@@ -54,6 +56,10 @@ class NodeEditPayload(YamlPayload):
 
 class RevisionPayload(_ClosedModel):
     expected_revision: int
+
+
+class JobPayload(RevisionPayload):
+    kind: Literal["validate", "preview_forward", "run", "compare", "benchmark"]
 
 
 class SessionYamlPayload(RevisionPayload):
@@ -97,9 +103,10 @@ class SessionSnapshotPayload(RevisionPayload):
 class SessionStore:
     """Thread-safe storage around immutable editor-session values."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, job_store: JobStore | None = None) -> None:
         self._sessions: dict[str, EditorSession] = {}
         self._lock = RLock()
+        self.jobs = job_store if job_store is not None else JobStore()
 
     def create(self, yaml_text: str) -> tuple[str, EditorSession]:
         session = new_session(yaml_text)
@@ -129,12 +136,37 @@ class SessionStore:
             self._sessions[session_id] = updated
             return updated
 
+    def submit_job(
+        self,
+        session_id: str,
+        kind: JobKind,
+        expected_revision: int,
+    ) -> tuple[EditorSession, str]:
+        """Revision-check and bind a job to one immutable YAML snapshot."""
+        with self._lock:
+            try:
+                current = self._sessions[session_id]
+            except KeyError:
+                raise KeyError(session_id) from None
+            if type(expected_revision) is not int or expected_revision != current.revision:
+                raise RevisionConflict(expected_revision, current.revision)
+            if snapshot(current.yaml_text).validation.run_blocked:
+                raise ConfigError(
+                    "Execution jobs are disabled while text-level refusals exist."
+                )
+            row = self.jobs.submit(session_id, kind, current.revision, current.yaml_text)
+            return current, row.job_id
+
 
 def _snapshot_body(found: EditorSnapshot) -> dict[str, object]:
     return dataclasses.asdict(found)
 
 
-def _session_body(session_id: str, session: EditorSession) -> dict[str, object]:
+def _session_body(
+    store: SessionStore,
+    session_id: str,
+    session: EditorSession,
+) -> dict[str, object]:
     return {
         "session_id": session_id,
         "revision": session.revision,
@@ -142,6 +174,10 @@ def _session_body(session_id: str, session: EditorSession) -> dict[str, object]:
         "validation_stale": session.validation_stale,
         "can_undo": session.can_undo,
         "can_redo": session.can_redo,
+        "jobs": [
+            dataclasses.asdict(row)
+            for row in store.jobs.project(session_id, yaml_digest(session.yaml_text))
+        ],
         "document": _snapshot_body(snapshot(session.yaml_text)),
     }
 
@@ -159,7 +195,7 @@ def _apply(
     transition: Callable[[EditorSession], EditorSession],
 ) -> dict[str, object]:
     try:
-        return _session_body(session_id, store.apply(session_id, transition))
+        return _session_body(store, session_id, store.apply(session_id, transition))
     except KeyError:
         raise _not_found(session_id) from None
     except RevisionConflict as error:
@@ -172,10 +208,14 @@ def create_app(
     frontend_dir: Path | None = None,
     *,
     session_store: SessionStore | None = None,
+    job_store: JobStore | None = None,
+    job_runner: JobRunner = execute_job,
 ) -> FastAPI:
     """Build the selected-stack API independently of a live frontend."""
     app = FastAPI(title="Rheplicant YAML config editor")
-    store = session_store if session_store is not None else SessionStore()
+    if session_store is not None and job_store is not None:
+        raise ValueError("job_store belongs to SessionStore when both are supplied.")
+    store = session_store if session_store is not None else SessionStore(job_store=job_store)
 
     @app.post("/api/snapshot")
     def document_snapshot(payload: YamlPayload) -> dict[str, object]:
@@ -203,14 +243,14 @@ def create_app(
     def create_session(payload: YamlPayload) -> dict[str, object]:
         try:
             session_id, session = store.create(payload.yaml_text)
-            return _session_body(session_id, session)
+            return _session_body(store, session_id, session)
         except ConfigError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/sessions/{session_id}")
     def get_session(session_id: str) -> dict[str, object]:
         try:
-            return _session_body(session_id, store.get(session_id))
+            return _session_body(store, session_id, store.get(session_id))
         except KeyError:
             raise _not_found(session_id) from None
 
@@ -397,6 +437,28 @@ def create_app(
                 expected_revision=payload.expected_revision,
             ),
         )
+
+    @app.post("/api/sessions/{session_id}/jobs", status_code=202)
+    def submit_job_route(
+        session_id: str,
+        payload: JobPayload,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, object]:
+        try:
+            session, job_id = store.submit_job(
+                session_id,
+                payload.kind,
+                payload.expected_revision,
+            )
+        except KeyError:
+            raise _not_found(session_id) from None
+        except RevisionConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ConfigError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        body = _session_body(store, session_id, session)
+        background_tasks.add_task(store.jobs.run, job_id, job_runner)
+        return body
 
     if frontend_dir is not None:
         root = frontend_dir.resolve()

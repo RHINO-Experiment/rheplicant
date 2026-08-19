@@ -22,6 +22,26 @@ const VALIDATION = {
   preset_changes: [],
   run_blocked: false,
 };
+const PREVIEWS = {
+  classes: [
+    { preview_id: "graph" as const, label: "Signal path", cadence: "continuous" as const, priced: false, description: "free" },
+    { preview_id: "axes_shapes" as const, label: "Axes and shapes", cadence: "continuous" as const, priced: false, description: "free" },
+    { preview_id: "validate" as const, label: "Validate", cadence: "explicit" as const, priced: true, description: "priced" },
+    { preview_id: "forward" as const, label: "Preview forward", cadence: "explicit" as const, priced: true, description: "priced" },
+  ],
+  axes: [],
+  shapes: [],
+  forward_cost: {
+    label: "Cost unavailable until the document declares complete axes",
+    estimated_milliseconds: null,
+    estimated_peak_megabytes: null,
+    n_freq: null,
+    nside: null,
+    lmax: null,
+    optimizations: [],
+  },
+  declared_run_kinds: ["forward"],
+};
 const DIAGRAM: GraphDiagram = {
   name: "base",
   svg: SVG,
@@ -38,6 +58,7 @@ function documentState(yamlText = YAML) {
     nodes: [],
     walk_order: [],
     forms: FORMS,
+    previews: PREVIEWS,
     validation: VALIDATION,
     base_diagram: DIAGRAM,
     backend_diagram: { ...DIAGRAM, name: "backend" },
@@ -53,6 +74,7 @@ function state(overrides: Partial<EditorSession> = {}): EditorSession {
     validation_stale: false,
     can_undo: false,
     can_redo: false,
+    jobs: [],
     document: documentState(),
     ...overrides,
   };
@@ -78,6 +100,7 @@ function candidate(initial = state()) {
   }));
   const save = vi.fn(async () => state({ revision: initial.revision + 1 }));
   const unchanged = vi.fn(async () => initial);
+  const submitJob = vi.fn(async () => initial);
   const transport: SessionTransport = {
     replaceYaml,
     undo,
@@ -89,8 +112,9 @@ function candidate(initial = state()) {
     composeNode: unchanged,
     placeNode: unchanged,
     setSnapshotBefore: unchanged,
+    submitJob,
   };
-  return { transport, replaceYaml, undo, redo, load, save };
+  return { transport, replaceYaml, undo, redo, load, save, submitJob };
 }
 
 describe("durable React editor session", () => {

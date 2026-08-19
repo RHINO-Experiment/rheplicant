@@ -194,6 +194,7 @@ class TestTheLayerBoundaryIsMechanical:
         src = pathlib.Path(rheplicant.__file__).parent
         allowed_clients = {
             pathlib.Path("gui/form_catalog.py"),
+            pathlib.Path("gui/jobs.py"),
             pathlib.Path("gui/validation.py"),
         }
         offenders = [

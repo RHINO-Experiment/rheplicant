@@ -19,6 +19,20 @@ def client():
     return TestClient(create_app())
 
 
+@pytest.fixture
+def job_client():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import create_app
+
+    def runner(kind, yaml_text):
+        return {"kind": kind, "yaml_text": yaml_text}
+
+    return TestClient(create_app(job_runner=runner))
+
+
 def create_session(client):
     response = client.post("/api/sessions", json={"yaml_text": BASE})
     assert response.status_code == 201
@@ -31,6 +45,7 @@ def test_session_routes_expose_projection_and_durable_state(client):
     assert created["revision"] == 0
     assert created["dirty"] is False
     assert created["validation_stale"] is False
+    assert created["jobs"] == []
     assert created["document"]["validation"]["run_blocked"] is True
     assert created["can_undo"] is False
     assert len(created["document"]["nodes"]) == 33
@@ -246,3 +261,101 @@ runs: []
         json={"expected_revision": 2, "from_index": 0, "to_index": 1},
     )
     assert conflict.status_code == 409
+
+
+def test_priced_actions_return_job_ids_and_refresh_to_completed_results(job_client):
+    document = preflight_document(variants={})
+    created = job_client.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+
+    response = job_client.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 0, "kind": "validate"},
+    )
+    assert response.status_code == 202
+    submitted = response.json()
+    assert len(submitted["jobs"]) == 1
+    assert submitted["jobs"][0]["job_id"]
+    assert submitted["jobs"][0]["status"] == "queued"
+
+    refreshed = job_client.get(f"/api/sessions/{session_id}").json()
+    assert refreshed["jobs"][0]["status"] == "succeeded"
+    assert refreshed["jobs"][0]["result"]["kind"] == "validate"
+
+
+def test_every_explicit_action_returns_a_distinct_job_id(job_client):
+    document = preflight_document(variants={})
+    created = job_client.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+    ids = []
+
+    for kind in ("validate", "preview_forward", "run", "compare", "benchmark"):
+        response = job_client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": kind},
+        )
+        assert response.status_code == 202
+        ids.append(response.json()["jobs"][-1]["job_id"])
+
+    assert len(ids) == len(set(ids)) == 5
+
+
+def test_job_submission_is_revision_checked_before_scheduling(job_client):
+    document = preflight_document(variants={})
+    created = job_client.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+
+    response = job_client.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 8, "kind": "validate"},
+    )
+    assert response.status_code == 409
+    assert job_client.get(f"/api/sessions/{session_id}").json()["jobs"] == []
+
+
+def test_editing_marks_completed_priced_results_stale(job_client):
+    document = preflight_document(variants={})
+    text = yaml.safe_dump(document, sort_keys=False)
+    created = job_client.post("/api/sessions", json={"yaml_text": text}).json()
+    session_id = created["session_id"]
+    job_client.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 0, "kind": "validate"},
+    )
+    assert job_client.get(f"/api/sessions/{session_id}").json()["jobs"][0]["stale"] is False
+
+    changed = yaml.safe_load(text)
+    changed["runtime"]["seed"] = 7
+    edited = job_client.put(
+        f"/api/sessions/{session_id}/yaml",
+        json={
+            "expected_revision": 0,
+            "yaml_text": yaml.safe_dump(changed, sort_keys=False),
+        },
+    ).json()
+    assert edited["jobs"][0]["stale"] is True
+
+
+def test_text_refusal_blocks_every_execution_job_but_not_the_free_projection(client):
+    created = create_session(client)
+    session_id = created["session_id"]
+
+    for kind in ("validate", "preview_forward", "run", "compare", "benchmark"):
+        response = client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": kind},
+        )
+        assert response.status_code == 422
+        assert "text-level refusals" in response.json()["detail"]
+    fetched = client.get(f"/api/sessions/{session_id}").json()
+    assert len(fetched["document"]["nodes"]) == 33
+    assert fetched["jobs"] == []
