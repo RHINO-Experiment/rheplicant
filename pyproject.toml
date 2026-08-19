@@ -106,6 +106,9 @@ Documentation = "https://rheplicant.readthedocs.io"
 Repository = "https://github.com/RHINO-Experiment/rheplicant"
 Changelog = "https://rheplicant.readthedocs.io/en/latest/changelog.html"
 
+[project.scripts]
+rheplicant = "_rheplicant_bootstrap:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8",
@@ -146,7 +149,16 @@ MomentRFI = { git = "https://github.com/zzhang0123/MomentRFI" }
 MomentEmu = { git = "https://github.com/zzhang0123/MomentEmu" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rheplicant"]
+packages = ["src/rheplicant", "src/_rheplicant_bootstrap"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/rheplicant",
+    "/src/_rheplicant_bootstrap",
+    "/pyproject.toml",
+    "/README.md",
+    "/LICENSE",
+]
 
 [tool.ruff]
 line-length = 100
@@ -159,10 +171,10 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=rheplicant --cov-fail-under=80"
+addopts = "-q --cov=rheplicant --cov=_rheplicant_bootstrap --cov-fail-under=80"
 
 [tool.coverage.run]
-source = ["rheplicant"]
+source = ["rheplicant", "_rheplicant_bootstrap"]
 
 [tool.coverage.report]
 exclude_lines = [
