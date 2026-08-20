@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import math
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -219,19 +218,6 @@ def _source(yaml_text: str) -> SourceInput:
     )
 
 
-def _prepared_mapping(yaml_text: str) -> tuple[dict[str, object], str]:
-    from _rheplicant_bootstrap.output.manager import parse_output_grammar
-    from _rheplicant_bootstrap.prepare import prepare_config
-    from _rheplicant_bootstrap.presets import read_installed_preset
-
-    prepared = prepare_config(
-        _source(yaml_text),
-        preset_provider=read_installed_preset,
-        parse_outputs=parse_output_grammar,
-    )
-    return dict(_plain(prepared.source.layered_document)), prepared.source.base_dir
-
-
 def _finding(row: object, layer: str) -> dict[str, object]:
     return {
         "check": getattr(row, "check", ""),
@@ -308,80 +294,9 @@ def run_priced_validation(yaml_text: str) -> Mapping[str, object]:
     return _run_isolated_job("validate", yaml_text)
 
 
-def _array_summary(value: object, *, include_values: bool) -> dict[str, object]:
-    import numpy as np
-
-    array = np.asarray(value)
-    summary: dict[str, object] = {"shape": list(array.shape), "dtype": str(array.dtype)}
-    measured = np.abs(array) if np.iscomplexobj(array) else array
-    if np.iscomplexobj(array):
-        summary["statistic"] = "magnitude"
-    if array.size:
-        summary.update(
-            minimum=float(np.nanmin(measured)),
-            maximum=float(np.nanmax(measured)),
-            mean=float(np.nanmean(measured)),
-        )
-    if include_values and array.ndim == 2 and not np.iscomplexobj(array):
-        row_step = max(1, math.ceil(array.shape[0] / 64))
-        column_step = max(1, math.ceil(array.shape[1] / 64))
-        summary["values"] = array[::row_step, ::column_step].tolist()
-    return summary
-
-
-def _uniform_sky(configured: object) -> dict[str, float]:
-    import jax.numpy as jnp
-    import numpy as np
-
-    context = configured.context
-    state = configured.state
-    n_freq = int(state.coords.freq.shape[0])
-    found: dict[str, float] = {}
-    for name, resource in context.resources.items():
-        forward = getattr(resource, "forward", None)
-        nside = getattr(resource, "nside", None)
-        if callable(forward) and isinstance(nside, int) and nside > 0:
-            sky = jnp.full((n_freq, 12 * nside * nside), 200.0)
-            found[name] = float(np.asarray(forward(sky, state.coords)).mean())
-    return found
-
-
 def run_forward_preview(yaml_text: str) -> Mapping[str, object]:
-    """Execute one synthesized forward exit and return bounded render data."""
-    from rheplicant.config.orchestration import execute_prepared, prepare_document
-
-    document, base_dir = _prepared_mapping(yaml_text)
-    prepared = prepare_document(document, scope="all_layers", base_dir=base_dir)
-    record = execute_prepared(prepared)
-    if record.status != "ok":
-        if isinstance(record.error, BaseException):
-            raise record.error
-        raise RuntimeError("forward preview failed without a terminal error")
-    result = record.results["preview-forward"].product
-    data = getattr(result, "data", None)
-    if data is None:
-        raise ConfigError("forward preview produced no waterfall data.")
-    aux = getattr(result, "aux", {})
-    taps = {
-        str(name): _array_summary(value, include_values=False)
-        for name, value in aux.items()
-    } if isinstance(aux, Mapping) else {}
-    model = document.get("model", {})
-    adc = model.get("adc") if isinstance(model, Mapping) else None
-    n_bits = adc.get("n_bits") if isinstance(adc, Mapping) else None
-    saturated_fraction = None
-    if isinstance(n_bits, int) and not isinstance(n_bits, bool) and n_bits > 0:
-        import numpy as np
-
-        array = np.asarray(data)
-        saturated_fraction = float(np.mean(np.abs(array) >= 2 ** (n_bits - 1)))
-    configured = prepared.layers[0].configured
-    return {
-        "waterfall": _array_summary(data, include_values=True),
-        "taps": taps,
-        "saturated_fraction": saturated_fraction,
-        "uniform_sky_mean": _uniform_sky(configured),
-    }
+    """Execute one synthesized Forward exit in a fresh Plan 4 runtime."""
+    return _run_isolated_job("preview_forward", yaml_text)
 
 
 def execute_job(
@@ -402,26 +317,33 @@ def execute_job(
     if kind != "run" and kind not in _declared_kinds(yaml_text):
         raise ConfigError(f"The document declares no {kind!r} exit to run.")
     if dispatcher is None:
-        from _rheplicant_bootstrap.entry import dispatch_request
-
-        dispatcher = dispatch_request
-    stdout = StringIO()
-    stderr = StringIO()
-    exit_code = dispatcher("run", _source(yaml_text), stdout=stdout, stderr=stderr)
-    result = {
-        "exit_code": exit_code,
-        "stdout": stdout.getvalue(),
-        "stderr": stderr.getvalue(),
-    }
+        result = dict(_run_isolated_job(kind, yaml_text))
+        exit_code = result.get("exit_code")
+        stderr_text = str(result.get("stderr", ""))
+    else:
+        stdout = StringIO()
+        stderr = StringIO()
+        exit_code = dispatcher(
+            "run",
+            _source(yaml_text),
+            stdout=stdout,
+            stderr=stderr,
+        )
+        stderr_text = stderr.getvalue()
+        result = {
+            "exit_code": exit_code,
+            "stdout": stdout.getvalue(),
+            "stderr": stderr_text,
+        }
     if exit_code == 2:
-        error = ConfigError(stderr.getvalue().strip() or f"{kind} job was refused.")
-        output = _failure_audit(stderr.getvalue())
+        error = ConfigError(stderr_text.strip() or f"{kind} job was refused.")
+        output = _failure_audit(stderr_text)
         if output is not None:
             error.gui_output = output
         raise error
     if exit_code != 0:
-        error = RuntimeError(stderr.getvalue().strip() or f"{kind} job failed.")
-        output = _failure_audit(stderr.getvalue())
+        error = RuntimeError(stderr_text.strip() or f"{kind} job failed.")
+        output = _failure_audit(stderr_text)
         if output is not None:
             error.gui_output = output
         raise error

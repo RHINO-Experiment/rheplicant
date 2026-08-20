@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from tests.config.preflight_helpers import preflight_document
+from tests.config.test_config_document import synthetic_document
 
 from .test_document import BASE
 
@@ -35,10 +36,43 @@ def job_client():
     return TestClient(create_app(job_runner=runner))
 
 
-def create_session(client):
-    response = client.post("/api/sessions", json={"yaml_text": BASE})
+@pytest.fixture
+def real_job_client():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import create_app
+    from rheplicant.gui.jobs import execute_job
+
+    return TestClient(create_app(job_runner=execute_job))
+
+
+def create_session(client, yaml_text=BASE):
+    response = client.post("/api/sessions", json={"yaml_text": yaml_text})
     assert response.status_code == 201
     return response.json()
+
+
+def complete_priced_yaml(tmp_path):
+    document = synthetic_document()
+    document["defaults"] = ["rhino_v1"]
+    document["observation"]["pointing"] = {"materialise": []}
+    document["outputs"] = {
+        "dir": str(tmp_path / "priced-api"),
+        "clobber": False,
+        "write": {"arrays": {"format": "npz"}},
+    }
+    return yaml.safe_dump(document, sort_keys=False)
+
+
+def wait_for_terminal_job(client, session_id, kind):
+    for _ in range(5):
+        jobs = client.get(f"/api/sessions/{session_id}").json()["jobs"]
+        matches = [row for row in jobs if row["kind"] == kind]
+        if matches and matches[-1]["status"] in {"succeeded", "refused", "error"}:
+            return matches[-1]
+    raise AssertionError(f"{kind} job did not reach a terminal state")
 
 
 def test_session_routes_expose_projection_and_durable_state(client):
@@ -286,6 +320,22 @@ def test_priced_actions_return_job_ids_and_refresh_to_completed_results(job_clie
     refreshed = job_client.get(f"/api/sessions/{session_id}").json()
     assert refreshed["jobs"][0]["status"] == "succeeded"
     assert refreshed["jobs"][0]["result"]["kind"] == "validate"
+
+
+def test_real_priced_jobs_with_outputs_reach_succeeded(real_job_client, tmp_path):
+    session = create_session(real_job_client, complete_priced_yaml(tmp_path))
+
+    for kind in ("validate", "preview_forward"):
+        submitted = real_job_client.post(
+            f"/api/sessions/{session['session_id']}/jobs",
+            json={"expected_revision": session["revision"], "kind": kind},
+        )
+        assert submitted.status_code == 202
+        terminal = wait_for_terminal_job(
+            real_job_client, session["session_id"], kind
+        )
+        assert terminal["status"] == "succeeded"
+        assert terminal["stale"] is False
 
 
 def test_every_explicit_action_returns_a_distinct_job_id(job_client):

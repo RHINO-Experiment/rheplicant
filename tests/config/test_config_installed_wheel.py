@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from tests.config.test_config_cli import document
+from tests.config.test_config_document import synthetic_document
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UV = "uv"
@@ -342,6 +343,45 @@ def test_fresh_wheel_launches_gui_api_and_static_assets(
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate(timeout=5)
+
+
+def test_fresh_gui_wheel_contains_and_runs_the_scientific_worker(
+    fresh_install, built_distributions
+):
+    install = fresh_install(built_distributions["direct-wheel"], extras=("gui",))
+    worker_document = synthetic_document()
+    worker_document["defaults"] = ["rhino_v1"]
+    worker_document["observation"]["pointing"] = {"materialise": []}
+    worker_document["outputs"] = {
+        "dir": "priced-wheel",
+        "clobber": False,
+        "write": {"arrays": {"format": "npz"}},
+    }
+    completed = subprocess.run(
+        [
+            os.fspath(install.python),
+            "-m",
+            "_rheplicant_bootstrap.gui_worker",
+            "validate",
+        ],
+        input=yaml.safe_dump(worker_document, sort_keys=False).encode(
+            "utf-8", "strict"
+        ),
+        cwd=install.cwd,
+        env=install.env,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(
+        "utf-8", "replace"
+    )
+    prefix = b"\x1eRHEPLICANT_GUI_JOB "
+    encoded = completed.stdout.rsplit(prefix, 1)[1].split(b"\n", 1)[0]
+    frame = json.loads(encoded.decode("utf-8", "strict"))
+    assert frame == {
+        "status": "ok",
+        "result": {"findings": [], "layers": 2},
+    }
 
 
 def test_wheel_and_editable_preset_discovery_are_byte_identical(

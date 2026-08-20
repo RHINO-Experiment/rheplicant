@@ -6,10 +6,10 @@ from io import StringIO
 import pytest
 import yaml
 
+from _rheplicant_bootstrap.gui_worker import _array_summary
 from rheplicant.config import ConfigError
 from rheplicant.gui.jobs import (
     JobStore,
-    _array_summary,
     execute_job,
     forward_preview_document,
     run_forward_preview,
@@ -151,6 +151,52 @@ def test_validate_and_preview_use_separate_priced_orchestration_seams():
     )
 
 
+def test_job_identity_keeps_original_bytes_and_preview_detaches_only_runs():
+    exact_yaml = YAML
+    store = JobStore(id_factory=lambda: "job-1")
+
+    submitted = store.submit("session", "preview_forward", 7, exact_yaml)
+
+    assert submitted.yaml_digest == yaml_digest(exact_yaml)
+    captured = []
+    execute_job(
+        "preview_forward",
+        exact_yaml,
+        forwarder=lambda text: captured.append(text) or {"waterfall": {}},
+    )
+    preview_document = yaml.safe_load(captured[0])
+    assert preview_document["runs"] == [
+        {"name": "preview-forward", "kind": "forward"}
+    ]
+    assert "kind: optimize" in exact_yaml
+
+    execute_job(
+        "validate",
+        exact_yaml,
+        validator=lambda text: captured.append(text) or {"findings": []},
+    )
+    assert captured[1] == exact_yaml
+
+
+@pytest.mark.parametrize("kind", ["run", "compare", "benchmark"])
+def test_default_formal_jobs_use_the_clean_worker_with_exact_bytes(
+    monkeypatch, kind
+):
+    calls = []
+
+    def isolated(worker_kind, yaml_text):
+        calls.append((worker_kind, yaml_text))
+        return {"exit_code": 0, "stdout": "done", "stderr": ""}
+
+    monkeypatch.setattr("rheplicant.gui.jobs._run_isolated_job", isolated)
+
+    found = execute_job(kind, YAML)
+
+    assert calls == [(kind, YAML)]
+    assert found["exit_code"] == 0
+    assert found["stdout"] == "done"
+
+
 def test_real_priced_validation_and_forward_preview_cross_plan4_orchestration():
     text = yaml.safe_dump(synthetic_document(), sort_keys=False)
 
@@ -176,6 +222,23 @@ def test_real_priced_validation_accepts_plan4_preset_and_outputs(tmp_path):
     text = yaml.safe_dump(document, sort_keys=False)
 
     assert run_priced_validation(text) == {"findings": [], "layers": 2}
+
+
+def test_real_forward_preview_accepts_plan4_preset_and_outputs(tmp_path):
+    document = synthetic_document()
+    document["defaults"] = ["rhino_v1"]
+    document["observation"]["pointing"] = {"materialise": []}
+    document["outputs"] = {
+        "dir": str(tmp_path / "priced-preview"),
+        "clobber": False,
+        "write": {"arrays": {"format": "npz"}},
+    }
+    text = yaml.safe_dump(document, sort_keys=False)
+
+    found = run_forward_preview(forward_preview_document(text))
+
+    assert found["waterfall"]["shape"] == [16, 8]
+    assert len(found["waterfall"]["values"]) == 16
 
 
 def test_complex_taps_are_summarised_by_magnitude_without_losing_the_dtype():

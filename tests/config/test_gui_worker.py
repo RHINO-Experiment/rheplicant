@@ -4,12 +4,14 @@ import json
 import os
 import subprocess
 import sys
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
 import _rheplicant_bootstrap.gui_worker as gui_worker
+from _rheplicant_bootstrap.errors import ConfigError
 from rheplicant.gui import jobs
 from tests.config.test_config_document import synthetic_document
 
@@ -139,7 +141,7 @@ def test_validation_worker_closes_environment_after_success(monkeypatch):
     assert execution.close_calls == 1
 
 
-def test_parent_worker_adapter_passes_exact_utf8_bytes(monkeypatch):
+def test_parent_worker_adapter_preserves_exact_job_bytes(monkeypatch):
     exact_yaml = "schema_version: 1\n# café and formatting stay exact\n"
     captured = []
 
@@ -163,12 +165,190 @@ def test_parent_worker_adapter_passes_exact_utf8_bytes(monkeypatch):
         "findings": [],
         "layers": 1,
     }
+    preview = jobs.forward_preview_document(exact_yaml)
+    jobs.run_forward_preview(preview)
+    jobs._run_isolated_job("run", exact_yaml)
     assert captured == [
         (
             [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", "validate"],
             exact_yaml.encode("utf-8", "strict"),
-        )
+        ),
+        (
+            [
+                sys.executable,
+                "-m",
+                "_rheplicant_bootstrap.gui_worker",
+                "preview_forward",
+            ],
+            preview.encode("utf-8", "strict"),
+        ),
+        (
+            [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", "run"],
+            exact_yaml.encode("utf-8", "strict"),
+        ),
     ]
+    assert yaml.safe_load(preview)["runs"] == [
+        {"name": "preview-forward", "kind": "forward"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ConfigError("refused"), RuntimeError("boom")],
+)
+def test_priced_job_closes_environment_on_every_terminal_failure(
+    monkeypatch, failure
+):
+    class RecordingExecution:
+        def __init__(self):
+            self.close_calls = 0
+
+        @property
+        def document(self):
+            raise failure
+
+        def close(self):
+            self.close_calls += 1
+
+    execution = RecordingExecution()
+    monkeypatch.setattr(gui_worker, "_prepared_config", lambda _text: object())
+    monkeypatch.setattr(
+        gui_worker,
+        "prepare_execution_environment",
+        lambda *_args, **_kwargs: execution,
+    )
+
+    with pytest.raises(type(failure), match=str(failure)):
+        gui_worker._run_validation("exact yaml")
+
+    assert execution.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [None, ConfigError("refused"), RuntimeError("boom")],
+)
+def test_forward_preview_closes_environment_on_every_terminal_path(
+    monkeypatch, failure
+):
+    class RecordingOrchestration:
+        @staticmethod
+        def execute_prepared(_document, *, trace):
+            assert trace == "trace"
+            return "record"
+
+    class RecordingExecution:
+        orchestration = RecordingOrchestration()
+        document = SimpleNamespace(
+            layers=(SimpleNamespace(configured="configured"),)
+        )
+        trace = "trace"
+
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    prepared = SimpleNamespace(
+        source=SimpleNamespace(
+            layered_document={"model": {"adc": {"n_bits": 4}}}
+        )
+    )
+    execution = RecordingExecution()
+    monkeypatch.setattr(gui_worker, "_prepared_config", lambda _text: prepared)
+    monkeypatch.setattr(
+        gui_worker,
+        "prepare_execution_environment",
+        lambda *_args, **_kwargs: execution,
+    )
+
+    def bounded(record, *, configured, adc):
+        assert (record, configured, adc) == (
+            "record",
+            "configured",
+            {"n_bits": 4},
+        )
+        if failure is not None:
+            raise failure
+        return {"waterfall": {}}
+
+    monkeypatch.setattr(gui_worker, "_bounded_preview_result", bounded)
+
+    if failure is None:
+        assert gui_worker._run_forward_preview("exact yaml") == {
+            "waterfall": {}
+        }
+    else:
+        with pytest.raises(type(failure), match=str(failure)):
+            gui_worker._run_forward_preview("exact yaml")
+
+    assert execution.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("kind", "runner_name"),
+    [
+        ("validate", "validate"),
+        ("preview_forward", "preview"),
+        ("run", "formal"),
+        ("compare", "formal"),
+        ("benchmark", "formal"),
+    ],
+)
+def test_worker_main_routes_every_job_kind(monkeypatch, kind, runner_name):
+    calls = []
+
+    def runner(name):
+        def run(yaml_text):
+            calls.append((name, yaml_text))
+            return {"runner": name}
+
+        return run
+
+    monkeypatch.setattr(gui_worker, "_run_validation", runner("validate"))
+    monkeypatch.setattr(gui_worker, "_run_forward_preview", runner("preview"))
+    monkeypatch.setattr(gui_worker, "_run_formal", runner("formal"))
+    monkeypatch.setattr(
+        gui_worker,
+        "_write_frame",
+        lambda frame: calls.append(("frame", frame)),
+    )
+    monkeypatch.setattr(
+        gui_worker.sys,
+        "stdin",
+        SimpleNamespace(buffer=BytesIO(b"exact yaml bytes")),
+    )
+
+    assert gui_worker.main([kind]) == 0
+    assert calls == [
+        (runner_name, "exact yaml bytes"),
+        ("frame", {"status": "ok", "result": {"runner": runner_name}}),
+    ]
+
+
+def test_formal_worker_calls_plan4_dispatcher_with_exact_bytes(monkeypatch):
+    from _rheplicant_bootstrap import entry
+
+    calls = []
+
+    def dispatcher(command, source, *, stdout, stderr):
+        calls.append((command, source.input_bytes, stdout, stderr))
+        stdout.write("done")
+        stderr.write("detail")
+        return 7
+
+    monkeypatch.setattr(entry, "dispatch_request", dispatcher)
+
+    assert gui_worker._run_formal("schema_version: 1\n# café\n") == {
+        "exit_code": 7,
+        "stdout": "done",
+        "stderr": "detail",
+    }
+    assert calls[0][:2] == (
+        "run",
+        "schema_version: 1\n# café\n".encode("utf-8", "strict"),
+    )
 
 
 @pytest.mark.parametrize(
