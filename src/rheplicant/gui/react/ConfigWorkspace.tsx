@@ -2,12 +2,20 @@ import { useEffect, useState } from "react";
 
 import { ConfigField } from "./ConfigField";
 import { ConfigSectionNav } from "./ConfigSectionNav";
+import type { DraftCoordinator } from "./drafts";
 import type { WorkspaceSurface } from "./ModelWorkspace";
-import type { FormProjection, ProjectedWidget, SectionBadge } from "./types";
+import type { EditorSession, ProjectedWidget, SessionTransport } from "./types";
 
 export interface ConfigWorkspaceProps {
-  forms: FormProjection;
-  badges?: SectionBadge[];
+  session: EditorSession;
+  transport: SessionTransport;
+  drafts: DraftCoordinator;
+  disabled: boolean;
+  disabledReason: string | null;
+  requestedPath: string | null;
+  onAccept(next: EditorSession, message: string): void;
+  onEditYaml(path: string): void;
+  onRun(action: () => Promise<EditorSession>, message: string): void;
 }
 
 function matchesFilter(widget: ProjectedWidget, filter: string) {
@@ -17,20 +25,36 @@ function matchesFilter(widget: ProjectedWidget, filter: string) {
     || widget.path.toLowerCase() === needle;
 }
 
-function FieldGroup({ label, widgets }: { label: string; widgets: ProjectedWidget[] }) {
+type FieldGroupProps = Omit<ConfigWorkspaceProps, "requestedPath"> & {
+  label: string;
+  widgets: ProjectedWidget[];
+};
+
+function FieldGroup({ label, widgets, ...editorProps }: FieldGroupProps) {
   if (widgets.length === 0) return null;
   return (
     <section aria-label={label}>
       <h3>{label}</h3>
-      {widgets.map((widget) => <ConfigField key={widget.path} widget={widget} />)}
+      {widgets.map((widget) => (
+        <ConfigField key={widget.path} widget={widget} {...editorProps} />
+      ))}
     </section>
   );
 }
 
 export function useConfigWorkspace({
-  forms,
-  badges = [],
+  session,
+  transport,
+  drafts,
+  disabled,
+  disabledReason,
+  requestedPath,
+  onAccept,
+  onEditYaml,
+  onRun,
 }: ConfigWorkspaceProps): WorkspaceSurface {
+  const forms = session.document.forms;
+  const badges = session.document.validation.section_badges;
   const [activeSection, setActiveSection] = useState<string | null>(
     forms.sections[0]?.section_id ?? null,
   );
@@ -42,6 +66,16 @@ export function useConfigWorkspace({
   useEffect(() => {
     if (activeSection !== resolvedSection) setActiveSection(resolvedSection);
   }, [activeSection, resolvedSection]);
+
+  useEffect(() => {
+    if (requestedPath === null) return;
+    const section = forms.sections.find((candidate) => candidate.widgets.some(
+      (widget) => widget.path === requestedPath,
+    ));
+    if (!section) return;
+    setActiveSection(section.section_id);
+    setFilter(requestedPath);
+  }, [forms, requestedPath]);
 
   const visible = (selected?.widgets ?? [])
     .filter((widget) => widget.visible)
@@ -78,9 +112,42 @@ export function useConfigWorkspace({
         >
           <h2>{selected.label}</h2>
           {selected.reason && <p>{selected.reason}</p>}
-          <FieldGroup label="Missing required fields" widgets={missingRequired} />
-          <FieldGroup label="Present values" widgets={present} />
-          <FieldGroup label="Optional fields not set" widgets={optionalAbsent} />
+          <FieldGroup
+            label="Missing required fields"
+            widgets={missingRequired}
+            session={session}
+            transport={transport}
+            drafts={drafts}
+            disabled={disabled || selected.disabled}
+            disabledReason={disabledReason}
+            onAccept={onAccept}
+            onEditYaml={onEditYaml}
+            onRun={onRun}
+          />
+          <FieldGroup
+            label="Present values"
+            widgets={present}
+            session={session}
+            transport={transport}
+            drafts={drafts}
+            disabled={disabled || selected.disabled}
+            disabledReason={disabledReason}
+            onAccept={onAccept}
+            onEditYaml={onEditYaml}
+            onRun={onRun}
+          />
+          <FieldGroup
+            label="Optional fields not set"
+            widgets={optionalAbsent}
+            session={session}
+            transport={transport}
+            drafts={drafts}
+            disabled={disabled || selected.disabled}
+            disabledReason={disabledReason}
+            onAccept={onAccept}
+            onEditYaml={onEditYaml}
+            onRun={onRun}
+          />
           {visible.length === 0 && !selected.disabled && <p>No fields match this filter.</p>}
         </section>
       )}

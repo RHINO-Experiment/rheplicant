@@ -1,3 +1,4 @@
+import { FieldEditor, type FieldEditorProps } from "./FieldEditor";
 import type { ProjectedWidget } from "./types";
 
 function deliveryLabel(delivery: string | null) {
@@ -16,7 +17,9 @@ function projectedValue(widget: ProjectedWidget) {
   return encoded ?? String(widget.value);
 }
 
-export function ConfigField({ widget }: { widget: ProjectedWidget }) {
+type Props = { widget: ProjectedWidget } & Omit<FieldEditorProps, "widget">;
+
+export function ConfigField({ widget, ...editorProps }: Props) {
   const delivery = deliveryLabel(widget.delivery);
   return (
     <article aria-label={widget.path} aria-disabled={widget.disabled || undefined}>
@@ -31,6 +34,7 @@ export function ConfigField({ widget }: { widget: ProjectedWidget }) {
       </p>
       {widget.choices.length > 0 && <p>Choices: {widget.choices.join(" · ")}</p>}
       {widget.reason && <p>{widget.reason}</p>}
+      <FieldEditor widget={widget} {...editorProps} />
       <details>
         <summary>Delivery and source metadata</summary>
         <dl>

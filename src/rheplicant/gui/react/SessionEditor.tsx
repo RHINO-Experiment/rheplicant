@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useConfigWorkspace } from "./ConfigWorkspace";
+import { DiagnosticsDrawer } from "./DiagnosticsDrawer";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
 import { FirstJobConfirmation } from "./FirstJobConfirmation";
 import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
@@ -36,6 +37,9 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const [session, setSession] = useState(initial);
   const [draft, setDraft] = useState<DraftEnvelope>(NO_DRAFT);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [requestedConfigPath, setRequestedConfigPath] = useState<string | null>(null);
+  const [yamlContext, setYamlContext] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
   const [statusError, setStatusError] = useState(false);
   const [yamlDiagnostic, setYamlDiagnostic] = useState<string | null>(null);
@@ -145,6 +149,7 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
       jobBlocked
       || busyRef.current
       || drawerOpen
+      || diagnosticsOpen
       || pendingJob !== null
       || opener === null
       || !opener.isConnected
@@ -193,9 +198,26 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     onRun: (action, message) => void run(action, message),
   });
   const configSurface = useConfigWorkspace({
-    forms: session.document.forms,
-    badges: session.document.validation.section_badges,
+    session,
+    transport,
+    drafts: coordinator,
+    disabled: busy || (draft.kind !== "none" && draft.kind !== "field"),
+    disabledReason: reasonId ?? null,
+    requestedPath: requestedConfigPath,
+    onAccept: accept,
+    onEditYaml(path) {
+      if (pendingJob !== null) return;
+      setYamlContext(path);
+      setDiagnosticsOpen(false);
+      setDrawerOpen(true);
+    },
+    onRun: (action, message) => void run(action, message),
   });
+  useEffect(() => {
+    if (requestedConfigPath !== null && activeWorkspace === "config" && !diagnosticsOpen) {
+      setRequestedConfigPath(null);
+    }
+  }, [activeWorkspace, diagnosticsOpen, requestedConfigPath]);
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
     model: modelSurface,
     config: configSurface,
@@ -206,7 +228,8 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const actionDescription = reasonId;
 
   return <WorkbenchShell
-    header={<WorkbenchHeader dirty={session.dirty} validationStale={session.validation_stale} revision={session.revision} mutationBlocked={mutationBlocked} mutationReason={mutationReason} yamlBlocked={pendingJob !== null} onOpenYaml={() => { if (pendingJob === null) setDrawerOpen(true); }} actions={<>
+    header={<WorkbenchHeader dirty={session.dirty} validationStale={session.validation_stale} revision={session.revision} mutationBlocked={mutationBlocked} mutationReason={mutationReason} yamlBlocked={pendingJob !== null} onOpenYaml={() => { if (pendingJob === null) { setYamlContext(null); setDiagnosticsOpen(false); setDrawerOpen(true); } }} actions={<>
+      <button type="button" disabled={pendingJob !== null} onClick={() => { setDrawerOpen(false); setDiagnosticsOpen(true); }}>Diagnostics</button>
       <button disabled={mutationBlocked || !session.can_undo} aria-describedby={actionDescription} onClick={() => void run(() => transport.undo(session.session_id, session.revision), "Undid YAML edit")}>Undo</button>
       <button disabled={mutationBlocked || !session.can_redo} aria-describedby={actionDescription} onClick={() => void run(() => transport.redo(session.session_id, session.revision), "Redid YAML edit")}>Redo</button>
       <label>Load YAML<input aria-label="Load YAML file" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain" disabled={mutationBlocked} aria-describedby={actionDescription} onChange={load} /></label>
@@ -217,8 +240,9 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     main={<><OnboardingChecklist missingRequired={session.document.forms.missing_required} runBlocked={session.document.validation.run_blocked} jobs={session.jobs} /><section id={`workspace-panel-${activeWorkspace}`} role="tabpanel" aria-label={workspaceLabels[activeWorkspace]} aria-labelledby={`workspace-tab-${activeWorkspace}`}>{surface.main}</section></>}
     inspector={surface.inspector}
     jobs={<p role={statusError ? "alert" : "status"} className={statusError ? "error-surface" : undefined}>{status}</p>}
-    overlay={drawerOpen || pendingJob !== null ? <>
-      {drawerOpen && <YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshJobs()} />}
+    overlay={drawerOpen || diagnosticsOpen || pendingJob !== null ? <>
+      {drawerOpen && <>{yamlContext && <p>YAML context: <code>{yamlContext}</code></p>}<YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshJobs()} /></>}
+      {diagnosticsOpen && <DiagnosticsDrawer session={session} onOpenConfigPath={(path) => { setRequestedConfigPath(path); setActiveWorkspace("config"); setDiagnosticsOpen(false); }} onOpenYamlPath={(path) => { setYamlContext(path); setDiagnosticsOpen(false); setDrawerOpen(true); }} onClose={() => setDiagnosticsOpen(false)} />}
       {pendingJob !== null && <FirstJobConfirmation kind={pendingJob} blocked={jobBlocked} onConfirm={confirmPendingJob} onCancel={cancelPendingJob} />}
     </> : null}
   />;
