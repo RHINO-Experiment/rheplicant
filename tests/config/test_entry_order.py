@@ -25,6 +25,7 @@ def test_plugin_fact_is_recorded_before_post_import_runtime_verification(
     tmp_path, monkeypatch
 ):
     import _rheplicant_bootstrap.entry as entry
+    import _rheplicant_bootstrap.execution_environment as environment
 
     events = []
 
@@ -59,19 +60,19 @@ def test_plugin_fact_is_recorded_before_post_import_runtime_verification(
         events.append("runtime_environment")
         return Session(), import_main()
 
-    monkeypatch.setattr(entry, "establish_runtime", establish)
+    monkeypatch.setattr(environment, "establish_runtime", establish)
     monkeypatch.setattr(
-        entry.importlib,
+        environment.importlib,
         "import_module",
         lambda name: events.append(f"main_import:{name}") or Orchestration(),
     )
-    monkeypatch.setattr(entry, "runtime_audit_row", lambda _session: {})
+    monkeypatch.setattr(environment, "runtime_audit_row", lambda _session: {})
     monkeypatch.setattr(
-        entry,
+        environment,
         "import_plugin",
         lambda name: events.append(f"import:{name}") or object(),
     )
-    monkeypatch.setattr(entry, "plugin_audit_row", lambda _record: {})
+    monkeypatch.setattr(environment, "plugin_audit_row", lambda _record: {})
     prepared = SimpleNamespace(
         process=SimpleNamespace(runtime=object(), plugins=("trusted.plugin",)),
         source=SimpleNamespace(layered_document={}, base_dir=str(tmp_path)),

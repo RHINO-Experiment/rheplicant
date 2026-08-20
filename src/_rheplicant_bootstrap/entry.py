@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import importlib
 import os
-import tempfile
 import traceback
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
 from typing import Literal, TextIO, cast
 
 from _rheplicant_bootstrap.audit import AuditTrace
@@ -31,12 +28,12 @@ from _rheplicant_bootstrap.audit.types import (
     ArtefactTable,
     AuditSnapshot,
 )
-from _rheplicant_bootstrap.capture import (
-    CapturedInput,
-    CaptureService,
-    captured_input_json,
-)
+from _rheplicant_bootstrap.capture import CaptureService
 from _rheplicant_bootstrap.errors import ConfigError
+from _rheplicant_bootstrap.execution_environment import (
+    TRUSTED_CODE_WARNING,
+    prepare_execution_environment,
+)
 from _rheplicant_bootstrap.output.manager import (
     acquire_output_lease,
     close_output_lease,
@@ -64,20 +61,16 @@ from _rheplicant_bootstrap.output.types import (
     PublicationLease,
     VerifiedOutputLease,
 )
-from _rheplicant_bootstrap.plugins import import_plugin, plugin_audit_row
 from _rheplicant_bootstrap.prepare import PreparedConfig, prepare_config
 from _rheplicant_bootstrap.presets import (
     PresetSnapshot,
     read_installed_preset,
     validate_preset_document,
 )
-from _rheplicant_bootstrap.runtime import establish_runtime, runtime_audit_row
 from _rheplicant_bootstrap.types import SourceInput, Status
 from _rheplicant_bootstrap.yaml import safe_load_document
 
-_TRUSTED_CODE_WARNING = (
-    "warning: trusted plugin/python code may perform unobserved filesystem I/O\n"
-)
+_TRUSTED_CODE_WARNING = TRUSTED_CODE_WARNING
 
 
 def _exception_row(error: BaseException) -> dict[str, str]:
@@ -440,49 +433,19 @@ def _prepare_document(
     stderr: TextIO,
     warning_written: bool,
 ):
-    session, orchestration = establish_runtime(
-        prepared.process.runtime,
-        import_main=lambda: importlib.import_module(
-            "rheplicant.config.orchestration"
-        ),
+    found = prepare_execution_environment(
+        prepared,
+        trace=trace,
+        stderr=stderr,
+        warning_written=warning_written,
     )
-    trace.record_runtime(runtime_audit_row(session))
-    trace.boundary_completed("runtime")
-    if prepared.process.plugins and not warning_written:
-        stderr.write(_TRUSTED_CODE_WARNING)
-        stderr.flush()
-        warning_written = True
-    for name in prepared.process.plugins:
-        record = import_plugin(name)
-        trace.record_plugin(plugin_audit_row(record))
-        session.verify(boundary=f"plugin {name!r}")
-    trace.boundary_completed("plugins")
-
-    root = Path(tempfile.mkdtemp(prefix="rheplicant-capture-"))
-
-    def on_verified(layer, row: CapturedInput) -> None:
-        trace.record_input(layer, captured_input_json(row))
-
-    capture = CaptureService(root, on_verified=on_verified)
-    try:
-        document = orchestration.prepare_document(
-            prepared.source.layered_document,
-            scope="all_layers",
-            base_dir=prepared.source.base_dir,
-            layers=prepared.layers,
-            layer_origins=prepared.layer_origins,
-            layer_deletions=prepared.layer_deletions,
-            trace=trace,
-            capture=capture,
-        )
-        if trace.snapshot().python_targets and not warning_written:
-            stderr.write(_TRUSTED_CODE_WARNING)
-            stderr.flush()
-            warning_written = True
-        return session, orchestration, document, capture, warning_written
-    except BaseException:
-        capture.close()
-        raise
+    return (
+        found.runtime,
+        found.orchestration,
+        found.document,
+        found.capture,
+        found.warning_written,
+    )
 
 
 def dispatch_request(
