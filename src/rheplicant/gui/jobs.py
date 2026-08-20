@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import math
+import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from io import StringIO
 from threading import RLock
-from typing import Literal
+from typing import Literal, cast
 from uuid import uuid4
 
 import yaml
@@ -117,11 +120,14 @@ class JobStore:
             )
         except Exception as error:  # noqa: BLE001 -- the job records terminal errors
             output = getattr(error, "gui_output", None)
+            exception_type = getattr(
+                error, "job_exception_type", type(error).__name__
+            )
             finished = replace(
                 running,
                 status="error",
                 result=None if output is None else {"output": output},
-                message=f"{type(error).__name__}: {error}",
+                message=f"{exception_type}: {error}",
             )
         else:
             finished = replace(running, status="succeeded", result=_plain(result))
@@ -236,18 +242,70 @@ def _finding(row: object, layer: str) -> dict[str, object]:
     }
 
 
-def run_priced_validation(yaml_text: str) -> Mapping[str, object]:
-    """Run the public Plan 4 orchestration through all priced boundaries."""
-    from rheplicant.config.orchestration import prepare_document
+_FRAME_PREFIX = b"\x1eRHEPLICANT_GUI_JOB "
 
-    document, base_dir = _prepared_mapping(yaml_text)
-    prepared = prepare_document(document, scope="all_layers", base_dir=base_dir)
-    findings = [
-        _finding(row, layer.layer.prefix or "base")
-        for layer in prepared.layers
-        for row in layer.configured.report.findings
-    ]
-    return {"findings": findings, "layers": len(prepared.layers)}
+
+def _last_worker_frame(stdout: bytes) -> Mapping[str, object]:
+    at = stdout.rfind(_FRAME_PREFIX)
+    if at < 0:
+        raise RuntimeError("GUI scientific worker returned no result frame")
+    payload = stdout[at + len(_FRAME_PREFIX) :].split(b"\n", 1)[0]
+    frame = json.loads(payload.decode("utf-8", "strict"))
+    if not isinstance(frame, Mapping) or frame.get("status") not in {
+        "ok",
+        "refused",
+        "error",
+    }:
+        raise RuntimeError(
+            "GUI scientific worker returned an invalid result frame"
+        )
+    status = frame["status"]
+    if status == "ok" and not isinstance(frame.get("result"), Mapping):
+        raise RuntimeError("GUI scientific worker result must be a mapping")
+    if status == "refused" and not isinstance(frame.get("message"), str):
+        raise RuntimeError(
+            "GUI scientific worker refusal must carry a message"
+        )
+    if status == "error" and (
+        not isinstance(frame.get("exception_type"), str)
+        or not isinstance(frame.get("message"), str)
+    ):
+        raise RuntimeError(
+            "GUI scientific worker error must carry a type and message"
+        )
+    return frame
+
+
+def _run_isolated_job(
+    kind: JobKind, yaml_text: str
+) -> Mapping[str, object]:
+    completed = subprocess.run(
+        [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", kind],
+        input=yaml_text.encode("utf-8", "strict"),
+        capture_output=True,
+        check=False,
+    )
+    stderr = completed.stderr.decode("utf-8", "replace")[-4000:]
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"GUI scientific worker exited {completed.returncode}: {stderr}"
+        )
+    try:
+        frame = _last_worker_frame(completed.stdout)
+    except (RuntimeError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"{error}; worker stderr: {stderr}") from None
+    if frame["status"] == "refused":
+        raise ConfigError(str(frame["message"]))
+    if frame["status"] == "error":
+        error = RuntimeError(str(frame["message"]))
+        error.job_exception_type = str(frame["exception_type"])
+        raise error
+    return cast(Mapping[str, object], frame["result"])
+
+
+def run_priced_validation(yaml_text: str) -> Mapping[str, object]:
+    """Run priced validation in a fresh Plan 4 runtime environment."""
+    return _run_isolated_job("validate", yaml_text)
 
 
 def _array_summary(value: object, *, include_values: bool) -> dict[str, object]:

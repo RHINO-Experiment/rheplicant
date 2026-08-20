@@ -66,6 +66,22 @@ def test_runner_completion_and_refusal_are_retained_without_mutating_yaml():
     assert refused_store.get("job-r").message == "priced refusal"
 
 
+def test_runner_retains_a_worker_supplied_terminal_exception_name():
+    store = JobStore(id_factory=lambda: "job-error")
+    row = store.submit("session-1", "validate", 0, YAML)
+    error = RuntimeError("worker failed")
+    error.job_exception_type = "WorkerValueError"
+
+    store.run(
+        row.job_id,
+        lambda _kind, _yaml: (_ for _ in ()).throw(error),
+    )
+
+    finished = store.get(row.job_id)
+    assert finished.status == "error"
+    assert finished.message == "WorkerValueError: worker failed"
+
+
 def test_forward_preview_replaces_every_declared_exit_with_one_forward_only():
     preview = yaml.safe_load(forward_preview_document(YAML))
 
@@ -146,6 +162,20 @@ def test_real_priced_validation_and_forward_preview_cross_plan4_orchestration():
     assert len(previewed["waterfall"]["values"]) == 16
     assert all(len(row) == 8 for row in previewed["waterfall"]["values"])
     assert previewed["saturated_fraction"] is None
+
+
+def test_real_priced_validation_accepts_plan4_preset_and_outputs(tmp_path):
+    document = synthetic_document()
+    document["defaults"] = ["rhino_v1"]
+    document["observation"]["pointing"] = {"materialise": []}
+    document["outputs"] = {
+        "dir": str(tmp_path / "priced-preview"),
+        "clobber": False,
+        "write": {"arrays": {"format": "npz"}},
+    }
+    text = yaml.safe_dump(document, sort_keys=False)
+
+    assert run_priced_validation(text) == {"findings": [], "layers": 2}
 
 
 def test_complex_taps_are_summarised_by_magnitude_without_losing_the_dtype():
