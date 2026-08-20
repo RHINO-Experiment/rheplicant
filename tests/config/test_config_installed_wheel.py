@@ -5,23 +5,23 @@ import hashlib
 import json
 import os
 import re
-import socket
 import subprocess
-import time
-import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 import yaml
 
 from tests.config.test_config_cli import document
 from tests.config.test_config_document import synthetic_document
+from tests.config.wheel_support import (
+    PROJECT_ROOT,
+    Install,
+    build_distributions,
+    fresh_install_factory,
+    running_gui,
+)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-UV = "uv"
 PRESET = PROJECT_ROOT / "src/rheplicant/config/presets/rhino_v1.yaml"
 SCHEMAS = (
     "provenance-v1.schema.json",
@@ -30,124 +30,14 @@ SCHEMAS = (
 )
 
 
-def _run(arguments, *, cwd=PROJECT_ROOT, env=None):
-    completed = subprocess.run(
-        arguments,
-        cwd=cwd,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode == 0, (
-        f"command failed: {arguments!r}\n{completed.stdout}\n{completed.stderr}"
-    )
-    return completed
-
-
-def _single(directory: Path, suffix: str) -> Path:
-    rows = tuple(path for path in directory.iterdir() if path.name.endswith(suffix))
-    assert len(rows) == 1, rows
-    return rows[0]
-
-
 @pytest.fixture(scope="session")
 def built_distributions(tmp_path_factory):
-    root = tmp_path_factory.mktemp("config-distributions")
-    direct = root / "direct"
-    sdist = root / "sdist"
-    derived = root / "from-sdist"
-    _run([UV, "build", "--wheel", "--out-dir", str(direct), "--clear"])
-    _run([UV, "build", "--sdist", "--out-dir", str(sdist), "--clear"])
-    archive = _single(sdist, ".tar.gz")
-    _run(
-        [
-            UV,
-            "build",
-            str(archive),
-            "--wheel",
-            "--out-dir",
-            str(derived),
-            "--clear",
-        ]
-    )
-    return {
-        "direct-wheel": _single(direct, ".whl"),
-        "sdist-wheel": _single(derived, ".whl"),
-        "root": root,
-    }
-
-
-@dataclass(frozen=True)
-class Install:
-    python: Path
-    command: Path
-    gui_command: Path
-    cwd: Path
-    env: dict[str, str]
-
-    def run(self, arguments, *, input=None):
-        return subprocess.run(
-            [os.fspath(self.command), *arguments],
-            cwd=self.cwd,
-            env=self.env,
-            input=input,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-
-    def python_run(self, program: str):
-        return _run(
-            [os.fspath(self.python), "-c", program],
-            cwd=self.cwd,
-            env=self.env,
-        )
+    return build_distributions(tmp_path_factory)
 
 
 @pytest.fixture
 def fresh_install(tmp_path):
-    counter = 0
-
-    def install(
-        source: Path,
-        *,
-        editable: bool = False,
-        extras: tuple[str, ...] = (),
-    ) -> Install:
-        nonlocal counter
-        counter += 1
-        root = tmp_path / f"install-{counter}"
-        venv = root / "venv"
-        cwd = root / "cwd"
-        cwd.mkdir(parents=True)
-        _run([UV, "venv", "--clear", str(venv)])
-        arguments = [
-            UV,
-            "pip",
-            "install",
-            "--python",
-            os.fspath(venv / "bin/python"),
-        ]
-        if editable:
-            arguments.append("--editable")
-        requirement = os.fspath(source)
-        if extras:
-            requirement += f"[{','.join(extras)}]"
-        arguments.append(requirement)
-        _run(arguments)
-        env = dict(os.environ)
-        env.pop("PYTHONPATH", None)
-        env.pop("PYTHONHOME", None)
-        return Install(
-            venv / "bin/python",
-            venv / "bin/rheplicant",
-            venv / "bin/rheplicant-gui",
-            cwd,
-            env,
-        )
-
-    return install
+    return fresh_install_factory(tmp_path)
 
 
 def _resource_probe(install: Install) -> dict[str, object]:
@@ -284,40 +174,9 @@ def test_fresh_wheel_launches_gui_api_and_static_assets(
     built_distributions,
 ):
     install = fresh_install(built_distributions["direct-wheel"], extras=("gui",))
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-
-    process = subprocess.Popen(
-        [
-            os.fspath(install.gui_command),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
-        ],
-        cwd=install.cwd,
-        env=install.env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    base_url = f"http://127.0.0.1:{port}"
-    try:
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                with urllib.request.urlopen(base_url + "/", timeout=1) as response:
-                    markup = response.read().decode("utf-8")
-                break
-            except (OSError, urllib.error.URLError):
-                if process.poll() is not None or time.monotonic() >= deadline:
-                    stdout, stderr = process.communicate(timeout=5)
-                    pytest.fail(f"GUI did not start.\nstdout:\n{stdout}\nstderr:\n{stderr}")
-                time.sleep(0.1)
-
+    with running_gui(install) as base_url:
+        with urllib.request.urlopen(base_url + "/", timeout=5) as response:
+            markup = response.read().decode("utf-8")
         assert "Rheplicant YAML config editor" in markup
         asset = re.search(r'src="(/[^"]+\.js)"', markup)
         assert asset is not None
@@ -336,13 +195,6 @@ def test_fresh_wheel_launches_gui_api_and_static_assets(
             payload = json.load(response)
         assert response.status == 201
         assert payload["document"]["yaml_text"] == "model: {}\nruns: []\n"
-    finally:
-        process.terminate()
-        try:
-            process.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate(timeout=5)
 
 
 def test_fresh_gui_wheel_contains_and_runs_the_scientific_worker(
