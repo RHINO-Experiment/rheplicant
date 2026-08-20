@@ -847,3 +847,59 @@ def test_completed_job_audit_link_is_identity_bound(tmp_path):
     assert browser.get(
         f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
     ).status_code == 409
+
+
+def test_formal_job_api_projects_closed_unsafe_output_refusal(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import create_app
+    from rheplicant.gui.jobs import execute_job
+    from rheplicant.gui.outputs import OutputState
+
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs._inspection_state",
+        lambda _inspection: OutputState(
+            "blocked_unsafe",
+            "Closed API unsafe output projection.",
+        ),
+    )
+
+    dispatched = []
+
+    def refused(_command, _source, *, stdout, stderr):
+        dispatched.append(True)
+        stderr.write("formal API refusal without an output classification")
+        return 2
+
+    browser = TestClient(create_app(job_runner=lambda kind, text: execute_job(
+        kind,
+        text,
+        dispatcher=refused,
+    )))
+    document = preflight_document(variants={})
+    target = tmp_path / "unsafe-api-result"
+    document["outputs"] = {"dir": str(target), "stdout": "none"}
+    created = browser.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+
+    submitted = browser.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 0, "kind": "run"},
+    )
+    assert submitted.status_code == 202
+    found = browser.get(f"/api/sessions/{session_id}/jobs").json()["jobs"][0]
+    assert found["status"] == "refused"
+    assert found["message"] == "Closed API unsafe output projection."
+    assert dispatched == []
+    assert found["result"] == {
+        "output": {
+            "state": "blocked_unsafe",
+            "state_message": "Closed API unsafe output projection.",
+            "target_path": str(target),
+        }
+    }

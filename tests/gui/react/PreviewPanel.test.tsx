@@ -27,5 +27,8 @@ describe("forward preview summary", () => {
     expect(continuous).toHaveTextContent("n_freq = 4");
     expect(screen.getByText("estimated 24.13 ms / 14.25 MB for 4 channels")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Result summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Completed audit bundles" }))
+      .not.toBeInTheDocument();
   });
 });

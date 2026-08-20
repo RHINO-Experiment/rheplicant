@@ -151,6 +151,26 @@ def _plain(value: object) -> object:
     return value
 
 
+def _unsafe_formal_refusal(yaml_text: str) -> ConfigError | None:
+    from rheplicant.gui.outputs import project_output_workflow
+
+    try:
+        projection = project_output_workflow(yaml_text)
+    except Exception:  # noqa: BLE001 -- optional preflight cannot replace job truth
+        return None
+    if projection.state != "blocked_unsafe":
+        return None
+    output: dict[str, object] = {
+        "state": projection.state,
+        "state_message": projection.state_message,
+    }
+    if isinstance(projection.target_path, str):
+        output["target_path"] = projection.target_path
+    error = ConfigError(projection.state_message)
+    error.gui_output = output
+    return error
+
+
 def _error_result(error: ConfigError) -> object | None:
     output = getattr(error, "gui_output", None)
     report = getattr(error, "report", None)
@@ -316,6 +336,9 @@ def execute_job(
         raise ConfigError(f"unknown GUI job kind {kind!r}.")
     if kind != "run" and kind not in _declared_kinds(yaml_text):
         raise ConfigError(f"The document declares no {kind!r} exit to run.")
+    unsafe_refusal = _unsafe_formal_refusal(yaml_text)
+    if unsafe_refusal is not None:
+        raise unsafe_refusal
     if dispatcher is None:
         result = dict(_run_isolated_job(kind, yaml_text))
         exit_code = result.get("exit_code")

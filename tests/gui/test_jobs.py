@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -64,6 +65,172 @@ def test_runner_completion_and_refusal_are_retained_without_mutating_yaml():
     )
     assert refused_store.get("job-r").status == "refused"
     assert refused_store.get("job-r").message == "priced refusal"
+    assert refused_store.get("job-r").result is None
+
+
+@pytest.mark.parametrize("kind", ["run", "compare", "benchmark"])
+def test_unsafe_formal_refusal_projects_only_the_closed_output_state(
+    kind,
+    monkeypatch,
+):
+    from rheplicant.gui.outputs import OutputState
+
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs._inspection_state",
+        lambda _inspection: OutputState(
+            "blocked_unsafe",
+            "Closed unsafe output projection.",
+        ),
+    )
+
+    dispatched = []
+
+    def refused(_command, _source, *, stdout, stderr):
+        dispatched.append(True)
+        stderr.write("formal refusal without an output classification")
+        return 2
+
+    store = JobStore(id_factory=lambda: f"job-unsafe-{kind}")
+    row = store.submit("session-1", kind, 0, YAML)
+    store.run(
+        row.job_id,
+        lambda kind, text: execute_job(kind, text, dispatcher=refused),
+    )
+
+    finished = store.get(row.job_id)
+    assert finished.status == "refused"
+    assert finished.message == "Closed unsafe output projection."
+    assert dispatched == []
+    assert finished.result == {
+        "output": {
+            "state": "blocked_unsafe",
+            "state_message": "Closed unsafe output projection.",
+            "target_path": "/rheplicant-gui/results/example",
+        }
+    }
+
+
+def test_projector_failure_cannot_escape_generic_refusal_or_retain_yaml(monkeypatch):
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs.project_output_workflow",
+        lambda _yaml: (_ for _ in ()).throw(RuntimeError("projection failed")),
+    )
+    store = JobStore(id_factory=lambda: "job-projector-error")
+    row = store.submit("session-1", "run", 0, YAML)
+
+    def refused(_command, _source, *, stdout, stderr):
+        stderr.write("original refusal")
+        return 2
+
+    store.run(
+        row.job_id,
+        lambda kind, text: execute_job(kind, text, dispatcher=refused),
+    )
+
+    finished = store.get(row.job_id)
+    assert finished.status == "refused"
+    assert finished.message == "original refusal"
+    assert finished.result is None
+    assert row.job_id not in store._yaml
+
+
+def test_undeclared_compare_is_not_relabelled_by_an_unsafe_output_projection(
+    monkeypatch,
+):
+    calls = []
+
+    def unsafe_projection(_yaml):
+        calls.append(True)
+        return SimpleNamespace(
+            state="blocked_unsafe",
+            state_message="Unrelated unsafe projection.",
+            target_path="/unrelated",
+        )
+
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs.project_output_workflow",
+        unsafe_projection,
+    )
+    document = yaml.safe_load(YAML)
+    document["runs"] = [{"name": "fit", "kind": "optimize", "n_steps": 2}]
+    run_only_yaml = yaml.safe_dump(document, sort_keys=False)
+    store = JobStore(id_factory=lambda: "job-no-compare")
+    row = store.submit("session-1", "compare", 0, run_only_yaml)
+    store.run(row.job_id, execute_job)
+
+    finished = store.get(row.job_id)
+    assert calls == []
+    assert finished.status == "refused"
+    assert finished.message == "The document declares no 'compare' exit to run."
+    assert finished.result is None
+
+
+def test_non_unsafe_formal_projection_does_not_enrich_a_dispatcher_refusal(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs.project_output_workflow",
+        lambda _yaml: SimpleNamespace(
+            state="ready_new",
+            state_message="Ready.",
+            target_path="/ready",
+        ),
+    )
+
+    def refused(_command, _source, *, stdout, stderr):
+        stderr.write("ordinary formal refusal")
+        return 2
+
+    store = JobStore(id_factory=lambda: "job-ready-refusal")
+    row = store.submit("session-1", "run", 0, YAML)
+    store.run(
+        row.job_id,
+        lambda kind, text: execute_job(kind, text, dispatcher=refused),
+    )
+
+    finished = store.get(row.job_id)
+    assert finished.status == "refused"
+    assert finished.message == "ordinary formal refusal"
+    assert finished.result is None
+
+
+@pytest.mark.parametrize("kind", ["validate", "preview_forward"])
+def test_non_formal_jobs_never_enter_the_output_safety_bridge(kind, monkeypatch):
+    calls = []
+
+    def ready_projection(_yaml):
+        calls.append(True)
+        return SimpleNamespace(
+            state="ready_new",
+            state_message="Ready.",
+            target_path="/ready",
+        )
+
+    monkeypatch.setattr(
+        "rheplicant.gui.outputs.project_output_workflow",
+        ready_projection,
+    )
+
+    def refused(_yaml):
+        raise ConfigError("non-formal refusal")
+
+    store = JobStore(id_factory=lambda: f"job-{kind}")
+    row = store.submit("session-1", kind, 0, YAML)
+    store.run(
+        row.job_id,
+        lambda selected, text: execute_job(
+            selected,
+            text,
+            validator=refused,
+            forwarder=refused,
+        ),
+    )
+
+    finished = store.get(row.job_id)
+    assert calls == []
+    assert finished.status == "refused"
+    assert finished.message == "non-formal refusal"
+    assert finished.result is None
 
 
 def test_runner_retains_a_worker_supplied_terminal_exception_name():
@@ -287,4 +454,6 @@ def test_refused_job_retains_its_published_audit_bundle_links(tmp_path):
     assert finished.status == "refused"
     assert finished.result["output"]["target_path"] == str(target)
     assert finished.result["output"]["marker_id"] == marker_id
+    assert finished.result["output"]["target_device"] == target.stat().st_dev
+    assert finished.result["output"]["target_inode"] == target.stat().st_ino
     assert finished.result["output"]["audit_files"] == ["config.resolved.yaml"]

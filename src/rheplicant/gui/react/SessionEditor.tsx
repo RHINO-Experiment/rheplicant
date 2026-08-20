@@ -8,6 +8,7 @@ import { FirstJobConfirmation } from "./FirstJobConfirmation";
 import { JobsDrawer } from "./JobsDrawer";
 import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
 import { OnboardingChecklist } from "./OnboardingChecklist";
+import { hasIdenticalActiveJob, useResultsWorkspace } from "./ResultsWorkspace";
 import { ValidationLedger } from "./ValidationLedger";
 import { WorkbenchHeader } from "./WorkbenchHeader";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -21,7 +22,6 @@ import type { WorkspaceId } from "./WorkspaceNav";
 type ReadFile = (file: File) => Promise<string>;
 type SaveFile = (yamlText: string) => Promise<void> | void;
 const workspaceLabels: Record<WorkspaceId, string> = { model: "Model", config: "Config", execute: "Execute", results: "Results" };
-function emptyInspector(message: string) { return <aside aria-label="Context inspector"><p>{message}</p></aside>; }
 
 interface Props { initial: EditorSession; transport: SessionTransport; readFile?: ReadFile; saveFile?: SaveFile; }
 function browserReadFile(file: File) { return file.text(); }
@@ -98,6 +98,9 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const mutationBlocked = busy || draftBlocksMutation(draft);
   const jobBlocked = mutationBlocked || session.document.validation.run_blocked;
   const mutationReason = busy ? "Another action is running" : draftLabel(draft);
+  const jobBlockingReason = mutationReason ?? (session.document.validation.run_blocked
+    ? "Run is blocked until validation is repaired."
+    : null);
 
   function accept(next: EditorSession, message: string, clearDraft = true) {
     acceptedSessionRef.current = next;
@@ -156,7 +159,10 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   }
   function discardDraft() { coordinator.clear(); setYamlDiagnostic(null); setYamlConflict(null); }
   function submitJob(kind: JobKind) {
-    if (jobBlocked) return;
+    if (
+      jobBlocked
+      || hasIdenticalActiveJob(displayJobs, kind, session.revision, session.yaml_digest)
+    ) return;
     void run(() => transport.submitJob(session.session_id, kind, session.revision), `${kind === "preview_forward" ? "Forward preview" : kind} job submitted`);
   }
   function captureJobOpener(event: React.MouseEvent<HTMLDivElement>) {
@@ -169,6 +175,7 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     capturedJobOpener.current = null;
     if (
       jobBlocked
+      || hasIdenticalActiveJob(displayJobs, kind, session.revision, session.yaml_digest)
       || busyRef.current
       || drawerOpen
       || diagnosticsOpen
@@ -247,6 +254,13 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     onSubmit: requestJob,
     onRun: (action, message) => void run(action, message),
   });
+  const resultsSurface = useResultsWorkspace({
+    jobs: displayJobs,
+    revision: session.revision,
+    yamlDigest: session.yaml_digest,
+    disabledReason: jobBlockingReason,
+    onSubmit: requestJob,
+  });
   useEffect(() => {
     if (requestedConfigPath !== null && activeWorkspace === "config" && !diagnosticsOpen) {
       setRequestedConfigPath(null);
@@ -256,7 +270,10 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     model: modelSurface,
     config: configSurface,
     execute: { main: <div onClickCapture={captureJobOpener}>{executeSurface.main}</div>, inspector: executeSurface.inspector },
-    results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },
+    results: {
+      main: <div onClickCapture={captureJobOpener}><ValidationLedger validation={session.document.validation} />{resultsSurface.main}</div>,
+      inspector: <div onClickCapture={captureJobOpener}>{resultsSurface.inspector}</div>,
+    },
   };
   const surface = surfaces[activeWorkspace];
   const actionDescription = reasonId;
