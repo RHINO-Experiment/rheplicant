@@ -24,6 +24,7 @@ from rheplicant.gui.document import (
     set_node,
     set_snapshot_before,
 )
+from rheplicant.gui.form_edits import set_form_value
 from rheplicant.gui.outputs import set_output_product, set_output_report
 
 
@@ -114,6 +115,20 @@ def replace_session_yaml(
 ) -> EditorSession:
     """Commit one validated YAML-mirror edit to ``session``."""
     _expect(session, expected_revision)
+    return _commit(session, replace_yaml(yaml_text).yaml_text)
+
+
+def set_session_field(
+    session: EditorSession,
+    path: str,
+    value: object,
+    *,
+    remove: bool = False,
+    expected_revision: int,
+) -> EditorSession:
+    """Commit one closed projected form-field transition."""
+    _expect(session, expected_revision)
+    yaml_text = set_form_value(session.yaml_text, path, value, remove=remove)
     return _commit(session, replace_yaml(yaml_text).yaml_text)
 
 
@@ -414,6 +429,7 @@ __all__ = [
     "save_session_file",
     "set_session_output_product",
     "set_session_output_report",
+    "set_session_field",
     "set_session_snapshot_before",
     "undo",
 ]

@@ -36,6 +36,7 @@ from rheplicant.gui.session import (
     place_session_node,
     redo,
     replace_session_yaml,
+    set_session_field,
     set_session_output_product,
     set_session_output_report,
     set_session_snapshot_before,
@@ -68,6 +69,12 @@ class JobPayload(RevisionPayload):
 
 class SessionYamlPayload(RevisionPayload):
     yaml_text: str
+
+
+class SessionFieldPayload(RevisionPayload):
+    path: str
+    value: object | None = None
+    remove: bool = False
 
 
 class SessionNodeEditPayload(RevisionPayload):
@@ -291,6 +298,23 @@ def create_app(
             lambda current: replace_session_yaml(
                 current,
                 payload.yaml_text,
+                expected_revision=payload.expected_revision,
+            ),
+        )
+
+    @app.patch("/api/sessions/{session_id}/fields")
+    def set_session_field_route(
+        session_id: str,
+        payload: SessionFieldPayload,
+    ) -> dict[str, object]:
+        return _apply(
+            store,
+            session_id,
+            lambda current: set_session_field(
+                current,
+                payload.path,
+                payload.value,
+                remove=payload.remove,
                 expected_revision=payload.expected_revision,
             ),
         )

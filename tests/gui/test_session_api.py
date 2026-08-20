@@ -193,6 +193,237 @@ def test_session_route_refusals_do_not_overwrite_the_current_document(client):
     assert fetched["document"]["yaml_text"] == BASE
 
 
+def test_session_field_transition_uses_existing_revision_history_and_noop_identity():
+    from rheplicant.gui.session import (
+        RevisionConflict,
+        new_session,
+        set_session_field,
+    )
+
+    original = new_session(BASE)
+    changed = set_session_field(
+        original,
+        "runtime.jax_enable_x64",
+        False,
+        expected_revision=0,
+    )
+
+    assert changed.revision == 1
+    assert changed.cursor == 1
+    assert changed.history[0] == BASE
+    assert changed.dirty is True
+    assert changed.validation_stale is False
+    assert changed.can_undo is True
+    assert yaml.safe_load(changed.yaml_text)["runtime"]["jax_enable_x64"] is False
+
+    same = set_session_field(
+        changed,
+        "runtime.jax_enable_x64",
+        False,
+        expected_revision=1,
+    )
+    assert same is changed
+
+    with pytest.raises(RevisionConflict):
+        set_session_field(
+            changed,
+            "model.gain",
+            {},
+            expected_revision=0,
+        )
+
+
+def test_session_field_route_returns_the_complete_updated_projection(client):
+    created = create_session(client)
+    session_id = created["session_id"]
+
+    response = client.patch(
+        f"/api/sessions/{session_id}/fields",
+        json={
+            "expected_revision": 0,
+            "path": "runtime.jax_enable_x64",
+            "value": False,
+            "remove": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 1
+    assert body["dirty"] is True
+    assert body["validation_stale"] is False
+    assert set(body) == {
+        "session_id",
+        "revision",
+        "dirty",
+        "validation_stale",
+        "can_undo",
+        "can_redo",
+        "jobs",
+        "outputs",
+        "document",
+    }
+    assert len(body["document"]["nodes"]) == 33
+    assert len(body["document"]["forms"]["sections"]) == 12
+    assert "base_diagram" in body["document"]
+    assert "validation" in body["document"]
+    assert body["outputs"]["requested_yaml"] == body["document"]["yaml_text"]
+    assert yaml.safe_load(body["document"]["yaml_text"])["runtime"][
+        "jax_enable_x64"
+    ] is False
+
+
+def test_session_field_route_preserves_exact_yaml_and_revision_on_noop(client):
+    created = create_session(client)
+    session_id = created["session_id"]
+
+    response = client.patch(
+        f"/api/sessions/{session_id}/fields",
+        json={
+            "expected_revision": 0,
+            "path": "runtime.jax_enable_x64",
+            "value": True,
+            "remove": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["revision"] == 0
+    assert body["document"]["yaml_text"] == BASE
+    assert body["dirty"] is False
+    assert body["can_undo"] is False
+
+
+def test_session_field_route_is_closed_and_preserves_state_after_conflict_or_refusal(
+    client,
+):
+    created = create_session(client)
+    session_id = created["session_id"]
+    route = f"/api/sessions/{session_id}/fields"
+
+    changed = client.patch(
+        route,
+        json={
+            "expected_revision": 0,
+            "path": "runtime.jax_enable_x64",
+            "value": False,
+        },
+    )
+    assert changed.status_code == 200
+    accepted_yaml = changed.json()["document"]["yaml_text"]
+
+    conflict = client.patch(
+        route,
+        json={
+            "expected_revision": 0,
+            "path": "runtime.jax_enable_x64",
+            "value": True,
+        },
+    )
+    assert conflict.status_code == 409
+
+    generic = client.patch(
+        route,
+        json={"expected_revision": 1, "path": "model.gain", "value": {}},
+    )
+    assert generic.status_code == 422
+    assert "Edit this value in YAML" in generic.json()["detail"]
+
+    bool_as_int = client.patch(
+        route,
+        json={"expected_revision": 1, "path": "runtime.seed", "value": True},
+    )
+    assert bool_as_int.status_code == 422
+
+    extra = client.patch(
+        route,
+        json={
+            "expected_revision": 1,
+            "path": "runtime.seed",
+            "value": 4,
+            "surprise": True,
+        },
+    )
+    assert extra.status_code == 422
+
+    fetched = client.get(f"/api/sessions/{session_id}").json()
+    assert fetched["revision"] == 1
+    assert fetched["document"]["yaml_text"] == accepted_yaml
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "path", "value"),
+    [
+        (BASE, "model.foregrounds.type", "ForegroundOperator"),
+        (
+            "schema_version: 1\nresources:\n  beams:\n    horn.dot:\n"
+            "      format: inline\nmodel: {}\nruns: []\n",
+            "resources.beams.horn.dot.format",
+            "gaussian",
+        ),
+    ],
+)
+def test_session_field_route_refuses_hidden_or_ambiguous_paths_without_state_change(
+    client,
+    yaml_text: str,
+    path: str,
+    value: object,
+):
+    created = create_session(client, yaml_text)
+    session_id = created["session_id"]
+
+    refused = client.patch(
+        f"/api/sessions/{session_id}/fields",
+        json={
+            "expected_revision": 0,
+            "path": path,
+            "value": value,
+            "remove": False,
+        },
+    )
+
+    assert refused.status_code == 422
+    fetched = client.get(f"/api/sessions/{session_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["revision"] == 0
+    assert fetched.json()["document"]["yaml_text"] == yaml_text
+
+
+def test_session_field_route_reprojects_candidate_before_store_install(monkeypatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    import rheplicant.gui.session as session_module
+    from rheplicant.gui.api import create_app
+
+    browser = TestClient(create_app(), raise_server_exceptions=False)
+    created = create_session(browser)
+    session_id = created["session_id"]
+    monkeypatch.setattr(
+        session_module,
+        "set_form_value",
+        lambda *_args, **_kwargs: "model: []\n",
+    )
+
+    refused = browser.patch(
+        f"/api/sessions/{session_id}/fields",
+        json={
+            "expected_revision": 0,
+            "path": "runtime.seed",
+            "value": 4,
+            "remove": False,
+        },
+    )
+
+    assert refused.status_code == 422
+    fetched = browser.get(f"/api/sessions/{session_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["revision"] == 0
+    assert fetched.json()["document"]["yaml_text"] == BASE
+
+
 def test_api_serializes_the_complete_attributed_ledger_and_preset_diff(client):
     document = preflight_document(
         defaults=["rhino_v1"],

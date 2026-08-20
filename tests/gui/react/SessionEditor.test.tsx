@@ -162,6 +162,7 @@ function candidate(initial = state()) {
   const transport: SessionTransport = {
     refresh,
     replaceYaml,
+    setField: unchanged,
     undo,
     redo,
     load,

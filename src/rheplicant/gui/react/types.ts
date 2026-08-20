@@ -247,6 +247,13 @@ export interface SessionTransport {
     yamlText: string,
     expectedRevision: number,
   ): Promise<EditorSession>;
+  setField(
+    sessionId: string,
+    path: string,
+    value: unknown,
+    remove: boolean,
+    expectedRevision: number,
+  ): Promise<EditorSession>;
   undo(sessionId: string, expectedRevision: number): Promise<EditorSession>;
   redo(sessionId: string, expectedRevision: number): Promise<EditorSession>;
   load(

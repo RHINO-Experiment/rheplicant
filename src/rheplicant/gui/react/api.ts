@@ -64,6 +64,20 @@ export const sessionTransport: SessionTransport = {
       }),
     });
   },
+  setField(sessionId, path, value, remove, expectedRevision) {
+    return requestJson<EditorSession>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/fields`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          path,
+          value,
+          remove,
+        }),
+      },
+    );
+  },
   undo(sessionId, expectedRevision) {
     return postRevision(
       `/api/sessions/${encodeURIComponent(sessionId)}/undo`,

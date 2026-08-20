@@ -141,6 +141,7 @@ function transport(): SessionTransport {
   const unchanged = async () => state();
   return {
     replaceYaml: vi.fn(unchanged),
+    setField: vi.fn(unchanged),
     undo: vi.fn(unchanged),
     redo: vi.fn(unchanged),
     load: vi.fn(unchanged),

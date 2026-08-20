@@ -96,6 +96,7 @@ function transport(): SessionTransport {
   return {
     refresh: vi.fn(unchanged),
     replaceYaml: vi.fn(unchanged),
+    setField: vi.fn(unchanged),
     undo: vi.fn(unchanged),
     redo: vi.fn(unchanged),
     load: vi.fn(unchanged),
