@@ -3,6 +3,11 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GraphEditor } from "../../../src/rheplicant/gui/react/GraphEditor";
+import { GraphCanvas } from "../../../src/rheplicant/gui/react/GraphCanvas";
+import {
+  useModelWorkspace,
+  type ModelWorkspaceProps,
+} from "../../../src/rheplicant/gui/react/ModelWorkspace";
 import {
   canUpdateDraft,
   draftLabel,
@@ -101,6 +106,10 @@ function state(): EditorSession {
     '<svg><g data-node-id="flagging" role="button" tabindex="0"></g><g data-node-id="filters" role="button" tabindex="0"></g></svg>',
   );
   const variant = { ...diagram("low_gain", [{ ...GAIN, lit: true, count: 1 }]), changed_nodes: ["gain"] };
+  const secondVariant = {
+    ...diagram("high_gain", [{ ...GAIN, lit: true, count: 1, settings: { gain: 2 } }]),
+    changed_nodes: ["gain"],
+  };
   return {
     session_id: "session-1",
     revision: 4,
@@ -123,7 +132,7 @@ function state(): EditorSession {
       },
       base_diagram: base,
       backend_diagram: backend,
-      variant_diagrams: [variant],
+      variant_diagrams: [variant, secondVariant],
     },
   };
 }
@@ -216,8 +225,8 @@ function CoordinatedGraph({
           setAccepted(next);
           coordinator.clear();
         }}
-        coordinator={coordinator}
-        disabledReasonId={reason ? "graph-draft-reason" : undefined}
+        drafts={coordinator}
+        disabledReason={reason ? "graph-draft-reason" : null}
       />
     </>
   );
@@ -229,10 +238,240 @@ function selectVariant() {
   });
 }
 
+function openAdvanced() {
+  if (!screen.queryByRole("textbox", { name: "Placement settings JSON" })) {
+    fireEvent.click(screen.getByText("Advanced node controls"));
+  }
+}
+
 function expectBlocked(control: HTMLElement, reason: string) {
   expect(control).toBeDisabled();
   expect(control).toHaveAccessibleDescription(reason);
 }
+
+function modelProps(overrides: Partial<ModelWorkspaceProps> = {}): ModelWorkspaceProps {
+  const drafts: DraftCoordinator = {
+    draft: NO_DRAFT,
+    begin: vi.fn(() => true),
+    update: vi.fn(),
+    clear: vi.fn(),
+  };
+  return {
+    session: state(),
+    transport: transport(),
+    drafts,
+    disabled: false,
+    disabledReason: null,
+    onAccept: vi.fn(),
+    ...overrides,
+  };
+}
+
+function ModelHarness(props: ModelWorkspaceProps) {
+  const surface = useModelWorkspace(props);
+  return <>{surface.main}{surface.inspector}</>;
+}
+
+describe("model workspace ownership", () => {
+  it("updates the roving stop when only the controlled canvas selection changes", () => {
+    const graph = state().document.base_diagram;
+    const onSelect = vi.fn();
+    const { container, rerender } = render(
+      <GraphCanvas
+        diagram={graph}
+        editable
+        selectedNode="gain"
+        zoom={1}
+        onSelect={onSelect}
+      />,
+    );
+    const gain = container.querySelector('[data-node-id="gain"]');
+    const flagging = container.querySelector('[data-node-id="flagging"]');
+
+    expect(gain).toHaveAttribute("tabindex", "0");
+    expect(gain).toHaveAttribute("aria-pressed", "true");
+    rerender(
+      <GraphCanvas
+        diagram={graph}
+        editable
+        selectedNode="flagging"
+        zoom={1}
+        onSelect={onSelect}
+      />,
+    );
+
+    expect(gain).toHaveAttribute("tabindex", "-1");
+    expect(gain).toHaveAttribute("aria-pressed", "false");
+    expect(flagging).toHaveAttribute("tabindex", "0");
+    expect(flagging).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("renders one interactive server canvas and the selected node inspector as siblings", () => {
+    const { container } = render(<ModelHarness {...modelProps()} />);
+
+    expect(screen.getAllByRole("group", { name: "Signal path" })).toHaveLength(1);
+    expect(container.querySelectorAll(".graph-viewport svg")).toHaveLength(1);
+    fireEvent.click(container.querySelector('[data-node-id="gain"]')!);
+    expect(screen.getByRole("complementary", { name: "gain settings" })).toBeVisible();
+  });
+
+  it("switches the one editable canvas between full and processing projections", () => {
+    const { container } = render(<ModelHarness {...modelProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Processing" }));
+    expect(container.querySelectorAll(".graph-viewport svg")).toHaveLength(1);
+    expect(container.querySelector('[data-node-id="filters"]')).not.toBeNull();
+    expect(container.querySelector('[data-node-id="gain"]')).toBeNull();
+    expect(screen.getAllByRole("group", { name: "Signal path" })).toHaveLength(1);
+  });
+
+  it("contains zoomed graph overflow inside its labelled viewport", () => {
+    render(<ModelHarness {...modelProps()} />);
+
+    expect(screen.getByRole("group", { name: "Signal path" })).toHaveStyle({
+      maxWidth: "100%",
+      overflow: "auto",
+    });
+  });
+
+  it("mounts only base and the selected variant in Compare and removes every node from the tab order", () => {
+    render(<ModelHarness {...modelProps()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
+      target: { value: "high_gain" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    const diagrams = screen.getAllByRole("img", { name: /comparison graph/i });
+    expect(diagrams).toHaveLength(2);
+    expect(screen.getByRole("img", { name: "base comparison graph" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "high_gain comparison graph" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "low_gain comparison graph" })).not.toBeInTheDocument();
+    for (const diagram of diagrams) {
+      for (const node of within(diagram).getAllByRole("button")) {
+        expect(node).toHaveAttribute("tabindex", "-1");
+        expect(node).toHaveAttribute("aria-disabled", "true");
+        expect(node).not.toHaveAttribute("aria-pressed");
+      }
+    }
+  });
+
+  it("preserves one roving tab stop when a composition node is selected", () => {
+    const { container } = render(<ModelHarness {...modelProps()} />);
+    const canvas = screen.getByRole("group", { name: "Signal path" });
+
+    fireEvent.click(container.querySelector('[data-node-id="astro_sum"]')!);
+    expect(screen.getByRole("complementary", { name: "astro_sum settings" })).toBeVisible();
+    expect(canvas.querySelectorAll('[data-node-id][role="button"][tabindex="0"]')).toHaveLength(1);
+    expect(canvas.querySelector('[data-node-id="gain"]')).toHaveAttribute("tabindex", "0");
+  });
+
+  it("stops routing edits to a selected variant after a complete session removes it", () => {
+    const initial = state();
+    const api = transport();
+    const props = modelProps({ session: initial, transport: api });
+    const { rerender } = render(<ModelHarness {...props} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
+      target: { value: "high_gain" },
+    });
+
+    const withoutSelectedVariant = {
+      ...initial,
+      revision: 5,
+      document: {
+        ...initial.document,
+        variant_diagrams: initial.document.variant_diagrams.filter(
+          (variant) => variant.name !== "high_gain",
+        ),
+      },
+    };
+    rerender(<ModelHarness {...props} session={withoutSelectedVariant} />);
+
+    expect(screen.getByRole("combobox", { name: "Editing layer" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Light and configure gain" }));
+    expect(api.editNode).toHaveBeenLastCalledWith(
+      "session-1",
+      "gain",
+      true,
+      {},
+      5,
+      null,
+    );
+  });
+
+  it("preserves a removed variant while its graph draft still owns that route", () => {
+    const initial = state();
+    const api = transport();
+    const drafts: DraftCoordinator = {
+      draft: {
+        kind: "graph",
+        baseRevision: 4,
+        path: "high_gain:gain:settings",
+        rawValue: '{"gain":9}',
+      },
+      begin: vi.fn(() => false),
+      update: vi.fn(),
+      clear: vi.fn(),
+    };
+    const props = modelProps({ session: initial, transport: api, drafts });
+    const { rerender } = render(<ModelHarness {...props} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
+      target: { value: "high_gain" },
+    });
+
+    const withoutSelectedVariant = {
+      ...initial,
+      revision: 5,
+      document: {
+        ...initial.document,
+        variant_diagrams: initial.document.variant_diagrams.filter(
+          (variant) => variant.name !== "high_gain",
+        ),
+      },
+    };
+    rerender(<ModelHarness {...props} session={withoutSelectedVariant} />);
+
+    expect(screen.getByRole("textbox", { name: "Node settings JSON" })).toHaveValue(
+      '{"gain":9}',
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Light and configure gain" }));
+    expect(api.editNode).toHaveBeenLastCalledWith(
+      "session-1",
+      "gain",
+      true,
+      { gain: 9 },
+      4,
+      "high_gain",
+    );
+  });
+
+  it("keeps selection while changing views and owns zoom without changing the session", () => {
+    const props = modelProps();
+    const { container } = render(<ModelHarness {...props} />);
+    fireEvent.click(container.querySelector('[data-node-id="flagging"]')!);
+
+    fireEvent.click(screen.getByRole("button", { name: "Processing" }));
+    expect(screen.getByRole("complementary", { name: "flagging settings" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1.25)" });
+    fireEvent.click(screen.getByRole("button", { name: "100%" }));
+    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1)" });
+    expect(props.transport.editNode).not.toHaveBeenCalled();
+    expect(props.onAccept).not.toHaveBeenCalled();
+  });
+
+  it("does not mount advanced inspector controls until their disclosure opens", () => {
+    const { container } = render(<ModelHarness {...modelProps()} />);
+    fireEvent.click(container.querySelector('[data-node-id="flagging"]')!);
+
+    expect(screen.queryByRole("textbox", { name: "Composition stages JSON" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Placement settings JSON" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Snapshot name" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Advanced node controls"));
+    expect(screen.getByRole("textbox", { name: "Composition stages JSON" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Placement settings JSON" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Snapshot name" })).toBeInTheDocument();
+  });
+});
 
 describe("graph-guided instrument editor", () => {
   it("keeps the owning graph draft editable while preserving accepted values and offering Apply and Discard", () => {
@@ -254,7 +493,7 @@ describe("graph-guided instrument editor", () => {
         update(next) { setDraft(next); },
         clear() { setDraft(NO_DRAFT); },
       };
-      return <GraphEditor session={projected} transport={api} onAccept={vi.fn()} coordinator={coordinator} />;
+      return <GraphEditor session={projected} transport={api} onAccept={vi.fn()} drafts={coordinator} />;
     }
     render(<CoordinatedGraph />);
     fireEvent.click(document.querySelector('[data-node-id="gain"]')!);
@@ -275,8 +514,9 @@ describe("graph-guided instrument editor", () => {
       update: vi.fn(),
       clear: vi.fn(),
     };
-    render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} coordinator={coordinator} />);
+    render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} drafts={coordinator} />);
     fireEvent.click(document.querySelector('[data-node-id="gain"]')!);
+    openAdvanced();
     expect(screen.getByRole("textbox", { name: "Node settings JSON" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Light and configure gain" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Apply cascade" })).toBeDisabled();
@@ -297,6 +537,7 @@ describe("graph-guided instrument editor", () => {
     const composeNode = vi.fn(async () => accepted);
     api.composeNode = composeNode;
     render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+    openAdvanced();
 
     expect(screen.getByRole("textbox", { name: "Composition stages JSON" })).toHaveValue(
       '[\n  {\n    "name": "base-stage",\n    "scale": 1\n  }\n]',
@@ -367,6 +608,7 @@ describe("graph-guided instrument editor", () => {
     const placeNode = vi.fn(async () => accepted);
     api.placeNode = placeNode;
     render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+    openAdvanced();
 
     expect(screen.getByRole("textbox", { name: "Placement settings JSON" })).toHaveValue(
       '{\n  "type": "BaseAcceptedOperator",\n  "stages": [\n    {\n      "name": "base-stage",\n      "scale": 1\n    }\n  ],\n  "at": [\n    "base-left",\n    "base-right"\n  ],\n  "snapshot_before": "base-raw"\n}',
@@ -437,6 +679,7 @@ describe("graph-guided instrument editor", () => {
     const setSnapshotBefore = vi.fn(async () => accepted);
     api.setSnapshotBefore = setSnapshotBefore;
     render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+    openAdvanced();
 
     expect(screen.getByRole("textbox", { name: "Snapshot name" })).toHaveValue("base-raw");
     selectVariant();
@@ -495,6 +738,7 @@ describe("graph-guided instrument editor", () => {
     };
     const api = transport();
     render(<CoordinatedGraph initial={guarded} refreshed={guarded} api={api} />);
+    openAdvanced();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Node settings JSON" }), {
       target: { value: '[{"name":"draft-first"},{"name":"draft-second"}]' },
@@ -511,7 +755,8 @@ describe("graph-guided instrument editor", () => {
     expect(api.editNode).not.toHaveBeenCalled();
     expect(api.moveNodeInstance).not.toHaveBeenCalled();
 
-    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="flagging"]')!);
+    fireEvent.click(document.querySelector('[aria-label="Signal path"] [data-node-id="flagging"]')!);
+    openAdvanced();
     const snapshot = screen.getByRole("button", { name: "Keep raw data before flagging" });
     expectBlocked(snapshot, reason);
     snapshot.removeAttribute("disabled");
@@ -545,9 +790,10 @@ describe("graph-guided instrument editor", () => {
         session={guarded}
         transport={api}
         onAccept={vi.fn()}
-        coordinator={coordinator}
+        drafts={coordinator}
       />,
     );
+    openAdvanced();
 
     const disable = screen.getByRole("button", { name: "Disable filters" });
     const move = screen.getByRole("button", { name: "Move filters 2 up" });
@@ -568,7 +814,8 @@ describe("graph-guided instrument editor", () => {
     expect(api.moveNodeInstance).not.toHaveBeenCalled();
 
     coordinator.draft = NO_DRAFT;
-    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="flagging"]')!);
+    fireEvent.click(document.querySelector('[aria-label="Signal path"] [data-node-id="flagging"]')!);
+    openAdvanced();
     const snapshot = screen.getByRole("button", { name: "Keep raw data before flagging" });
     expect(snapshot).toBeEnabled();
     coordinator.draft = {
@@ -620,6 +867,8 @@ describe("graph-guided instrument editor", () => {
     render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} />);
 
     fireEvent.click(document.querySelector('[data-node-id="filters"]')!);
+    expect(screen.queryByRole("list", { name: "filters instances" })).not.toBeInTheDocument();
+    openAdvanced();
     const list = screen.getByRole("list", { name: "filters instances" });
     expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       expect.stringContaining("filters 1"),
@@ -635,12 +884,14 @@ describe("graph-guided instrument editor", () => {
     render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} />);
 
     expect(screen.getByText("lit 1 · skipped 2 · reserved 3 · instances 2")).toBeInTheDocument();
-    const backend = screen.getByRole("region", { name: "Processing backend" });
+    fireEvent.click(screen.getByRole("button", { name: "Processing" }));
+    const backend = screen.getByRole("region", { name: "Model graph workspace" });
     expect(within(backend).getByText(/overwrite data/)).toBeInTheDocument();
     expect(backend.querySelector('[data-node-id="filters"]')).not.toBeNull();
     expect(backend.querySelector('[data-node-id="gain"]')).toBeNull();
 
-    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="flagging"]')!);
+    fireEvent.click(document.querySelector('[aria-label="Signal path"] [data-node-id="flagging"]')!);
+    openAdvanced();
     fireEvent.change(screen.getByRole("textbox", { name: "Snapshot name" }), {
       target: { value: "raw" },
     });
@@ -653,7 +904,8 @@ describe("graph-guided instrument editor", () => {
       null,
     );
 
-    const comparison = screen.getByRole("region", { name: "Base versus variants" });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    const comparison = screen.getByRole("region", { name: "Base versus selected variant" });
     expect(within(comparison).getByText("Base")).toBeInTheDocument();
     expect(within(comparison).getByText("low_gain")).toBeInTheDocument();
     expect(within(comparison).getByText("Changed nodes: gain")).toBeInTheDocument();
@@ -668,7 +920,8 @@ describe("graph-guided instrument editor", () => {
     const api = transport();
     render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} />);
 
-    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="gain"]')!);
+    fireEvent.click(document.querySelector('[aria-label="Signal path"] [data-node-id="gain"]')!);
+    openAdvanced();
     fireEvent.change(screen.getByRole("textbox", { name: "Composition stages JSON" }), {
       target: { value: '[{"name":"lna"},{"name":"post"}]' },
     });
@@ -707,7 +960,7 @@ describe("graph-guided instrument editor", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
       target: { value: "low_gain" },
     });
-    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="gain"]')!);
+    fireEvent.click(document.querySelector('[aria-label="Signal path"] [data-node-id="gain"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Apply configuration to gain" }));
     expect(api.editNode).toHaveBeenCalledWith(
       "session-1",
@@ -722,7 +975,7 @@ describe("graph-guided instrument editor", () => {
   it("uses a roving focus stop and traverses editable nodes in graph order", () => {
     const initial = state();
     render(<GraphEditor session={initial} transport={transport()} onAccept={vi.fn()} />);
-    const canvas = screen.getByLabelText("Signal path diagram");
+    const canvas = screen.getByLabelText("Signal path");
     const gain = canvas.querySelector('[data-node-id="gain"]') as SVGElement;
     const flagging = canvas.querySelector('[data-node-id="flagging"]') as SVGElement;
     const filters = canvas.querySelector('[data-node-id="filters"]') as SVGElement;
@@ -738,5 +991,29 @@ describe("graph-guided instrument editor", () => {
     expect(filters).toHaveAttribute("tabindex", "0");
     fireEvent.keyDown(filters, { key: "Home" });
     expect(gain).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(gain, { key: "ArrowLeft" });
+    expect(filters).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(filters, { key: "ArrowUp" });
+    expect(flagging).toHaveAttribute("tabindex", "0");
+  });
+
+  it("selects editable nodes with Enter and Space", () => {
+    render(<GraphEditor session={state()} transport={transport()} onAccept={vi.fn()} />);
+    const canvas = screen.getByLabelText("Signal path");
+    const gain = canvas.querySelector('[data-node-id="gain"]') as SVGElement;
+    const flagging = canvas.querySelector('[data-node-id="flagging"]') as SVGElement;
+
+    expect(gain).toHaveAttribute("tabindex", "0");
+    gain.focus();
+    expect(gain).toHaveFocus();
+    expect(fireEvent.keyDown(gain, { key: "Enter" })).toBe(false);
+    expect(screen.getByRole("complementary", { name: "gain settings" })).toBeVisible();
+
+    fireEvent.keyDown(gain, { key: "ArrowRight" });
+    expect(flagging).toHaveAttribute("tabindex", "0");
+    expect(flagging).toHaveFocus();
+    expect(screen.getByRole("complementary", { name: "flagging settings" })).toBeVisible();
+    expect(fireEvent.keyDown(flagging, { key: " " })).toBe(false);
+    expect(screen.getByRole("complementary", { name: "flagging settings" })).toBeVisible();
   });
 });

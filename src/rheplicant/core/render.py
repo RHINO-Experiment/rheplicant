@@ -58,7 +58,11 @@ p.legend { font-size: 13px; color: #5f5e5a; }
 _DARK_PAGE = "body{background:#1f1e1b;color:#d3d1c7}p.legend{color:#b4b2a9}"
 
 # Inside the SVG so the rendering survives standalone embedding (<img>, docs).
-_SVG_STYLE = ".lit{opacity:1}.wire{opacity:.55}.dim{opacity:.22}"
+_SVG_STYLE = (
+    ".lit{opacity:1}.wire{opacity:.78}.dim{opacity:1}"
+    ".dim rect,.dim line{stroke-dasharray:3 3}"
+    ".dim text{font-style:italic}"
+)
 
 
 def _layers(graph) -> dict[str, int]:

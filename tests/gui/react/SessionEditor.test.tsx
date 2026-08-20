@@ -497,7 +497,9 @@ describe("durable React editor session", () => {
 
     const model = screen.getByRole("tabpanel", { name: "Model" });
     expect(within(model).getAllByText("accepted graph SVG").length).toBeGreaterThan(0);
+    fireEvent.click(within(model).getByRole("button", { name: "Processing" }));
     expect(within(model).getByText("accepted backend SVG")).toBeInTheDocument();
+    fireEvent.click(within(model).getByRole("button", { name: "Compare" }));
     expect(within(model).getByText("Changed nodes: accepted_gain")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));

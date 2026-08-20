@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import { ConfigForms } from "./ConfigForms";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
 import { FirstJobConfirmation } from "./FirstJobConfirmation";
-import { GraphEditor } from "./GraphEditor";
+import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
 import { OnboardingChecklist } from "./OnboardingChecklist";
 import { OutputWorkflow } from "./OutputWorkflow";
 import { PreviewPanel } from "./PreviewPanel";
@@ -19,8 +18,6 @@ import type { WorkspaceId } from "./WorkspaceNav";
 
 type ReadFile = (file: File) => Promise<string>;
 type SaveFile = (yamlText: string) => Promise<void> | void;
-type WorkspaceSurface = { main: ReactNode; inspector: ReactNode };
-
 const workspaceLabels: Record<WorkspaceId, string> = { model: "Model", config: "Config", execute: "Execute", results: "Results" };
 function emptyInspector(message: string) { return <aside aria-label="Context inspector"><p>{message}</p></aside>; }
 
@@ -186,8 +183,17 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     finally { busyRef.current = false; setBusy(false); }
   }
   const reasonId = mutationReason ? "mutation-blocked-reason" : undefined;
+  const modelSurface = useModelWorkspace({
+    session,
+    transport,
+    drafts: coordinator,
+    disabled: busy || (draft.kind !== "none" && draft.kind !== "graph"),
+    disabledReason: reasonId ?? null,
+    onAccept: accept,
+    onRun: (action, message) => void run(action, message),
+  });
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
-    model: { main: <GraphEditor session={session} transport={transport} onAccept={accept} disabled={busy || (draft.kind !== "none" && draft.kind !== "graph")} disabledReasonId={reasonId} coordinator={coordinator} onRun={(action, message) => void run(action, message)} />, inspector: emptyInspector("Select a graph node") },
+    model: modelSurface,
     config: { main: <ConfigForms forms={session.document.forms} badges={session.document.validation.section_badges} />, inspector: emptyInspector("Select a field") },
     execute: { main: <><OutputWorkflow session={session} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={session.jobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
     results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rheplicant.core.render import _SVG_STYLE, _THEMES
+
 CSS = (
     Path(__file__).parents[2] / "src/rheplicant/gui/react/editor.css"
 ).read_text(encoding="utf-8")
@@ -64,3 +66,15 @@ def test_wide_workbench_is_a_bounded_frame_with_independent_main_and_inspector_s
     assert CSS.count("min-height: 0;") >= 2
     assert CSS.count("min-width: 0;") >= 2
     assert CSS.count("overflow: auto;") >= 2
+
+
+def test_inactive_graph_labels_keep_aa_contrast_without_opacity():
+    assert ".dim{opacity:1}" in _SVG_STYLE
+    assert ".dim rect,.dim line{stroke-dasharray:3 3}" in _SVG_STYLE
+    assert ".dim text{font-style:italic}" in _SVG_STYLE
+    assert "opacity:.22" not in _SVG_STYLE
+
+    for theme, canvas in (("light", "#ffffff"), ("dark", "#111820")):
+        for kind in ("source", "transform", "processing"):
+            text_colour = _THEMES[theme][kind][2]
+            assert _contrast(text_colour, canvas) >= 4.5
