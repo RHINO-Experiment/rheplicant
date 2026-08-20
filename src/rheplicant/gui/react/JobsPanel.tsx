@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import { resultLabel } from "./ResultSummary";
+import { resultLabel, resultTone } from "./ResultSummary";
+import { StatusChip } from "./StatusChip";
 import type { JobProjection } from "./types";
 
 interface JobsPanelProps {
@@ -34,7 +35,7 @@ function JobGroup({
     <section role="group" aria-label={label}>
       <h3>{label}</h3>
       {jobs.length === 0 ? <p>{empty}</p> : (
-        <ol>{jobs.map((job) => {
+        <ol className="result-grid">{jobs.map((job) => {
           const visibleId = shortJobId(job.job_id);
           return (
             <li key={job.job_id}>
@@ -46,9 +47,13 @@ function JobGroup({
               >
                 View
               </button>
-              {" "}<code>{visibleId}</code>{" · "}<strong>{resultLabel(job)}</strong>
+              {" "}<code>{visibleId}</code>{" · "}
+              <StatusChip
+                tone={resultTone(job)}
+                label={resultLabel(job)}
+              />
               {" · "}{job.kind}
-              {job.stale && <p>From revision {job.revision}</p>}
+              {job.stale && <StatusChip tone="stale" label={`From revision ${job.revision}`} />}
               <button
                 type="button"
                 aria-label="Copy full job id"

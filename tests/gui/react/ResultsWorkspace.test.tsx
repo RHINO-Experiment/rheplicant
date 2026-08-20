@@ -70,6 +70,8 @@ describe("results workspace", () => {
       .toBeVisible();
     expect(within(screen.getByRole("group", { name: "Stale history" })).getByText("From revision 7"))
       .toBeVisible();
+    expect(screen.getByRole("group", { name: "Current history" }).querySelector("ol"))
+      .toHaveClass("result-grid");
   });
 
   it("assigns every row to exactly one group, including stale active work", () => {
@@ -143,8 +145,10 @@ describe("results workspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Copy full job id" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Could not copy the job id");
-    expect(screen.getByRole("status")).not.toHaveTextContent("operating-system clipboard details");
+    const failure = await screen.findByText(/Could not copy the job id/);
+    expect(failure.closest("[role='status']")).toHaveTextContent("Could not copy the job id");
+    expect(failure.closest("[role='status']"))
+      .not.toHaveTextContent("operating-system clipboard details");
   });
 
   it("reports the same bounded failure when the clipboard API is unavailable", async () => {
@@ -153,7 +157,8 @@ describe("results workspace", () => {
     try {
       renderResults([job()]);
       fireEvent.click(screen.getByRole("button", { name: "Copy full job id" }));
-      expect(await screen.findByRole("status"))
+      const failure = await screen.findByText(/Could not copy the job id/);
+      expect(failure.closest("[role='status']"))
         .toHaveTextContent("Could not copy the job id");
     } finally {
       if (descriptor === undefined) delete (navigator as { clipboard?: Clipboard }).clipboard;
@@ -162,8 +167,8 @@ describe("results workspace", () => {
   });
 
   it.each([
-    [job({ status: "refused", message: "document refused" }), "Refused"],
-    [job({ status: "error", message: "RuntimeError: boom" }), "Internal error"],
+    [job({ status: "refused", message: "document refused" }), "Refused", "status", "danger"],
+    [job({ status: "error", message: "RuntimeError: boom" }), "Internal error", "status", "danger"],
     [job({
       status: "refused",
       result: { output: {
@@ -171,7 +176,7 @@ describe("results workspace", () => {
         state_message: "Output ancestry or access protections could not be proved safely.",
         target_path: "/data/unsafe-result",
       } },
-    }), "Unsafe target"],
+    }), "Unsafe target", "status", "danger"],
     [job({
       kind: "validate",
       result: {
@@ -183,13 +188,44 @@ describe("results workspace", () => {
           layer: "base",
         }],
       },
-    }), "Warning"],
-  ])("renders terminal evidence with the distinct %s label", async (row, label) => {
+    }), "Warning", "status", "warning"],
+    [job({ status: "succeeded" }), "Succeeded", "status", "success"],
+    [job({ status: "queued" }), "Queued", "status", "neutral"],
+    [job({ status: "running" }), "Running", "status", "neutral"],
+  ] as const)("renders terminal evidence with the distinct %s label", async (
+    row,
+    label,
+    role,
+    tone,
+  ) => {
     renderResults([row]);
     await selectJob();
 
-    expect(within(screen.getByRole("region", { name: "Result summary" })).getByText(label))
-      .toBeVisible();
+    const summary = screen.getByRole("region", { name: "Result summary" });
+    const visibleLabel = within(summary).getByText(label);
+    const evidence = visibleLabel.closest("[role]");
+    expect(visibleLabel).toBeVisible();
+    expect(evidence).toHaveAttribute("role", role);
+    expect(evidence).toHaveClass(`status-${tone}`);
+    expect(evidence).toHaveTextContent(label);
+    expect(evidence).toHaveAttribute("aria-live", "polite");
+    expect(within(summary).queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("labels stale evidence by source revision with non-urgent status semantics", async () => {
+    renderResults([job({ stale: true, revision: 6 })]);
+    await selectJob();
+
+    const summary = screen.getByRole("region", { name: "Result summary" });
+    const staleLabel = within(summary).getByText("From revision 6");
+    const stale = staleLabel.closest("[role]");
+    expect(staleLabel).toBeVisible();
+    expect(stale).toHaveAttribute("role", "status");
+    expect(stale).toHaveTextContent("From revision 6");
+    expect(stale).toHaveAttribute("aria-live", "polite");
+    expect(stale).toHaveClass("status-stale");
+    expect(screen.getByRole("button", { name: "Re-run Run" })).toBeEnabled();
   });
 
   it("renders only closed result fields instead of dumping arbitrary payloads", async () => {

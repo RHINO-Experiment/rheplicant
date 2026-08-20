@@ -211,8 +211,12 @@ describe("progressive execute workspace", () => {
       const session = state({ outputs: { ...state().outputs, state: stateName as EditorSession["outputs"]["state"] } });
       const { unmount } = render(<OutputTargetCard output={session.outputs} />);
       expect(screen.getByText(label)).toBeInTheDocument();
-      const target = screen.getByRole(stateName === "ready_new" || stateName === "replace_owned" ? "status" : "alert", { name: "Output target state" });
-      expect(target).toHaveTextContent("ready");
+      const visibleLabel = screen.getByText(label);
+      const target = visibleLabel.closest("[role]");
+      expect(visibleLabel).toBeVisible();
+      expect(target).toHaveAttribute("role", "status");
+      expect(target).toHaveTextContent(label);
+      expect(screen.getByText("ready")).toBeVisible();
       unmount();
     }
   });
@@ -232,6 +236,26 @@ const queuedJob = (overrides: Partial<JobProjection>): JobProjection => ({
 });
 
 describe("execution action priority", () => {
+  it.each([
+    [false, false, "Run disabled: no run is declared."],
+    [true, false, "Run disabled: repair the output target."],
+  ])("gives an unavailable Run one adjacent semantic reason", (
+    runDeclared,
+    targetRunnable,
+    reason,
+  ) => {
+    const { container } = render(executionActions({ runDeclared, targetRunnable }));
+
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAccessibleDescription(reason);
+    expect(container.querySelectorAll("#execution-run-disabled")).toHaveLength(1);
+    const reasonChip = screen.getByText(reason).closest("[role]");
+    expect(reasonChip).toHaveAttribute("role", "status");
+    expect(reasonChip).toHaveClass("status-disabled");
+    expect(reasonChip).toHaveTextContent(reason);
+  });
+
   it("promotes preview before readiness and run after a current preview", () => {
     // Kills a regression that marks Run primary before its required preview is current.
     const { rerender } = renderExecutionActions({ previewCurrent: false, jobs: [] });

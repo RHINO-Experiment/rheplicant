@@ -1,4 +1,5 @@
 import { ValidationLedger } from "./ValidationLedger";
+import { StatusChip, type StatusTone } from "./StatusChip";
 import { useWorkbenchModal } from "./WorkbenchShell";
 import type {
   EditorSession,
@@ -44,14 +45,23 @@ function latestValidation(session: EditorSession): JobProjection | null {
   return matching.at(-1) ?? validations.at(-1) ?? null;
 }
 
-function validationState(job: JobProjection | null) {
-  if (!job) return "Not run for this YAML";
-  if (job.stale) return "Stale for this YAML";
-  if (job.status === "queued") return "Queued";
-  if (job.status === "running") return "Running";
-  if (job.status === "refused") return `Refused${job.message ? ` · ${job.message}` : ""}`;
-  if (job.status === "error") return `Error${job.message ? ` · ${job.message}` : ""}`;
-  return `Current for revision ${job.revision}`;
+function validationState(job: JobProjection | null): {
+  label: string;
+  tone: StatusTone;
+} {
+  if (!job) return { label: "Not run for this YAML", tone: "neutral" };
+  if (job.stale) return { label: "Stale for this YAML", tone: "stale" };
+  if (job.status === "queued") return { label: "Queued", tone: "neutral" };
+  if (job.status === "running") return { label: "Running", tone: "neutral" };
+  if (job.status === "refused") return {
+    label: `Refused${job.message ? ` · ${job.message}` : ""}`,
+    tone: "danger",
+  };
+  if (job.status === "error") return {
+    label: `Internal error${job.message ? ` · ${job.message}` : ""}`,
+    tone: "danger",
+  };
+  return { label: `Current for revision ${job.revision}`, tone: "success" };
 }
 
 export function DiagnosticsDrawer({
@@ -77,6 +87,7 @@ export function DiagnosticsDrawer({
     preset_changes: [],
     run_blocked: false,
   };
+  const fullState = validationState(validationJob);
 
   return (
     <aside
@@ -101,7 +112,10 @@ export function DiagnosticsDrawer({
       </section>
       <section aria-label="Full validation">
         <h2>Full validation</h2>
-        <p>{validationState(validationJob)}</p>
+        <StatusChip
+          tone={fullState.tone}
+          label={fullState.label}
+        />
         {fullProjection.findings.length > 0 ? (
           <ValidationLedger
             validation={fullProjection}

@@ -93,6 +93,25 @@ def test_editor_defines_every_semantic_state_token_in_each_colour_mode():
         assert token in forced
 
 
+def test_status_chips_use_token_colours_and_a_non_colour_boundary():
+    chip = _block(CSS, ".rheplicant-editor .status-chip")
+
+    assert "display: inline-flex;" in chip
+    assert "border: 2px solid currentColor;" in chip
+    assert "border-radius: var(--rh-radius-sm);" in chip
+    for tone, background, text in (
+        ("neutral", "--rh-surface-raised", "--rh-text"),
+        ("success", "--rh-success-bg", "--rh-success-text"),
+        ("warning", "--rh-warning-bg", "--rh-warning-text"),
+        ("danger", "--rh-danger-bg", "--rh-danger-text"),
+        ("stale", "--rh-stale-bg", "--rh-stale-text"),
+        ("disabled", "--rh-disabled-bg", "--rh-disabled-text"),
+    ):
+        rule = _block(CSS, f".rheplicant-editor .status-{tone}")
+        assert f"var({background})" in rule
+        assert f"var({text})" in rule
+
+
 def test_wide_workbench_is_a_bounded_shrink_safe_desktop_frame():
     grid_children = _block(CSS, ".workbench-shell > *")
     assert "box-sizing: border-box;" in CSS
@@ -137,6 +156,7 @@ def test_workbench_has_all_four_responsive_layout_contracts():
     assert "width: 100%;" in _block(compact, ".workbench-inspector,")
     assert ".product-grid" in narrow
     assert ".result-grid" in narrow
+    assert '[aria-label="Enabled products"]' in narrow
     assert "grid-template-columns: minmax(0, 1fr);" in narrow
 
 
@@ -155,6 +175,15 @@ def test_forced_colours_keep_the_editor_focus_indicator_visible():
     assert "summary" in forced
     assert "outline-color: Highlight;" in forced
     assert "forced-color-adjust: auto;" in forced
+
+
+def test_forced_colours_keep_status_chip_boundaries_visible():
+    forced = _block(CSS, "@media (forced-colors: active)")
+
+    assert ".rheplicant-editor .status-chip" in forced
+    chip = _block(forced, ".rheplicant-editor .status-chip")
+    assert "border-color: CanvasText;" in chip
+    assert "forced-color-adjust: auto;" in chip
 
 
 def test_inactive_graph_labels_keep_aa_contrast_without_opacity():

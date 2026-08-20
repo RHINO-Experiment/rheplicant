@@ -1,3 +1,4 @@
+import { StatusChip, type StatusTone } from "./StatusChip";
 import type { JobProjection } from "./types";
 
 type Finding = {
@@ -54,6 +55,16 @@ export function resultLabel(job: JobProjection) {
     running: "Running",
     succeeded: "Succeeded",
   }[job.status];
+}
+
+export function resultTone(job: JobProjection): StatusTone {
+  const label = resultLabel(job);
+  if (label === "Unsafe target" || label === "Internal error" || label === "Refused") {
+    return "danger";
+  }
+  if (label === "Warning") return "warning";
+  if (job.status === "succeeded") return "success";
+  return "neutral";
 }
 
 function recovery(job: JobProjection) {
@@ -195,13 +206,18 @@ export function ResultSummary({ job }: { job: JobProjection }) {
     ? result.exit_code
     : null;
   const help = recovery(job);
+  const label = resultLabel(job);
+  const tone = resultTone(job);
   return (
     <section aria-label="Result summary">
-      <h2>{resultLabel(job)}</h2>
+      <h2>Job result</h2>
+      <StatusChip tone={tone} label={label} />
       <p>Job <code>{job.job_id}</code></p>
       <p>{job.kind} · revision {job.revision}</p>
-      {job.stale && <p>From revision {job.revision}</p>}
-      {job.message !== null && <p role={job.status === "succeeded" ? undefined : "alert"}>{job.message}</p>}
+      {job.stale && (
+        <StatusChip tone="stale" label={`From revision ${job.revision}`} />
+      )}
+      {job.message !== null && <p>{job.message}</p>}
       {help !== null && <p>{help}</p>}
       {exitCode !== null && <p>Exit code {exitCode}</p>}
       {knownFindings.length > 0 && (

@@ -272,13 +272,14 @@ describe("global diagnostics drawer", () => {
     ["queued", [validateJob({ status: "queued", result: null })], "Queued"],
     ["running", [validateJob({ status: "running", result: null })], "Running"],
     ["refused", [validateJob({ status: "refused", result: null, message: "Validation refused" })], "Refused · Validation refused"],
-    ["error", [validateJob({ status: "error", result: null, message: "Worker failed" })], "Error · Worker failed"],
+    ["error", [validateJob({ status: "error", result: null, message: "Worker failed" })], "Internal error · Worker failed"],
     ["stale", [validateJob({ revision: 6, stale: true })], "Stale for this YAML"],
   ])("renders the %s Validate job state without inventing progress", (_label, jobs, text) => {
     renderDrawer(session(jobs as JobProjection[]));
 
     const full = screen.getByRole("region", { name: "Full validation" });
     expect(full).toHaveTextContent(text);
+    expect(within(full).getByRole("status")).toHaveTextContent(text);
     expect(full).not.toHaveTextContent("%");
   });
 

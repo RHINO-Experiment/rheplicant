@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { SessionEditor } from "./SessionEditor";
+import { StatusChip } from "./StatusChip";
 import { createStarterSession, sessionTransport } from "./api";
 import type { EditorSession } from "./types";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -9,7 +10,7 @@ import { WorkbenchShell } from "./WorkbenchShell";
 import "./tokens.css";
 import "./editor.css";
 
-function BootstrapShell({ error }: { error: string }) {
+export function BootstrapShell({ error }: { error: string }) {
   const loading = error === "";
   return (
     <WorkbenchShell
@@ -23,11 +24,15 @@ function BootstrapShell({ error }: { error: string }) {
       main={
         <section aria-label="Workbench startup">
           {loading ? (
-            <p role="status" aria-label="Workbench startup" aria-busy="true">
+            <p role="status" aria-label="Workbench startup" aria-busy="true" aria-live="polite">
               Loading the canonical starter and creating the editor session…
             </p>
           ) : (
-            <p role="alert">Could not start the editor: {error}</p>
+            <StatusChip
+              tone="danger"
+              label={`Could not start the editor: ${error}`}
+              urgent
+            />
           )}
         </section>
       }

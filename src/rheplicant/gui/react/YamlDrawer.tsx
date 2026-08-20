@@ -1,4 +1,7 @@
+import { useEffect, useRef, useState } from "react";
+
 import type { DraftEnvelope } from "./drafts";
+import { StatusChip } from "./StatusChip";
 import { useWorkbenchModal } from "./WorkbenchShell";
 
 interface YamlDrawerProps {
@@ -15,6 +18,19 @@ interface YamlDrawerProps {
   onRefresh?(): void;
 }
 
+function useNewEvidence(value: string | null) {
+  const previous = useRef(value);
+  const [urgentValue, setUrgentValue] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (previous.current !== value && value !== null) setUrgentValue(value);
+    else if (value === null) setUrgentValue(null);
+    previous.current = value;
+  }, [value]);
+
+  return value !== null && urgentValue === value;
+}
+
 export function YamlDrawer({
   acceptedYaml,
   revision,
@@ -29,6 +45,8 @@ export function YamlDrawer({
   onRefresh,
 }: YamlDrawerProps) {
   const { dialogRef, closeModal, handleModalKeyDown } = useWorkbenchModal(onClose);
+  const urgentDiagnostic = useNewEvidence(diagnostic);
+  const urgentConflict = useNewEvidence(conflict);
 
   const yamlDraft = draft.kind === "yaml" ? draft : null;
   const text = yamlDraft?.text ?? acceptedYaml;
@@ -63,13 +81,23 @@ export function YamlDrawer({
       </button>
       {yamlDraft && <button type="button" disabled={busy} onClick={onDiscard}>Discard draft</button>}
       {diagnostic && (
-        <p id="yaml-diagnostic" role="alert" aria-label="YAML parse diagnostic" className="error-surface">
-          {diagnostic}
-        </p>
+        <span id="yaml-diagnostic">
+          <StatusChip
+            key={urgentDiagnostic ? `urgent:${diagnostic}` : "diagnostic"}
+            tone="danger"
+            label={`Invalid YAML: ${diagnostic}`}
+            urgent={urgentDiagnostic}
+          />
+        </span>
       )}
       {conflict && (
         <section aria-label="YAML revision conflict" className="error-surface">
-          <p role="alert">{conflict}</p>
+          <StatusChip
+            key={urgentConflict ? `urgent:${conflict}` : "conflict"}
+            tone="danger"
+            label={`Revision conflict: ${conflict}`}
+            urgent={urgentConflict}
+          />
           <p>Draft base revision {yamlDraft?.baseRevision}; accepted revision {revision}.</p>
           <button type="button" onClick={() => void navigator.clipboard?.writeText(text)}>Copy draft</button>
           {onRefresh && <button type="button" disabled={busy} onClick={onRefresh}>Refresh accepted YAML</button>}

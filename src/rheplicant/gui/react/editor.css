@@ -27,6 +27,52 @@
   opacity: 1;
 }
 
+.rheplicant-editor .status-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: baseline;
+  gap: var(--rh-space-2);
+  border: 2px solid currentColor;
+  border-radius: var(--rh-radius-sm);
+  padding: var(--rh-space-1) var(--rh-space-2);
+  overflow-wrap: anywhere;
+}
+
+.rheplicant-editor .status-chip-icon {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.rheplicant-editor .status-neutral {
+  color: var(--rh-text);
+  background: var(--rh-surface-raised);
+}
+
+.rheplicant-editor .status-success {
+  color: var(--rh-success-text);
+  background: var(--rh-success-bg);
+}
+
+.rheplicant-editor .status-warning {
+  color: var(--rh-warning-text);
+  background: var(--rh-warning-bg);
+}
+
+.rheplicant-editor .status-danger {
+  color: var(--rh-danger-text);
+  background: var(--rh-danger-bg);
+}
+
+.rheplicant-editor .status-stale {
+  color: var(--rh-stale-text);
+  background: var(--rh-stale-bg);
+}
+
+.rheplicant-editor .status-disabled {
+  color: var(--rh-disabled-text);
+  background: var(--rh-disabled-bg);
+}
+
 .rheplicant-editor .error-surface {
   color: var(--rh-danger-text);
   background: var(--rh-danger-bg);
@@ -53,7 +99,8 @@
 }
 
 .rheplicant-editor .product-grid,
-.rheplicant-editor .result-grid {
+.rheplicant-editor .result-grid,
+.rheplicant-editor [aria-label="Enabled products"] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: var(--rh-space-3);
@@ -214,7 +261,8 @@
 
 @media (max-width: 719px) {
   .rheplicant-editor .product-grid,
-  .rheplicant-editor .result-grid {
+  .rheplicant-editor .result-grid,
+  .rheplicant-editor [aria-label="Enabled products"] {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -222,6 +270,11 @@
 @media (forced-colors: active) {
   .rheplicant-editor :where(button, input, select, textarea, summary, a, [role="button"], [role="tab"]):focus-visible {
     outline-color: Highlight;
+    forced-color-adjust: auto;
+  }
+
+  .rheplicant-editor .status-chip {
+    border-color: CanvasText;
     forced-color-adjust: auto;
   }
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { SecurityBoundaryNotice } from "./SecurityBoundaryNotice";
+import { StatusChip } from "./StatusChip";
 
 interface WorkbenchHeaderProps {
   dirty: boolean;
@@ -29,11 +30,21 @@ export function WorkbenchHeader({
       <p>YAML is the sole scientific state; controls are projections.</p>
       <SecurityBoundaryNotice />
       <div aria-label="Editor session state">
-        <strong>{dirty ? "Unsaved changes" : "Saved"}</strong>
-        <span>{validationStale ? "Validation stale" : "Validation current"}</span>
+        <StatusChip
+          tone={dirty ? "warning" : "success"}
+          label={dirty ? "Unsaved changes" : "Saved"}
+        />
+        <StatusChip
+          tone={validationStale ? "stale" : "success"}
+          label={validationStale ? "Validation stale" : "Validation current"}
+        />
         <span>Revision {revision}</span>
       </div>
-      {mutationBlocked && mutationReason && <p id="mutation-blocked-reason">{mutationReason}</p>}
+      {mutationBlocked && mutationReason && (
+        <span id="mutation-blocked-reason">
+          <StatusChip tone="disabled" label={mutationReason} />
+        </span>
+      )}
       <nav aria-label="History and file actions">
         <button type="button" disabled={yamlBlocked} onClick={onOpenYaml}>YAML</button>
         {actions}

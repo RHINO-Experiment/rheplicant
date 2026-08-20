@@ -51,7 +51,7 @@ describe("authoritative YAML drawer", () => {
     expect(canUpdateDraft(graph, { kind: "field", baseRevision: 4, path: "base:gain:stages", rawValue: "x" })).toBe(false);
   });
 
-  it("shows a single inline parse diagnostic while retaining the raw YAML", () => {
+  it("shows one quiet historical parse diagnostic while retaining the raw YAML", () => {
     render(
       <YamlDrawer
         acceptedYaml="model: {}\n"
@@ -67,9 +67,10 @@ describe("authoritative YAML drawer", () => {
 
     expect(screen.getByRole("textbox", { name: "YAML source of truth" }))
       .toHaveValue("model: [");
-    expect(screen.getByRole("alert", { name: "YAML parse diagnostic" }))
-      .toHaveTextContent("expected the node content");
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    const diagnostic = screen.getByText("Invalid YAML: expected the node content");
+    expect(diagnostic).toBeVisible();
+    expect(diagnostic.closest("[role]")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("keeps close and discard available for a dirty draft", () => {

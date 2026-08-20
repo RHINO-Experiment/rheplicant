@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionEditor } from "../../../src/rheplicant/gui/react/SessionEditor";
+import { JobsDrawer } from "../../../src/rheplicant/gui/react/JobsDrawer";
 import { RequestError } from "../../../src/rheplicant/gui/react/api";
+import { BootstrapShell } from "../../../src/rheplicant/gui/react/main";
+import { YamlDrawer } from "../../../src/rheplicant/gui/react/YamlDrawer";
 import type {
   EditorSession,
   GraphDiagram,
@@ -453,7 +456,411 @@ function fullyDistinctSession(): EditorSession {
   };
 }
 
+function visibleEvidence(
+  label: string | RegExp,
+  role: "status" | "alert",
+  tone?: "neutral" | "success" | "warning" | "danger" | "stale" | "disabled",
+) {
+  const visibleLabel = screen.getByText(label);
+  const evidence = visibleLabel.closest("[role]");
+  expect(visibleLabel).toBeVisible();
+  expect(evidence).toHaveAttribute("role", role);
+  if (tone) expect(evidence).toHaveClass(`status-${tone}`);
+  return evidence as HTMLElement;
+}
+
+async function findVisibleEvidence(
+  label: string | RegExp,
+  role: "status" | "alert",
+  tone?: "neutral" | "success" | "warning" | "danger" | "stale" | "disabled",
+) {
+  await screen.findByText(label);
+  let evidence: Element | null = null;
+  await waitFor(() => {
+    evidence = screen.getByText(label).closest("[role]");
+    expect(evidence).toHaveAttribute("role", role);
+    if (tone) expect(evidence).toHaveClass(`status-${tone}`);
+  });
+  return evidence as HTMLElement;
+}
+
 describe("durable React editor session", () => {
+  it("keeps the named projection visible while bootstrap is loading", () => {
+    render(<BootstrapShell error="" />);
+
+    const loading = screen.getByRole("status", { name: "Workbench startup" });
+    expect(loading).toHaveTextContent("canonical starter");
+    expect(loading).toHaveTextContent("editor session");
+    expect(loading).toHaveAttribute("aria-busy", "true");
+    expect(loading).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("renders the empty jobs state as quiet evidence with one refresh action", () => {
+    const initial = state();
+    render(<SessionEditor initial={initial} transport={candidate(initial).transport} />);
+
+    const jobs = screen.getByRole("region", { name: "Jobs" });
+    const empty = visibleEvidence("No jobs submitted.", "status", "neutral");
+    expect(empty).toHaveTextContent("No jobs submitted");
+    expect(empty).toHaveAttribute("aria-live", "polite");
+    expect(within(jobs).getAllByRole("button")).toHaveLength(1);
+    expect(within(jobs).getByRole("button", { name: "Refresh jobs" })).toBeEnabled();
+  });
+
+  it("alerts once for each new refusal or internal-error transition, not historical evidence or rerenders", async () => {
+    const running: JobProjection = {
+      job_id: "transition-job",
+      session_id: "session-1",
+      kind: "run",
+      revision: 4,
+      yaml_digest: "digest-4",
+      status: "running",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const polling = {
+      status: "polling" as const,
+      error: null,
+      nextRetryMs: null,
+      refreshNow: vi.fn(),
+    };
+    const { rerender } = render(<JobsDrawer jobs={[running]} {...polling} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    visibleEvidence("Running run at revision 4", "status", "neutral");
+
+    const refused = { ...running, status: "refused" as const, message: "repair the source" };
+    rerender(<JobsDrawer jobs={[refused]} {...polling} />);
+    const refusalAlert = await findVisibleEvidence(
+      "Refused run at revision 4: repair the source",
+      "alert",
+      "danger",
+    );
+    expect(refusalAlert).toHaveTextContent("Refused");
+
+    rerender(<JobsDrawer jobs={[refused]} {...polling} />);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toBe(refusalAlert);
+
+    const failed = { ...refused, status: "error" as const, message: "bounded failure" };
+    rerender(<JobsDrawer jobs={[failed]} {...polling} />);
+    const errorAlert = await findVisibleEvidence(
+      "Internal error in run at revision 4: bounded failure",
+      "alert",
+      "danger",
+    );
+    expect(errorAlert).toBe(refusalAlert);
+    expect(errorAlert).toHaveTextContent("Internal error");
+  });
+
+  it("keeps a newly refused job visible when another terminal row is array-latest", async () => {
+    const running: JobProjection = {
+      job_id: "job-a",
+      session_id: "session-1",
+      kind: "run",
+      revision: 4,
+      yaml_digest: "digest-4",
+      status: "running",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const succeeded: JobProjection = {
+      ...running,
+      job_id: "job-b",
+      kind: "validate",
+      status: "succeeded",
+    };
+    const polling = {
+      status: "idle" as const,
+      error: null,
+      nextRetryMs: null,
+      refreshNow: vi.fn(),
+    };
+    const view = render(<JobsDrawer jobs={[running, succeeded]} {...polling} />);
+    visibleEvidence("Running run at revision 4", "status", "neutral");
+    visibleEvidence("Current validate succeeded at revision 4", "status", "success");
+
+    view.rerender(<JobsDrawer
+      jobs={[{ ...running, status: "refused", message: "new refusal" }, succeeded]}
+      {...polling}
+    />);
+    const alert = await findVisibleEvidence(
+      "Refused run at revision 4: new refusal",
+      "alert",
+      "danger",
+    );
+    expect(alert).toBeVisible();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("Current validate succeeded at revision 4"))
+      .not.toBeInTheDocument();
+
+    const nextRunning: JobProjection = {
+      ...running,
+      job_id: "job-c",
+      kind: "benchmark",
+    };
+    view.rerender(<JobsDrawer
+      jobs={[
+        { ...running, status: "refused", message: "new refusal" },
+        succeeded,
+        nextRunning,
+      ]}
+      {...polling}
+    />);
+    expect(visibleEvidence("Refused run at revision 4: new refusal", "alert", "danger"))
+      .toBe(alert);
+    visibleEvidence("Running benchmark at revision 4", "status", "neutral");
+
+    view.rerender(<JobsDrawer
+      jobs={[
+        { ...running, status: "refused", message: "new refusal" },
+        succeeded,
+        { ...nextRunning, status: "succeeded" },
+      ]}
+      {...polling}
+    />);
+    await findVisibleEvidence(
+      "Current benchmark succeeded at revision 4",
+      "status",
+      "success",
+    );
+    expect(screen.queryByText("Refused run at revision 4: new refusal"))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("prioritizes a same-batch danger before a genuinely later success", async () => {
+    const runningA: JobProjection = {
+      job_id: "batch-a",
+      session_id: "session-1",
+      kind: "run",
+      revision: 4,
+      yaml_digest: "digest-4",
+      status: "running",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const runningB: JobProjection = {
+      ...runningA,
+      job_id: "batch-b",
+      kind: "validate",
+    };
+    const polling = {
+      status: "idle" as const,
+      error: null,
+      nextRetryMs: null,
+      refreshNow: vi.fn(),
+    };
+    const view = render(<JobsDrawer jobs={[runningA, runningB]} {...polling} />);
+    visibleEvidence("Running run at revision 4", "status", "neutral");
+    visibleEvidence("Running validate at revision 4", "status", "neutral");
+
+    const refusedA = { ...runningA, status: "refused" as const, message: "same batch" };
+    const succeededB = { ...runningB, status: "succeeded" as const };
+    view.rerender(<JobsDrawer jobs={[refusedA, succeededB]} {...polling} />);
+    await findVisibleEvidence(
+      "Refused run at revision 4: same batch",
+      "alert",
+      "danger",
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("Current validate succeeded at revision 4"))
+      .not.toBeInTheDocument();
+
+    const runningC: JobProjection = {
+      ...runningA,
+      job_id: "batch-c",
+      kind: "benchmark",
+    };
+    view.rerender(<JobsDrawer jobs={[refusedA, succeededB, runningC]} {...polling} />);
+    visibleEvidence("Running benchmark at revision 4", "status", "neutral");
+    visibleEvidence("Refused run at revision 4: same batch", "alert", "danger");
+
+    view.rerender(<JobsDrawer
+      jobs={[refusedA, succeededB, { ...runningC, status: "succeeded" }]}
+      {...polling}
+    />);
+    await findVisibleEvidence(
+      "Current benchmark succeeded at revision 4",
+      "status",
+      "success",
+    );
+    expect(screen.queryByText("Refused run at revision 4: same batch"))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("re-alerts a refusal after the same job returns through running", async () => {
+    const refused: JobProjection = {
+      job_id: "cycle-job",
+      session_id: "session-1",
+      kind: "run",
+      revision: 4,
+      yaml_digest: "digest-4",
+      status: "refused",
+      result: null,
+      message: "cycle refusal",
+      stale: false,
+    };
+    const polling = {
+      status: "idle" as const,
+      error: null,
+      nextRetryMs: null,
+      refreshNow: vi.fn(),
+    };
+    const view = render(<JobsDrawer jobs={[refused]} {...polling} />);
+    visibleEvidence("Refused run at revision 4: cycle refusal", "status", "danger");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    view.rerender(<JobsDrawer jobs={[{ ...refused, status: "running", message: null }]} {...polling} />);
+    visibleEvidence("Running run at revision 4", "status", "neutral");
+    view.rerender(<JobsDrawer jobs={[refused]} {...polling} />);
+    await findVisibleEvidence("Refused run at revision 4: cycle refusal", "alert", "danger");
+  });
+
+  it("alerts only newly reached YAML evidence and keeps reopened history quiet", async () => {
+    const base = {
+      acceptedYaml: YAML,
+      revision: 4,
+      draft: { kind: "yaml" as const, baseRevision: 4, text: "model: [" },
+      busy: false,
+      onChange: vi.fn(),
+      onApply: vi.fn(),
+      onDiscard: vi.fn(),
+      onClose: vi.fn(),
+      onRefresh: vi.fn(),
+    };
+    const view = render(<YamlDrawer {...base} diagnostic={null} conflict={null} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    view.rerender(<YamlDrawer {...base} diagnostic="expected node" conflict={null} />);
+    const diagnostic = await findVisibleEvidence("Invalid YAML: expected node", "alert", "danger");
+    view.rerender(<YamlDrawer {...base} diagnostic="expected node" conflict={null} />);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(visibleEvidence("Invalid YAML: expected node", "alert", "danger")).toBe(diagnostic);
+
+    view.rerender(<YamlDrawer {...base} diagnostic="expected mapping" conflict={null} />);
+    const nextDiagnostic = await findVisibleEvidence(
+      "Invalid YAML: expected mapping",
+      "alert",
+      "danger",
+    );
+    expect(nextDiagnostic).not.toBe(diagnostic);
+    view.rerender(<YamlDrawer {...base} diagnostic="expected mapping" conflict={null} />);
+    expect(visibleEvidence("Invalid YAML: expected mapping", "alert", "danger"))
+      .toBe(nextDiagnostic);
+
+    view.unmount();
+    const diagnosticHistory = render(
+      <YamlDrawer {...base} diagnostic="expected mapping" conflict={null} />,
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    visibleEvidence("Invalid YAML: expected mapping", "status", "danger");
+    diagnosticHistory.unmount();
+
+    const conflictView = render(<YamlDrawer {...base} diagnostic={null} conflict={null} />);
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="expected revision 4, current 5" />,
+    );
+    const conflict = await findVisibleEvidence(
+      "Revision conflict: expected revision 4, current 5",
+      "alert",
+      "danger",
+    );
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="expected revision 4, current 5" />,
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(visibleEvidence(
+      "Revision conflict: expected revision 4, current 5",
+      "alert",
+      "danger",
+    ))
+      .toBe(conflict);
+
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="expected revision 5, current 6" />,
+    );
+    const nextConflict = await findVisibleEvidence(
+      "Revision conflict: expected revision 5, current 6",
+      "alert",
+      "danger",
+    );
+    expect(nextConflict).not.toBe(conflict);
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="expected revision 5, current 6" />,
+    );
+    expect(visibleEvidence(
+      "Revision conflict: expected revision 5, current 6",
+      "alert",
+      "danger",
+    ))
+      .toBe(nextConflict);
+
+    conflictView.unmount();
+    render(<YamlDrawer
+      {...base}
+      diagnostic={null}
+      conflict="expected revision 5, current 6"
+    />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    visibleEvidence("Revision conflict: expected revision 5, current 6", "status", "danger");
+  });
+
+  it("re-alerts a historical YAML diagnostic identity after an A-B-A cycle", async () => {
+    const base = {
+      acceptedYaml: YAML,
+      revision: 4,
+      draft: { kind: "yaml" as const, baseRevision: 4, text: "model: [" },
+      busy: false,
+      onChange: vi.fn(),
+      onApply: vi.fn(),
+      onDiscard: vi.fn(),
+      onClose: vi.fn(),
+      onRefresh: vi.fn(),
+    };
+    const diagnosticView = render(
+      <YamlDrawer {...base} diagnostic="diagnostic A" conflict={null} />,
+    );
+    visibleEvidence("Invalid YAML: diagnostic A", "status", "danger");
+    diagnosticView.rerender(
+      <YamlDrawer {...base} diagnostic="diagnostic B" conflict={null} />,
+    );
+    await findVisibleEvidence("Invalid YAML: diagnostic B", "alert", "danger");
+    diagnosticView.rerender(
+      <YamlDrawer {...base} diagnostic="diagnostic A" conflict={null} />,
+    );
+    await findVisibleEvidence("Invalid YAML: diagnostic A", "alert", "danger");
+  });
+
+  it("re-alerts a historical YAML conflict identity after an A-B-A cycle", async () => {
+    const base = {
+      acceptedYaml: YAML,
+      revision: 4,
+      draft: { kind: "yaml" as const, baseRevision: 4, text: "model: [" },
+      busy: false,
+      onChange: vi.fn(),
+      onApply: vi.fn(),
+      onDiscard: vi.fn(),
+      onClose: vi.fn(),
+      onRefresh: vi.fn(),
+    };
+    const conflictView = render(
+      <YamlDrawer {...base} diagnostic={null} conflict="conflict A" />,
+    );
+    visibleEvidence("Revision conflict: conflict A", "status", "danger");
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="conflict B" />,
+    );
+    await findVisibleEvidence("Revision conflict: conflict B", "alert", "danger");
+    conflictView.rerender(
+      <YamlDrawer {...base} diagnostic={null} conflict="conflict A" />,
+    );
+    await findVisibleEvidence("Revision conflict: conflict A", "alert", "danger");
+  });
+
   it("retains a YAML draft across workspaces and explains blocked mutations", async () => {
     const user = userEvent.setup();
     const initial = state({
@@ -472,6 +879,10 @@ describe("durable React editor session", () => {
     });
     await user.click(screen.getByRole("tab", { name: "Model" }));
     expect(screen.getByText("Unsaved YAML draft")).toBeVisible();
+    const draftState = screen.getByText("Unsaved YAML draft").closest("[role]");
+    expect(draftState).toHaveAttribute("role", "status");
+    expect(draftState).toHaveAttribute("aria-live", "polite");
+    expect(draftState).toHaveClass("status-disabled");
     expect(screen.getByRole("button", { name: /Apply configuration/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Apply configuration/ }))
       .toHaveAccessibleDescription("Unsaved YAML draft");
@@ -516,14 +927,20 @@ describe("durable React editor session", () => {
     render(<SessionEditor initial={state()} transport={transport} />);
     fireEvent.click(screen.getByRole("button", { name: "YAML" }));
 
-    expect(screen.getByText("Saved")).toBeInTheDocument();
-    expect(screen.getByText("Validation current")).toBeInTheDocument();
+    expect(screen.getByText("Saved").closest("[role]"))
+      .toHaveAttribute("role", "status");
+    expect(screen.getByText("Validation current").closest("[role]"))
+      .toHaveAttribute("role", "status");
+    expect(screen.getByText("Validation current").closest("[role]"))
+      .toHaveClass("status-success");
     const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
     fireEvent.change(mirror, { target: { value: EDITED } });
     fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
 
     await waitFor(() => expect(replaceYaml).toHaveBeenCalledWith("session-1", EDITED, 0));
-    expect(await screen.findByText("Unsaved changes")).toBeInTheDocument();
+    const unsaved = await screen.findByText("Unsaved changes");
+    expect(unsaved.closest("[role]")).toHaveAttribute("role", "status");
+    expect(unsaved.closest("[role]")).toHaveClass("status-warning");
     expect(screen.getByText("Revision 1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
   });
@@ -630,7 +1047,10 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("button", { name: "Discard draft" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Close YAML drawer" })).toBeEnabled();
     rejectApply?.(new RequestError(422, "expected node"));
-    expect(await screen.findByRole("alert", { name: "YAML parse diagnostic" })).toHaveTextContent("expected node");
+    const diagnostic = await findVisibleEvidence("Invalid YAML: expected node", "alert", "danger");
+    expect(diagnostic).toHaveTextContent("Invalid YAML");
+    expect(diagnostic).toHaveTextContent("expected node");
+    expect(diagnostic).toHaveAttribute("aria-live", "assertive");
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(source).toHaveValue("model: [");
   });
@@ -662,19 +1082,27 @@ describe("durable React editor session", () => {
       409,
       "Editor command expected revision 3, but the current revision is 4.",
     ));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("YAML revision conflict"));
+    await waitFor(() => expect(screen.getByText("YAML revision conflict").closest("[role='status']"))
+      .toHaveTextContent("YAML revision conflict"));
     fireEvent.click(screen.getByRole("button", { name: "YAML" }));
 
     expect(screen.getByRole("textbox", { name: "YAML source of truth" })).toHaveValue(raw);
     const conflict = screen.getByRole("region", { name: "YAML revision conflict" });
-    expect(within(conflict).getByRole("alert"))
+    const historicalConflict = within(conflict)
+      .getByText(/Revision conflict: Editor command expected revision 3/)
+      .closest("[role]");
+    expect(historicalConflict).toHaveAttribute("role", "status");
+    expect(historicalConflict).toHaveClass("status-danger");
+    expect(historicalConflict).toHaveTextContent("Revision conflict");
+    expect(historicalConflict)
       .toHaveTextContent("expected revision 3, but the current revision is 4");
+    expect(historicalConflict).toHaveAttribute("aria-live", "polite");
     expect(within(conflict).getByText("Draft base revision 3; accepted revision 3."))
       .toBeInTheDocument();
     expect(within(conflict).getByRole("button", { name: "Copy draft" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Discard draft" })).toBeEnabled();
     expect(within(conflict).getByRole("button", { name: "Refresh accepted YAML" })).toBeEnabled();
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("undoes and redoes through optimistic revisions", async () => {
@@ -863,7 +1291,8 @@ describe("durable React editor session", () => {
 
     await waitFor(() => expect(readFile).toHaveBeenCalledWith(file));
     expect(load).toHaveBeenCalledWith("session-1", EDITED, 0);
-    expect(await screen.findByRole("status")).toHaveTextContent("Loaded experiment.yaml");
+    expect((await screen.findByText("Loaded experiment.yaml")).closest("[role='status']"))
+      .toHaveTextContent("Loaded experiment.yaml");
     expect(screen.getByRole("textbox", { name: "YAML source of truth" })).toHaveValue(EDITED);
   });
 
@@ -915,11 +1344,14 @@ describe("durable React editor session", () => {
     fireEvent.change(mirror, { target: { value: EDITED } });
     fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("current revision is 1");
+    expect(await findVisibleEvidence(
+      /Revision conflict: Editor command expected revision 0/,
+      "alert",
+      "danger",
+    )).toHaveTextContent("current revision is 1");
     expect(mirror).toHaveValue(EDITED);
     expect(screen.getByText("Revision 0")).toBeInTheDocument();
-    expect(screen.queryByRole("alert", { name: "YAML parse diagnostic" }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByText(/^Invalid YAML:/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy draft" }));
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText).toHaveBeenCalledWith(EDITED);
@@ -947,7 +1379,11 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
 
-    expect(await screen.findByRole("alert", { name: "YAML parse diagnostic" }))
+    expect(await findVisibleEvidence(
+      "Invalid YAML: GUI document: expected the node content",
+      "alert",
+      "danger",
+    ))
       .toHaveTextContent("expected the node content");
     expect(mirror).toHaveValue("model: [");
     fireEvent.click(screen.getByRole("tab", { name: "Model" }));
@@ -1201,6 +1637,13 @@ describe("durable React editor session", () => {
     expect(drawer).toHaveTextContent("new-terminal");
     expect(drawer).toHaveTextContent("bounded refusal");
     expect(drawer).not.toHaveTextContent("old-terminal");
+    expect(visibleEvidence("Queued run at revision 0", "status", "neutral"))
+      .toHaveTextContent("Queued run at revision 0");
+    expect(visibleEvidence("Running benchmark at revision 0", "status", "neutral"))
+      .toHaveTextContent("Running benchmark at revision 0");
+    const refused = visibleEvidence(/Refused compare at revision 0/, "status", "danger");
+    expect(refused).toHaveTextContent("bounded refusal");
+    expect(refused).toHaveAttribute("aria-live", "polite");
   });
 
   it("shows polling failures and manually refreshes without the full-session transport", async () => {
@@ -1213,6 +1656,14 @@ describe("durable React editor session", () => {
     const drawer = screen.getByRole("region", { name: "Jobs" });
     await waitFor(() => expect(drawer).toHaveTextContent("jobs endpoint offline"));
     expect(drawer).toHaveTextContent("Retrying in 1 second");
+    const failure = visibleEvidence(
+      "Polling failure: jobs endpoint offline. Retrying in 1 second",
+      "alert",
+      "danger",
+    );
+    expect(failure).toHaveTextContent("jobs endpoint offline");
+    expect(failure).toHaveTextContent("Retrying in 1 second");
+    expect(failure).toHaveAttribute("aria-live", "assertive");
     candidateApi.transport.refreshJobs.mockClear();
     fireEvent.click(within(drawer).getByRole("button", { name: "Refresh jobs" }));
 
