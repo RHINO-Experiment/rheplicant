@@ -54,6 +54,15 @@ def create_session(client, yaml_text=BASE):
     return response.json()
 
 
+def test_starter_route_returns_a_valid_bounded_file_free_document(client):
+    from rheplicant.gui.starter import STARTER_YAML
+
+    response = client.get("/api/starter")
+
+    assert response.status_code == 200
+    assert response.json()["yaml_text"] == STARTER_YAML
+
+
 def complete_priced_yaml(tmp_path):
     document = synthetic_document()
     document["defaults"] = ["rhino_v1"]

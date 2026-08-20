@@ -625,15 +625,17 @@ def _inference_widgets(builder: _Builder) -> None:
         "sample": NPE_SAMPLE_KEYS,
     }
     npe_defaults = {**_CREATE_DEFAULTS, **_TRAIN_DEFAULTS}
+    npe_visible = _rule("inference.npe", "present")
     for subsection, keys in npe_tables.items():
         for key in sorted(keys):
             builder.add(
                 f"inference.npe.{subsection}.{key}",
                 required=key in {"n_simulations", "seed", "n_draws"},
                 default=npe_defaults.get(key, _NO_DEFAULT),
+                visible_when=npe_visible,
             )
     for key in sorted(_NPE_KEYS - set(npe_tables)):
-        builder.add(f"inference.npe.{key}")
+        builder.add(f"inference.npe.{key}", visible_when=npe_visible)
 
 
 def _run_widgets(builder: _Builder) -> None:

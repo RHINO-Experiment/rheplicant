@@ -38,6 +38,14 @@ def _projected(yaml_text: str, path: str):
     )
 
 
+def test_npe_required_fields_appear_only_when_npe_is_present():
+    absent = project_forms({"schema_version": 1})
+    assert not any(path.startswith("inference.npe.") for path in absent.missing_required)
+
+    present = project_forms({"schema_version": 1, "inference": {"npe": {"bank": {}}}})
+    assert "inference.npe.bank.n_simulations" in present.missing_required
+
+
 def test_catalog_is_frozen_closed_and_covers_every_planned_view():
     found = widget_catalog()
     assert dataclasses.is_dataclass(found)

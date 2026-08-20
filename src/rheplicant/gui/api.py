@@ -41,6 +41,7 @@ from rheplicant.gui.session import (
     set_session_snapshot_before,
     undo,
 )
+from rheplicant.gui.starter import STARTER_YAML
 
 
 class _ClosedModel(BaseModel):
@@ -237,6 +238,10 @@ def create_app(
     if session_store is not None and job_store is not None:
         raise ValueError("job_store belongs to SessionStore when both are supplied.")
     store = session_store if session_store is not None else SessionStore(job_store=job_store)
+
+    @app.get("/api/starter")
+    def get_starter() -> dict[str, str]:
+        return {"yaml_text": STARTER_YAML}
 
     @app.post("/api/snapshot")
     def document_snapshot(payload: YamlPayload) -> dict[str, object]:

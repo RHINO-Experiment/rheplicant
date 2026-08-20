@@ -1,8 +1,8 @@
 .rheplicant-editor {
-  color: #17251d;
-  background: #ffffff;
+  color: var(--rh-text);
+  background: var(--rh-surface-work);
   color-scheme: light dark;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--rh-font-sans);
   line-height: 1.5;
 }
 
@@ -14,7 +14,7 @@
 }
 
 .rheplicant-editor :where(button, input, select, textarea, a, [role="button"], [role="tab"]):focus-visible {
-  outline: 3px solid #005fcc;
+  outline: 3px solid var(--rh-focus);
   outline-offset: 3px;
 }
 
@@ -22,63 +22,70 @@
 .rheplicant-editor input[disabled],
 .rheplicant-editor select[disabled],
 .rheplicant-editor textarea[disabled] {
-  color: #545d57;
+  color: var(--rh-disabled-text);
+  background: var(--rh-disabled-bg);
   opacity: 1;
 }
 
 .rheplicant-editor .error-surface {
-  color: #7a1010;
-  background: #fff1f0;
-  border: 2px solid #b42318;
-  border-radius: .35rem;
-  padding: .65rem .8rem;
+  color: var(--rh-danger-text);
+  background: var(--rh-danger-bg);
+  border: 2px solid var(--rh-danger-text);
+  border-radius: var(--rh-radius-sm);
+  padding: var(--rh-space-2) var(--rh-space-3);
 }
 
 .rheplicant-editor [role="tab"][aria-selected="true"] {
-  color: #ffffff;
-  background: #174f35;
+  color: var(--rh-action-contrast);
+  background: var(--rh-action);
 }
 
 .rheplicant-editor pre {
   max-height: 32rem;
   overflow: auto;
-  color: #15261d;
-  background: #f4f7f3;
-  border: 1px solid #708077;
-  padding: 1rem;
+  color: var(--rh-text);
+  background: var(--rh-surface-raised);
+  border: 1px solid var(--rh-border);
+  padding: var(--rh-space-4);
 }
 
 .rheplicant-editor .product-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: .75rem;
+  gap: var(--rh-space-3);
 }
 
-@media (prefers-color-scheme: dark) {
-  .rheplicant-editor {
-    color: #f4f7f3;
-    background: #111814;
-  }
-
-  .rheplicant-editor pre {
-    color: #f4f7f3;
-    background: #1c2821;
-    border-color: #9fb1a5;
-  }
-
-  .rheplicant-editor .error-surface {
-    color: #ffd6d2;
-    background: #3a1714;
-    border-color: #ff8a80;
-  }
-
-  .rheplicant-editor :where(button, input, select, textarea, a, [role="button"], [role="tab"]):focus-visible {
-    outline-color: #8db9ff;
-  }
+.workbench-shell {
+  box-sizing: border-box;
+  display: grid;
+  height: 100dvh;
+  min-height: 0;
+  min-width: 0;
+  grid-template-rows: minmax(0, 14rem) minmax(0, 1fr) minmax(0, 16rem);
+  padding: var(--rh-space-4);
+  background: var(--rh-surface-canvas);
+  overflow: hidden;
 }
 
-@media (forced-colors: active) {
-  .rheplicant-editor :where(button, input, select, textarea, a, [role="button"], [role="tab"]):focus-visible {
-    outline-color: Highlight;
-  }
+.workbench-layout {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  grid-template-columns: minmax(14rem, 16rem) minmax(0, 1fr) minmax(22rem, 28rem);
+  gap: var(--rh-space-4);
+  margin-block: var(--rh-space-4);
+}
+
+.workbench-header,
+.workbench-jobs,
+.workbench-navigation,
+.workbench-main,
+.workbench-inspector {
+  min-height: 0;
+  min-width: 0;
+  padding: var(--rh-space-4);
+  background: var(--rh-surface-work);
+  border: 1px solid var(--rh-border);
+  border-radius: var(--rh-radius-md);
+  overflow: auto;
 }

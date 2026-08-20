@@ -2,27 +2,49 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { SessionEditor } from "./SessionEditor";
-import { createSession, sessionTransport } from "./api";
+import { createStarterSession, sessionTransport } from "./api";
 import type { EditorSession } from "./types";
+import { WorkbenchShell } from "./WorkbenchShell";
 
-const STARTER_YAML = `runtime:
-  jax_enable_x64: true
-model:
-  gain:
-    type: GainOperator
-    gain: 1.0
-runs:
-  - name: forward
-    kind: forward
-`;
+import "./tokens.css";
+import "./editor.css";
 
-function App() {
+function BootstrapShell({ error }: { error: string }) {
+  const loading = error === "";
+  return (
+    <WorkbenchShell
+      header={
+        <>
+          <h1>Rheplicant configuration workbench</h1>
+          <p>YAML is the sole scientific state; controls are projections.</p>
+        </>
+      }
+      navigation={<nav aria-label="Workbench workspaces"><p>Loading workspaces…</p></nav>}
+      main={
+        <section aria-label="Workbench startup">
+          {loading ? (
+            <p role="status" aria-label="Workbench startup" aria-busy="true">
+              Loading the canonical starter and creating the editor session…
+            </p>
+          ) : (
+            <p role="alert">Could not start the editor: {error}</p>
+          )}
+        </section>
+      }
+      inspector={<aside aria-label="Context inspector"><p>Startup context will appear here.</p></aside>}
+      jobs={<p>Startup jobs are unavailable until the editor session is ready.</p>}
+      overlay={null}
+    />
+  );
+}
+
+export function App() {
   const [session, setSession] = useState<EditorSession | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    createSession(STARTER_YAML)
+    createStarterSession()
       .then((created) => {
         if (active) setSession(created);
       })
@@ -34,13 +56,15 @@ function App() {
     };
   }, []);
 
-  if (error) return <p role="alert">Could not start the editor: {error}</p>;
-  if (!session) return <p role="status">Creating local YAML editor session…</p>;
+  if (error || !session) return <BootstrapShell error={error} />;
   return <SessionEditor initial={session} transport={sessionTransport} />;
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+const rootElement = document.getElementById("root");
+if (rootElement) {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}

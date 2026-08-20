@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from rheplicant.gui.document import snapshot
 from rheplicant.gui.previews import project_previews
 
 DOCUMENT = {
@@ -35,6 +36,19 @@ DOCUMENT = {
     "model": {},
     "runs": [{"name": "forward", "kind": "forward"}],
 }
+
+
+def test_starter_is_valid_bounded_and_file_free():
+    from rheplicant.gui.starter import STARTER_YAML
+
+    text = STARTER_YAML
+    found = snapshot(text)
+
+    assert found.validation.run_blocked is False
+    assert found.previews.axes
+    assert found.forms.missing_required == ()
+    assert "plugins:" not in text
+    assert "from_file:" not in text
 
 
 def test_exactly_four_preview_classes_have_the_schema_cost_boundaries():

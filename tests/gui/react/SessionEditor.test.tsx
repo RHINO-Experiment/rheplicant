@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionEditor } from "../../../src/rheplicant/gui/react/SessionEditor";
@@ -145,6 +146,31 @@ function candidate(initial = state()) {
 }
 
 describe("durable React editor session", () => {
+  it("switches four workspaces without changing YAML or revision", async () => {
+    const user = userEvent.setup();
+    const session = state({ revision: 7 });
+    const {
+      transport,
+      replaceYaml,
+      submitJob,
+    } = candidate(session);
+    const refresh = vi.fn(async () => session);
+    transport.refresh = refresh;
+    render(<SessionEditor initial={session} transport={transport} />);
+
+    for (const workspace of ["Config", "Execute", "Results", "Model"] as const) {
+      await user.click(screen.getByRole("tab", { name: workspace }));
+      expect(screen.getByRole("tabpanel", { name: workspace })).toBeVisible();
+      expect(document.querySelectorAll('[role="tabpanel"][id^="workspace-panel-"]'))
+        .toHaveLength(1);
+      expect(screen.getByRole("textbox", { name: "YAML source of truth" })).toHaveValue(YAML);
+      expect(screen.getByText(`Revision ${session.revision}`)).toBeVisible();
+    }
+    expect(replaceYaml).not.toHaveBeenCalled();
+    expect(submitJob).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("applies YAML with the visible revision and projects dirty/stale state", async () => {
     const { transport, replaceYaml } = candidate();
     render(<SessionEditor initial={state()} transport={transport} />);
@@ -252,6 +278,7 @@ describe("durable React editor session", () => {
     render(<SessionEditor initial={state()} transport={transport} />);
     const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
 
+    fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
     fireEvent.change(mirror, { target: { value: "model: [" } });
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
@@ -260,6 +287,7 @@ describe("durable React editor session", () => {
     expect(await screen.findByRole("alert", { name: "YAML parse diagnostic" }))
       .toHaveTextContent("expected the node content");
     expect(mirror).toHaveValue("model: [");
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }));
     expect(screen.getAllByText("gain").length).toBeGreaterThan(0);
     expect(screen.getByText("Revision 0")).toBeInTheDocument();
     fireEvent.change(mirror, { target: { value: "model: [still editing" } });
@@ -316,6 +344,7 @@ describe("durable React editor session", () => {
       document: { ...documentState(), validation },
     })} transport={candidate().transport} />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Results" }));
     const ledger = screen.getByRole("region", { name: "Pre-flight finding ledger" });
     expect(ledger).toHaveTextContent("unknown model node");
     expect(ledger).toHaveTextContent("suspicious run");
@@ -323,6 +352,7 @@ describe("durable React editor session", () => {
     expect(ledger).toHaveTextContent("variant:bad");
     expect(screen.getByRole("region", { name: "Diff against preset" }))
       .toHaveTextContent("runtime.jax_enable_x64");
+    fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
@@ -354,6 +384,7 @@ describe("durable React editor session", () => {
 
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("session-1"));
     expect(mirror).toHaveValue(EDITED);
+    fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
     expect(screen.getByRole("region", { name: "Explicit jobs" }))
       .toHaveTextContent("succeeded");
   });

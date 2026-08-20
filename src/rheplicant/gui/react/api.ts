@@ -7,7 +7,7 @@ export class RequestError extends Error {
   }
 }
 
-async function request(path: string, init: RequestInit): Promise<EditorSession> {
+async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...init.headers },
@@ -19,18 +19,27 @@ async function request(path: string, init: RequestInit): Promise<EditorSession> 
       body.detail ?? `Request failed with status ${response.status}`,
     );
   }
-  return body as EditorSession;
+  return body as T;
 }
 
 export function createSession(yamlText: string) {
-  return request("/api/sessions", {
+  return requestJson<EditorSession>("/api/sessions", {
     method: "POST",
     body: JSON.stringify({ yaml_text: yamlText }),
   });
 }
 
+export function getStarter(): Promise<{ yaml_text: string }> {
+  return requestJson("/api/starter", { method: "GET" });
+}
+
+export async function createStarterSession(): Promise<EditorSession> {
+  const { yaml_text } = await getStarter();
+  return createSession(yaml_text);
+}
+
 function postRevision(path: string, expectedRevision: number) {
-  return request(path, {
+  return requestJson<EditorSession>(path, {
     method: "POST",
     body: JSON.stringify({ expected_revision: expectedRevision }),
   });
@@ -42,12 +51,12 @@ function nodePath(sessionId: string, nodeId: string, suffix = "") {
 
 export const sessionTransport: SessionTransport = {
   refresh(sessionId) {
-    return request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
       method: "GET",
     });
   },
   replaceYaml(sessionId, yamlText, expectedRevision) {
-    return request(`/api/sessions/${encodeURIComponent(sessionId)}/yaml`, {
+    return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}/yaml`, {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -68,7 +77,7 @@ export const sessionTransport: SessionTransport = {
     );
   },
   load(sessionId, yamlText, expectedRevision) {
-    return request(`/api/sessions/${encodeURIComponent(sessionId)}/load`, {
+    return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}/load`, {
       method: "POST",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -83,7 +92,7 @@ export const sessionTransport: SessionTransport = {
     );
   },
   editNode(sessionId, nodeId, enabled, settings, expectedRevision, variant) {
-    return request(nodePath(sessionId, nodeId), {
+    return requestJson<EditorSession>(nodePath(sessionId, nodeId), {
       method: "PATCH",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -101,7 +110,7 @@ export const sessionTransport: SessionTransport = {
     expectedRevision,
     variant,
   ) {
-    return request(nodePath(sessionId, nodeId, "/move"), {
+    return requestJson<EditorSession>(nodePath(sessionId, nodeId, "/move"), {
       method: "POST",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -112,7 +121,7 @@ export const sessionTransport: SessionTransport = {
     });
   },
   composeNode(sessionId, nodeId, compose, stages, expectedRevision, variant) {
-    return request(nodePath(sessionId, nodeId, "/compose"), {
+    return requestJson<EditorSession>(nodePath(sessionId, nodeId, "/compose"), {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -123,7 +132,7 @@ export const sessionTransport: SessionTransport = {
     });
   },
   placeNode(sessionId, nodeId, at, settings, expectedRevision, variant) {
-    return request(nodePath(sessionId, nodeId, "/placement"), {
+    return requestJson<EditorSession>(nodePath(sessionId, nodeId, "/placement"), {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -140,7 +149,7 @@ export const sessionTransport: SessionTransport = {
     expectedRevision,
     variant,
   ) {
-    return request(nodePath(sessionId, nodeId, "/snapshot-before"), {
+    return requestJson<EditorSession>(nodePath(sessionId, nodeId, "/snapshot-before"), {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -159,7 +168,7 @@ export const sessionTransport: SessionTransport = {
     themes,
     expectedRevision,
   ) {
-    return request(
+    return requestJson<EditorSession>(
       `/api/sessions/${encodeURIComponent(sessionId)}/outputs/products/${encodeURIComponent(name)}`,
       {
         method: "PUT",
@@ -184,7 +193,7 @@ export const sessionTransport: SessionTransport = {
     formats,
     expectedRevision,
   ) {
-    return request(`/api/sessions/${encodeURIComponent(sessionId)}/outputs/report`, {
+    return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}/outputs/report`, {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
@@ -198,7 +207,7 @@ export const sessionTransport: SessionTransport = {
     });
   },
   submitJob(sessionId, kind: JobKind, expectedRevision) {
-    return request(`/api/sessions/${encodeURIComponent(sessionId)}/jobs`, {
+    return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}/jobs`, {
       method: "POST",
       body: JSON.stringify({
         expected_revision: expectedRevision,
