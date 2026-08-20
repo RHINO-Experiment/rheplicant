@@ -59,6 +59,8 @@ runtime:
 observation:
   meta:
     telescope: RHINO
+  pointing:
+    materialise: []
   freq:
     grid:
       linspace:

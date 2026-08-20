@@ -83,7 +83,7 @@ test("package scripts and development dependencies retain exact pins", async () 
   expect(manifest.scripts["test:e2e"]).toBe("playwright test");
   expect(manifest.scripts["test:e2e:update"]).toBe("playwright test --update-snapshots");
   expect(manifest.scripts["check:e2e"]).toBe(
-    "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --types node playwright.config.ts ../../../tests/gui/e2e/fixtures.ts ../../../tests/gui/e2e/helpers.ts ../../../tests/gui/e2e/smoke.spec.ts",
+    "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --types node playwright.config.ts ../../../tests/gui/e2e/fixtures.ts ../../../tests/gui/e2e/helpers.ts ../../../tests/gui/e2e/smoke.spec.ts ../../../tests/gui/e2e/editor-journeys.spec.ts ../../../tests/gui/e2e/execution-results.spec.ts ../../../tests/gui/e2e/responsive.spec.ts ../../../tests/gui/e2e/accessibility.spec.ts",
   );
   expect(manifest.devDependencies["@playwright/test"]).toBe("1.62.1");
   expect(manifest.devDependencies["@axe-core/playwright"]).toBe("4.10.2");
@@ -97,6 +97,19 @@ test("package scripts and development dependencies retain exact pins", async () 
   expect(lock.packages["node_modules/playwright"].version).toBe("1.62.1");
   expect(lock.packages["node_modules/playwright-core"].version).toBe("1.62.1");
   expect(typeof AxeBuilder).toBe("function");
+});
+
+test("responsive coverage retains vertical overflow and header-bound assertions", async () => {
+  const responsive = await readFile(
+    resolve(repository, "tests/gui/e2e/responsive.spec.ts"),
+    "utf8",
+  );
+
+  expect(responsive).toContain("verticalDelta: 0,");
+  expect(responsive).toContain("bodyVerticalDelta: 0,");
+  expect(responsive).toContain("expect(await headerActionsOverflow(page)).toEqual");
+  expect(responsive).toContain("expect(firstPreviewMain.usableHeight).toBeGreaterThanOrEqual(128);");
+  expect(responsive).toContain("expect(firstPreviewMain.nextActionOverflow).toEqual");
 });
 
 test("output fixture adds safe root keys exactly once", () => {

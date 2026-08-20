@@ -70,6 +70,8 @@ export function useModelWorkspace({
   const comparisonVariant = session.document.variant_diagrams.find(
     (item) => item.name === resolvedActiveVariant,
   ) ?? session.document.variant_diagrams[0];
+  const comparisonZoomDisabled = view === "compare";
+  const comparisonZoomReasonId = "comparison-zoom-reason";
 
   useEffect(() => {
     if (activeVariant !== null && resolvedActiveVariant === null) setActiveVariant(null);
@@ -109,12 +111,40 @@ export function useModelWorkspace({
           </select>
         </label>
         <div aria-label="Graph zoom">
-          <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}>Zoom out</button>
-          <button type="button" onClick={() => setZoom(0.8)}>Fit</button>
-          <button type="button" onClick={() => setZoom(1)}>100%</button>
-          <button type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.25))}>Zoom in</button>
-          <button type="button" onClick={() => { setView("full"); setZoom(1); }}>Reset view</button>
+          <button
+            type="button"
+            disabled={comparisonZoomDisabled}
+            aria-describedby={comparisonZoomDisabled ? comparisonZoomReasonId : undefined}
+            onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+          >Zoom out</button>
+          <button
+            type="button"
+            disabled={comparisonZoomDisabled}
+            aria-describedby={comparisonZoomDisabled ? comparisonZoomReasonId : undefined}
+            onClick={() => setZoom(0.8)}
+          >Fit</button>
+          <button
+            type="button"
+            disabled={comparisonZoomDisabled}
+            aria-describedby={comparisonZoomDisabled ? comparisonZoomReasonId : undefined}
+            onClick={() => setZoom(1)}
+          >100%</button>
+          <button
+            type="button"
+            disabled={comparisonZoomDisabled}
+            aria-describedby={comparisonZoomDisabled ? comparisonZoomReasonId : undefined}
+            onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
+          >Zoom in</button>
+          <button
+            type="button"
+            onClick={() => { setView("full"); setZoom(1); }}
+          >Reset view</button>
         </div>
+        {comparisonZoomDisabled && (
+          <p id={comparisonZoomReasonId}>
+            Comparison graphs fit their containers; switch to Full path or Processing to use zoom.
+          </p>
+        )}
       </header>
 
       {view === "compare" ? (

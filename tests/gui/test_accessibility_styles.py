@@ -54,6 +54,7 @@ def test_editor_text_and_error_surfaces_have_wcag_aa_contrast():
 
 def test_focus_indicator_is_thick_and_contrasts_in_light_and_dark_modes():
     assert ":focus-visible" in CSS
+    assert '[role="img"]' not in _block(CSS, ".rheplicant-editor :where(")
     assert "outline: 3px solid var(--rh-focus)" in CSS
     assert "#005fcc" in TOKENS
     assert "#8dc8ff" in TOKENS
@@ -114,9 +115,11 @@ def test_status_chips_use_token_colours_and_a_non_colour_boundary():
 
 def test_wide_workbench_is_a_bounded_shrink_safe_desktop_frame():
     grid_children = _block(CSS, ".workbench-shell > *")
+    body = _block(CSS, "body {")
     assert "box-sizing: border-box;" in CSS
+    assert "margin: 0;" in body
     assert "height: 100dvh;" in CSS
-    assert "grid-template-rows: minmax(0, 14rem) minmax(0, 1fr) minmax(0, 16rem);" in CSS
+    assert "grid-template-rows: minmax(0, 16rem) minmax(0, 1fr) minmax(0, 16rem);" in CSS
     assert "grid-template-columns: minmax(14rem, 16rem) minmax(0, 1fr) minmax(22rem, 28rem);" in CSS
     assert ".workbench-shell > *," in CSS
     assert ".workbench-layout > *" in CSS
@@ -148,6 +151,7 @@ def test_workbench_has_all_four_responsive_layout_contracts():
     assert "inset: 0 0 0 auto;" in inspector_overlay
     assert "width: min(28rem, 90vw);" in inspector_overlay
     assert ".workbench-layout" in compact
+    assert "grid-template-rows: minmax(0, 18rem) minmax(0, 1fr) minmax(0, 16rem);" in compact
     assert "grid-template-columns: minmax(0, 1fr);" in compact
     assert ".workspace-nav" in compact
     assert "flex-direction: row;" in compact
@@ -155,17 +159,34 @@ def test_workbench_has_all_four_responsive_layout_contracts():
     assert ".workbench-drawer > [role=\"dialog\"]" in compact
     assert "width: 100%;" in _block(compact, ".workbench-inspector,")
     assert ".product-grid" in narrow
+    assert "grid-template-rows: minmax(0, 20rem) minmax(0, 1fr) minmax(0, 16rem);" in narrow
     assert ".result-grid" in narrow
     assert '[aria-label="Enabled products"]' in narrow
     assert "grid-template-columns: minmax(0, 1fr);" in narrow
 
 
 def test_only_the_graph_viewport_may_scroll_horizontally():
-    graph = _block(CSS, ".graph-viewport")
+    editable = _block(CSS, '.graph-viewport[role="group"]')
+    readonly = _block(CSS, '.graph-viewport[role="img"]')
+    readonly_svg = _block(CSS, '.graph-viewport[role="img"] .graph-markup > svg')
 
-    assert "overflow-x: auto;" in graph
+    assert "overflow-x: auto;" in editable
     assert CSS.count("overflow-x: auto;") == 1
-    assert "overflow-x: hidden;" in CSS
+    assert "overflow: hidden;" in readonly
+    assert "max-width: 100%;" in readonly_svg
+    assert "height: auto;" in readonly_svg
+
+
+def test_published_output_paths_wrap_inside_the_results_region():
+    published_code = _block(
+        CSS,
+        '.rheplicant-editor [aria-label="Published output summary"] code',
+    )
+
+    assert "display: block;" in published_code
+    assert "max-width: 100%;" in published_code
+    assert "overflow-wrap: anywhere;" in published_code
+    assert "white-space: normal;" in published_code
 
 
 def test_forced_colours_keep_the_editor_focus_indicator_visible():
@@ -173,6 +194,7 @@ def test_forced_colours_keep_the_editor_focus_indicator_visible():
 
     assert ":focus-visible" in forced
     assert "summary" in forced
+    assert '[role="img"]' not in forced
     assert "outline-color: Highlight;" in forced
     assert "forced-color-adjust: auto;" in forced
 

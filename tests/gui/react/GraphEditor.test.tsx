@@ -281,6 +281,62 @@ function ModelHarness(props: ModelWorkspaceProps) {
 }
 
 describe("model workspace ownership", () => {
+  it("gives the canvas sole root semantics and removes readonly node interaction", () => {
+    const graph = state().document.base_diagram;
+    const diagram = {
+      ...graph,
+      svg: graph.svg.replace(
+        "<svg>",
+        '<svg role="img" aria-label="Server signal path">',
+      ),
+    };
+    const onSelect = vi.fn();
+    const comparison = { ...diagram, name: "readonly" };
+    render(
+      <>
+        <GraphCanvas
+          diagram={diagram}
+          editable
+          selectedNode="gain"
+          zoom={1}
+          onSelect={onSelect}
+        />
+        <GraphCanvas
+          diagram={comparison}
+          editable={false}
+          selectedNode={null}
+          zoom={2}
+          onSelect={onSelect}
+        />
+      </>,
+    );
+    const editable = screen.getByRole("group", { name: "Signal path" });
+    const readonly = screen.getByRole("img", { name: "readonly comparison graph" });
+    const editableSvg = editable.querySelector(".graph-markup > svg");
+    const readonlySvg = readonly.querySelector(".graph-markup > svg");
+    const gain = editable.querySelector('[data-node-id="gain"]');
+
+    expect(editableSvg).not.toHaveAttribute("role");
+    expect(editableSvg).not.toHaveAttribute("aria-label");
+    expect(editableSvg).not.toHaveAttribute("aria-hidden");
+    expect(gain).toHaveAttribute("role", "button");
+    expect(gain).toHaveAttribute("tabindex", "0");
+    expect(gain).toHaveAttribute("aria-pressed", "true");
+    expect(readonly).not.toHaveAttribute("tabindex");
+    expect(readonly.querySelector(".graph-scale")).not.toHaveAttribute("style");
+    expect(readonlySvg).toHaveAttribute("aria-hidden", "true");
+    expect(readonlySvg).not.toHaveAttribute("role");
+    expect(readonlySvg).not.toHaveAttribute("aria-label");
+    expect(screen.getAllByRole("img", { name: "readonly comparison graph" }))
+      .toHaveLength(1);
+    for (const node of readonly.querySelectorAll("[data-node-id]")) {
+      expect(node).not.toHaveAttribute("role");
+      expect(node).not.toHaveAttribute("tabindex");
+      expect(node).not.toHaveAttribute("aria-pressed");
+      expect(node).not.toHaveAttribute("aria-disabled");
+    }
+  });
+
   it("updates the roving stop when only the controlled canvas selection changes", () => {
     const graph = state().document.base_diagram;
     const onSelect = vi.fn();
@@ -336,15 +392,19 @@ describe("model workspace ownership", () => {
   it("contains zoomed graph overflow inside its labelled viewport", () => {
     render(<ModelHarness {...modelProps()} />);
 
-    expect(screen.getByRole("group", { name: "Signal path" })).toHaveStyle({
-      maxWidth: "100%",
-      overflow: "auto",
+    const graph = screen.getByRole("group", { name: "Signal path" });
+    expect(graph).toHaveClass("graph-viewport");
+    expect(graph.querySelector(".graph-scale")).toHaveStyle({
+      transform: "scale(1)",
+      transformOrigin: "top left",
     });
   });
 
   it("mounts only base and the selected variant in Compare and removes every node from the tab order", () => {
-    render(<ModelHarness {...modelProps()} />);
+    const { container } = render(<ModelHarness {...modelProps()} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1.25)" });
     fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
       target: { value: "high_gain" },
     });
@@ -355,12 +415,31 @@ describe("model workspace ownership", () => {
     expect(screen.getByRole("img", { name: "high_gain comparison graph" })).toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "low_gain comparison graph" })).not.toBeInTheDocument();
     for (const diagram of diagrams) {
-      for (const node of within(diagram).getAllByRole("button")) {
-        expect(node).toHaveAttribute("tabindex", "-1");
-        expect(node).toHaveAttribute("aria-disabled", "true");
+      expect(within(diagram).queryAllByRole("button")).toEqual([]);
+      for (const node of diagram.querySelectorAll("[data-node-id]")) {
+        expect(node).not.toHaveAttribute("role");
+        expect(node).not.toHaveAttribute("tabindex");
+        expect(node).not.toHaveAttribute("aria-disabled");
         expect(node).not.toHaveAttribute("aria-pressed");
       }
     }
+    const zoomReason = "Comparison graphs fit their containers; switch to Full path or Processing to use zoom.";
+    expect(screen.getByText(zoomReason, { exact: true })).toBeVisible();
+    for (const name of ["Zoom out", "Fit", "100%", "Zoom in"]) {
+      const control = screen.getByRole("button", { name });
+      expect(control).toBeDisabled();
+      expect(control).toHaveAccessibleDescription(zoomReason);
+    }
+    const reset = screen.getByRole("button", { name: "Reset view" });
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    expect(screen.getByRole("button", { name: "Full path" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("group", { name: "Signal path" })).toBeVisible();
+    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1)" });
+    expect(screen.queryByText(zoomReason, { exact: true })).not.toBeInTheDocument();
   });
 
   it("preserves one roving tab stop when a composition node is selected", () => {
@@ -457,12 +536,24 @@ describe("model workspace ownership", () => {
     const { container } = render(<ModelHarness {...props} />);
     fireEvent.click(container.querySelector('[data-node-id="flagging"]')!);
 
+    const zoom = (name: "Zoom out" | "Fit" | "100%" | "Zoom in", scale: number) => {
+      const control = screen.getByRole("button", { name });
+      expect(control).toBeEnabled();
+      fireEvent.click(control);
+      expect(container.querySelector(".graph-scale")).toHaveStyle({
+        transform: `scale(${scale})`,
+      });
+    };
+    zoom("Zoom out", 0.75);
+    zoom("Fit", 0.8);
+    zoom("100%", 1);
+    zoom("Zoom in", 1.25);
     fireEvent.click(screen.getByRole("button", { name: "Processing" }));
     expect(screen.getByRole("complementary", { name: "flagging settings" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1.25)" });
-    fireEvent.click(screen.getByRole("button", { name: "100%" }));
-    expect(container.querySelector(".graph-scale")).toHaveStyle({ transform: "scale(1)" });
+    zoom("Zoom out", 1);
+    zoom("Fit", 0.8);
+    zoom("100%", 1);
+    zoom("Zoom in", 1.25);
     expect(props.transport.editNode).not.toHaveBeenCalled();
     expect(props.onAccept).not.toHaveBeenCalled();
   });
@@ -918,9 +1009,13 @@ describe("graph-guided instrument editor", () => {
     expect(within(comparison).getByText("low_gain")).toBeInTheDocument();
     expect(within(comparison).getByText("Changed nodes: gain")).toBeInTheDocument();
     const comparisonNode = comparison.querySelector('[data-node-id="gain"]')!;
-    expect(comparisonNode).toHaveAttribute("tabindex", "-1");
+    expect(comparisonNode).not.toHaveAttribute("role");
+    expect(comparisonNode).not.toHaveAttribute("tabindex");
+    expect(comparisonNode).not.toHaveAttribute("aria-disabled");
+    expect(comparisonNode).not.toHaveAttribute("aria-pressed");
     fireEvent.click(comparisonNode);
-    expect(comparisonNode).toHaveAttribute("tabindex", "-1");
+    expect(comparisonNode).not.toHaveAttribute("role");
+    expect(comparisonNode).not.toHaveAttribute("tabindex");
   });
 
   it("authors ordered compose and at-region edits through their document routes", () => {

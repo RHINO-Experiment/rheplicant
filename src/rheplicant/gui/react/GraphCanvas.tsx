@@ -32,27 +32,40 @@ export const GraphCanvas = memo(function GraphCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const nodes = Array.from(
-      canvas.querySelectorAll<SVGElement>('[data-node-id][role="button"]'),
+    const injectedRoot = canvas.querySelector("svg");
+    injectedRoot?.removeAttribute("role");
+    injectedRoot?.removeAttribute("aria-label");
+    if (editable) injectedRoot?.removeAttribute("aria-hidden");
+    else injectedRoot?.setAttribute("aria-hidden", "true");
+    const allNodes = Array.from(
+      canvas.querySelectorAll<SVGElement>("[data-node-id]"),
     );
     if (!editable) {
-      nodes.forEach((node) => {
-        node.setAttribute("tabindex", "-1");
-        node.setAttribute("aria-disabled", "true");
+      allNodes.forEach((node) => {
+        node.removeAttribute("role");
+        node.removeAttribute("tabindex");
+        node.removeAttribute("aria-disabled");
         node.removeAttribute("aria-pressed");
       });
       return;
     }
+    const editableNodes = new Set(
+      diagram.nodes.filter((node) => node.editable).map((node) => node.node_id),
+    );
+    const nodes = allNodes.filter((node) => (
+      node.dataset.nodeId !== undefined && editableNodes.has(node.dataset.nodeId)
+    ));
     const active = nodes.find((node) => node.dataset.nodeId === selectedNode)
       ?? nodes.find((node) => node.getAttribute("tabindex") === "0")
       ?? nodes[0];
     nodes.forEach((node) => {
       const selected = node === active;
+      node.setAttribute("role", "button");
       node.setAttribute("tabindex", selected ? "0" : "-1");
       node.setAttribute("aria-pressed", selected ? "true" : "false");
       node.removeAttribute("aria-disabled");
     });
-  }, [diagram.svg, editable, selectedNode]);
+  }, [diagram.nodes, diagram.svg, editable, selectedNode]);
 
   function select(target: EventTarget | null) {
     if (!editable) return;
@@ -115,11 +128,12 @@ export const GraphCanvas = memo(function GraphCanvas({
       className="graph-viewport"
       role={editable ? "group" : "img"}
       aria-label={editable ? "Signal path" : `${diagram.name} comparison graph`}
-      style={{ maxWidth: "100%", overflow: "auto" }}
     >
       <div
         className="graph-scale"
-        style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
+        style={editable
+          ? { transform: `scale(${zoom})`, transformOrigin: "top left" }
+          : undefined}
         data-selected-node={selectedNode ?? undefined}
         onClick={editable ? (event) => select(event.target) : undefined}
         onKeyDown={editable ? keyDown : undefined}

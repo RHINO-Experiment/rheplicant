@@ -1,3 +1,7 @@
+body {
+  margin: 0;
+}
+
 .rheplicant-editor {
   color: var(--rh-text);
   background: var(--rh-surface-work);
@@ -134,7 +138,36 @@
 
 .graph-viewport {
   max-width: 100%;
+}
+
+.graph-viewport[role="group"] {
   overflow-x: auto;
+}
+
+.graph-viewport[role="img"] {
+  overflow: hidden;
+}
+
+.graph-viewport[role="img"] .graph-markup > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.rheplicant-editor [aria-label="Published output summary"] code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.rheplicant-editor [aria-label="First preview checklist"] {
+  display: grid;
+  gap: var(--rh-space-1);
+}
+
+.rheplicant-editor [aria-label="First preview checklist"] > :where(h2, ul, p) {
+  margin-block: 0;
 }
 
 .workbench-shell {
@@ -143,7 +176,7 @@
   height: 100dvh;
   min-height: 0;
   min-width: 0;
-  grid-template-rows: minmax(0, 14rem) minmax(0, 1fr) minmax(0, 16rem);
+  grid-template-rows: minmax(0, 16rem) minmax(0, 1fr) minmax(0, 16rem);
   padding: var(--rh-space-4);
   background: var(--rh-surface-canvas);
   overflow: hidden;
@@ -243,6 +276,10 @@
 }
 
 @media (max-width: 959px) {
+  .workbench-shell {
+    grid-template-rows: minmax(0, 18rem) minmax(0, 1fr) minmax(0, 16rem);
+  }
+
   .workbench-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -260,6 +297,10 @@
 }
 
 @media (max-width: 719px) {
+  .workbench-shell {
+    grid-template-rows: minmax(0, 20rem) minmax(0, 1fr) minmax(0, 16rem);
+  }
+
   .rheplicant-editor .product-grid,
   .rheplicant-editor .result-grid,
   .rheplicant-editor [aria-label="Enabled products"] {
