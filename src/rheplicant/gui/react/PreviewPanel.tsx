@@ -9,6 +9,7 @@ interface Props {
   jobs: JobProjection[];
   disabled: boolean;
   blocked: boolean;
+  disabledReasonId?: string;
   onSubmit: (kind: JobKind) => void;
 }
 
@@ -110,6 +111,7 @@ export function PreviewPanel({
   jobs,
   disabled,
   blocked,
+  disabledReasonId,
   onSubmit,
 }: Props) {
   const unavailable = disabled || blocked;
@@ -150,25 +152,28 @@ export function PreviewPanel({
 
       <section aria-label="Explicit preview and run actions">
         <h2>Explicit, priced work</h2>
-        <button disabled={unavailable} onClick={() => onSubmit("validate")}>
+        <button disabled={unavailable} aria-describedby={disabled ? disabledReasonId : undefined} onClick={() => onSubmit("validate")}>
           Validate
         </button>
         <button
           aria-label={`Preview forward · ${previews.forward_cost.label}`}
           disabled={unavailable}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onClick={() => onSubmit("preview_forward")}
         >
           Preview forward · {previews.forward_cost.label}
         </button>
-        <button disabled={unavailable} onClick={() => onSubmit("run")}>Run</button>
+        <button disabled={unavailable} aria-describedby={disabled ? disabledReasonId : undefined} onClick={() => onSubmit("run")}>Run</button>
         <button
           disabled={unavailable || !declared.has("compare")}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onClick={() => onSubmit("compare")}
         >
           Compare
         </button>
         <button
           disabled={unavailable || !declared.has("benchmark")}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onClick={() => onSubmit("benchmark")}
         >
           Benchmark

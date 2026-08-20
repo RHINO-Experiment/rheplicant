@@ -6,12 +6,16 @@ import type {
   NodeCard,
   SessionTransport,
 } from "./types";
+import type { DraftCoordinator } from "./drafts";
 
 interface Props {
   session: EditorSession;
   transport: SessionTransport;
   onAccept: (next: EditorSession, message: string) => void;
   disabled?: boolean;
+  disabledReasonId?: string;
+  coordinator?: DraftCoordinator;
+  onRun?: (action: () => Promise<EditorSession>, message: string) => void;
 }
 
 function nodeElement(target: EventTarget | null) {
@@ -141,7 +145,7 @@ function countLine(diagram: GraphDiagram) {
   return `lit ${lit} · skipped ${skipped} · reserved ${reserved} · instances ${instances}`;
 }
 
-export function GraphEditor({ session, transport, onAccept, disabled = false }: Props) {
+export function GraphEditor({ session, transport, onAccept, disabled = false, disabledReasonId, coordinator, onRun }: Props) {
   const [selectedId, setSelectedId] = useState(session.document.walk_order[0] ?? "");
   const [activeVariant, setActiveVariant] = useState<string | null>(null);
   const [settingsText, setSettingsText] = useState("{}");
@@ -163,8 +167,20 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
   const selectedAt = selected?.settings && typeof selected.settings === "object"
     ? (selected.settings as { at?: unknown }).at
     : undefined;
+  const selectedSettings = selected
+    ? jsonText(selected.settings, selected.configuration === "fan" ? {} : selected.many ? [] : {})
+    : "{}";
+  const selectedStages = selected?.settings && typeof selected.settings === "object"
+    ? jsonText((selected.settings as { stages?: unknown }).stages, [])
+    : "[]";
+  const selectedRegion = Array.isArray(selectedAt) ? selectedAt.join(", ") : typeof selectedAt === "string" ? selectedAt : "";
+  const selectedSnapshot = selected?.settings && typeof selected.settings === "object"
+    && typeof (selected.settings as { snapshot_before?: unknown }).snapshot_before === "string"
+    ? (selected.settings as { snapshot_before: string }).snapshot_before
+    : "";
 
   useEffect(() => {
+    if (coordinator) return;
     if (!selected) return;
     const fallback = selected.configuration === "fan" ? {} : selected.many ? [] : {};
     setSettingsText(jsonText(selected.settings, fallback));
@@ -175,9 +191,74 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
       { name: "stage_1" },
       { name: "stage_2" },
     ]));
-  }, [selected]);
+  }, [selected, coordinator]);
+
+  function rawGraphValue(path: string, fallback: string) {
+    const draft = coordinator?.draft;
+    return draft?.kind === "graph" && draft.path === path ? draft.rawValue : fallback;
+  }
+
+  function ownsGraphDraft(path: string) {
+    return coordinator?.draft.kind === "graph" && coordinator.draft.path === path;
+  }
+
+  function graphControlDisabled(path: string) {
+    return disabled || (coordinator !== undefined && coordinator.draft.kind !== "none" && !ownsGraphDraft(path));
+  }
+
+  function graphRevision(path: string) {
+    const current = coordinator?.draft;
+    return current?.kind === "graph" && current.path === path
+      ? current.baseRevision
+      : session.revision;
+  }
+
+  function placementValues(path: string) {
+    const draft = coordinator?.draft;
+    const fallback = { settings: selectedSettings, region: selectedRegion };
+    if (draft?.kind !== "graph" || draft.path !== path) return fallback;
+    try {
+      const parsed = JSON.parse(draft.rawValue) as { settings?: unknown; region?: unknown };
+      return {
+        settings: typeof parsed.settings === "string" ? parsed.settings : fallback.settings,
+        region: typeof parsed.region === "string" ? parsed.region : fallback.region,
+      };
+    } catch { return fallback; }
+  }
+
+  function updatePlacement(path: string, key: "settings" | "region", value: string) {
+    if (!coordinator) return;
+    const values = placementValues(path);
+    const current = coordinator.draft;
+    const next = {
+      kind: "graph" as const,
+      path,
+      rawValue: JSON.stringify({ ...values, [key]: value }),
+      baseRevision: current.kind === "graph" && current.path === path ? current.baseRevision : session.revision,
+    };
+    if (current.kind === "none") coordinator.begin(next);
+    else if (current.kind === "graph" && current.path === path) coordinator.update(next);
+  }
+
+  function updateRawGraph(path: string, rawValue: string, setLocal: (value: string) => void) {
+    if (!coordinator) {
+      setLocal(rawValue);
+      return;
+    }
+    const previous = coordinator.draft;
+    const baseRevision = previous.kind === "graph" && previous.path === path
+      ? previous.baseRevision
+      : session.revision;
+    const next = { kind: "graph" as const, path, rawValue, baseRevision };
+    if (coordinator.draft.kind === "none") coordinator.begin(next);
+    else if (coordinator.draft.kind === "graph" && coordinator.draft.path === path) coordinator.update(next);
+  }
 
   async function run(action: () => Promise<EditorSession>, message: string) {
+    if (onRun) {
+      onRun(action, message);
+      return;
+    }
     try {
       const next = await action();
       onAccept(next, message);
@@ -195,9 +276,10 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
 
   function applyNode() {
     if (!selected) return;
+    if (graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:settings`)) return;
     let settings: unknown;
     try {
-      settings = parseSettings(settingsText);
+      settings = parseSettings(rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:settings`, coordinator ? selectedSettings : settingsText));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
       setStatusError(true);
@@ -209,7 +291,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
         selected.node_id,
         true,
         settings,
-        session.revision,
+        graphRevision(`${activeVariant ?? "base"}:${selected.node_id}:settings`),
         activeVariant,
       ),
       `Configured ${selected.node_id}`,
@@ -218,6 +300,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
 
   function disableNode() {
     if (!selected) return;
+    if (graphControlDisabled("node-action")) return;
     void run(
       () => transport.editNode(
         session.session_id,
@@ -231,10 +314,19 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
     );
   }
 
+  function moveInstance(index: number) {
+    if (!selected || graphControlDisabled("node-action")) return;
+    void run(
+      () => transport.moveNodeInstance(session.session_id, selected.node_id, index, index - 1, session.revision, activeVariant),
+      `Moved ${selected.instances[index].label}`,
+    );
+  }
+
   function applyComposition() {
     if (!selected) return;
+    if (graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:stages`)) return;
     try {
-      const stages = JSON.parse(stagesText) as unknown;
+      const stages = JSON.parse(rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:stages`, coordinator ? selectedStages : stagesText)) as unknown;
       if (!Array.isArray(stages) || stages.some(
         (stage) => stage === null || Array.isArray(stage) || typeof stage !== "object",
       )) {
@@ -247,7 +339,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
           selected.node_id,
           compose,
           stages as Record<string, unknown>[],
-          session.revision,
+          graphRevision(`${activeVariant ?? "base"}:${selected.node_id}:stages`),
           activeVariant,
         ),
         `Composed ${selected.node_id}`,
@@ -260,9 +352,12 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
 
   function applyPlacement() {
     if (!selected) return;
+    const path = `${activeVariant ?? "base"}:${selected.node_id}:placement`;
+    if (graphControlDisabled(path)) return;
     try {
-      const settings = parseObject(settingsText);
-      const nodes = regionText.split(",").map((item) => item.trim()).filter(Boolean);
+      const values = coordinator ? placementValues(path) : { settings: settingsText, region: regionText };
+      const settings = parseObject(values.settings);
+      const nodes = values.region.split(",").map((item) => item.trim()).filter(Boolean);
       if (nodes.length === 0) throw new Error("A placement needs at least one node.");
       void run(
         () => transport.placeNode(
@@ -270,7 +365,7 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
           selected.node_id,
           nodes.length === 1 ? nodes[0] : nodes,
           settings,
-          session.revision,
+          graphRevision(path),
           activeVariant,
         ),
         `Placed ${selected.node_id}`,
@@ -332,19 +427,10 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
                   {selected.configuration === "chain" && index > 0 && (
                     <button
                       type="button"
-                      disabled={disabled}
+                      disabled={graphControlDisabled("node-action")}
+                      aria-describedby={graphControlDisabled("node-action") ? disabledReasonId : undefined}
                       aria-label={`Move ${instance.label} up`}
-                      onClick={() => void run(
-                        () => transport.moveNodeInstance(
-                          session.session_id,
-                          selected.node_id,
-                          index,
-                          index - 1,
-                          session.revision,
-                          activeVariant,
-                        ),
-                        `Moved ${instance.label}`,
-                      )}
+                      onClick={() => moveInstance(index)}
                     >
                       Move up
                     </button>
@@ -360,22 +446,27 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
                 Node settings JSON
                 <textarea
                   aria-label="Node settings JSON"
-                  value={settingsText}
-                  disabled={disabled}
-                  onChange={(event) => setSettingsText(event.target.value)}
+                  value={rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:settings`, coordinator ? selectedSettings : settingsText)}
+                  disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:settings`)}
+                  aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:settings`) ? disabledReasonId : undefined}
+                  onChange={(event) => updateRawGraph(`${activeVariant ?? "base"}:${selected.node_id}:settings`, event.target.value, setSettingsText)}
                 />
               </label>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:settings`)}
+                aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:settings`) ? disabledReasonId : undefined}
                 onClick={applyNode}
               >
                 {selected.lit ? `Apply configuration to ${selected.node_id}` : `Light and configure ${selected.node_id}`}
               </button>
               {selected.lit && (
-                <button type="button" disabled={disabled} onClick={disableNode}>
+                <button type="button" disabled={graphControlDisabled("node-action")} aria-describedby={graphControlDisabled("node-action") ? disabledReasonId : undefined} onClick={disableNode}>
                   Disable {selected.node_id}
                 </button>
+              )}
+              {coordinator?.draft.kind === "graph" && (
+                <button type="button" disabled={disabled} aria-describedby={disabled ? disabledReasonId : undefined} onClick={() => coordinator.clear()}>Discard graph draft</button>
               )}
 
               {!selected.many && !selected.reserved && (
@@ -383,11 +474,12 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
                   <summary>Compose stages</summary>
                   <textarea
                     aria-label="Composition stages JSON"
-                    value={stagesText}
-                    disabled={disabled}
-                    onChange={(event) => setStagesText(event.target.value)}
+                    value={rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:stages`, coordinator ? selectedStages : stagesText)}
+                    disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:stages`)}
+                    aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:stages`) ? disabledReasonId : undefined}
+                    onChange={(event) => updateRawGraph(`${activeVariant ?? "base"}:${selected.node_id}:stages`, event.target.value, setStagesText)}
                   />
-                  <button type="button" disabled={disabled} onClick={applyComposition}>
+                  <button type="button" disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:stages`)} aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:stages`) ? disabledReasonId : undefined} onClick={applyComposition}>
                     Apply {selected.kind === "source" ? "sum" : "cascade"}
                   </button>
                 </details>
@@ -396,15 +488,26 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
               <details>
                 <summary>Place python operator with at:</summary>
                 <label>
-                  Covered nodes in signal order
-                  <input
-                    value={regionText}
-                    disabled={disabled}
-                    placeholder="noise, emi"
-                    onChange={(event) => setRegionText(event.target.value)}
+                  Placement settings JSON
+                  <textarea
+                    aria-label="Placement settings JSON"
+                    value={coordinator ? placementValues(`${activeVariant ?? "base"}:${selected.node_id}:placement`).settings : settingsText}
+                    disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`)}
+                    aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`) ? disabledReasonId : undefined}
+                    onChange={(event) => coordinator ? updatePlacement(`${activeVariant ?? "base"}:${selected.node_id}:placement`, "settings", event.target.value) : setSettingsText(event.target.value)}
                   />
                 </label>
-                <button type="button" disabled={disabled} onClick={applyPlacement}>
+                <label>
+                  Covered nodes in signal order
+                  <input
+                    value={coordinator ? placementValues(`${activeVariant ?? "base"}:${selected.node_id}:placement`).region : regionText}
+                    disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`)}
+                    aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`) ? disabledReasonId : undefined}
+                    placeholder="noise, emi"
+                    onChange={(event) => coordinator ? updatePlacement(`${activeVariant ?? "base"}:${selected.node_id}:placement`, "region", event.target.value) : setRegionText(event.target.value)}
+                  />
+                </label>
+                <button type="button" disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`)} aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:placement`) ? disabledReasonId : undefined} onClick={applyPlacement}>
                   Apply placement
                 </button>
               </details>
@@ -414,19 +517,21 @@ export function GraphEditor({ session, transport, onAccept, disabled = false }: 
                   Snapshot name
                   <input
                     aria-label="Snapshot name"
-                    value={snapshotName}
-                    disabled={disabled}
-                    onChange={(event) => setSnapshotName(event.target.value)}
+                    value={rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`, coordinator ? selectedSnapshot : snapshotName)}
+                    disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`)}
+                    aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`) ? disabledReasonId : undefined}
+                    onChange={(event) => updateRawGraph(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`, event.target.value, setSnapshotName)}
                   />
                   <button
                     type="button"
-                    disabled={disabled || !snapshotName}
-                    onClick={() => void run(
+                    disabled={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`) || !rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`, coordinator ? selectedSnapshot : snapshotName)}
+                    aria-describedby={graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`) ? disabledReasonId : undefined}
+                    onClick={() => !graphControlDisabled(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`) && void run(
                       () => transport.setSnapshotBefore(
                         session.session_id,
                         selected.node_id,
-                        snapshotName,
-                        session.revision,
+                        rawGraphValue(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`, coordinator ? selectedSnapshot : snapshotName),
+                        graphRevision(`${activeVariant ?? "base"}:${selected.node_id}:snapshot`),
                         activeVariant,
                       ),
                       `Snapshot before ${selected.node_id}`,

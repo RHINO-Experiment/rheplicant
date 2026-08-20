@@ -1,7 +1,15 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GraphEditor } from "../../../src/rheplicant/gui/react/GraphEditor";
+import {
+  canUpdateDraft,
+  draftLabel,
+  NO_DRAFT,
+  type DraftCoordinator,
+  type DraftEnvelope,
+} from "../../../src/rheplicant/gui/react/drafts";
 import type {
   EditorSession,
   GraphDiagram,
@@ -136,7 +144,444 @@ function transport(): SessionTransport {
   };
 }
 
+const BASE_OPERATION_SETTINGS = {
+  type: "BaseAcceptedOperator",
+  stages: [{ name: "base-stage", scale: 1 }],
+  at: ["base-left", "base-right"],
+  snapshot_before: "base-raw",
+};
+
+const VARIANT_OPERATION_SETTINGS = {
+  type: "VariantAcceptedOperator",
+  stages: [{ name: "variant-stage-old", scale: 2 }],
+  at: ["variant-left", "variant-right"],
+  snapshot_before: "variant-raw",
+};
+
+function operationState(
+  revision: number,
+  variantSettings: Record<string, unknown>,
+): EditorSession {
+  const initial = state();
+  const baseNode = { ...FLAGGING, settings: BASE_OPERATION_SETTINGS };
+  const variantNode = { ...FLAGGING, settings: variantSettings };
+  return {
+    ...initial,
+    revision,
+    document: {
+      ...initial.document,
+      walk_order: ["flagging"],
+      base_diagram: diagram("base", [baseNode]),
+      backend_diagram: diagram("backend", [baseNode]),
+      variant_diagrams: [{ ...diagram("low_gain", [variantNode]), changed_nodes: ["flagging"] }],
+    },
+  };
+}
+
+function CoordinatedGraph({
+  initial,
+  refreshed,
+  api,
+}: {
+  initial: EditorSession;
+  refreshed: EditorSession;
+  api: SessionTransport;
+}) {
+  const [accepted, setAccepted] = useState(initial);
+  const [draft, setDraft] = useState<DraftEnvelope>(NO_DRAFT);
+  const coordinator: DraftCoordinator = {
+    draft,
+    begin(next) {
+      if (draft.kind !== "none") return false;
+      setDraft(next);
+      return true;
+    },
+    update(next) {
+      if (!canUpdateDraft(draft, next)) {
+        throw new Error("Cannot replace a different editor draft");
+      }
+      setDraft(next);
+    },
+    clear() { setDraft(NO_DRAFT); },
+  };
+  const reason = draftLabel(draft);
+  return (
+    <>
+      <button type="button" onClick={() => setAccepted(refreshed)}>Refresh accepted graph</button>
+      {reason && <p id="graph-draft-reason">{reason}</p>}
+      <GraphEditor
+        session={accepted}
+        transport={api}
+        onAccept={(next) => {
+          setAccepted(next);
+          coordinator.clear();
+        }}
+        coordinator={coordinator}
+        disabledReasonId={reason ? "graph-draft-reason" : undefined}
+      />
+    </>
+  );
+}
+
+function selectVariant() {
+  fireEvent.change(screen.getByRole("combobox", { name: "Editing layer" }), {
+    target: { value: "low_gain" },
+  });
+}
+
+function expectBlocked(control: HTMLElement, reason: string) {
+  expect(control).toBeDisabled();
+  expect(control).toHaveAccessibleDescription(reason);
+}
+
 describe("graph-guided instrument editor", () => {
+  it("keeps the owning graph draft editable while preserving accepted values and offering Apply and Discard", () => {
+    const initial = state();
+    const projected = {
+      ...initial,
+      document: {
+        ...initial.document,
+        base_diagram: diagram("base", [{ ...GAIN, lit: true, settings: { gain: 1.25 } }]),
+        walk_order: ["gain"],
+      },
+    };
+    const api = transport();
+    function CoordinatedGraph() {
+      const [draft, setDraft] = useState<DraftEnvelope>(NO_DRAFT);
+      const coordinator: DraftCoordinator = {
+        draft,
+        begin(next) { if (draft.kind !== "none") return false; setDraft(next); return true; },
+        update(next) { setDraft(next); },
+        clear() { setDraft(NO_DRAFT); },
+      };
+      return <GraphEditor session={projected} transport={api} onAccept={vi.fn()} coordinator={coordinator} />;
+    }
+    render(<CoordinatedGraph />);
+    fireEvent.click(document.querySelector('[data-node-id="gain"]')!);
+    const settings = screen.getByRole("textbox", { name: "Node settings JSON" });
+    expect(settings).toHaveValue('{\n  "gain": 1.25\n}');
+    fireEvent.change(settings, { target: { value: '{"gain":2}' } });
+    expect(settings).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply configuration to gain" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard graph draft" })).toBeEnabled();
+  });
+
+  it("blocks every non-owning graph mutation while a settings draft owns the coordinator", () => {
+    const initial = state();
+    const api = transport();
+    const coordinator: DraftCoordinator = {
+      draft: { kind: "graph", baseRevision: 4, path: "base:gain:settings", rawValue: '{"gain":2}' },
+      begin: vi.fn(() => false),
+      update: vi.fn(),
+      clear: vi.fn(),
+    };
+    render(<GraphEditor session={initial} transport={api} onAccept={vi.fn()} coordinator={coordinator} />);
+    fireEvent.click(document.querySelector('[data-node-id="gain"]')!);
+    expect(screen.getByRole("textbox", { name: "Node settings JSON" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Light and configure gain" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply cascade" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply placement" })).toBeDisabled();
+  });
+
+  it("keeps a variant composition draft through accepted refresh, applies from its original base, and discards independently", async () => {
+    const initial = operationState(4, VARIANT_OPERATION_SETTINGS);
+    const refreshed = operationState(9, {
+      ...VARIANT_OPERATION_SETTINGS,
+      stages: [{ name: "variant-stage-from-refresh", scale: 9 }],
+    });
+    const accepted = operationState(10, {
+      ...VARIANT_OPERATION_SETTINGS,
+      stages: [{ name: "variant-stage-after-apply", scale: 10 }],
+    });
+    const api = transport();
+    const composeNode = vi.fn(async () => accepted);
+    api.composeNode = composeNode;
+    render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+
+    expect(screen.getByRole("textbox", { name: "Composition stages JSON" })).toHaveValue(
+      '[\n  {\n    "name": "base-stage",\n    "scale": 1\n  }\n]',
+    );
+    selectVariant();
+    const stages = screen.getByRole("textbox", { name: "Composition stages JSON" });
+    expect(stages).toHaveValue(
+      '[\n  {\n    "name": "variant-stage-old",\n    "scale": 2\n  }\n]',
+    );
+    const raw = '[\n{"name":"draft-stage","scale":7}\n]';
+    fireEvent.change(stages, { target: { value: raw } });
+
+    const reason = "Unsaved graph: low_gain:flagging:stages";
+    expect(stages).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply cascade" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard graph draft" })).toBeEnabled();
+    for (const control of [
+      screen.getByRole("textbox", { name: "Node settings JSON" }),
+      screen.getByRole("button", { name: "Apply configuration to flagging" }),
+      screen.getByRole("button", { name: "Disable flagging" }),
+      screen.getByRole("textbox", { name: "Placement settings JSON" }),
+      screen.getByRole("textbox", { name: "Covered nodes in signal order" }),
+      screen.getByRole("button", { name: "Apply placement" }),
+      screen.getByRole("textbox", { name: "Snapshot name" }),
+      screen.getByRole("button", { name: "Keep raw data before flagging" }),
+    ]) expectBlocked(control, reason);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh accepted graph" }));
+    expect(stages).toHaveValue(raw);
+    fireEvent.click(screen.getByRole("button", { name: "Apply cascade" }));
+    await waitFor(() => expect(composeNode).toHaveBeenCalledWith(
+      "session-1",
+      "flagging",
+      "cascade",
+      [{ name: "draft-stage", scale: 7 }],
+      4,
+      "low_gain",
+    ));
+    expect(screen.queryByRole("button", { name: "Discard graph draft" })).not.toBeInTheDocument();
+    expect(stages).toHaveValue(
+      '[\n  {\n    "name": "variant-stage-after-apply",\n    "scale": 10\n  }\n]',
+    );
+
+    composeNode.mockClear();
+    fireEvent.change(stages, { target: { value: '[{"name":"discard-me"}]' } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard graph draft" }));
+    expect(stages).toHaveValue(
+      '[\n  {\n    "name": "variant-stage-after-apply",\n    "scale": 10\n  }\n]',
+    );
+    expect(composeNode).not.toHaveBeenCalled();
+  });
+
+  it("preserves both exact placement strings through refresh and applies one variant envelope from its original base", async () => {
+    const initial = operationState(4, VARIANT_OPERATION_SETTINGS);
+    const refreshed = operationState(9, {
+      type: "VariantRefreshedOperator",
+      stages: [{ name: "refresh-stage" }],
+      at: ["refresh-left", "refresh-right"],
+      snapshot_before: "refresh-raw",
+    });
+    const accepted = operationState(10, {
+      type: "VariantAppliedOperator",
+      gain: 11,
+      at: ["success-left", "success-right"],
+      snapshot_before: "success-raw",
+    });
+    const api = transport();
+    const placeNode = vi.fn(async () => accepted);
+    api.placeNode = placeNode;
+    render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+
+    expect(screen.getByRole("textbox", { name: "Placement settings JSON" })).toHaveValue(
+      '{\n  "type": "BaseAcceptedOperator",\n  "stages": [\n    {\n      "name": "base-stage",\n      "scale": 1\n    }\n  ],\n  "at": [\n    "base-left",\n    "base-right"\n  ],\n  "snapshot_before": "base-raw"\n}',
+    );
+    expect(screen.getByRole("textbox", { name: "Covered nodes in signal order" }))
+      .toHaveValue("base-left, base-right");
+    selectVariant();
+    const settings = screen.getByRole("textbox", { name: "Placement settings JSON" });
+    const region = screen.getByRole("textbox", { name: "Covered nodes in signal order" });
+    expect(settings).toHaveValue(
+      '{\n  "type": "VariantAcceptedOperator",\n  "stages": [\n    {\n      "name": "variant-stage-old",\n      "scale": 2\n    }\n  ],\n  "at": [\n    "variant-left",\n    "variant-right"\n  ],\n  "snapshot_before": "variant-raw"\n}',
+    );
+    expect(region).toHaveValue("variant-left, variant-right");
+    const rawSettings = '{ "python" : "pkg:Draft" , "gain": 7 }';
+    const rawRegion = "draft-left, draft-middle, draft-right";
+    fireEvent.change(settings, { target: { value: rawSettings } });
+    fireEvent.change(region, { target: { value: rawRegion } });
+
+    const reason = "Unsaved graph: low_gain:flagging:placement";
+    expect(settings).toBeEnabled();
+    expect(region).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply placement" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard graph draft" })).toBeEnabled();
+    for (const control of [
+      screen.getByRole("textbox", { name: "Node settings JSON" }),
+      screen.getByRole("button", { name: "Apply configuration to flagging" }),
+      screen.getByRole("button", { name: "Disable flagging" }),
+      screen.getByRole("textbox", { name: "Composition stages JSON" }),
+      screen.getByRole("button", { name: "Apply cascade" }),
+      screen.getByRole("textbox", { name: "Snapshot name" }),
+      screen.getByRole("button", { name: "Keep raw data before flagging" }),
+    ]) expectBlocked(control, reason);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh accepted graph" }));
+    expect(settings).toHaveValue(rawSettings);
+    expect(region).toHaveValue(rawRegion);
+    fireEvent.click(screen.getByRole("button", { name: "Apply placement" }));
+    await waitFor(() => expect(placeNode).toHaveBeenCalledWith(
+      "session-1",
+      "flagging",
+      ["draft-left", "draft-middle", "draft-right"],
+      { python: "pkg:Draft", gain: 7 },
+      4,
+      "low_gain",
+    ));
+    expect(screen.queryByRole("button", { name: "Discard graph draft" })).not.toBeInTheDocument();
+    expect(settings).toHaveValue(
+      '{\n  "type": "VariantAppliedOperator",\n  "gain": 11,\n  "at": [\n    "success-left",\n    "success-right"\n  ],\n  "snapshot_before": "success-raw"\n}',
+    );
+    expect(region).toHaveValue("success-left, success-right");
+
+    placeNode.mockClear();
+    fireEvent.change(settings, { target: { value: '{"python":"discard"}' } });
+    fireEvent.change(region, { target: { value: "discard-left, discard-right" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard graph draft" }));
+    expect(settings).toHaveValue(
+      '{\n  "type": "VariantAppliedOperator",\n  "gain": 11,\n  "at": [\n    "success-left",\n    "success-right"\n  ],\n  "snapshot_before": "success-raw"\n}',
+    );
+    expect(region).toHaveValue("success-left, success-right");
+    expect(placeNode).not.toHaveBeenCalled();
+  });
+
+  it("keeps a variant snapshot draft through accepted refresh, applies from its original base, and discards independently", async () => {
+    const initial = operationState(4, VARIANT_OPERATION_SETTINGS);
+    const refreshed = operationState(9, { ...VARIANT_OPERATION_SETTINGS, snapshot_before: "refresh-raw" });
+    const accepted = operationState(10, { ...VARIANT_OPERATION_SETTINGS, snapshot_before: "success-raw" });
+    const api = transport();
+    const setSnapshotBefore = vi.fn(async () => accepted);
+    api.setSnapshotBefore = setSnapshotBefore;
+    render(<CoordinatedGraph initial={initial} refreshed={refreshed} api={api} />);
+
+    expect(screen.getByRole("textbox", { name: "Snapshot name" })).toHaveValue("base-raw");
+    selectVariant();
+    const snapshot = screen.getByRole("textbox", { name: "Snapshot name" });
+    expect(snapshot).toHaveValue("variant-raw");
+    fireEvent.change(snapshot, { target: { value: "draft-snapshot-byte-exact" } });
+
+    const reason = "Unsaved graph: low_gain:flagging:snapshot";
+    expect(snapshot).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Keep raw data before flagging" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard graph draft" })).toBeEnabled();
+    for (const control of [
+      screen.getByRole("textbox", { name: "Node settings JSON" }),
+      screen.getByRole("button", { name: "Apply configuration to flagging" }),
+      screen.getByRole("button", { name: "Disable flagging" }),
+      screen.getByRole("textbox", { name: "Composition stages JSON" }),
+      screen.getByRole("button", { name: "Apply cascade" }),
+      screen.getByRole("textbox", { name: "Placement settings JSON" }),
+      screen.getByRole("textbox", { name: "Covered nodes in signal order" }),
+      screen.getByRole("button", { name: "Apply placement" }),
+    ]) expectBlocked(control, reason);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh accepted graph" }));
+    expect(snapshot).toHaveValue("draft-snapshot-byte-exact");
+    fireEvent.click(screen.getByRole("button", { name: "Keep raw data before flagging" }));
+    await waitFor(() => expect(setSnapshotBefore).toHaveBeenCalledWith(
+      "session-1",
+      "flagging",
+      "draft-snapshot-byte-exact",
+      4,
+      "low_gain",
+    ));
+    expect(screen.queryByRole("button", { name: "Discard graph draft" })).not.toBeInTheDocument();
+    expect(snapshot).toHaveValue("success-raw");
+
+    setSnapshotBefore.mockClear();
+    fireEvent.change(snapshot, { target: { value: "discard-snapshot" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard graph draft" }));
+    expect(snapshot).toHaveValue("success-raw");
+    expect(setSnapshotBefore).not.toHaveBeenCalled();
+  });
+
+  it("blocks Disable, CHAIN move, and snapshot handlers while a settings draft owns the coordinator", () => {
+    const initial = state();
+    const filters = { ...FILTERS, settings: [{ name: "accepted-first" }, { name: "accepted-second" }] };
+    const flagging = { ...FLAGGING, settings: { snapshot_before: "accepted-raw" } };
+    const guarded = {
+      ...initial,
+      document: {
+        ...initial.document,
+        walk_order: ["filters", "flagging"],
+        base_diagram: diagram("base", [filters, flagging]),
+        backend_diagram: diagram("backend", [filters, flagging]),
+        variant_diagrams: [],
+      },
+    };
+    const api = transport();
+    render(<CoordinatedGraph initial={guarded} refreshed={guarded} api={api} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Node settings JSON" }), {
+      target: { value: '[{"name":"draft-first"},{"name":"draft-second"}]' },
+    });
+    const reason = "Unsaved graph: base:filters:settings";
+    const disable = screen.getByRole("button", { name: "Disable filters" });
+    const move = screen.getByRole("button", { name: "Move filters 2 up" });
+    expectBlocked(disable, reason);
+    expectBlocked(move, reason);
+    disable.removeAttribute("disabled");
+    move.removeAttribute("disabled");
+    fireEvent.click(disable);
+    fireEvent.click(move);
+    expect(api.editNode).not.toHaveBeenCalled();
+    expect(api.moveNodeInstance).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="flagging"]')!);
+    const snapshot = screen.getByRole("button", { name: "Keep raw data before flagging" });
+    expectBlocked(snapshot, reason);
+    snapshot.removeAttribute("disabled");
+    fireEvent.click(snapshot);
+    expect(api.setSnapshotBefore).not.toHaveBeenCalled();
+  });
+
+  it("rechecks coordinator ownership inside enabled Disable, move, and snapshot handlers", () => {
+    const initial = state();
+    const filters = { ...FILTERS, settings: [{ name: "accepted-first" }, { name: "accepted-second" }] };
+    const flagging = { ...FLAGGING, settings: { snapshot_before: "accepted-raw" } };
+    const guarded = {
+      ...initial,
+      document: {
+        ...initial.document,
+        walk_order: ["filters", "flagging"],
+        base_diagram: diagram("base", [filters, flagging]),
+        backend_diagram: diagram("backend", [filters, flagging]),
+        variant_diagrams: [],
+      },
+    };
+    const coordinator: DraftCoordinator = {
+      draft: NO_DRAFT,
+      begin: vi.fn(() => true),
+      update: vi.fn(),
+      clear: vi.fn(),
+    };
+    const api = transport();
+    render(
+      <GraphEditor
+        session={guarded}
+        transport={api}
+        onAccept={vi.fn()}
+        coordinator={coordinator}
+      />,
+    );
+
+    const disable = screen.getByRole("button", { name: "Disable filters" });
+    const move = screen.getByRole("button", { name: "Move filters 2 up" });
+    expect(disable).toBeEnabled();
+    expect(move).toBeEnabled();
+
+    coordinator.draft = {
+      kind: "graph",
+      baseRevision: 4,
+      path: "base:filters:settings",
+      rawValue: '[{"name":"draft-first"},{"name":"draft-second"}]',
+    };
+    expect(disable).toBeEnabled();
+    expect(move).toBeEnabled();
+    fireEvent.click(disable);
+    fireEvent.click(move);
+    expect(api.editNode).not.toHaveBeenCalled();
+    expect(api.moveNodeInstance).not.toHaveBeenCalled();
+
+    coordinator.draft = NO_DRAFT;
+    fireEvent.click(document.querySelector('[aria-label="Signal path diagram"] [data-node-id="flagging"]')!);
+    const snapshot = screen.getByRole("button", { name: "Keep raw data before flagging" });
+    expect(snapshot).toBeEnabled();
+    coordinator.draft = {
+      kind: "graph",
+      baseRevision: 4,
+      path: "base:flagging:settings",
+      rawValue: '{"snapshot_before":"draft-raw"}',
+    };
+    expect(snapshot).toBeEnabled();
+    fireEvent.click(snapshot);
+    expect(api.setSnapshotBefore).not.toHaveBeenCalled();
+  });
+
   it("lights and configures a selected node in one revision-checked act", async () => {
     const initial = state();
     const api = transport();

@@ -12,6 +12,8 @@ interface Props {
   transport: SessionTransport;
   onAccept: (next: EditorSession, message: string) => void;
   disabled?: boolean;
+  disabledReasonId?: string;
+  onRun?: (action: () => Promise<EditorSession>, message: string) => void;
 }
 
 function toggled(values: string[], value: string, enabled: boolean) {
@@ -47,10 +49,12 @@ function ProductSelector({
   runs,
   disabled,
   apply,
+  disabledReasonId,
 }: {
   row: OutputProductProjection;
   runs: string[];
   disabled: boolean;
+  disabledReasonId?: string;
   apply: (
     enabled: boolean,
     format: string,
@@ -78,6 +82,7 @@ function ProductSelector({
           aria-label={`Write ${row.name}`}
           checked={row.enabled}
           disabled={disabled}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onChange={(event) => submit({ enabled: event.target.checked })}
         />
         Write {row.name}
@@ -88,6 +93,7 @@ function ProductSelector({
           aria-label={`${row.name} format`}
           value={row.format}
           disabled={disabled}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onChange={(event) => submit({ format: event.target.value })}
         >
           {row.formats.map((format) => (
@@ -105,6 +111,7 @@ function ProductSelector({
                 aria-label={`${row.name} run ${run}`}
                 checked={row.runs.includes(run)}
                 disabled={disabled}
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => submit({
                   runs: toggled(row.runs, run, event.target.checked),
                 })}
@@ -121,6 +128,7 @@ function ProductSelector({
             aria-label={`${row.name} keys`}
             value={row.keys.join(", ")}
             disabled={disabled}
+            aria-describedby={disabled ? disabledReasonId : undefined}
             onChange={(event) => submit({
               keys: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
             })}
@@ -137,6 +145,7 @@ function ProductSelector({
                 aria-label={`signal_paths theme ${theme}`}
                 checked={row.themes.includes(theme)}
                 disabled={disabled}
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => submit({
                   themes: toggled(row.themes, theme, event.target.checked),
                 })}
@@ -160,6 +169,8 @@ export function OutputWorkflow({
   transport,
   onAccept,
   disabled = false,
+  disabledReasonId,
+  onRun,
 }: Props) {
   const [tab, setTab] = useState<"requested" | "resolved">("requested");
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +181,10 @@ export function OutputWorkflow({
   const bundles = auditBundles(session.jobs);
 
   async function run(action: () => Promise<EditorSession>, message: string) {
+    if (onRun) {
+      onRun(action, message);
+      return;
+    }
     try {
       const next = await action();
       setError(null);
@@ -301,6 +316,7 @@ export function OutputWorkflow({
               row={row}
               runs={output.declared_runs}
               disabled={disabled}
+              disabledReasonId={disabledReasonId}
               apply={(...values) => product(row, ...values)}
             />
           ))}
@@ -314,6 +330,7 @@ export function OutputWorkflow({
           type="checkbox"
           checked={report.enabled}
           disabled={disabled || (!report.enabled && output.declared_runs.length === 0)}
+          aria-describedby={disabled ? disabledReasonId : undefined}
           onChange={(event) => updateReport({
             enabled: event.target.checked,
             rows: event.target.checked && report.rows.length === 0
@@ -336,6 +353,7 @@ export function OutputWorkflow({
                   || !report.enabled
                   || (report.rows.length === 1 && report.rows.includes(name))
                 }
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => updateReport({
                   rows: toggled(report.rows, name, event.target.checked),
                   reference: !event.target.checked && report.reference === name
@@ -362,6 +380,7 @@ export function OutputWorkflow({
                   || !report.enabled
                   || (report.columns.length === 1 && report.columns.includes(name))
                 }
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => updateReport({
                   columns: toggled(report.columns, name, event.target.checked),
                 })}
@@ -375,6 +394,7 @@ export function OutputWorkflow({
           <select
             value={report.reference ?? ""}
             disabled={disabled || !report.enabled}
+            aria-describedby={disabled ? disabledReasonId : undefined}
             onChange={(event) => updateReport({
               reference: event.target.value || null,
               relative: event.target.value ? report.relative : [],
@@ -392,6 +412,7 @@ export function OutputWorkflow({
                 type="checkbox"
                 checked={report.relative.includes(name)}
                 disabled={disabled || !report.enabled || report.reference === null}
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => updateReport({
                   relative: toggled(report.relative, name, event.target.checked),
                 })}
@@ -412,6 +433,7 @@ export function OutputWorkflow({
                   || !report.enabled
                   || (report.formats.length === 1 && report.formats.includes(name))
                 }
+                aria-describedby={disabled ? disabledReasonId : undefined}
                 onChange={(event) => updateReport({
                   formats: toggled(report.formats, name, event.target.checked),
                 })}
