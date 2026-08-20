@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ConfigForms } from "./ConfigForms";
+import { useConfigWorkspace } from "./ConfigWorkspace";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
 import { FirstJobConfirmation } from "./FirstJobConfirmation";
 import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
@@ -192,9 +192,13 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     onAccept: accept,
     onRun: (action, message) => void run(action, message),
   });
+  const configSurface = useConfigWorkspace({
+    forms: session.document.forms,
+    badges: session.document.validation.section_badges,
+  });
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
     model: modelSurface,
-    config: { main: <ConfigForms forms={session.document.forms} badges={session.document.validation.section_badges} />, inspector: emptyInspector("Select a field") },
+    config: configSurface,
     execute: { main: <><OutputWorkflow session={session} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={session.jobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
     results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },
   };
