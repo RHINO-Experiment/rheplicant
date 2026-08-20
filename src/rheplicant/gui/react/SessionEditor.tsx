@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ConfigForms } from "./ConfigForms";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
+import { FirstJobConfirmation } from "./FirstJobConfirmation";
 import { GraphEditor } from "./GraphEditor";
+import { OnboardingChecklist } from "./OnboardingChecklist";
 import { OutputWorkflow } from "./OutputWorkflow";
 import { PreviewPanel } from "./PreviewPanel";
 import { ValidationLedger } from "./ValidationLedger";
@@ -44,6 +46,24 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>("model");
+  const [pendingJob, setPendingJob] = useState<JobKind | null>(null);
+  const [securityAcknowledged, setSecurityAcknowledged] = useState(false);
+  const jobOpener = useRef<HTMLElement | null>(null);
+  const capturedJobOpener = useRef<HTMLButtonElement | null>(null);
+  const restoreJobFocus = useRef(false);
+
+  useEffect(() => {
+    if (pendingJob !== null || busy || !restoreJobFocus.current) return;
+    restoreJobFocus.current = false;
+    const opener = jobOpener.current;
+    jobOpener.current = null;
+    if (opener instanceof HTMLButtonElement && opener.isConnected && !opener.disabled) {
+      opener.focus();
+      return;
+    }
+    const fallback = document.getElementById(`workspace-tab-${activeWorkspace}`);
+    if (fallback instanceof HTMLElement) fallback.focus();
+  }, [pendingJob, busy, activeWorkspace]);
 
   const coordinator: DraftCoordinator = {
     draft,
@@ -55,6 +75,7 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     clear() { setDraft(NO_DRAFT); },
   };
   const mutationBlocked = busy || draftBlocksMutation(draft);
+  const jobBlocked = mutationBlocked || session.document.validation.run_blocked;
   const mutationReason = busy ? "Another action is running" : draftLabel(draft);
 
   function accept(next: EditorSession, message: string, clearDraft = true) {
@@ -112,8 +133,44 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   }
   function discardDraft() { coordinator.clear(); setYamlDiagnostic(null); setYamlConflict(null); }
   function submitJob(kind: JobKind) {
-    if (mutationBlocked) return;
+    if (jobBlocked) return;
     void run(() => transport.submitJob(session.session_id, kind, session.revision), `${kind === "preview_forward" ? "Forward preview" : kind} job submitted`);
+  }
+  function captureJobOpener(event: React.MouseEvent<HTMLDivElement>) {
+    capturedJobOpener.current = event.target instanceof HTMLButtonElement
+      ? event.target
+      : null;
+  }
+  function requestJob(kind: JobKind) {
+    const opener = capturedJobOpener.current;
+    capturedJobOpener.current = null;
+    if (
+      jobBlocked
+      || busyRef.current
+      || drawerOpen
+      || pendingJob !== null
+      || opener === null
+      || !opener.isConnected
+      || opener.disabled
+    ) return;
+    if (securityAcknowledged) {
+      submitJob(kind);
+      return;
+    }
+    jobOpener.current = opener;
+    setPendingJob(kind);
+  }
+  function cancelPendingJob() {
+    restoreJobFocus.current = true;
+    setPendingJob(null);
+  }
+  function confirmPendingJob() {
+    if (pendingJob === null || jobBlocked || busyRef.current) return;
+    const kind = pendingJob;
+    restoreJobFocus.current = true;
+    setSecurityAcknowledged(true);
+    setPendingJob(null);
+    submitJob(kind);
   }
   async function refreshJobs() {
     if (busyRef.current) return;
@@ -132,14 +189,14 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
     model: { main: <GraphEditor session={session} transport={transport} onAccept={accept} disabled={busy || (draft.kind !== "none" && draft.kind !== "graph")} disabledReasonId={reasonId} coordinator={coordinator} onRun={(action, message) => void run(action, message)} />, inspector: emptyInspector("Select a graph node") },
     config: { main: <ConfigForms forms={session.document.forms} badges={session.document.validation.section_badges} />, inspector: emptyInspector("Select a field") },
-    execute: { main: <><OutputWorkflow session={session} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><PreviewPanel previews={session.document.previews} jobs={session.jobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={submitJob} /></>, inspector: emptyInspector("Select an output") },
+    execute: { main: <><OutputWorkflow session={session} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={session.jobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
     results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },
   };
   const surface = surfaces[activeWorkspace];
   const actionDescription = reasonId;
 
   return <WorkbenchShell
-    header={<WorkbenchHeader dirty={session.dirty} validationStale={session.validation_stale} revision={session.revision} mutationBlocked={mutationBlocked} mutationReason={mutationReason} onOpenYaml={() => setDrawerOpen(true)} actions={<>
+    header={<WorkbenchHeader dirty={session.dirty} validationStale={session.validation_stale} revision={session.revision} mutationBlocked={mutationBlocked} mutationReason={mutationReason} yamlBlocked={pendingJob !== null} onOpenYaml={() => { if (pendingJob === null) setDrawerOpen(true); }} actions={<>
       <button disabled={mutationBlocked || !session.can_undo} aria-describedby={actionDescription} onClick={() => void run(() => transport.undo(session.session_id, session.revision), "Undid YAML edit")}>Undo</button>
       <button disabled={mutationBlocked || !session.can_redo} aria-describedby={actionDescription} onClick={() => void run(() => transport.redo(session.session_id, session.revision), "Redid YAML edit")}>Redo</button>
       <label>Load YAML<input aria-label="Load YAML file" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain" disabled={mutationBlocked} aria-describedby={actionDescription} onChange={load} /></label>
@@ -147,9 +204,12 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
       <button disabled={busy} aria-describedby={actionDescription} onClick={() => void refreshJobs()}>Refresh jobs</button>
     </>} />}
     navigation={<WorkspaceNav active={activeWorkspace} onChange={setActiveWorkspace} />}
-    main={<section id={`workspace-panel-${activeWorkspace}`} role="tabpanel" aria-label={workspaceLabels[activeWorkspace]} aria-labelledby={`workspace-tab-${activeWorkspace}`}>{surface.main}</section>}
+    main={<><OnboardingChecklist missingRequired={session.document.forms.missing_required} runBlocked={session.document.validation.run_blocked} jobs={session.jobs} /><section id={`workspace-panel-${activeWorkspace}`} role="tabpanel" aria-label={workspaceLabels[activeWorkspace]} aria-labelledby={`workspace-tab-${activeWorkspace}`}>{surface.main}</section></>}
     inspector={surface.inspector}
     jobs={<p role={statusError ? "alert" : "status"} className={statusError ? "error-surface" : undefined}>{status}</p>}
-    overlay={drawerOpen ? <YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshJobs()} /> : null}
+    overlay={drawerOpen || pendingJob !== null ? <>
+      {drawerOpen && <YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshJobs()} />}
+      {pendingJob !== null && <FirstJobConfirmation kind={pendingJob} blocked={jobBlocked} onConfirm={confirmPendingJob} onCancel={cancelPendingJob} />}
+    </> : null}
   />;
 }

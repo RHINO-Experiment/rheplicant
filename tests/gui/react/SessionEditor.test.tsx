@@ -979,4 +979,397 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("region", { name: "Explicit jobs" }))
       .toHaveTextContent("succeeded");
   });
+
+  it("holds the first explicit job, submits its stored kind and current revision once, and acknowledges only this browser editor", async () => {
+    const user = userEvent.setup();
+    const initial = state({ revision: 6 });
+    const currentForward = state({
+      revision: 6,
+      jobs: [{
+        job_id: "forward-current",
+        session_id: "session-1",
+        kind: "preview_forward",
+        revision: 6,
+        yaml_digest: "digest-6",
+        status: "succeeded",
+        result: { waterfall: { values: [] } },
+        message: null,
+        stale: false,
+      }],
+    });
+    const candidateApi = candidate(initial);
+    candidateApi.submitJob.mockResolvedValue(currentForward);
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+
+    const preview = screen.getByRole("button", { name: /^Preview forward/ });
+    await user.click(preview);
+    const dialog = screen.getByRole("dialog", { name: "Trusted execution" });
+    expect(dialog).toBeVisible();
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+    expect(dialog).toHaveTextContent("plugins and python targets");
+    expect(dialog).toHaveTextContent("server filesystem");
+    expect(dialog).toHaveTextContent("CPU, accelerator time and wall time");
+    expect(dialog).toHaveTextContent("shared server process and account");
+
+    await user.click(within(dialog).getByRole("button", { name: "I understand, continue" }));
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1",
+      "preview_forward",
+      6,
+    ));
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    await waitFor(() => expect(preview).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Help" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1",
+      "validate",
+      6,
+    ));
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByText(
+      "Trusted YAML: plugins, python targets, paths and jobs run as the server account.",
+    )).toBeVisible();
+    expect(candidateApi.replaceYaml).not.toHaveBeenCalled();
+  });
+
+  it("cancels with the button or Escape without submitting and restores each exact opener", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate(state({ revision: 3 }));
+    render(<SessionEditor initial={state({ revision: 3 })} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+
+    const run = screen.getByRole("button", { name: "Run" });
+    await user.click(run);
+    await user.click(screen.getByRole("button", { name: "Cancel trusted execution" }));
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+    await waitFor(() => expect(run).toHaveFocus());
+
+    const validate = screen.getByRole("button", { name: "Validate" });
+    await user.click(validate);
+    expect(screen.getByRole("dialog", { name: "Trusted execution" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+    await waitFor(() => expect(validate).toHaveFocus());
+  });
+
+  it("restores a pointer-invoked job button even when it was not the active element", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+
+    const yaml = screen.getByRole("button", { name: "YAML" });
+    const run = screen.getByRole("button", { name: "Run" });
+    yaml.focus();
+    expect(yaml).toHaveFocus();
+    fireEvent.click(run);
+    expect(screen.getByRole("dialog", { name: "Trusted execution" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel trusted execution" }));
+
+    await waitFor(() => expect(run).toHaveFocus());
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("wraps focus between the first and last confirmation controls", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    const cancel = screen.getByRole("button", { name: "Cancel trusted execution" });
+    const confirm = screen.getByRole("button", { name: "I understand, continue" });
+    expect(cancel).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    screen.getByRole("tab", { name: "Execute" }).focus();
+    expect(cancel).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("keeps the YAML drawer and trusted confirmation mutually exclusive", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const run = screen.getByRole("button", { name: "Run" });
+    const yaml = screen.getByRole("button", { name: "YAML" });
+
+    await user.click(yaml);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "YAML drawer" })).toBeVisible();
+    fireEvent.click(run);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Close YAML drawer" }));
+    fireEvent.click(run);
+    const confirmation = screen.getByRole("dialog", { name: "Trusted execution" });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const cancel = within(confirmation).getByRole("button", { name: "Cancel trusted execution" });
+    expect(cancel).toHaveFocus();
+    expect(yaml).toBeDisabled();
+    fireEvent.click(yaml);
+    expect(screen.queryByRole("dialog", { name: "YAML drawer" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(cancel).toHaveFocus();
+    await user.click(cancel);
+    await waitFor(() => expect(run).toHaveFocus());
+  });
+
+  it("does not open or submit trusted execution while a draft or accepted operation blocks mutations", async () => {
+    const user = userEvent.setup();
+    const draftCandidate = candidate();
+    const draftEditor = render(
+      <SessionEditor initial={state()} transport={draftCandidate.transport} />,
+    );
+    await user.click(screen.getByRole("button", { name: "YAML" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YAML source of truth" }), {
+      target: { value: "model: [" },
+    });
+    await user.click(screen.getByRole("button", { name: "Close YAML drawer" }));
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const dirtyPreview = screen.getByRole("button", { name: /^Preview forward/ });
+    expect(dirtyPreview).toBeDisabled();
+    fireEvent.click(dirtyPreview);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expect(draftCandidate.submitJob).not.toHaveBeenCalled();
+    draftEditor.unmount();
+
+    let resolveOutput: ((next: EditorSession) => void) | undefined;
+    const initial = interactiveState(9);
+    const busyCandidate = candidate(initial);
+    busyCandidate.transport.setOutputProduct = vi.fn(() => new Promise<EditorSession>((resolve) => {
+      resolveOutput = resolve;
+    }));
+    render(<SessionEditor initial={initial} transport={busyCandidate.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    await user.click(screen.getByRole("checkbox", { name: "Write assembly" }));
+    const busyRun = screen.getByRole("button", { name: "Run" });
+    expectRunningDescription(busyRun);
+    fireEvent.click(busyRun);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expect(busyCandidate.submitJob).not.toHaveBeenCalled();
+    resolveOutput?.(interactiveState(10));
+    await waitFor(() => expect(screen.getByText("Revision 10")).toBeInTheDocument());
+  });
+
+  it("uses the refreshed accepted revision when confirmation remains open across a pending refresh", async () => {
+    const user = userEvent.setup();
+    let resolveRefresh: ((next: EditorSession) => void) | undefined;
+    const initial = state({ revision: 4 });
+    const candidateApi = candidate(initial);
+    candidateApi.transport.refresh = vi.fn(() => new Promise<EditorSession>((resolve) => {
+      resolveRefresh = resolve;
+    }));
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const preview = screen.getByRole("button", { name: /^Preview forward/ });
+    await user.click(preview);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
+    const confirm = screen.getByRole("button", { name: "I understand, continue" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+    resolveRefresh?.(state({ revision: 5 }));
+    await waitFor(() => expect(screen.getByText("Revision 5")).toBeInTheDocument());
+    expect(confirm).toBeEnabled();
+
+    await user.click(confirm);
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1",
+      "preview_forward",
+      5,
+    ));
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(preview).toHaveFocus());
+  });
+
+  it.each([
+    ["validate", "Validate"],
+    ["preview_forward", /^Preview forward/],
+    ["run", "Run"],
+    ["compare", "Compare"],
+    ["benchmark", "Benchmark"],
+  ] as const)("confirms the %s kind with the current accepted revision", async (kind, name) => {
+    const user = userEvent.setup();
+    const initial = state({
+      revision: 12,
+      document: {
+        ...documentState(),
+        previews: {
+          ...PREVIEWS,
+          declared_run_kinds: ["forward", "compare", "benchmark"],
+        },
+      },
+    });
+    const candidateApi = candidate(initial);
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+
+    await user.click(screen.getByRole("button", { name }));
+    await user.click(screen.getByRole("button", { name: "I understand, continue" }));
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1",
+      kind,
+      12,
+    ));
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses rapid double confirmation until the one deferred job settles", async () => {
+    let resolveSubmit: ((next: EditorSession) => void) | undefined;
+    const user = userEvent.setup();
+    const initial = state({ revision: 12 });
+    const candidateApi = candidate(initial);
+    candidateApi.submitJob.mockImplementationOnce(() => new Promise<EditorSession>((resolve) => {
+      resolveSubmit = resolve;
+    }));
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const run = screen.getByRole("button", { name: "Run" });
+    await user.click(run);
+    const confirm = screen.getByRole("button", { name: "I understand, continue" });
+
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+    expect(candidateApi.submitJob).toHaveBeenCalledWith("session-1", "run", 12);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    expectRunningDescription(run);
+    expectRunningDescription(screen.getByRole("button", { name: "Save YAML" }));
+    expectRunningDescription(screen.getByRole("button", { name: "Refresh jobs" }));
+    expect(run).not.toHaveFocus();
+    confirm.click();
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+
+    resolveSubmit?.(state({ revision: 13 }));
+    await waitFor(() => expect(screen.getByText("Revision 13")).toBeInTheDocument());
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(run).toHaveFocus());
+    expect(candidateApi.replaceYaml).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1",
+      "validate",
+      13,
+    ));
+    expect(candidateApi.submitJob).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not confirm an intent when refreshed accepted validation now blocks jobs", async () => {
+    const user = userEvent.setup();
+    const initial = state({ revision: 4 });
+    const refused = state({
+      revision: 5,
+      document: {
+        ...documentState(),
+        validation: { ...VALIDATION, run_blocked: true },
+      },
+    });
+    const candidateApi = candidate(initial);
+    candidateApi.transport.refresh = vi.fn(async () => refused);
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const run = screen.getByRole("button", { name: "Run" });
+    await user.click(run);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
+    await waitFor(() => expect(screen.getByText("Revision 5")).toBeInTheDocument());
+    const confirm = screen.getByRole("button", { name: "I understand, continue" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel trusted execution" }));
+    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
+      .not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Execute" })).toHaveFocus());
+  });
+
+  it("derives onboarding counts and stale/current Forward state without scientific mutation", async () => {
+    const user = userEvent.setup();
+    const stale = state({
+      document: {
+        ...documentState(),
+        forms: { sections: [], missing_required: ["runtime.mode", "outputs.path"] },
+        validation: { ...VALIDATION, run_blocked: true },
+      },
+      jobs: [{
+        job_id: "forward-stale",
+        session_id: "session-1",
+        kind: "preview_forward",
+        revision: 1,
+        yaml_digest: "old-digest",
+        status: "succeeded",
+        result: null,
+        message: null,
+        stale: true,
+      }],
+    });
+    const staleCandidate = candidate(stale);
+    const staleEditor = render(
+      <SessionEditor initial={stale} transport={staleCandidate.transport} />,
+    );
+    const staleChecklist = screen.getByRole("region", { name: "First preview checklist" });
+    expect(within(staleChecklist).getByText("2 required choices remain")).toBeVisible();
+    expect(within(staleChecklist).getByText("Quick checks need attention")).toBeVisible();
+    expect(within(staleChecklist).getByText("Forward preview stale")).toBeVisible();
+    expect(staleCandidate.replaceYaml).not.toHaveBeenCalled();
+    expect(staleCandidate.submitJob).not.toHaveBeenCalled();
+    expect(staleCandidate.refresh).not.toHaveBeenCalled();
+    staleEditor.unmount();
+
+    const current = state({
+      jobs: [{
+        job_id: "forward-current",
+        session_id: "session-1",
+        kind: "preview_forward",
+        revision: 0,
+        yaml_digest: "current-digest",
+        status: "succeeded",
+        result: null,
+        message: null,
+        stale: false,
+      }],
+    });
+    const currentCandidate = candidate(current);
+    render(<SessionEditor initial={current} transport={currentCandidate.transport} />);
+    expect(screen.queryByRole("region", { name: "First preview checklist" }))
+      .not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Help" }));
+    const currentChecklist = screen.getByRole("region", { name: "First preview checklist" });
+    expect(within(currentChecklist).getByText("Required choices complete")).toBeVisible();
+    expect(within(currentChecklist).getByText("Quick checks clean")).toBeVisible();
+    expect(within(currentChecklist).getByText("Forward preview complete")).toBeVisible();
+    expect(currentCandidate.replaceYaml).not.toHaveBeenCalled();
+    expect(currentCandidate.submitJob).not.toHaveBeenCalled();
+    expect(currentCandidate.refresh).not.toHaveBeenCalled();
+    await user.click(within(currentChecklist).getByRole("button", { name: "Dismiss setup guide" }));
+    expect(screen.queryByRole("region", { name: "First preview checklist" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Help" })).toBeVisible();
+  });
 });
