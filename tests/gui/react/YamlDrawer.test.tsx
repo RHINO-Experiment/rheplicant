@@ -1,4 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { YamlDrawer } from "../../../src/rheplicant/gui/react/YamlDrawer";
@@ -13,6 +15,26 @@ import {
 afterEach(cleanup);
 
 describe("authoritative YAML drawer", () => {
+  function FocusHarness() {
+    const [open, setOpen] = useState(false);
+    return <>
+      <button type="button" onClick={() => setOpen(true)}>First YAML opener</button>
+      <button type="button" onClick={() => setOpen(true)}>Actual YAML opener</button>
+      {open && (
+        <YamlDrawer
+          acceptedYaml="model: {}\n"
+          revision={4}
+          draft={{ kind: "yaml", baseRevision: 4, text: "model: {gain: 2}\n" }}
+          diagnostic={null}
+          onChange={vi.fn()}
+          onApply={vi.fn()}
+          onDiscard={vi.fn()}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>;
+  }
+
   it("allows only one raw draft and blocks accepted mutation", () => {
     const yaml: DraftEnvelope = { kind: "yaml", baseRevision: 4, text: "model: [" };
     expect(draftBlocksMutation(yaml)).toBe(true);
@@ -88,5 +110,46 @@ describe("authoritative YAML drawer", () => {
     );
     expect(screen.getByRole("button", { name: "Discard draft" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Close YAML drawer" })).toBeEnabled();
+  });
+
+  it("moves initial focus inside and wraps YAML focus in both directions", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+
+    await user.click(screen.getByRole("button", { name: "Actual YAML opener" }));
+    const close = screen.getByRole("button", { name: "Close YAML drawer" });
+    const last = screen.getByRole("button", { name: "Discard draft" });
+    await waitFor(() => expect(close).toHaveFocus());
+
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+  });
+
+  it("closes on Escape and restores focus to the actual YAML opener", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+    const opener = screen.getByRole("button", { name: "Actual YAML opener" });
+
+    await user.click(opener);
+    await user.click(screen.getByRole("textbox", { name: "YAML source of truth" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "YAML drawer" })).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("restores focus to the actual YAML opener after explicit Close", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+    const first = screen.getByRole("button", { name: "First YAML opener" });
+    const opener = screen.getByRole("button", { name: "Actual YAML opener" });
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Close YAML drawer" }));
+
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(first).not.toHaveFocus();
   });
 });

@@ -11,7 +11,55 @@ import type {
   SessionTransport,
 } from "../../../src/rheplicant/gui/react/types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+type ViewportListener = (event: { matches: boolean }) => void;
+
+function installViewport(initialWidth: number) {
+  let width = initialWidth;
+  const media = new Map<string, {
+    matches: boolean;
+    listeners: Set<ViewportListener>;
+    addEventListener: ReturnType<typeof vi.fn>;
+    removeEventListener: ReturnType<typeof vi.fn>;
+  }>();
+  function matches(query: string) {
+    const maximum = /max-width:\s*(\d+)px/.exec(query)?.[1];
+    return maximum === undefined ? false : width <= Number(maximum);
+  }
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => {
+    let entry = media.get(query);
+    if (!entry) {
+      const listeners = new Set<ViewportListener>();
+      entry = {
+        matches: matches(query),
+        listeners,
+        addEventListener: vi.fn((_type: string, listener: ViewportListener) => {
+          listeners.add(listener);
+        }),
+        removeEventListener: vi.fn((_type: string, listener: ViewportListener) => {
+          listeners.delete(listener);
+        }),
+      };
+      media.set(query, entry);
+    }
+    return entry;
+  }));
+  return {
+    resize(nextWidth: number) {
+      width = nextWidth;
+      for (const [query, entry] of media) {
+        const next = matches(query);
+        if (entry.matches === next) continue;
+        entry.matches = next;
+        for (const listener of entry.listeners) listener({ matches: next });
+      }
+    },
+  };
+}
 
 const YAML = "model:\n  gain:\n    type: GainOperator\n    gain: 1.0\n";
 const EDITED = YAML.replace("1.0", "1.25");
@@ -1133,6 +1181,110 @@ describe("durable React editor session", () => {
     expect(cancel).toHaveFocus();
     await user.click(cancel);
     await waitFor(() => expect(run).toHaveFocus());
+  });
+
+  it("restores the global YAML and Diagnostics controls after their drawers close", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    const yaml = screen.getByRole("button", { name: "YAML" });
+    const diagnostics = screen.getByRole("button", { name: "Diagnostics" });
+
+    diagnostics.focus();
+    fireEvent.click(yaml);
+    expect(screen.getByRole("dialog", { name: "YAML drawer" }).parentElement)
+      .toHaveClass("workbench-drawer");
+    await user.click(screen.getByRole("button", { name: "Close YAML drawer" }));
+    await waitFor(() => expect(yaml).toHaveFocus());
+
+    yaml.focus();
+    fireEvent.click(diagnostics);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Diagnostics" })).not.toBeInTheDocument();
+    await waitFor(() => expect(diagnostics).toHaveFocus());
+    expect(candidateApi.replaceYaml).not.toHaveBeenCalled();
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
+  });
+
+  it("moves modal focus inside, inerts every background region, and preserves first-job focus", async () => {
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    const background = () => [
+      ".workbench-header",
+      ".workbench-navigation",
+      ".workbench-main",
+      ".workbench-inspector",
+      ".workbench-jobs",
+    ].map((selector) => document.querySelector(selector) as HTMLElement);
+    const expectInert = (inert: boolean) => {
+      for (const region of background()) {
+        expect(region).not.toBeNull();
+        if (inert) expect(region).toHaveAttribute("inert");
+        else expect(region).not.toHaveAttribute("inert");
+      }
+    };
+
+    await user.click(screen.getByRole("button", { name: "YAML" }));
+    const yamlClose = screen.getByRole("button", { name: "Close YAML drawer" });
+    await waitFor(() => expect(yamlClose).toHaveFocus());
+    expectInert(true);
+    screen.getByRole("tab", { name: "Model" }).focus();
+    expect(yamlClose).toHaveFocus();
+    await user.click(yamlClose);
+    expectInert(false);
+
+    await user.click(screen.getByRole("button", { name: "Diagnostics" }));
+    const diagnosticsClose = screen.getByRole("button", { name: "Close diagnostics" });
+    await waitFor(() => expect(diagnosticsClose).toHaveFocus());
+    expectInert(true);
+    await user.click(diagnosticsClose);
+    expectInert(false);
+
+    await user.click(screen.getByRole("tab", { name: "Execute" }));
+    const run = screen.getByRole("button", { name: "Run" });
+    await user.click(run);
+    const cancel = screen.getByRole("button", { name: "Cancel trusted execution" });
+    expect(cancel).toHaveFocus();
+    expectInert(true);
+    await user.click(cancel);
+    await waitFor(() => expect(run).toHaveFocus());
+    expectInert(false);
+  });
+
+  it.each([1024, 768, 640])(
+    "starts the context inspector collapsed at %ipx",
+    (width) => {
+      installViewport(width);
+      render(<SessionEditor initial={state()} transport={candidate().transport} />);
+      expect(document.querySelector("details.workbench-inspector"))
+        .not.toHaveAttribute("open");
+    },
+  );
+
+  it("exposes the desktop inspector and resets it safely across compact breakpoints", async () => {
+    const viewport = installViewport(1440);
+    const user = userEvent.setup();
+    const candidateApi = candidate();
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    const inspector = document.querySelector<HTMLDetailsElement>(
+      "details.workbench-inspector",
+    );
+
+    expect(inspector).not.toBeNull();
+    expect(inspector).toHaveAttribute("open");
+    act(() => viewport.resize(1024));
+    await waitFor(() => expect(inspector).not.toHaveAttribute("open"));
+    await user.click(within(inspector as HTMLDetailsElement).getByText("Context inspector"));
+    expect(inspector).toHaveAttribute("open");
+    await user.click(within(inspector as HTMLDetailsElement).getByText("Context inspector"));
+    expect(inspector).not.toHaveAttribute("open");
+    act(() => viewport.resize(1440));
+    await waitFor(() => expect(inspector).toHaveAttribute("open"));
+    act(() => viewport.resize(640));
+    await waitFor(() => expect(inspector).not.toHaveAttribute("open"));
+    expect(candidateApi.replaceYaml).not.toHaveBeenCalled();
+    expect(candidateApi.submitJob).not.toHaveBeenCalled();
   });
 
   it("does not open or submit trusted execution while a draft or accepted operation blocks mutations", async () => {

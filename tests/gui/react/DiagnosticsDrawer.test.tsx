@@ -1,4 +1,5 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -231,6 +232,22 @@ function transportFor(candidate: EditorSession): SessionTransport {
 }
 
 describe("global diagnostics drawer", () => {
+  function FocusHarness() {
+    const [open, setOpen] = useState(false);
+    return <>
+      <button type="button" onClick={() => setOpen(true)}>First diagnostics opener</button>
+      <button type="button" onClick={() => setOpen(true)}>Actual diagnostics opener</button>
+      {open && (
+        <DiagnosticsDrawer
+          session={session()}
+          onOpenConfigPath={vi.fn()}
+          onOpenYamlPath={vi.fn()}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>;
+  }
+
   it("keeps accepted Quick checks distinct from the current Full validation", () => {
     renderDrawer(session([validateJob()]));
 
@@ -433,5 +450,71 @@ describe("global diagnostics drawer", () => {
     expect(nonempty).not.toHaveAttribute("open");
     expect(nonempty).toHaveTextContent("runtime.seed");
     expect(nonempty).toHaveTextContent("1 → 2");
+  });
+
+  it("moves initial focus inside and wraps diagnostics focus in both directions", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+
+    await user.click(screen.getByRole("button", { name: "Actual diagnostics opener" }));
+    const dialog = screen.getByRole("dialog", { name: "Diagnostics" });
+    const close = within(dialog).getByRole("button", { name: "Close diagnostics" });
+    const last = within(dialog).getByText("Diff against preset", { selector: "summary" });
+    await waitFor(() => expect(close).toHaveFocus());
+
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+  });
+
+  it("restores the stable Diagnostics opener after YAML finding transitions", async () => {
+    const user = userEvent.setup();
+    const candidate = session([validateJob()]);
+    render(<SessionEditor initial={candidate} transport={transportFor(candidate)} />);
+    const opener = screen.getByRole("button", { name: "Diagnostics" });
+
+    for (const closeWith of ["button", "escape"] as const) {
+      await user.click(opener);
+      await user.click(within(screen.getByRole("dialog", { name: "Diagnostics" })).getByRole(
+        "button",
+        { name: /observation\.channel_start\.extra$/ },
+      ));
+      const yaml = screen.getByRole("dialog", { name: "YAML drawer" });
+      expect(yaml).toBeVisible();
+      if (closeWith === "button") {
+        await user.click(within(yaml).getByRole("button", { name: "Close YAML drawer" }));
+      } else {
+        await user.keyboard("{Escape}");
+      }
+      expect(screen.queryByRole("dialog", { name: "YAML drawer" })).not.toBeInTheDocument();
+      await waitFor(() => expect(opener).toHaveFocus());
+    }
+  });
+
+  it("closes on Escape and restores focus to the actual diagnostics opener", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+    const opener = screen.getByRole("button", { name: "Actual diagnostics opener" });
+
+    await user.click(opener);
+    await user.click(screen.getByRole("heading", { name: "Diagnostics" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "Diagnostics" })).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("restores focus to the actual diagnostics opener after explicit Close", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+    const first = screen.getByRole("button", { name: "First diagnostics opener" });
+    const opener = screen.getByRole("button", { name: "Actual diagnostics opener" });
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Close diagnostics" }));
+
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(first).not.toHaveFocus();
   });
 });

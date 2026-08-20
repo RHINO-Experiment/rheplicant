@@ -1,4 +1,5 @@
 import type { DraftEnvelope } from "./drafts";
+import { useWorkbenchModal } from "./WorkbenchShell";
 
 interface YamlDrawerProps {
   acceptedYaml: string;
@@ -27,14 +28,22 @@ export function YamlDrawer({
   onClose,
   onRefresh,
 }: YamlDrawerProps) {
+  const { dialogRef, closeModal, handleModalKeyDown } = useWorkbenchModal(onClose);
+
   const yamlDraft = draft.kind === "yaml" ? draft : null;
   const text = yamlDraft?.text ?? acceptedYaml;
 
   return (
-    <aside aria-label="YAML drawer" role="dialog" aria-modal="true">
+    <aside
+      ref={dialogRef}
+      aria-label="YAML drawer"
+      role="dialog"
+      aria-modal="true"
+      onKeyDown={handleModalKeyDown}
+    >
       <header>
         <h2>YAML source of truth</h2>
-        <button type="button" aria-label="Close YAML drawer" onClick={onClose}>Close</button>
+        <button type="button" aria-label="Close YAML drawer" onClick={closeModal}>Close</button>
       </header>
       <p>Accepted revision {revision}</p>
       <textarea

@@ -1,4 +1,5 @@
 import { ValidationLedger } from "./ValidationLedger";
+import { useWorkbenchModal } from "./WorkbenchShell";
 import type {
   EditorSession,
   JobProjection,
@@ -59,6 +60,8 @@ export function DiagnosticsDrawer({
   onOpenYamlPath,
   onClose,
 }: DiagnosticsDrawerProps) {
+  const { dialogRef, closeModal, handleModalKeyDown } = useWorkbenchModal(onClose);
+
   const validationJob = latestValidation(session);
   const projectedPaths = new Set(session.document.forms.sections.flatMap(
     (section) => section.widgets.map((widget) => widget.path),
@@ -76,10 +79,16 @@ export function DiagnosticsDrawer({
   };
 
   return (
-    <aside role="dialog" aria-modal="true" aria-label="Diagnostics">
+    <aside
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Diagnostics"
+      onKeyDown={handleModalKeyDown}
+    >
       <header>
         <h2>Diagnostics</h2>
-        <button type="button" onClick={onClose}>Close diagnostics</button>
+        <button type="button" onClick={closeModal}>Close diagnostics</button>
       </header>
       <section aria-label="Quick checks">
         <h2>Quick checks</h2>
