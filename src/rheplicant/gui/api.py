@@ -195,19 +195,38 @@ def _session_body(
     session_id: str,
     session: EditorSession,
 ) -> dict[str, object]:
+    digest = yaml_digest(session.yaml_text)
     return {
         "session_id": session_id,
         "revision": session.revision,
+        "yaml_digest": digest,
         "dirty": session.dirty,
         "validation_stale": session.validation_stale,
         "can_undo": session.can_undo,
         "can_redo": session.can_redo,
         "jobs": [
             dataclasses.asdict(row)
-            for row in store.jobs.project(session_id, yaml_digest(session.yaml_text))
+            for row in store.jobs.project(session_id, digest)
         ],
         "outputs": dataclasses.asdict(project_output_workflow(session.yaml_text)),
         "document": _snapshot_body(snapshot(session.yaml_text)),
+    }
+
+
+def _jobs_body(
+    store: SessionStore,
+    session_id: str,
+    session: EditorSession,
+) -> dict[str, object]:
+    digest = yaml_digest(session.yaml_text)
+    return {
+        "session_id": session_id,
+        "revision": session.revision,
+        "yaml_digest": digest,
+        "jobs": [
+            dataclasses.asdict(row)
+            for row in store.jobs.project(session_id, digest)
+        ],
     }
 
 
@@ -528,6 +547,13 @@ def create_app(
                 expected_revision=payload.expected_revision,
             ),
         )
+
+    @app.get("/api/sessions/{session_id}/jobs")
+    def get_jobs_route(session_id: str) -> dict[str, object]:
+        try:
+            return _jobs_body(store, session_id, store.get(session_id))
+        except KeyError:
+            raise _not_found(session_id) from None
 
     @app.post("/api/sessions/{session_id}/jobs", status_code=202)
     def submit_job_route(

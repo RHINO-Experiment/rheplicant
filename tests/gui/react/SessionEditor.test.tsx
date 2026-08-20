@@ -7,6 +7,8 @@ import { RequestError } from "../../../src/rheplicant/gui/react/api";
 import type {
   EditorSession,
   GraphDiagram,
+  JobPollProjection,
+  JobProjection,
   NodeCard,
   SessionTransport,
 } from "../../../src/rheplicant/gui/react/types";
@@ -169,9 +171,11 @@ function documentState(yamlText = YAML) {
 }
 
 function state(overrides: Partial<EditorSession> = {}): EditorSession {
+  const revision = overrides.revision ?? 0;
   return {
     session_id: "session-1",
-    revision: 0,
+    revision,
+    yaml_digest: `digest-${revision}`,
     dirty: false,
     validation_stale: false,
     can_undo: false,
@@ -203,12 +207,16 @@ function candidate(initial = state()) {
   }));
   const save = vi.fn(async () => state({ revision: initial.revision + 1 }));
   const refresh = vi.fn(async () => initial);
+  const refreshJobs = vi.fn(
+    (_sessionId: string, _signal: AbortSignal) => new Promise<JobPollProjection>(() => undefined),
+  );
   const unchanged = vi.fn(async () => initial);
   const setOutputProduct = vi.fn(async () => initial);
   const setOutputReport = vi.fn(async () => initial);
   const submitJob = vi.fn(async () => initial);
   const transport: SessionTransport = {
     refresh,
+    refreshJobs,
     replaceYaml,
     setField: unchanged,
     undo,
@@ -232,6 +240,7 @@ function candidate(initial = state()) {
     load,
     save,
     refresh,
+    refreshJobs,
     setOutputProduct,
     setOutputReport,
     submitJob,
@@ -307,6 +316,7 @@ function fullyDistinctSession(): EditorSession {
   return {
     session_id: "session-1",
     revision: 17,
+    yaml_digest: "accepted-digest",
     dirty: true,
     validation_stale: true,
     can_undo: true,
@@ -678,7 +688,7 @@ describe("durable React editor session", () => {
     await waitFor(() => expect(redo).toHaveBeenCalledWith("session-1", 2));
   });
 
-  it("keeps a graph draft base revision across refresh and routes Apply through the parent guard", async () => {
+  it("keeps a graph draft base revision across jobs-only refresh and routes Apply through the parent guard", async () => {
     const initial = state({
       document: {
         ...documentState(),
@@ -688,17 +698,21 @@ describe("durable React editor session", () => {
     });
     const candidateApi = candidate(initial);
     const edited = vi.fn(async () => state({ revision: 2, document: initial.document }));
-    const refresh = vi.fn(async () => state({ revision: 1, document: initial.document }));
     candidateApi.transport.editNode = edited;
-    candidateApi.transport.refresh = refresh;
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
 
     fireEvent.click(document.querySelector('[data-node-id="gain"]')!);
     const settings = screen.getByRole("textbox", { name: "Node settings JSON" });
     fireEvent.change(settings, { target: { value: '{"gain":2}' } });
     expect(settings).toBeEnabled();
+    await waitFor(() => expect(candidateApi.refreshJobs).toHaveBeenCalledOnce());
+    candidateApi.refreshJobs.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
-    await waitFor(() => expect(refresh).toHaveBeenCalledWith("session-1"));
+    await waitFor(() => expect(candidateApi.refreshJobs).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(AbortSignal),
+    ));
+    expect(candidateApi.refresh).not.toHaveBeenCalled();
     fireEvent.change(settings, { target: { value: '{"gain":3}' } });
     fireEvent.click(screen.getByRole("button", { name: "Apply configuration to gain" }));
     await waitFor(() => expect(edited).toHaveBeenCalledWith(
@@ -997,38 +1011,236 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
-  it("refreshes terminal jobs without erasing an in-progress YAML draft", async () => {
+  it("installs polled jobs without erasing an in-progress YAML draft or accepted session", async () => {
     const initial = state({
       jobs: [{
         job_id: "job-1",
         session_id: "session-1",
         kind: "run",
         revision: 0,
-        yaml_digest: "abc",
+        yaml_digest: "digest-0",
         status: "running",
         result: null,
         message: null,
         stale: false,
       }],
     });
-    const refreshed = state({
-      jobs: [{ ...initial.jobs[0], status: "succeeded", result: { exit_code: 0 } }],
-    });
+    const terminal: JobProjection = {
+      ...initial.jobs[0],
+      status: "succeeded",
+      result: { exit_code: 0 },
+    };
+    let resolveJobs: ((next: JobPollProjection) => void) | undefined;
     const candidateApi = candidate(initial);
-    const refresh = vi.fn(async () => refreshed);
-    candidateApi.transport.refresh = refresh;
+    candidateApi.transport.refreshJobs = vi.fn(() => new Promise<JobPollProjection>((resolve) => {
+      resolveJobs = resolve;
+    }));
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
     fireEvent.click(screen.getByRole("button", { name: "YAML" }));
 
     const mirror = screen.getByRole("textbox", { name: "YAML source of truth" });
     fireEvent.change(mirror, { target: { value: EDITED } });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
+    resolveJobs?.({
+      session_id: "session-1",
+      revision: 0,
+      yaml_digest: "digest-0",
+      jobs: [terminal],
+    });
 
-    await waitFor(() => expect(refresh).toHaveBeenCalledWith("session-1"));
+    await waitFor(() => expect(screen.getByRole("region", { name: "Jobs" }))
+      .toHaveTextContent("job-1"));
     expect(mirror).toHaveValue(EDITED);
+    expect(screen.getByText("Revision 0")).toBeInTheDocument();
+    expect(candidateApi.refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
     expect(screen.getByRole("region", { name: "Explicit jobs" }))
       .toHaveTextContent("succeeded");
+  });
+
+  it("syncs display jobs from every complete accepted mutation response", async () => {
+    const acceptedJob: JobProjection = {
+      job_id: "accepted-queued",
+      session_id: "session-1",
+      kind: "validate",
+      revision: 1,
+      yaml_digest: "digest-1",
+      status: "queued",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const candidateApi = candidate();
+    candidateApi.replaceYaml.mockResolvedValueOnce(state({
+      revision: 1,
+      dirty: true,
+      jobs: [acceptedJob],
+      document: documentState(EDITED),
+    }));
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YAML source of truth" }), {
+      target: { value: EDITED },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply YAML edit" }));
+
+    await waitFor(() => expect(screen.getByText("Revision 1")).toBeInTheDocument());
+    expect(screen.getByRole("region", { name: "Jobs" }))
+      .toHaveTextContent("accepted-queued");
+  });
+
+  it("rejects an old same-identity poll resolved after an accepted job response in the same batch", async () => {
+    const acceptedJob: JobProjection = {
+      job_id: "accepted-job",
+      session_id: "session-1",
+      kind: "validate",
+      revision: 0,
+      yaml_digest: "digest-0",
+      status: "queued",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const accepted = state({
+      jobs: [acceptedJob],
+    });
+    let resolveSubmit: ((next: EditorSession) => void) | undefined;
+    let resolveOldPoll: ((next: JobPollProjection) => void) | undefined;
+    const candidateApi = candidate();
+    candidateApi.submitJob.mockImplementationOnce(() => new Promise<EditorSession>((resolve) => {
+      resolveSubmit = resolve;
+    }));
+    candidateApi.transport.refreshJobs = vi.fn()
+      .mockImplementationOnce(() => new Promise<JobPollProjection>((resolve) => {
+        resolveOldPoll = resolve;
+      }))
+      .mockImplementation(() => new Promise<JobPollProjection>(() => undefined));
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+    await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    fireEvent.click(screen.getByRole("button", { name: "I understand, continue" }));
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      resolveSubmit?.(accepted);
+      resolveOldPoll?.({
+        session_id: "session-1",
+        revision: 0,
+        yaml_digest: "digest-0",
+        jobs: [],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("Revision 0")).toBeInTheDocument());
+    const jobs = screen.getByRole("region", { name: "Jobs" });
+    expect(jobs).toHaveTextContent("accepted-job");
+  });
+
+  it("bounds the Jobs drawer to active jobs and the most recent terminal transition", () => {
+    const jobs: JobProjection[] = [
+      {
+        job_id: "old-terminal",
+        session_id: "session-1",
+        kind: "validate",
+        revision: 0,
+        yaml_digest: "digest-0",
+        status: "succeeded",
+        result: null,
+        message: null,
+        stale: false,
+      },
+      {
+        job_id: "queued-active",
+        session_id: "session-1",
+        kind: "run",
+        revision: 0,
+        yaml_digest: "digest-0",
+        status: "queued",
+        result: null,
+        message: null,
+        stale: false,
+      },
+      {
+        job_id: "new-terminal",
+        session_id: "session-1",
+        kind: "compare",
+        revision: 0,
+        yaml_digest: "digest-0",
+        status: "refused",
+        result: null,
+        message: "bounded refusal",
+        stale: false,
+      },
+      {
+        job_id: "running-active",
+        session_id: "session-1",
+        kind: "benchmark",
+        revision: 0,
+        yaml_digest: "digest-0",
+        status: "running",
+        result: null,
+        message: null,
+        stale: false,
+      },
+    ];
+    render(<SessionEditor initial={state({ jobs })} transport={candidate(state({ jobs })).transport} />);
+
+    const drawer = screen.getByRole("region", { name: "Jobs" });
+    expect(drawer).toHaveTextContent("queued-active");
+    expect(drawer).toHaveTextContent("running-active");
+    expect(drawer).toHaveTextContent("new-terminal");
+    expect(drawer).toHaveTextContent("bounded refusal");
+    expect(drawer).not.toHaveTextContent("old-terminal");
+  });
+
+  it("shows polling failures and manually refreshes without the full-session transport", async () => {
+    const candidateApi = candidate();
+    candidateApi.transport.refreshJobs = vi.fn(async () => {
+      throw new Error("jobs endpoint offline");
+    });
+    render(<SessionEditor initial={state()} transport={candidateApi.transport} />);
+
+    const drawer = screen.getByRole("region", { name: "Jobs" });
+    await waitFor(() => expect(drawer).toHaveTextContent("jobs endpoint offline"));
+    expect(drawer).toHaveTextContent("Retrying in 1 second");
+    candidateApi.transport.refreshJobs.mockClear();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Refresh jobs" }));
+
+    await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(AbortSignal),
+    ));
+    expect(candidateApi.refresh).not.toHaveBeenCalled();
+    expect(screen.getByText("Revision 0")).toBeInTheDocument();
+  });
+
+  it("keeps the memoized refresh stable for fresh arrays with the same active identity", async () => {
+    const active: JobProjection = {
+      job_id: "stable-active",
+      session_id: "session-1",
+      kind: "run",
+      revision: 0,
+      yaml_digest: "digest-0",
+      status: "running",
+      result: null,
+      message: null,
+      stale: false,
+    };
+    const initial = state({ jobs: [active] });
+    const candidateApi = candidate(initial);
+    candidateApi.transport.refreshJobs = vi.fn(async () => ({
+      session_id: "session-1",
+      revision: 0,
+      yaml_digest: "digest-0",
+      jobs: [{ ...active }],
+    }));
+
+    render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
+
+    await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalledOnce());
+    await act(async () => Promise.resolve());
+    expect(candidateApi.transport.refreshJobs).toHaveBeenCalledOnce();
   });
 
   it("holds the first explicit job, submits its stored kind and current revision once, and acknowledges only this browser editor", async () => {
@@ -1326,13 +1538,15 @@ describe("durable React editor session", () => {
     await waitFor(() => expect(screen.getByText("Revision 10")).toBeInTheDocument());
   });
 
-  it("uses the refreshed accepted revision when confirmation remains open across a pending refresh", async () => {
+  it("keeps confirmation bound to accepted state across a jobs-only refresh", async () => {
     const user = userEvent.setup();
-    let resolveRefresh: ((next: EditorSession) => void) | undefined;
     const initial = state({ revision: 4 });
     const candidateApi = candidate(initial);
-    candidateApi.transport.refresh = vi.fn(() => new Promise<EditorSession>((resolve) => {
-      resolveRefresh = resolve;
+    candidateApi.transport.refreshJobs = vi.fn(async () => ({
+      session_id: "session-1",
+      revision: 4,
+      yaml_digest: "digest-4",
+      jobs: [],
     }));
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
     await user.click(screen.getByRole("tab", { name: "Execute" }));
@@ -1341,18 +1555,15 @@ describe("durable React editor session", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
     const confirm = screen.getByRole("button", { name: "I understand, continue" });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    expect(candidateApi.submitJob).not.toHaveBeenCalled();
-    resolveRefresh?.(state({ revision: 5 }));
-    await waitFor(() => expect(screen.getByText("Revision 5")).toBeInTheDocument());
+    await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalled());
+    expect(screen.getByText("Revision 4")).toBeInTheDocument();
     expect(confirm).toBeEnabled();
 
     await user.click(confirm);
     await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
       "session-1",
       "preview_forward",
-      5,
+      4,
     ));
     expect(candidateApi.submitJob).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(preview).toHaveFocus());
@@ -1435,33 +1646,30 @@ describe("durable React editor session", () => {
       .not.toBeInTheDocument();
   });
 
-  it("does not confirm an intent when refreshed accepted validation now blocks jobs", async () => {
+  it("does not let jobs-only refresh overwrite accepted validation", async () => {
     const user = userEvent.setup();
     const initial = state({ revision: 4 });
-    const refused = state({
-      revision: 5,
-      document: {
-        ...documentState(),
-        validation: { ...VALIDATION, run_blocked: true },
-      },
-    });
     const candidateApi = candidate(initial);
-    candidateApi.transport.refresh = vi.fn(async () => refused);
+    candidateApi.transport.refreshJobs = vi.fn(async () => ({
+      session_id: "session-1",
+      revision: 4,
+      yaml_digest: "digest-4",
+      jobs: [],
+    }));
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
     await user.click(screen.getByRole("tab", { name: "Execute" }));
     const run = screen.getByRole("button", { name: "Run" });
     await user.click(run);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh jobs" }));
-    await waitFor(() => expect(screen.getByText("Revision 5")).toBeInTheDocument());
+    await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalled());
+    expect(screen.getByText("Revision 4")).toBeInTheDocument();
     const confirm = screen.getByRole("button", { name: "I understand, continue" });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    expect(candidateApi.submitJob).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Cancel trusted execution" }));
-    expect(screen.queryByRole("dialog", { name: "Trusted execution" }))
-      .not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Execute" })).toHaveFocus());
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+    await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
+      "session-1", "run", 4,
+    ));
   });
 
   it("derives onboarding counts and stale/current Forward state without scientific mutation", async () => {

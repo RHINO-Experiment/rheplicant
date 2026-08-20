@@ -240,6 +240,7 @@ function editorSession(
   return {
     session_id: "session-1",
     revision,
+    yaml_digest: `digest-${revision}`,
     dirty: false,
     validation_stale: false,
     can_undo: true,
@@ -306,6 +307,12 @@ function transportFor(initial = editorSession()) {
   const setField = vi.fn(async () => initial);
   const transport: SessionTransport = {
     refresh: unchanged,
+    refreshJobs: vi.fn(async () => ({
+      session_id: initial.session_id,
+      revision: initial.revision,
+      yaml_digest: initial.yaml_digest,
+      jobs: initial.jobs,
+    })),
     replaceYaml: unchanged,
     setField,
     undo: unchanged,

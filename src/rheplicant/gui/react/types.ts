@@ -168,6 +168,7 @@ export interface ValidationProjection {
 export interface EditorSession {
   session_id: string;
   revision: number;
+  yaml_digest: string;
   dirty: boolean;
   validation_stale: boolean;
   can_undo: boolean;
@@ -240,8 +241,16 @@ export interface JobProjection {
   stale: boolean;
 }
 
+export interface JobPollProjection {
+  session_id: string;
+  revision: number;
+  yaml_digest: string;
+  jobs: JobProjection[];
+}
+
 export interface SessionTransport {
   refresh(sessionId: string): Promise<EditorSession>;
+  refreshJobs(sessionId: string, signal: AbortSignal): Promise<JobPollProjection>;
   replaceYaml(
     sessionId: string,
     yamlText: string,

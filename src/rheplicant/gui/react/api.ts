@@ -1,4 +1,9 @@
-import type { EditorSession, JobKind, SessionTransport } from "./types";
+import type {
+  EditorSession,
+  JobKind,
+  JobPollProjection,
+  SessionTransport,
+} from "./types";
 
 export class RequestError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -54,6 +59,12 @@ export const sessionTransport: SessionTransport = {
     return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
       method: "GET",
     });
+  },
+  refreshJobs(sessionId, signal) {
+    return requestJson<JobPollProjection>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/jobs`,
+      { method: "GET", signal },
+    );
   },
   replaceYaml(sessionId, yamlText, expectedRevision) {
     return requestJson<EditorSession>(`/api/sessions/${encodeURIComponent(sessionId)}/yaml`, {

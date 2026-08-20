@@ -113,6 +113,7 @@ function state(): EditorSession {
   return {
     session_id: "session-1",
     revision: 4,
+    yaml_digest: "digest-4",
     dirty: false,
     validation_stale: true,
     can_undo: false,
@@ -140,6 +141,12 @@ function state(): EditorSession {
 function transport(): SessionTransport {
   const unchanged = async () => state();
   return {
+    refreshJobs: vi.fn(async () => ({
+      session_id: "session-1",
+      revision: 4,
+      yaml_digest: "digest-4",
+      jobs: [],
+    })),
     replaceYaml: vi.fn(unchanged),
     setField: vi.fn(unchanged),
     undo: vi.fn(unchanged),

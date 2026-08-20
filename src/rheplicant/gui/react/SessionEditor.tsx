@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConfigWorkspace } from "./ConfigWorkspace";
 import { DiagnosticsDrawer } from "./DiagnosticsDrawer";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
 import { FirstJobConfirmation } from "./FirstJobConfirmation";
+import { JobsDrawer } from "./JobsDrawer";
 import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
 import { OnboardingChecklist } from "./OnboardingChecklist";
 import { OutputWorkflow } from "./OutputWorkflow";
@@ -14,6 +15,7 @@ import { WorkbenchShell } from "./WorkbenchShell";
 import { WorkspaceNav } from "./WorkspaceNav";
 import { YamlDrawer } from "./YamlDrawer";
 import { RequestError } from "./api";
+import { useJobPolling } from "./useJobPolling";
 import type { EditorSession, JobKind, SessionTransport } from "./types";
 import type { WorkspaceId } from "./WorkspaceNav";
 
@@ -35,6 +37,7 @@ function browserSaveFile(yamlText: string) {
 
 export function SessionEditor({ initial, transport, readFile = browserReadFile, saveFile = browserSaveFile }: Props) {
   const [session, setSession] = useState(initial);
+  const [displayJobs, setDisplayJobs] = useState(initial.jobs);
   const [draft, setDraft] = useState<DraftEnvelope>(NO_DRAFT);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -46,12 +49,30 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const [yamlConflict, setYamlConflict] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const acceptedSessionRef = useRef(initial);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>("model");
   const [pendingJob, setPendingJob] = useState<JobKind | null>(null);
   const [securityAcknowledged, setSecurityAcknowledged] = useState(false);
   const jobOpener = useRef<HTMLElement | null>(null);
   const capturedJobOpener = useRef<HTMLButtonElement | null>(null);
   const restoreJobFocus = useRef(false);
+  const refreshJobProjection = useCallback(
+    (signal: AbortSignal) => transport.refreshJobs(session.session_id, signal),
+    [transport, session.session_id],
+  );
+  const installPolledJobs = useCallback((jobs: EditorSession["jobs"]) => {
+    if (acceptedSessionRef.current !== session) return;
+    setDisplayJobs(jobs);
+  }, [session]);
+  const polling = useJobPolling({
+    sessionId: session.session_id,
+    revision: session.revision,
+    yamlDigest: session.yaml_digest,
+    jobs: displayJobs,
+    refresh: refreshJobProjection,
+    onJobs: installPolledJobs,
+  });
+  const displaySession = { ...session, jobs: displayJobs };
 
   useEffect(() => {
     if (pendingJob !== null || busy || !restoreJobFocus.current) return;
@@ -80,7 +101,9 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const mutationReason = busy ? "Another action is running" : draftLabel(draft);
 
   function accept(next: EditorSession, message: string, clearDraft = true) {
+    acceptedSessionRef.current = next;
     setSession(next);
+    setDisplayJobs(next.jobs);
     if (clearDraft) coordinator.clear();
     setYamlDiagnostic(null);
     setYamlConflict(null);
@@ -174,14 +197,16 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     setPendingJob(null);
     submitJob(kind);
   }
-  async function refreshJobs() {
+  async function refreshAcceptedSession() {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
       const next = await transport.refresh(session.session_id);
+      acceptedSessionRef.current = next;
       setSession(next);
-      setStatus("Job state refreshed");
+      setDisplayJobs(next.jobs);
+      setStatus("Accepted YAML refreshed");
       setStatusError(false);
     }
     catch (error) { setStatus(error instanceof Error ? error.message : String(error)); setStatusError(true); }
@@ -221,7 +246,7 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
     model: modelSurface,
     config: configSurface,
-    execute: { main: <><OutputWorkflow session={session} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={session.jobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
+    execute: { main: <><OutputWorkflow session={displaySession} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={displayJobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
     results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },
   };
   const surface = surfaces[activeWorkspace];
@@ -234,15 +259,14 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
       <button disabled={mutationBlocked || !session.can_redo} aria-describedby={actionDescription} onClick={() => void run(() => transport.redo(session.session_id, session.revision), "Redid YAML edit")}>Redo</button>
       <label>Load YAML<input aria-label="Load YAML file" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain" disabled={mutationBlocked} aria-describedby={actionDescription} onChange={load} /></label>
       <button disabled={mutationBlocked} aria-describedby={actionDescription} onClick={save}>Save YAML</button>
-      <button disabled={busy} aria-describedby={actionDescription} onClick={() => void refreshJobs()}>Refresh jobs</button>
     </>} />}
     navigation={<WorkspaceNav active={activeWorkspace} onChange={setActiveWorkspace} />}
-    main={<><OnboardingChecklist missingRequired={session.document.forms.missing_required} runBlocked={session.document.validation.run_blocked} jobs={session.jobs} /><section id={`workspace-panel-${activeWorkspace}`} role="tabpanel" aria-label={workspaceLabels[activeWorkspace]} aria-labelledby={`workspace-tab-${activeWorkspace}`}>{surface.main}</section></>}
+    main={<><OnboardingChecklist missingRequired={session.document.forms.missing_required} runBlocked={session.document.validation.run_blocked} jobs={displayJobs} /><section id={`workspace-panel-${activeWorkspace}`} role="tabpanel" aria-label={workspaceLabels[activeWorkspace]} aria-labelledby={`workspace-tab-${activeWorkspace}`}>{surface.main}</section></>}
     inspector={surface.inspector}
-    jobs={<p role={statusError ? "alert" : "status"} className={statusError ? "error-surface" : undefined}>{status}</p>}
+    jobs={<><JobsDrawer jobs={displayJobs} {...polling} disabled={busy} disabledReasonId={actionDescription} /><p role={statusError ? "alert" : "status"} className={statusError ? "error-surface" : undefined}>{status}</p></>}
     overlay={drawerOpen || diagnosticsOpen || pendingJob !== null ? <>
-      {drawerOpen && <>{yamlContext && <p>YAML context: <code>{yamlContext}</code></p>}<YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshJobs()} /></>}
-      {diagnosticsOpen && <DiagnosticsDrawer session={session} onOpenConfigPath={(path) => { setRequestedConfigPath(path); setActiveWorkspace("config"); setDiagnosticsOpen(false); }} onOpenYamlPath={(path) => { setYamlContext(path); setDiagnosticsOpen(false); setDrawerOpen(true); }} onClose={() => setDiagnosticsOpen(false)} />}
+      {drawerOpen && <>{yamlContext && <p>YAML context: <code>{yamlContext}</code></p>}<YamlDrawer acceptedYaml={session.document.yaml_text} revision={session.revision} draft={draft} diagnostic={yamlDiagnostic} conflict={yamlConflict} busy={busy} onChange={updateYamlDraft} onApply={() => void applyYamlDraft()} onDiscard={discardDraft} onClose={() => setDrawerOpen(false)} onRefresh={() => void refreshAcceptedSession()} /></>}
+      {diagnosticsOpen && <DiagnosticsDrawer session={displaySession} onOpenConfigPath={(path) => { setRequestedConfigPath(path); setActiveWorkspace("config"); setDiagnosticsOpen(false); }} onOpenYamlPath={(path) => { setYamlContext(path); setDiagnosticsOpen(false); setDrawerOpen(true); }} onClose={() => setDiagnosticsOpen(false)} />}
       {pendingJob !== null && <FirstJobConfirmation kind={pendingJob} blocked={jobBlocked} onConfirm={confirmPendingJob} onCancel={cancelPendingJob} />}
     </> : null}
   />;

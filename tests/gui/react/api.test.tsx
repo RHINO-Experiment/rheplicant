@@ -37,6 +37,7 @@ function createdSession(yamlText: string): EditorSession {
   return {
     session_id: "created",
     revision: 0,
+    yaml_digest: "server-digest",
     dirty: false,
     validation_stale: false,
     can_undo: false,

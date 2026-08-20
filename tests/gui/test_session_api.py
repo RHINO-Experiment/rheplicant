@@ -54,6 +54,83 @@ def create_session(client, yaml_text=BASE):
     return response.json()
 
 
+def test_full_session_carries_exact_yaml_digest(client):
+    from rheplicant.gui.jobs import yaml_digest
+
+    session = create_session(client, BASE)
+
+    assert session["yaml_digest"] == yaml_digest(
+        session["document"]["yaml_text"]
+    )
+
+
+def test_get_jobs_returns_identity_without_full_document(client):
+    from rheplicant.gui.jobs import yaml_digest
+
+    session = create_session(client, BASE)
+
+    response = client.get(f"/api/sessions/{session['session_id']}/jobs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "session_id": session["session_id"],
+        "revision": session["revision"],
+        "yaml_digest": yaml_digest(session["document"]["yaml_text"]),
+        "jobs": [],
+    }
+    assert "document" not in response.json()
+    assert "outputs" not in response.json()
+
+
+def test_get_jobs_returns_the_projected_submitted_job(job_client):
+    from rheplicant.gui.jobs import yaml_digest
+
+    yaml_text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
+    session = create_session(job_client, yaml_text)
+    submitted = job_client.post(
+        f"/api/sessions/{session['session_id']}/jobs",
+        json={"expected_revision": 0, "kind": "validate"},
+    )
+    assert submitted.status_code == 202
+    submitted_job_id = submitted.json()["jobs"][0]["job_id"]
+
+    response = job_client.get(f"/api/sessions/{session['session_id']}/jobs")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"session_id", "revision", "yaml_digest", "jobs"}
+    assert body["session_id"] == session["session_id"]
+    assert body["revision"] == 0
+    assert body["yaml_digest"] == yaml_digest(yaml_text)
+    assert len(body["jobs"]) == 1
+    assert {
+        key: body["jobs"][0][key]
+        for key in (
+            "job_id",
+            "session_id",
+            "kind",
+            "status",
+            "revision",
+            "yaml_digest",
+            "stale",
+        )
+    } == {
+        "job_id": submitted_job_id,
+        "session_id": session["session_id"],
+        "kind": "validate",
+        "status": "succeeded",
+        "revision": 0,
+        "yaml_digest": yaml_digest(yaml_text),
+        "stale": False,
+    }
+
+
+def test_get_jobs_returns_404_for_an_unknown_session(client):
+    response = client.get("/api/sessions/unknown-session/jobs")
+
+    assert response.status_code == 404
+
+
 def test_starter_route_returns_a_valid_bounded_file_free_document(client):
     from rheplicant.gui.starter import STARTER_YAML
 
@@ -255,6 +332,7 @@ def test_session_field_route_returns_the_complete_updated_projection(client):
     assert set(body) == {
         "session_id",
         "revision",
+        "yaml_digest",
         "dirty",
         "validation_stale",
         "can_undo",

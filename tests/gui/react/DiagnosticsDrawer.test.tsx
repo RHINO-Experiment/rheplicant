@@ -80,6 +80,7 @@ function session(jobs: JobProjection[] = [], overrides: Partial<EditorSession> =
   return {
     session_id: "session-1",
     revision: 7,
+    yaml_digest: "current-digest",
     dirty: false,
     validation_stale: false,
     can_undo: false,
@@ -214,6 +215,12 @@ function transportFor(candidate: EditorSession): SessionTransport {
   const unchanged = vi.fn(async () => candidate);
   return {
     refresh: unchanged,
+    refreshJobs: vi.fn(async () => ({
+      session_id: candidate.session_id,
+      revision: candidate.revision,
+      yaml_digest: candidate.yaml_digest,
+      jobs: candidate.jobs,
+    })),
     replaceYaml: unchanged,
     setField: unchanged,
     undo: unchanged,
@@ -381,19 +388,32 @@ describe("global diagnostics drawer", () => {
 
   it("does not replay a consumed finding command when accepted forms refresh", async () => {
     const user = userEvent.setup();
-    const candidate = session([validateJob()]);
+    const candidate = session([validateJob()], { can_undo: true });
+    let accepted = candidate;
     const transport = transportFor(candidate);
-    transport.refresh = vi.fn(async () => session(candidate.jobs, {
-      revision: 8,
-      document: {
-        ...candidate.document,
-        forms: {
-          ...candidate.document.forms,
-          sections: [...candidate.document.forms.sections],
-        },
-      },
+    transport.refreshJobs = vi.fn(async () => ({
+      session_id: accepted.session_id,
+      revision: accepted.revision,
+      yaml_digest: accepted.yaml_digest,
+      jobs: accepted.jobs,
     }));
+    const refreshJobs = vi.mocked(transport.refreshJobs);
+    transport.undo = vi.fn(async () => {
+      accepted = session(candidate.jobs, {
+        revision: 8,
+        can_undo: false,
+        document: {
+          ...candidate.document,
+          forms: {
+            ...candidate.document.forms,
+            sections: [...candidate.document.forms.sections],
+          },
+        },
+      });
+      return accepted;
+    });
     render(<SessionEditor initial={candidate} transport={transport} />);
+    await waitFor(() => expect(refreshJobs).toHaveBeenCalledTimes(1));
 
     await user.click(screen.getByRole("button", { name: "Diagnostics" }));
     await user.click(within(screen.getByRole("dialog", { name: "Diagnostics" })).getAllByRole(
@@ -403,9 +423,16 @@ describe("global diagnostics drawer", () => {
     await user.click(screen.getByRole("button", { name: /Runtime/ }));
     expect(screen.getByRole("region", { name: "Runtime form" })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Refresh jobs" }));
-    expect(await screen.findByText("Job state refreshed")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    expect(await screen.findByText("Undid YAML edit")).toBeVisible();
+    expect(screen.getByText("Revision 8")).toBeVisible();
     expect(screen.getByRole("region", { name: "Runtime form" })).toBeVisible();
+    await waitFor(() => expect(refreshJobs).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("region", { name: "Jobs" }))
+      .toHaveTextContent("Job polling idle"));
+    expect(screen.queryByText(
+      "Job refresh identity no longer matches this accepted session; refresh the session.",
+    )).not.toBeInTheDocument();
   });
 
   it("keeps an empty preset diff collapsed and renders only projected nonempty changes", () => {
