@@ -432,8 +432,13 @@ class TestRendering:
         svg = asm.to_svg()
         assert svg.startswith("<svg") and svg.endswith("</svg>")
         assert "<body" not in svg and "<html" not in svg
-        # opacity classes are styled INSIDE the svg (survives <img> embedding)
-        assert "<style>" in svg and ".dim{opacity:.22}" in svg
+        # State classes are styled INSIDE the svg (survives <img> embedding),
+        # without making dim labels unreadable through low opacity.
+        assert "<style>" in svg
+        assert ".dim{opacity:1}" in svg
+        assert ".dim rect,.dim line{stroke-dasharray:3 3}" in svg
+        assert ".dim text{font-style:italic}" in svg
+        assert ".dim{opacity:.22}" not in svg
         assert svg in asm.to_html()  # the page embeds the same figure
 
 

@@ -52,10 +52,29 @@ and you install it yourself.
     limTOD
   - `pip install "rheplicant[uvbeam]"`
 * - `gui`
-  - The packaged FastAPI + React YAML editor and `rheplicant-gui` launcher
+  - The packaged FastAPI + React configuration workbench and
+    `rheplicant-gui` launcher
   - `pip install "rheplicant[gui]"`, then `rheplicant-gui`; see the
     [editor security and trust boundaries](config-gui.md)
 :::
+
+### Start the configuration workbench
+
+The `gui` extra contains the production assets, so an installed wheel needs no
+Node.js toolchain:
+
+```bash
+pip install "rheplicant[gui]"
+rheplicant-gui                    # http://127.0.0.1:8000/
+```
+
+The launcher binds to loopback by default. A non-loopback bind is refused
+unless `--allow-remote` is explicit, and that flag is only acknowledgement:
+the application has no authentication, tenant isolation or sandbox. YAML may
+load plugins and `python:` targets; resource/output fields are server paths;
+jobs use the server account's files and compute. Read the complete
+[workbench workflow and trust boundary](config-gui.md) before using remote
+access or running a document from another person.
 
 ## Development
 

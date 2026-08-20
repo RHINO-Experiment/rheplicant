@@ -171,8 +171,8 @@ instrument is another template registered the same way.
   - [Configuration command line](config-cli.md), then the
     [configuration overview](config.md)
 * - edit a YAML configuration in a browser
-  - [YAML configuration editor](config-gui.md) — install, start, workflow and
-    the local-only security boundary
+  - [Configuration workbench](config-gui.md) — Model, Config, Execute and
+    Results over exact YAML, plus install and trusted-server boundaries
 * - **turn a RHINO recording into a `State`**
   - [Ingestion](ingestion.md) — every other page starts from a `State` that
     already exists; this is where one comes from

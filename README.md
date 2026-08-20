@@ -160,16 +160,26 @@ scientific products, reports, and a hashed `products.json` manifest. See the
 [configuration CLI](https://rheplicant.readthedocs.io/en/latest/config-cli.html)
 for stdin, output, clobber, and trusted-plugin rules.
 
-Edit the same YAML-as-truth document in the optional browser application:
+Edit the same YAML-as-truth document in the optional browser workbench:
 
 ```bash
 pip install "rheplicant[gui]"
 rheplicant-gui                    # http://127.0.0.1:8000/
 ```
 
+Model, Config, Execute and Results are four responsive views over the exact
+accepted YAML. Safe control edits return complete YAML through Python;
+unsubmitted raw YAML/field drafts remain browser view state. Quick and Full
+validation, progressive output setup, explicit actions, automatic job polling,
+current/stale results, Re-run and identity-checked audit links share that one
+revision/digest boundary.
+
 The launcher serves packaged React assets and the FastAPI boundary from one
-local origin. It has no authentication or multi-user isolation and refuses a
-non-loopback bind unless `--allow-remote` is explicit. Read the
+origin and binds to loopback by default. It has no authentication, tenant
+isolation or sandbox and refuses a non-loopback bind unless `--allow-remote`
+is explicit. That flag is acknowledgement, not protection: plugins,
+`python:` targets, server paths and jobs retain the server account's authority.
+Read the
 [GUI security and trust boundaries](https://rheplicant.readthedocs.io/en/latest/config-gui.html)
 before exposing it beyond the local machine or executing a document received
 from someone else.
@@ -205,7 +215,7 @@ architecture decisions and the changelog, with a sidebar that lists them.
 Build it locally with
 `cd docs && ../.venv/bin/python -m sphinx -n -b html . _build/html`.
 
-Design decisions D1–D53 and the physics roadmap are in
+Design decisions D1–D54 and the physics roadmap are in
 [`DESIGN.md`](https://rheplicant.readthedocs.io/en/latest/design.html); what
 arrived when is in
 [`CHANGELOG.md`](https://rheplicant.readthedocs.io/en/latest/changelog.html).

@@ -56,7 +56,7 @@ def test_bundled_frontend_is_a_closed_production_build() -> None:
         if reference.endswith(".js")
     )
     assert "/api/sessions" in javascript
-    assert "Rheplicant config editor" in javascript
+    assert "Rheplicant configuration workbench" in javascript
 
 
 def test_bundled_app_serves_the_editor_and_api_from_one_origin() -> None:

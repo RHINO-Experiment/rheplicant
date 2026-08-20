@@ -8,7 +8,7 @@ below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
-numbered decisions (D1–D53), each with the constraint that forced it. New
+numbered decisions (D1–D54), each with the constraint that forced it. New
 here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
 the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
@@ -1842,6 +1842,12 @@ the process has no authentication, tenant isolation or sandbox. Bounded safe
 YAML parsing protects the parser; it does not make `python:` targets, plugins,
 resource paths, output paths or expensive jobs untrusted. A configuration is
 trusted input to the server account, exactly as it is at the CLI boundary.
+
+### D54 — Workbench drafts are view state; accepted edits return exact YAML
+
+Workbench navigation, selection and raw drafts are browser view state.
+Exact accepted YAML remains the sole scientific state; every accepted control
+edit returns complete YAML through a revision-checked Python transformation.
 
 ## Known deferred issues
 

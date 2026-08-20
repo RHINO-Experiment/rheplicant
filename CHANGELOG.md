@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### The browser editor is now a persistent scientific workbench
+
+Config Plans 6A–6C retain exact YAML as the sole scientific state while
+organising the application into Model, Config, Execute and Results. Guided
+first use reaches a bounded Forward preview; Model and Config provide
+revision-checked graph, safe primitive field and raw-YAML draft paths; Execute
+progressively exposes Quick/Full validation, target safety, all 22 products,
+reports and declared actions; Results retains current and stale evidence,
+Re-run and identity-checked audit links.
+
+Jobs now poll through a jobs-only session/revision/YAML-digest projection, so
+a late response cannot replace accepted YAML or an unsubmitted draft. Polling
+has one in-flight request, visibility pause/resume, bounded backoff, terminal
+stop and manual recovery. Queued, running, warning, refused, error, stale and
+current states have visible semantic treatments across light, dark and forced
+colours.
+
+The workbench keeps keyboard graph/workspace navigation and responsive drawers
+at 1440x1000, 1024x768, 768x900 and 640x900. Source and fresh-wheel Playwright
+run the same semantic journeys, including six reviewed wide screenshots. The
+launcher remains a trusted server-account surface: loopback is the default,
+remote binding requires explicit acknowledgement, and no authentication or
+sandbox is claimed. Plugins, `python:` targets, server paths and jobs retain
+their existing authority and safety boundaries.
+
 ### A YAML document is now its own browser editor
 
 Config Plan 5 ships the selected FastAPI + React configuration editor as the
