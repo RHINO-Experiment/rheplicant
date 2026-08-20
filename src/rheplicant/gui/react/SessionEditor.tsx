@@ -2,13 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConfigWorkspace } from "./ConfigWorkspace";
 import { DiagnosticsDrawer } from "./DiagnosticsDrawer";
+import { useExecuteWorkspace } from "./ExecuteWorkspace";
 import { canUpdateDraft, draftBlocksMutation, draftLabel, NO_DRAFT, type DraftCoordinator, type DraftEnvelope } from "./drafts";
 import { FirstJobConfirmation } from "./FirstJobConfirmation";
 import { JobsDrawer } from "./JobsDrawer";
 import { useModelWorkspace, type WorkspaceSurface } from "./ModelWorkspace";
 import { OnboardingChecklist } from "./OnboardingChecklist";
-import { OutputWorkflow } from "./OutputWorkflow";
-import { PreviewPanel } from "./PreviewPanel";
 import { ValidationLedger } from "./ValidationLedger";
 import { WorkbenchHeader } from "./WorkbenchHeader";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -238,6 +237,16 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
     },
     onRun: (action, message) => void run(action, message),
   });
+  const executeSurface = useExecuteWorkspace({
+    session,
+    jobs: displayJobs,
+    transport,
+    drafts: coordinator,
+    disabledReason: reasonId ?? null,
+    onAccept: accept,
+    onSubmit: requestJob,
+    onRun: (action, message) => void run(action, message),
+  });
   useEffect(() => {
     if (requestedConfigPath !== null && activeWorkspace === "config" && !diagnosticsOpen) {
       setRequestedConfigPath(null);
@@ -246,7 +255,7 @@ export function SessionEditor({ initial, transport, readFile = browserReadFile, 
   const surfaces: Record<WorkspaceId, WorkspaceSurface> = {
     model: modelSurface,
     config: configSurface,
-    execute: { main: <><OutputWorkflow session={displaySession} transport={transport} onAccept={accept} disabled={mutationBlocked} disabledReasonId={reasonId} onRun={(action, message) => void run(action, message)} /><div onClickCapture={captureJobOpener}><PreviewPanel previews={session.document.previews} jobs={displayJobs} disabled={mutationBlocked} blocked={session.document.validation.run_blocked} disabledReasonId={reasonId} onSubmit={requestJob} /></div></>, inspector: emptyInspector("Select an output") },
+    execute: { main: <div onClickCapture={captureJobOpener}>{executeSurface.main}</div>, inspector: executeSurface.inspector },
     results: { main: <ValidationLedger validation={session.document.validation} />, inspector: emptyInspector("Select a job") },
   };
   const surface = surfaces[activeWorkspace];

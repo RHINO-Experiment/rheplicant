@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OutputWorkflow } from "../../../src/rheplicant/gui/react/OutputWorkflow";
@@ -119,79 +119,62 @@ function transport(): SessionTransport {
   };
 }
 
-describe("output and recovery workflow", () => {
-  it("renders keyboard-accessible requested/resolved tabs and the exact target state", () => {
+describe("output request editor", () => {
+  it("keeps terminal audit detail and requested/resolved tabs out of the execute request", () => {
+    // Kills a regression that leaks legacy terminal detail or YAML artefact tabs back into Task 2 Execute.
     render(
       <OutputWorkflow
         session={state()}
         transport={transport()}
-        onAccept={vi.fn()}
+        onRun={vi.fn()}
       />,
     );
 
-    const tabs = screen.getByRole("tablist", { name: "Configuration artefacts" });
-    const asked = within(tabs).getByRole("tab", { name: "What I asked for" });
-    const resolved = within(tabs).getByRole("tab", { name: "What will run" });
-    expect(asked).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel")).toHaveTextContent("clobber: false");
-    fireEvent.keyDown(asked, { key: "ArrowRight" });
-    expect(resolved).toHaveAttribute("aria-selected", "true");
-    expect(resolved).toHaveFocus();
-    expect(screen.getByRole("tabpanel")).toHaveTextContent("jax_enable_x64");
+    expect(screen.queryByRole("tablist", { name: "Configuration artefacts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Completed audit bundles" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "config.resolved.yaml" })).not.toBeInTheDocument();
     expect(screen.getByRole("alert", { name: "Output target state" }))
       .toHaveTextContent("target exists and clobber is false");
     expect(screen.getByText("/data/night.results")).toBeInTheDocument();
   });
 
-  it("edits product formats/runs and report rows through revisioned transport", () => {
+  it("hands output mutations to the required parent runner", () => {
+    // Kills a regression that restores a local OutputWorkflow transport fallback and bypasses SessionEditor's busy gate.
     const api = transport();
+    const onRun = vi.fn();
     render(
-      <OutputWorkflow session={state()} transport={api} onAccept={vi.fn()} />,
+      <OutputWorkflow session={state()} transport={api} onRun={onRun} />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Add product" }));
+    fireEvent.click(screen.getByRole("option", { name: "chains" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Write chains" }));
+    expect(api.setOutputProduct).not.toHaveBeenCalled();
+    expect(onRun).toHaveBeenCalledOnce();
+    const [action, message] = onRun.mock.calls[0] as [() => Promise<EditorSession>, string];
+    expect(message).toBe("Updated chains output");
+    void action();
     expect(api.setOutputProduct).toHaveBeenCalledWith(
       "session-1", "chains", true, "npz", [], [], [], 3,
     );
-    fireEvent.change(screen.getByRole("combobox", { name: "chains format" }), {
-      target: { value: "netcdf" },
-    });
-    expect(api.setOutputProduct).toHaveBeenCalledWith(
-      "session-1", "chains", false, "netcdf", [], [], [], 3,
-    );
-
     fireEvent.click(screen.getByRole("checkbox", { name: "Report row compare" }));
-    expect(api.setOutputReport).toHaveBeenCalledWith(
-      "session-1",
-      true,
-      ["fit", "compare"],
-      ["seconds"],
-      null,
-      [],
-      ["json"],
-      3,
-    );
+    expect(onRun).toHaveBeenCalledTimes(2);
   });
 
-  it("shows predictable paths and identity-bound audit bundle links", () => {
+  it("shows a product's predictable paths only when its request is expanded", () => {
+    // Kills a regression that restores eager settings or terminal-audit rendering to the request editor.
     render(
       <OutputWorkflow
         session={state()}
         transport={transport()}
-        onAccept={vi.fn()}
+        onRun={vi.fn()}
       />,
     );
 
+    expect(screen.queryByText("runs/n-666974/arrays.npz")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add product" }));
+    fireEvent.click(screen.getByRole("option", { name: "arrays" }));
     expect(screen.getByText("runs/n-666974/arrays.npz")).toBeInTheDocument();
-    const links = screen.getByRole("region", { name: "Completed audit bundles" });
-    expect(within(links).getByRole("link", { name: "config.resolved.yaml" }))
-      .toHaveAttribute(
-        "href",
-        "/api/sessions/session-1/jobs/job-1/artifacts/config.resolved.yaml",
-      );
-    expect(within(links).getByRole("link", { name: "config.resolved.yaml" }))
-      .toHaveAttribute("target", "_blank");
-    expect(within(links).getByRole("link", { name: "provenance.json" }))
-      .toBeInTheDocument();
+    expect(screen.queryByText("job-1")).not.toBeInTheDocument();
   });
 });

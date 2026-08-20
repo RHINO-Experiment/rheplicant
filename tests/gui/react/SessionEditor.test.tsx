@@ -477,9 +477,10 @@ describe("durable React editor session", () => {
       .toHaveAccessibleDescription("Unsaved YAML draft");
     await user.click(screen.getByRole("tab", { name: "Execute" }));
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Write assembly" }))
+    expect(screen.getByRole("button", { name: "Expand assembly product settings" }))
       .toHaveAccessibleDescription("Unsaved YAML draft");
-    expect(screen.getByRole("checkbox", { name: "Write report" }))
+    // Kills a regression that lets a pending draft bypass the lazy report-output gate.
+    expect(screen.getByRole("button", { name: "Write report" }))
       .toHaveAccessibleDescription("Unsaved YAML draft");
     expect(submitJob).not.toHaveBeenCalled();
   });
@@ -573,16 +574,20 @@ describe("durable React editor session", () => {
     const execute = screen.getByRole("tabpanel", { name: "Execute" });
     expect(within(execute).getByText("/accepted/session.results")).toBeInTheDocument();
     expect(within(execute).getByText("Accepted output target is ready.")).toBeInTheDocument();
+    // Kills a regression that loses accepted product configuration when its lazy control is opened.
+    fireEvent.click(within(execute).getByRole("button", { name: "Add product" }));
+    fireEvent.click(within(execute).getByRole("option", { name: "accepted_product" }));
     expect(within(execute).getByRole("checkbox", { name: "Write accepted_product" }))
       .not.toBeChecked();
     expect(within(execute).getByText("accepted/product.fits")).toBeInTheDocument();
     expect(within(execute).getByText(/count 17/)).toBeInTheDocument();
     expect(within(execute).getByText("Naccepted").closest("li")).toHaveTextContent("17");
-    expect(within(execute).getByRole("button", { name: /Accepted forward cost/ })).toBeEnabled();
-    expect(within(execute).getByRole("region", { name: "Explicit jobs" }))
-      .toHaveTextContent("accepted-job-17 · succeeded · stale");
-    expect(within(execute).getByRole("link", { name: "accepted-audit.json" }))
-      .toBeInTheDocument();
+    expect(within(execute).getByText("Accepted forward cost")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Jobs" }))
+      .toHaveTextContent("accepted-job-17 · run · succeeded");
+    // Terminal artefacts belong to Task 3 Results, never the progressive Execute workspace.
+    expect(within(execute).queryByRole("link", { name: "accepted-audit.json" }))
+      .not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Results" }));
     const results = screen.getByRole("tabpanel", { name: "Results" });
@@ -754,8 +759,9 @@ describe("durable React editor session", () => {
     const execute = screen.getByRole("tab", { name: "Execute" });
     expect(execute).toBeEnabled();
     fireEvent.click(execute);
-    const assembly = screen.getByRole("checkbox", { name: "Write assembly" });
-    const report = screen.getByRole("checkbox", { name: "Write report" });
+    const assembly = screen.getByRole("button", { name: "Expand assembly product settings" });
+    // Kills a regression that omits the lazy report trigger from the shared busy gate.
+    const report = screen.getByRole("button", { name: "Write report" });
     const run = screen.getByRole("button", { name: "Run" });
     expectRunningDescription(assembly);
     expectRunningDescription(report);
@@ -793,8 +799,10 @@ describe("durable React editor session", () => {
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
     fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
 
+    fireEvent.click(screen.getByRole("button", { name: "Expand assembly product settings" }));
     const assembly = screen.getByRole("checkbox", { name: "Write assembly" });
-    const report = screen.getByRole("checkbox", { name: "Write report" });
+    // Kills a regression that lets a second output mutation bypass the parent runner while the first is pending.
+    const report = screen.getByRole("button", { name: "Write report" });
     act(() => {
       assembly.click();
       report.click();
@@ -809,7 +817,7 @@ describe("durable React editor session", () => {
       screen.getByRole("button", { name: "Redo" }),
       screen.getByRole("button", { name: "Refresh jobs" }),
       screen.getByRole("checkbox", { name: "Write assembly" }),
-      screen.getByRole("checkbox", { name: "Write report" }),
+      screen.getByRole("button", { name: "Write report" }),
       screen.getByRole("button", { name: "Run" }),
     ]) expectRunningDescription(control);
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
@@ -836,7 +844,7 @@ describe("durable React editor session", () => {
     expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
     expect(graphApply).toBeEnabled();
     fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
-    expect(screen.getByRole("checkbox", { name: "Write assembly" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Expand assembly product settings" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
@@ -1053,7 +1061,8 @@ describe("durable React editor session", () => {
     expect(screen.getByText("Revision 0")).toBeInTheDocument();
     expect(candidateApi.refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("tab", { name: "Execute" }));
-    expect(screen.getByRole("region", { name: "Explicit jobs" }))
+    // Kills a regression that renders polling state from an old accepted session rather than displayJobs.
+    expect(screen.getByRole("region", { name: "Jobs" }))
       .toHaveTextContent("succeeded");
   });
 
@@ -1527,6 +1536,7 @@ describe("durable React editor session", () => {
     }));
     render(<SessionEditor initial={initial} transport={busyCandidate.transport} />);
     await user.click(screen.getByRole("tab", { name: "Execute" }));
+    await user.click(screen.getByRole("button", { name: "Expand assembly product settings" }));
     await user.click(screen.getByRole("checkbox", { name: "Write assembly" }));
     const busyRun = screen.getByRole("button", { name: "Run" });
     expectRunningDescription(busyRun);
@@ -1591,6 +1601,10 @@ describe("durable React editor session", () => {
     render(<SessionEditor initial={initial} transport={candidateApi.transport} />);
     await user.click(screen.getByRole("tab", { name: "Execute" }));
 
+    if (kind === "compare" || kind === "benchmark") {
+      // Kills a regression that submits a declared advanced job without explicit disclosure.
+      await user.click(screen.getByRole("button", { name: "Advanced actions" }));
+    }
     await user.click(screen.getByRole("button", { name }));
     await user.click(screen.getByRole("button", { name: "I understand, continue" }));
     await waitFor(() => expect(candidateApi.submitJob).toHaveBeenCalledWith(
