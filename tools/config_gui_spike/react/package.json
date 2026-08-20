@@ -7,20 +7,26 @@
     "build": "tsc -b && vite build",
     "build:production": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.production.config.ts",
     "build:session": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.session.config.ts",
+    "check:e2e": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --types node playwright.config.ts ../../../tests/gui/e2e/fixtures.ts ../../../tests/gui/e2e/helpers.ts ../../../tests/gui/e2e/smoke.spec.ts",
     "dev": "vite",
     "test": "vitest",
-    "test:session": "vitest --config vite.session.config.ts"
+    "test:session": "vitest --config vite.session.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots"
   },
   "dependencies": {
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.62.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@types/node": "25.9.5",
     "@vitejs/plugin-react": "^5.0.2",
     "jsdom": "^26.1.0",
     "typescript": "~5.9.2",
