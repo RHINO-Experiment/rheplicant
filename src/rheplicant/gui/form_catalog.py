@@ -34,6 +34,7 @@ from rheplicant.config.sections.benchmark import _BENCHMARK_KEYS
 from rheplicant.config.sections.benchmark import _METRICS as BENCHMARK_METRICS
 from rheplicant.config.sections.comparison import _COMPARE_KEYS
 from rheplicant.config.sections.comparison import _METRICS as COMPARE_METRICS
+from rheplicant.config.sections.compose import many_shape_problem
 from rheplicant.config.sections.conjugate import (
     _CONDITION_KEYS,
     _GCR_KEYS,
@@ -132,7 +133,10 @@ def _section_for(path: str) -> str:
     if path.startswith("resources"):
         return "resources"
     if path.startswith("model"):
-        node = path.split(".")[1] if "." in path else ""
+        # A list node's instance prefix spells the node ``filters[]``, which is
+        # not a node id: without the trim every field of every list node falls
+        # through to the Instrument default, and ``filters`` is `processing`.
+        node = path.split(".")[1].removesuffix("[]") if "." in path else ""
         spec = RADIO_GRAPH.nodes.get(node)
         return "backend" if spec is not None and spec.segment == "processing" else "instrument"
     if (
@@ -145,6 +149,37 @@ def _section_for(path: str) -> str:
     # The catch-all hatch-argument destination is a value-form concern rather
     # than a thirteenth view; Resources owns the generic value-node palette.
     return "resources" if root == "python" else root
+
+
+#: A non-empty mapping, so :func:`_is_fan` keeps answering correctly if the
+#: FAN branch ever grows the non-emptiness rule the list branch already has.
+_FAN_PROBE = {"probe": {}}
+
+
+def _is_fan(node_id: str) -> bool:
+    """Does this ``many`` node hold a label-keyed mapping rather than a list?
+
+    Asked of :func:`many_shape_problem`, which is where the shape of a ``many``
+    node is decided, rather than answered here: a second spelling of the FAN
+    node would be a second thing to keep in step, and nothing would go red
+    when the two disagreed.
+    """
+    return many_shape_problem(node_id, _FAN_PROBE, many=True) is None
+
+
+def _instance_prefix(node_id: str) -> str:
+    """Where ONE instance of a node's settings lives in a document.
+
+    A single-slot node has its fields at ``model.<node>.<field>``. A ``many``
+    node has one set per list entry (``model.<node>[].<field>``) or one per
+    FAN label (``model.<node>.*.<field>``). Spelling a ``many`` node flat
+    reads a list or a label mapping with ``Mapping.get`` on the field name,
+    which never finds anything, so the field is permanently absent and --
+    being required -- permanently *must decide*.
+    """
+    if not RADIO_GRAPH.nodes[node_id].many:
+        return f"model.{node_id}"
+    return f"model.{node_id}.*" if _is_fan(node_id) else f"model.{node_id}[]"
 
 
 def _default_value(value: object) -> object:
@@ -471,43 +506,47 @@ def _resource_widgets(builder: _Builder) -> None:
 
 def _model_widgets(builder: _Builder) -> None:
     table = operator_table()
-    fields: dict[str, list[tuple[type, Any, str]]] = {}
+    fields: dict[str, tuple[str, list[tuple[type, Any, str]]]] = {}
     for node_id in RADIO_GRAPH._topo:
         node = RADIO_GRAPH.nodes[node_id]
         classes = table.get(node_id, ())
+        # The node widget names the whole slot -- the list, or the label
+        # mapping -- so it stays flat while its settings move per instance.
         builder.add(
             f"model.{node_id}",
             widget="node",
             disabled=node.reserved and not classes,
             reason=node.doc,
         )
+        instance = _instance_prefix(node_id)
         if classes:
             builder.add(
-                f"model.{node_id}.type",
+                f"{instance}.type",
                 widget="select",
                 choices=tuple(cls.__name__ for cls in classes),
                 required=len(classes) > 1,
                 default=classes[0].__name__ if len(classes) == 1 else _NO_DEFAULT,
-                visible_when=_rule(f"model.{node_id}", "present"),
+                visible_when=_rule(instance, "present"),
             )
         for cls in classes:
             prefix = f"{cls.__module__}.{cls.__qualname__}"
             for name, spec in field_specs(cls).items():
-                fields.setdefault(f"model.{node_id}.{name}", []).append(
+                fields.setdefault(f"{instance}.{name}", (instance, []))[1].append(
                     (cls, spec, f"{prefix}.{name}")
                 )
         builder.add(
-            f"model.{node_id}.eqx_leaves",
+            f"{instance}.eqx_leaves",
             widget="file",
-            visible_when=_rule(f"model.{node_id}", "present"),
+            visible_when=_rule(instance, "present"),
         )
     dimension_rows = {
         selector.selector: spec
         for selector, spec in registered_dimension_rows()
         if selector.domain == "model_field"
     }
-    for path, rows in fields.items():
-        node_id = path.split(".")[1]
+    # The instance prefix is carried through rather than re-read off the path:
+    # ``path.split(".")[1]`` would give ``"filters[]"``, which is not a node.
+    for path, (instance, rows) in fields.items():
         classes = tuple(row[0].__name__ for row in rows)
         specs = [row[1] for row in rows]
         first = specs[0]
@@ -525,8 +564,8 @@ def _model_widgets(builder: _Builder) -> None:
             required=all(spec.required for spec in specs),
             default=default,
             visible_when=_all(
-                _rule(f"model.{node_id}", "present"),
-                _rule(f"model.{node_id}.type", "absent_or_in", classes),
+                _rule(instance, "present"),
+                _rule(f"{instance}.type", "absent_or_in", classes),
             ),
             dimension=_dimension(dimension_spec),
             unit_policy=dimension_spec.unit_policy,

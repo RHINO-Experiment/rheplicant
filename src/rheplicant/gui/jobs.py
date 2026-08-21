@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import subprocess
 import sys
@@ -32,6 +31,7 @@ from _rheplicant_bootstrap.gui_child import (
 from _rheplicant_bootstrap.gui_limits import (
     MAX_CHILD_STREAM_BYTES,
     MAX_FRAME_BYTES,
+    MAX_RETAINED_JOBS,
     MAX_STREAM_BYTES,
     MAX_WORKER_SECONDS,
     bounded_findings,
@@ -88,11 +88,34 @@ def yaml_digest(yaml_text: str) -> str:
 
 
 class JobStore:
-    """Thread-safe in-memory lifecycle storage for explicit GUI jobs."""
+    """Thread-safe in-memory lifecycle storage for explicit GUI jobs.
+
+    Bounded storage.  ``MAX_RESULT_BYTES`` bounds one result and bounded
+    nothing about a process that kept every result it had ever produced: what
+    a server costs is the product of that budget and a count, and until
+    ``MAX_RETAINED_JOBS`` there was no second factor.  Finished jobs are
+    therefore retired here, oldest first, and only finished ones -- a
+    ``queued`` or ``running`` record owns its action, is read by
+    ``_active_duplicate``, and has a result nobody has collected yet.
+
+    Bounding the mapping also bounds the two scans that walk it: the duplicate
+    check on every submit, and the per-session projection on every poll.  Both
+    used to grow without limit for the life of the process, under the lock.
+
+    Retiring a job is visible from outside, and deliberately so: an audit
+    link the GUI handed out names a ``job_id``, and once that job is retired
+    the link cannot resolve.  :meth:`retired` is what lets the caller answer
+    "this existed and is no longer served" rather than "this never existed",
+    which are different claims and only one of them is true.  The memory of
+    retirement is itself bounded -- ``MAX_RETAINED_JOBS`` ids, the same window
+    again -- so a link older than two full windows degrades to the ordinary
+    missing-job answer, which is still bounded and still honest.
+    """
 
     def __init__(self, *, id_factory: Callable[[], str] | None = None) -> None:
         self._jobs: dict[str, JobRecord] = {}
         self._yaml: dict[str, str] = {}
+        self._retired: dict[str, None] = {}
         self._lock = RLock()
         self._id_factory = id_factory or (lambda: uuid4().hex)
 
@@ -137,7 +160,56 @@ class JobStore:
                 )
             self._jobs[job_id] = row
             self._yaml[job_id] = yaml_text
+            self._evict()
         return row
+
+    def _evict(self) -> None:
+        """Retire finished jobs, oldest first, until the store fits its bound.
+
+        The caller holds ``_lock``; this is not a public entry point for the
+        same reason ``_active_duplicate`` is not, and for a sharper one: it
+        deletes.  Insertion order IS submission order for a ``dict``, so the
+        front of the mapping is the oldest job and the scan needs no clock.
+
+        Active rows are skipped rather than counted out, so a store whose live
+        jobs alone exceed the bound stays above it and nothing running is lost.
+        That is the deliberate asymmetry ``MAX_RETAINED_JOB_BYTES`` describes:
+        the budget is for results that have been produced, and an active job
+        has not produced one.
+        """
+        over = len(self._jobs) - MAX_RETAINED_JOBS
+        if over <= 0:
+            return
+        for job_id, row in list(self._jobs.items()):
+            if over <= 0:
+                return
+            if row.status in _ACTIVE_STATUSES:
+                continue
+            del self._jobs[job_id]
+            self._yaml.pop(job_id, None)
+            self._remember_retired(job_id)
+            over -= 1
+
+    def _remember_retired(self, job_id: str) -> None:
+        """Keep one retired id for as long as one more window of jobs.
+
+        Bounded, because a set of ids that grew for the life of the process
+        would be the very defect this eviction exists to close, wearing a
+        smaller hat.
+        """
+        self._retired[job_id] = None
+        while len(self._retired) > MAX_RETAINED_JOBS:
+            del self._retired[next(iter(self._retired))]
+
+    def retired(self, job_id: str) -> bool:
+        """Whether this store issued ``job_id`` and has since retired it.
+
+        ``False`` means only that this store cannot say otherwise: an id it
+        never issued and an id it has forgotten answer alike, which is why the
+        caller's refusal for ``False`` must be the one that claims least.
+        """
+        with self._lock:
+            return job_id in self._retired
 
     def _active_duplicate(
         self,
@@ -234,6 +306,10 @@ class JobStore:
             with self._lock:
                 self._jobs[job_id] = finished
                 self._yaml.pop(job_id, None)
+                # This row only became evictable on this line, so the store
+                # can be over its bound with nothing that was retirable when
+                # the row was inserted.
+                self._evict()
 
     def abandon(self, job_id: str, failure: BaseException | None) -> None:
         """Write a terminal record for a queued job that will never run.
@@ -258,14 +334,57 @@ class JobStore:
                 current, "the job was never started", failure
             )
             self._yaml.pop(job_id, None)
+            self._evict()
 
     def project(self, session_id: str, current_digest: str) -> tuple[JobProjection, ...]:
+        """Project this session's jobs, sharing each result rather than copying it.
+
+        ``dataclasses.asdict`` deep-copies every value it walks, so building a
+        projection through it copied each stored result in full -- on every
+        poll, and ``useJobPolling`` polls continuously while any job is active.
+        Sharing is safe because there is nothing to protect: ``JobRecord`` is
+        frozen, a terminal record is replaced rather than mutated, and the
+        result it carries is a plain structure ``bounded_result`` built once
+        and nothing writes to afterwards.
+        """
         with self._lock:
             rows = tuple(row for row in self._jobs.values() if row.session_id == session_id)
         return tuple(
-            JobProjection(**dataclasses.asdict(row), stale=row.yaml_digest != current_digest)
+            JobProjection(
+                row.job_id,
+                row.session_id,
+                row.kind,
+                row.revision,
+                row.yaml_digest,
+                row.status,
+                row.result,
+                row.message,
+                row.yaml_digest != current_digest,
+            )
             for row in rows
         )
+
+
+def projection_body(row: JobProjection) -> dict[str, object]:
+    """One JSON-ready mapping for a projected job, built rather than copied.
+
+    The poll path used to deep-copy twice: once inside :meth:`JobStore.project`
+    and once more here, where ``dataclasses.asdict`` walked the projection it
+    had just been handed.  Naming the fields costs a dict per job and copies
+    nothing, and the key order is the projection's own declaration order, so
+    the body is byte-for-byte what ``asdict`` produced.
+    """
+    return {
+        "job_id": row.job_id,
+        "session_id": row.session_id,
+        "kind": row.kind,
+        "revision": row.revision,
+        "yaml_digest": row.yaml_digest,
+        "status": row.status,
+        "result": row.result,
+        "message": row.message,
+        "stale": row.stale,
+    }
 
 
 def _stranded(running: JobRecord, failure: BaseException | None) -> JobRecord:
@@ -649,6 +768,7 @@ __all__ = [
     "JobStore",
     "execute_job",
     "forward_preview_document",
+    "projection_body",
     "run_forward_preview",
     "run_priced_validation",
     "yaml_digest",

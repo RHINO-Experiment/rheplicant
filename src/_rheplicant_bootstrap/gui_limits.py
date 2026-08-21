@@ -119,6 +119,38 @@ Length, depth and string caps each bound one dimension; only a total budget
 bounds their product, which is what a response body actually costs.
 """
 
+MAX_RETAINED_JOB_BYTES = 32 * 1024 * 1024
+"""Encoded-JSON budget for every finished job one process still holds.
+
+``MAX_RESULT_BYTES`` bounds one result; a store that never forgets a job
+bounds nothing, because what a long-lived process actually costs is the
+PRODUCT of a per-result budget and a count nobody chose.  Measured before this
+existed: 200 retained jobs held 404.5 MB that was never freed, and one poll of
+that session built a 200.5 MB body -- the same product, spent twice.
+
+This is therefore the budget the retention policy really bounds.  It is a size
+rather than a count because a count says nothing about cost while each result
+may approach ``MAX_RESULT_BYTES``, and because raising the per-result budget
+must shorten the history rather than silently multiply the bill.
+
+It bounds the two things it was measured against and nothing else: the results
+of FINISHED jobs, and the largest job list one poll can build.  A queued or
+running job is never evicted -- it owns its action and its result has not been
+collected yet -- so a session with more live jobs than this holds more than
+this, deliberately.  What such a job costs is its submitted document, which is
+the user's own text and is bounded where it is accepted rather than here.
+"""
+
+MAX_RETAINED_JOBS = max(1, MAX_RETAINED_JOB_BYTES // MAX_RESULT_BYTES)
+"""How many finished jobs that budget pays for, oldest evicted first.
+
+Derived rather than chosen: a bare count is the weak form of this bound, and
+writing it as one would let the two numbers drift into disagreement.  The floor
+of one is what keeps a store that can retain nothing from being expressible --
+a job whose own result is evicted before it can be read has not finished, it
+has vanished.
+"""
+
 MAX_FRAME_BYTES = 2 * 1024 * 1024
 """Largest worker result frame the parent will parse.
 
@@ -430,6 +462,8 @@ __all__ = [
     "MAX_FRAME_TAIL_BYTES",
     "MAX_NESTING_DEPTH",
     "MAX_RESULT_BYTES",
+    "MAX_RETAINED_JOBS",
+    "MAX_RETAINED_JOB_BYTES",
     "MAX_STREAM_BYTES",
     "MAX_TEXT_CHARACTERS",
     "MAX_WORKER_SECONDS",

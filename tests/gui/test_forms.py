@@ -87,7 +87,7 @@ def test_catalog_is_projected_from_every_live_registry_and_dimension_row():
 
 
 def test_model_widgets_derive_required_default_dimension_and_delivery_from_classes():
-    static = _widget("model.foregrounds.ref_freq")
+    static = _widget("model.foregrounds[].ref_freq")
     assert static.required is True
     assert static.has_default is False
     assert static.delivery == "static_float"

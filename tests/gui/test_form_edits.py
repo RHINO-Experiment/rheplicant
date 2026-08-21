@@ -224,9 +224,17 @@ def test_every_generic_widget_kind_and_campaign_remain_yaml_only(
 
 
 def test_hidden_primitive_widget_is_refused_with_bounded_yaml_guidance():
-    with pytest.raises(ConfigError, match="Edit this value in YAML") as caught:
-        set_form_value(BASE_YAML, "model.foregrounds.type", "ForegroundOperator")
+    """``cw_tone`` is absent from this document, so the widget exists and is
+    invisible -- which is a different refusal from a path that names no widget
+    at all, even though both end in the same guidance sentence. The example
+    has to be a SINGLE-SLOT node: a ``many`` node's fields are declared per
+    instance (``model.foregrounds[].type``), so the flat spelling this test
+    used to carry stopped naming a widget and quietly moved the test onto the
+    unknown-path branch, where it went on passing."""
+    with pytest.raises(ConfigError, match="This projected field is unavailable") as caught:
+        set_form_value(BASE_YAML, "model.cw_tone.line_width", 1.0)
 
+    assert "Edit this value in YAML" in str(caught.value)
     assert len(str(caught.value)) < 240
 
 
