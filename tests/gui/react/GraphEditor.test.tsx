@@ -46,6 +46,7 @@ const GAIN: NodeCard = {
   selected_type: null,
   fields: [],
   extra_keys: [],
+  removed_by_type: {},
 };
 
 const FILTERS: NodeCard = {

@@ -26,7 +26,7 @@ keeps that list at five files -- and reaches its vocabulary through
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from rheplicant.gui.form_catalog import (
@@ -111,6 +111,11 @@ class NodeFieldSet:
     #: with their own existing controls, and refusing the whole form over one
     #: of them would take the typed fields away from every node that uses it.
     extra_keys: tuple[str, ...]
+    #: Each candidate type -> the written keys it would leave nowhere to live.
+    #: Computed here rather than in the browser because the catalog is what
+    #: knows which key belongs to which class, and a confirmation that names
+    #: the wrong keys is worse than no confirmation at all.
+    removed_by_type: dict[str, tuple[str, ...]]
 
 
 def classify_value(value: object) -> ValueReading:
@@ -156,6 +161,22 @@ def classify_value(value: object) -> ValueReading:
     if len(forms) == 1 and keys <= {forms[0], *VALUE_MODIFIERS}:
         return ValueReading(forms[0], None, None)
     return ValueReading("unknown", None, None)
+
+
+def _removed_by_type(
+    *, written: Sequence[str], current: frozenset[str], candidate: frozenset[str]
+) -> tuple[str, ...]:
+    """The written keys that ``candidate`` has no field for.
+
+    A key the current class does not own either -- ``snapshot_before:``, an
+    unknown key -- belongs to the node rather than to its operator, so a
+    change of class has no business removing it. A key BOTH classes own
+    survives, which is why the candidate's fields are subtracted rather than
+    the whole intersection being taken: no node this release can reach has
+    such a field, but all three filters own ``mode``, so the case is real and
+    arrives with many-node cards.
+    """
+    return tuple(key for key in written if key in current and key not in candidate)
 
 
 def _control(widget: WidgetMetadata) -> Control:
@@ -220,6 +241,15 @@ def _class_of(selector: str) -> str:
     return selector.split(".")[-2]
 
 
+def _class_fields(node_id: str, class_name: str, catalog: FormCatalog) -> tuple[str, ...]:
+    """Which field names one class owns at this node, read off the catalog."""
+    return tuple(
+        widget.path.rsplit(".", 1)[-1]
+        for widget in _field_widgets(node_id, catalog)
+        if any(_class_of(source.selector) == class_name for source in widget.sources)
+    )
+
+
 def _field_widgets(node_id: str, catalog: FormCatalog) -> tuple[WidgetMetadata, ...]:
     prefix = f"model.{node_id}."
     return tuple(
@@ -241,6 +271,7 @@ def _refused(node_id: str, reason: str, type_choices: tuple[str, ...] = ()) -> N
         selected_type=None,
         fields=(),
         extra_keys=(),
+        removed_by_type={choice: () for choice in type_choices},
     )
 
 
@@ -325,7 +356,14 @@ def project_node_fields(
         if selected is not None
         else ()
     )
-    named = {field.name for field in fields} | {_TYPE_KEY}
+    owned = frozenset(field.name for field in fields)
+    named = owned | {_TYPE_KEY}
+    by_class = {
+        cls.__name__: frozenset(
+            _class_fields(node_id, cls.__name__, catalog)
+        )
+        for cls in classes
+    }
     return NodeFieldSet(
         node_id=node_id,
         typed_form=True,
@@ -334,6 +372,14 @@ def project_node_fields(
         selected_type=selected,
         fields=fields,
         extra_keys=tuple(key for key in written if key not in named),
+        removed_by_type={
+            name: _removed_by_type(
+                written=tuple(key for key in written if key != _TYPE_KEY),
+                current=owned,
+                candidate=candidate,
+            )
+            for name, candidate in by_class.items()
+        },
     )
 
 

@@ -48,7 +48,12 @@ tabs replace the main panel without changing YAML:
   conversion would produce a plausible wrong answer. Fields written in a form
   no control can represent, and nodes configured through `python:`, `from:`,
   `at:` or `compose:`, say so and keep the raw settings JSON, which is
-  rendered for every editable node regardless.
+  rendered for every editable node regardless. Where a node accepts more than
+  one operator class, a `type:` select offers them; because the classes at a
+  node share no fields, changing one is confirmed first and the confirmation
+  names every written value the change would remove. Keys the node owns
+  rather than its class -- `snapshot_before:`, `eqx_leaves:` -- are never
+  among them.
 - **Config** shows one of the 12 server-projected sections at a time. Missing
   required choices come first, followed by current and optional values. Safe
   select, toggle, integer and text controls are applied by Python; complex

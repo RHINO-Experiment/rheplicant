@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,7 @@ function card(overrides: Partial<NodeCard> = {}): NodeCard {
     selected_type: "GlobalSignalOperator",
     fields: [field()],
     extra_keys: [],
+  removed_by_type: {},
     ...overrides,
   };
 }
@@ -245,7 +246,7 @@ describe("typed node fields", () => {
     expect(screen.getByText(/snapshot_before, eqx_leaves/)).toBeVisible();
   });
 
-  it("says which types are on offer when the document has chosen none", () => {
+  it("offers the classes as a select, with no class chosen yet", () => {
     render(<Harness selected={card({
       node_id: "noise",
       type_choices: ["NoiseOperator", "RadiometerNoiseOperator"],
@@ -253,7 +254,10 @@ describe("typed node fields", () => {
       fields: [],
     })} />);
 
-    expect(screen.getByText(/NoiseOperator, RadiometerNoiseOperator/)).toBeVisible();
+    const select = screen.getByRole("combobox", { name: "noise type" });
+    expect(select).toHaveValue("");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["not chosen", "NoiseOperator", "RadiometerNoiseOperator"]);
   });
 
   it("edits an enum field through a select carrying its own members", () => {
@@ -302,5 +306,147 @@ describe("typed node fields", () => {
     );
     expect(screen.getAllByRole("button", { name: /Apply configuration to global_signal/ }))
       .toHaveLength(1);
+  });
+});
+
+/** `noise` is one of the two nodes that hold more than one operator class.
+ *  The two share no fields at all, so every type change here destroys every
+ *  written value -- which is why the change is confirmed rather than applied. */
+function noiseCard(overrides: Partial<NodeCard> = {}): NodeCard {
+  return card({
+    node_id: "noise",
+    label: "noise",
+    kind: "transform",
+    settings: { type: "NoiseOperator", sigma: { value: 0.05, unit: "K" } },
+    type_choices: ["NoiseOperator", "RadiometerNoiseOperator"],
+    selected_type: "NoiseOperator",
+    fields: [field({
+      name: "sigma",
+      label: "sigma",
+      path: "model.noise.sigma",
+      number: 0.05,
+      written: { value: 0.05, unit: "K" },
+    })],
+    removed_by_type: { NoiseOperator: [], RadiometerNoiseOperator: ["sigma"] },
+    ...overrides,
+  });
+}
+
+describe("changing the operator class", () => {
+  it("offers no select where there is only one class to choose", () => {
+    render(<Harness selected={card()} />);
+
+    expect(screen.queryByRole("combobox", { name: "global_signal type" })).toBeNull();
+  });
+
+  it("names what the change would remove, and writes nothing yet", () => {
+    render(<Harness selected={noiseCard()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "RadiometerNoiseOperator" },
+    });
+
+    const confirm = screen.getByRole("group", { name: "noise type change" });
+    expect(within(confirm).getByText(/sigma/)).toBeVisible();
+    expect(textarea()).toHaveValue(
+      JSON.stringify({ type: "NoiseOperator", sigma: { value: 0.05, unit: "K" } }, null, 2),
+    );
+  });
+
+  it("removes exactly the named keys once confirmed", () => {
+    render(<Harness selected={noiseCard()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "RadiometerNoiseOperator" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Change noise to RadiometerNoiseOperator" }));
+
+    expect(textarea()).toHaveValue(
+      JSON.stringify({ type: "RadiometerNoiseOperator" }, null, 2),
+    );
+    expect(screen.queryByRole("group", { name: "noise type change" })).toBeNull();
+  });
+
+  it("keeps the keys no operator class owns", () => {
+    /** `snapshot_before` belongs to the NODE, not to its class. A change of
+     *  class has no business taking it. */
+    render(<Harness selected={noiseCard({
+      settings: {
+        type: "NoiseOperator",
+        sigma: { value: 0.05, unit: "K" },
+        snapshot_before: "pre_noise",
+      },
+      extra_keys: ["snapshot_before"],
+    })} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "RadiometerNoiseOperator" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Change noise to RadiometerNoiseOperator" }));
+
+    expect(textarea()).toHaveValue(
+      JSON.stringify(
+        { type: "RadiometerNoiseOperator", snapshot_before: "pre_noise" },
+        null,
+        2,
+      ),
+    );
+  });
+
+  it("cancelling writes nothing and puts the select back", () => {
+    render(<Harness selected={noiseCard()} />);
+    const select = screen.getByRole("combobox", { name: "noise type" });
+
+    fireEvent.change(select, { target: { value: "RadiometerNoiseOperator" } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep NoiseOperator" }));
+
+    expect(select).toHaveValue("NoiseOperator");
+    expect(textarea()).toHaveValue(
+      JSON.stringify({ type: "NoiseOperator", sigma: { value: 0.05, unit: "K" } }, null, 2),
+    );
+    expect(screen.queryByRole("group", { name: "noise type change" })).toBeNull();
+  });
+
+  it("applies at once when the document has written nothing to lose", () => {
+    render(<Harness selected={noiseCard({
+      settings: { type: "NoiseOperator" },
+      fields: [],
+      removed_by_type: { NoiseOperator: [], RadiometerNoiseOperator: [] },
+    })} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "RadiometerNoiseOperator" },
+    });
+
+    expect(screen.queryByRole("group", { name: "noise type change" })).toBeNull();
+    expect(textarea()).toHaveValue(JSON.stringify({ type: "RadiometerNoiseOperator" }, null, 2));
+  });
+
+  it("writes the type into a document that had not chosen one", () => {
+    render(<Harness selected={noiseCard({
+      settings: {},
+      selected_type: null,
+      fields: [],
+      removed_by_type: { NoiseOperator: [], RadiometerNoiseOperator: [] },
+    })} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "NoiseOperator" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({ type: "NoiseOperator" }, null, 2));
+  });
+
+  it("still uses the one shared draft", () => {
+    const seen: DraftEnvelope[] = [];
+    render(<Harness selected={noiseCard()} onEdit={(envelope) => seen.push(envelope)} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "noise type" }), {
+      target: { value: "RadiometerNoiseOperator" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Change noise to RadiometerNoiseOperator" }));
+
+    expect(seen.map((envelope) => envelope.kind === "graph" && envelope.path))
+      .toEqual(["base:noise:settings"]);
   });
 });

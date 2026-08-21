@@ -31,6 +31,10 @@ export interface NodeCard {
   selected_type: string | null;
   fields: NodeField[];
   extra_keys: string[];
+  /** Each candidate type -> the written keys it would leave nowhere to live.
+   *  Computed by the server, which owns the catalog; a confirmation naming
+   *  the wrong keys is worse than no confirmation at all. */
+  removed_by_type: Record<string, string[]>;
 }
 
 export type NodeFieldControl =

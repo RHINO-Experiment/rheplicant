@@ -102,6 +102,7 @@ class NodeCard:
     selected_type: str | None
     fields: tuple[NodeField, ...]
     extra_keys: tuple[str, ...]
+    removed_by_type: dict[str, tuple[str, ...]]
 @dataclass(frozen=True, slots=True)
 class GraphDiagram:
     """One base, backend, or resolved-variant graph projection."""
@@ -338,6 +339,7 @@ def _node_cards(
             selected_type=typed.selected_type,
             fields=typed.fields,
             extra_keys=typed.extra_keys,
+            removed_by_type=typed.removed_by_type,
             instances=_instances(node_id, model.get(node_id)),
             stage_names=tuple(
                 str(stage.get("name"))
