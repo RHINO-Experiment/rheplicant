@@ -156,6 +156,12 @@ const GAIN: NodeCard = {
   settings: {},
   instances: [],
   stage_names: [],
+  typed_form: false,
+  typed_form_reason: null,
+  type_choices: [],
+  selected_type: null,
+  fields: [],
+  extra_keys: [],
 };
 
 function documentState(yamlText = YAML) {

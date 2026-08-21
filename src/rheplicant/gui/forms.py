@@ -79,6 +79,10 @@ class WidgetMetadata:
     visible_when: FormRule | None = None
     dimension: str | None = None
     unit_policy: str | None = None
+    #: Every spelling the alphabet accepts for :attr:`dimension`, canonical
+    #: first, or empty when it has no second spelling to offer or refuses a
+    #: unit outright. Derived in the builder; never written at a call site.
+    units: tuple[str, ...] = ()
     delivery: str | None = None
     disabled: bool = False
     reason: str | None = None
@@ -111,6 +115,7 @@ class ProjectedWidget:
     value: object
     dimension: str | None
     unit_policy: str | None
+    units: tuple[str, ...]
     delivery: str | None
     disabled: bool
     reason: str | None
@@ -350,6 +355,7 @@ def project_forms(document: Mapping[str, object]) -> FormProjection:
                     value=_plain_value(value) if present else None,
                     dimension=metadata.dimension,
                     unit_policy=metadata.unit_policy,
+                    units=metadata.units,
                     delivery=metadata.delivery,
                     disabled=disabled,
                     reason=metadata.reason,

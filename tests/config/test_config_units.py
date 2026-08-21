@@ -234,3 +234,61 @@ def test_offset_is_applied_after_scaling_not_before(monkeypatch):
     )
     got, _ = convert_to_canonical(41.0, "fahrenheit")
     assert got == pytest.approx(278.15)
+
+
+class TestTheSpellingTableIsClosedOverTheAlphabet:
+    """``UNIT_SPELLINGS`` is what a form offers in a unit select.
+
+    ``_ATOMS`` cannot supply it on its own: its keys are lower-cased for
+    lookup, so building the table from them would offer ``mhz`` -- which
+    parses, but reads as millihertz to anyone who knows the SI prefixes, and
+    the number beside it would be wrong by nine orders of magnitude in the
+    reader's head while being right in the file. The conventional casing is
+    therefore written out, and pinned here against the alphabet so a new atom
+    cannot be added without being spelled.
+    """
+
+    def test_every_spelling_is_an_atom_and_every_atom_is_spelled_once(self):
+        from rheplicant.config.units import _ATOMS, UNIT_SPELLINGS
+
+        claimed = [
+            spelling.lower() for spellings in UNIT_SPELLINGS.values() for spelling in spellings
+        ]
+        assert sorted(claimed) == sorted(_ATOMS), (
+            "a new atom needs a spelling here, and no atom may be claimed twice"
+        )
+
+    def test_the_keys_are_the_canonical_units_and_lead_their_own_tuple(self):
+        from rheplicant.config.units import UNIT_SPELLINGS
+
+        assert tuple(UNIT_SPELLINGS) == ACCEPTED_UNITS
+        for canonical, spellings in UNIT_SPELLINGS.items():
+            assert spellings[0] == canonical, "the canonical spelling comes first"
+            assert len(set(spellings)) == len(spellings)
+
+    def test_every_spelling_parses_back_to_the_unit_that_offered_it(self):
+        """The half that makes this a contract rather than a word list: a
+        select writes the spelling into the document verbatim, so every one of
+        them has to survive the same parser the file will meet."""
+        from rheplicant.config.units import UNIT_SPELLINGS
+
+        for canonical, spellings in UNIT_SPELLINGS.items():
+            for spelling in spellings:
+                assert canonical_unit(spelling).canonical == canonical
+
+    def test_the_four_units_with_a_choice_to_offer(self):
+        """Measured, and the reason the table exists at all: everything else
+        has exactly one spelling, so a select over it would be a control with
+        one option."""
+        from rheplicant.config.units import UNIT_SPELLINGS
+
+        assert {
+            canonical: spellings
+            for canonical, spellings in UNIT_SPELLINGS.items()
+            if len(spellings) > 1
+        } == {
+            "Hz": ("Hz", "kHz", "MHz", "GHz"),
+            "s": ("s", "ms"),
+            "K": ("K", "celsius"),
+            "deg": ("deg", "rad"),
+        }

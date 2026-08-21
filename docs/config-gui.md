@@ -40,7 +40,15 @@ tabs replace the main panel without changing YAML:
 - **Model** shows one server-rendered signal-path graph at a time. Full path
   and Processing are interactive; Compare fits read-only base and variant
   diagrams into their containers. Select a node by mouse or keyboard and use
-  the adjacent inspector for supported edits.
+  the adjacent inspector for supported edits. For a node that holds exactly
+  one operator instance the inspector also offers the same settings as typed
+  fields -- one control per field, carrying the field's own dimension, its
+  accepted unit spellings and its enum members. A unit select rewrites the
+  unit and never the number, because `celsius` is affine and a silent
+  conversion would produce a plausible wrong answer. Fields written in a form
+  no control can represent, and nodes configured through `python:`, `from:`,
+  `at:` or `compose:`, say so and keep the raw settings JSON, which is
+  rendered for every editable node regardless.
 - **Config** shows one of the 12 server-projected sections at a time. Missing
   required choices come first, followed by current and optional values. Safe
   select, toggle, integer and text controls are applied by Python; complex

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { DraftCoordinator } from "./drafts";
-import type { EditorSession, NodeCard, SessionTransport } from "./types";
+import type { EditorSession, NodeCard, NodeField, SessionTransport } from "./types";
 
 export interface NodeInspectorProps {
   session: EditorSession;
@@ -26,6 +26,21 @@ function parseObject(text: string): Record<string, unknown> {
     throw new Error("Settings JSON must be an object.");
   }
   return parsed as Record<string, unknown>;
+}
+
+/** What one typed control writes back, in the shape the field already had.
+ *
+ *  A field written as the `<number> <unit>` shorthand stays shorthand and one
+ *  written as the `{value, unit}` envelope stays an envelope: normalising
+ *  between them would rewrite a line the user did not touch. The number is
+ *  carried through verbatim -- changing a unit NEVER scales it, because
+ *  `celsius` is affine and a silent conversion is a finite, correctly-shaped
+ *  wrong answer. */
+function quantityValue(field: NodeField, numberText: string, unit: string) {
+  const parsed = Number(numberText);
+  if (!unit) return parsed;
+  if (field.form === "shorthand") return `${numberText} ${unit}`;
+  return { value: parsed, unit };
 }
 
 function parseSettings(text: string): unknown {
@@ -53,6 +68,12 @@ export function NodeInspector({
   const [regionText, setRegionText] = useState("");
   const [snapshotName, setSnapshotName] = useState("raw");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // What the typed controls currently SHOW, seeded from the server's own
+  // decomposition of each field and kept here until the draft is applied or
+  // discarded. Deliberately not re-read from the JSON draft: reading it back
+  // would need a second value-form parser in the browser, and a second parser
+  // is a second authority on what a document says.
+  const [typedEdits, setTypedEdits] = useState<Record<string, { number?: string; unit?: string }>>({});
 
   const selectedAt = selected?.settings && typeof selected.settings === "object"
     ? (selected.settings as { at?: unknown }).at
@@ -88,6 +109,10 @@ export function NodeInspector({
   useEffect(() => {
     setAdvancedOpen(false);
   }, [selected?.node_id]);
+
+  useEffect(() => {
+    setTypedEdits({});
+  }, [selected?.node_id, activeVariant, session.revision]);
 
   if (!selected) {
     return <aside aria-label="Selected graph node"><p>Select a graph node</p></aside>;
@@ -183,6 +208,24 @@ export function NodeInspector({
     } catch (error) {
       onStatus(error instanceof Error ? error.message : String(error), true);
     }
+  }
+
+  function writeTypedField(
+    draftPath: string,
+    source: string,
+    name: string,
+    value: unknown,
+  ) {
+    let current: Record<string, unknown>;
+    try {
+      current = parseObject(source);
+    } catch {
+      return;
+    }
+    const next = { ...current };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    updateRawGraph(draftPath, JSON.stringify(next, null, 2), setSettingsText);
   }
 
   function applyNode() {
@@ -296,6 +339,60 @@ export function NodeInspector({
   }
 
   const settingsPath = path("settings");
+  const settingsSource = rawGraphValue(settingsPath, drafts ? selectedSettings : settingsText);
+  const typedParseError = (() => {
+    if (!selected.typed_form) return null;
+    try {
+      parseObject(settingsSource);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  })();
+
+  function shownNumber(field: NodeField) {
+    const edited = typedEdits[field.name]?.number;
+    if (edited !== undefined) return edited;
+    return field.number === null ? "" : String(field.number);
+  }
+
+  function shownUnit(field: NodeField) {
+    const edited = typedEdits[field.name]?.unit;
+    if (edited !== undefined) return edited;
+    return field.unit ?? (field.units[0] ?? "");
+  }
+
+  function editNumber(field: NodeField, text: string) {
+    setTypedEdits((current) => ({ ...current, [field.name]: { ...current[field.name], number: text } }));
+    if (text === "") {
+      writeTypedField(settingsPath, settingsSource, field.name, undefined);
+      return;
+    }
+    if (!Number.isFinite(Number(text))) return;
+    const value = field.control === "quantity"
+      ? quantityValue(field, text, shownUnit(field))
+      : Number(text);
+    writeTypedField(settingsPath, settingsSource, field.name, value);
+  }
+
+  function editUnit(field: NodeField, unit: string) {
+    setTypedEdits((current) => ({ ...current, [field.name]: { ...current[field.name], unit } }));
+    const number = shownNumber(field);
+    // Nothing to hang a unit on yet. A lone `{unit: K}` is not a value node,
+    // so the choice is remembered and written with the first number.
+    if (number === "" || !Number.isFinite(Number(number))) return;
+    writeTypedField(settingsPath, settingsSource, field.name, quantityValue(field, number, unit));
+  }
+
+  function editText(field: NodeField, value: string) {
+    setTypedEdits((current) => ({ ...current, [field.name]: { ...current[field.name], number: value } }));
+    writeTypedField(settingsPath, settingsSource, field.name, value === "" ? undefined : value);
+  }
+
+  function fieldDisabled(field: NodeField) {
+    return !field.typed || typedParseError !== null || graphControlDisabled(settingsPath);
+  }
+
   const stagesPath = path("stages");
   const placementPath = path("placement");
   const snapshotPath = path("snapshot");
@@ -317,6 +414,66 @@ export function NodeInspector({
 
       {selected.editable && (
         <>
+          <fieldset aria-label={`${selected.node_id} typed fields`}>
+            <legend>Typed fields</legend>
+            {!selected.typed_form && <p>{selected.typed_form_reason}</p>}
+            {selected.typed_form && selected.type_choices.length > 1 && (
+              <p>
+                {selected.selected_type
+                  ? `Class: ${selected.selected_type}`
+                  : `Choose a type in the JSON below: ${selected.type_choices.join(", ")}`}
+              </p>
+            )}
+            {typedParseError !== null && <p>Typed fields need valid JSON: {typedParseError}</p>}
+            {selected.typed_form && selected.fields.map((field) => (
+              <p key={field.name}>
+                <label>
+                  {field.label}{field.required ? " (required)" : ""}
+                  {field.control === "select" ? (
+                    <select
+                      aria-label={field.label}
+                      value={shownNumber(field)}
+                      disabled={fieldDisabled(field)}
+                      onChange={(event) => editText(field, event.target.value)}
+                    >
+                      <option value="">not set</option>
+                      {field.choices.map((choice) => (
+                        <option key={choice} value={choice}>{choice}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      aria-label={field.label}
+                      type={field.control === "quantity" || field.control === "integer" ? "number" : "text"}
+                      value={shownNumber(field)}
+                      disabled={fieldDisabled(field)}
+                      onChange={(event) => (
+                        field.control === "quantity" || field.control === "integer"
+                          ? editNumber(field, event.target.value)
+                          : editText(field, event.target.value)
+                      )}
+                    />
+                  )}
+                </label>
+                {field.units.length > 1 && field.unit_policy !== "forbidden" && (
+                  <select
+                    aria-label={`${field.label} unit`}
+                    value={shownUnit(field)}
+                    disabled={fieldDisabled(field)}
+                    onChange={(event) => editUnit(field, event.target.value)}
+                  >
+                    {field.units.map((unit) => (
+                      <option key={unit} value={unit}>{unit}</option>
+                    ))}
+                  </select>
+                )}
+                {!field.typed && <span> written as {field.form}: edit it in the JSON below</span>}
+              </p>
+            ))}
+            {selected.typed_form && selected.extra_keys.length > 0 && (
+              <p>Also written: {selected.extra_keys.join(", ")}. Edit those in the JSON below.</p>
+            )}
+          </fieldset>
           <label>
             Node settings JSON
             <textarea
