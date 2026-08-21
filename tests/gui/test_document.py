@@ -182,3 +182,84 @@ def test_plain_selection_state_is_not_smuggled_into_yaml():
     found = snapshot(BASE)
     assert "selected" not in found.yaml_text
     assert "hover" not in found.yaml_text
+
+
+VARIANT_YAML = """\
+schema_version: 1
+model:
+  gain:
+    gain: {value: 1.1, unit: dimensionless}
+  cw_tone:
+    python: {target: example_package.example_module.Tone}
+  bandpass:
+    bandpass: {ref: resources.arrays.flat}
+    nonsense_key: 1
+variants:
+  low_gain:
+    model:
+      gain:
+        gain: {value: 0.9, unit: dimensionless}
+runs:
+  - name: forward
+    kind: forward
+"""
+
+
+def _card(diagram, node_id: str) -> NodeCard:
+    return next(node for node in diagram.nodes if node.node_id == node_id)
+
+
+class TestTheTypedNodeFormRidesOnTheNodeCard:
+    """It lives on the card rather than beside it, because the card is what a
+    variant re-resolves. ``session.document.forms`` projects the BASE document
+    only, so a typed form driven off that would show base numbers under a
+    variant's name -- silently, and only for the fields a variant changed."""
+
+    def test_a_lit_single_slot_node_carries_its_typed_fields(self):
+        card = _card(snapshot(VARIANT_YAML).base_diagram, "gain")
+
+        assert card.typed_form is True
+        assert card.typed_form_reason is None
+        assert card.selected_type == "GainOperator"
+        assert card.type_choices == ("GainOperator",)
+        assert [field.name for field in card.fields] == ["gain"]
+        assert card.fields[0].number == 1.1
+        assert card.fields[0].unit == "dimensionless"
+        assert card.fields[0].typed is True
+
+    def test_a_variant_card_shows_the_variants_own_numbers(self):
+        found = snapshot(VARIANT_YAML)
+        base = _card(found.base_diagram, "gain")
+        variant = _card(found.variant_diagrams[0], "gain")
+
+        assert found.variant_diagrams[0].name == "low_gain"
+        assert base.fields[0].number == 1.1
+        assert variant.fields[0].number == 0.9
+
+    def test_a_python_node_shows_the_security_gates_reason(self):
+        card = _card(snapshot(VARIANT_YAML).base_diagram, "cw_tone")
+
+        assert card.typed_form is False
+        assert card.typed_form_reason == (
+            "python: target; its class is not resolved in the browser."
+        )
+        assert card.fields == ()
+
+    def test_an_unknown_written_key_is_reported_without_disabling_the_form(self):
+        card = _card(snapshot(VARIANT_YAML).base_diagram, "bandpass")
+
+        assert card.typed_form is True
+        assert card.extra_keys == ("nonsense_key",)
+
+    def test_every_node_card_answers_the_question_one_way_or_the_other(self):
+        """A card with neither a typed form nor a reason would render an empty
+        panel and no explanation for it."""
+        for card in snapshot(VARIANT_YAML).base_diagram.nodes:
+            assert (card.typed_form_reason is None) == card.typed_form
+
+    def test_the_card_survives_the_dataclass_serialisation_the_api_uses(self):
+        found = dataclasses.asdict(snapshot(VARIANT_YAML).base_diagram)
+        card = next(node for node in found["nodes"] if node["node_id"] == "gain")
+
+        assert card["fields"][0]["units"] == ("dimensionless",)
+        assert card["fields"][0]["written"] == {"value": 1.1, "unit": "dimensionless"}

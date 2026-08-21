@@ -23,6 +23,47 @@ export interface NodeCard {
   settings: unknown;
   instances: NodeInstance[];
   stage_names: string[];
+  /** The typed view of the same `settings`, or the reason there is not one.
+   *  It rides on the card because the card is what a variant re-resolves. */
+  typed_form: boolean;
+  typed_form_reason: string | null;
+  type_choices: string[];
+  selected_type: string | null;
+  fields: NodeField[];
+  extra_keys: string[];
+}
+
+export type NodeFieldControl =
+  | "quantity"
+  | "integer"
+  | "text"
+  | "select"
+  | "toggle"
+  | "opaque";
+
+export interface NodeField {
+  name: string;
+  path: string;
+  label: string;
+  control: NodeFieldControl;
+  required: boolean;
+  has_default: boolean;
+  default: unknown;
+  dimension: string | null;
+  unit_policy: string | null;
+  units: string[];
+  choices: string[];
+  delivery: string | null;
+  /** False when the written value is a shape no control can represent. The
+   *  control goes read-only and the raw JSON textarea stays the only way to
+   *  edit it -- a control that half-understands a value overwrites the half
+   *  it did not. */
+  typed: boolean;
+  present: boolean;
+  form: string;
+  number: number | null;
+  unit: string | null;
+  written: unknown;
 }
 
 export interface NodeInstance {

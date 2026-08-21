@@ -61,6 +61,36 @@ _ATOMS: dict[str, _Atom] = {
 #: Every accepted spelling, in canonical form, for messages and for callers.
 ACCEPTED_UNITS: tuple[str, ...] = tuple(dict.fromkeys(atom.canonical for atom in _ATOMS.values()))
 
+#: Canonical unit -> every spelling this layer accepts for it, canonical first.
+#:
+#: Written out rather than derived from ``_ATOMS``, whose keys are lower-cased
+#: for lookup: a table built from them would offer ``mhz``, which parses but
+#: reads as millihertz, so the number beside it would be wrong by nine orders
+#: of magnitude in the reader's head while being right in the file. A form
+#: offering a unit choice offers these and writes the chosen spelling through
+#: verbatim; it never converts the number, because ``celsius`` is affine and a
+#: silent conversion is exactly the finite, correctly-shaped wrong answer the
+#: alphabet above refuses to produce.
+#:
+#: ``tests/config/test_config_units.py`` pins this against ``_ATOMS`` both
+#: ways, so a new atom cannot be added without being spelled here.
+UNIT_SPELLINGS: dict[str, tuple[str, ...]] = {
+    "Hz": ("Hz", "kHz", "MHz", "GHz"),
+    "s": ("s", "ms"),
+    "unix_s": ("unix_s",),
+    "K": ("K", "celsius"),
+    "deg": ("deg", "rad"),
+    "m": ("m",),
+    "ohm": ("ohm",),
+    "dimensionless": ("dimensionless",),
+    "count": ("count",),
+    "samples": ("samples",),
+    "bits": ("bits",),
+    "channels": ("channels",),
+    "cycles": ("cycles",),
+    "adc_count": ("adc_count",),
+}
+
 #: Field-name suffix -> the dimension the stored value is in. Only the two the
 #: schema names: a wider table invents a claim about fields it has not read.
 _NAME_SUFFIX_DIMENSION: dict[str, str] = {"_deg": "angle", "_m": "length"}

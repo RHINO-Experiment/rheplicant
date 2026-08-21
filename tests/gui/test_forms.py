@@ -263,3 +263,102 @@ def test_projection_detaches_immutable_parser_containers_for_api_serialization()
     )
     assert settings.value == {"gain": {"nested": [1, 2]}}
     assert dataclasses.asdict(projected)["sections"]
+
+
+class TestUnitSpellingsReachTheWidget:
+    """A quantity control offers the spellings its own dimension accepts.
+
+    Derived inside the builder from ``dimension`` and ``unit_policy`` rather
+    than passed at each call site: there are five hundred widgets and one of
+    them forgetting would be a control that silently offers nothing.
+    """
+
+    def test_a_temperature_and_a_frequency_offer_their_own_spellings(self):
+        assert _widget("model.global_signal.depth").units == ("K", "celsius")
+        assert _widget("model.global_signal.centre").units == ("Hz", "kHz", "MHz", "GHz")
+        assert _widget("model.global_signal.width").units == ("Hz", "kHz", "MHz", "GHz")
+
+    def test_a_single_spelling_dimension_still_reports_its_one_spelling(self):
+        assert _widget("model.gain.gain").units == ("dimensionless",)
+
+    def test_a_compound_dimension_offers_nothing(self):
+        """``adc_count/K`` is a quotient, not an atom, so the alphabet has no
+        second spelling to offer. An invented one-element tuple would read as
+        a choice where there is none."""
+        widget = _widget("model.adc.scale")
+        assert widget.dimension == "adc_count/K"
+        assert widget.units == ()
+
+    def test_a_structural_field_offers_nothing(self):
+        """``unit_policy == "forbidden"`` means a unit is a refusal, so a
+        control that offered one would be inviting an error."""
+        forbidden = [
+            widget
+            for widget in widget_catalog().widgets
+            if widget.unit_policy == "forbidden"
+        ]
+        assert forbidden
+        assert all(widget.units == () for widget in forbidden)
+
+    def test_units_are_non_empty_exactly_when_the_dimension_is_an_atom(self):
+        from rheplicant.config.units import UNIT_SPELLINGS
+
+        for widget in widget_catalog().widgets:
+            expected = (
+                ()
+                if widget.unit_policy == "forbidden"
+                else UNIT_SPELLINGS.get(widget.dimension or "", ())
+            )
+            assert widget.units == expected, widget.path
+
+    def test_the_projection_carries_them_to_the_client(self):
+        projected = _projected(
+            "schema_version: 1\nmodel:\n  global_signal:\n"
+            "    depth: {value: 0.5, unit: K}\nruns: []\n",
+            "model.global_signal.depth",
+        )
+        assert projected.units == ("K", "celsius")
+
+
+class TestEnumMembersReachTheWidget:
+    """A ``static_str`` field with a closed member list is a select.
+
+    The members are read off the live constants the operators validate
+    against, never re-spelled here: a second list is a second thing to keep in
+    step, and the one that drifts is the one nothing runs.
+    """
+
+    def test_the_enum_table_is_exactly_the_live_enum_dimension_rows(self):
+        from rheplicant.config.dimensions import registered_dimension_rows
+        from rheplicant.gui.form_catalog import _ENUMS
+
+        live = {
+            selector.selector
+            for selector, spec in registered_dimension_rows()
+            if selector.domain == "model_field"
+            and spec.disposition == "structural"
+            and spec.reason == "enum"
+        }
+        assert set(_ENUMS) == live, "an enum field without members ships an empty select"
+
+    def test_the_members_are_the_operators_own_constants(self):
+        from rheplicant.gui.form_catalog import _ENUMS
+        from rheplicant.radio.filters.base import _MODES
+        from rheplicant.radio.instrument.calibration import LINESHAPES
+
+        assert set(_ENUMS.values()) == {_MODES, LINESHAPES}
+
+    def test_the_three_filters_agree_on_one_member_list(self):
+        """They share one widget -- ``model.filters[].mode`` -- so a
+        disagreement would have to be resolved by the census rather than
+        discovered by a user."""
+        assert _widget("model.filters[].mode").choices == ("extract", "remove")
+
+    def test_a_single_class_enum_field_carries_its_members(self):
+        assert _widget("model.cw_tone.lineshape").choices == ("sinc2", "gaussian")
+
+    def test_a_structural_field_that_is_not_an_enum_offers_no_choices(self):
+        """``switch_key`` is a ``Coordinates.extra`` key and ``projector`` a
+        resource reference: both are structural, neither is closed."""
+        assert _widget("model.noise_wave.switch_key").choices == ()
+        assert _widget("model.filters[].projector").choices == ()

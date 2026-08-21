@@ -18,7 +18,13 @@ from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.layering import apply_variant
 from _rheplicant_bootstrap.yaml import safe_load_document
 from rheplicant.core.graph import SignalGraph
-from rheplicant.gui.forms import FormProjection, project_forms
+from rheplicant.gui.forms import (
+    FormCatalog,
+    FormProjection,
+    project_forms,
+    widget_catalog,
+)
+from rheplicant.gui.node_forms import NodeField, project_node_fields
 from rheplicant.gui.previews import PreviewProjection, project_previews
 from rheplicant.gui.validation import ValidationProjection, validate_document
 from rheplicant.radio.graph import RADIO_GRAPH
@@ -86,6 +92,16 @@ class NodeCard:
     settings: object | None
     instances: tuple[NodeInstance, ...]
     stage_names: tuple[str, ...]
+    #: The typed view of the same ``settings``. It rides on the card because
+    #: the card is what a variant re-resolves: ``EditorSnapshot.forms``
+    #: projects the BASE document only, so a typed form driven off that would
+    #: show base numbers under a variant's name.
+    typed_form: bool
+    typed_form_reason: str | None
+    type_choices: tuple[str, ...]
+    selected_type: str | None
+    fields: tuple[NodeField, ...]
+    extra_keys: tuple[str, ...]
 @dataclass(frozen=True, slots=True)
 class GraphDiagram:
     """One base, backend, or resolved-variant graph projection."""
@@ -280,8 +296,13 @@ def _explanation(node_id: str, *, kind: str, reserved: bool, many: bool, doc: st
     return doc
 
 
-def _node_cards(model: Mapping[str, object], graph: SignalGraph) -> tuple[NodeCard, ...]:
+def _node_cards(
+    model: Mapping[str, object], graph: SignalGraph, catalog: FormCatalog | None = None
+) -> tuple[NodeCard, ...]:
     lit = set(_claims(model, graph))
+    # Built once for all 33 cards. It is the whole widget census -- about
+    # 9 ms -- and one per node would spend a third of a second per diagram.
+    catalog = widget_catalog() if catalog is None else catalog
     return tuple(
         NodeCard(
             node_id=node_id,
@@ -310,7 +331,13 @@ def _node_cards(model: Mapping[str, object], graph: SignalGraph) -> tuple[NodeCa
                 reserved=spec.reserved,
                 many=spec.many,
             ),
-            settings=_plain(model[node_id]) if node_id in model else None,
+            settings=settings,
+            typed_form=typed.typed_form,
+            typed_form_reason=typed.typed_form_reason,
+            type_choices=typed.type_choices,
+            selected_type=typed.selected_type,
+            fields=typed.fields,
+            extra_keys=typed.extra_keys,
             instances=_instances(node_id, model.get(node_id)),
             stage_names=tuple(
                 str(stage.get("name"))
@@ -322,6 +349,8 @@ def _node_cards(model: Mapping[str, object], graph: SignalGraph) -> tuple[NodeCa
         )
         for node_id in graph._topo
         for spec in (graph.nodes[node_id],)
+        for settings in (_plain(model[node_id]) if node_id in model else None,)
+        for typed in (project_node_fields(node_id, settings, catalog),)
     )
 
 
@@ -360,8 +389,9 @@ def _diagram(
     graph: SignalGraph,
     *,
     changed_nodes: tuple[str, ...] = (),
+    catalog: FormCatalog | None = None,
 ) -> GraphDiagram:
-    nodes = _node_cards(model, graph)
+    nodes = _node_cards(model, graph, catalog)
     lit = tuple(node.node_id for node in nodes if node.lit)
     counts = {node.node_id: node.count for node in nodes if node.many and node.count > 1}
     return GraphDiagram(
@@ -388,7 +418,9 @@ def _changed_nodes(base: Mapping[str, object], variant: Mapping[str, object]) ->
 
 
 def _variant_diagrams(
-    document: Mapping[str, object], base_model: Mapping[str, object]
+    document: Mapping[str, object],
+    base_model: Mapping[str, object],
+    catalog: FormCatalog | None = None,
 ) -> tuple[GraphDiagram, ...]:
     variants = document.get("variants", {})
     if not isinstance(variants, Mapping):
@@ -405,6 +437,7 @@ def _variant_diagrams(
                 variant_model,
                 RADIO_GRAPH,
                 changed_nodes=_changed_nodes(base_model, variant_model),
+                catalog=catalog,
             )
         )
     return tuple(diagrams)
@@ -412,8 +445,11 @@ def _variant_diagrams(
 
 def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
     model = _model(document)
-    base = _diagram("base", model, RADIO_GRAPH)
-    backend = _diagram("backend", model, _PROCESSING_GRAPH)
+    # One census for every diagram this snapshot builds: base, backend and
+    # one per variant.
+    catalog = widget_catalog()
+    base = _diagram("base", model, RADIO_GRAPH, catalog=catalog)
+    backend = _diagram("backend", model, _PROCESSING_GRAPH, catalog=catalog)
     forms = project_forms(document)
     return EditorSnapshot(
         yaml_text=yaml_text,
@@ -425,7 +461,7 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
         validation=validate_document(yaml_text, document, forms),
         base_diagram=base,
         backend_diagram=backend,
-        variant_diagrams=_variant_diagrams(document, model),
+        variant_diagrams=_variant_diagrams(document, model, catalog),
     )
 
 

@@ -96,16 +96,40 @@ from rheplicant.config.sections.runs import _RUN_KEYS
 from rheplicant.config.sections.switching import _KEYS as SWITCHING_KEYS
 from rheplicant.config.sections.transforms import _BINDING_KEYS
 from rheplicant.config.sections.twin import _TWIN_KEYS
+from rheplicant.config.units import UNIT_SPELLINGS
+from rheplicant.config.values import _SHORTHAND as SHORTHAND
+from rheplicant.config.values import VALUE_FORMS, VALUE_MODIFIERS
 from rheplicant.gui.forms import (
     FormCatalog,
     FormRule,
     SourceRef,
     WidgetMetadata,
 )
+from rheplicant.radio.filters.base import _MODES as FILTER_MODES
 from rheplicant.radio.graph import RADIO_GRAPH
+from rheplicant.radio.instrument.calibration import LINESHAPES
 
 _NO_DEFAULT = object()
 _RUN_HANDLER_REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
+
+#: Class-path selector -> the members a ``static_str`` field accepts.
+#:
+#: Keyed by the same selector the dimension registry uses, so the two are
+#: comparable by construction: ``tests/gui/test_forms.py`` asserts this table
+#: is EXACTLY the live ``model_field`` rows whose disposition is structural
+#: and whose reason is ``"enum"``, which makes a new enum field impossible to
+#: ship with an empty select.
+#:
+#: The members are the operators' own constants rather than copies. Both are
+#: what the operator validates against -- ``filters/base.py`` and
+#: ``instrument/calibration.py`` raise on anything else -- so a select built
+#: from them cannot offer a member the constructor would refuse.
+_ENUMS: dict[str, tuple[str, ...]] = {
+    "rheplicant.radio.filters.fourier.FourierBandFilter.mode": FILTER_MODES,
+    "rheplicant.radio.filters.sidereal.SiderealFilter.mode": FILTER_MODES,
+    "rheplicant.radio.filters.skyspace.SkySpaceFilter.mode": FILTER_MODES,
+    "rheplicant.radio.instrument.calibration.CWCalibrationOperator.lineshape": LINESHAPES,
+}
 
 
 def _rule(path: str, operator: str, expected: object = None) -> FormRule:
@@ -192,6 +216,20 @@ def _default_value(value: object) -> object:
     return repr(value)
 
 
+def _units(dimension: str | None, unit_policy: str | None) -> tuple[str, ...]:
+    """The spellings a unit select may offer for one widget.
+
+    Empty for a compound like ``adc_count/K``: a quotient is not an atom, so
+    the alphabet has no second spelling for it, and a one-element tuple would
+    read as a choice where there is none. Empty too when the policy is
+    ``forbidden`` -- there a unit is a refusal, so offering one would be
+    inviting an error.
+    """
+    if unit_policy == "forbidden":
+        return ()
+    return UNIT_SPELLINGS.get(dimension or "", ())
+
+
 def _dimension(spec: DimensionSpec) -> str:
     if spec.signature is not None:
         return signature_token(spec.signature)
@@ -235,6 +273,7 @@ class _Builder:
             visible_when=visible_when,
             dimension=dimension,
             unit_policy=unit_policy,
+            units=_units(dimension, unit_policy),
             delivery=delivery,
             disabled=disabled,
             reason=reason,
@@ -254,10 +293,13 @@ class _Builder:
         source = SourceRef(domain, selector)
         if path in self.widgets:
             previous = self.widgets[path]
+            dimension = previous.dimension or _dimension(spec)
+            unit_policy = previous.unit_policy or spec.unit_policy
             self.widgets[path] = dataclasses.replace(
                 previous,
-                dimension=previous.dimension or _dimension(spec),
-                unit_policy=previous.unit_policy or spec.unit_policy,
+                dimension=dimension,
+                unit_policy=unit_policy,
+                units=_units(dimension, unit_policy),
                 sources=tuple(dict.fromkeys((*previous.sources, source))),
             )
         else:
@@ -559,8 +601,18 @@ def _model_widgets(builder: _Builder) -> None:
         elif field.default_factory is not dataclasses.MISSING:
             default = field.default_factory()
         dimension_spec = dimension_rows[rows[0][2]]
+        # One widget can be shared by several classes, so the members are the
+        # union in declaration order; the suite pins that today's three
+        # filters agree rather than leaving a disagreement to be discovered.
+        choices = tuple(
+            dict.fromkeys(
+                member for _cls, _spec, selector in rows for member in _ENUMS.get(selector, ())
+            )
+        )
         builder.add(
             path,
+            choices=choices,
+            widget="select" if choices else "value",
             required=all(spec.required for spec in specs),
             default=default,
             visible_when=_all(
@@ -772,4 +824,17 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
     return inspect_drift(catalog)
 
 
-__all__ = ["build_catalog", "catalog_drift"]
+#: ``operator_table``, the value vocabulary and the shorthand pattern are
+#: re-exported rather than merely imported. ``gui/node_forms.py`` needs all
+#: four and may not reach the config layer itself -- the boundary test at
+#: ``tests/config/test_config_surface.py`` keeps that list at five files, and
+#: this module is one of them, so gatewaying is the role it already has.
+#: ``form_catalog_finalize`` takes the same route for the same reason.
+__all__ = [
+    "SHORTHAND",
+    "VALUE_FORMS",
+    "VALUE_MODIFIERS",
+    "build_catalog",
+    "catalog_drift",
+    "operator_table",
+]
