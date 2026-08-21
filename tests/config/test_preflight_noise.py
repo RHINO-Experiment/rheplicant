@@ -29,13 +29,8 @@ from rheplicant.config.document import load_document
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import REFUSE
 from rheplicant.config.preflight import CHECKS, preflight
-from rheplicant.config.preflight.document import _task3_over_layers
 from rheplicant.config.preflight.noise import (
-    _a26_in,
     _a26_rank,
-    _a49_in,
-    _b6_is_layered,
-    _b6_over_layers,
     _logdet,
     _sigma_axis,
 )
@@ -752,90 +747,6 @@ class TestTheTwins:
             f"v{index}": {"inference": {"parameters": {}}}
             for index in range(4)})
         assert only(document, "A26").message == A26_MESSAGE
-
-
-class TestTheLayerGate:
-    """``_b6_is_layered`` is a COST gate and must change no answer.
-
-    ``_task3_over_layers`` deep-copies the whole document once per variant per
-    check that layers, and ``test_config_preflight.py``'s cold budget is the
-    tightest guard in this suite.  So the walk is skipped when no declared
-    patch can reach ``inference:`` at all -- which is decidable from the
-    patch's own top-level keys, because layering is one level deep by design
-    (``layering.py``).
-    """
-
-    #: Documents whose gate answers differ, so the equivalence below is driven
-    #: through both branches.  ``~inference`` is the delete spelling and a gate
-    #: that forgot it would skip the walk on a variant that removes the
-    #: section outright.
-    BATTERY = {
-        "no variants at all": {},
-        "a variant that touches model only": {
-            "v": {"model": {"gain": {"gain": {"value": 2.0,
-                                              "unit": "dimensionless"}}}}},
-        "a variant that rewrites the noise": {
-            "v": {"inference": {"noise": ONE_D}}},
-        "a variant that deletes inference": {"v": {"~inference": None}},
-        "a variant that is not a mapping": {"v": 5},
-        "variants that are not a mapping": None,
-    }
-
-    def _document(self, variants):
-        return with_variants(ONE_D_FIXED, variants)
-
-    @pytest.mark.parametrize("case", sorted(BATTERY))
-    @pytest.mark.parametrize("per_layer", [_a26_in, _a49_in],
-                             ids=["A26", "A49"])
-    def test_the_layer_gate_changes_no_finding(self, case, per_layer):
-        """The gate against the walker it is allowed to skip, side by side."""
-        document = self._document(self.BATTERY[case])
-        assert (tuple(_b6_over_layers(document, per_layer))
-                == tuple(_task3_over_layers(document, per_layer)))
-
-    def test_the_layer_gate_actually_skips_the_deepcopy(self, monkeypatch):
-        """The anti-vacuity partner, counted rather than TIMED.
-
-        A wall-clock assertion here would be a benchmark of whatever else is
-        running on the machine; the property is that ``apply_variant`` is not
-        CALLED, and that is exact.  A gate stuck at True passes every
-        equivalence above and fails this one.
-        """
-        import rheplicant.config.layering as layering
-
-        calls: list[str] = []
-        real = layering.apply_variant
-        monkeypatch.setattr(layering, "apply_variant",
-                            lambda document, name: (calls.append(name),
-                                                    real(document, name))[1])
-
-        untouched = with_variants(ONE_D_FIXED, {"a": {"model": {}},
-                                                "b": {"model": {}}})
-        tuple(_b6_over_layers(untouched, _a26_in))
-        assert calls == []
-
-        touched = with_variants(ONE_D_FIXED, {"a": {"inference": {}},
-                                              "b": {"model": {}}})
-        tuple(_b6_over_layers(touched, _a26_in))
-        assert calls == ["a", "b"]
-
-    @pytest.mark.parametrize(
-        ("variants", "layered"),
-        [(None, False),
-         ({"v": {"model": {}}}, False),
-         ({"v": {"inference": {}}}, True),
-         ({"v": {"~inference": None}}, True),
-         ({"a": {"model": {}}, "b": {"inference": {}}}, True),
-         ("nope", False)],
-    )
-    def test_the_gate_reads_the_patches_own_top_level(self, variants,
-                                                      layered):
-        document = with_noise(ONE_D_FIXED)
-        if variants is not None:
-            document["variants"] = variants
-        else:
-            document.pop("variants", None)
-        assert _b6_is_layered(document) is layered
 
 
 class TestTheRankReader:

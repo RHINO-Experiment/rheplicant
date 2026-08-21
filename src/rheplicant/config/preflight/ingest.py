@@ -147,10 +147,10 @@ import dataclasses
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.delivery import field_specs
 from rheplicant.config.findings import Finding, refuse, warn
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_over_layers, _task3_where
 from rheplicant.config.sections.ingest import RHINO_FORMAT, freq_unit_problem
 from rheplicant.config.sections.model import operator_table
 from rheplicant.config.sections.pointing import pointing_extra_keys
@@ -400,7 +400,9 @@ def _a10_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     for where, spec in _a10_sites(layer):
         problem = freq_unit_problem(spec)
         if problem is not None:
-            yield refuse("A10", _task3_where(where), f"{problem} (check A10).")
+            yield refuse(
+                "A10", longest_legal_prefix(where), f"{problem} (check A10)."
+            )
 
 
 @register("A10")
@@ -415,7 +417,7 @@ def _freq_unit(document: Mapping[str, Any]) -> Iterable[Finding]:
     variant nobody has selected yet is no longer accepted at load and
     refused only the day it is.
     """
-    return _task3_over_layers(document, _a10_in)
+    return _a10_in(document)
 
 
 def _a45_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
@@ -474,7 +476,7 @@ def _a45_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         if value in written:
             continue
         yield refuse(
-            "A45", _task3_where(f"{path}.{_A45_FIELD}"),
+            "A45", longest_legal_prefix(f"{path}.{_A45_FIELD}"),
             f"{path}.{_A45_FIELD}: {value!r} is not a key this run writes "
             f"into coords.extra, so the operator has no switch index to read "
             f"-- with more than one source the twin refuses the moment it is "
@@ -492,7 +494,7 @@ def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``_task3_over_layers`` is CALLED and not re-implemented
     (``preflight/noise.py::_b6_over_layers`` is the precedent).
     """
-    return _task3_over_layers(document, _a45_in)
+    return _a45_in(document)
 
 
 def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
@@ -536,7 +538,7 @@ def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     for where, label in model_loads + replace_loads:
         if columns is None or label not in columns:
             yield refuse(
-                "A46", _task3_where(where),
+                "A46", longest_legal_prefix(where),
                 f"{where}: label: {label!r} has no entry in "
                 f"observation.from_file.thermistor_columns, so this load's "
                 f"t_load is asked for a column the recording was never read "
@@ -576,4 +578,4 @@ def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``_task3_over_layers`` is CALLED and not re-implemented
     (``preflight/noise.py::_b6_over_layers`` is the precedent).
     """
-    return _task3_over_layers(document, _a46_in)
+    return _a46_in(document)

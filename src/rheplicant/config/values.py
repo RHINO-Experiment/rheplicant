@@ -8,14 +8,25 @@ representation is only answerable from the target class, so a function taking
 both could be tested against neither.
 """
 
+import dataclasses
+import inspect
 import re
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import (
+    DimensionEnvironment,
+    DimensionSignature,
+    DimensionSpec,
+    dimension_for,
+    dimension_of,
+    dimension_spec_for,
+)
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.modifiers import apply_modifiers
-from rheplicant.config.units import Unit, convert_to_canonical
+from rheplicant.config.units import Unit, canonical_unit, convert_to_canonical
 
 #: Every form key. A mapping value node holds exactly one of these.
 VALUE_FORMS: tuple[str, ...] = (
@@ -86,7 +97,159 @@ class ResolvedValue(NamedTuple):
     modifiers: dict[str, Any]
 
 
-def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
+@dataclasses.dataclass(frozen=True, slots=True)
+class ResolutionTarget:
+    """The catalog row and concrete document address governing one value."""
+
+    destination: DestinationDescriptor
+    spec: DimensionSpec
+    expected: DimensionSignature | None
+    explicit_unit: Unit | None
+    inherits_outer_unit: bool = False
+    formula_name: str | None = None
+    formula_role: str = "result"
+
+    def operand(
+        self,
+        node: object,
+        segment: str | int,
+        *,
+        formula: str,
+        role: str,
+        environment: DimensionEnvironment,
+        destination: DestinationDescriptor | None = None,
+    ) -> "ResolutionTarget":
+        return target_for_formula_operand(
+            self,
+            node=node,
+            segment=segment,
+            formula=formula,
+            role=role,
+            environment=environment,
+            destination=destination,
+        )
+
+
+def _declared_unit(node: object) -> str | None:
+    if isinstance(node, str):
+        match = _SHORTHAND.match(node)
+        return None if match is None else match.group("unit")
+    if isinstance(node, dict):
+        if "unit" not in node:
+            return None
+        token = node["unit"]
+        if not isinstance(token, str):
+            raise ConfigError(
+                f"dimensions: unit modifier is a string; got {token!r} ({type(token).__name__})"
+            )
+        return token
+    return None
+
+
+def validate_declared_unit(node: object, target: ResolutionTarget) -> ResolutionTarget:
+    """Validate only the node's declaration, before a resolver can do I/O."""
+    token = _declared_unit(node)
+    if target.spec.disposition == "structural" and token is not None:
+        raise ConfigError(f"dimensions: {target.destination.document_path!r} is structural")
+    if target.spec.unit_policy == "forbidden" and token is not None:
+        raise ConfigError(f"dimensions: {target.destination.document_path!r} forbids unit")
+    if target.spec.unit_policy == "required" and token is None and not target.inherits_outer_unit:
+        raise ConfigError(f"dimensions: {target.destination.document_path!r} requires unit")
+    unit = canonical_unit(token) if token is not None else target.explicit_unit
+    if unit is not None and target.expected is not None and dimension_of(unit) != target.expected:
+        raise ConfigError(
+            f"dimensions: {target.destination.document_path!r} declares {token!r}, "
+            f"but requires {target.expected}"
+        )
+    return dataclasses.replace(target, explicit_unit=unit)
+
+
+def make_resolution_target(
+    node: object, destination: DestinationDescriptor, environment: DimensionEnvironment
+) -> ResolutionTarget:
+    spec = dimension_spec_for(destination)
+    expected = dimension_for(destination, environment)
+    return validate_declared_unit(node, ResolutionTarget(destination, spec, expected, None))
+
+
+def target_for_formula_operand(
+    parent: ResolutionTarget,
+    *,
+    node: object,
+    segment: str | int,
+    formula: str,
+    role: str,
+    environment: DimensionEnvironment,
+    destination: DestinationDescriptor | None,
+) -> ResolutionTarget:
+    from rheplicant.config import dimensions
+
+    try:
+        registration = dimensions._FORMULA_REGISTRY[formula]
+    except KeyError as error:
+        raise ConfigError(f"dimensions: no formula named {formula!r}") from error
+    matches = [candidate for candidate in registration.operands if candidate.role == role]
+    if len(matches) != 1:
+        raise ConfigError(f"dimensions: formula {formula}.{role} is not registered")
+    operand = matches[0]
+    addressed = parent.destination.nested(segment)
+    if operand.spec.resolver == "outer":
+        if destination is not None:
+            raise ConfigError(f"dimensions: {formula}.{role} inherits its outer destination")
+        return validate_declared_unit(
+            node,
+            dataclasses.replace(
+                parent,
+                destination=addressed,
+                inherits_outer_unit=True,
+                formula_name=formula,
+                formula_role=role,
+            ),
+        )
+    if operand.spec.disposition in ("open", "structural"):
+        if destination is None:
+            raise ConfigError(f"dimensions: {formula}.{role} requires an explicit destination")
+        addressed = dataclasses.replace(destination, document_path=addressed.document_path)
+        declared = dimension_spec_for(addressed)
+        agreement = (
+            declared.disposition,
+            declared.signature,
+            declared.resolver,
+            declared.unit_policy,
+        ) == (
+            operand.spec.disposition,
+            operand.spec.signature,
+            operand.spec.resolver,
+            operand.spec.unit_policy,
+        )
+        if not agreement:
+            raise ConfigError(f"dimensions: {formula}.{role} disagrees with catalog")
+    elif destination is not None:
+        raise ConfigError(f"dimensions: fixed role {formula}.{role} is formula-addressed")
+    expected = (
+        operand.spec.signature
+        if operand.spec.disposition == "fixed"
+        else dimension_for(addressed, environment, outer=parent.expected)
+    )
+    return validate_declared_unit(
+        node,
+        ResolutionTarget(
+            addressed,
+            operand.spec,
+            expected,
+            None,
+            formula_name=formula,
+            formula_role=role,
+        ),
+    )
+
+
+def resolve_value(
+    node: Any,
+    context: ResolutionContext,
+    *,
+    destination: DestinationDescriptor | None = None,
+) -> ResolvedValue:
     """Resolve one value node.
 
     Args:
@@ -98,6 +261,43 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
         ConfigError: on zero or several form keys, on an unknown key beside a
             form, and on anything a form's own resolver refuses.
     """
+    target = (
+        make_resolution_target(node, destination, context.dimensions)
+        if destination is not None
+        else None
+    )
+    return resolve_registered_form(node, context, target)
+
+
+def resolve_operand(
+    node: object,
+    context: ResolutionContext,
+    parent: ResolutionTarget,
+    *,
+    segment: str | int,
+    formula: str,
+    role: str,
+    destination: DestinationDescriptor | None = None,
+) -> ResolvedValue:
+    if parent is None:  # compatibility for direct utility form calls
+        return resolve_registered_form(node, context, None)
+    target = parent.operand(
+        node,
+        segment,
+        formula=formula,
+        role=role,
+        environment=context.dimensions,
+        destination=destination,
+    )
+    return resolve_registered_form(node, context, target)
+
+
+def resolve_registered_form(
+    node: Any,
+    context: ResolutionContext,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
+    """The sole value-form dispatcher, after destination validation."""
     # MEASURED: this branch is redundant today -- bool IS int in Python, so a
     # bool already reaches the branch below and comes back as the same object
     # by the same expression. It is kept because it is the place any coercion
@@ -175,7 +375,7 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
                 f"Form {form!r} is declared in the grammar but no resolver is registered "
                 f"for it. Registered: {sorted(_RESOLVERS)}."
             )
-        resolved = resolver(node, context, modifiers)
+        resolved = resolver(node, context, modifiers, target)
     # One exit, deliberately, rather than a call on each branch. Every form's
     # result passes through the same modifier order, and a form added in a
     # later task cannot opt out of it by forgetting to call -- which is the
@@ -184,7 +384,12 @@ def resolve_value(node: Any, context: ResolutionContext) -> ResolvedValue:
     # document declared. The resolver's own `modifiers` dict is read back off
     # `resolved` rather than reused, because a form may have added to it.
     return resolved._replace(
-        value=apply_modifiers(resolved.value, resolved.modifiers, form=resolved.source)
+        value=apply_modifiers(
+            resolved.value,
+            resolved.modifiers,
+            form=resolved.source,
+            context=context,
+        )
     )
 
 
@@ -242,7 +447,22 @@ def register_form(
     """
 
     def _register(fn):
-        _RESOLVERS[name] = fn
+        # The compatibility adapter makes every registered resolver obey the
+        # destination-aware four-argument protocol while preserving external
+        # third-party forms written for the historical three arguments.
+        try:
+            inspect.signature(fn).bind_partial(None, None, None, None)
+        except TypeError:
+            takes_target = False
+        else:
+            takes_target = True
+
+        def _with_target(node, context, modifiers, target):
+            if takes_target:
+                return fn(node, context, modifiers, target)
+            return fn(node, context, modifiers)
+
+        _RESOLVERS[name] = _with_target
         _FORM_ARGUMENTS[name] = arguments
         return fn
 

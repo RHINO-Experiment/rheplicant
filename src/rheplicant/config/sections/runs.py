@@ -15,10 +15,10 @@ execute -- executor's decision, recorded in the 2B plan.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.resolution_audit import ResolutionAudit
 
 __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 
@@ -26,15 +26,13 @@ _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
 _KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
           "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
           "identifiability", "score_directions", "gradient", "mmodes",
-          "predict", "nuts", "npe")
+          "predict", "nuts", "npe", "compare", "benchmark")
 # Plan 2C's and Plan 2D's own deferral tuples are GONE rather than emptied:
 # `predict` was 2C's last member and `npe` was 2D's, and an empty one would
 # leave `if kind in ()` in `_one` below -- dead, green and forever, and read
 # by the next author as a kind still owed.  Neither name is written here
 # either, so that `grep -rn <that name> src` stays the check it was meant to
-# be.  A deferral tuple a LATER plan adds must be named `_KINDS_*`: the
-# disjointness guard discovers its tables by that prefix.
-_KINDS_PLAN4 = ("compare", "benchmark")
+# be.  Plan 4B has now retired the final deferral tuple too.
 
 
 class RunSpec(NamedTuple):
@@ -72,24 +70,28 @@ class RunResult(NamedTuple):
     variant: str | None = None
 
 
-def _one(index: int, entry: Any, several: bool) -> RunSpec:
+def _one(
+    index: int,
+    entry: Any,
+    several: bool,
+    audit: ResolutionAudit | None,
+) -> RunSpec:
     where = f"runs[{index}]"
     if not isinstance(entry, Mapping):
         raise ConfigError(f"{where}: is a mapping; got {entry!r}.")
     kind = entry.get("kind")
     if kind is None:
         raise ConfigError(f"{where}: kind: is required.")
-    if kind in _KINDS_PLAN4:
-        raise ConfigError(
-            f"{where}: kind: {kind} arrives with Plan 4 (D-C16), with the "
-            "outputs that make it reportable."
-        )
     if kind not in _KINDS:
         raise ConfigError(
             f"{where}: kind: {kind!r} is not an exit; this layer runs "
             f"{list(_KINDS)}."
         )
-    reuse = entry.get("reuse")
+    reuse = (
+        entry["reuse"]
+        if "reuse" in entry
+        else None if audit is None else audit.use_default("runs[].reuse", None)
+    )
     if reuse is not None and not isinstance(reuse, str):
         raise ConfigError(f"{where}: reuse: is an earlier run's name; got "
                           f"{reuse!r}.")
@@ -100,13 +102,27 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
         )
     if name is not None and not isinstance(name, str):
         raise ConfigError(f"{where}: name: is a string; got {name!r}.")
-    variant = entry.get("variant")
+    if name is None and audit is not None:
+        name = audit.use_default("runs[].name", kind)
+    variant = (
+        entry["variant"]
+        if "variant" in entry
+        else None if audit is None else audit.use_default("runs[].variant", None)
+    )
     if variant is not None and not isinstance(variant, str):
         raise ConfigError(f"{where}: variant: is a name; got {variant!r}.")
-    on = entry.get("on", "primary")
+    on = (
+        entry["on"]
+        if "on" in entry
+        else "primary" if audit is None else audit.use_default("runs[].on", "primary")
+    )
     if not isinstance(on, str):
         raise ConfigError(f"{where}: on: is an observed name; got {on!r}.")
-    expect = entry.get("expect", "ok")
+    expect = (
+        entry["expect"]
+        if "expect" in entry
+        else "ok" if audit is None else audit.use_default("runs[].expect", "ok")
+    )
     if expect not in ("ok", "refuse"):
         raise ConfigError(f"{where}: expect: is ok or refuse; got "
                           f"{expect!r}.")
@@ -117,7 +133,11 @@ def _one(index: int, entry: Any, several: bool) -> RunSpec:
                    reuse=reuse)
 
 
-def parse_runs(section: Any) -> tuple[RunSpec, ...]:
+def parse_runs(
+    section: Any,
+    *,
+    audit: ResolutionAudit | None = None,
+) -> tuple[RunSpec, ...]:
     """``runs:`` -> parsed entries, names resolved and unique."""
     if isinstance(section, Mapping):
         section = [section]
@@ -126,7 +146,7 @@ def parse_runs(section: Any) -> tuple[RunSpec, ...]:
             "runs: is a list of exits (or one exit mapping); got "
             f"{section!r}."
         )
-    parsed = tuple(_one(index, entry, len(section) > 1)
+    parsed = tuple(_one(index, entry, len(section) > 1, audit)
                    for index, entry in enumerate(section))
     names = [run.name for run in parsed]
     for name in names:
@@ -137,39 +157,25 @@ def parse_runs(section: Any) -> tuple[RunSpec, ...]:
 
 def run_document(document: Mapping, *,
                  base_dir: str | None = None) -> dict[str, RunResult]:
-    """Execute every run a document declares, in order, by name."""
-    from rheplicant.config.document import load_document
-    from rheplicant.config.sections.exits import execute_run
+    """Execute every run a document declares, in order, by name.
+
+    A compatibility wrapper over the orchestration (Plan 4A Task 10): the
+    document is prepared through ``scope="all_layers"`` -- every declared
+    variant validated, every schedule handler-parsed before the first
+    executor -- the base schedule executes in declaration order, and the
+    terminal error, if any, is re-raised exactly as the per-run loop used to
+    raise it.  The return stays a plain ``dict`` keyed by run name.
+    """
+    from rheplicant.config.orchestration import execute_prepared, prepare_document
 
     if not isinstance(document, Mapping):
         raise ConfigError(
             f"A document is a mapping of sections; got "
             f"{type(document).__name__} ({document!r})."
         )
-    runs = parse_runs(document.get("runs"))
-    built: dict[str | None, Any] = {}
-
-    def configured(variant: str | None):
-        if variant not in built:
-            built[variant] = load_document(document, variant=variant,
-                                           base_dir=base_dir)
-        return built[variant]
-
-    # Executors see the accumulation through a read-only view: `reuse_of`
-    # types it as a Mapping, and this is what makes that intent true.  An
-    # executor that wrote here would rewrite an earlier run's recorded
-    # result, or add a key no run declared.
-    #
-    # The view wraps a COPY, not the live dict.  A proxy over the live dict
-    # would keep growing after the executor was handed it, so an executor
-    # that retained the view -- a deferred product closing over it -- would
-    # later see runs that had not executed when it looked.  `reuse_of`
-    # promises a reuse may only look backwards; the copy is what keeps that
-    # promise under retention.  (A caller wanting a mutable copy of the view
-    # takes `dict(view)`: `copy.copy` on a mappingproxy raises about
-    # pickling, which says nothing about what the caller did wrong.)
-    results: dict[str, RunResult] = {}
-    for run in runs:
-        results[run.name] = execute_run(run, configured(run.variant),
-                                        MappingProxyType(dict(results)))
-    return results
+    prepared = prepare_document(document, scope="all_layers",
+                                base_dir=base_dir)
+    record = execute_prepared(prepared)
+    if record.status != "ok":
+        raise record.error
+    return dict(record.results)

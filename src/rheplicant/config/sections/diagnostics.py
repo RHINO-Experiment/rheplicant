@@ -53,16 +53,20 @@ from typing import Any
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.sections.exit_support import (
     _PROBE,
+    ParsedRun,
     _binds,
     _noise,
     _number,
     _observed,
     _space,
     _sweep,
+    parsed_options,
     register,
     reuse_of,
 )
@@ -71,6 +75,94 @@ from rheplicant.config.values import resolve_value
 
 _IDENTIFIABILITY_KEYS = frozenset({"names", "at", "rtol"})
 _SCORE_KEYS = frozenset({"names", "at"})
+
+#: Measured against ``identifiability``'s own signature
+#: (``identifiability.py:425``, ``rtol=DEFAULT_RANK_RTOL``), so an explicit
+#: keyword is byte-identical to today's omission.
+_IDENTIFIABILITY_DEFAULTS = {"rtol": 1e-8}
+
+
+def _parse_identifiability(options, context):
+    """names/at/rtol grammar and the rtol default; the report is execute's."""
+    spec = context.spec
+    built = context.configured_run
+    _sweep(spec, _IDENTIFIABILITY_KEYS)
+    space = _space(spec, built)
+    execution: dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
+    if "names" in options:
+        execution["names"] = resolved["names"] = _names(spec)
+    if "at" in options:
+        execution["at"] = _at_values(spec, built, space)
+        resolved["at"] = options["at"]
+    execution["rtol"] = resolved["rtol"] = (
+        _bounded_rtol(spec)
+        if "rtol" in options
+        else built.context.use_default("runs[].options.rtol", 1e-8)
+    )
+    return parsed_options(execution, resolved=resolved)
+
+
+def _parse_score_directions(options, context):
+    """names/at grammar; no defaults, and the basis is execute's."""
+    spec = context.spec
+    built = context.configured_run
+    _sweep(spec, _SCORE_KEYS)
+    space = _space(spec, built)
+    execution: dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
+    if "names" in options:
+        execution["names"] = resolved["names"] = _names(spec)
+    if "at" in options:
+        execution["at"] = _at_values(spec, built, space)
+        resolved["at"] = options["at"]
+    return parsed_options(execution, resolved=resolved)
+
+
+@register("identifiability", parse=_parse_identifiability)
+def _run_identifiability(run: ParsedRun, built: Any, previous: Any = None) -> Any:
+    """``kind: identifiability`` -> the package's IdentifiabilityReport.
+
+    The report holds numpy arrays and Python ints and cannot be jitted
+    (identifiability.py:255-267), so this executor drives the call plainly.
+    Nor does it need an x64 document: ``identifiability`` forces x64 on for
+    its own duration and casts the selected latents (``:481``, ``:408``), so
+    an ordinary float32 config run LANDS -- its "even with x64" refusal
+    (``:501-509``) is for a model that pins its output dtype.
+    """
+    from rheplicant.inference import identifiability
+
+    _sweep(run, _IDENTIFIABILITY_KEYS)
+    options = run.options
+    kwargs: dict[str, Any] = {"rtol": options["rtol"]}
+    if "names" in options:
+        kwargs["names"] = options["names"]
+    if options.get("at"):
+        kwargs["at"] = options["at"]
+    # Keyword-only, all three.  Positional is a TypeError here and legal one
+    # module away, which is exactly why this call names every argument.
+    return identifiability(_space(run, built), built.inference.fit_twin, built.state, **kwargs)
+
+
+@register("score_directions", parse=_parse_score_directions)
+def _run_score_directions(run: ParsedRun, built: Any, previous: Any = None) -> Any:
+    """``kind: score_directions`` -> ``{latent: (size, n_data)}``.
+
+    Returned exactly as the package built it.  The order is the caller's,
+    deliberately: jax rebuilds a dict from its flattened, sorted form, so
+    re-keying or re-sorting this product hands back alphabetical names and
+    reintroduces the bug reduced_basis.py:171-180 is named after.
+    """
+    from rheplicant.inference import score_directions
+
+    _sweep(run, _SCORE_KEYS)
+    options = run.options
+    kwargs: dict[str, Any] = {}
+    if "names" in options:
+        kwargs["names"] = options["names"]
+    if options.get("at"):
+        kwargs["at"] = options["at"]
+    return score_directions(_space(run, built), built.inference.fit_twin, built.state, **kwargs)
 
 
 def _names(run: RunSpec) -> tuple[str, ...] | None:
@@ -108,8 +200,7 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
     if "names" not in run.options:
         return None
     names = run.options["names"]
-    if not isinstance(names, list) or not names or not all(
-            isinstance(name, str) for name in names):
+    if not isinstance(names, list) or not names or not all(isinstance(name, str) for name in names):
         raise ConfigError(
             f"runs[{run.name!r}]: names: is a non-empty list of latent names "
             f"-- [g] for a block of one; got {names!r}."
@@ -179,9 +270,15 @@ def _at_values(run: RunSpec, built: Any, space: Any) -> dict[str, Any]:
     # float64 document gets float64 overrides rather than whatever the value
     # node happened to resolve to.
     context = built.context
-    return {name: jnp.asarray(resolve_value(node, context).value,
-                              dtype=context.dtype)
-            for name, node in at.items()}
+    values = {}
+    for name, node in at.items():
+        destination = DestinationDescriptor(
+            f"runs[{run.index}].at.{name}", "config_path", "runs[].at.*"
+        )
+        resolved = resolve_value(node, context, destination=destination)
+        values[name] = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+    return values
 
 
 def _bounded_rtol(run: RunSpec) -> float:
@@ -209,62 +306,6 @@ def _bounded_rtol(run: RunSpec) -> float:
             "neither verdict is about the latents."
         )
     return rtol
-
-
-@register("identifiability")
-def _run_identifiability(run: RunSpec, built: Any,
-                         *, results: Any = None) -> Any:
-    """``kind: identifiability`` -> the package's IdentifiabilityReport.
-
-    The report holds numpy arrays and Python ints and cannot be jitted
-    (identifiability.py:255-267), so this executor drives the call plainly.
-    Nor does it need an x64 document: ``identifiability`` forces x64 on for
-    its own duration and casts the selected latents (``:481``, ``:408``), so
-    an ordinary float32 config run LANDS -- its "even with x64" refusal
-    (``:501-509``) is for a model that pins its output dtype.
-    """
-    from rheplicant.inference import identifiability
-
-    _sweep(run, _IDENTIFIABILITY_KEYS)
-    space = _space(run, built)
-    kwargs: dict[str, Any] = {}
-    names = _names(run)
-    if names is not None:
-        kwargs["names"] = names
-    at = _at_values(run, built, space)
-    if at:
-        kwargs["at"] = at
-    if "rtol" in run.options:
-        kwargs["rtol"] = _bounded_rtol(run)
-    # Keyword-only, all three.  Positional is a TypeError here and legal one
-    # module away, which is exactly why this call names every argument.
-    return identifiability(space, built.inference.fit_twin, built.state,
-                           **kwargs)
-
-
-@register("score_directions")
-def _run_score_directions(run: RunSpec, built: Any,
-                          *, results: Any = None) -> Any:
-    """``kind: score_directions`` -> ``{latent: (size, n_data)}``.
-
-    Returned exactly as the package built it.  The order is the caller's,
-    deliberately: jax rebuilds a dict from its flattened, sorted form, so
-    re-keying or re-sorting this product hands back alphabetical names and
-    reintroduces the bug reduced_basis.py:171-180 is named after.
-    """
-    from rheplicant.inference import score_directions
-
-    _sweep(run, _SCORE_KEYS)
-    space = _space(run, built)
-    kwargs: dict[str, Any] = {}
-    names = _names(run)
-    if names is not None:
-        kwargs["names"] = names
-    at = _at_values(run, built, space)
-    if at:
-        kwargs["at"] = at
-    return score_directions(space, built.inference.fit_twin, built.state,
-                            **kwargs)
 
 
 # --- kind: gradient --------------------------------------------------------
@@ -304,12 +345,14 @@ def _chi2(run: RunSpec, built: Any) -> Any:
     observed = _observed(run, built)
     build = built.inference.noise
     if build.model is None:
+
         def frozen_chi2(prediction: Any) -> Any:
             return jnp.sum(((observed - prediction) / noise) ** 2)
 
         return frozen_chi2
-    declared = ({} if build.include_logdet is None
-                else {"include_logdet": bool(build.include_logdet)})
+    declared = (
+        {} if build.include_logdet is None else {"include_logdet": bool(build.include_logdet)}
+    )
     likelihood = NoiseModelLikelihood(noise=noise, **declared)
 
     def chi2(prediction: Any) -> Any:
@@ -322,7 +365,7 @@ def _sum_squares(run: RunSpec, built: Any) -> Any:
     """``sum prediction^2`` -- pure in the prediction, reading no data."""
 
     def sum_squares(prediction: Any) -> Any:
-        return jnp.sum(prediction ** 2)
+        return jnp.sum(prediction**2)
 
     return sum_squares
 
@@ -357,10 +400,7 @@ def _mse(run: RunSpec, built: Any) -> Any:
 # see this plan's Executor's note -- so this table IS the definition.  Each
 # entry takes (run, built) and returns a closure over the prediction alone,
 # so an objective that reads no data never reaches for inference.observed.
-_OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse,
-               "sum_squares": _sum_squares}
-
-
+_OBJECTIVES = {"chi2": _chi2, "mean": _mean, "mse": _mse, "sum_squares": _sum_squares}
 
 
 def _scores_a_pair(where: str, target: str, scoring: Any) -> None:
@@ -464,12 +504,8 @@ def _of_paths(run: RunSpec) -> tuple[str, ...]:
             "leaves this gradient differentiates."
         )
     paths = [of] if isinstance(of, str) else of
-    if (not isinstance(paths, list) or not paths
-            or not all(isinstance(path, str) for path in paths)):
-        raise ConfigError(
-            f"{where}: of: is a path or a non-empty list of paths; got "
-            f"{of!r}."
-        )
+    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) for path in paths):
+        raise ConfigError(f"{where}: of: is a path or a non-empty list of paths; got {of!r}.")
     repeated = sorted({path for path in paths if paths.count(path) > 1})
     if repeated:
         raise ConfigError(
@@ -482,8 +518,41 @@ def _of_paths(run: RunSpec) -> tuple[str, ...]:
     return tuple(paths)
 
 
-@register("gradient")
-def _run_gradient(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+def _parse_gradient(options, context):
+    """objective/of/at grammar, the imported signature -- and no ``grad``."""
+    from rheplicant.config.paths import resolve_path_on
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _GRADIENT_KEYS)
+    paths = _of_paths(spec)
+    execution: dict[str, Any] = {"objective": _objective(spec, built)}
+    resolved: dict[str, Any] = {"objective": options["objective"]}
+    space = built.inference.space
+    twin = built.inference.fit_twin
+    if space is None:
+        if "at" in options:
+            raise ConfigError(
+                f"{where}: at: overrides the declared init: of a latent, and "
+                "this document declares no inference.parameters. Without "
+                "them the gradient runs at the twin's own leaf values, which "
+                "is what dropping at: asks for."
+            )
+    else:
+        if "at" in options:
+            execution["at"] = _at_values(spec, built, space)
+            resolved["at"] = options["at"]
+        for path in paths:
+            # The SELECTOR is compiled at execute on the bound twin; what
+            # parse owes the document is the refusal a dead path earns.
+            resolve_path_on(path, twin)
+    execution["of"] = resolved["of"] = paths
+    return parsed_options(execution, resolved=resolved)
+
+
+@register("gradient", parse=_parse_gradient)
+def _run_gradient(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """One differentiation of a named objective (schema section 4.7.9).
 
     The evaluation point is the document's own: where ``inference.parameters``
@@ -500,8 +569,7 @@ def _run_gradient(run: RunSpec, built: Any, *, results: Any = None) -> Any:
 
     :func:`_space` is NOT called here on purpose -- ``gradient`` does not
     require latents, so the shared "fits latents" refusal would say the wrong
-    thing.  The ``at:``-without-parameters refusal below is the one this kind
-    needs.
+    thing.  The ``at:``-without-parameters refusal lives in the parser.
     """
     import equinox as eqx
     import jax
@@ -509,31 +577,21 @@ def _run_gradient(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     from rheplicant.config.paths import resolve_path_on
     from rheplicant.inference import build_forward_fn
 
-    where = f"runs[{run.name!r}]"
     _sweep(run, _GRADIENT_KEYS)
-    paths = _of_paths(run)
-    objective = _objective(run, built)
+    options = run.options
     space = built.inference.space
     twin = built.inference.fit_twin
-    if space is None:
-        if "at" in run.options:
-            raise ConfigError(
-                f"{where}: at: overrides the declared init: of a latent, and "
-                "this document declares no inference.parameters. Without "
-                "them the gradient runs at the twin's own leaf values, which "
-                "is what dropping at: asks for."
-            )
-    else:
-        twin = space.bind(twin, {**space.initial_values(),
-                                 **_at_values(run, built, space)})
+    if space is not None:
+        twin = space.bind(twin, {**space.initial_values(), **options.get("at", {})})
+    paths = options["of"]
     selectors = [resolve_path_on(path, twin).selector for path in paths]
     spec = jax.tree.map(lambda _: False, twin)
     for selector in selectors:
         spec = eqx.tree_at(selector, spec, replace=True)
     forward, params0 = build_forward_fn(twin, built.state, spec)
+    objective = options["objective"]
     grads = jax.grad(lambda params: objective(forward(params)))(params0)
-    return {path: selector(grads)
-            for path, selector in zip(paths, selectors, strict=True)}
+    return {path: selector(grads) for path, selector in zip(paths, selectors, strict=True)}
 
 
 # --- kind: mmodes ----------------------------------------------------------
@@ -590,26 +648,13 @@ def _evaluates_a_grid(where: str, sky_model: Any) -> None:
         )
 
 
-@register("mmodes")
-def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
-    """``kind: mmodes`` -> ``DriftScanProjector.mmodes`` on the run's own grid.
-
-    Two references and nothing else.  The beam is the projector's own traced
-    ``beam_alms`` -- ``mmodes(sky, coords)`` has no ``beam=`` argument to give
-    it (driftscan.py:663) -- and the coords come off ``built.state`` because
-    ``mmodes`` reads ``coords.extra["lst_deg"]`` and cross-checks
-    ``coords.pointing`` against the projector's fixed az/el itself
-    (driftscan.py:387-436).  That cross-check's refusal is the package's and
-    is left alone: it names the disagreement, and nothing this layer could
-    say about it would be more specific.
-
-    The product is the complex ``(n_freq, lmax + 1)`` spectrum, ``lmax``
-    being the PROJECTOR's; ``(lmax+1)(lmax+2)//2`` is the sky's alm width and
-    a different number.
-    """
-    _sweep(run, _MMODES_KEYS)
-    where = f"runs[{run.name!r}]"
-    projector = _mmodes_ref(run, built, "projector")
+def _parse_mmodes(options, context):
+    """Both ``{ref}`` resolutions and the callability grammar -- no maps."""
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _MMODES_KEYS)
+    projector = _mmodes_ref(spec, built, "projector")
     if not hasattr(projector, "mmodes"):
         raise ConfigError(
             f"{where}: projector: names a {type(projector).__name__}, which "
@@ -631,7 +676,7 @@ def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
             "StateValidationError once the whole document is built; this is "
             "that refusal, before anything is traced."
         )
-    sky_model = _mmodes_ref(run, built, "sky")
+    sky_model = _mmodes_ref(spec, built, "sky")
     if not callable(sky_model):
         raise ConfigError(
             f"{where}: sky: names a {type(sky_model).__name__}, which is not "
@@ -640,6 +685,33 @@ def _run_mmodes(run: RunSpec, built: Any, *, results: Any = None) -> Any:
             "frequency grid to get the (n_freq, n_pix) maps mmodes takes."
         )
     _evaluates_a_grid(where, sky_model)
+    execution = {"projector": projector, "sky": sky_model}
+    resolved = {"projector": options["projector"], "sky": options["sky"]}
+    return parsed_options(execution, resolved=resolved)
+
+
+@register("mmodes", parse=_parse_mmodes)
+def _run_mmodes(run: ParsedRun, built: Any, previous: Any = None) -> Any:
+    """``kind: mmodes`` -> ``DriftScanProjector.mmodes`` on the run's own grid.
+
+    Two references and nothing else.  The beam is the projector's own traced
+    ``beam_alms`` -- ``mmodes(sky, coords)`` has no ``beam=`` argument to give
+    it (driftscan.py:663) -- and the coords come off ``built.state`` because
+    ``mmodes`` reads ``coords.extra["lst_deg"]`` and cross-checks
+    ``coords.pointing`` against the projector's fixed az/el itself
+    (driftscan.py:387-436).  That cross-check's refusal is the package's and
+    is left alone: it names the disagreement, and nothing this layer could
+    say about it would be more specific.
+
+    The product is the complex ``(n_freq, lmax + 1)`` spectrum, ``lmax``
+    being the PROJECTOR's; ``(lmax+1)(lmax+2)//2`` is the sky's alm width and
+    a different number.  The objects arrive resolved by the parser; what
+    remains here is the sky evaluation and the expansion itself.
+    """
+    _sweep(run, _MMODES_KEYS)
+    where = f"runs[{run.name!r}]"
+    projector = run.options["projector"]
+    sky_model = run.options["sky"]
     coords = built.state.coords
     maps = sky_model(coords.freq)
     # `shape` and not the extents: `_validate_sky` (driftscan.py:551-557)
@@ -676,14 +748,107 @@ _PREDICT_KEYS = frozenset({"n_draw"})
 _DRAW_SOURCES = {
     "plan.sample": "plan.sample discards its warmup before returning",
     "nuts": "get_samples() returns the post-warmup draws alone -- "
-            "num_samples x num_chains, after any thinning:, is the chain",
+    "num_samples x num_chains, after any thinning:, is the chain",
     "npe": "npe drew exactly the inference.npe.sample.n_draws: it was "
-           "asked for and has no warmup to recover",
+    "asked for and has no warmup to recover",
 }
 
 
-@register("predict")
-def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+#: The five result-dependent checks ``pre_execute`` owns, in the order they
+#: run there.  ``validate`` reports them as deferred rather than passed.
+_PREDICT_DEFERRED = (
+    "predict.reuse_available",
+    "predict.reuse_succeeded",
+    "predict.variant_matches",
+    "predict.product_supported",
+    "predict.draw_count_available",
+)
+
+
+def _a39_predict_takes_no_from(where: str, options: Mapping[str, Any]) -> None:
+    """``predict`` reads ``reuse:``, never ``from:`` -- refused before the sweep.
+
+    Module-level and taking plain data for the family's standing reason
+    (plan §2.2, one binding, two call sites): the parser raises it before
+    anything exists, and the executor keeps the same call ahead of its
+    ``_sweep`` so the pre-flight stand-down table keeps deriving
+    ``predict: {from}`` from the executor's own source until Task 10
+    retires that mirror.
+    """
+    if "from" in options:
+        raise ConfigError(
+            f"{where}: from: is schema 4.7.9's second spelling of the "
+            "cross-run link, and reuse: is the one this layer reads -- "
+            "runs[].reuse is already a member of the run grammar and from: "
+            "is not. Rename from: to reuse:."
+        )
+
+
+def _parse_predict(options, context):
+    """The whole static grammar: the ``from:`` redirection, the sweep, the
+    space, and ``n_draw:``'s type.  Everything an earlier run's product
+    decides is deferred to :func:`_predict_pre_execute`."""
+    spec = context.spec
+    where = f"runs[{spec.name!r}]"
+    _a39_predict_takes_no_from(where, options)
+    _sweep(spec, _PREDICT_KEYS)
+    _space(spec, context.configured_run)
+    normalized: dict[str, Any] = {}
+    if "n_draw" in options:
+        normalized["n_draw"] = _number(spec, "n_draw", options["n_draw"], kind=int, minimum=1)
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _predict_pre_execute(parsed_run, configured_run, previous_results):
+    """Every check only a finished earlier run can answer, immediately
+    before the executor -- the five named ``_PREDICT_DEFERRED`` conditions,
+    with the messages the pre-split executor raised."""
+    where = f"runs[{parsed_run.name!r}]"
+    earlier = reuse_of(parsed_run, previous_results)
+    if earlier.variant != parsed_run.variant:
+        raise ConfigError(
+            f"{where}: variant: {parsed_run.variant!r}, and reuse: "
+            f"{parsed_run.reuse!r} ran on variant: {earlier.variant!r} -- "
+            "pushing one build's product through another build's model MIXES "
+            "TWO BUILDS. The numbers would come back finite, correctly shaped "
+            "and plausible: measured, a model-only mismatch is 1.1 % wrong. "
+            "Declare the same variant: on both runs."
+        )
+    if earlier.kind == "fisher":
+        if "n_draw" in parsed_run.options:
+            raise ConfigError(
+                f"{where}: n_draw: thins an earlier run's draws, and "
+                f"reuse: {parsed_run.reuse!r} names a kind: fisher run, "
+                "whose product is a covariance -- the delta method draws "
+                f"nothing. Drop n_draw:, or reuse one of "
+                f"{' / '.join(_DRAW_SOURCES)}."
+            )
+        return
+    if earlier.kind in _DRAW_SOURCES:
+        available = earlier.product.n_draw
+        if "n_draw" in parsed_run.options and parsed_run.options["n_draw"] > available:
+            raise ConfigError(
+                f"{where}: n_draw: {parsed_run.options['n_draw']} exceeds "
+                f"the {available} draws reuse: {parsed_run.reuse!r} kept -- "
+                f"{_DRAW_SOURCES[earlier.kind]}, so this is all there is."
+                f" Lower n_draw:, or make {parsed_run.reuse!r} draw more."
+            )
+        return
+    raise ConfigError(
+        f"{where}: reuse: {parsed_run.reuse!r} names a kind: {earlier.kind} "
+        "run, and predict pushes forward either a fisher run's covariance or "
+        f"the draws of a {' / '.join(_DRAW_SOURCES)} run. Those are the "
+        f"{len(_DRAW_SOURCES) + 1} products this exit knows how to propagate."
+    )
+
+
+@register(
+    "predict",
+    parse=_parse_predict,
+    pre_execute=_predict_pre_execute,
+    deferred_checks=_PREDICT_DEFERRED,
+)
+def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: predict`` -- an earlier run's product, pushed through the model.
 
     TWO routes, over ``fisher`` plus every kind :data:`_DRAW_SOURCES` lists,
@@ -721,79 +886,38 @@ def _run_predict(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     imports therefore sit inside this body, which is also what keeps
     ``import rheplicant.config`` off ``rheplicant.inference``.
 
-    Both routes re-derive their expansion point or their pipeline from THIS
-    run's ``built``, so a ``predict`` on a different ``variant:`` from the
-    run it reuses MIXES TWO BUILDS.  ``RunResult`` carries the variant its
-    run was configured on, and the comparison below sits before the dispatch
-    so it guards both routes at once.  The package catches only what moves
-    the parameter LAYOUT (uncertainty.py:533, :544) and is silent about the
-    rest: measured, a model-only mismatch returns a finite, correctly-shaped
-    width off by 1.1 % -- a ratio of 0.98883 against the un-mixed answer on
-    the SAME variant, 1.12 % at the worst channel -- because with one latent
-    the whole error is the scalar sigma_g(base)/sigma_g(variant).  An error
-    nobody would ever notice is the argument for refusing it.
+    Every result-dependent guard -- availability, success, variant, product
+    kind, draw count -- lives in :func:`_predict_pre_execute`, which the
+    registry runs immediately before this body; what remains here is the
+    reuse lookup and the two propagations.
     """
     where = f"runs[{run.name!r}]"
-    if "from" in run.options:
-        raise ConfigError(
-            f"{where}: from: is schema 4.7.9's second spelling of the "
-            "cross-run link, and reuse: is the one this layer reads -- "
-            "runs[].reuse is already a member of the run grammar and from: "
-            "is not. Rename from: to reuse:."
-        )
+    # Ahead of the sweep, as before the split: unreachable on the parsed
+    # path (the parser refuses it first), kept until Task 10 retires the
+    # pre-flight mirror, which derives predict's stand-down from here.
+    _a39_predict_takes_no_from(where, run.options)
     _sweep(run, _PREDICT_KEYS)
-    earlier = reuse_of(run, results)
-    if earlier.variant != run.variant:
-        raise ConfigError(
-            f"{where}: variant: {run.variant!r}, and reuse: "
-            f"{run.reuse!r} ran on variant: {earlier.variant!r} -- pushing "
-            "one build's product through another build's model MIXES TWO "
-            "BUILDS. The numbers would come back finite, correctly shaped "
-            "and plausible: measured, a model-only mismatch is 1.1 % wrong. "
-            "Declare the same variant: on both runs."
-        )
+    earlier = reuse_of(run, previous)
     space = _space(run, built)
     if earlier.kind == "fisher":
         from rheplicant.inference import propagate_covariance
 
-        if "n_draw" in run.options:
-            raise ConfigError(
-                f"{where}: n_draw: thins an earlier run's draws, and "
-                f"reuse: {run.reuse!r} names a kind: fisher run, whose "
-                "product is a covariance -- the delta method draws nothing. "
-                f"Drop n_draw:, or reuse one of {' / '.join(_DRAW_SOURCES)}."
-            )
-        forward, values = space.forward_fn(built.inference.fit_twin,
-                                           built.state)
-        return propagate_covariance(forward, values,
-                                    earlier.product["covariance"])
+        forward, values = space.forward_fn(built.inference.fit_twin, built.state)
+        return propagate_covariance(forward, values, earlier.product["covariance"])
     if earlier.kind in _DRAW_SOURCES:
         from rheplicant.inference import predict_from_samples
 
         draws = earlier.product
         available = draws.n_draw
-        keep = available
-        if "n_draw" in run.options:
-            keep = _number(run, "n_draw", run.options["n_draw"], kind=int,
-                           minimum=1)
-            if keep > available:
-                raise ConfigError(
-                    f"{where}: n_draw: {keep} exceeds the {available} draws "
-                    f"reuse: {run.reuse!r} kept -- "
-                    f"{_DRAW_SOURCES[earlier.kind]}, so this is all there is."
-                    f" Lower n_draw:, or make {run.reuse!r} draw more."
-                )
+        keep = run.options.get("n_draw", available)
         # The LAST draws, not the first: no source here still carries a
         # warmup -- two discarded theirs and npe never had one -- but the
         # leading kept draws are still the ones nearest the declared init,
         # and the tail is the part a thinning is meant to keep.
-        samples = {name: stack[-keep:]
-                   for name, stack in draws.samples.items()}
-        return predict_from_samples(built.inference.fit_twin, built.state,
-                                    space, samples)
-    raise ConfigError(
-        f"{where}: reuse: {run.reuse!r} names a kind: {earlier.kind} run, "
-        "and predict pushes forward either a fisher run's covariance or the "
-        f"draws of a {' / '.join(_DRAW_SOURCES)} run. Those are the "
-        f"{len(_DRAW_SOURCES) + 1} products this exit knows how to propagate."
+        samples = {name: stack[-keep:] for name, stack in draws.samples.items()}
+        return predict_from_samples(built.inference.fit_twin, built.state, space, samples)
+    raise TypeError(
+        "predict.execute reached a product pre_execute has already refused "
+        "-- the registry runs pre_execute first; this is wiring, not a "
+        "document error."
     )

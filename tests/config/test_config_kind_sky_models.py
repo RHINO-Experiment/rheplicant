@@ -1,10 +1,11 @@
-"""resources.sky_models: four kinds, and the grid a MapSky is pinned to."""
+"""resources.sky_models: addressed kinds, and the grid a MapSky is pinned to."""
 
 import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.kinds import sky_models as sky_models_module
 from rheplicant.config.kinds.sky_models import build_sky_model
 from rheplicant.config.resources import build_resources
 from rheplicant.radio import MapSky, PowerLawSkyModel, UniformSkyModel
@@ -126,6 +127,30 @@ class TestTheFourKinds:
                 context,
             )
         assert "amplitude" in str(excinfo.value)
+
+    def test_python_argument_targets_are_validated_before_import(
+        self, context, monkeypatch
+    ):
+        imported = []
+        monkeypatch.setattr(
+            sky_models_module,
+            "import_target",
+            lambda target: imported.append(target) or (lambda **kwargs: object()),
+        )
+        with pytest.raises(ConfigError, match="unit"):
+            build_resources(
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "python",
+                            "python": "probe.module:factory",
+                            "args": {"bad": {"value": 1.0, "unit": 7}},
+                        }
+                    }
+                },
+                context,
+            )
+        assert imported == []
 
 
 class TestStaticFieldGuards:

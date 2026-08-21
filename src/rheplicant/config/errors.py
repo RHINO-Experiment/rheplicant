@@ -14,16 +14,4 @@ contradict what the caller declared about them", and it is confined to
 a document *meant*.
 """
 
-from rheplicant.core.errors import DirtError
-
-
-class ConfigError(DirtError, ValueError):
-    """A configuration document was written in a way this package refuses to run.
-
-    Covers the whole config layer: an unknown key, a unit that does not
-    convert, a shape symbol with no source, a value form landing on a field
-    that cannot hold it, a path that reaches no array leaf. Derives from
-    ``DirtError`` so the framework family stays catchable in one clause, and
-    from ``ValueError`` so generic handlers keep working -- the rule
-    :mod:`rheplicant.core.errors` states and every concrete class there obeys.
-    """
+from _rheplicant_bootstrap.errors import ConfigError  # noqa: F401

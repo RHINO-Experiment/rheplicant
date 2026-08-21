@@ -74,10 +74,12 @@ hands over ``fn()``.
 import importlib
 from typing import Any
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.units import convert_to_canonical
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.values import ResolutionTarget, ResolvedValue, register_form
 
 
 def import_target(target: str) -> Any:
@@ -107,8 +109,7 @@ def import_target(target: str) -> Any:
     except AttributeError as exc:
         offered = sorted(name for name in dir(module) if not name.startswith("_"))
         raise ConfigError(
-            f"python: {module_name!r} has no attribute {attribute!r}. It offers "
-            f"{offered}."
+            f"python: {module_name!r} has no attribute {attribute!r}. It offers {offered}."
         ) from exc
 
 
@@ -182,8 +183,13 @@ def _call(attribute: Any, keywords: dict, target: str) -> Any:
 # refusal already names them ("and python: also takes ['args', 'literal']"),
 # and a second check here would be unreachable behind it.
 @register_form("python", arguments=frozenset({"args", "literal"}))
-def _python(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
-    from rheplicant.config.values import resolve_value
+def _python(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    resolution_target: ResolutionTarget | None,
+) -> ResolvedValue:
+    from rheplicant.config.values import resolve_operand
 
     target = node["python"]
     args = node.get("args", {})
@@ -205,11 +211,49 @@ def _python(node: dict, context: ResolutionContext, modifiers: dict) -> Resolved
             "{file: ...} was read or passed through as a dict."
         )
 
+    argument_targets = {}
+    if resolution_target is not None:
+        for name, spec in args.items():
+            argument_targets[name] = resolution_target.operand(
+                spec,
+                f"args.{name}",
+                formula="python",
+                role="args.*",
+                environment=context.dimensions,
+                destination=DestinationDescriptor(
+                    f"python.args.{name}", "config_path", "python.args.*"
+                ),
+            )
+
     # Import AFTER the node has been checked, deliberately. Importing a module
     # runs its body, so a node this layer is going to refuse anyway must be
     # refused before it can have that effect.
+    if context.audit is not None:
+        document_path = (
+            "python" if resolution_target is None else resolution_target.destination.document_path
+        )
+        context.audit.python_target(document_path, target)
     attribute = import_target(target)
-    keywords = {name: resolve_value(spec, context).value for name, spec in args.items()}
+    keywords = {}
+    for name, spec in args.items():
+        resolved = resolve_operand(
+            spec,
+            context,
+            parent=resolution_target,
+            segment=f"args.{name}",
+            formula="python",
+            role="args.*",
+            destination=DestinationDescriptor(
+                f"python.args.{name}", "config_path", "python.args.*"
+            ),
+        )
+        keywords[name] = resolved.value
+        if resolution_target is not None:
+            record_resolved_delivery(
+                context,
+                argument_targets[name].destination,
+                resolved.unit,
+            )
     keywords.update(literal)
     # Presence of the KEY, not truth of its value: `args: {}` is how a document
     # spells a call that takes no arguments, and it is the only spelling there

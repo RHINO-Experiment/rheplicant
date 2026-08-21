@@ -57,9 +57,11 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _COST_CHILD = textwrap.dedent('''
     import sys, time
 
+    from _rheplicant_bootstrap.layering import initial_merge
+    from _rheplicant_bootstrap.types import Origin
+    from _rheplicant_bootstrap.variants import enumerate_layers_once
     from rheplicant.config.preflight import preflight
     from rheplicant.config.preflight.depends import _in_layer
-    from rheplicant.config.preflight.document import _task3_layers
     from tests.config.preflight_helpers import preflight_document
 
     OPTIONAL = ("numpyro", "limtod_jax", "limTOD", "healpy", "h5py",
@@ -73,7 +75,11 @@ _COST_CHILD = textwrap.dedent('''
     print(min(passes))
     print(" ".join(sorted(m for m in OPTIONAL if m in sys.modules)))
 
-    layers = [layer for _, layer in _task3_layers(document)]   # once, unclocked
+    merged = initial_merge(document, origin=Origin("user"))
+    enumeration = enumerate_layers_once(
+        merged.document, merged.origins, merged.deletions
+    )
+    layers = [layer.document for layer in enumeration.layers]  # once, unclocked
     best = None
     for _ in range(50):
         start = time.perf_counter()

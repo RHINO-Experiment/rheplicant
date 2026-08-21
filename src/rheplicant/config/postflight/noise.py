@@ -1,6 +1,9 @@
 """C18, the numeric half: the sigma that drew the data and the sigma that
 weighs it, made to agree.
 
+This slot consumes the already-normalized floor; it is intentionally not a
+twenty-third value resolver producer in Task 12's destination census.
+
 D-C17, the handover's own words: *"a run can carry two sigmas... nothing in
 the package keeps them equal, and if they drift the fit is weighted by a
 number that did not generate the data -- finite, correctly shaped, wrong, and
@@ -469,14 +472,14 @@ def _t6_radiometer_floor(kind: str, weighed: Any) -> float:
     is none. Read off ``weighed.model.floor`` for ``kind: radiometer`` --
     unwrapped the same way :func:`_t6_radiometer_fractional` is, since
     ``flags:`` wraps the same object this reads -- and off
-    ``NoiseBuild.frozen["floor_k"]`` for ``kind: radiometer_frozen`` -- the
+    ``NoiseBuild.frozen["floor"]`` for ``kind: radiometer_frozen`` -- the
     two places :func:`~rheplicant.config.sections.noise.build_noise` puts it,
     mirroring :func:`_t6_radiometer_fractional`'s own split.
     """
     if kind == "radiometer":
         return float(_t6_unwrapped(weighed.model).floor)
     facts = weighed.frozen or {}
-    return float(facts.get("floor_k", 0.0))
+    return float(facts.get("floor", 0.0))
 
 
 def _t6_floor_clause(floor: float) -> str:

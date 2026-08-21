@@ -1,4 +1,4 @@
-"""resources.beams: eight formats, two required declarations, and one sub-value."""
+"""resources.beams: addressed formats, required declarations, and one sub-value."""
 
 import dataclasses
 
@@ -8,6 +8,8 @@ import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.kinds import beams as beams_module
+from rheplicant.config.kinds.beams import _horizon_angle
 from rheplicant.config.resources import build_resources
 
 
@@ -127,6 +129,27 @@ class TestTheFormats:
                 context,
             )
         assert "shape" in str(excinfo.value)
+
+    def test_python_argument_targets_are_validated_before_import(
+        self, context, monkeypatch
+    ):
+        imported = []
+        monkeypatch.setattr(
+            beams_module,
+            "import_target",
+            lambda target: imported.append(target) or (lambda **kwargs: jnp.ones((4, 192))),
+        )
+        with pytest.raises(ConfigError, match="unit"):
+            build_resources(
+                _beam(
+                    format="python",
+                    path=None,
+                    python="probe.module:factory",
+                    args={"bad": {"value": 1.0, "unit": 7}},
+                ),
+                context,
+            )
+        assert imported == []
 
 
 class TestTheTwoDeclarationsWithNoDefault:
@@ -484,6 +507,30 @@ class TestTheHorizonInnerKeys:
     def test_a_non_mapping_horizon_is_refused(self, context):
         with pytest.raises(ConfigError, match="horizon"):
             build_resources(_beam(horizon="truncate_map"), context)
+
+    def test_an_implicit_horizon_angle_records_default_origin(self, context):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        configured = dataclasses.replace(
+            context,
+            trace=trace,
+            origin_lookup=lambda path: pytest.fail(
+                f"defaulted path unexpectedly looked up: {path}"
+            ),
+        )
+        assert _horizon_angle(
+            "resources.beams.horn", {}, "el_deg", 90.0, configured
+        ) == 90.0
+        _, destination, facts = trace.deliveries[0]
+        assert destination.document_path == "resources.beams.horn.horizon.el_deg"
+        assert facts["origin"].kind == "rheplicant-default"
+        assert facts["unit"] == "deg"
 
 
 class TestPresenceRefusals:

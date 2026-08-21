@@ -99,6 +99,7 @@ import sys
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.preflight import register
 from rheplicant.config.resources import resolved_specs
@@ -562,8 +563,6 @@ def _in_layer(layer: Mapping[str, Any],
     the module, so a projector missing limtod_jax AND a second distribution
     still hears about both.
     """
-    from rheplicant.config.preflight.document import _task3_where
-
     said: set[tuple[str, str]] = set()
     for where, token, value, siblings in _routes(layer):
         if not isinstance(value, str):
@@ -579,7 +578,7 @@ def _in_layer(layer: Mapping[str, Any],
             if (where, message) in said:
                 continue
             said.add((where, message))
-            yield refuse("A35", _task3_where(where), message)
+            yield refuse("A35", longest_legal_prefix(where), message)
 
 
 @register("A35")
@@ -623,7 +622,5 @@ def _extras(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``test_preflight_depends_cost.py`` times the read rather than the merge for
     exactly that reason.
     """
-    from rheplicant.config.preflight.document import _task3_over_layers
-
     seen: dict[Requirement, str | None] = {}
-    return _task3_over_layers(document, lambda layer: _in_layer(layer, seen))
+    return _in_layer(document, seen)

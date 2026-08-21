@@ -91,6 +91,11 @@ class Unit(NamedTuple):
     dimension: str | None
 
 
+# A9 derives its normalized signature exclusively from ``numerator`` and
+# ``denominator`` above. Keep this compatibility record at six fields: a
+# cached seventh dimension field would create two authorities that can drift.
+
+
 def _atom(token: str) -> _Atom:
     found = _ATOMS.get(token.strip().lower())
     if found is None:

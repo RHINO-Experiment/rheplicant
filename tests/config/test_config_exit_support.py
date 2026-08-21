@@ -7,7 +7,10 @@ from rheplicant.config import ConfigError
 from rheplicant.config.sections import exits
 from rheplicant.config.sections import runs as runs_module
 from rheplicant.config.sections.exit_support import (
+    DEFERRED_CHECKS,
     EXECUTORS,
+    PARSERS,
+    PRE_EXECUTORS,
     _binds,
     _decided_sigma,
     _noise,
@@ -20,7 +23,6 @@ from rheplicant.config.sections.exit_support import (
 from rheplicant.config.sections.observed import ObservedBuild
 from rheplicant.config.sections.runs import (
     _KINDS,
-    _KINDS_PLAN4,
     RunResult,
     RunSpec,
     parse_runs,
@@ -80,7 +82,7 @@ class TestTheRegistryIsComplete:
         """
         tables = {name: getattr(runs_module, name) for name in vars(runs_module)
                   if name.startswith("_KINDS")}
-        assert "_KINDS" in tables and len(tables) >= 2, sorted(tables)
+        assert tuple(tables) == ("_KINDS",), sorted(tables)
         assert "_KINDS_2C" not in tables, "predict was its last member"
         names = sorted(tables)
         for i, left in enumerate(names):
@@ -110,11 +112,15 @@ class TestTheRegistryIsComplete:
 
         register("_probe_kind")(probe)
         try:
-            assert EXECUTORS["_probe_kind"] is probe
+            # The transitional legacy adapter wraps a parse-less binding;
+            # ``__wrapped__`` is the executor the caller registered.
+            assert EXECUTORS["_probe_kind"].__wrapped__ is probe
             with pytest.raises(ConfigError):
                 register("_probe_kind")(probe)
         finally:
-            EXECUTORS.pop("_probe_kind", None)
+            for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS,
+                             DEFERRED_CHECKS):
+                registry.pop("_probe_kind", None)
 
     def test_an_unregistered_kind_refuses_in_the_layers_own_voice(self):
         """A kind in _KINDS with no executor must not escape as a KeyError.
@@ -190,8 +196,8 @@ class TestTheLoopIsOrdered:
         """
         seen = {}
 
-        def spy(run, built, *, results=None):
-            seen[run.name] = sorted(results or {})
+        def spy(run, built, previous):
+            seen[run.name] = sorted(previous or {})
             return built.state
 
         original = EXECUTORS["forward"]
@@ -213,9 +219,9 @@ class TestTheLoopIsOrdered:
         """
         refused = []
 
-        def vandal(run, built, *, results=None):
+        def vandal(run, built, previous):
             try:
-                results["injected"] = "not a run"
+                previous["injected"] = "not a run"
             except TypeError as error:
                 refused.append(str(error))
             return built.state
@@ -409,7 +415,7 @@ class TestTheObservationFan:
 
 
 class TestTheDeferredKindsNameTheirPlan:
-    """One deferral tuple is left, and it names its plan.
+    """Plan 4B retires the final kind deferral tuple.
 
     ``_KINDS_2C`` went when ``predict`` shipped and ``_KINDS_2D`` when ``npe``
     did -- both DELETED rather than emptied, because ``_one`` tests the
@@ -419,11 +425,12 @@ class TestTheDeferredKindsNameTheirPlan:
     left by prefix, so it needs no edit here.
     """
 
-    def test_compare_and_benchmark_are_plan_4(self):
-        assert _KINDS_PLAN4 == ("compare", "benchmark")
-        for kind in _KINDS_PLAN4:
-            with pytest.raises(ConfigError, match="Plan 4"):
-                parse_runs([{"kind": kind}])
+    def test_compare_and_benchmark_are_both_live(self):
+        assert not hasattr(runs_module, "_KINDS_PLAN4")
+        assert parse_runs(
+            [{"kind": "compare", "of": ["a", "b"], "metric": "rms", "tolerance": 0.0}]
+        )[0].kind == "compare"
+        assert parse_runs([{"kind": "benchmark", "variants": ["base"]}])[0].kind == "benchmark"
 
     def test_nuts_and_npe_have_left_and_the_tuple_has_gone_with_them(self):
         assert not hasattr(runs_module, "_KINDS_2D"), (

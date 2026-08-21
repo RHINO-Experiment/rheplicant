@@ -1052,16 +1052,23 @@ class TestResolvedSpecsIsTotal:
         """The docstring's backstop claim, held to what is true.
 
         A spec whose KEY is not a string resolves here untouched -- there is
-        no ``extends:`` to fail on -- and then dies inside ``build_resources``
-        as a bare ``TypeError``, not a ``ConfigError``.  So "build_resources
-        says the right sentence" is true of the six modelled shapes and NOT of
-        every shape, and what this function guarantees is the narrower thing:
-        the pass is not aborted.
+        no ``extends:`` to fail on -- and then dies at Task 4's evidence
+        freeze (``initial_merge``) with a ``ConfigError`` naming the key's
+        type: the origin tree cannot tell a mapping key from a sequence index
+        otherwise, and the audit record cannot hold it.  Measured, that is a
+        strictly earlier and better death than the bare ``TypeError`` from
+        ``build_resources`` this test pinned before the hardening.  So
+        "build_resources says the right sentence" is true of the six modelled
+        shapes and NOT of every shape, and what this function guarantees is
+        the narrower thing: the pass is not aborted.
         """
         section = {"arrays": {"a": {1: "x"}}}
         assert resolved_specs(section) == {"resources.arrays.a": {1: "x"}}
-        with pytest.raises(TypeError):
+        with pytest.raises(ConfigError) as caught:
             load_document(preflight_document(resources=section))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence mapping key type "
+            "int.")
 
     def test_a_well_formed_sibling_survives_a_malformed_entry(self):
         """Only the malformed ENTRY is dropped, not the whole kind and not the

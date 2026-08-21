@@ -17,7 +17,8 @@ it carries are the forward model rather than an accessory — and since limTOD
 
 ## Extras
 
-Two of the four name a requirement that is not on PyPI, deliberately: the
+Two of the integration extras name a requirement that is not on PyPI,
+deliberately: the
 package is developed alongside them and pinning a git URL in `pyproject.toml`
 would make this project unpublishable. So the extra records *what is needed*,
 and you install it yourself.
@@ -46,7 +47,34 @@ and you install it yourself.
   - `read_rhino_observation()` — the RHINO HDF5 reader (h5py). The Touchstone
     reader needs none of it, being numpy only
   - `pip install "rheplicant[rhino]"`
+* - `uvbeam`
+  - Read pyuvdata `UVBeam` resources; the beam physics bridge itself comes with
+    limTOD
+  - `pip install "rheplicant[uvbeam]"`
+* - `gui`
+  - The packaged FastAPI + React configuration workbench and
+    `rheplicant-gui` launcher
+  - `pip install "rheplicant[gui]"`, then `rheplicant-gui`; see the
+    [editor security and trust boundaries](config-gui.md)
 :::
+
+### Start the configuration workbench
+
+The `gui` extra contains the production assets, so an installed wheel needs no
+Node.js toolchain:
+
+```bash
+pip install "rheplicant[gui]"
+rheplicant-gui                    # http://127.0.0.1:8000/
+```
+
+The launcher binds to loopback by default. A non-loopback bind is refused
+unless `--allow-remote` is explicit, and that flag is only acknowledgement:
+the application has no authentication, tenant isolation or sandbox. YAML may
+load plugins and `python:` targets; resource/output fields are server paths;
+jobs use the server account's files and compute. Read the complete
+[workbench workflow and trust boundary](config-gui.md) before using remote
+access or running a document from another person.
 
 ## Development
 

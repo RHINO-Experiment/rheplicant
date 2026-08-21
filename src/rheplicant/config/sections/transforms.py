@@ -18,7 +18,10 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
+from rheplicant.config.dimensions import dimension_for
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
 from rheplicant.config.paths import (
@@ -29,33 +32,82 @@ from rheplicant.config.paths import (
 )
 from rheplicant.config.refs import resolve_reference
 from rheplicant.config.resources import check_unknown_keys
-from rheplicant.config.values import resolve_value
+from rheplicant.config.values import ResolutionTarget, resolve_operand
 from rheplicant.core.errors import ParameterSpaceError
 
 __all__ = ["build_space", "parse_transform"]
 
 _NAMED = ("identity", "exp", "log", "sum", "split_rows", "unit_mean_bandpass")
-_MAPPING = ("affine", "matmul", "log_link_basis", "basis_expand",
-            "beam_analysis", "python")
+_MAPPING = ("affine", "matmul", "log_link_basis", "basis_expand", "beam_analysis", "python")
 _BINDING_KEYS = frozenset({"latents", "into", "transform", "fan"})
 
 
-def _operand(where: str, node: Any, context: ResolutionContext) -> Any:
+def _formula_parent(where: str, formula: str, context: ResolutionContext) -> ResolutionTarget:
+    from rheplicant.config import dimensions
+
+    registration = dimensions._FORMULA_REGISTRY[formula]
+    document_path = where.rsplit(".", 1)[0]
+    selector = (
+        "inference.parameters.*.init"
+        if document_path.startswith("inference.parameters.")
+        else document_path
+    )
+    destination = DestinationDescriptor(document_path, "config_path", selector)
+    return ResolutionTarget(
+        destination,
+        registration.result,
+        dimension_for(destination, context.dimensions)
+        if selector == "inference.parameters.*.init"
+        else registration.result.signature,
+        None,
+        formula_name=formula,
+    )
+
+
+def _operand(
+    where: str,
+    node: Any,
+    context: ResolutionContext,
+    *,
+    formula: str,
+    role: str,
+    defaulted: bool = False,
+) -> Any:
     if isinstance(node, bool) or not isinstance(node, (int, float, Mapping)):
         raise ConfigError(f"{where}: is a number or a value node; got {node!r}.")
-    if isinstance(node, (int, float)):
-        return float(node)
-    return jnp.asarray(resolve_value(node, context).value)
+    parent = _formula_parent(where, formula, context)
+    segment = where.rsplit(".", 1)[-1]
+    operand_target = parent.operand(
+        node,
+        segment,
+        formula=formula,
+        role=role,
+        environment=context.dimensions,
+    )
+    resolved = resolve_operand(
+        node,
+        context,
+        parent=parent,
+        segment=segment,
+        formula=formula,
+        role=role,
+    )
+    value = jnp.asarray(resolved.value)
+    record_resolved_delivery(
+        context,
+        operand_target.destination,
+        resolved.unit,
+        defaulted=defaulted,
+        expected=operand_target.expected,
+    )
+    return value
 
 
 def _whole(where: str, value: Any, minimum: int) -> int:
     """A configuration integer, with ``bool`` refused: ``True`` is not an
     ``nside``, and Python would otherwise let it through as ``1``."""
-    if isinstance(value, bool) or not isinstance(value, int) \
-            or value < minimum:
-        raise ConfigError(
-            f"{where}: is an integer >= {minimum}; got {value!r}."
-        )
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ConfigError(f"{where}: is an integer >= {minimum}; got {value!r}.")
     return int(value)
 
 
@@ -128,9 +180,9 @@ def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
     malformed ``beam_analysis:`` is refused in this layer's voice on an
     install that lacks it rather than raising ``ImportError`` first.
     """
-    check_unknown_keys(where, dict(body),
-                       frozenset({"nside", "lmax", "iterations"}),
-                       label="beam_analysis:")
+    check_unknown_keys(
+        where, dict(body), frozenset({"nside", "lmax", "iterations"}), label="beam_analysis:"
+    )
     missing = sorted({"nside", "lmax"} - set(body))
     if missing:
         raise ConfigError(
@@ -148,8 +200,7 @@ def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
     _refuse_unreachable_band(where, nside, lmax)
     # What is left is ``iterations``, and only where the document declared it:
     # the package's own default is never restated here.
-    extra = {key: value for key, value in numbers.items()
-             if key not in ("nside", "lmax")}
+    extra = {key: value for key, value in numbers.items() if key not in ("nside", "lmax")}
 
     import limtod_jax as ltj
 
@@ -159,8 +210,7 @@ def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
     return jax.vmap(analyse), "broadcast"
 
 
-def parse_transform(spec: Any, context: ResolutionContext, *,
-                    where: str) -> tuple[Any, str | None]:
+def parse_transform(spec: Any, context: ResolutionContext, *, where: str) -> tuple[Any, str | None]:
     """A transform spec -> ``(fn, canonical_fan)``; identity -> ``(None, None)``."""
     if spec is None or spec == "identity":
         return None, None
@@ -193,8 +243,7 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
     if head == "python":
         unknown = sorted(set(spec) - {"python", "fan"})
         if unknown:
-            raise ConfigError(f"{where}: python: takes fan: and nothing else; "
-                              f"got {unknown} too.")
+            raise ConfigError(f"{where}: python: takes fan: and nothing else; got {unknown} too.")
         fan = spec.get("fan")
         if fan not in ("broadcast", "distribute"):
             raise ConfigError(
@@ -202,6 +251,8 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
                 "(broadcast or distribute) -- the registry cannot know what "
                 f"an arbitrary callable produces; got {fan!r}."
             )
+        if context.audit is not None:
+            context.audit.python_target(f"{where}.python", spec["python"])
         return import_target(spec["python"]), fan
     body = spec[head]
     unknown = sorted(set(spec) - {head})
@@ -210,53 +261,95 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
     if not isinstance(body, Mapping):
         raise ConfigError(f"{where}.{head}: is a mapping; got {body!r}.")
     if head == "affine":
-        check_unknown_keys(where, dict(body), frozenset({"scale", "offset"}),
-                           label="affine:")
-        scale = _operand(f"{where}.affine.scale", body.get("scale", 1.0),
-                         context)
-        offset = _operand(f"{where}.affine.offset", body.get("offset", 0.0),
-                          context)
+        check_unknown_keys(where, dict(body), frozenset({"scale", "offset"}), label="affine:")
+        scale_node = (
+            body["scale"]
+            if "scale" in body
+            else context.use_default("inference.transforms[].affine.scale", 1.0)
+        )
+        scale = _operand(
+            f"{where}.affine.scale",
+            scale_node,
+            context,
+            formula="transform_affine",
+            role="scale",
+            defaulted="scale" not in body,
+        )
+        offset_node = (
+            body["offset"]
+            if "offset" in body
+            else context.use_default("inference.transforms[].affine.offset", 0.0)
+        )
+        offset = _operand(
+            f"{where}.affine.offset",
+            offset_node,
+            context,
+            formula="transform_affine",
+            role="offset",
+            defaulted="offset" not in body,
+        )
         return (lambda v, _s=scale, _o=offset: _s * v + _o), "broadcast"
     if head == "matmul":
-        check_unknown_keys(where, dict(body), frozenset({"design"}),
-                           label="matmul:")
+        check_unknown_keys(where, dict(body), frozenset({"design"}), label="matmul:")
         if "design" not in body:
-            raise ConfigError(f"{where}.matmul: requires design: -- a value "
-                              "node for the design matrix.")
-        design = jnp.asarray(resolve_value(body["design"], context).value)
+            raise ConfigError(
+                f"{where}.matmul: requires design: -- a value node for the design matrix."
+            )
+        design_where = f"{where}.matmul.design"
+        parent = _formula_parent(design_where, "matmul", context)
+        operand_target = parent.operand(
+            body["design"],
+            "design",
+            formula="matmul",
+            role="design",
+            environment=context.dimensions,
+        )
+        resolved = resolve_operand(
+            body["design"],
+            context,
+            parent=parent,
+            segment="design",
+            formula="matmul",
+            role="design",
+        )
+        design = jnp.asarray(resolved.value)
+        record_resolved_delivery(
+            context,
+            operand_target.destination,
+            resolved.unit,
+            expected=operand_target.expected,
+        )
         return (lambda c, _d=design: _d @ c), "broadcast"
     if head == "log_link_basis":
         from rheplicant.core.basis import basis_matrix
 
-        check_unknown_keys(where, dict(body),
-                           frozenset({"kind", "n_basis", "axis"}),
-                           label="log_link_basis:")
+        check_unknown_keys(
+            where, dict(body), frozenset({"kind", "n_basis", "axis"}), label="log_link_basis:"
+        )
         axis = body.get("axis", "freq")
         if axis not in ("freq", "time"):
-            raise ConfigError(f"{where}.log_link_basis.axis: is freq or "
-                              f"time; got {axis!r}.")
+            raise ConfigError(f"{where}.log_link_basis.axis: is freq or time; got {axis!r}.")
         grid = context.freq if axis == "freq" else context.time
         if grid is None:
-            raise ConfigError(f"{where}.log_link_basis: needs the run's "
-                              f"{axis} grid, and this context has none.")
+            raise ConfigError(
+                f"{where}.log_link_basis: needs the run's {axis} grid, and this context has none."
+            )
         if "kind" not in body or "n_basis" not in body:
-            raise ConfigError(f"{where}.log_link_basis: requires kind: and "
-                              "n_basis:; n comes from the grid.")
-        matrix = basis_matrix(str(body["kind"]), n=int(grid.shape[0]),
-                              n_basis=int(body["n_basis"]))
+            raise ConfigError(
+                f"{where}.log_link_basis: requires kind: and n_basis:; n comes from the grid."
+            )
+        matrix = basis_matrix(str(body["kind"]), n=int(grid.shape[0]), n_basis=int(body["n_basis"]))
         return (lambda c, _m=matrix: jnp.exp(_m @ c)), "broadcast"
     if head == "beam_analysis":
         return _beam_analysis(where, body)
     # basis_expand
     from rheplicant.core.basis import SeparableBasis
 
-    check_unknown_keys(where, dict(body), frozenset({"basis"}),
-                       label="basis_expand:")
+    check_unknown_keys(where, dict(body), frozenset({"basis"}), label="basis_expand:")
     reference = body.get("basis")
     if not isinstance(reference, Mapping) or set(reference) != {"ref"}:
         raise ConfigError(
-            f"{where}.basis_expand: basis is {{ref: resources.bases.<name>}}; "
-            f"got {reference!r}."
+            f"{where}.basis_expand: basis is {{ref: resources.bases.<name>}}; got {reference!r}."
         )
     basis = resolve_reference(reference["ref"], context)
     if not isinstance(basis, SeparableBasis):
@@ -267,10 +360,8 @@ def parse_transform(spec: Any, context: ResolutionContext, *,
     return basis.expand, "broadcast"
 
 
-def _merged_fan(declared: str | None, canonical: str | None,
-                where: str) -> str | None:
-    if declared is not None and canonical is not None \
-            and declared != canonical:
+def _merged_fan(declared: str | None, canonical: str | None, where: str) -> str | None:
+    if declared is not None and canonical is not None and declared != canonical:
         raise ConfigError(
             f"{where}: fan: {declared} contradicts the transform's own fan "
             f"({canonical}) -- check A38's registry consistency."
@@ -278,8 +369,9 @@ def _merged_fan(declared: str | None, canonical: str | None,
     return declared if declared is not None else canonical
 
 
-def _selectors(where: str, paths: tuple[str, ...], fit_twin: Any,
-               replaced: tuple[str, ...], seen: list[str]) -> tuple:
+def _selectors(
+    where: str, paths: tuple[str, ...], fit_twin: Any, replaced: tuple[str, ...], seen: list[str]
+) -> tuple:
     selectors = []
     for path in paths:
         head = parse_path(path)[0]
@@ -308,13 +400,17 @@ def _joint_prior(section: Any, names: tuple[str, ...]) -> Any:
         )
     body = section["jeffreys"]
     if not isinstance(body, Mapping):
-        raise ConfigError(f"inference.joint_prior.jeffreys: is a mapping; "
-                          f"got {body!r}.")
-    check_unknown_keys("inference.joint_prior.jeffreys", dict(body),
-                       frozenset({"over", "rank_rtol"}), label="jeffreys:")
+        raise ConfigError(f"inference.joint_prior.jeffreys: is a mapping; got {body!r}.")
+    check_unknown_keys(
+        "inference.joint_prior.jeffreys",
+        dict(body),
+        frozenset({"over", "rank_rtol"}),
+        label="jeffreys:",
+    )
     if "over" not in body:
-        raise ConfigError("inference.joint_prior.jeffreys: requires over: -- "
-                          "the latent names it covers.")
+        raise ConfigError(
+            "inference.joint_prior.jeffreys: requires over: -- the latent names it covers."
+        )
     kwargs = {}
     if "rank_rtol" in body:
         kwargs["rank_rtol"] = float(body["rank_rtol"])
@@ -349,10 +445,11 @@ def _b4_refuse_unbound_latents(parsed: Any, binds: list, bindings: Any) -> None:
     if not dead:
         return
     keys = ", ".join(f"inference.parameters.{name}" for name in dead)
-    where = ("an inference.bindings entry -- this document declares "
-             "bindings, and none of them names it"
-             if bindings else
-             "an inference.bindings entry -- this document declares none yet")
+    where = (
+        "an inference.bindings entry -- this document declares bindings, and none of them names it"
+        if bindings
+        else "an inference.bindings entry -- this document declares none yet"
+    )
     raise ConfigError(
         f"{keys}: declared and bound to nothing, so the fit would sample it "
         "without it ever reaching the model and its posterior would just "
@@ -379,12 +476,10 @@ def _c17_stochastic_nodes(fit_twin: Any) -> tuple[str, ...]:
     """
     from rheplicant.core.contract import RANDOMNESS, stages_requiring
 
-    return tuple(node_id for node_id, _ in stages_requiring(fit_twin,
-                                                            RANDOMNESS))
+    return tuple(node_id for node_id, _ in stages_requiring(fit_twin, RANDOMNESS))
 
 
-def _c17_bound_paths(parsed: Any, bindings: Any,
-                     fit_twin: Any) -> tuple[str, ...]:
+def _c17_bound_paths(parsed: Any, bindings: Any, fit_twin: Any) -> tuple[str, ...]:
     """``(document key, path as written, path as the twin spells it)`` rows.
 
     Both spellings, because ``config/paths.py`` already argues that naming
@@ -419,8 +514,7 @@ def _c17_bound_paths(parsed: Any, bindings: Any,
     return tuple(spelled)
 
 
-def _c17_validate_space(space: Any, fit_twin: Any, parsed: Any,
-                        bindings: Any) -> None:
+def _c17_validate_space(space: Any, fit_twin: Any, parsed: Any, bindings: Any) -> None:
     """``ParameterSpace.validate`` at load time, in this layer's voice (C17).
 
     Measured: the package ships this check, four call sites call it, and
@@ -492,9 +586,15 @@ def _c17_validate_space(space: Any, fit_twin: Any, parsed: Any,
         ) from exc
 
 
-def build_space(parsed: Any, bindings: Any, joint_prior: Any, *,
-                fit_twin: Any, replaced: tuple[str, ...],
-                context: ResolutionContext) -> Any:
+def build_space(
+    parsed: Any,
+    bindings: Any,
+    joint_prior: Any,
+    *,
+    fit_twin: Any,
+    replaced: tuple[str, ...],
+    context: ResolutionContext,
+) -> Any:
     """Parsed latents + bindings + joint_prior -> a ParameterSpace, or None."""
     from rheplicant.inference import Bind, ParameterSpace
 
@@ -523,27 +623,34 @@ def build_space(parsed: Any, bindings: Any, joint_prior: Any, *,
                     "inference.bindings."
                 )
             continue
-        fn, canonical = parse_transform(entry.transform, context,
-                                        where=f"{where}.transform")
+        fn, canonical = parse_transform(entry.transform, context, where=f"{where}.transform")
         fan = _merged_fan(entry.fan, canonical, where)
-        binds.append(Bind(name,
-                          into=_selectors(where, entry.into, fit_twin,
-                                          replaced, seen_paths),
-                          fn=fn, fan=fan))
+        binds.append(
+            Bind(
+                name,
+                into=_selectors(where, entry.into, fit_twin, replaced, seen_paths),
+                fn=fn,
+                fan=fan,
+            )
+        )
         sugared.add(name)
     for index, entry in enumerate(bindings or []):
         where = f"inference.bindings[{index}]"
         if not isinstance(entry, Mapping):
             raise ConfigError(f"{where}: is a mapping; got {entry!r}.")
-        check_unknown_keys(where, dict(entry), _BINDING_KEYS,
-                           label="a binding:")
+        check_unknown_keys(where, dict(entry), _BINDING_KEYS, label="a binding:")
         latents = entry.get("latents")
         if isinstance(latents, str):
             latents = [latents]
-        if not isinstance(latents, (list, tuple)) or not latents or not all(
-                isinstance(item, str) for item in latents):
-            raise ConfigError(f"{where}: latents: is a non-empty list of "
-                              f"latent names; got {entry.get('latents')!r}.")
+        if (
+            not isinstance(latents, (list, tuple))
+            or not latents
+            or not all(isinstance(item, str) for item in latents)
+        ):
+            raise ConfigError(
+                f"{where}: latents: is a non-empty list of "
+                f"latent names; got {entry.get('latents')!r}."
+            )
         for item in latents:
             if item in sugared:
                 raise ConfigError(
@@ -560,15 +667,19 @@ def build_space(parsed: Any, bindings: Any, joint_prior: Any, *,
         if isinstance(into, str):
             into = [into]
         if not isinstance(into, (list, tuple)) or not into:
-            raise ConfigError(f"{where}: into: is a path or a list of paths; "
-                              f"got {entry.get('into')!r}.")
-        fn, canonical = parse_transform(entry.get("transform"), context,
-                                        where=f"{where}.transform")
+            raise ConfigError(
+                f"{where}: into: is a path or a list of paths; got {entry.get('into')!r}."
+            )
+        fn, canonical = parse_transform(entry.get("transform"), context, where=f"{where}.transform")
         fan = _merged_fan(entry.get("fan"), canonical, where)
-        binds.append(Bind(tuple(latents),
-                          into=_selectors(where, tuple(into), fit_twin,
-                                          replaced, seen_paths),
-                          fn=fn, fan=fan))
+        binds.append(
+            Bind(
+                tuple(latents),
+                into=_selectors(where, tuple(into), fit_twin, replaced, seen_paths),
+                fn=fn,
+                fan=fan,
+            )
+        )
     refuse_duplicate_targets(seen_paths, fit_twin)
     _b4_refuse_unbound_latents(parsed, binds, bindings)
     return ParameterSpace(

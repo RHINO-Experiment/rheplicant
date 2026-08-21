@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+### The browser editor is now a persistent scientific workbench
+
+Config Plans 6A–6C retain exact YAML as the sole scientific state while
+organising the application into Model, Config, Execute and Results. Guided
+first use reaches a bounded Forward preview; Model and Config provide
+revision-checked graph, safe primitive field and raw-YAML draft paths; Execute
+progressively exposes Quick/Full validation, target safety, all 22 products,
+reports and declared actions; Results retains current and stale evidence,
+Re-run and identity-checked audit links.
+
+Jobs now poll through a jobs-only session/revision/YAML-digest projection, so
+a late response cannot replace accepted YAML or an unsubmitted draft. Polling
+has one in-flight request, visibility pause/resume, bounded backoff, terminal
+stop and manual recovery. Queued, running, warning, refused, error, stale and
+current states have visible semantic treatments across light, dark and forced
+colours.
+
+The workbench keeps keyboard graph/workspace navigation and responsive drawers
+at 1440x1000, 1024x768, 768x900 and 640x900. Source and fresh-wheel Playwright
+run the same semantic journeys, including six reviewed wide screenshots. The
+launcher remains a trusted server-account surface: loopback is the default,
+remote binding requires explicit acknowledgement, and no authentication or
+sandbox is claimed. Plugins, `python:` targets, server paths and jobs retain
+their existing authority and safety boundaries.
+
+### A YAML document is now its own browser editor
+
+Config Plan 5 ships the selected FastAPI + React configuration editor as the
+optional `rheplicant[gui]` install and the local `rheplicant-gui` command. The
+wheel carries the built, content-hashed frontend assets; direct and
+sdist-derived wheels have identical listings, and fresh-wheel verification
+launches the real server, creates an API session and fetches the emitted
+JavaScript asset.
+
+YAML remains the sole scientific state. The complete 33-node signal path,
+closed 12-section form catalog, validation ledger, preset diff, four preview
+classes, explicit jobs, all 22 output selectors, report design, recovery state
+and audit links are projections or transformations of exact document bytes.
+Undo/redo, dirty and validation baselines are content-addressed; invalid drafts
+remain editable; job results are bound to the submitted YAML digest; refreshing
+a job cannot replace an in-progress draft.
+
+The launcher binds to loopback by default. It refuses a remote bind without
+`--allow-remote` because the application has no authentication, TLS or
+multi-user isolation. This is deliberately documented as an acknowledgement,
+not a sandbox: safe YAML loading rejects tags and duplicate keys, while named
+plugins, `python:` targets, resource/output paths and execution jobs remain
+trusted capabilities of the server account.
+
+### A configuration run is now a scientific publication
+
+Config Plan 4B completes the scientific half of the command boundary. All 22
+reserved `outputs.write` selectors now parse as typed requests: arrays, aux,
+taps, assemblies, estimates, parameters, draws, losses, gradients,
+covariances, prediction products, diagnostics, recovery records, histories,
+timings, captured refusals, signal paths, comparisons, benchmarks, and chains.
+An explicit incompatible run is refused; an unfiltered selector records honest
+omissions and must still emit at least one compatible file.
+
+Numeric products use deterministic pickle-free NPZ, records use canonical
+finite JSON, and optional NetCDF chains never silently fall back. Canonical
+`products.json`, validated against the new packaged strict
+`products-v1.schema.json`, binds every file to its byte count, SHA-256 digest,
+format, kind, selector, and metadata. Reports in JSON or text read only prior
+results and timings. `aux` and `taps` read returned state rather than rerunning
+the twin; assembly and signal-path files read prepared layers.
+
+Two run kinds join the live parser/pre-executor/executor/deferred registries.
+`compare` checks the structure, keys, shapes, and dtype classes of exactly two
+earlier products before reducing `max_rel_diff`, `rms`, or `max_abs`; a
+tolerance miss is data (`passed: false`), not a failed run. `benchmark` runs
+named prepared variants, blocks JAX work, excludes warmups, retains raw
+samples, and distinguishes wall nanoseconds from Python-traced peak bytes.
+
+Scientific bytes do not get a weaker publication route. They are materialized
+after successful execution, inserted into the existing audit bundle before
+the first staging write, and published by the same descriptor-safe journalled
+transaction as configuration and metadata. Crash recovery, exact modes,
+clobber proof, CLI/generated-program parity, and failure siblings therefore
+cover the entire product tree; `validate` remains read-only and does no
+scientific execution or materialization.
+
 ### The checks that cost something, and the gate that decides whether to pay
 
 Plan 3C: a fourth validation pass for the checks that cannot be decided

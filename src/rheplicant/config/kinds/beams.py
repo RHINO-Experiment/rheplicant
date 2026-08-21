@@ -34,14 +34,22 @@ CST meridian, is the fact its file cannot state. ``healpix`` still needs
 
 import dataclasses
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.capture import manifest_entry, register_capture_route
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.files import resolve_file_path
+from rheplicant.config.files import (
+    consume_captured_directory,
+    consume_captured_file,
+    resolve_file_path,
+)
 from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.values import resolve_value
@@ -66,7 +74,13 @@ RAW_ARRAY_FORMATS: tuple[str, ...] = (
     "python",
 )
 
-_COMMON_FORMAT_KEYS: frozenset[str] = frozenset({"format", "nside", "normalize", "horizon"})
+register_capture_route("cst", owner="resources.beams:cst")
+register_capture_route("uvbeam", owner="resources.beams:uvbeam")
+register_capture_route("healpix", owner="resources.beams:healpix")
+
+_COMMON_FORMAT_KEYS: frozenset[str] = frozenset(
+    {"format", "nside", "normalize", "horizon", "sha256"}
+)
 #: format -> every key that format's builder reads, common keys always
 #: included. Checked by :func:`check_unknown_keys`, right after the
 #: phi0_deg/phi_sense/frame gate below settles which of THOSE three keys
@@ -264,21 +278,27 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
         )
     maps = _normalized(maps, normalize)
     fraction = jnp.ones((maps.shape[0],), dtype=maps.dtype)
-    horizon = spec.get("horizon") or {}
+    horizon = (
+        spec.get("horizon")
+        if "horizon" in spec
+        else context.use_default("resources.beams[].horizon", {})
+    ) or {}
     if not isinstance(horizon, dict):
         raise ConfigError(
             f"{name}: horizon: is a mapping (mode, el_deg, apod_deg); got "
             f"{type(horizon).__name__} ({horizon!r})."
         )
-    check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}),
-                       label="horizon:")
-    mode = horizon.get("mode", "none")
+    check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}), label="horizon:")
+    mode = (
+        horizon["mode"]
+        if "mode" in horizon
+        else context.use_default("resources.beams[].horizon.mode", "none")
+    )
     if mode == "truncate_map":
-        maps, fraction = _truncate(name, maps, horizon)
+        maps, fraction = _truncate(name, maps, horizon, context)
     elif mode not in ("none", "projector_mask"):
         raise ConfigError(
-            f"{name}: horizon.mode={mode!r}; it is one of 'none', 'truncate_map', "
-            "'projector_mask'."
+            f"{name}: horizon.mode={mode!r}; it is one of 'none', 'truncate_map', 'projector_mask'."
         )
     return Beam(maps=maps, sky_fraction=fraction, nside=nside, normalize=normalize)
 
@@ -292,17 +312,47 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
             raise ConfigError(f"{name}: format: cst requires a directory of per-frequency exports.")
         if context.freq is None:
             raise ConfigError(f"{name}: format: cst needs observation.freq.grid to sample onto.")
-        return jnp.asarray(
-            cst_beam_maps(
-                resolve_file_path(directory, context),
+        destination = DestinationDescriptor(
+            f"{name}.phi0_deg",
+            "resource_field",
+            "rheplicant.config.kinds.beams.build_beam.cst.phi0_deg",
+        )
+        resolved = resolve_value(spec["phi0_deg"], context, destination=destination)
+        phi0_deg = float(resolved.value)
+        record_resolved_delivery(context, destination, resolved.unit)
+        source = resolve_file_path(directory, context)
+        suffix = (
+            spec["suffix"]
+            if "suffix" in spec
+            else context.use_default("resources.beams[].suffix", ".txt")
+        )
+
+        def enumerate_cst(root: Path):
+            return tuple(
+                manifest_entry(root, path, path.relative_to(root).as_posix())
+                for path in sorted(root.rglob(f"*{suffix}"))
+                if path.is_file()
+            )
+
+        maps = consume_captured_directory(
+            source,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.directory", "config_path", "resources.beams.*.directory"
+            ),
+            format="cst",
+            enumerate_manifest=enumerate_cst,
+            reader=lambda snapshot: cst_beam_maps(
+                snapshot,
                 np.asarray(context.freq),
                 nside=nside,
-                suffix=spec.get("suffix", ".txt"),
-                phi0_deg=float(resolve_value(spec["phi0_deg"], context).value),
+                suffix=suffix,
+                phi0_deg=phi0_deg,
                 phi_sense=spec["phi_sense"],
             ),
-            dtype=context.dtype,
+            declared_sha256=spec.get("sha256"),
         )
+        return jnp.asarray(maps, dtype=context.dtype)
     if fmt == "uvbeam":
         return _uvbeam_maps(name, spec, context, nside)
     if fmt == "healpix":
@@ -315,16 +365,31 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
         node = {"file": {"path": spec["path"], "format": fmt}}
         if "key" in spec:
             node["file"]["key"] = spec["key"]
-        return jnp.asarray(resolve_value(node, context).value, dtype=context.dtype)
+        destination = DestinationDescriptor(
+            f"{name}.maps",
+            "resource_field",
+            f"rheplicant.config.kinds.beams.build_beam.{fmt}.maps",
+        )
+        resolved = resolve_value(node, context, destination=destination)
+        maps = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+        return maps
     if fmt == "inline":
         if "maps" not in spec:
             raise ConfigError(f"{name}: format: inline requires a 'maps' value node.")
-        return jnp.asarray(resolve_value(spec["maps"], context).value, dtype=context.dtype)
+        destination = DestinationDescriptor(
+            f"{name}.maps",
+            "resource_field",
+            "rheplicant.config.kinds.beams.build_beam.inline.maps",
+        )
+        resolved = resolve_value(spec["maps"], context, destination=destination)
+        maps = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, destination, resolved.unit)
+        return maps
     if fmt == "python":
         if "python" not in spec:
             raise ConfigError(
-                f"{name}: format: python requires a 'python:' target "
-                "('pkg.mod:callable')."
+                f"{name}: format: python requires a 'python:' target ('pkg.mod:callable')."
             )
         args = spec.get("args", {})
         literal = spec.get("literal", {})
@@ -347,8 +412,35 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
                 "resolved through the value grammar and literal values are forwarded "
                 "untouched, so one argument cannot be both."
             )
+        from rheplicant.config.values import make_resolution_target
+
+        for key, value in args.items():
+            make_resolution_target(
+                value,
+                DestinationDescriptor(
+                    f"{name}.args.{key}",
+                    "resource_field",
+                    "rheplicant.config.kinds.beams.build_beam.python.args.*",
+                ),
+                context.dimensions,
+            )
+        if context.audit is not None:
+            context.audit.python_target(f"{name}.python", spec["python"])
         factory = import_target(spec["python"])
-        arguments = {key: resolve_value(value, context).value for key, value in args.items()}
+        arguments = {}
+        for key, value in args.items():
+            destination = DestinationDescriptor(
+                f"{name}.args.{key}",
+                "resource_field",
+                "rheplicant.config.kinds.beams.build_beam.python.args.*",
+            )
+            resolved = resolve_value(
+                value,
+                context,
+                destination=destination,
+            )
+            arguments[key] = resolved.value
+            record_resolved_delivery(context, destination, resolved.unit)
         arguments.update(literal)
         return jnp.asarray(factory(**arguments), dtype=context.dtype)
     return _gaussian(name, spec, context, nside)
@@ -383,16 +475,28 @@ def _uvbeam_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
     if "path" not in spec:
         raise ConfigError(f"{name}: format: uvbeam requires a 'path'.")
     if context.freq is None:
-        raise ConfigError(
-            f"{name}: format: uvbeam needs observation.freq.grid to sample onto."
-        )
+        raise ConfigError(f"{name}: format: uvbeam needs observation.freq.grid to sample onto.")
     path = resolve_file_path(spec["path"], context)
-    try:
-        uvb = pyuvdata.UVBeam.from_file(path)
+
+    def read(snapshot: Path):
+        uvb = pyuvdata.UVBeam.from_file(snapshot)
         rows = [
             uvbeam_to_healpix_maps(uvb, freq_MHz=float(f) / 1e6, nside=nside)
             for f in np.asarray(context.freq)
         ]
+        return np.stack(rows)
+
+    try:
+        rows = consume_captured_file(
+            path,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.path", "config_path", "resources.beams.*.path"
+            ),
+            format="uvbeam",
+            reader=read,
+            declared_sha256=spec.get("sha256"),
+        )
     except ConfigError:
         raise
     except Exception as exc:
@@ -402,7 +506,7 @@ def _uvbeam_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
             "(pyuvdata interpolates, it does not extrapolate), and the beam must "
             "cover a regular (az, za) grid over the full azimuth range."
         ) from exc
-    return jnp.asarray(np.stack(rows), dtype=context.dtype)
+    return jnp.asarray(rows, dtype=context.dtype)
 
 
 def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int):
@@ -437,8 +541,21 @@ def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int)
     if order not in ("ring", "nested"):
         raise ConfigError(f"{name}: order={order!r}; it is 'ring' or 'nested'.")
     path = resolve_file_path(spec["path"], context)
+
+    def read(snapshot: Path):
+        return hp.read_map(snapshot, field=None, nest=None, h=True)
+
     try:
-        raw, header = hp.read_map(path, field=None, nest=None, h=True)
+        raw, header = consume_captured_file(
+            path,
+            context,
+            destination=DestinationDescriptor(
+                f"{name}.path", "config_path", "resources.beams.*.path"
+            ),
+            format="healpix",
+            reader=read,
+            declared_sha256=spec.get("sha256"),
+        )
     except ConfigError:
         raise
     except Exception as exc:
@@ -468,7 +585,14 @@ def _healpix_maps(name: str, spec: dict, context: ResolutionContext, nside: int)
     maps = np.atleast_2d(np.asarray(raw))
     if order == "nested":
         maps = np.stack([hp.reorder(row, n2r=True) for row in maps])
-    freq = np.asarray(resolve_value(spec["freq"], context).value)
+    destination = DestinationDescriptor(
+        f"{name}.freq",
+        "resource_field",
+        "rheplicant.config.kinds.beams.build_beam.healpix.freq",
+    )
+    resolved = resolve_value(spec["freq"], context, destination=destination)
+    freq = np.asarray(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
     if freq.ndim != 1 or freq.shape[0] != maps.shape[0]:
         raise ConfigError(
             f"{name}: freq declares {tuple(freq.shape)} while the file carries "
@@ -503,10 +627,16 @@ def _gaussian(name: str, spec: dict, context: ResolutionContext, nside: int):
             "widths for one beam have no defined relationship here, and none is a beam."
         )
     width_key = "fwhm_deg" if "fwhm_deg" in spec else "sigma_deg"
+    destination = DestinationDescriptor(
+        f"{name}.{width_key}",
+        "resource_field",
+        f"rheplicant.config.kinds.beams.build_beam.gaussian.{width_key}",
+    )
+    resolved = resolve_value(spec[width_key], context, destination=destination)
+    sigma_deg = jnp.asarray(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
     if width_key == "fwhm_deg":
-        sigma_deg = jnp.asarray(resolve_value(spec["fwhm_deg"], context).value) / 2.3548200450309493
-    else:
-        sigma_deg = jnp.asarray(resolve_value(spec["sigma_deg"], context).value)
+        sigma_deg = sigma_deg / 2.3548200450309493
     n_freq = 1 if context.freq is None else int(context.freq.shape[0])
     widths_raw = jnp.atleast_1d(sigma_deg)
     n_widths = int(widths_raw.shape[0])
@@ -545,10 +675,35 @@ def _normalized(maps, normalize: str):
     return maps / (jnp.sum(maps, axis=1, keepdims=True) * (4.0 * jnp.pi / n_pix))
 
 
-def _truncate(name: str, maps, horizon: dict):
+def _horizon_angle(
+    name: str,
+    horizon: dict,
+    key: str,
+    default: float,
+    context: ResolutionContext,
+) -> float:
+    defaulted = key not in horizon
+    destination = DestinationDescriptor(
+        f"{name}.horizon.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.beams.build_beam.horizon.{key}",
+    )
+    if key in horizon:
+        node = horizon[key]
+    elif key == "el_deg":
+        node = context.use_default("resources.beams[].horizon.el_deg", default)
+    else:
+        node = context.use_default("resources.beams[].horizon.apod_deg", default)
+    resolved = resolve_value(node, context, destination=destination)
+    value = float(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit, defaulted=defaulted)
+    return value
+
+
+def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):
     from rheplicant.radio import horizon_truncated_beam
 
-    el_deg = float(horizon.get("el_deg", 90.0))
+    el_deg = _horizon_angle(name, horizon, "el_deg", 90.0, context)
     if el_deg != 90.0:
         raise ConfigError(
             f"{name}: horizon.el_deg={el_deg}. truncate_map accepts only 90 -- limTOD's "
@@ -557,6 +712,8 @@ def _truncate(name: str, maps, horizon: dict):
             "projector_mask), which applies it in the horizontal frame."
         )
     truncated, fraction = horizon_truncated_beam(
-        np.asarray(maps), el_deg=el_deg, apod_deg=float(horizon.get("apod_deg", 0.0))
+        np.asarray(maps),
+        el_deg=el_deg,
+        apod_deg=_horizon_angle(name, horizon, "apod_deg", 0.0, context),
     )
     return jnp.asarray(truncated), jnp.asarray(fraction)

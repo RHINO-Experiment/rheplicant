@@ -23,16 +23,14 @@ promise is aimed. The alternative is the same refusal arriving from
 ``ParameterSpace`` once that build is already underway.
 """
 
-import re
 from collections.abc import Callable, Iterable
 from typing import Any, NamedTuple
 
 import equinox as eqx
 import jax
 
+from _rheplicant_bootstrap.path_syntax import PATH_STEP as _STEP
 from rheplicant.config.errors import ConfigError
-
-_STEP = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z_0-9]*)?(?:\[(?P<index>0|[1-9][0-9]*)\])?$")
 
 
 def parse_path(path: str) -> tuple[str | int, ...]:
@@ -57,7 +55,7 @@ def parse_path(path: str) -> tuple[str | int, ...]:
         )
     parts: list[Any] = []
     for piece in text.split("."):
-        match = _STEP.match(piece)
+        match = _STEP.fullmatch(piece)
         if match is None or (match.group("name") is None and match.group("index") is None):
             raise ConfigError(
                 f"Path {path!r} has an unusable segment {piece!r}. Each segment is an "

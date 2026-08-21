@@ -35,6 +35,7 @@ from rheplicant.config.sections.npe import _estimator, _npe_spec, _simulate_bank
 from rheplicant.config.sections.runs import _KINDS, run_document
 from rheplicant.inference.npe import MIN_SCALE
 from tests.config.exit_helpers import FROZEN, PRIOR_FREE
+from tests.config.inflight_helpers import built_run
 from tests.config.posterior_helpers import (
     NPE_SECTION,
     NPE_SEEDS,
@@ -243,19 +244,13 @@ class TestTheEstimator:
         assert _estimator(npe_spec(), built, built.inference.npe,
                           thetas, data).net.width_size == 9
 
-    def test_an_undeclared_knob_gets_the_packages_own_default(self):
-        # min_scale is the key NPE_SECTION deliberately does not write, so
-        # this is the standing rule -- config keys never restate package
-        # defaults -- observed arriving rather than asserted in prose.  The
-        # second assertion is what keeps it honest: if a later edit adds
-        # min_scale to NPE_SECTION, this test would otherwise keep passing
-        # while proving nothing.
+    def test_an_undeclared_knob_is_materialized_as_the_package_default(self):
         built = npe_built(npe={"bank": {"n_simulations": 8}})
         _, thetas, data = self._pairs(built)
         estimator = _estimator(npe_spec(), built, built.inference.npe,
                                thetas, data)
         assert estimator.min_scale == MIN_SCALE
-        assert "min_scale" not in built.inference.npe.create
+        assert built.inference.npe.create["min_scale"] == MIN_SCALE
 
     def test_a_declared_min_scale_is_forwarded_and_not_dropped(self):
         # The other leg, and it is not optional.  min_scale is the one
@@ -332,13 +327,22 @@ class TestTheSectionIsRequired:
         # without it declares no bank size, no seeds and no draw count.  The
         # refusal names the SECTION and lists its five subsections rather
         # than naming whichever key happened to be looked up first.
+        #
+        # Two boundaries, one refusal: Task 10's orchestration handler-parses
+        # the schedule at LOAD, so the document itself never loads; the
+        # payload route (``built_run``, no handler parse) still hands the
+        # helper a build, and the helper's own refusal is unchanged.
         doc = npe_document()
         del doc["inference"]["npe"]
-        built = load_document(doc)
+        built = built_run(doc)
         assert built.inference.npe is None
         with pytest.raises(ConfigError,
                            match="declares no inference.npe:") as caught:
             _npe_spec(npe_spec(), built)
+        assert str(caught.value).startswith("runs['amortized']: ")
+        with pytest.raises(ConfigError,
+                           match="declares no inference.npe:") as caught:
+            load_document(doc)
         assert str(caught.value).startswith("runs['amortized']: ")
 
     def test_a_subsection_with_no_seed_is_refused_naming_that_subsection(self):
@@ -758,3 +762,26 @@ class TestTheKindIsRunnable:
             "runs._KINDS_2D still exists; the last task to move a kind out of "
             "it deletes the tuple and its refusal branch."
         )
+
+
+class TestTheRunLevelParse:
+    """Plan 4A Task 9: npe's parse is the empty sweep plus the section's
+    presence -- no simulation, no training, no draw."""
+
+    def test_parse_touches_no_science_and_projects_empty_views(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import parse_run
+
+        def explode(*args, **kwargs):
+            raise AssertionError("science ran during parse")
+
+        monkeypatch.setattr(inference, "simulate_pairs", explode)
+        monkeypatch.setattr(inference, "NeuralPosterior", explode)
+        monkeypatch.setattr(inference, "train_posterior", explode)
+        parsed = parse_run(npe_spec(), npe_built(), index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        assert dict(parsed.parsed.execution) == {}
+        assert dict(parsed.parsed.resolved) == {}

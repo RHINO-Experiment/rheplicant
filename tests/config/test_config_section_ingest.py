@@ -1,4 +1,4 @@
-"""observation.from_file: the recording comes off disk as an object."""
+"""observation.from_file: A9 validates its structural destination before disk I/O."""
 
 import numpy as np
 import pytest

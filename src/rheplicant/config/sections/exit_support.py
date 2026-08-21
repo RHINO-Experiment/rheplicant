@@ -1,27 +1,291 @@
 """What every exit executor shares: the sweep, the accessors, the registry.
 
-An executor is ``(run, built, *, results=None) -> product``.  It is registered
-under its ``runs[].kind`` by the :func:`register` decorator, and
-:data:`EXECUTORS` is the one table :func:`execute_run` dispatches through.
+An exit handler is FOUR bindings under one ``runs[].kind``: a ``parse`` that
+freezes the entry's options into a :class:`ParsedOptions`, a ``pre_execute``
+for the checks only a finished earlier run can answer, an ``execute`` that
+produces the product, and the ordered ``deferred_checks`` a validating
+caller reports rather than claims.  :func:`register` binds all four
+atomically under one lock, and :func:`handler_for` projects the live tables
+on every call, so which handler a kind has never depends on import order or
+on a cached copy.
+
 The leaf modules (``exits``, ``conjugate``, ``diagnostics``) import from here
 and never from each other, so the registration is a one-way import.
+
+TRANSITIONAL until Tasks 8-9: the eleven conjugate/diagnostics built-ins
+still bind with ``parse`` omitted (Task 7 migrated the five base kinds to
+explicit parsers).  Their parser is then :func:`_legacy_freeze_parse` -- the
+same freeze/YAML-safe snapshot factory explicit parsers call -- and their
+executor keeps today's ``(run, built, *, results=None)`` convention behind
+an adapter that hands it the raw ``RunSpec``.  A registration WITH ``parse=``
+stores its executor unwrapped, and that executor is called
+``(parsed_run, configured_run, previous)`` positionally.
 """
 
 from __future__ import annotations
 
+import functools
+import threading
+import types
 from collections.abc import Callable, Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
+from _rheplicant_bootstrap.frozen import freeze, freeze_evidence
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.noise import decided_noise
 
-__all__ = ["EXECUTORS", "register", "reuse_of"]
+if TYPE_CHECKING:
+    from _rheplicant_bootstrap.types import JsonValue, LayerIdentity, TraceSink
+    from _rheplicant_bootstrap.variants import LayerRef
+    from rheplicant.config.document import ConfiguredRun
+    from rheplicant.config.sections.runs import RunResult, RunSpec
 
-EXECUTORS: dict[str, Callable[..., Any]] = {}
+__all__ = [
+    "DEFERRED_CHECKS",
+    "EXECUTORS",
+    "PARSERS",
+    "PRE_EXECUTORS",
+    "ExitHandler",
+    "ParsedOptions",
+    "ParsedRun",
+    "RunParseContext",
+    "handler_for",
+    "parse_run",
+    "parsed_options",
+    "register",
+    "reuse_of",
+]
 
 
-def register(kind: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Bind an executor to its ``runs[].kind``.
+@dataclass(frozen=True, slots=True)
+class ParsedOptions:
+    """One run entry's options, frozen twice: what execute reads, and the
+    YAML-safe audit projection of it.
+
+    The two views are detached from each other and from the caller's
+    mapping: mutating the parsed document afterwards moves neither, and a
+    hook that belongs in execution (a callable, a live object) never reaches
+    the resolved view a serializer will read.
+    """
+
+    execution: Mapping[str, object]
+    resolved: Mapping[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class RunParseContext:
+    """The cheapest context a kind's parser may read: position, layer, the
+    common ``RunSpec``, and the configured build's static facts."""
+
+    index: int
+    layer: LayerRef
+    spec: RunSpec
+    configured_run: ConfiguredRun
+
+@dataclass(frozen=True, slots=True)
+class ParsedRun:
+    """A ``RunSpec`` after its kind's parser: the spec, plus the two frozen
+    option views the rest of the pipeline is allowed to read."""
+
+    index: int
+    layer: LayerRef
+    spec: RunSpec
+    parsed: ParsedOptions
+    declaration_layer: LayerIdentity | None = None
+
+    @property
+    def audit_layer(self) -> LayerIdentity:
+        """Layer whose schedule declared this run, distinct from its target."""
+        return self.layer.identity if self.declaration_layer is None else self.declaration_layer
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    @property
+    def kind(self) -> str:
+        return self.spec.kind
+
+    @property
+    def variant(self) -> str | None:
+        return self.spec.variant
+
+    @property
+    def on(self) -> str:
+        return self.spec.on
+
+    @property
+    def expect(self) -> str:
+        return self.spec.expect
+
+    @property
+    def reuse(self) -> str | None:
+        return self.spec.reuse
+
+    @property
+    def options(self) -> Mapping[str, object]:
+        """The parsed execution view, never the raw ``spec.options``."""
+        return self.parsed.execution
+
+
+ParseExit = Callable[[Mapping[str, object], RunParseContext], ParsedOptions]
+PreExecute = Callable[
+    [ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], None
+]
+ExecuteExit = Callable[
+    [ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], object
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ExitHandler:
+    """One kind's four bindings, projected live out of the registry."""
+
+    parse: ParseExit
+    pre_execute: PreExecute
+    execute: ExecuteExit
+    deferred_checks: tuple[str, ...]
+
+
+PARSERS: dict[str, ParseExit] = {}
+PRE_EXECUTORS: dict[str, PreExecute] = {}
+EXECUTORS: dict[str, ExecuteExit] = {}
+DEFERRED_CHECKS: dict[str, tuple[str, ...]] = {}
+_HANDLER_LOCK = threading.RLock()
+
+
+def _require_yaml_safe(view: object, path: str) -> None:
+    """Refuse a resolved-view leaf the audit record cannot hold.
+
+    ``freeze_evidence`` has already refused sets, foreign objects, cycles
+    and non-string keys by the time this walks the frozen view; what remains
+    outside ``JsonValue`` is the binary family, which canonicalizes to
+    ``bytes`` and would otherwise reach the resolved-YAML encoder.
+    """
+    if isinstance(view, Mapping):
+        for key, child in view.items():
+            _require_yaml_safe(child, f"{path}.{key}")
+        return
+    if type(view) is tuple:
+        for index, child in enumerate(view):
+            _require_yaml_safe(child, f"{path}[{index}]")
+        return
+    if view is None or isinstance(view, (bool, int, float, str)):
+        return
+    raise ConfigError(
+        "runs[].options: the resolved audit view must be YAML-safe; "
+        f"{path} is {type(view).__name__}."
+    )
+
+
+def parsed_options(
+    execution: Mapping[str, object],
+    *,
+    resolved: Mapping[str, object],
+) -> ParsedOptions:
+    """Freeze one run entry's two option views, independently and atomically.
+
+    The execution view uses the permissive recursive freeze: containers
+    become read-only and leaf objects pass through, because a later explicit
+    parser may legitimately place a hook there.  The resolved view uses the
+    strict evidence freeze -- a detached copy with string keys, canonical
+    scalars, and the depth/node/edge budgets -- and is then validated as
+    YAML-safe BEFORE either view is returned, so a rejected entry hands back
+    nothing at all.  There is no trace parameter: this factory never appends
+    an event.
+    """
+    if not isinstance(execution, Mapping):
+        raise ConfigError(
+            "runs[].options: parsed execution options are a mapping; got "
+            f"{type(execution).__name__}."
+        )
+    if not isinstance(resolved, Mapping):
+        raise ConfigError(
+            "runs[].options: resolved options are a mapping; got "
+            f"{type(resolved).__name__}."
+        )
+    frozen_resolved = freeze_evidence(
+        resolved, where="runs[].options resolved view"
+    )
+    _require_yaml_safe(frozen_resolved, "resolved")
+    frozen_execution = freeze(execution)
+    return ParsedOptions(execution=frozen_execution, resolved=frozen_resolved)
+
+
+def _legacy_freeze_parse(
+    options: Mapping[str, object], context: RunParseContext
+) -> ParsedOptions:
+    """The transitional parser the unmigrated built-ins sit on (Tasks 8-9).
+
+    Both views are the entry's own options, frozen independently -- the same
+    factory an explicit parser calls, so migrating a kind changes WHO calls
+    it, never how the freeze behaves.
+    """
+    return parsed_options(options, resolved=options)
+
+
+def _noop_pre_execute(
+    parsed_run: ParsedRun,
+    configured_run: ConfiguredRun,
+    previous_results: Mapping[str, RunResult],
+) -> None:
+    """The default: every check this kind has is decidable at parse time."""
+    return None
+
+
+def _legacy_dispatch(
+    parsed_run: ParsedRun,
+    configured_run: ConfiguredRun,
+    previous_results: Mapping[str, RunResult],
+    _execute: Callable[..., Any],
+) -> object:
+    """The transitional legacy calling convention, as a closure-free body.
+
+    Closure-free so that :func:`_adapt_legacy_executor` can rebind this code
+    object onto the wrapped executor's OWN ``__globals__``.
+    """
+    return _execute(parsed_run.spec, configured_run, results=previous_results)
+
+
+def _adapt_legacy_executor(execute: Callable[..., Any]) -> ExecuteExit:
+    """Wrap a ``(run, built, *, results=None)`` executor as an ExecuteExit.
+
+    The wrapper is a real function built from :func:`_legacy_dispatch`'s code
+    object but rebound to ``execute``'s OWN ``__globals__``, and
+    ``functools.update_wrapper`` then restores ``__module__``/``__name__`` and
+    sets ``__wrapped__``.  That is what keeps the wrapped executor
+    transparent to the two things that read it in place: the
+    duplicate-registration message, which must name the claimant's module,
+    and the preflight sweep census
+    (``tests/config/test_preflight_document.py``), which parses
+    ``inspect.getsource``'s unwrapped source and resolves helper calls
+    through ``fn.__globals__`` -- a plain closure would report
+    ``exit_support``'s globals and silently empty that census.
+    """
+    globals_ = getattr(execute, "__globals__", None)
+    if type(globals_) is not dict:
+        # A callable that is not a function has no module namespace; the
+        # body below touches none, so ours is only a label.
+        globals_ = globals()
+    adapted = types.FunctionType(
+        _legacy_dispatch.__code__,
+        globals_,
+        getattr(execute, "__name__", None) or "_legacy_dispatch",
+        (execute,),
+    )
+    functools.update_wrapper(adapted, execute)
+    return adapted
+
+
+def register(
+    kind: str,
+    *,
+    parse: ParseExit | None = None,
+    pre_execute: PreExecute = _noop_pre_execute,
+    deferred_checks: tuple[str, ...] = (),
+) -> Callable[[ExecuteExit], ExecuteExit]:
+    """Bind one exit handler to its ``runs[].kind`` -- atomically, all four.
 
     Registering the same kind twice is a programming error, not a
     configuration one -- and it is refused with a RAISE rather than the
@@ -31,34 +295,132 @@ def register(kind: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         $ python -O -c "...register('_probe')(one); register('_probe')(two)..."
         under -O, second registration won: True
 
-    -- so under ``-O`` which executor a document got depended on import order,
-    with nothing said.  ``ConfigError`` and not ``RuntimeError``, following
-    ``errors.py``'s "one refusal type for the whole config layer"; the message
-    is what carries "this is wiring, not your document", and it names both
-    claimants so the second one can be found.
+    -- so under ``-O`` which executor a document got depended on import
+    order, with nothing said.  ``ConfigError`` and not ``RuntimeError``,
+    following ``errors.py``'s "one refusal type for the whole config layer";
+    the message is what carries "this is wiring, not your document", and it
+    names both claimants so the second one can be found.
 
     That rule is stated layer-wide and, measured, is not yet applied
-    layer-wide: this is the first of five registration decorators in
+    layer-wide: this remains the only one of five registration decorators in
     ``config/`` to refuse a double registration at all.  The other four --
     ``files.register_reader``, ``values.register_form``,
     ``derive.register_derivation`` and ``resources.register_kind`` -- assign
     unconditionally, so the second registration wins in silence with no
     ``assert`` to strip.  They are outside Plan 3A's scope and are recorded on
     its residue ledger rather than fixed here.
+
+    Every member is validated before ANY table is bound, the four
+    assignments run under the one lock, and a failure mid-bind rolls all
+    four back: a partial handler -- a parser with no executor, or the
+    reverse -- is never observable.  Omitting ``parse`` is the transitional
+    legacy shape: the parser is :func:`_legacy_freeze_parse` and the
+    executor keeps its old calling convention behind an adapter.
     """
 
-    def bind(fn: Callable[..., Any]) -> Callable[..., Any]:
-        if kind in EXECUTORS:
-            raise ConfigError(
-                f"runs[].kind: {kind!r} is registered twice, by "
-                f"{EXECUTORS[kind].__module__} and by {fn.__module__}. A kind "
-                "has one executor, and which of the two you would get depends "
-                "on import order."
+    def bind(execute: ExecuteExit) -> ExecuteExit:
+        registries = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
+        if not callable(execute) or not callable(pre_execute):
+            raise TypeError(
+                "exit parser, pre-executor, and executor are callable"
             )
-        EXECUTORS[kind] = fn
-        return fn
+        chosen_parse = _legacy_freeze_parse if parse is None else parse
+        if not callable(chosen_parse):
+            raise TypeError(
+                "exit parser, pre-executor, and executor are callable"
+            )
+        if isinstance(deferred_checks, (str, bytes)):
+            raise ValueError(
+                "deferred check names are unique non-empty strings"
+            )
+        checks = tuple(deferred_checks)
+        if len(checks) != len(set(checks)) or not all(
+                isinstance(check, str) and check for check in checks):
+            raise ValueError(
+                "deferred check names are unique non-empty strings"
+            )
+        stored_execute = (
+            execute if parse is not None else _adapt_legacy_executor(execute)
+        )
+        with _HANDLER_LOCK:
+            if any(kind in registry for registry in registries):
+                incumbent = EXECUTORS[kind]
+                raise ConfigError(
+                    f"runs[].kind: {kind!r} is registered twice, by "
+                    f"{incumbent.__module__} and by {execute.__module__}. "
+                    "A kind has one executor, and which of the two you would "
+                    "get depends on import order."
+                )
+            try:
+                PARSERS[kind] = chosen_parse
+                PRE_EXECUTORS[kind] = pre_execute
+                EXECUTORS[kind] = stored_execute
+                DEFERRED_CHECKS[kind] = checks
+            except BaseException:
+                for registry in registries:
+                    registry.pop(kind, None)
+                raise
+        return execute
 
     return bind
+
+
+def handler_for(kind: str) -> ExitHandler:
+    """The complete live handler for ``kind``, assembled at call time."""
+    with _HANDLER_LOCK:
+        try:
+            return ExitHandler(PARSERS[kind], PRE_EXECUTORS[kind],
+                               EXECUTORS[kind], DEFERRED_CHECKS[kind])
+        except KeyError:
+            raise ConfigError(
+                f"runs[].kind: {kind!r} is not registered; it takes "
+                f"{sorted(EXECUTORS)}."
+            ) from None
+
+
+def parse_run(
+    spec: RunSpec,
+    configured: ConfiguredRun,
+    *,
+    index: int,
+    layer: LayerRef,
+    trace: TraceSink | None = None,
+    declaration_layer: LayerIdentity | None = None,
+) -> ParsedRun:
+    """Parse one declared run through its current handler -> a ``ParsedRun``.
+
+    Exactly one parser runs -- the one the registry holds NOW -- and the one
+    parsed-run trace projection is appended only after that parser and its
+    ``parsed_options`` complete successfully.  The row keys are the closed
+    ``("descriptor", "resolved_options", "deferred_checks")`` of plan §1.4's
+    ``parsed_run`` record, with the descriptor exactly
+    ``{index, name, kind, variant}``.
+    """
+    handler = handler_for(spec.kind)
+    context = RunParseContext(index=index, layer=layer, spec=spec,
+                              configured_run=configured)
+    parsed = handler.parse(spec.options, context)
+    if not isinstance(parsed, ParsedOptions):
+        raise TypeError(
+            f"exit parser for {spec.kind!r} returned "
+            f"{type(parsed).__name__}, not ParsedOptions."
+        )
+    run = ParsedRun(
+        index=index,
+        layer=layer,
+        spec=spec,
+        parsed=parsed,
+        declaration_layer=declaration_layer,
+    )
+    if trace is not None:
+        audit_row = {
+            "descriptor": {"index": index, "name": spec.name,
+                           "kind": spec.kind, "variant": spec.variant},
+            "resolved_options": parsed.resolved,
+            "deferred_checks": handler.deferred_checks,
+        }
+        trace.record_parsed_run(run.audit_layer, audit_row)
+    return run
 
 
 def _sweep(run: Any, allowed: frozenset[str]) -> None:

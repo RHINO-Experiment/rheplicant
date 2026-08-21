@@ -18,6 +18,7 @@ requires-python = ">=3.11"
 dependencies = [
     "jax>=0.5",
     "equinox>=0.13",
+    "PyYAML>=6.0",
     # The sky engines (GeneralPointingProjector, DriftScanProjector) and the beam
     # adapters are wired to limTOD, and they are the package's real forward model
     # rather than an accessory, so this is a dependency and not an extra.
@@ -77,7 +78,7 @@ cal = ["rhino-cal-jax"]
 #   uv pip install -e <path-to-MomentRFI>
 #   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 # The threshold-based FlaggingOperator needs none of it.
-rfi = ["MomentRFI"]
+rfi = ["MomentRFI", "MomentEmu"]
 # read_rhino_observation() reads the RHINO observation HDF5 through h5py. Unlike
 # rhino-cal-jax and MomentRFI this one IS on PyPI, so the extra resolves
 # normally:
@@ -90,6 +91,17 @@ rhino = ["h5py"]
 # Python >= 3.11, the floor this package already declares:
 #   uv pip install -e ".[uvbeam]"
 uvbeam = ["pyuvdata>=3.0"]
+# Plan 5's two-candidate spike keeps both web stacks optional: neither the
+# scientific package nor the JAX-free command boundary imports them.  The
+# selected stack will become the documented ``gui`` extra after the spike;
+# these named extras keep the comparison reproducible in the meantime.
+gui-panel = ["panel>=1.9,<2"]
+gui-react = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "httpx2"]
+# The selected Plan 5 editor. ``gui-react`` remains the reproducible spike and
+# includes ``httpx2`` solely for Starlette's test client; the shipped server
+# talks HTTP through uvicorn and does not make that test dependency a runtime
+# requirement.
+gui = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1"]
 docs = [
     "sphinx>=7",
     "myst-parser",
@@ -105,11 +117,16 @@ Documentation = "https://rheplicant.readthedocs.io"
 Repository = "https://github.com/RHINO-Experiment/rheplicant"
 Changelog = "https://rheplicant.readthedocs.io/en/latest/changelog.html"
 
+[project.scripts]
+rheplicant = "_rheplicant_bootstrap:main"
+rheplicant-gui = "rheplicant.gui.launcher:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-cov",
     "ruff",
+    "jsonschema>=4.23",
     # tests/test_docs_links.py checks every `](page.md#anchor)` against the
     # anchors myst would generate, and imports myst's own slugifier to do it
     # rather than inventing a third scheme that agrees with neither. That
@@ -138,8 +155,22 @@ dev = [
     "pytest-xdist",
 ]
 
+[tool.uv.sources]
+rhino-cal-jax = { git = "https://github.com/RHINO-Experiment/rhino-cal", branch = "feat/rhino-cal-jax" }
+MomentRFI = { git = "https://github.com/zzhang0123/MomentRFI" }
+MomentEmu = { git = "https://github.com/zzhang0123/MomentEmu" }
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/rheplicant"]
+packages = ["src/rheplicant", "src/_rheplicant_bootstrap"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/rheplicant",
+    "/src/_rheplicant_bootstrap",
+    "/pyproject.toml",
+    "/README.md",
+    "/LICENSE",
+]
 
 [tool.ruff]
 line-length = 100
@@ -152,10 +183,10 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=rheplicant --cov-fail-under=80"
+addopts = "-q --cov=rheplicant --cov=_rheplicant_bootstrap --cov-fail-under=80"
 
 [tool.coverage.run]
-source = ["rheplicant"]
+source = ["rheplicant", "_rheplicant_bootstrap"]
 
 [tool.coverage.report]
 exclude_lines = [

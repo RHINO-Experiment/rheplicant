@@ -1,0 +1,80 @@
+:root {
+  --rh-font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --rh-font-mono: "SFMono-Regular", Consolas, monospace;
+  --rh-space-1: 0.25rem;
+  --rh-space-2: 0.5rem;
+  --rh-space-3: 0.75rem;
+  --rh-space-4: 1rem;
+  --rh-space-5: 1.5rem;
+  --rh-space-6: 2rem;
+  --rh-control-height: 2.25rem;
+  --rh-radius-sm: 0.25rem;
+  --rh-radius-md: 0.5rem;
+  --rh-surface-canvas: #f4f6f8;
+  --rh-surface-work: #ffffff;
+  --rh-surface-raised: #f8fafc;
+  --rh-border: #c5ced8;
+  --rh-text: #17212b;
+  --rh-text-muted: #52616f;
+  --rh-action: #1769aa;
+  --rh-action-contrast: #ffffff;
+  --rh-focus: #005fcc;
+  --rh-success-bg: #e7f6ed;
+  --rh-success-text: #176b38;
+  --rh-warning-bg: #fff3cd;
+  --rh-warning-text: #6b4d00;
+  --rh-danger-bg: #fdebec;
+  --rh-danger-text: #8f1d24;
+  --rh-stale-bg: #ece7f6;
+  --rh-stale-text: #5b3c88;
+  --rh-disabled-bg: #e5e9ed;
+  --rh-disabled-text: #59636d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rh-surface-canvas: #111820;
+    --rh-surface-work: #18222c;
+    --rh-surface-raised: #202c37;
+    --rh-border: #586978;
+    --rh-text: #eef3f7;
+    --rh-text-muted: #b6c2cc;
+    --rh-action: #67b7f7;
+    --rh-action-contrast: #10202d;
+    --rh-focus: #8dc8ff;
+    --rh-success-bg: #173d29;
+    --rh-success-text: #a8e7bd;
+    --rh-warning-bg: #453713;
+    --rh-warning-text: #ffe08a;
+    --rh-danger-bg: #492126;
+    --rh-danger-text: #ffb3ba;
+    --rh-stale-bg: #352a4a;
+    --rh-stale-text: #d5c1f2;
+    --rh-disabled-bg: #303a43;
+    --rh-disabled-text: #bec7ce;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --rh-surface-canvas: Canvas;
+    --rh-surface-work: Canvas;
+    --rh-surface-raised: Canvas;
+    --rh-border: CanvasText;
+    --rh-text: CanvasText;
+    --rh-text-muted: CanvasText;
+    --rh-action: LinkText;
+    --rh-action-contrast: Canvas;
+    --rh-focus: Highlight;
+    --rh-success-bg: Canvas;
+    --rh-success-text: CanvasText;
+    --rh-warning-bg: Canvas;
+    --rh-warning-text: CanvasText;
+    --rh-danger-bg: Canvas;
+    --rh-danger-text: CanvasText;
+    --rh-stale-bg: Canvas;
+    --rh-stale-text: CanvasText;
+    --rh-disabled-bg: Canvas;
+    --rh-disabled-text: GrayText;
+  }
+}

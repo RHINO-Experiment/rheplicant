@@ -318,7 +318,12 @@ T5_MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
 
 def t5_model(adc: dict) -> dict:
     """A ``model:`` patch: this task's pinned ``noise`` plus an ``adc`` node."""
-    return {"noise": T5_MODEL_NOISE, "adc": dict(adc)}
+    adc = dict(adc)
+    if "scale" in adc and not (
+        isinstance(adc["scale"], dict) and "unit" in adc["scale"]
+    ):
+        adc["scale"] = {"value": adc["scale"], "unit": "adc_count/K"}
+    return {"noise": T5_MODEL_NOISE, "adc": adc}
 
 
 ADC_UNSATURATED = {"scale": 1.0, "n_bits": 12}
@@ -644,14 +649,15 @@ T4_CHECKS_LINEARITY_REPORT = {"linearity": {"mode": "refuse", "report": True}}
 # invisible to the module because only two of its tests called
 # ``load_document``.  Nothing above this line is edited.
 
-#: ``inference.noise`` for a C16 document: :data:`T5_MODEL_NOISE`'s OWN sigma,
-#: on the likelihood side.  Reads the drawn sigma rather than restating 0.5 as
-#: a second literal, so the pair cannot drift apart the way the pinned model
-#: side and the inherited likelihood side did -- and so a future edit of
-#: ``exit_helpers.SIGMA_K`` (D-10 was one) moves NEITHER side and leaves every
-#: measured ADC number below where Task 5 measured it.
+#: ``inference.noise`` for a C16 document: :data:`T5_MODEL_NOISE`'s OWN sigma
+#: value on the likelihood side.  The likelihood consumes the ADC output
+#: trunk, so its unit is ``adc_count`` rather than the upstream model noise's
+#: ``K``.  Reads the drawn value rather than restating 0.5 as a second literal,
+#: so the numerical pair cannot drift apart while each side keeps its own
+#: physical trunk.
 T5_LIKELIHOOD_NOISE = {"kind": "homoscedastic",
-                       "sigma": dict(T5_MODEL_NOISE["sigma"])}
+                       "sigma": {"value": T5_MODEL_NOISE["sigma"]["value"],
+                                 "unit": "adc_count"}}
 
 #: ``linearity`` declined, in the shape and for the reason
 #: ``test_config_exits_conjugate.LINEARITY_DECLINED`` established: a document

@@ -34,7 +34,9 @@ from typing import Any
 
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.derive import register_derivation
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.kinds.beams import _require_healpy
@@ -61,16 +63,40 @@ _NOT_WRITABLE: tuple[str, ...] = ("beam_frame", "beam_ref_lst_deg")
 #: one -- the same ordering kinds/beams.py established for its own
 #: format-specific gates.
 _ENGINE_KEYS: dict[str, frozenset[str]] = {
-    "driftscan": frozenset({
-        "engine", "beam", "lmax", "lat_deg", "az_deg", "el_deg", "normalize_beam",
-        "acknowledge_float32_sky", "optimizations", "lst_ref_deg", "beam_iterations",
-        "selfrot_deg", "horizon_mask", "apod_deg", "mask_iterations", "uniform_sampling",
-        "freq_chunk",
-    }),
-    "general_pointing": frozenset({
-        "engine", "beam", "beam_alms", "lmax", "nside", "lat_deg", "normalize_beam",
-        "acknowledge_float32_sky", "beam_iterations",
-    }),
+    "driftscan": frozenset(
+        {
+            "engine",
+            "beam",
+            "lmax",
+            "lat_deg",
+            "az_deg",
+            "el_deg",
+            "normalize_beam",
+            "acknowledge_float32_sky",
+            "optimizations",
+            "lst_ref_deg",
+            "beam_iterations",
+            "selfrot_deg",
+            "horizon_mask",
+            "apod_deg",
+            "mask_iterations",
+            "uniform_sampling",
+            "freq_chunk",
+        }
+    ),
+    "general_pointing": frozenset(
+        {
+            "engine",
+            "beam",
+            "beam_alms",
+            "lmax",
+            "nside",
+            "lat_deg",
+            "normalize_beam",
+            "acknowledge_float32_sky",
+            "beam_iterations",
+        }
+    ),
     "matrix": frozenset({"engine", "matrix", "provenance"}),
 }
 
@@ -104,8 +130,7 @@ def _a12_normalize_beam(name: str, spec: Mapping[str, Any]) -> str | None:
     )
 
 
-def _a44_float32_sky(name: str, spec: Mapping[str, Any],
-                     dtype: str) -> str | None:
+def _a44_float32_sky(name: str, spec: Mapping[str, Any], dtype: str) -> str | None:
     """Check A44: a real sky engine in float32, unacknowledged.
 
     **The dtype is an ARGUMENT, not a key of ``spec``.**  A44 reads like a
@@ -196,13 +221,24 @@ def _beam_ref(name: str, spec: dict, engine: str) -> dict:
     return beam
 
 
-def _angle(spec: dict, key: str, context: ResolutionContext, name: str) -> float:
+def _angle(spec: dict, key: str, context: ResolutionContext, name: str, engine: str) -> float:
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for this engine.")
-    resolved = resolve_value(spec[key], context)
+    destination = DestinationDescriptor(
+        f"{name}.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.projectors.build_projector.{engine}.{key}",
+    )
+    resolved = resolve_value(
+        spec[key],
+        context,
+        destination=destination,
+    )
     if resolved.unit is not None and resolved.unit.canonical != "deg":
         raise ConfigError(f"{name}: {key} must be an angle, got {resolved.unit.canonical!r}.")
-    return float(resolved.value)
+    value = float(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return value
 
 
 @register_kind("projectors")
@@ -243,10 +279,18 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "records nothing, so it is refused the same as an absent one."
             )
         check_unknown_keys(name, spec, _ENGINE_KEYS["matrix"], label="engine: matrix")
-        _require(name, spec, "matrix", "matrix",
-                 "the (n_data, n_pix) projection matrix as a value node")
-        return MatrixProjector(matrix=jnp.asarray(resolve_value(spec["matrix"], context).value,
-                                                  dtype=context.dtype))
+        _require(
+            name, spec, "matrix", "matrix", "the (n_data, n_pix) projection matrix as a value node"
+        )
+        matrix_destination = DestinationDescriptor(
+            f"{name}.matrix",
+            "resource_field",
+            "rheplicant.config.kinds.projectors.build_projector.matrix.matrix",
+        )
+        resolved = resolve_value(spec["matrix"], context, destination=matrix_destination)
+        matrix = jnp.asarray(resolved.value, dtype=context.dtype)
+        record_resolved_delivery(context, matrix_destination, resolved.unit)
+        return MatrixProjector(matrix=matrix)
 
     # A12's projector half and A44, in the order they were written in. Both
     # are the pre-flight pass's rows now (preflight/resources.py) and both are
@@ -256,10 +300,19 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
     problem = _a12_normalize_beam(name, spec)
     if problem is not None:
         raise ConfigError(problem)
+    if "acknowledge_float32_sky" not in spec:
+        context.use_default("resources.projectors[].acknowledge_float32_sky", False)
     problem = _a44_float32_sky(name, spec, context.dtype)
     if problem is not None:
         raise ConfigError(problem)
-    optimizations = list(spec.get("optimizations") or [])
+    optimizations = list(
+        (
+            spec.get("optimizations")
+            if "optimizations" in spec
+            else context.use_default("resources.projectors[].optimizations", [])
+        )
+        or []
+    )
     for entry in optimizations:
         if entry == "read_horizon_fraction":
             raise ConfigError(
@@ -282,22 +335,33 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
 
     beam_alms = None
     if "beam_alms" in spec:
-        beam_alms = jnp.asarray(resolve_value(spec["beam_alms"], context).value)
+        alms_destination = DestinationDescriptor(
+            f"{name}.beam_alms",
+            "resource_field",
+            "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
+        )
+        resolved = resolve_value(spec["beam_alms"], context, destination=alms_destination)
+        beam_alms = jnp.asarray(resolved.value)
+        record_resolved_delivery(context, alms_destination, resolved.unit)
     if engine == "general_pointing":
         check_unknown_keys(
             name, spec, _ENGINE_KEYS["general_pointing"], label="engine: general_pointing"
         )
         _require(name, spec, "lmax", "general_pointing", "the spherical-harmonic band limit")
-        _require(name, spec, "nside", "general_pointing",
-                 "the HEALPix resolution of the sampling grid")
+        _require(
+            name, spec, "nside", "general_pointing", "the HEALPix resolution of the sampling grid"
+        )
         if beam_alms is None:
             beam = resolve_reference(_beam_ref(name, spec, "general_pointing")["ref"], context)
-            beam_alms = _analyse(
-                name, beam.maps, int(spec["lmax"]), int(spec.get("beam_iterations", 3))
+            iterations = (
+                spec["beam_iterations"]
+                if "beam_iterations" in spec
+                else context.use_default("resources.projectors[].beam_iterations", 3)
             )
+            beam_alms = _analyse(name, beam.maps, int(spec["lmax"]), int(iterations))
         return GeneralPointingProjector(
             beam_alms=beam_alms,
-            lat_deg=_angle(spec, "lat_deg", context, name),
+            lat_deg=_angle(spec, "lat_deg", context, name, engine),
             lmax=int(spec["lmax"]),
             nside=int(spec["nside"]),
             normalize_beam=bool(spec["normalize_beam"]),
@@ -316,20 +380,31 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
     beam = resolve_reference(_beam_ref(name, spec, "driftscan")["ref"], context)
     forwarded = {
         key: spec[key]
-        for key in ("selfrot_deg", "horizon_mask", "apod_deg", "mask_iterations",
-                    "lst_ref_deg", "uniform_sampling", "freq_chunk")
+        for key in (
+            "selfrot_deg",
+            "horizon_mask",
+            "apod_deg",
+            "mask_iterations",
+            "lst_ref_deg",
+            "uniform_sampling",
+            "freq_chunk",
+        )
         if key in spec
     }
     for key in ("selfrot_deg", "apod_deg", "lst_ref_deg"):
         if key in forwarded:
-            forwarded[key] = _angle(spec, key, context, name)
+            forwarded[key] = _angle(spec, key, context, name, engine)
     projector = DriftScanProjector.from_beam_maps(
         beam.maps,
-        lat_deg=_angle(spec, "lat_deg", context, name),
-        az_deg=_angle(spec, "az_deg", context, name),
-        el_deg=_angle(spec, "el_deg", context, name),
+        lat_deg=_angle(spec, "lat_deg", context, name, engine),
+        az_deg=_angle(spec, "az_deg", context, name, engine),
+        el_deg=_angle(spec, "el_deg", context, name, engine),
         lmax=int(spec["lmax"]),
-        iterations=int(spec.get("beam_iterations", 3)),
+        iterations=int(
+            spec["beam_iterations"]
+            if "beam_iterations" in spec
+            else context.use_default("resources.projectors[].beam_iterations", 3)
+        ),
         normalize_beam=bool(spec["normalize_beam"]),
         **forwarded,
     )
@@ -351,15 +426,17 @@ def _analyse(name: str, maps, lmax: int, iterations: int):
 
     healpy = _require_healpy(name)
     return jnp.asarray(
-        np.stack([
-            healpy.map2alm(np.asarray(row), lmax=lmax, iter=iterations)
-            for row in np.asarray(maps)
-        ])
+        np.stack(
+            [
+                healpy.map2alm(np.asarray(row), lmax=lmax, iter=iterations)
+                for row in np.asarray(maps)
+            ]
+        )
     )
 
 
 @register_derivation("horizon_fraction", frozenset({"projector"}))
-def _horizon_fraction(node, context, modifiers) -> ResolvedValue:
+def _horizon_fraction(node, context, modifiers, target) -> ResolvedValue:
     """``DriftScanProjector.horizon_fraction()`` -- the above-horizon beam fraction."""
     reference = node.get("projector")
     if not isinstance(reference, dict) or "ref" not in reference:

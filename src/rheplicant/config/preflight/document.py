@@ -3,14 +3,14 @@
 Three holes in A1's sweep, measured rather than inferred:
 
 * ``runs[i]`` option keys.  ``runs.py:113-114`` puts every unrecognised key
-  into ``RunSpec.options`` and ``exit_support._sweep`` sweeps them INSIDE the
-  executor.  All sixteen registered executors do sweep -- so this is timing,
-  not absence: measured, four ``forward`` runs with a typo on the last one
-  execute r0, r1 and r2 before the refusal.  The fix reuses each executor's
-  own allowed-key table (thirteen of the sixteen by importing the very object
-  the executor sweeps with) and the executor's own ``_sweep``, so the two
-  cannot drift; ``test_preflight_document.py`` reads the tables back out of
-  the executors' source and compares.
+  into ``RunSpec.options`` and the kind's registered PARSER sweeps them
+  (Tasks 7-9 moved the sweep out of the executor); Task 10's orchestration
+  runs every parse before the first execute, so the cost of a late typo is
+  gone there too -- but a text pass still beats the build, which is the
+  phase this check owns.  The fix reuses each handler's own allowed-key
+  table (fifteen of the eighteen by importing the very object the parser
+  sweeps with), so the two cannot drift; ``test_preflight_document.py``
+  reads the tables back out of the PARSERS' source and compares.
 * An unselected ``variants`` entry.  ``layering.py:41-85`` merges only the
   REQUESTED variant, so SEVEN document-grammar clauses never fire for the
   others: three of ``apply_variant``'s six (of the other three, two are about
@@ -52,13 +52,12 @@ half-initialised module.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
-from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import register
 
 #: The eight keys schema §8 reserves at capability 3 or 4 -> (capability,
@@ -90,14 +89,16 @@ _CAPABILITY_KEYS: dict[str, tuple[str, str]] = {
 #: ``sections/parameters.py``'s own clause unchanged.
 _TASK3_SCOPES_RESERVED = ("per_epoch", "linked")
 
-#: run kind -> the option keys whose OWN executor raises a bespoke refusal
+#: run kind -> the option keys whose OWN handler raises a bespoke refusal
 #: BEFORE its generic key sweep, so this pass must stand down on them.
 #:
-#: ``conjugate.py:580-582`` argues the ordering by name -- the bespoke refusal
-#: runs "BEFORE the sweep on purpose: the sweep would fire first with the
-#: generic 'does not take [...]' and the reader would fix the symptom by
-#: deleting a key they had good reason to write."  Hoisting the generic sweep
-#: in front of it inverts exactly that, in a phase the executor cannot reach.
+#: The bespoke refusals moved with Tasks 7-9's parsers (the call sites are now
+#: the parsers' pre-sweep helpers), and the ordering argument is unchanged --
+#: ``conjugate.py`` argues it by name: the bespoke refusal runs "BEFORE the
+#: sweep on purpose: the sweep would fire first with the generic 'does not
+#: take [...]' and the reader would fix the symptom by deleting a key they had
+#: good reason to write."  Hoisting the generic sweep in front of it inverts
+#: exactly that, in a phase the handler cannot reach.
 #:
 #: **The stand-down is for the whole RUN, not for the key alone, and that is
 #: measured rather than chosen.**  Dropping only the spoken-for key and
@@ -110,12 +111,12 @@ _TASK3_SCOPES_RESERVED = ("per_epoch", "linked")
 #: to prevent.  Measured: the per-key form turns that test red and nothing in
 #: this task's own module notices.
 #:
-#: A skip, not a rewording: the key is still refused, by the executor, with the
-#: message the executor wrote.  What P-1 gives up is only earliness, and only
-#: for a run carrying one of these five keys.
-#: ``test_the_spoken_for_table_is_every_executor_that_raises_first`` derives
-#: this table from the executors' own source and is what makes a sixth such
-#: key a red test rather than a re-broken message.
+#: A skip, not a rewording: the key is still refused, by the handler's parser,
+#: with the message the parser wrote.  What P-1 gives up is only earliness,
+#: and only for a run carrying one of these five keys.
+#: ``test_the_spoken_for_table_is_every_handler_that_raises_first`` derives
+#: this table from the registered parsers' own source and is what makes a
+#: sixth such key a red test rather than a re-broken message.
 _TASK3_SPOKEN_FOR: dict[str, frozenset[str]] = {
     "condition": frozenset({"prior_mean"}),
     "npe": frozenset({"seed"}),
@@ -125,214 +126,19 @@ _TASK3_SPOKEN_FOR: dict[str, frozenset[str]] = {
 }
 
 
-def _task3_where(label: str) -> str:
-    """``label``, cut back to the longest prefix the path grammar can spell.
-
-    A name the user chose is not required to be an identifier: ``variants:
-    {unity-gain: ...}`` and ``parameters: {d-1: ...}`` both load today,
-    measured, and neither ``apply_variant`` nor ``parse_latents`` validates a
-    name.  ``Finding.where`` is held to ``config/paths.py``'s segment grammar
-    by ``preflight._check_where``, which raises OUTSIDE the per-check ``try``
-    -- so an un-spellable segment would kill the whole pass rather than report
-    the violation.  The full path stays in the MESSAGE, which is what the
-    reader is shown.
-    """
-    pieces = label.split(".")
-    for stop in range(len(pieces), 1, -1):
-        candidate = ".".join(pieces[:stop])
-        try:
-            parse_path(candidate)
-        except ConfigError:
-            continue
-        return candidate
-    return pieces[0]
-
-
-#: The ONE-ENTRY memo behind :func:`_task3_layers`: ``(document, layers)`` for
-#: the document most recently walked, or ``None`` before the first walk.
-#:
-#: **The document itself is held, not only its ``id()``, and that is a
-#: correctness requirement rather than a convenience.**  ``id()`` in CPython is
-#: a memory address, and an address is reused the moment its object is freed --
-#: so a memo keyed on the bare integer would answer a hit for a DIFFERENT
-#: document that happened to land where the first one used to be, and hand it
-#: another document's layers.  Holding the reference is what makes the address
-#: un-reusable for as long as the entry lives, and the hit path below asserts
-#: ``is`` rather than ``==``: two equal documents are still two documents, and
-#: either may be mutated after the other was walked.
-#:
-#: **What a live entry costs, stated as the measurement and not as an
-#: impression.**  It is not "one document": it is the document PLUS one deep
-#: merge of it per declared variant -- 42 340 bytes of document and 777 475
-#: bytes of entry on the cold guard's own 21-variant row.  That is why
-#: :func:`preflight` drops it on the way out as well as on the way in: a
-#: process that loads one config would otherwise hold all of it for the rest of
-#: its life, for a cache nothing will read again.  Inside the pass it is paid
-#: once rather than once per check, which is the whole point.
-#:
-#: **No test can show this memo returning another document's layers if the
-#: reference is dropped, and the honest reason is written here rather than
-#: implied by a test that does not exist.**  Layer 0 IS ``("", document)``, so
-#: the layers tuple holds the document too, and a single entry can only hold
-#: one of them -- an id-only key would therefore be un-recyclable today by
-#: accident.  It is an accident: a walk that ever handed out a COPY as layer 0,
-#: or a memo that ever held more than one entry, loses it, and the failure
-#: would be a silent wrong answer rather than an exception.  The reference is
-#: explicit so that the guarantee stops depending on the shape of the value.
-_TASK3_LAYER_MEMO: tuple[Mapping[str, Any], tuple[tuple[str, Mapping], ...]] | None = None
-
-
-def _task3_forget_layers() -> None:
-    """Drop the memo.  ``preflight`` calls this at the head AND the tail of
-    every pass -- the head for correctness, the tail so nothing is retained.
-
-    **Identity alone is not a safe key ACROSS passes, and that is measured
-    rather than argued.**  Within one pass a document cannot change: every
-    check reads text and layer 0 IS the caller's own document object, shared
-    by every layering caller since the walk was written.  BETWEEN two passes
-    it changes constantly -- ``tests/config/test_preflight_instrument.py:970``
-    earns A13, writes the remedy the message advises straight into the
-    document it already passed to :func:`preflight`, and requires the next pass
-    to see it.  That is R4's "apply your own advice" shape, the suite is full
-    of it, and a memo that outlived the pass would answer those documents from
-    before their own fix -- silently, since layer 0 would show the mutation and
-    only the merged variants would be stale.
-
-    So the memo's lifetime is ONE pass, and the assumption it rests on is only
-    the one the walk already rested on.
-
-    The tail drop is a second reason rather than a second mechanism: the entry
-    is the document plus one merge of it per variant, and a library that leaves
-    that behind after answering a question is holding a cache with no reader.
-    It also keeps ``inflight``'s two passes out of the question entirely --
-    ``_assemble`` runs :func:`preflight` and then ``axes`` on the SAME document
-    object, so an entry that outlived the pass would be inherited by the first
-    axis check that ever walks layers.
-    """
-    global _TASK3_LAYER_MEMO
-
-    _TASK3_LAYER_MEMO = None
-
-
-def _task3_build_layers(
-        document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...]:
-    """:func:`_task3_layers` without the memo -- the walk itself.
-
-    Split out so that the memo is one readable branch rather than a flag
-    threaded through the build, and so a test can drive the uncached walk
-    directly.
-    """
-    from rheplicant.config.layering import apply_variant
-
-    layers: list[tuple[str, Mapping]] = [("", document)]
-    variants = document.get("variants")
-    if not isinstance(variants, Mapping):
-        return tuple(layers)
-    for name in variants:
-        try:
-            layers.append((f"variants.{name}", apply_variant(document, name)))
-        except ConfigError:
-            continue
-    return tuple(layers)
-
-
-def _task3_layers(document: Mapping[str, Any]) -> tuple[tuple[str, Mapping], ...]:
-    """``("", document)`` plus one ``("variants.<name>", merged)`` per variant.
-
-    Layering is one level deep by design (``layering.py:9-12``), so the walk
-    is one layer per DECLARED variant and never a pair of them merged.
-
-    A variant ``apply_variant`` refuses is dropped rather than raised on:
-    ``_variant_text`` is the check that reports it, and a walk that let the
-    ``ConfigError`` out would abort the pass and hide every later finding
-    (§2.3's TRAP).
-
-    **Built ONCE per document and handed to every caller, because
-    ``apply_variant`` is a deep merge of the whole document and every check
-    that layers used to pay for its own copy of it.**  Measured on the cold
-    guard's own child (40 ``plan.sample`` runs, 21 declared variants) at the
-    wave-1 tip: **ten of the eleven merge sites ran** -- ``noise``'s walk is
-    gated off on that document -- for 210 ``apply_variant`` calls and 45 ms
-    against a 50 ms budget the pass then breached 3 runs in 5 under
-    ``-n 16``.  With the
-    memo it is 21 calls, one per declared variant, and the number no longer
-    moves when a check that layers is added.
-
-    **The assumption, stated rather than left implicit: a document is not
-    mutated between two checks of one pass.**  That is already what the layer
-    walk rests on -- layer 0 IS the caller's own document object, shared by
-    every check since the walk was written -- and the memo extends the same
-    assumption to the merged layers.  A document mutated between two calls
-    WITHIN one pass gets the layers built for the first, and
-    ``test_a_mutation_inside_one_pass_is_not_seen_by_the_memo`` pins that as
-    documented behaviour rather than leaving it to be discovered.  Across
-    passes there is no such limit: :func:`_task3_forget_layers` drops the entry
-    at the head of every pass, for the reason written there.
-
-    The layers are a ``tuple`` of ``(prefix, Mapping)`` and callers only read
-    them, so nothing is copied on the way out.
-
-    Reading the memo into a local before testing it is deliberate: the entry is
-    an immutable tuple, so a concurrent pass on another document can cost this
-    one a hit but can never hand it half of someone else's entry.
-    """
-    global _TASK3_LAYER_MEMO
-
-    memo = _TASK3_LAYER_MEMO
-    if memo is not None and memo[0] is document:
-        return memo[1]
-    layers = _task3_build_layers(document)
-    _TASK3_LAYER_MEMO = (document, layers)
-    return layers
-
-
-def _task3_over_layers(document, per_layer) -> Iterable[Finding]:
-    """``per_layer`` over every layer, with the base's own findings said once.
-
-    A document with one A38 error and four variants would otherwise hand the
-    user the same sentence five times, four of them blaming a variant that did
-    not introduce it.
-
-    **The key is the whole ``Finding``, not its ``where``.**  A variant that
-    breaks the same rule DIFFERENTLY -- the base binds two targets, the
-    variant rebinds the same latent to three -- has the same ``where`` and is
-    a second violation; keying on ``where`` swallows it, which is a lost check
-    rather than a duplicated sentence.
-    ``test_a_variant_that_breaks_the_rule_DIFFERENTLY_is_still_reported``
-    is that assertion.
-
-    Keying on ``finding.message`` instead is, measured, an EQUIVALENT mutation
-    TODAY: every message this module emits opens with the label its ``where``
-    is derived from, so the message determines the finding (probed over 14
-    findings on three documents built to collide -- two beams with the same
-    two bad angles, two latents with the same two targets, two bindings alike
-    -- zero collisions between unequal findings).  It is not equivalent in
-    general, and the whole-``Finding`` key is what keeps it safe for a later
-    check whose sentence does not carry its own path.
-    """
-    base: set[Finding] = set()
-    for prefix, layer in _task3_layers(document):
-        for finding in per_layer(layer):
-            if not prefix:
-                base.add(finding)
-                yield finding
-            elif finding not in base:
-                yield dataclasses.replace(
-                    finding,
-                    where=_task3_where(f"{prefix}.{finding.where}"),
-                    message=f"{prefix}: {finding.message}")
-
-
 def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
-    """run kind -> the option keys its executor accepts.
+    """run kind -> the option keys its registered parser accepts.
 
-    Thirteen of the sixteen entries ARE the executor module's own object --
+    Fifteen of the eighteen entries ARE the parser module's own object --
     identity, not equality -- so for those drift is not possible, only
-    deletion.  ``forward``, ``fisher`` and ``npe`` write their allowed set as a
-    literal at the ``_sweep`` call site and have no name to import; those three
-    are restated, and ``test_the_table_is_the_executors_own_allowed_sets``
-    reads all sixteen back out of the executors' source and compares.
+    deletion.  ``forward``, ``fisher`` and ``npe`` write their allowed set as
+    a literal at the parser's ``_sweep`` call site and have no name to
+    import; those three are restated, and
+    ``test_the_table_is_the_handlers_own_allowed_sets`` reads all eighteen
+    back out of the registered parsers' source and compares.
     """
+    from rheplicant.config.sections.benchmark import _BENCHMARK_KEYS
+    from rheplicant.config.sections.comparison import _COMPARE_KEYS
     from rheplicant.config.sections.conjugate import (
         _CONDITION_KEYS,
         _GCR_KEYS,
@@ -370,11 +176,13 @@ def _task3_allowed_run_options() -> dict[str, frozenset[str]]:
         "mmodes": _MMODES_KEYS,
         "predict": _PREDICT_KEYS,
         "nuts": _NUTS_KEYS,
+        "compare": _COMPARE_KEYS,
+        "benchmark": _BENCHMARK_KEYS,
     }
 
 
 def _task3_run_options_in(layer) -> Iterable[Finding]:
-    """The executor's own sweep, run one phase early, on one layer.
+    """The handler parser's own sweep, run one phase early, on one layer.
 
     A ``runs:`` section ``parse_runs`` cannot read yields nothing here: an
     unknown ``kind:`` is ``parse_runs``' refusal and ``run_document``'s to
@@ -415,7 +223,7 @@ def _task3_run_options_in(layer) -> Iterable[Finding]:
 @register("A1.runs")
 def _run_option_keys(document) -> Iterable[Finding]:
     """A1: an option key no executor takes, before any run has executed."""
-    return _task3_over_layers(document, _task3_run_options_in)
+    return _task3_run_options_in(document)
 
 
 def _task3_horizon_in(layer) -> Iterable[Finding]:
@@ -437,7 +245,7 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 where = f"resources.beams.{name}.horizon.{key}"
                 yield refuse(
-                    "A1", _task3_where(where),
+                    "A1", longest_legal_prefix(where),
                     f"{where}: is a plain number of degrees; got {value!r}. "
                     "kinds/beams.py hands both horizon angles straight to "
                     "float(), so the value grammar never reaches here and a "
@@ -449,67 +257,53 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
 @register("A1.horizon")
 def _task3_horizon_numbers(document) -> Iterable[Finding]:
     """A1: ``resources.beams.<name>.horizon``'s two angles, over every layer."""
-    return _task3_over_layers(document, _task3_horizon_in)
+    return _task3_horizon_in(document)
 
 
 @register("A1.variants")
 def _variant_text(document) -> Iterable[Finding]:
-    """A1: the document-grammar refusals an unselected variant never earns.
+    """Turn this already-enumerated layer's structural error into A1.
 
-    Each declared variant is merged with the layer's own ``apply_variant`` and
-    the merge is handed to ``_structural``; the raised ``ConfigError`` becomes
-    a finding.  It does NOT re-enter the registry per variant: P-1 is defined
-    (§2.1) over one variant-applied document, a registered check that called
-    ``preflight`` would walk over itself, and every base-document finding
-    would be reported once per layer.  The model interior of an unselected
-    variant therefore stays open here, and §6 records it.
-
-    **The merge comes from :func:`_task3_layers`, which is the same merge.**
-    This check used to call ``apply_variant`` itself, once per declared
-    variant, on top of the once per variant every layering check was already
-    paying -- so it was the tenth caller of a walk that had one answer.  A
-    variant the merge REFUSES is not in the layers (``_task3_layers`` drops
-    it), and that is exactly the variant this check exists to report: for
-    those, and only those, ``apply_variant`` is called here to re-raise the
-    ``ConfigError`` whose text becomes the finding.
-
-    **A name that is not a string misses the lookup and re-merges, recorded
-    rather than left to be discovered.**  ``merged`` is keyed by the layer
-    prefix with ``variants.`` cut off, which is always a ``str``, while
-    ``variants:`` may carry any YAML scalar as a key -- ``{1: {...}}`` is legal
-    and loads.  Such a name falls through to the ``apply_variant`` branch and
-    pays for one extra merge of its own layer, which is the pre-memo cost for
-    that one variant.  The ANSWER is identical either way, because that branch
-    is exactly the code this check used to run; only the cost differs, only on
-    a document nobody has yet written.
+    The pass driver calls this only after ``_structural`` rejected a variant
+    layer.  Enumeration, origin tracking, and merge failure remain outside the
+    check registry, so this function never applies or replays a variant.
     """
-    from rheplicant.config.layering import apply_variant
     from rheplicant.config.preflight import _structural
 
-    variants = document.get("variants")
-    if variants is None:
-        return
-    if not isinstance(variants, Mapping):
+    try:
+        _structural(document)
+    except ConfigError as exc:
+        if "campaign" in document:
+            where = "campaign"
+        else:
+            allowed = {
+                "schema_version", "runtime", "observation", "resources",
+                "model", "inference", "runs", "campaign",
+            }
+            unknown = next((key for key in document if key not in allowed), None)
+            if isinstance(unknown, str):
+                # The raw key may not itself have a legal prefix.  The pass
+                # driver attributes this variant-only finding first, then
+                # cuts the complete ``variants.<name>.<key>`` path once.
+                where = unknown
+            else:
+                missing = next(
+                    (
+                        section
+                        for section in ("runtime", "observation", "model", "runs")
+                        if section not in document
+                    ),
+                    "schema_version",
+                )
+                where = missing
         yield refuse(
-            "A1", "variants",
-            "variants: is a mapping of name -> patch; got "
-            f"{type(variants).__name__} ({variants!r}). Nothing reads it "
-            "until a variant is selected, so today this document loads and "
-            "the error waits for the run that asks for one (check A1).")
+            "A1",
+            where,
+            f"{exc} That is what selecting this variant would raise. An "
+            "unselected variant is validated with every other layer, so the "
+            "refusal is reported before any build (check A1).",
+        )
         return
-    merged = {prefix.removeprefix("variants."): layer
-              for prefix, layer in _task3_layers(document) if prefix}
-    for name in variants:
-        try:
-            _structural(merged[name] if name in merged
-                        else apply_variant(document, name))
-        except ConfigError as exc:
-            yield refuse(
-                "A1", _task3_where(f"variants.{name}"),
-                f"variants.{name}: {exc} That is what selecting this variant "
-                "would raise. An unselected variant is merged only when "
-                "someone asks for it, so until now this document loaded and "
-                "the refusal waited for the run that selects it (check A1).")
 
 
 def _task3_targets(where: str, into: Any) -> tuple[str, ...]:
@@ -546,7 +340,7 @@ def _task3_fan_one(where: str, spec: Mapping) -> Iterable[Finding]:
     if transform is not None and transform != "identity":
         return
     yield refuse(
-        "A38", _task3_where(where),
+        "A38", longest_legal_prefix(where),
         f"{where}: into: names {len(targets)} targets {list(targets)} and "
         "fan: is absent. broadcast writes one produced value into every "
         "target and distribute writes the k-th into the k-th, and with fan: "
@@ -583,7 +377,7 @@ def _task3_fan_in(layer) -> Iterable[Finding]:
 @register("A38")
 def _fan_present(document) -> Iterable[Finding]:
     """A38: ``fan:`` is required when ``into:`` names more than one target."""
-    return _task3_over_layers(document, _task3_fan_in)
+    return _task3_fan_in(document)
 
 
 def _task3_capability(where: str, key: str, got: str = "") -> Finding:
@@ -600,7 +394,7 @@ def _task3_capability(where: str, key: str, got: str = "") -> Finding:
     the same capability and the same schema section.
     """
     capability, section = _CAPABILITY_KEYS[key]
-    return refuse("A39", _task3_where(where),
+    return refuse("A39", longest_legal_prefix(where),
                   f"{where}: {got}is reserved with {capability}, schema "
                   f"{section}, and refused in v1 (check A39).")
 
@@ -639,4 +433,4 @@ def _task3_capability_in(layer) -> Iterable[Finding]:
 @register("A39")
 def _capability_keys(document) -> Iterable[Finding]:
     """A39: every capability-3/4 key refused by its capability, not by luck."""
-    return _task3_over_layers(document, _task3_capability_in)
+    return _task3_capability_in(document)

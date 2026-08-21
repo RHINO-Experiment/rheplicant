@@ -1026,7 +1026,6 @@ class TestNoHostileDocumentCanAbortThePass:
         {"inference": "nope"},
         {"inference": {"parameters": "nope"}},
         {"inference": {"parameters": ["d"]}},
-        {"inference": {"parameters": {7: {"linear": True}}}},
         {"inference": {"parameters": {"d": None}}},
         {"runs": "nope"},
         {"runs": 7},
@@ -1056,9 +1055,20 @@ class TestNoHostileDocumentCanAbortThePass:
                    "blocks": [{"names": ["d", "a"]}]}]},
     ]
 
-    @pytest.mark.parametrize("patch", HOSTILE,
+    #: The one shape the pass no longer survives: a non-string mapping key,
+    #: refused by Task 4's evidence freeze inside ``initial_merge`` before
+    #: any check runs (the contract is pinned whole in
+    #: ``tests/bootstrap/test_bootstrap_frozen.py``).  It stays in the
+    #: CHECK-level table -- the checks read the raw mapping and never see the
+    #: freeze -- and is pinned refusing, whole-string, in
+    #: ``test_the_evidence_freeze_refuses_it_first``.
+    _FROZEN = [
+        {"inference": {"parameters": {7: {"linear": True}}}},
+    ]
+
+    @pytest.mark.parametrize("patch", HOSTILE + _FROZEN,
                              ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+                                  range(len(HOSTILE) + len(_FROZEN))])
     def test_the_check_returns_findings_and_raises_nothing(self, patch):
         document = _hostile_document(patch)
         for finding in _found(document):
@@ -1073,6 +1083,20 @@ class TestNoHostileDocumentCanAbortThePass:
         # document could kill the pass even when the check itself returns
         # cleanly.  Kills a `where` built from a user-supplied string.
         preflight(_hostile_document(patch))
+
+    @pytest.mark.parametrize("patch", _FROZEN, ids=["an-int-key"])
+    def test_the_evidence_freeze_refuses_it_first(self, patch):
+        # The boundary Task 4 hardened: a YAML scalar int key really does
+        # reach here (the loader produces ``7``), so this is a user route.
+        # The refusal precedes every check now -- the "survives" contract
+        # above covers what the CHECKS read.
+        from rheplicant.config.errors import ConfigError
+
+        with pytest.raises(ConfigError) as caught:
+            preflight(_hostile_document(patch))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence mapping key type "
+            "int.")
 
 
 # --- Task 8: the prior gates and the seed asymmetry -------------------------
@@ -3952,8 +3976,6 @@ class TestNoHostileDocumentCanAbortTheCounts:
         {"runs": [{"kind": "plan.estimate", "max_iter": float("nan")}]},
         {"runs": [{"kind": "plan.estimate", "min_sweeps": float("inf"),
                    "max_iter": float("inf")}]},
-        {"runs": [{"kind": "plan.estimate",
-                   "max_iter": decimal.Decimal("2.5")}]},
         {"runs": [{"kind": "nuts", "num_samples": float("inf")}]},
         {"runs": [{"kind": "plan.sample", "n_sweeps": 12,
                    "warm_start": {"kind": "plan.estimate", "move": ["d"],
@@ -3991,9 +4013,20 @@ class TestNoHostileDocumentCanAbortTheCounts:
         {"runs": {"kind": "plan.sample", "n_sweeps": 6}},
     ]
 
-    @pytest.mark.parametrize("patch", HOSTILE,
+    #: The one shape the pass no longer survives: a non-JSON leaf
+    #: (``Decimal`` is the shape a non-YAML caller supplies), refused by Task
+    #: 4's evidence freeze inside ``initial_merge`` before any check runs.
+    #: It stays in the CHECK-level table -- the checks read the raw mapping
+    #: and never see the freeze -- and is pinned refusing, whole-string, in
+    #: ``test_the_evidence_freeze_refuses_it_first``.
+    _FROZEN = [
+        {"runs": [{"kind": "plan.estimate",
+                   "max_iter": decimal.Decimal("2.5")}]},
+    ]
+
+    @pytest.mark.parametrize("patch", HOSTILE + _FROZEN,
                              ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+                                  range(len(HOSTILE) + len(_FROZEN))])
     def test_the_check_returns_findings_and_raises_nothing(self, patch):
         for finding in _counted(_hostile_document(patch)):
             assert finding.check in ("A24", "A25")
@@ -4007,6 +4040,18 @@ class TestNoHostileDocumentCanAbortTheCounts:
         # cleanly.  This task's three `where` shapes are `runs[<int>]`,
         # `runs[<int>].warm_start` and `inference.npe.<literal>.<literal>`.
         preflight(_hostile_document(patch))
+
+    @pytest.mark.parametrize("patch", _FROZEN, ids=["a-decimal-leaf"])
+    def test_the_evidence_freeze_refuses_it_first(self, patch):
+        # Same boundary as the Pass class's, one grammar earlier: a leaf the
+        # audit record cannot hold is refused before any check runs.
+        from rheplicant.config.errors import ConfigError
+
+        with pytest.raises(ConfigError) as caught:
+            preflight(_hostile_document(patch))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence leaf type "
+            "Decimal.")
 
 
 # --- Task 10: the (kind, noise.kind) table ---------------------------------

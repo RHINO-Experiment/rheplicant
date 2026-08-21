@@ -23,6 +23,7 @@ which is the ``_number``-vs-``_whole`` divergence on the 2C ledger.
 """
 
 import re
+import sys
 
 import jax.numpy as jnp
 import pytest
@@ -155,7 +156,8 @@ MOVED = [
             "gain": GAIN},
      "model.filters: 3 classes register at this node (['FourierBandFilter', "
      "'SiderealFilter', 'SkySpaceFilter']); type: is required."),
-    ("A7", {"flagging": {"threshold": 3.0}, "gain": GAIN},
+    ("A7", {"flagging": {"threshold": {"value": 3.0,
+                                         "unit": "adc_count"}}, "gain": GAIN},
      "model.flagging: 2 classes register at this node (['FlaggingOperator', "
      "'MomentRFIFlaggingOperator']); type: is required."),
     ("A32", {"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN},
@@ -192,7 +194,7 @@ BANDPASS = {"bandpass": {"value": [1.0] * 8, "unit": "dimensionless"}}
 #: Written under a ``bandpass:`` key it lands at ``adc``, which is what makes
 #: it the document where a key and its operator's node come furthest apart.
 ADC = {"python": "rheplicant.radio:ADCOperator", "n_bits": 8,
-       "scale": {"value": 1.0, "unit": "dimensionless"}}
+       "scale": {"value": 1.0, "unit": "adc_count/K"}}
 SKY = {"amplitude": {"value": 10.0, "unit": "K"}}
 DATA = {"zeros": ["n_time", "n_freq"]}
 NOISE_STAGE = {"type": "NoiseOperator", "sigma": SIGMA}
@@ -224,7 +226,9 @@ def _model_only(model):
     need those gone, and a merge cannot express a removal, so those tests
     replace the section outright rather than patch it.
     """
-    return {**preflight_document(), "model": dict(model)}
+    document = {**preflight_document(), "model": dict(model)}
+    document["variants"] = {}
+    return document
 
 
 def _t5_one(model, check):
@@ -1027,12 +1031,17 @@ class TestTheGraphChecksInThePass:
 
     def test_a_malformed_model_produces_findings_and_never_raises(self):
         # §2.3's TRAP: a check that raises aborts the pass and hides every
-        # later finding.  None of these specs is a mapping and one node id
-        # is not a string.
+        # later finding.  None of these specs is a mapping.
         model = {"gain": None, "foregrounds": 3, "beam": "type",
-                 "filters": "everything", 4: {}}
+                 "filters": "everything"}
         report = preflight(preflight_document(model=model))
         assert report.refusals()
+
+    def test_a_non_string_model_key_is_rejected_at_the_evidence_boundary(self):
+        with pytest.raises(
+                ConfigError,
+                match=r"initial_merge document: unsupported evidence mapping key type int"):
+            preflight(preflight_document(model={4: {}}))
 
     def test_every_where_is_a_path_into_the_document(self):
         """``Finding.where`` is where the USER types (§3.1, rule 2), and it
@@ -1848,7 +1857,7 @@ class TestDeclaredDataAndSources:
         assert _t5_refused(document, "A31") == []
 
     def test_a_recording_beside_declared_data_keeps_the_sections_own_words(
-            self):
+            self, monkeypatch):
         """``from_file`` and ``data`` together is ``build_observation``'s, and
         it already precedes the beam.
 
@@ -1860,6 +1869,10 @@ class TestDeclaredDataAndSources:
         earlier than the sentence that is right.
         """
         from rheplicant.config.document import load_document
+
+        # This test is about the observation-section conflict, not the live
+        # environment's optional-dependency inventory.
+        monkeypatch.setitem(sys.modules, "h5py", object())
 
         document = {**preflight_document(
             model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
@@ -2081,7 +2094,7 @@ class TestTheReVoicedChecksInThePass:
         reader really does have to fix -- is what disappears.
         """
         document = _with_data(preflight_document(model={
-            "gain": None, "foregrounds": 3, 4: {}, "gian": GAIN,
+            "gain": None, "foregrounds": 3, "gian": GAIN,
             "noise": {"python": "rheplicant.radio:Typo", "name": "t"},
             "bandpass": dict(PY_GAIN, at=["nope"]),
             "emi": dict(PY_GAIN, at=["nope"]),
@@ -2145,7 +2158,7 @@ A30_MESSAGE = (
     "model.noise puts NoiseOperator at node 'noise', which draws its own "
     "randomness -- NoiseOperator declares 'key' in requires -- and "
     "inference.twin.without: does not drop it. This document declares "
-    "kind: fisher, and every exit but forward and mmodes closes the fit twin "
+    "kind: fisher, and these fitting exits close the fit twin "
     "over ONE template state, so that draw would be the SAME realisation "
     "added to every prediction alike: a bias that is exactly affine and full "
     "rank, which is why no shape check, no linearity check and no rank test "
@@ -2178,10 +2191,13 @@ def _t11_fit(model=None, twin=_ABSENT, runs=None, **inference):
     block = dict(inference)
     if twin is not _ABSENT:
         block["twin"] = twin
-    return preflight_document(model=model or STOCHASTIC_MODEL,
-                              inference=block,
-                              runs=[{"kind": "fisher"}] if runs is None
-                              else runs)
+    document = preflight_document(
+        model=model or STOCHASTIC_MODEL,
+        inference=block,
+        runs=[{"kind": "fisher"}] if runs is None else runs,
+    )
+    document["variants"] = {}
+    return document
 
 
 def _walks(document, segments):
@@ -2311,12 +2327,13 @@ class TestTheStochasticFitTwin:
         assert "A30" not in preflight(
             _t11_fit(twin=None, runs=[{"kind": "forward"}])).checks()
 
-    def test_mmodes_is_not_a_fitting_exit_either(self):
-        # Kills: _A30_NOT_FITTING == {"forward"}.  _run_mmodes
-        # (diagnostics.py:594-660) expands a projector against a sky and
-        # closes over no twin at all.
-        assert "A30" not in preflight(
-            _t11_fit(twin=None, runs=[{"kind": "mmodes"}])).checks()
+    def test_the_other_non_fitting_exits_do_not_earn_a30(self):
+        # _run_mmodes expands a projector against a sky; compare consumes
+        # prior products; benchmark evaluates prepared-layer forward calls.
+        # None closes a ParameterSpace over built.inference.fit_twin.
+        for kind in ("mmodes", "compare", "benchmark"):
+            assert "A30" not in preflight(
+                _t11_fit(twin=None, runs=[{"kind": kind}])).checks()
 
     def test_a_forward_run_beside_a_fitting_one_is_still_refused(self):
         # Kills: the condition read off the FIRST run, or the complement test
@@ -2669,7 +2686,8 @@ class TestTheStochasticFitTwin:
 
         assert frozenset(_KINDS) == frozenset({
             "condition", "conjugate.gcr", "conjugate.gls", "conjugate.wiener",
-            "fisher", "forward", "gradient", "identifiability", "mmodes",
+            "benchmark", "compare", "fisher", "forward", "gradient",
+            "identifiability", "mmodes",
             "npe", "nuts", "optimize", "plan.estimate", "plan.sample",
             "predict", "score_directions",
         }), (
@@ -3582,7 +3600,7 @@ class TestWhichRunsA30IsAbout:
 
     def test_a_kind_the_run_grammar_does_not_offer_earns_nothing(self):
         """A30's message claimed *"This document declares kind: banana, and
-        every exit but forward and mmodes closes the fit twin over ONE
+        these fitting exits close the fit twin over ONE
         template state"* -- a claim about the closure behaviour of a kind that
         does not exist.
 
@@ -3597,7 +3615,8 @@ class TestWhichRunsA30IsAbout:
         {"forward", "fisher", "optimize", "plan.estimate", "plan.sample",
          "nuts", "npe", "conjugate.gls", "conjugate.wiener", "conjugate.gcr",
          "identifiability", "score_directions", "predict", "mmodes",
-         "condition", "gradient"} - {"forward", "mmodes"}))
+         "condition", "gradient", "compare", "benchmark"}
+        - {"forward", "mmodes", "compare", "benchmark"}))
     def test_every_fitting_kind_the_enum_declares_still_earns_it(self, kind):
         """ANTI-VACUITY on the narrowing: intersecting with ``runs._KINDS``
         must not drop a kind that IS declared.

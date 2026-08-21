@@ -31,6 +31,7 @@ from tests.config.exit_helpers import (
     TIGHT_GAIN,
     TRUTH_G,
     WIENER,
+    conjugate_document,
     gcr_document,
     run_product,
     two_latent_document,
@@ -583,3 +584,47 @@ class TestTheCheapChecksComeFirst:
         del document["runs"][0]["seed"]
         with pytest.raises(ConfigError, match="A29"):
             run_document(document)
+
+
+def _explode(*args, **kwargs):
+    raise AssertionError(f"an operator ran during a grammar refusal: {args!r}")
+
+
+class TestRefusalsPrecedeTheOperator:
+    """Plan 4A Task 8: a grammar refusal used to wait for the operator."""
+
+    def test_a_bad_prior_shape_speaks_before_the_operator_is_built(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+
+        monkeypatch.setattr(inference, "linear_operator", _explode)
+        monkeypatch.setattr(inference, "wiener_solve", _explode)
+        with pytest.raises(ConfigError, match="block-diagonal"):
+            run_document(wiener_document({**WIENER,
+                                         "prior_std": {"ghost": 1.0}}))
+
+
+class TestConditionDefaultsAreThePackagesOwn:
+    """``iterations: 12`` is the package's default, pinned as a RESULT
+    equivalence -- config restates no package default in the parsed views."""
+
+    def test_an_undeclared_iterations_is_the_packages_twelve(self):
+        run = {"kind": "condition", "names": ["g"]}
+        implicit = run_product(conjugate_document(run), "condition")
+        explicit = run_product(conjugate_document({**run, "iterations": 12}),
+                               "condition")
+        assert float(implicit) == float(explicit)
+
+    def test_the_seed_is_optional_and_reproducible_by_name(self):
+        run = {"kind": "condition", "names": ["g"],
+               "seed": {"from": "runtime.seeds.kappa"}}
+        first = run_product(conjugate_document(run, seeds={"kappa": 5}),
+                            "condition")
+        again = run_product(conjugate_document(run, seeds={"kappa": 5}),
+                            "condition")
+        assert float(first) == float(again)
+        # ...and the unseeded run runs at all: A29 makes no demand here.
+        unseeded = run_product(
+            conjugate_document({"kind": "condition", "names": ["g"]}),
+            "condition")
+        assert float(unseeded) > 0.0

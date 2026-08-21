@@ -1,8 +1,13 @@
-"""plan.estimate / plan.sample from a document: blocks, seeds, warm starts."""
+"""plan.estimate / plan.sample from a document: blocks, seeds, warm starts.
+
+Plan 4A Task 7 adds the phase pin: warm-start normalization moved to parse;
+the warm-start estimate itself remains scientific execution.
+"""
 
 import numpy as np
 import pytest
 
+from _rheplicant_bootstrap.variants import LayerRef
 from rheplicant.config import ConfigError
 from rheplicant.config.sections.runs import run_document
 from tests.config.test_config_document import synthetic_document
@@ -190,3 +195,37 @@ class TestSample:
                 {**SAMPLE, "warm_start": {"kind": "plan.estimate",
                                           "blocks": [{"names": ["g"]}],
                                           "move": ["ghost"]}}))
+
+
+class TestTheWarmStartEstimateStaysInExecute:
+    """Plan 4A Task 7's carve-out: warm-start NORMALIZATION is parse, but the
+    warm-start estimate itself is scientific execution and stays in execute."""
+
+    def test_parse_never_estimates_and_execute_estimates_once(
+            self, monkeypatch):
+        from rheplicant.config.document import load_document
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
+        from rheplicant.config.sections.runs import parse_runs
+        from rheplicant.inference import SamplingPlan
+
+        calls = []
+        real = SamplingPlan.estimate
+
+        def spy(self, *args, **kwargs):
+            calls.append(len(calls))
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(SamplingPlan, "estimate", spy)
+        doc = document(WARMED)
+        built = load_document(doc)
+        (spec,) = parse_runs(doc["runs"])
+        parsed = parse_run(spec, built, index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        assert calls == []  # parse is normalization, never the estimate
+        product = handler_for("plan.sample").execute(parsed, built, {})
+        assert calls == [0]  # exactly the warm start's own estimate
+        assert float(product.mean["g"]) == pytest.approx(1.5, abs=0.2)

@@ -26,6 +26,40 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Build sdist and wheel
         run: uv build
+      - name: Inspect and verify the wheel
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python -m zipfile -l "$wheel"
+          uv venv --clear dist/verify
+          uv pip install --python dist/verify/bin/python "$wheel"
+          dist/verify/bin/python -c "import sys, _rheplicant_bootstrap; assert 'jax' not in sys.modules; assert 'rheplicant' not in sys.modules"
+          dist/verify/bin/python - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          from pathlib import Path
+          from tests.config.test_config_cli import document
+          from _rheplicant_bootstrap.presets import read_installed_preset
+          import yaml
+
+          root = Path('/tmp/rheplicant-wheel-proof')
+          root.mkdir(mode=0o700, exist_ok=True)
+          (root / 'config.yaml').write_text(
+              yaml.safe_dump(document(), sort_keys=False)
+          )
+          snapshot = read_installed_preset('rhino_v1')
+          assert snapshot.sha256 == hashlib.sha256(snapshot.input_bytes).hexdigest()
+          spec = importlib.util.find_spec('rheplicant')
+          package = Path(tuple(spec.submodule_search_locations)[0])
+          for name in ('provenance-v1.schema.json', 'diagnostics-v1.schema.json'):
+              schema = package / 'config' / 'schemas' / name
+              assert json.loads(schema.read_bytes())['$schema'] == (
+                  'https://json-schema.org/draft/2020-12/schema'
+              )
+          PY
+          cd /tmp
+          "$GITHUB_WORKSPACE/dist/verify/bin/rheplicant" validate /tmp/rheplicant-wheel-proof/config.yaml
       - name: Check metadata
         run: uvx twine check dist/*
       - uses: actions/upload-artifact@v4

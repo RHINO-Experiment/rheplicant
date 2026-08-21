@@ -376,12 +376,22 @@ def trio_npe_document():
     parameter costs -- a later edit can drop it while every test stays green.
     A test that needs a variant of this document calls
     :func:`npe_document` with these three keywords itself.
+
+    **The inherited ``variants:`` block is dropped.**  It is
+    ``synthetic_document``'s ``unity_gain`` patch, written against the default
+    model's value-form gain node; :data:`VECTOR_GAIN_MODEL`'s gain is
+    full-form, so the merged node would carry ``full`` AND ``value`` -- two
+    form keys, which the value grammar refuses.  Since Task 10 every declared
+    variant is built whether or not a run targets it, and the patch was never
+    this document's to begin with.
     """
-    return npe_document(
+    document = npe_document(
         None, inference=NPE_TRIO, model=VECTOR_GAIN_MODEL,
         npe={"bank": {"n_simulations": 32},
              "train": {"n_steps": 20, "batch_size": 16},
              "sample": {"n_draws": 40}})
+    del document["variants"]
+    return document
 
 
 #: Two latents with NO ``prior:`` of their own, both covered by a joint prior.

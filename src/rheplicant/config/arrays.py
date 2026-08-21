@@ -15,7 +15,7 @@ from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.symbols import resolve_extent, resolve_shape
 from rheplicant.config.units import convert_to_canonical
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.values import ResolutionTarget, ResolvedValue, register_form
 
 
 def _shape(spec: Any, context: ResolutionContext, form: str) -> tuple[tuple[int, ...], dict]:
@@ -35,8 +35,22 @@ def _shape(spec: Any, context: ResolutionContext, form: str) -> tuple[tuple[int,
     )
 
 
-def _finish(array, modifiers: dict, form: str, shadowed: dict) -> ResolvedValue:
-    unit_token = modifiers.get("unit")
+def _finish(
+    array,
+    modifiers: dict,
+    form: str,
+    shadowed: dict,
+    context: ResolutionContext,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
+    if "unit" in modifiers:
+        unit_token = modifiers["unit"]
+    elif target is None:
+        unit_token = None
+    else:
+        unit_token = context.use_default(
+            f"{target.destination.document_path}.unit", None
+        )
     if unit_token is None:
         return ResolvedValue(array, None, form, {**modifiers, "_shadowed": shadowed})
     converted, unit = convert_to_canonical(array, unit_token)
@@ -44,34 +58,60 @@ def _finish(array, modifiers: dict, form: str, shadowed: dict) -> ResolvedValue:
 
 
 @register_form("zeros")
-def _zeros(node, context, modifiers):
+def _zeros(node, context, modifiers, target=None):
     shape, shadowed = _shape(node["zeros"], context, "zeros")
-    return _finish(jnp.zeros(shape, dtype=context.dtype), modifiers, "zeros", shadowed)
+    return _finish(
+        jnp.zeros(shape, dtype=context.dtype),
+        modifiers,
+        "zeros",
+        shadowed,
+        context,
+        target,
+    )
 
 
 @register_form("ones")
-def _ones(node, context, modifiers):
+def _ones(node, context, modifiers, target=None):
     shape, shadowed = _shape(node["ones"], context, "ones")
-    return _finish(jnp.ones(shape, dtype=context.dtype), modifiers, "ones", shadowed)
+    return _finish(
+        jnp.ones(shape, dtype=context.dtype),
+        modifiers,
+        "ones",
+        shadowed,
+        context,
+        target,
+    )
 
 
 @register_form("full")
-def _full(node, context, modifiers):
+def _full(node, context, modifiers, target=None):
     spec = node["full"]
     _require_keys(spec, {"shape", "value"}, "full")
     shape, shadowed = _shape(spec["shape"], context, "full")
     return _finish(
-        jnp.full(shape, spec["value"], dtype=context.dtype), modifiers, "full", shadowed
+        jnp.full(shape, spec["value"], dtype=context.dtype),
+        modifiers,
+        "full",
+        shadowed,
+        context,
+        target,
     )
 
 
 @register_form("list")
-def _list(node, context, modifiers):
-    return _finish(jnp.asarray(node["list"], dtype=context.dtype), modifiers, "list", {})
+def _list(node, context, modifiers, target=None):
+    return _finish(
+        jnp.asarray(node["list"], dtype=context.dtype),
+        modifiers,
+        "list",
+        {},
+        context,
+        target,
+    )
 
 
 @register_form("linspace")
-def _linspace(node, context, modifiers):
+def _linspace(node, context, modifiers, target=None):
     spec = node["linspace"]
     # Before _require_keys, not after: a missing 'endpoint' is the one absence
     # this form has to explain rather than list. _require_keys would report it
@@ -97,32 +137,39 @@ def _linspace(node, context, modifiers):
         endpoint=bool(spec["endpoint"]),
         dtype=context.dtype,
     )
-    return _finish(array, modifiers, "linspace", {})
+    return _finish(array, modifiers, "linspace", {}, context, target)
 
 
 @register_form("arange")
-def _arange(node, context, modifiers):
+def _arange(node, context, modifiers, target=None):
     spec = node["arange"]
     _require_keys(spec, {"start", "step", "num"}, "arange")
     num = resolve_extent(spec["num"], context.shape_scope)
     start, step = float(spec["start"]), float(spec["step"])
     array = start + step * jnp.arange(num, dtype=context.dtype)
-    return _finish(array, modifiers, "arange", {})
+    return _finish(array, modifiers, "arange", {}, context, target)
 
 
 @register_form("modulo")
-def _modulo(node, context, modifiers):
+def _modulo(node, context, modifiers, target=None):
     spec = node["modulo"]
     _require_keys(spec, {"num", "period"}, "modulo")
     num = resolve_extent(spec["num"], context.shape_scope)
     period = resolve_extent(spec["period"], context.shape_scope)
     if period < 1:
         raise ConfigError(f"modulo: period must be >= 1, got {period}.")
-    return _finish(jnp.arange(num) % period, modifiers, "modulo", {})
+    return _finish(
+        jnp.arange(num) % period,
+        modifiers,
+        "modulo",
+        {},
+        context,
+        target,
+    )
 
 
 @register_form("from_grid")
-def _from_grid(node, context, modifiers):
+def _from_grid(node, context, modifiers, target=None):
     axis = node["from_grid"]
     grid = {"freq": context.freq, "time": context.time}.get(axis, ...)
     if grid is ...:
@@ -138,7 +185,7 @@ def _from_grid(node, context, modifiers):
             "this is reachable only when a value node is resolved before the "
             "observation is."
         )
-    return _finish(grid, modifiers, "from_grid", {})
+    return _finish(grid, modifiers, "from_grid", {}, context, target)
 
 
 def _require_keys(spec: Any, required: set[str], form: str) -> None:

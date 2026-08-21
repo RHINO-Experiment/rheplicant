@@ -8,7 +8,7 @@ below is in service of making that replica faithful, composable, and cheap to
 differentiate.
 
 The design record: **why** the framework is shaped the way it is, as
-numbered decisions (D1–D13), each with the constraint that forced it. New
+numbered decisions (D1–D54), each with the constraint that forced it. New
 here? Read the [README](https://github.com/RHINO-Experiment/rheplicant#readme) for
 the philosophy and the [guided tour](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/tour.md)
 for the API — this document is for contributors
@@ -29,6 +29,7 @@ Contents: [Layering](#layering) ·
 [D12 inference layer](#d12--bayesian-bridge-uncertainty-propagation-neural-surrogates) ·
 [D13 atmosphere entries](#d13--atmosphere-is-an-equivalent-entry-pair-not-a-trunk-stage) ·
 [D14 parameter spaces](#d14--parameter-spaces-what-is-inferred-vs-how-it-enters) ·
+[D37–D52 config entry and scientific products](#d37--audit-facts-and-scientific-products-have-separate-schemas) ·
 [Element taxonomy → modules](#element-taxonomy--module-map) ·
 [Physics roadmap](#roadmap-physics-to-port-into-the-placeholder-contracts)
 
@@ -1682,6 +1683,171 @@ remaining questions:
 
 D35 is the sharpest instance: it rejects the convenient option specifically
 because the failure it guards against has no numerical symptom at all.
+
+### D37 — Audit facts and scientific products have separate schemas
+
+Plan 4A owns document entry, validation, execution status, and the mandatory
+input/resolved/provenance/diagnostics audit tree. Plan 4B adds scientific
+products without widening either fixed audit schema: its files are described
+by `products.json` and `products-v1.schema.json`. Keeping the tables separate
+means adding a scientific selector cannot silently change what an old audit
+consumer thinks was materialized.
+
+### D38 — The console bootstrap is physically JAX-free until runtime is chosen
+
+`_rheplicant_bootstrap` reads exact bytes, layers presets, preflights output,
+and records audit facts without importing `rheplicant`, JAX, or jaxlib. The
+sole first main-package import is the callback passed to `establish_runtime`
+after process-global x64/platform environment state is installed. A convenient
+top-level import would make the document's runtime declaration arrive too late
+to be true.
+
+### D39 — YAML and presets are exact-byte inputs, not reconstructed mappings
+
+The source is consumed once with bounded safe YAML loading and duplicate-key
+refusal. A selected package preset keeps its original bytes, digest, resource,
+and expanded-node count; generated programs embed those snapshots rather than
+adopting whatever preset a later installation happens to provide. This makes
+the recorded input the input that actually ran.
+
+### D40 — Named plugin and Python targets are trusted, but never called pure
+
+Executable extensions are an explicit trust boundary. Validation guarantees
+that RHEPLICANT/bootstrap/output code performs no output mutation, while one
+fixed warning and `unobserved_io: true` state that named code may do private
+I/O the trace cannot observe. A sandbox claim would be false; silently
+omitting the warning would be worse.
+
+### D41 — Every exit has one parser before any exit executes
+
+Raw run options become immutable parsed execution/resolved views exactly once.
+All selected layers and all declared schedules parse before execution begins,
+so an error in the last variant cannot arrive after earlier runs already spent
+time or produced state. Compatibility registries remain, but built-in
+executors do not reparse their raw mappings.
+
+### D42 — A9 dimensional compatibility is a registry-wide delivery invariant
+
+Every production value delivery names its destination and consults the one
+dimension registry. Units are checked at the model/resource field that will
+consume the value, not guessed from the spelling at its source. A missing
+registry row is itself a refusal: accepting one new field without a dimension
+would reopen the exact route A9 exists to close.
+
+### D43 — Declarative files are captured once before readers consume them
+
+A regular input is streamed into a private mode-0600 snapshot while hashing;
+directories use a verified manifest/tree snapshot. Readers consume only that
+capture. Hashing an original and reopening it would let provenance describe
+one inode while computation reads another, even when both reads individually
+succeed.
+
+### D44 — Resolved YAML is deterministic evidence, not a debug dump
+
+Each completed layer records its effective document, parallel origin tree,
+deletions, defaults, parsed schedule, and decisions. A dedicated serializer
+uses the closed name codec and canonical scalar rules; it never calls
+`yaml.dump` on live scientific objects. A later variant refusal therefore
+still preserves the complete base document it actually earned.
+
+### D45 — Partial audit envelopes say only what completed
+
+The append-only trace marks a boundary only after it succeeds. Refused/error
+envelopes retain earlier findings, parsed rows, run outcomes, and resolved
+layers while leaving future artefacts explicitly unwritten with a closed
+reason. Serialization consumes a detached candidate and contributes exactly
+one final boundary only after final staged metadata is durable.
+
+### D46 — Output publication is a descriptor-safe recoverable transaction
+
+The output manager walks without following symlinks, proves ancestor rename
+protection and access/default ACLs, checks atomic no-replace capability without
+writing, and budgets the real leased filesystem `NAME_MAX` before mutation.
+Recovery runs before A34 clobber authorization. Journalled staging, metadata
+replacement, parent fsyncs, and no-replace publication make interruption
+recoverable; ambiguity preserves every path and permits no second transaction.
+
+### D47 — Per-target locks persist because lock identity is the exclusion
+
+The mode-0600 sibling lock is never unlinked on close. Unlinking would allow a
+second process to create and lock a new inode while the first still holds the
+old one, giving both writers apparent exclusivity. One adapter and one owning
+lease cover recovery, A34, staging, publication, and terminal recovery; an
+ordinary terminal I/O failure is recovered before the one permitted error
+sibling attempt.
+
+### D48 — A product request names a semantic product, not an object key
+
+The 22 `outputs.write` selectors compile to immutable requests and a typed
+`(run kind, selector)` extractor registry. Extractors read known result types;
+they never guess from whatever dictionary keys happen to be present. An
+explicitly named incompatible run is refused. An unfiltered request records
+truthful omissions and succeeds only if at least one compatible run emits a
+file. This keeps broad requests useful without turning a spelling error into
+an empty success.
+
+### D49 — Scientific bytes are deterministic, finite, and self-describing
+
+Numeric products use deterministic, pickle-free NPZ; records use canonical
+finite JSON; text and signal-path renderings use UTF-8. Optional NetCDF chains
+exist only when the writer imports, with no format fallback. Every emitted file
+has a portable encoded path, byte count, SHA-256 digest, selector, format, and
+metadata row in canonical `products.json`, which is checked against the strict
+packaged schema before publication.
+
+### D50 — Product extraction never reruns the science
+
+`aux` and `taps` read the `State.aux` already returned by a forward run;
+reports read prior execution results and recorded timings; recovery combines
+recorded truth with the estimator or posterior moments already present.
+Assembly and signal-path products use prepared layer assemblies. Missing
+truth, zero uncertainty, or an unavailable statistic becomes an explicit
+omission or refusal, never a second execution or non-finite JSON.
+
+### D51 — Comparison failures and benchmark measurements remain data
+
+`compare` requires two earlier successful, structurally identical numeric
+products and checks mapping keys, shapes, and dtype classes before reducing
+`max_rel_diff`, `rms`, or `max_abs`. Missing tolerance is not an exception:
+the serializable result says `passed: false`. `benchmark` runs named prepared
+variants, blocks JAX results before stopping the clock, excludes warmups, and
+retains raw samples; its memory metric is explicitly Python-traced peak bytes,
+not device memory.
+
+### D52 — Scientific files share the one recoverable publication transaction
+
+Product and report bytes are built only after successful execution and before
+the first staging write. They are inserted between resolved configuration and
+the two final audit metadata files in the existing `AuditBundle.files`; the
+same descriptor-relative staging, modes, fsyncs, journal, clobber proof, and
+recovery state machine publishes all of them. A materialization refusal emits
+only the ordinary failure audit sibling and never a partial success target.
+There is no second product transaction and no direct destination write.
+
+### D53 — The GUI projects exact YAML and is a local trusted execution surface
+
+The browser owns selection, hover, focus, open tabs and an invalid in-progress
+textarea draft. It owns no scientific configuration. Every accepted form,
+graph or output edit crosses the framework-free document engine and returns a
+new YAML string; validation, previews and jobs are content-bound projections of
+those bytes. This keeps the CLI, generated program and editor on one scientific
+state rather than asking three serializers to agree.
+
+The selected FastAPI + React application ships as one same-origin process with
+immutable in-memory sessions and explicit load/save/job boundaries. Its wheel
+contains the production assets, so running an installed editor requires no
+Node toolchain and cannot silently serve a developer checkout. Loopback is the
+default and a non-loopback bind requires an explicit acknowledgement because
+the process has no authentication, tenant isolation or sandbox. Bounded safe
+YAML parsing protects the parser; it does not make `python:` targets, plugins,
+resource paths, output paths or expensive jobs untrusted. A configuration is
+trusted input to the server account, exactly as it is at the CLI boundary.
+
+### D54 — Workbench drafts are view state; accepted edits return exact YAML
+
+Workbench navigation, selection and raw drafts are browser view state.
+Exact accepted YAML remains the sole scientific state; every accepted control
+edit returns complete YAML through a revision-checked Python transformation.
 
 ## Known deferred issues
 

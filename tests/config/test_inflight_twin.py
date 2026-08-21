@@ -561,6 +561,8 @@ class TestC9:
                           "C9").message == C9_T_LOAD
 
     def test_it_fires_on_a_noise_wave_temperature(self):
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         found = built_only(
             square(cal_loads={"ambient": {"t_load": {"value": 300.0,
                                                      "unit": "K"}}},
@@ -573,6 +575,8 @@ class TestC9:
         """Schema §6's C9 row says "a ``noise_wave`` temperature", singular.
         There are four, and a check keyed on ``t_unc`` alone would let the
         other three through with every shape correct."""
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = square(
             cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
             model={"noise_wave": noise_wave(**{field: AMBIGUOUS})})
@@ -642,6 +646,8 @@ class TestC9:
         Subset-shaped rather than ``len(...) == 2``: the ``where``s are read
         off this module's own ids only.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = square(
             cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
             model={"noise_wave": noise_wave(t_unc=AMBIGUOUS, t_sin=AMBIGUOUS)})
@@ -659,6 +665,8 @@ class TestC9:
         Asserted as the two sentences being different rather than as two
         substrings, because the mutant this kills is "quote one list".
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         assert "(n_time, n_freq)" in C9_T_UNC
         assert "NOT (n_time, n_freq)" in C9_T_LOAD
         loads = built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}),

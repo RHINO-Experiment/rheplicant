@@ -70,9 +70,21 @@ from rheplicant.config import findings
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys
 
-__all__ = ["AUTO_SKIP", "AUTO_SKIP_ID", "CHECK_ID", "CHECK_NAMES",
-           "DEFAULT_MODE", "MODES", "OFF", "STATES", "Gate", "auto_skipped",
-           "check_gates", "gates", "verdict"]
+__all__ = [
+    "AUTO_SKIP",
+    "AUTO_SKIP_ID",
+    "CHECK_ID",
+    "CHECK_NAMES",
+    "DEFAULT_MODE",
+    "MODES",
+    "OFF",
+    "STATES",
+    "Gate",
+    "auto_skipped",
+    "check_gates",
+    "gates",
+    "verdict",
+]
 
 #: The four words a document may write.  Moved here from
 #: ``sections/inference.py``'s ``_MODES``, which is now an import of this: one
@@ -85,8 +97,7 @@ MODES: tuple[str, ...] = ("refuse", "warn", "report", "skip")
 #: The three checks ``inference.checks`` knows.  Moved here from
 #: ``sections/inference.py``'s ``_CHECK_NAMES``, likewise.  **A FROZENSET** --
 #: it is used in ``set(spec) - allowed`` shapes and the refusal sorts it.
-CHECK_NAMES: frozenset[str] = frozenset(
-    {"identifiability", "linearity", "prior_sensitivity"})
+CHECK_NAMES: frozenset[str] = frozenset({"identifiability", "linearity", "prior_sensitivity"})
 
 #: No user asked for this check.  NOT in :data:`MODES`, so it cannot be
 #: written, so check A37 never has to exempt it.
@@ -106,15 +117,19 @@ STATES: tuple[str, ...] = ("refuse", "warn", "report", "skip", OFF, AUTO_SKIP)
 #: ``prior_sensitivity`` is that plus two Newton solves.  A dict over exactly
 #: :data:`CHECK_NAMES`, so a fourth check name cannot arrive without a default
 #: being chosen for it.
-DEFAULT_MODE: dict[str, str] = {"linearity": "refuse",
-                                "identifiability": OFF,
-                                "prior_sensitivity": OFF}
+DEFAULT_MODE: dict[str, str] = {
+    "linearity": "refuse",
+    "identifiability": OFF,
+    "prior_sensitivity": OFF,
+}
 
 #: check name -> the schema §6 id its findings carry.  C18 is the two-sigma
 #: cross-check and belongs to no gate, so it is not here.
-CHECK_ID: dict[str, str] = {"linearity": "C12",
-                            "identifiability": "C13",
-                            "prior_sensitivity": "C19"}
+CHECK_ID: dict[str, str] = {
+    "linearity": "C12",
+    "identifiability": "C13",
+    "prior_sensitivity": "C19",
+}
 
 #: The id an auto-skip reports under.  Never a registry slot: :func:`verdict`
 #: binds it, so a user grepping the record for C14 finds every check that was
@@ -188,15 +203,13 @@ def check_gates(section: Any) -> tuple[findings.Finding, ...]:
         where = f"inference.checks.{name}"
         if name not in CHECK_NAMES:
             return findings.refuse(
-                "A1", where,
-                f"{where}: {name!r} is not a check; v1 knows "
-                f"{sorted(CHECK_NAMES)}.")
+                "A1", where, f"{where}: {name!r} is not a check; v1 knows {sorted(CHECK_NAMES)}."
+            )
         if not isinstance(spec, Mapping):
-            return findings.refuse(
-                "A1", where,
-                f"{where}: is a mapping with mode:; got {spec!r}.")
+            return findings.refuse("A1", where, f"{where}: is a mapping with mode:; got {spec!r}.")
         allowed = frozenset({"mode", "report", "reason"}) | (
-            frozenset({"rtol"}) if name == "identifiability" else frozenset())
+            frozenset({"rtol"}) if name == "identifiability" else frozenset()
+        )
         try:
             check_unknown_keys(where, dict(spec), allowed, label="a check:")
         except ConfigError as unknown:
@@ -204,33 +217,37 @@ def check_gates(section: Any) -> tuple[findings.Finding, ...]:
         mode = spec.get("mode")
         if mode not in MODES:
             return findings.refuse(
-                "A1", where,
-                f"{where}.mode: is one of {list(MODES)}; got {mode!r}.")
+                "A1", where, f"{where}.mode: is one of {list(MODES)}; got {mode!r}."
+            )
         reason = spec.get("reason")
         if mode == "skip" and not isinstance(reason, str):
             return findings.refuse(
-                "A37", where,
+                "A37",
+                where,
                 f"{where}: mode: skip carries its own reason: (check A37) -- "
-                "three unrelated skips sharing one sentence was v0's mistake.")
+                "three unrelated skips sharing one sentence was v0's mistake.",
+            )
         if mode != "skip" and reason is not None:
-            return findings.refuse(
-                "A1", where,
-                f"{where}: reason: belongs to mode: skip alone.")
+            return findings.refuse("A1", where, f"{where}: reason: belongs to mode: skip alone.")
         if mode == "skip" and bool(spec.get("report", False)):
             return findings.refuse(
-                "A1", where,
+                "A1",
+                where,
                 f"{where}: mode: skip and report: true together ask to record "
                 "the numbers of a check that will not run. Drop report:, or "
                 "drop reason: and change mode: skip to mode: report so the "
-                "check runs and has numbers to record (check A1).")
+                "check runs and has numbers to record (check A1).",
+            )
         return None
 
     if section is None:
         return ()
     if not isinstance(section, Mapping):
-        return (findings.refuse(
-            "A1", "inference.checks",
-            f"inference.checks: is a mapping; got {section!r}."),)
+        return (
+            findings.refuse(
+                "A1", "inference.checks", f"inference.checks: is a mapping; got {section!r}."
+            ),
+        )
     found = []
     for name, spec in section.items():
         one = decide(name, spec)
@@ -239,7 +256,7 @@ def check_gates(section: Any) -> tuple[findings.Finding, ...]:
     return tuple(found)
 
 
-def gates(section: Any) -> dict[str, Gate]:
+def gates(section: Any, *, audit: Any = None) -> dict[str, Gate]:
     """The three gates, defaults applied, for a section that passed
     :func:`check_gates`.
 
@@ -256,17 +273,51 @@ def gates(section: Any) -> dict[str, Gate]:
         spec = declared.get(name)
         if not isinstance(spec, Mapping):
             spec = {}
-        state = spec.get("mode", DEFAULT_MODE[name])
+        if "mode" in spec:
+            state = spec["mode"]
+        elif audit is None:
+            state = DEFAULT_MODE[name]
+        elif name == "linearity":
+            state = audit.use_default("inference.checks.linearity.mode", DEFAULT_MODE[name])
+        elif name == "prior_sensitivity":
+            state = audit.use_default(
+                "inference.checks.prior_sensitivity.mode", DEFAULT_MODE[name]
+            )
+        else:
+            state = audit.use_default("inference.checks.identifiability.mode", DEFAULT_MODE[name])
         rtol = spec.get("rtol") if name == "identifiability" else None
-        gate = Gate(name=name,
-                    state=state,
-                    record=bool(spec.get("report", False)),
-                    reason=spec.get("reason") if state == "skip" else None,
-                    rtol=float(rtol) if rtol is not None else None)
+        if audit is not None and name == "identifiability" and "rtol" not in spec:
+            rtol = audit.use_default("inference.checks.identifiability.rtol", None)
+        if "report" in spec:
+            report = bool(spec["report"])
+        elif audit is None:
+            report = False
+        elif name == "linearity":
+            report = audit.use_default("inference.checks.linearity.report", False)
+        elif name == "identifiability":
+            report = audit.use_default("inference.checks.identifiability.report", False)
+        else:
+            report = audit.use_default("inference.checks.prior_sensitivity.report", False)
+        gate = Gate(
+            name=name,
+            state=state,
+            record=report,
+            reason=spec.get("reason") if state == "skip" else None,
+            rtol=float(rtol) if rtol is not None else None,
+        )
         # `record` is `report:`, and `report:` governs the numbers of a check
         # that RAN.  Forced here rather than trusted from the document so that
         # a caller reading `gate.record` never has to ask `gate.runs()` first.
         out[name] = gate if gate.runs() else gate._replace(record=False)
+        if audit is not None:
+            effective = out[name]
+            audit.gate(
+                name,
+                CHECK_ID[name],
+                state,
+                effective.state,
+                effective.reason,
+            )
     return out
 
 
@@ -296,14 +347,14 @@ def auto_skipped(gate: Gate, reason: str) -> Gate:
         raise ValueError(
             "auto_skipped(gate, reason=...): reason must not be empty. An "
             "auto-skip with no reason is silent -- the failure mode this "
-            "state exists to end -- and verdict()'s `gate.reason or \"\"` "
+            'state exists to end -- and verdict()\'s `gate.reason or ""` '
             "fallback would otherwise turn it into a REPORT finding whose "
-            "message says nothing.")
+            "message says nothing."
+        )
     return gate._replace(state=AUTO_SKIP, record=False, reason=reason)
 
 
-def verdict(gate: Gate, *, failed: bool, where: str,
-            message: str) -> findings.Finding | None:
+def verdict(gate: Gate, *, failed: bool, where: str, message: str) -> findings.Finding | None:
     """The cross-product of a mode and a ``report:``, in one place.
 
     **AT MOST ONE finding, ever.**  A failure with ``report: true`` is ONE

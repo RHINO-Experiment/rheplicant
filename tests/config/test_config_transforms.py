@@ -1,4 +1,4 @@
-"""The transform registry, and bindings -> ParameterSpace."""
+"""The formula-addressed transform registry, and bindings -> ParameterSpace."""
 
 import sys
 
@@ -6,9 +6,15 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.types import Origin
 from rheplicant.config import ConfigError
+from rheplicant.config.dimensions import DimensionEnvironment, signature
 from rheplicant.config.sections.parameters import parse_latents
-from rheplicant.config.sections.transforms import build_space, parse_transform
+from rheplicant.config.sections.transforms import (
+    _formula_parent,
+    build_space,
+    parse_transform,
+)
 from tests.config.inference_helpers import context, twin
 
 
@@ -57,6 +63,74 @@ class TestRegistry:
         fn, _ = parse_transform({"affine": {"scale": 2.0}}, context(),
                                 where="t")
         assert float(fn(jnp.asarray(3.0))) == pytest.approx(6.0)
+
+    def test_affine_offset_inherits_the_latent_dimension(self):
+        ctx = context(
+            dimensions=DimensionEnvironment(
+                latent_dimensions={"temperature": signature("K")}
+            )
+        )
+        with pytest.raises(ConfigError, match="affine.offset"):
+            parse_transform(
+                {"affine": {"offset": {"value": 1.0, "unit": "Hz"}}},
+                ctx,
+                where="inference.parameters.temperature.transform",
+            )
+
+    def test_affine_parent_keeps_a_concrete_path_and_patterned_selector(self):
+        ctx = context(
+            dimensions=DimensionEnvironment(
+                latent_dimensions={"temperature": signature("K")}
+            )
+        )
+        parent = _formula_parent(
+            "inference.parameters.temperature.transform.affine.offset",
+            "transform_affine",
+            ctx,
+        )
+        assert parent.destination.document_path == (
+            "inference.parameters.temperature.transform.affine"
+        )
+        assert parent.destination.selector == "inference.parameters.*.init"
+        assert parent.expected == signature("K")
+
+    def test_affine_defaults_record_their_formula_units(self):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        ctx = context(
+            dimensions=DimensionEnvironment(
+                latent_dimensions={"temperature": signature("K")}
+            ),
+            trace=trace,
+            origin_lookup=lambda path: pytest.fail(
+                f"defaulted affine operand unexpectedly looked up: {path}"
+            ),
+        )
+        parse_transform(
+            {"affine": {}},
+            ctx,
+            where="inference.parameters.temperature.transform",
+        )
+        by_path = {
+            destination.document_path: facts
+            for _, destination, facts in trace.deliveries
+        }
+        assert by_path[
+            "inference.parameters.temperature.transform.affine.scale"
+        ] == {
+            "dtype": "float32",
+            "origin": Origin("rheplicant-default"),
+            "unit": "dimensionless",
+        }
+        assert by_path[
+            "inference.parameters.temperature.transform.affine.offset"
+        ]["unit"] == "K"
 
     def test_matmul_applies_a_declared_design(self):
         fn, _ = parse_transform(

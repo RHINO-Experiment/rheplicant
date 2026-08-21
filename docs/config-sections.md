@@ -67,11 +67,11 @@ point). Lighting `beam_spill` and `ground_pickup` together requires
 
 `inference:` and `runs:` are read now — [their own page](config-inference.md)
 covers them, `runs:` is required, and
-[the sixteen kinds it runs](config-inference.md#runs) now include the
-conjugate family, the cheap diagnostics, NUTS and the neural posterior. What
-still goes elsewhere: `outputs:`, `defaults:` and `plugins:` arrive with
-Plan 4's CLI, and so do `compare` and `benchmark`; `campaign:` stays reserved
-with capability 4.
+[the eighteen kinds it runs](config-inference.md#runs) now include the
+conjugate family, the cheap diagnostics, NUTS, the neural posterior,
+`compare`, and `benchmark`. `outputs:`, `defaults:`, and `plugins:` are handled
+by the [configuration command](config-cli.md); scientific products are
+selected under `outputs.write`. `campaign:` stays reserved with capability 4.
 
 Most of what a document can be refused for is now decided *before* any of this
 runs — see [the pre-flight pass](config-validation.md#the-pre-flight-pass).

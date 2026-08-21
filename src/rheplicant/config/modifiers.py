@@ -13,11 +13,16 @@ trig, powers, a product of two value nodes -- goes to the ``python:`` hatch
 and pays the stated cost.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 
 from rheplicant.config.errors import ConfigError
+
+if TYPE_CHECKING:
+    from rheplicant.config.context import ResolutionContext
 
 #: ``part:`` -- which component of a complex value node.
 PARTS: tuple[str, ...] = ("re", "im", "abs", "angle")
@@ -38,7 +43,13 @@ NOISE_AXES: tuple[str, ...] = ("time", "freq", "none")
 REAL_DTYPES: tuple[str, ...] = tuple(name for name in DTYPES if not name.startswith("complex"))
 
 
-def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
+def apply_modifiers(
+    value: Any,
+    modifiers: dict[str, Any],
+    *,
+    form: str,
+    context: ResolutionContext | None = None,
+) -> Any:
     """Apply every modifier that transforms the value, in a fixed order.
 
     Order: ``dtype`` -> ``part`` -> ``scale``/``offset`` -> ``normalize`` ->
@@ -90,10 +101,22 @@ def apply_modifiers(value: Any, modifiers: dict[str, Any], *, form: str) -> Any:
         value = _cast(value, modifiers["dtype"], form)
     if "part" in modifiers:
         value = _part(value, modifiers["part"], was_complex=was_complex)
+        if modifiers["part"] == "angle":
+            modifiers["unit"] = "deg"
     if "scale" in modifiers or "offset" in modifiers:
-        value = value * float(modifiers.get("scale", 1.0)) + float(modifiers.get("offset", 0.0))
+        if "scale" in modifiers:
+            scale = modifiers["scale"]
+        else:
+            scale = 1.0 if context is None else context.use_default("value.scale", 1.0)
+        if "offset" in modifiers:
+            offset = modifiers["offset"]
+        else:
+            offset = 0.0 if context is None else context.use_default("value.offset", 0.0)
+        value = value * float(scale) + float(offset)
     if "normalize" in modifiers:
         value = _normalize(value, modifiers["normalize"])
+        if modifiers["normalize"] != "none":
+            modifiers["unit"] = "dimensionless"
     if modifiers.get("column"):
         value = _column(value, form)
     return value

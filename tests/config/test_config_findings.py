@@ -33,8 +33,16 @@ from rheplicant.config.findings import (
     warn,
 )
 from rheplicant.config.sections import exits
-from rheplicant.config.sections.exit_support import EXECUTORS, register
+from rheplicant.config.sections.exit_support import (
+    DEFERRED_CHECKS,
+    EXECUTORS,
+    PARSERS,
+    PRE_EXECUTORS,
+    register,
+)
 from rheplicant.config.sections.inference import _MODES
+
+_REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
 A = refuse("A2", "model.gian", "model: 'gian' is not a node (check A2).")
 B = warn("A41", "resources.arrays.flat", "A literal shadows n_freq (check A41).")
@@ -252,6 +260,13 @@ class TestRaiseIfRefused:
     def test_a_clean_report_raises_nothing(self):
         assert Report().raise_if_refused() is None
 
+    def test_a_refusal_attaches_the_supplied_cumulative_report(self):
+        current = Report(findings=(A,))
+        cumulative = Report(findings=(A, E))
+        with pytest.raises(ConfigError) as caught:
+            current.raise_if_refused(cumulative=cumulative)
+        assert caught.value.report is cumulative
+
     def test_a_report_of_warnings_alone_raises_nothing(self):
         """Kills ``if self.findings: raise`` -- a document with one warning
         would stop loading."""
@@ -417,11 +432,14 @@ class TestTheExecutorRegistryNoLongerAsserts:
     def test_a_second_registration_is_refused_in_the_layers_own_voice(self):
         register("_probe_kind")(self.probe)
         try:
-            assert EXECUTORS["_probe_kind"] is self.probe
+            # The transitional legacy adapter wraps a parse-less binding;
+            # ``__wrapped__`` is the executor the caller registered.
+            assert EXECUTORS["_probe_kind"].__wrapped__ is self.probe
             with pytest.raises(ConfigError, match="registered twice"):
                 register("_probe_kind")(self.probe)
         finally:
-            EXECUTORS.pop("_probe_kind", None)
+            for registry in _REGISTRIES:
+                registry.pop("_probe_kind", None)
 
     def test_the_first_registration_is_the_one_that_survives_the_refusal(self):
         """Kills assigning before raising.  A ``register`` that stored ``fn``
@@ -435,9 +453,10 @@ class TestTheExecutorRegistryNoLongerAsserts:
         try:
             with pytest.raises(ConfigError):
                 register("_probe_kind")(other)
-            assert EXECUTORS["_probe_kind"] is self.probe
+            assert EXECUTORS["_probe_kind"].__wrapped__ is self.probe
         finally:
-            EXECUTORS.pop("_probe_kind", None)
+            for registry in _REGISTRIES:
+                registry.pop("_probe_kind", None)
 
     def test_the_refusal_names_both_claimants(self):
         """Presence of the kind is not enough: with two modules registering
@@ -477,7 +496,8 @@ class TestTheExecutorRegistryNoLongerAsserts:
             assert "_probe_kind" in message
             assert message.index(first.__module__) < message.index(other.__module__)
         finally:
-            EXECUTORS.pop("_probe_kind", None)
+            for registry in _REGISTRIES:
+                registry.pop("_probe_kind", None)
 
     def test_the_refusal_survives_python_O(self):
         """The whole reason this changed.  Measured before the change: under

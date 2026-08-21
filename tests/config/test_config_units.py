@@ -7,10 +7,17 @@ import pytest
 from rheplicant.config import ConfigError
 from rheplicant.config.units import (
     ACCEPTED_UNITS,
+    Unit,
     canonical_unit,
     check_field_name_unit,
     convert_to_canonical,
 )
+
+
+def test_unit_compatibility_record_remains_exactly_six_fields():
+    assert Unit._fields == (
+        "canonical", "factor", "offset", "numerator", "denominator", "dimension"
+    )
 
 
 class TestTheAtomicAlphabet:

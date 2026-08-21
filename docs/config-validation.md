@@ -29,10 +29,13 @@ model forward. That is not a policy — it is what makes the pass free.
 **What "free" is, measured rather than claimed.** The pass runs once per
 document and once more per declared **variant**, because a variant *is* a
 different document and is checked as one. Cold — one call in a fresh process —
-the worked document below is **1.6 ms**, and a document with forty
-`plan.sample` runs and twenty variants is **26 ms**, against a budget of
-0.05 s. It is linear in the number of variants from there, so a document with
+the worked document below is **3.5 ms**, and a document with forty
+`plan.sample` runs and twenty variants is **58 ms**, against a budget of
+0.15 s. It is linear in the number of variants from there, so a document with
 several dozen of them costs several dozen passes; if you write one, time it.
+(These numbers moved at 2026-08-19, when the audit-evidence pipeline gained
+its hardened enumeration: the budget was re-measured against that contract,
+not the contract weakened to fit the old one.)
 Nothing in the pass grows with the size of a *beam*, which is the comparison
 that matters: `build_resources` is 1.397 s of `load_document`'s 1.536 s on a
 toy nside-16 beam, and worse on a real CST directory.
@@ -157,7 +160,8 @@ bound upstream of it is refused by `linearity` at the defaults above, whether
 or not the converter actually saturates.** `check_linearity` probes each
 `linear: true` claim at `(1e-3, 1, 1e3)` times the latent's own scale, and a
 converter that clips nothing at `1x` still clips hard at `1000x`. Measured on
-the most benign ADC this package can build (`model.adc: {scale: 1.0, n_bits:
+the most benign ADC this package can build (`model.adc: {scale: {value: 1.0,
+unit: adc_count/K}, n_bits:
 12}`, achieved peak `12.116166 adc_count` against a `2048 adc_count` clip
 limit — the real forward pass clips *nothing*): `linearity` still refuses,
 departure `5.32e+00` at the `1000x` probe against `rtol=1.19e-03`, with the
@@ -410,8 +414,9 @@ both, so C18 is last. Write the bullets in that order and keep them in it;
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction
-  alike. `kind: forward` and `kind: mmodes` keep the node — neither closes over
-  a fit twin — and every other kind cannot. Fix:
+  alike. `kind: forward`, `kind: mmodes`, `kind: compare`, and
+  `kind: benchmark` keep the node — none closes a fit twin over a parameter
+  template — while fitting kinds cannot. Fix:
   `inference.twin: {without: [noise]}`.
 - **A33** — `b` is free into `bandpass` and `g` is free into `gain`. The two
   multiply the same prediction, so only their product is constrained and the

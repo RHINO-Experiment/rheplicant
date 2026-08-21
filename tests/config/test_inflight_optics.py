@@ -113,7 +113,9 @@ def tone_and_flagger(threshold=3.0, tone=None, **model):
     return preflight_document(
         model={**BASE_MODEL, "cw_tone": tone or TONE,
                "flagging": {"type": "FlaggingOperator",
-                            "threshold": threshold},
+                            "threshold": {
+                                "value": threshold, "unit": "adc_count",
+                            }},
                **model})
 
 
@@ -286,7 +288,10 @@ class TestA43:
     def test_a_flagger_with_no_tone_earns_nothing(self):
         assert mine(preflight_document(
             model={**BASE_MODEL, "flagging": {"type": "FlaggingOperator",
-                                              "threshold": 3.0}})) \
+                                              "threshold": {
+                                                  "value": 3.0,
+                                                  "unit": "adc_count",
+                                              }}})) \
             == frozenset()
 
     def test_NO_ADC_LIT_is_a_real_document_and_not_a_crash(self):
@@ -315,7 +320,10 @@ class TestA43:
         dies on.
         """
         document = tone_and_flagger(threshold=3.0,
-                                    adc={"scale": 10.0, "n_bits": 12})
+                                    adc={"scale": {"value": 10.0,
+                                                    "unit": "adc_count/K"},
+                                         "n_bits": 12})
+        document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         assert built_only(document, "A43").message == a43_message(
             "3", "444.472", "6.74957e-05", scale="10")
 
@@ -466,11 +474,13 @@ class TestA43:
         document = preflight_document(
             model={**BASE_MODEL, "cw_tone": TONE,
                    "flagging": {"type": "FlaggingOperator",
-                                "threshold": 1000.0}},
+                                "threshold": {"value": 1000.0,
+                                               "unit": "adc_count"}}},
             inference={"twin": {"without": ["noise"],
                                 "replace": {"flagging": {
-                                    "type": "FlaggingOperator",
-                                    "threshold": 3.0}}}})
+                                "type": "FlaggingOperator",
+                                "threshold": {"value": 3.0,
+                                               "unit": "adc_count"}}}}})
         run = built_run(document)
         assert run.inference.replaced == ("flagging",)
         found = built_only(document, "A43")
@@ -499,11 +509,16 @@ class TestA43:
         document = preflight_document(
             model={**BASE_MODEL, "cw_tone": TONE,
                    "flagging": {"type": "FlaggingOperator",
-                                "threshold": 100.0},
-                   "adc": {"scale": 1.0, "n_bits": 12}},
+                                "threshold": {"value": 100.0,
+                                               "unit": "adc_count"}},
+                   "adc": {"scale": {"value": 1.0,
+                                      "unit": "adc_count/K"},
+                           "n_bits": 12}},
             inference={"twin": {"without": ["noise"],
-                                "replace": {"adc": {"scale": 10.0,
+                                "replace": {"adc": {"scale": {"value": 10.0,
+                                                               "unit": "adc_count/K"},
                                                     "n_bits": 12}}}})
+        document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         run = built_run(document)
         assert run.inference.replaced == ("adc",)
         assert float(run.twin["adc"].scale) == 1.0
@@ -536,7 +551,8 @@ class TestA43:
             resources=UNREADABLE_BEAM,
             model={**BASE_MODEL, "cw_tone": TONE,
                    "flagging": {"type": "FlaggingOperator",
-                                "threshold": 3.0}})
+                                "threshold": {"value": 3.0,
+                                               "unit": "adc_count"}}})
         with pytest.raises(ConfigError) as raised:
             load_document(document)
         assert "no_such_beam.npy" in str(raised.value)
@@ -925,7 +941,8 @@ class TestTheCostOfTheseTwoRows:
             resources=sections,
             model={**BASE_MODEL, "cw_tone": TONE,
                    "flagging": {"type": "FlaggingOperator",
-                                "threshold": 3.0}})
+                                "threshold": {"value": 3.0,
+                                               "unit": "adc_count"}}})
         run = built_run(document, base_dir=str(tmp_path))
         opened = []
         original = builtins.open

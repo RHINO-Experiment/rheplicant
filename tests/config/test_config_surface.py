@@ -24,10 +24,6 @@ def _section(text: str, heading: str) -> str:
     return body
 
 
-def _paragraphs(text: str) -> list[str]:
-    return [block for block in re.split(r"\n[ \t]*\n", text) if block.strip()]
-
-
 def _page_document(heading: str, page: str = "config-inference.md") -> dict:
     """The first ``yaml`` fence under a heading, parsed as a reader reads it.
 
@@ -90,23 +86,6 @@ def _rows(body: str) -> list[list[str]]:
             continue          # the |---|---| rule
         found.append(cells)
     return found[1:] if found else []
-
-
-def _kinds_named_in(paragraph: str, kinds) -> set[str]:
-    """Every run kind a paragraph names, family globs included.
-
-    ``conjugate.*`` is how both pages have always spelled the three conjugate
-    kinds at once, so matching backticked tokens exactly would read a
-    sentence naming all three as naming none -- and the sentence this guards
-    was exactly that shape.
-    """
-    hits = set()
-    for token in re.findall(r"`([^`]+)`", paragraph):
-        token = token.rstrip("*:")
-        for kind in kinds:
-            if token == kind or (token.endswith(".") and kind.startswith(token)):
-                hits.add(kind)
-    return hits
 
 
 class TestTheSurface:
@@ -210,13 +189,21 @@ class TestTheSurface:
 class TestTheLayerBoundaryIsMechanical:
     def test_no_config_module_is_imported_by_core_radio_or_inference(self):
         """The other direction is guarded by tests/core/test_layering.py for
-        core. This is the whole-package half: nothing below config may reach
-        up into it, or config stops being removable."""
+        core. Nothing below config may reach up into it; the GUI is above the
+        config layer and gets explicit catalog and live-validation gateways."""
         src = pathlib.Path(rheplicant.__file__).parent
+        allowed_clients = {
+            pathlib.Path("gui/form_catalog.py"),
+            pathlib.Path("gui/form_edits.py"),
+            pathlib.Path("gui/jobs.py"),
+            pathlib.Path("gui/outputs.py"),
+            pathlib.Path("gui/validation.py"),
+        }
         offenders = [
             str(path.relative_to(src))
             for path in src.rglob("*.py")
             if "config" not in path.parts
+            and path.relative_to(src) not in allowed_clients
             and (
                 "from rheplicant.config" in path.read_text()
                 or "import rheplicant.config" in path.read_text()
@@ -263,6 +250,14 @@ class TestThePlan2ASurface:
                      "recursive_update", "run_forward"):
             assert name in config.__all__
             assert getattr(config, name) is not None
+
+    def test_exported_layering_functions_are_the_neutral_objects(self):
+        """Catches package-level imports preserving an obsolete wrapper."""
+        import rheplicant.config as config
+        from _rheplicant_bootstrap import layering as neutral
+
+        assert config.apply_variant is neutral.apply_variant
+        assert config.recursive_update is neutral.recursive_update
 
     def test_importing_the_package_registers_the_object_readers(self):
         import rheplicant.config as config
@@ -336,6 +331,8 @@ class TestThePlan2CSurface:
     #: ``ConfiguredRun.report``.
     SURFACE_3C = ("Gate", "gates")
 
+    SURFACE_4A = ("register_dimension", "register_dimension_formula")
+
     def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(
             self):
         import rheplicant.config as config
@@ -343,7 +340,8 @@ class TestThePlan2CSurface:
         assert sorted(config.__all__) == sorted(self.SURFACE
                                                 + self.SURFACE_3A
                                                 + self.SURFACE_3B
-                                                + self.SURFACE_3C), (
+                                                + self.SURFACE_3C
+                                                + self.SURFACE_4A), (
             "rheplicant.config.__all__ changed. Plan 2C's decision was that "
             "nine new run kinds are document vocabulary rather than public "
             "API, and 2D's that a product received through run_document is "
@@ -356,8 +354,11 @@ class TestThePlan2CSurface:
         """The dispatch table is not something a caller may hold."""
         import rheplicant.config as config
 
-        for name in ("EXECUTORS", "register", "reuse_of", "RunSpec",
-                     "execute_run"):
+        for name in ("EXECUTORS", "PARSERS", "PRE_EXECUTORS",
+                     "DEFERRED_CHECKS", "register", "handler_for",
+                     "parse_run", "parsed_options", "ParsedOptions",
+                     "ParsedRun", "RunParseContext", "ExitHandler",
+                     "reuse_of", "RunSpec", "execute_run"):
             assert name not in config.__all__, name
 
     def test_every_declared_kind_is_reachable_from_a_document(self):
@@ -379,7 +380,7 @@ class TestThePlan2CSurface:
             (spec,) = parse_runs([{"kind": kind}])
             assert spec.kind == kind, f"{kind} is not reachable by a document"
             assert kind in EXECUTORS, f"{kind} declares no executor"
-        assert len(_KINDS) == len(set(_KINDS)) == 16, sorted(_KINDS)
+        assert len(_KINDS) == len(set(_KINDS)) == 18, sorted(_KINDS)
 
     def test_nothing_is_deferred_to_plan_2c_any_more(self):
         """The audit of Tasks 2-11: the deferral tuple itself must be gone.
@@ -452,13 +453,6 @@ class TestThePagesSayWhatTheLayerDoes:
     were found by reading the source, not by a red test. A new per-kind claim
     on either page is unguarded unless someone writes the guard.
     """
-
-    #: The plans that are still in the future.  "Plan 2D" left this tuple when
-    #: 2D landed: a paragraph that names a shipped kind beside the plan that
-    #: SHIPPED it is honest history, and scanning for it made this guard
-    #: assert a contradiction the moment the last 2D kind reached ``_KINDS``.
-    #: The docstring below is written against that; it moves with this tuple.
-    FUTURE_PLANS = ("Plan 4",)
 
     PAGES = ("config-inference.md", "config-sections.md")
 
@@ -564,77 +558,6 @@ class TestThePagesSayWhatTheLayerDoes:
                 f"the npe table's {subsection}: row offers "
                 f"{sorted(rows[subsection])}; npe.{table} sweeps "
                 f"{sorted(getattr(npe, table))}."
-            )
-
-    def test_no_page_says_a_shipped_kind_arrives_with_a_later_plan(self):
-        """A shipped kind may not share a paragraph with a FUTURE plan.
-
-        Paragraph-scoped rather than page-scoped: both pages legitimately
-        name later plans elsewhere, and a page-wide search would be satisfied
-        by any mention anywhere.
-
-        Narrower than the sentence it was written for, and worth saying so.
-        The false sentence named "Plan 2C", and only ``FUTURE_PLANS`` is
-        scanned -- a page claiming a kind arrives with a plan that has
-        already shipped it would still pass.  "Plan 2D" was in that tuple
-        until 2D landed and left it at Task 11: after the last 2D kind
-        reached ``_KINDS``, every honest sentence about what 2D shipped names
-        a shipped kind beside "Plan 2D", and a guard that called that an
-        offence would have made the page choose between being accurate and
-        being green.
-
-        The per-page anti-vacuity floor is not a formality.  A tuple narrowed
-        to a string no paragraph contains -- a typo, or a plan number that
-        retires the way "Plan 2D" just did -- makes ``continue`` fire on every
-        paragraph and leaves this guard passing while reading nothing.  It is
-        asserted PER PAGE rather than once at the end because ``_paragraphs``
-        splits on blank lines only: a deferral sentence that wraps between
-        ``Plan`` and ``4`` matches no filter, and a whole-run counter would be
-        held up by the other page while this one went unread.
-        """
-        from rheplicant.config.sections.runs import _KINDS
-
-        offenders = []
-        for name in self.PAGES:
-            scanned = 0
-            for paragraph in _paragraphs(_page(name)):
-                if not any(plan in paragraph for plan in self.FUTURE_PLANS):
-                    continue
-                scanned += 1
-                named = _kinds_named_in(paragraph, _KINDS)
-                if named:
-                    offenders.append(f"{name}: {sorted(named)} in "
-                                     f"{paragraph.strip()[:120]!r}")
-            assert scanned >= 1, (
-                f"{name}: no paragraph named any of {self.FUTURE_PLANS}, so "
-                "this guard read nothing. Either the pages stopped deferring "
-                "anything -- in which case delete the guard -- or the tuple "
-                "is stale, or a deferral sentence now wraps mid-name."
-            )
-        assert not offenders, (
-            "these kinds ship today and the page says they arrive later:\n  "
-            + "\n  ".join(offenders)
-        )
-
-    def test_both_pages_still_name_what_is_genuinely_deferred(self):
-        """The other direction: silence is not honesty either.
-
-        Deleting the deferral sentence would satisfy the test above and leave
-        a reader to discover ``kind: compare`` by being refused.  Only
-        ``_KINDS_PLAN4`` is left to defer: ``_KINDS_2C`` went with ``predict``
-        and ``_KINDS_2D`` with ``npe``.
-        """
-        from rheplicant.config.sections.runs import _KINDS_PLAN4
-
-        deferred = set(_KINDS_PLAN4)
-        for name in self.PAGES:
-            covered = set()
-            for paragraph in _paragraphs(_page(name)):
-                if "Plan 2D" in paragraph or "Plan 4" in paragraph:
-                    covered |= _kinds_named_in(paragraph, deferred)
-            assert covered == deferred, (
-                f"{name} names {sorted(covered)} as deferred; the module "
-                f"defers {sorted(deferred)}."
             )
 
     #: What each kind needs written beside it to get as far as the noise
@@ -752,7 +675,8 @@ class TestThePagesSayWhatTheLayerDoes:
     _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
                      "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
                      "eleven": 11, "twelve": 12, "thirteen": 13,
-                     "fourteen": 14, "fifteen": 15, "sixteen": 16}
+                     "fourteen": 14, "fifteen": 15, "sixteen": 16,
+                     "seventeen": 17, "eighteen": 18}
 
     #: A kind's own bullet under a ``### `` subsection: ``- `forward` — ``.
     #: The BULLET HEADS, never the body -- measured, the ``predict`` bullet
@@ -792,7 +716,7 @@ class TestThePagesSayWhatTheLayerDoes:
         reader has to be refused to find out it exists. A bullet naming no
         declared kind sends a reader to write a word ``parse_runs`` rejects.
         And a kind bulleted TWICE would let both halves of the count check
-        below pass while the page said sixteen and listed seventeen.
+        below pass while the page said eighteen and listed nineteen.
         """
         from rheplicant.config.sections.runs import _KINDS
 
@@ -838,7 +762,7 @@ class TestThePagesSayWhatTheLayerDoes:
     def test_config_sections_states_how_many_kinds_runs_holds(self):
         """``config-sections.md`` counts them in words and nothing read it.
 
-        It is right today -- 2D updated it from fourteen to sixteen -- and it
+        It is right today -- 4B updated it from sixteen to eighteen -- and it
         was right by hand, which is the condition this repo has twice paid for
         (README's test count drifted by 759; the D range by three).
         """
@@ -1579,14 +1503,14 @@ class TestPlan3CsSurfaceAndItsPage:
     SLOTS = "## The three later slots, and what each one buys"
     SPELLINGS = "### A refused document produces no record at all"
 
-    #: :data:`TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS` stops at sixteen
-    #: and the cross-product is eighteen cells. Extended here rather than
+    #: :data:`TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS` stops at eighteen
+    #: and later prose counts reach twenty. Extended here rather than
     #: widened there, for the reason
     #: :data:`TestTheCountsProseStatesAboutThisLayer._WORDS` gives: a reworded
     #: count must fail as a WRONG COUNT, where an unknown word fails as a
     #: broken scan and reads as this guard's own bug.
     _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
-              "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20}
+              "nineteen": 19, "twenty": 20}
 
     #: How the page's ``report:`` column expands into the cells it stands for.
     #: THREE of the five spellings expand, and each for its own reason:
@@ -2057,6 +1981,7 @@ class TestPlan3CsSurfaceAndItsPage:
         # Execute the claim itself: the most benign ADC this package can
         # build, no linearity decline, no C16 finding, C12 refuses anyway.
         document = unsaturated_linear_case()
+        document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         payload = priced_run(document)
         assert payload.run.report.refusals() == (), (
             "the built pass already refuses this document; the paragraph's "

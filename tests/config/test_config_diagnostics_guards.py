@@ -9,6 +9,8 @@ answer.  Both modules import their fixtures from
 and one measured model -- Task 8 moved them there when ``kind: gradient``
 became their third caller.
 
+Their ``runs[index].at.*`` values are destination-censused by concrete index.
+
 The whole class is parametrized over BOTH kinds on purpose.  ``_names`` and
 ``_at_values`` are one implementation serving two package entry points that
 disagree about every malformed shape, and on the shapes below it is

@@ -26,9 +26,11 @@ from typing import Any
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
+from rheplicant.config.dimensions import dimension_of, matching_dimension_rows, signature
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.units import convert_to_canonical
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.units import canonical_unit, convert_to_canonical
+from rheplicant.config.values import ResolutionTarget, ResolvedValue, register_form
 
 #: ``part:`` inside a ``from_switch_order``. Narrower than the modifier alphabet on
 #: purpose: NoiseWaveOperator takes gamma_src_re and gamma_src_im as separate
@@ -96,19 +98,64 @@ def _delivered(value: Any, modifiers: dict, form: str) -> ResolvedValue:
 
 
 @register_form("ref")
-def _ref(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
-    return _delivered(resolve_reference(node["ref"], context), modifiers, "ref")
+def _ref(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
+    dotted = node["ref"]
+    value = resolve_reference(dotted, context)
+    document_environment = (
+        context.dimensions.prediction_dimension is not None
+        or context.dimensions.model_input_dimension is not None
+    )
+    if document_environment and dotted not in context.dimensions.resource_dimensions:
+        rows = matching_dimension_rows("config_path", dotted)
+        if any(spec.disposition in ("fixed", "contextual") for _, spec in rows):
+            raise ConfigError(
+                f"ref: {dotted!r} is a fixed/contextual resource output but its "
+                "dimension was not bound after the builder succeeded."
+            )
+    source = context.dimensions.resource_dimensions.get(dotted)
+    if source is not None and target is not None and target.expected is not None:
+        if source != target.expected:
+            raise ConfigError(
+                f"ref: {dotted!r} has dimension {source}, but destination "
+                f"{target.destination.document_path!r} requires {target.expected}."
+            )
+    token = modifiers.get("unit")
+    if source is not None and token is not None and signature(token) != source:
+        raise ConfigError(
+            f"ref: {dotted!r} has dimension {source}, but unit {token!r} declares "
+            f"{signature(token)}. A reference cannot relabel its source."
+        )
+    if source is not None and token is None:
+        for candidate in (
+            "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
+            "count", "samples", "bits", "channels", "cycles", "adc_count",
+            "adc_count/K", "Hz/s", "dimensionless/s", "cycles/samples",
+        ):
+            unit = canonical_unit(candidate)
+            if dimension_of(unit) == source:
+                return ResolvedValue(value, unit, "ref", modifiers)
+    return _delivered(value, modifiers, "ref")
 
 
 @register_form("stack")
-def _stack(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _stack(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     # `stack` takes its entries under its own key and one flat sibling, `axis`,
     # which is spelled exactly like the noise-sigma modifier -- so it is
     # already admitted by the dispatcher and needs no `arguments=` on the
     # registration. What it does need is to be TAKEN OFF the modifiers on the
     # way out when it is stack's own: `axis: 0` is not one of NOISE_AXES and
     # the single modifier exit point would refuse the node.
-    from rheplicant.config.values import resolve_value
+    from rheplicant.config.values import resolve_operand
 
     entries = node["stack"]
     if not isinstance(entries, (list, tuple)) or not entries:
@@ -127,12 +174,33 @@ def _stack(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedV
     onward = modifiers
     if mine:
         onward = {key: value for key, value in modifiers.items() if key != "axis"}
-    parts = [jnp.asarray(resolve_value(entry, context).value) for entry in entries]
+    parts = []
+    for index, entry in enumerate(entries):
+        resolved = resolve_operand(
+            entry,
+            context,
+            parent=target,
+            segment=f"stack[{index}]",
+            formula="stack",
+            role="entry[]",
+        )
+        parts.append(jnp.asarray(resolved.value))
+        if target is not None:
+            record_resolved_delivery(
+                context,
+                target.destination.nested(f"stack[{index}]"),
+                resolved.unit,
+            )
     return _delivered(jnp.stack(parts, axis=axis), onward, "stack")
 
 
 @register_form("from_switch_order")
-def _from_switch_order(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _from_switch_order(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     spec = node["from_switch_order"]
     if not isinstance(spec, dict) or "resource" not in spec:
         raise ConfigError(

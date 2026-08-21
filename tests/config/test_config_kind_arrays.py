@@ -1,8 +1,9 @@
-"""resources.arrays: composition by naming, which is why there is no expression language."""
+"""resources.arrays: a named, destination-addressed value without expressions."""
 
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.types import LayerIdentity, Origin
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.resources import build_resources
@@ -90,3 +91,41 @@ class TestANamedValueNode:
         with pytest.raises(ConfigError) as excinfo:
             build_resources({"arrays": {"g": {"unit": "K"}}}, context)
         assert "form key" in str(excinfo.value)
+
+    def test_numeric_resource_records_normalized_delivery_facts(self, context):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        looked_up = []
+
+        def origin_lookup(path):
+            looked_up.append(path)
+            return Origin("variant", "cold")
+
+        configured = ResolutionContext(
+            freq=context.freq,
+            time=context.time,
+            dtype=context.dtype,
+            layer=LayerIdentity("variant", "cold"),
+            trace=trace,
+            origin_lookup=origin_lookup,
+        )
+        build_resources(
+            {"arrays": {"temperature": {"value": 2.0, "unit": "K"}}},
+            configured,
+        )
+        assert len(trace.deliveries) == 1
+        layer, destination, facts = trace.deliveries[0]
+        assert layer == LayerIdentity("variant", "cold")
+        assert facts == {
+            "dtype": "float32",
+            "origin": Origin("variant", "cold"),
+            "unit": "K",
+        }
+        assert destination.document_path == "resources.arrays.temperature"
+        assert looked_up == ["resources.arrays.temperature"]

@@ -332,6 +332,8 @@ class TestItDeclines:
         ``load_document`` would refuse it for a reason this test is not
         about.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
             inference=dict(parameters={
@@ -354,6 +356,8 @@ class TestItDeclines:
         document LOADS, so the wrong number was not even confined to a
         document nobody could run.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL,
                   "t_sys_extra": [{"from": "basis",
@@ -379,6 +383,8 @@ class TestItDeclines:
         ``python:`` clause away left every test in this class green, because
         nothing drove that branch.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL,
                   "t_sys_extra": [
@@ -441,6 +447,8 @@ class TestItDeclines:
         A6-refused on this node besides (only ``cal_loads`` is FAN-shaped; a
         SUM node like ``t_sys_extra`` takes a LIST).
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL,
                   "t_sys_extra": [
@@ -573,6 +581,8 @@ class TestTheMessagesWhole:
         """The twin of the test above.  **Kills** the basis route being
         re-worded, or collapsing into the transform route's sentence, where
         no substring pin could see it."""
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
             inference=dict(parameters={
@@ -609,6 +619,8 @@ class TestItDoesNotStopTheLoad:
         and a bare replacement of ``parameters:`` would be refused for that
         rather than for anything C15 decides.
         """
+        pytest.importorskip("rhino_cal_jax",
+                            reason="rhino_cal_jax comes with rheplicant[cal]")
         built = load_document(preflight_document(
             observation={**BASE_OBSERVATION,
                          "switching": NOISE_WAVE_SWITCHING},

@@ -43,18 +43,21 @@ from rheplicant.config.sections.conjugate_support import (
     _conjugate_block,
     _knobs,
     _one_prior,
+    _parsed_opening,
+    _parsed_priors,
     _prior_kwargs,
 )
 from rheplicant.config.sections.exit_support import (
+    ParsedRun,
     _decided_model,
     _decided_sigma,
     _noise,
     _number,
     _space,
     _sweep,
+    parsed_options,
     register,
 )
-from rheplicant.config.sections.runs import RunSpec
 
 # --- One block, so each exit's vocabulary has one place to be read ---------
 
@@ -68,9 +71,11 @@ _WIDTHS = ("none", "draws", "fisher")
 #: :func:`_knobs` call serves both.  None of the three is nullable:
 #: ``iterative_gls`` derives ``reweight_tol`` from ``tol`` when it is absent,
 #: which is what absent means.
-_GLS_KNOB_SPECS = (("reweight_tol", float, 0.0, False),
-                   ("min_reweights", int, 1, False),
-                   ("max_reweights", int, 1, False))
+_GLS_KNOB_SPECS = (
+    ("reweight_tol", float, 0.0, False),
+    ("min_reweights", int, 1, False),
+    ("max_reweights", int, 1, False),
+)
 #: The same three, as names: what the sweep allows and what the
 #: ``noise_from: declared`` staleness check looks for.  Derived rather than
 #: retyped, so a knob cannot be swept in and coerced by nothing.
@@ -83,8 +88,8 @@ _NOISE_FROM = ("declared", "gls")
 #: not from :data:`_WIENER_KEYS`: ``width:`` asks a draw for the error bar it
 #: already is.
 _GCR_KEYS = _SOLVE_KEYS | frozenset(
-    {"n_draws", "seed", "noise_from", "acknowledge_unconverged_covariance",
-     *_GLS_KNOBS})
+    {"n_draws", "seed", "noise_from", "acknowledge_unconverged_covariance", *_GLS_KNOBS}
+)
 #: ``conjugate.gls``'s own set, built from the SHARED :data:`_SOLVE_KEYS` for
 #: the same reason :data:`_GCR_KEYS` is: ``width:`` is ``conjugate.wiener``'s
 #: alone.  It adds ``iterative_gls``' reweight knobs and the acknowledgement
@@ -92,8 +97,7 @@ _GCR_KEYS = _SOLVE_KEYS | frozenset(
 #: refuses one for the deterministic conjugate exits, and this exit returns a
 #: point estimate and its covariance), and none of ``conjugate.gcr``'s draw
 #: vocabulary.
-_GLS_KEYS = _SOLVE_KEYS | frozenset(
-    {"acknowledge_unconverged_covariance", *_GLS_KNOBS})
+_GLS_KEYS = _SOLVE_KEYS | frozenset({"acknowledge_unconverged_covariance", *_GLS_KNOBS})
 #: ``condition``'s own set, and the one member of the family built from
 #: :data:`~rheplicant.config.sections.conjugate_support._BLOCK_KEYS` rather
 #: than from :data:`_SOLVE_KEYS`.  Measured against the venv,
@@ -164,8 +168,7 @@ def _require_the_whole_space(where: str, space: Any, block: Any) -> None:
     )
 
 
-def _gaussian_width(built: Any, space: Any, sigma: Any,
-                    mean: Any) -> dict[str, Any]:
+def _gaussian_width(built: Any, space: Any, sigma: Any, mean: Any) -> dict[str, Any]:
     """``width: fisher`` -> the Fisher and the posterior covariance.
 
     ``space=`` is what makes it the POSTERIOR precision rather than the
@@ -221,9 +224,11 @@ _A28_GLS_CLAUSES: dict[str, str] = {
     "wants": "solves for the covariance a PREDICTION-DEPENDENT sigma implies",
     "reads": "a model",
     "because": "has no fixed point to iterate",
-    "instead": ("Declare inference.noise.kind: radiometer to iterate the "
-                "rule, or run kind: conjugate.wiener, which is what a "
-                "decided sigma wants."),
+    "instead": (
+        "Declare inference.noise.kind: radiometer to iterate the "
+        "rule, or run kind: conjugate.wiener, which is what a "
+        "decided sigma wants."
+    ),
 }
 
 #: The same two clauses for the OTHER exit that reaches :func:`_gls_result`,
@@ -247,22 +252,48 @@ _A28_GLS_CLAUSES: dict[str, str] = {
 #: that whole sentence at ``be2027b``, so its two shared fragments are a move
 #: and only the two clauses above are the fix.
 _A28_GCR_CLAUSES: dict[str, str] = {
-    "wants": ("under noise_from: gls runs iterative_gls first and draws at "
-              "the covariance it converges to"),
+    "wants": (
+        "under noise_from: gls runs iterative_gls first and draws at the covariance it converges to"
+    ),
     "reads": "a model",
     "because": "has no fixed point to iterate",
-    "instead": ("Drop noise_from: gls: the declared route draws at that "
-                "array directly, which is what a frozen sigma is for -- and "
-                "noise_from: gls is check A27's answer for "
-                "inference.noise.kind: radiometer, so declaring both asks a "
-                "reweighting to find a fixed point in a number that is "
-                "already fixed."),
+    "instead": (
+        "Drop noise_from: gls: the declared route draws at that "
+        "array directly, which is what a frozen sigma is for -- and "
+        "noise_from: gls is check A27's answer for "
+        "inference.noise.kind: radiometer, so declaring both asks a "
+        "reweighting to find a fixed point in a number that is "
+        "already fixed."
+    ),
 }
 
 
-def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
-                prior: dict, solve: dict, where: str,
-                clauses: dict[str, str]) -> Any:
+def _acknowledged(run: Any, where: str) -> bool:
+    """``acknowledge_unconverged_covariance:`` -> the validated bool.
+
+    Module-level for the same reason the ``_a29_*`` refusals are: the parser
+    (Task 8) and :func:`_gls_result` (execute, and the direct callers its
+    unowned tests pin) raise the ONE sentence from the ONE binding.
+    """
+    acknowledged = run.options.get("acknowledge_unconverged_covariance", False)
+    if not isinstance(acknowledged, bool):
+        raise ConfigError(
+            f"{where}: acknowledge_unconverged_covariance: is a bool; got {acknowledged!r}."
+        )
+    return acknowledged
+
+
+def _gls_result(
+    run: Any,
+    built: Any,
+    *,
+    block: Any,
+    observed: Any,
+    prior: dict,
+    solve: dict,
+    where: str,
+    clauses: dict[str, str],
+) -> Any:
     """``iterative_gls`` at this document's noise model -> a ``GLSResult``.
 
     Shared by ``conjugate.gcr``'s ``noise_from: gls`` and by
@@ -305,16 +336,15 @@ def _gls_result(run: Any, built: Any, *, block: Any, observed: Any,
     """
     from rheplicant.inference import iterative_gls
 
-    acknowledged = run.options.get("acknowledge_unconverged_covariance", False)
-    if not isinstance(acknowledged, bool):
-        raise ConfigError(
-            f"{where}: acknowledge_unconverged_covariance: is a bool; got "
-            f"{acknowledged!r}."
-        )
-    found = iterative_gls(block, observed,
-                          noise=_decided_model(run, built, **clauses),
-                          **prior, **solve,
-                          **_knobs(run, _GLS_KNOB_SPECS))
+    acknowledged = _acknowledged(run, where)
+    found = iterative_gls(
+        block,
+        observed,
+        noise=_decided_model(run, built, **clauses),
+        **prior,
+        **solve,
+        **_knobs(run, _GLS_KNOB_SPECS),
+    )
     if not bool(found.converged) and not acknowledged:
         raise ConfigError(
             f"{where}: iterative_gls stopped after {int(found.iterations)} "
@@ -338,9 +368,11 @@ def _gls_record(found: Any) -> dict:
     ``GLSResult._fields == ('noise_std', 'solution', 'residual', 'iterations',
     'delta', 'converged')``).
     """
-    return {"iterations": int(found.iterations),
-            "delta": float(found.delta),
-            "converged": bool(found.converged)}
+    return {
+        "iterations": int(found.iterations),
+        "delta": float(found.delta),
+        "converged": bool(found.converged),
+    }
 
 
 def _wiener_plan(run: Any, *, where: str) -> dict:
@@ -394,9 +426,7 @@ def _gcr_plan(run: Any, *, where: str) -> dict:
     _a29_gcr_needs_a_seed(where, run.options)
     noise_from = run.options.get("noise_from", "declared")
     if noise_from not in _NOISE_FROM:
-        raise ConfigError(
-            f"{where}: noise_from: is declared or gls; got {noise_from!r}."
-        )
+        raise ConfigError(f"{where}: noise_from: is declared or gls; got {noise_from!r}.")
     if noise_from != "gls":
         # acknowledge_unconverged_covariance joins the three reweight knobs
         # here: every one is a member of _GCR_KEYS, so the sweep accepts them,
@@ -404,23 +434,52 @@ def _gcr_plan(run: Any, *, where: str) -> dict:
         # them -- a declared key that reaches nothing, which is what this
         # block stops.  Computed only on the branch that can refuse: on the
         # gls route every one of them is read.
-        stale = sorted(key for key in (*_GLS_KNOBS,
-                                       "acknowledge_unconverged_covariance")
-                       if key in run.options)
+        stale = sorted(
+            key for key in (*_GLS_KNOBS, "acknowledge_unconverged_covariance") if key in run.options
+        )
         if stale:
             raise ConfigError(
                 f"{where}: {stale} are iterative_gls' own knobs and this run "
                 "says noise_from: declared, which runs no GLS -- they would "
                 "be read by nothing. Declare noise_from: gls, or drop them."
             )
-    return {"noise_from": noise_from,
-            "n_draws": _number(run, "n_draws", run.options.get("n_draws", 1),
-                               kind=int, minimum=1)}
+    return {
+        "noise_from": noise_from,
+        "n_draws": _number(run, "n_draws", run.options.get("n_draws", 1), kind=int, minimum=1),
+    }
 
 
-def _draw_sigma(run: Any, built: Any, *, block: Any, observed: Any,
-                prior: dict, solve: dict, noise_from: str,
-                where: str) -> tuple[Any, dict | None]:
+def _a27_gcr_declared(run: Any, built: Any, where: str) -> None:
+    """``noise_from: declared`` needs a sigma that does not read the draw.
+
+    Module-level and taking ``built`` for plan §2.2's reason: the kind's
+    PARSER (Task 8) raises this before any operator exists, and
+    :func:`_draw_sigma` raises the same sentence at execute for the direct
+    callers its unowned tests pin -- one binding, two call sites.
+    """
+    if getattr(_noise(run, built), "depends_on_prediction", False):
+        raise ConfigError(
+            f"{where}: inference.noise.kind: {built.inference.noise.kind} has "
+            "a sigma that depends on the prediction, and a conjugate draw has "
+            "no prediction to evaluate it at -- the prediction is what it "
+            "draws. Declare noise_from: gls, which runs iterative_gls first "
+            "and draws at the covariance it converges to, or "
+            "inference.noise.kind: radiometer_frozen, which decides one sigma "
+            "array up front (check A27)."
+        )
+
+
+def _draw_sigma(
+    run: Any,
+    built: Any,
+    *,
+    block: Any,
+    observed: Any,
+    prior: dict,
+    solve: dict,
+    noise_from: str,
+    where: str,
+) -> tuple[Any, dict | None]:
     """``(noise_std, gls record)`` for a draw: declared, or the one GLS finds.
 
     ``noise_from: gls`` exists to serve exactly the document check A27
@@ -433,26 +492,33 @@ def _draw_sigma(run: Any, built: Any, *, block: Any, observed: Any,
     Keyword-only for the reason :func:`_gls_result` records.
     """
     if noise_from == "gls":
-        found = _gls_result(run, built, block=block, observed=observed,
-                            prior=prior, solve=solve, where=where,
-                            clauses=_A28_GCR_CLAUSES)
-        return found.noise_std, _gls_record(found)
-    if getattr(_noise(run, built), "depends_on_prediction", False):
-        raise ConfigError(
-            f"{where}: inference.noise.kind: {built.inference.noise.kind} has "
-            "a sigma that depends on the prediction, and a conjugate draw has "
-            "no prediction to evaluate it at -- the prediction is what it "
-            "draws. Declare noise_from: gls, which runs iterative_gls first "
-            "and draws at the covariance it converges to, or "
-            "inference.noise.kind: radiometer_frozen, which decides one sigma "
-            "array up front (check A27)."
+        found = _gls_result(
+            run,
+            built,
+            block=block,
+            observed=observed,
+            prior=prior,
+            solve=solve,
+            where=where,
+            clauses=_A28_GCR_CLAUSES,
         )
+        return found.noise_std, _gls_record(found)
+    _a27_gcr_declared(run, built, where)
     return _decided_sigma(run, built), None
 
 
-def _wiener_product(run: Any, built: Any, *, block: Any, sigma: Any,
-                    observed: Any, prior: dict, solve: dict, width: str,
-                    where: str) -> dict:
+def _wiener_product(
+    run: Any,
+    built: Any,
+    *,
+    block: Any,
+    sigma: Any,
+    observed: Any,
+    prior: dict,
+    solve: dict,
+    width: str,
+    where: str,
+) -> dict:
     """``wiener_solve``, and the width the solve does not give.
 
     ``wiener_solve`` returns ``(x_hat, relative_residual)`` -- the posterior
@@ -468,8 +534,7 @@ def _wiener_product(run: Any, built: Any, *, block: Any, sigma: Any,
     space = _space(run, built)
     if width == "fisher":
         _require_the_whole_space(where, space, block)
-    solution, residual = wiener_solve(block, observed, noise_std=sigma,
-                                      **prior, **solve)
+    solution, residual = wiener_solve(block, observed, noise_std=sigma, **prior, **solve)
     # as_dict is the idempotent wrap (linear.py:184): the product's shape is
     # the mapping six downstream consumers read, whichever spelling built the
     # block.  Over a GROUPED block -- the only one this layer compiles -- it
@@ -477,17 +542,23 @@ def _wiener_product(run: Any, built: Any, *, block: Any, sigma: Any,
     # because it is what makes the product's shape independent of that.
     # float() because the residual is a scalar jax.Array and these products
     # end up in reports and in expect: refuse messages.
-    product = {"mean": block.as_dict(solution),
-               "residual": float(residual),
-               "width": width}
+    product = {"mean": block.as_dict(solution), "residual": float(residual), "width": width}
     if width == "none":
         return product
-    return {**product, **_gaussian_width(built, space, sigma,
-                                         product["mean"])}
+    return {**product, **_gaussian_width(built, space, sigma, product["mean"])}
 
 
-def _gcr_product(run: Any, built: Any, *, block: Any, observed: Any,
-                 prior: dict, solve: dict, plan: dict, where: str) -> dict:
+def _gcr_product(
+    run: Any,
+    built: Any,
+    *,
+    block: Any,
+    observed: Any,
+    prior: dict,
+    solve: dict,
+    plan: dict,
+    where: str,
+) -> dict:
     """``gcr_sample``, ``n_draws`` times, from the seed the document names.
 
     ``gcr_sample`` returns ONE draw and has no ``n_draws`` parameter -- its
@@ -505,35 +576,146 @@ def _gcr_product(run: Any, built: Any, *, block: Any, observed: Any,
     """
     import jax
 
-    from rheplicant.config.draws import _seed_name, seed_for
     from rheplicant.inference import gcr_sample
 
-    sigma, gls = _draw_sigma(run, built, block=block, observed=observed,
-                             prior=prior, solve=solve,
-                             noise_from=plan["noise_from"], where=where)
-    # The NAME is resolved from the run and looked up in built.context, which
-    # is the widened context ConfiguredRun carries; seed_for is what makes the
-    # integer the draw consumes the same integer provenance.json reports.
-    keys = jax.random.split(
-        jax.random.key(seed_for(_seed_name(dict(run.options), where),
-                                built.context)),
-        plan["n_draws"])
+    sigma, gls = _draw_sigma(
+        run,
+        built,
+        block=block,
+        observed=observed,
+        prior=prior,
+        solve=solve,
+        noise_from=plan["noise_from"],
+        where=where,
+    )
+    # The parser resolved the seed's NAME to its reportable integer, so the
+    # keys the draws consume split from the integer provenance.json reports.
+    keys = jax.random.split(jax.random.key(run.options["seed"]), plan["n_draws"])
     draws, residual = jax.vmap(
-        lambda one: gcr_sample(block, observed, noise_std=sigma, key=one,
-                               **prior, **solve))(keys)
+        lambda one: gcr_sample(block, observed, noise_std=sigma, key=one, **prior, **solve)
+    )(keys)
     # as_dict is the idempotent wrap (linear.py:184), here for the same reason
     # as in :func:`_wiener_product` and just as unobservable: over a GROUPED
     # block -- the only one this layer compiles -- gcr_sample already returns
     # the mapping, so no test can distinguish this from `draws` (measured: the
     # whole suite is green with it removed).  It is what makes the product's
     # shape independent of which spelling built the block.
-    return {"draws": block.as_dict(draws), "residual": residual,
-            "noise_std": sigma, "gls": gls}
+    return {"draws": block.as_dict(draws), "residual": residual, "noise_std": sigma, "gls": gls}
 
 
-@register("conjugate.gcr")
-@register("conjugate.wiener")
-def _run_conjugate(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+# --- The four parsers: grammar, defaults, statics -- and no operator --------
+#
+# One parser per kind, in the executors' own refusal order (measured line by
+# line): sweep, per-kind grammar, solver-knob coercion, the shared opening,
+# priors, seed, and the noise-route checks.  Everything numeric -- the
+# operator, the decided sigma array, the solves, the draws -- stays in the
+# executors below, which re-derive it all from the parsed execution view.
+
+
+def _parse_wiener(options, context):
+    spec = context.spec
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _WIENER_KEYS)
+    width = _width(spec, where)
+    normalized = _knobs(spec, _SOLVER_KNOBS, context=context)
+    opening, space = _parsed_opening(spec, options, context, decides_sigma=True)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"], where))
+    normalized["width"] = width
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _parse_gcr(options, context):
+    from rheplicant.config.draws import _seed_name, seed_for
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _GCR_KEYS)
+    plan = _gcr_plan(spec, where=where)
+    if "noise_from" not in options:
+        built.context.use_default("runs[].options.noise_from", plan["noise_from"])
+    if "n_draws" not in options:
+        built.context.use_default("runs[].options.n_draws", plan["n_draws"])
+    normalized = _knobs(spec, _SOLVER_KNOBS, context=context)
+    opening, space = _parsed_opening(spec, options, context)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"], where))
+    normalized["noise_from"] = plan["noise_from"]
+    normalized["n_draws"] = plan["n_draws"]
+    normalized["seed"] = seed_for(_seed_name(dict(options), where), built.context)
+    if plan["noise_from"] == "gls":
+        normalized["acknowledge_unconverged_covariance"] = _acknowledged(spec, where)
+        normalized.update(_knobs(spec, _GLS_KNOB_SPECS, context=context))
+    else:
+        _a27_gcr_declared(spec, built, where)
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _parse_gls(options, context):
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    _sweep(spec, _GLS_KEYS)
+    normalized = _knobs(spec, _SOLVER_KNOBS, context=context)
+    opening, space = _parsed_opening(spec, options, context)
+    normalized.update(opening)
+    normalized.update(_parsed_priors(spec, options, space, opening["names"], where))
+    normalized["acknowledge_unconverged_covariance"] = _acknowledged(spec, where)
+    if "acknowledge_unconverged_covariance" not in options:
+        built.context.use_default("runs[].options.acknowledge_unconverged_covariance", False)
+    normalized.update(_knobs(spec, _GLS_KNOB_SPECS, context=context))
+    return parsed_options(normalized, resolved=normalized)
+
+
+def _a51_condition_takes_no_prior_mean(where: str, options: Mapping[str, Any]) -> None:
+    """``condition`` refuses ``prior_mean:`` before its sweep, by name.
+
+    Module-level and taking plain data for the family's standing reason
+    (plan §2.2, one binding, two call sites): the kind's PARSER raises it
+    before anything exists, and the executor keeps the same call ahead of
+    its ``_sweep`` so the pre-flight stand-down table
+    (``_TASK3_SPOKEN_FOR``) keeps deriving ``condition: {prior_mean}`` from
+    the executor's own source until Task 10 retires that mirror.
+    """
+    if "prior_mean" in options:
+        raise ConfigError(
+            f"{where}: kind: condition does not take prior_mean: -- kappa is "
+            "the conditioning of A^T N^-1 A + S^-1, which the prior's WIDTH "
+            "sets and its centre does not, and condition_estimate has no "
+            "prior_mean parameter to pass it to. Drop it; prior_std: is the "
+            "knob that moves kappa. To see what the centre does, solve: "
+            "kind: conjugate.wiener takes prior_mean."
+        )
+
+
+def _parse_condition(options, context):
+    from rheplicant.config.draws import _seed_name, seed_for
+
+    spec = context.spec
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    # BEFORE the sweep, exactly as in the executor: the census reads the
+    # membership there, and the reader deserves the bespoke sentence first.
+    _a51_condition_takes_no_prior_mean(where, options)
+    _sweep(spec, _CONDITION_KEYS)
+    opening, space = _parsed_opening(
+        spec, options, context, needs_observed=False, decides_sigma=True
+    )
+    normalized = dict(opening)
+    normalized.update(_knobs(spec, _CONDITION_KNOBS, context=context))
+    if "prior_std" in options:
+        normalized["prior_std"] = _one_prior(
+            spec, where, "prior_std", options["prior_std"], opening["names"], space
+        )
+    if "seed" in options:
+        normalized["seed"] = seed_for(_seed_name(dict(options), where), built.context)
+    return parsed_options(normalized, resolved=normalized)
+
+
+@register("conjugate.gcr", parse=_parse_gcr)
+@register("conjugate.wiener", parse=_parse_wiener)
+def _run_conjugate(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """The two conjugate exits that solve the same block: the mean, or a draw.
 
     One executor for both kinds, exactly as ``exits.py``'s ``_run_plan``
@@ -574,15 +756,31 @@ def _run_conjugate(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     block, sigma, observed = _conjugate_block(run, built, where)
     prior = _prior_kwargs(run, built, block, where)
     if drawing:
-        return _gcr_product(run, built, block=block, observed=observed,
-                            prior=prior, solve=solve, plan=plan, where=where)
-    return _wiener_product(run, built, block=block, sigma=sigma,
-                           observed=observed, prior=prior, solve=solve,
-                           width=plan["width"], where=where)
+        return _gcr_product(
+            run,
+            built,
+            block=block,
+            observed=observed,
+            prior=prior,
+            solve=solve,
+            plan=plan,
+            where=where,
+        )
+    return _wiener_product(
+        run,
+        built,
+        block=block,
+        sigma=sigma,
+        observed=observed,
+        prior=prior,
+        solve=solve,
+        width=plan["width"],
+        where=where,
+    )
 
 
-@register("conjugate.gls")
-def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+@register("conjugate.gls", parse=_parse_gls)
+def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """``kind: conjugate.gls`` -> a GLSResult whose diagnostics are scalars.
 
     A separate executor rather than a third ``@register`` on
@@ -618,10 +816,16 @@ def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     # deliberately: every parameter is typed Any, so a positional call written
     # by analogy would bind `where` to `block` in silence and break only
     # inside a refusal branch a passing test need never reach.
-    found = _gls_result(run, built, block=block, observed=observed,
-                        prior=_prior_kwargs(run, built, block, where),
-                        solve=_knobs(run, _SOLVER_KNOBS), where=where,
-                        clauses=_A28_GLS_CLAUSES)
+    found = _gls_result(
+        run,
+        built,
+        block=block,
+        observed=observed,
+        prior=_prior_kwargs(run, built, block, where),
+        solve=_knobs(run, _SOLVER_KNOBS),
+        where=where,
+        clauses=_A28_GLS_CLAUSES,
+    )
     # iterations/delta/converged are jax.Arrays on the way out (gls.py:97-99);
     # _gls_record casts all three, so neither a report nor diagnostics.json
     # ever sees a traced value -- examples/gls_gcr.py:150-152 is the idiom.
@@ -630,12 +834,11 @@ def _run_gls(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     # the only one this layer compiles -- the solution already IS the mapping,
     # so no test can distinguish this from `found.solution` (measured: the
     # whole suite is green with it removed).
-    return found._replace(solution=block.as_dict(found.solution),
-                          **_gls_record(found))
+    return found._replace(solution=block.as_dict(found.solution), **_gls_record(found))
 
 
-@register("condition")
-def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
+@register("condition", parse=_parse_condition)
+def _run_condition(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """kappa for the block a conjugate exit would solve -- and no data at all.
 
     ``condition_estimate`` (linear.py:1337) takes no ``observed`` and no
@@ -667,40 +870,28 @@ def _run_condition(run: RunSpec, built: Any, *, results: Any = None) -> Any:
     """
     import jax
 
-    from rheplicant.config.draws import _seed_name, seed_for
     from rheplicant.inference import condition_estimate
 
     where = f"runs[{run.name!r}]"
     # BEFORE the sweep on purpose: the sweep would fire first with the generic
     # "does not take ['prior_mean']" and the reader would fix the symptom by
     # deleting a key they had good reason to write.
-    if "prior_mean" in run.options:
-        raise ConfigError(
-            f"{where}: kind: condition does not take prior_mean: -- kappa is "
-            "the conditioning of A^T N^-1 A + S^-1, which the prior's WIDTH "
-            "sets and its centre does not, and condition_estimate has no "
-            "prior_mean parameter to pass it to. Drop it; prior_std: is the "
-            "knob that moves kappa. To see what the centre does, solve: "
-            "kind: conjugate.wiener takes prior_mean."
-        )
+    _a51_condition_takes_no_prior_mean(where, run.options)
     _sweep(run, _CONDITION_KEYS)
     # `observed` is None here and is dropped rather than bound: this exit has
     # no parameter to pass it to, and `on:` therefore decides nothing.
-    block, sigma, _ = _conjugate_block(run, built, where,
-                                       needs_observed=False)
+    block, sigma, _ = _conjugate_block(run, built, where, needs_observed=False)
     # iterations travels through the family's one coercion path, so
     # `iterations: "twelve"` is refused in the same words `maxiter: "many"` is;
     # a knob the document omits is omitted from the call, and POWER_ITERATIONS
     # (12) stands as the package's own default.
     kwargs: dict[str, Any] = _knobs(run, _CONDITION_KNOBS)
     if "prior_std" in run.options:
-        kwargs["prior_std"] = _one_prior(run, where, "prior_std",
-                                         run.options["prior_std"], block,
-                                         _space(run, built))
+        kwargs["prior_std"] = _one_prior(
+            run, where, "prior_std", run.options["prior_std"], block.names, _space(run, built)
+        )
     if "seed" in run.options:
-        # The NAME is resolved from the run and looked up in built.context, as
-        # _gcr_product does it: seed_for is what makes the integer the estimate
-        # consumes the same integer provenance.json reports.
-        kwargs["key"] = jax.random.key(
-            seed_for(_seed_name(dict(run.options), where), built.context))
+        # The parser resolved the name to its reportable integer, so the key
+        # the estimate consumes is the integer provenance.json reports.
+        kwargs["key"] = jax.random.key(run.options["seed"])
     return condition_estimate(block, noise_std=sigma, **kwargs)

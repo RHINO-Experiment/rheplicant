@@ -20,11 +20,11 @@ one document -- split across two files, the halves can silently disagree in
 exactly the keys the comparison is about.
 """
 
-import copy
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
+from _rheplicant_bootstrap.layering import merge_extends
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.registry import LiveNames
@@ -91,9 +91,7 @@ def check_unknown_keys(
             tail += " " + applicable
     if note:
         tail += " " + note
-    raise ConfigError(
-        f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}.{tail}"
-    )
+    raise ConfigError(f"{name}: {label} does not take {unknown}; it takes {sorted(allowed)}.{tail}")
 
 
 class BuiltResources(NamedTuple):
@@ -113,42 +111,6 @@ class BuiltResources(NamedTuple):
     resources: dict[str, Any]
     shared_objects: tuple[frozenset[str], ...]
     order: tuple[str, ...]
-
-
-def merge_extends(child: dict, parent: dict) -> dict:
-    """Deep-merge ``child`` over ``parent``.
-
-    Mappings merge; lists replace; ``{"append": [...]}`` extends the parent's
-    list; a ``~key`` entry deletes ``key``.
-    """
-    merged = copy.deepcopy(parent)
-    for key, value in child.items():
-        if key.startswith("~"):
-            merged.pop(key[1:], None)
-            continue
-        if isinstance(value, dict) and "append" in value:
-            if set(value) != {"append"}:
-                siblings = sorted(set(value) - {"append"})
-                raise ConfigError(
-                    f"{key!r}: append must be the only key when extending a list; "
-                    f"got the sibling keys {siblings}."
-                )
-            base = merged.get(key, [])
-            if not isinstance(base, list):
-                raise ConfigError(
-                    f"{key!r} is extended with {{append: ...}} but the inherited value "
-                    f"is {type(base).__name__}, not a list."
-                )
-            # deepcopy the appended items too -- splicing them in by reference
-            # would let a caller's later mutation of the merge RESULT reach
-            # back into the document they passed in as `child`.
-            merged[key] = [*base, *copy.deepcopy(value["append"])]
-            continue
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_extends(value, merged[key])
-            continue
-        merged[key] = copy.deepcopy(value)
-    return merged
 
 
 def _referenced_names(node: Any) -> set[str]:
@@ -199,7 +161,7 @@ def _resolved_spec(
     if dotted in done:
         return done[dotted]
     if dotted in chain:
-        loop = chain[chain.index(dotted):] + [dotted]
+        loop = chain[chain.index(dotted) :] + [dotted]
         raise ConfigError(
             "resources: these entries extend each other in a loop: "
             + " -> ".join(loop)
@@ -340,8 +302,7 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     """
     if not isinstance(section, dict):
         raise ConfigError(
-            f"resources: must be a mapping of kind -> name -> entry, got "
-            f"{type(section).__name__}."
+            f"resources: must be a mapping of kind -> name -> entry, got {type(section).__name__}."
         )
     unknown = sorted(set(section) - set(_KINDS))
     if unknown:
@@ -396,7 +357,7 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
         if dotted in built:
             return built[dotted]
         if dotted in building:
-            loop = building[building.index(dotted):] + [dotted]
+            loop = building[building.index(dotted) :] + [dotted]
             raise ConfigError(
                 "resources: these entries reference each other in a loop: "
                 + " -> ".join(loop)
@@ -414,6 +375,10 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
         # this builder wants "every sibling built before me", all at once.
         scoped = dataclasses.replace(context, resources=dict(built))
         built[dotted] = _KINDS[kind_of[dotted]](dotted, spec, scoped)
+        # Bind derived fixed outputs only after the builder has returned.
+        # The environment object is shared by every dependency snapshot, so
+        # the next resource can resolve a sub-value's dimension immediately.
+        scoped.with_resource(dotted, built[dotted])
         order.append(dotted)
         building.pop()
         return built[dotted]
@@ -425,6 +390,9 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     for dotted, value in built.items():
         groups.setdefault(id(value), set()).add(dotted)
     shared = tuple(frozenset(names) for names in groups.values() if len(names) > 1)
+    if context.audit is not None:
+        shared_objects = {name: sorted(names)[0] for names in shared for name in sorted(names)}
+        context.audit.resource(order, shared_objects)
     return BuiltResources(built, shared, tuple(order))
 
 

@@ -561,10 +561,14 @@ class TestTheKindNoneWarning:
         assert found.where == "model.noise"
 
     def test_it_stands_down_on_a_forward_only_document(self):
-        """``_A30_NOT_FITTING`` is ``{'forward', 'mmodes'}`` -- 3A's, imported
-        and never re-derived.  The base document's run is ``kind: forward``,
-        so nothing here fits and there is nothing to weigh."""
-        assert _T2C_NOT_FITTING == frozenset({"forward", "mmodes"})
+        """The shared non-fitting set includes 4B's cross-run exits too.
+
+        The base document's run is ``kind: forward``, so nothing here fits
+        and there is nothing to weigh.
+        """
+        assert _T2C_NOT_FITTING == frozenset(
+            {"forward", "mmodes", "compare", "benchmark"}
+        )
         assert mine(sigma_document(MODEL_NOISE, None)) == frozenset()
 
     def test_an_explicit_kind_none_is_the_same_cell(self):
@@ -619,7 +623,7 @@ class TestTheKindNoneWarning:
     def test_a_kind_the_run_grammar_does_not_know_is_not_a_fit(self):
         """**Measured, and it corrects P14's own arithmetic.**  P14 predicts
         that ``exit_helpers.diagnostic_document()`` trips this WARN, because
-        ``_A30_NOT_FITTING`` is ``{'forward', 'mmodes'}`` and its run kind is
+        ``_A30_NOT_FITTING`` holds the four non-fitting exits and its run kind is
         neither.  It does not: its run is ``kind: diagnostics.identifiability``
         and ``sections/runs._KINDS`` holds ``identifiability``, so
         ``_a30_exits`` -- which intersects with that closed enum -- answers
@@ -704,10 +708,12 @@ class TestApplyingTheAdviceLiterally:
         """The WARN's escape 1: *"Declare inference.noise: {kind:
         homoscedastic}"*."""
         before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls"}])
+                                runs=[{"kind": "conjugate.gls",
+                                       "names": ["g"]}])
         assert only(before, "C18").severity == WARN
         after = sigma_document(MODEL_NOISE, HOMOSCEDASTIC,
-                               runs=[{"kind": "conjugate.gls"}])
+                               runs=[{"kind": "conjugate.gls",
+                                      "names": ["g"]}])
         assert mine(after) == frozenset()
         load_document(after)
 
@@ -731,7 +737,8 @@ class TestApplyingTheAdviceLiterally:
         whole, which is the escape's own second clause.
         """
         before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls"}])
+                                runs=[{"kind": "conjugate.gls",
+                                       "names": ["g"]}])
         after = repatch(
             before,
             model={key: value for key, value in BASE_MODEL.items()
@@ -750,30 +757,51 @@ class TestNeitherCheckEverRaises:
     that aborts the whole pass and hides every finding after it."""
 
     @pytest.mark.parametrize("checks", [
-        {7: {"mode": "warn"}},
         {"a b": {"mode": "warn"}},
         {"": {"mode": "warn"}},
-        {None: {"mode": "warn"}},
-        {(1, 2): {"mode": "warn"}},
         {"linearity": {"mode": ["warn"]}},
         [], 7, True, ("linearity",)])
     def test_a_hostile_checks_section_does_not_abort_the_pass(self, checks):
         """**The measured trap.**  ``check_gates`` composes
         ``inference.checks.<name>`` from the KEY, and
-        ``parse_path('inference.checks.7')`` RAISES -- so the ``where`` guard
-        would turn a document with a numeric check name into "pre-flight check
-        'A1.checks' emitted where=..." and discard every other finding in the
-        report.  The finding is re-homed onto its legal parent instead, and
-        the MESSAGE still quotes the key the user wrote."""
+        ``parse_path('inference.checks.a b')`` RAISES -- so the ``where``
+        guard would turn a document with a hostile check name into
+        "pre-flight check 'A1.checks' emitted where=..." and discard every
+        other finding in the report.  The finding is re-homed onto its legal
+        parent instead, and the MESSAGE still quotes the key the user wrote.
+
+        A NON-string key is a different death: the evidence freeze refuses it
+        before any check runs (Task 4's hardened contract, pinned in
+        ``tests/bootstrap/test_bootstrap_frozen.py``) -- those three cases
+        left this table at Task 10's OI-1 triage and are pinned refusing in
+        the test below."""
         found = findings(checks_document(checks))
         for one in found:
             if one.check in ("A1", "A37"):
                 assert one.where.startswith("inference.checks")
 
+    @pytest.mark.parametrize(("checks", "key_type"), [
+        ({7: {"mode": "warn"}}, "int"),
+        ({None: {"mode": "warn"}}, "NoneType"),
+        ({(1, 2): {"mode": "warn"}}, "tuple"),
+    ], ids=["an-int-key", "a-none-key", "a-tuple-key"])
+    def test_a_non_string_check_name_is_refused_by_the_evidence_freeze(
+            self, checks, key_type):
+        """The boundary Task 4 hardened: ``initial_merge``'s evidence freeze
+        requires exact string mapping keys, because the origin tree cannot
+        tell a mapping key from a sequence index otherwise.  A YAML scalar
+        int key really does reach here (the loader produces ``7``), so this
+        is a user route, not only a programmatic one."""
+        with pytest.raises(ConfigError) as caught:
+            preflight(checks_document(checks))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence mapping key type "
+            f"{key_type}.")
+
     def test_the_re_homed_finding_still_names_the_key_the_user_wrote(self):
-        found = only(checks_document({7: {"mode": "warn"}}), "A1")
+        found = only(checks_document({"a b": {"mode": "warn"}}), "A1")
         assert found.where == "inference.checks"
-        assert "7 is not a check" in found.message
+        assert "'a b' is not a check" in found.message
 
     @pytest.mark.parametrize("observed", [7, [], "simulation", {"primary": 7},
                                           {"a": {"from": "simulation"},

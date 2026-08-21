@@ -40,7 +40,11 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 
+from _rheplicant_bootstrap.types import DestinationDescriptor, Origin
+from rheplicant.config.context import ResolutionContext
+from rheplicant.config.dimensions import DimensionSignature, dimension_for, dimension_of
 from rheplicant.config.errors import ConfigError
+from rheplicant.config.units import Unit, canonical_unit
 from rheplicant.core.frozen import FrozenMapping
 
 #: The values ``as:`` may take, and what each claims about the destination.
@@ -146,6 +150,21 @@ def mode_of(spec: FieldSpec) -> str:
     return "static_other"
 
 
+def declared_or_inferred_mode(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    spec: FieldSpec,
+    declared: str | None,
+) -> str | None:
+    """Return the exact mode delivery consumes, recording an omitted one."""
+    if declared is not None:
+        return declared
+    return context.use_default(
+        f"{destination.document_path}.as",
+        mode_of(spec),
+    )
+
+
 def _refuse_array_form(spec: FieldSpec, source: str) -> None:
     raise ConfigError(
         f"Field {spec.name!r} is static -- equinox puts it in the treedef, where it "
@@ -168,6 +187,93 @@ def deliver(
     dtype: str,
     source: str = "scalar",
     declared_as: str | None = None,
+    destination: DestinationDescriptor | None = None,
+) -> Any:
+    """Public compatibility wrapper for destination-aware delivery."""
+    return deliver_checked(
+        value, spec, dtype=dtype, source=source, declared_as=declared_as,
+        destination=destination,
+    )
+
+
+def origin_for_delivery(
+    context: ResolutionContext, destination: DestinationDescriptor, *, defaulted: bool = False
+) -> Origin:
+    """Find the payload authority exactly; never fabricate a user origin."""
+    if defaulted:
+        return Origin("rheplicant-default")
+    if context.origin_lookup is None:
+        raise ConfigError(f"audit: no origin lookup for {destination.document_path!r}")
+    origin = context.origin_lookup(destination.document_path)
+    if origin is None:
+        raise ConfigError(f"audit: no origin for {destination.document_path!r}")
+    return origin
+
+
+_CANONICAL_AUDIT_UNITS = (
+    "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
+    "count", "samples", "bits", "channels", "cycles", "adc_count",
+    "Hz/s", "adc_count/K", "dimensionless/s", "cycles/samples",
+)
+_EXPECTED_FROM_DESTINATION = object()
+
+
+def canonical_unit_for_delivery(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    explicit: Unit | None,
+    *,
+    expected: DimensionSignature | None | object = _EXPECTED_FROM_DESTINATION,
+) -> str | None:
+    """The canonical unit a destination receives, including implicit A9 units."""
+    if explicit is not None:
+        return explicit.canonical
+    signature = (
+        dimension_for(destination, context.dimensions)
+        if expected is _EXPECTED_FROM_DESTINATION
+        else expected
+    )
+    if signature is None:
+        return None
+    for token in _CANONICAL_AUDIT_UNITS:
+        unit = canonical_unit(token)
+        if dimension_of(unit) == signature:
+            return unit.canonical
+    raise ConfigError(
+        f"audit: no canonical unit represents {destination.document_path!r}"
+    )
+
+
+def record_resolved_delivery(
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    unit: Unit | None,
+    *,
+    defaulted: bool = False,
+    expected: DimensionSignature | None | object = _EXPECTED_FROM_DESTINATION,
+) -> None:
+    """Record a non-model value at the point its typed owner accepts it."""
+    if context.trace is None:
+        return
+    context.trace.record_delivery(
+        context.layer,
+        destination,
+        dtype=context.dtype,
+        origin=origin_for_delivery(context, destination, defaulted=defaulted),
+        unit=canonical_unit_for_delivery(
+            context, destination, unit, expected=expected
+        ),
+    )
+
+
+def deliver_checked(
+    value: Any,
+    spec: FieldSpec,
+    *,
+    dtype: str,
+    source: str = "scalar",
+    declared_as: str | None = None,
+    destination: DestinationDescriptor | None = None,
 ) -> Any:
     """Coerce a resolved value into what ``spec``'s field will accept.
 

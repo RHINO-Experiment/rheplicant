@@ -220,5 +220,5 @@ def _draw_key(run: Any, where: str, built: Any,
     from rheplicant.config.draws import _seed_name, seed_for
 
     declared = dict(run.options) if spec is None else dict(spec)
-    return jax.random.key(seed_for(_seed_name(declared, where),
-                                   built.context))
+    resolved_seed = seed_for(_seed_name(declared, where), built.context)
+    return jax.random.key(resolved_seed)

@@ -12,14 +12,25 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.layering import initial_merge, merge_with_origins
+from _rheplicant_bootstrap.types import DestinationDescriptor, Origin
 from rheplicant.config import ConfigError
-from rheplicant.config.delivery import FieldSpec, deliver, field_specs
+from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import (
+    FieldSpec,
+    deliver,
+    field_specs,
+    origin_for_delivery,
+)
+from rheplicant.config.orchestration import _origin_lookup_for
+from rheplicant.config.sections.model import build_node_operator
 from rheplicant.core.frozen import FrozenMapping
 from rheplicant.core.operator import SnapshotOperator
 from rheplicant.radio.backend.flagging import MomentRFIFlaggingOperator
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
+from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 
 
 class TestReadingTheFieldMetadata:
@@ -65,6 +76,87 @@ class TestReadingTheFieldMetadata:
         optional field required and every document without it is refused."""
         assert field_specs(MomentRFIFlaggingOperator)["config"].required is False
         assert field_specs(ADCOperator)["n_bits"].required is True
+
+
+class TestDeliveryOrigin:
+    destination = DestinationDescriptor(
+        "model.adc.scale",
+        "model_field",
+        "rheplicant.radio.instrument.adc.ADCOperator.scale",
+    )
+
+    def test_lookup_is_required_for_a_recorded_delivery(self):
+        with pytest.raises(ConfigError, match="no origin lookup"):
+            origin_for_delivery(ResolutionContext(), self.destination)
+
+    def test_lookup_result_is_returned_without_guessing_user(self):
+        expected = Origin("variant", "cold")
+        context = ResolutionContext(origin_lookup=lambda path: expected)
+        assert origin_for_delivery(context, self.destination) == expected
+
+    def test_only_an_explicit_default_gets_the_default_origin(self):
+        assert origin_for_delivery(
+            ResolutionContext(), self.destination, defaulted=True
+        ) == Origin("rheplicant-default")
+
+    def test_orchestration_uses_the_terminal_origin_for_a_scalar(self):
+        base = initial_merge(
+            {"runtime": {"seed": 1}}, origin=Origin("preset", "factory")
+        )
+        merged = merge_with_origins(
+            base, {"runtime": {"seed": 4}}, origin=Origin("variant", "cold")
+        )
+        lookup = _origin_lookup_for(merged.document, merged.origins)
+        assert lookup("runtime.seed") == Origin("variant", "cold")
+
+    def test_orchestration_uses_the_form_key_not_its_unit_sibling(self):
+        base = initial_merge(
+            {
+                "model": {
+                    "adc": {
+                        "scale": {"value": 1, "unit": "adc_count/K"}
+                    }
+                }
+            },
+            origin=Origin("preset", "factory"),
+        )
+        merged = merge_with_origins(
+            base,
+            {"model": {"adc": {"scale": {"value": 2}}}},
+            origin=Origin("variant", "cold"),
+        )
+        lookup = _origin_lookup_for(merged.document, merged.origins)
+        assert lookup("model.adc.scale") == Origin("variant", "cold")
+
+    def test_bare_optional_model_value_records_catalogued_canonical_unit(self):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        context = ResolutionContext(
+            trace=trace,
+            origin_lookup=lambda path: Origin("user"),
+        )
+        operator = build_node_operator(
+            "global_signal",
+            {
+                "depth": 0.5,
+                "centre": {"value": 75, "unit": "MHz"},
+                "width": {"value": 5, "unit": "MHz"},
+            },
+            context,
+        )
+        assert isinstance(operator, GlobalSignalOperator)
+        depth = next(
+            facts
+            for _, destination, facts in trace.deliveries
+            if destination.document_path == "model.global_signal.depth"
+        )
+        assert depth["unit"] == "K"
 
 
 class TestTracedDeliveryForcesAFloatingDtype:

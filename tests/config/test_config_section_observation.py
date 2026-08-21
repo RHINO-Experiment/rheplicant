@@ -68,7 +68,7 @@ class TestTheGrids:
         assert width == pytest.approx(3.125e6)
 
     def test_the_epoch_takes_unix_s_and_nothing_else(self, context):
-        with pytest.raises(ConfigError, match="unix_s"):
+        with pytest.raises(ConfigError, match="time_epoch"):
             _time_facts({**TIME, "epoch": {"value": 0.0, "unit": "s"}}, context)
 
     def test_time_extras_default_to_none(self, context):

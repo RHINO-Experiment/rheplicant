@@ -64,9 +64,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.findings import Finding, refuse, warn
 from rheplicant.config.preflight import register
-from rheplicant.config.preflight.document import _task3_where
 from rheplicant.config.preflight.model import (
     _a30_stochastic,
     _lit,
@@ -417,7 +417,7 @@ def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
                 if symbol is None:
                     continue
                 findings.append(warn(
-                    "A41", _task3_where(path),
+                    "A41", longest_legal_prefix(path),
                     f"{path}: the literal {entry} at shape position {index} "
                     f"is this run's {symbol}, which {declared_by[symbol]} "
                     f"declares. Write '{symbol}' there instead -- a copied "
@@ -450,7 +450,7 @@ def _simulated_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
             continue
         path = f"inference.observed.{name}"
         findings.append(warn(
-            "A42", _task3_where(path),
+            "A42", longest_legal_prefix(path),
             f"{path}: from: simulation with twin: fit simulates this "
             f"observation through the FIT twin, and inference.twin: takes "
             f"{list(removed)} out of that twin -- so the data carries no "
@@ -501,7 +501,7 @@ def _pointing_none(document: Mapping[str, Any]) -> Iterable[Finding]:
             "{mode: drift|tracked|baked}, or drop the node (check A52)."))
     for path in _a52_projector_refs(document.get("model"), "model"):
         findings.append(refuse(
-            "A52", _task3_where(path),
+            "A52", longest_legal_prefix(path),
             f"{path} references a projector while observation.pointing is "
             "mode: none -- which is the default when the section is absent, "
             "and the statement that this run has no pointing at all. A "

@@ -1,10 +1,41 @@
 """runtime: -> facts. Recorded and checked here; applied by Plan 4's CLI."""
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import jax
 import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.sections.runtime import RuntimeFacts, build_runtime, state_key
+
+SRC = Path(__file__).parents[2] / "src"
+
+
+def _clean_build_runtime(section, *, x64: bool, platform: str = "cpu"):
+    program = (
+        f"import os, sys; sys.path.insert(0, {str(SRC)!r}); "
+        f"os.environ['JAX_ENABLE_X64'] = {('true' if x64 else 'false')!r}; "
+        f"os.environ['JAX_PLATFORMS'] = {platform!r}; "
+        "from rheplicant.config.sections.runtime import build_runtime; "
+        "from rheplicant.config import ConfigError; import json; "
+        f"section = {section!r}; "
+        "\ntry:\n build_runtime(section)\n"
+        "except ConfigError as error:\n print(json.dumps(str(error)))\n"
+        "else:\n raise AssertionError('runtime mismatch was accepted')\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", program],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
 
 
 class TestBuildRuntime:
@@ -54,6 +85,13 @@ class TestBuildRuntime:
         with pytest.raises(ConfigError, match="seeds"):
             build_runtime({"seeds": "sample"})
 
+    def test_result_retains_namedtuple_and_mutable_seed_mapping_compatibility(self):
+        facts = build_runtime({"seeds": {"sample": 3}})
+        assert isinstance(facts, tuple)
+        assert facts._asdict()["platform"] == "auto"
+        facts.seeds["late"] = 4
+        assert facts.seeds == {"sample": 3, "late": 4}
+
     def test_declaring_x64_in_a_float32_process_is_refused_up_front(self):
         """The suite runs float32; the refusal must name the fix and who
         applies it automatically (Plan 4's CLI)."""
@@ -63,6 +101,24 @@ class TestBuildRuntime:
         message = str(excinfo.value)
         assert "jax_enable_x64" in message
         assert "before any array exists" in message
+
+    def test_declaring_float32_in_a_float64_process_is_also_refused(self):
+        message = _clean_build_runtime(
+            {"jax_enable_x64": False}, x64=True
+        )
+        assert message == (
+            "runtime.jax_enable_x64: requested False, but current process has True."
+        )
+
+    def test_explicit_platform_is_verified_in_the_direct_mapping_api(self):
+        message = _clean_build_runtime(
+            {"jax_enable_x64": False, "platform": "gpu"},
+            x64=False,
+            platform="cpu",
+        )
+        assert message == (
+            "runtime.platform: requested 'gpu', but current process selected 'cpu'."
+        )
 
 
 class TestRuntimeFacts:

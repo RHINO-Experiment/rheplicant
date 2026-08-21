@@ -241,7 +241,7 @@ class TestTheEngineKeys:
 
 class TestAngleUnits:
     def test_lat_deg_with_a_non_angle_unit_is_refused(self, context):
-        with pytest.raises(ConfigError, match="must be an angle"):
+        with pytest.raises(ConfigError, match="dimensions"):
             build_resources(_doc(lat_deg={"value": 1.0, "unit": "Hz"}), context)
 
 

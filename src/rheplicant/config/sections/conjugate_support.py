@@ -64,6 +64,15 @@ _DECIDES_SIGMA_HERE = frozenset({"conjugate.wiener", "condition"})
 _SOLVER_KNOBS = (("tol", float, 0.0, False),
                  ("maxiter", int, 1, True),
                  ("require_convergence", float, 0.0, True))
+_KNOB_DEFAULTS = {
+    "tol": 1e-6,
+    "maxiter": None,
+    "require_convergence": 1e-3,
+    "reweight_tol": None,
+    "min_reweights": 5,
+    "max_reweights": 100,
+    "iterations": 12,
+}
 #: The same three, as names: the CG knobs every conjugate SOLVE forwards.
 #: Derived rather than retyped so the two can never drift.
 _SOLVE_PASSTHROUGH = tuple(key for key, _cast, _floor, _null in _SOLVER_KNOBS)
@@ -92,7 +101,9 @@ def _selected(run: Any, where: str) -> tuple[str, ...]:
     names = run.options.get("names")
     if isinstance(names, str):
         return (names,)
-    if (isinstance(names, list) and names
+    # A tuple is the frozen view's spelling of the list the document wrote --
+    # the parse/execute split re-reads this through ``ParsedRun.options``.
+    if (isinstance(names, (list, tuple)) and names
             and all(isinstance(one, str) for one in names)):
         return tuple(names)
     raise ConfigError(
@@ -144,35 +155,40 @@ def _conjugate_block(run: Any, built: Any, where: str, *,
     return block, sigma, observed
 
 
-def _one_prior(run: Any, where: str, key: str, value: Any, block: Any,
+def _one_prior(run: Any, where: str, key: str, value: Any, names: tuple,
                space: Any) -> dict[str, Any]:
-    """One of ``prior_std``/``prior_mean`` -> the per-member mapping."""
+    """One of ``prior_std``/``prior_mean`` -> the per-member mapping.
+
+    ``names`` is the block's member tuple -- at parse time it is
+    :func:`_selected`'s output and no block exists yet; at execute time
+    ``_prior_kwargs`` passes ``block.names``, the same tuple built.
+    """
     minimum = 0.0 if key == "prior_std" else None
     if isinstance(value, Mapping):
-        if set(value) != set(block.names):
-            declared = [name for name in block.names
+        if set(value) != set(names):
+            declared = [name for name in names
                         if space.latent(name).prior is not None]
             raise ConfigError(
                 f"{where}: {key}: names {sorted(value)}, and this block "
-                f"groups {list(block.names)}; S is block-diagonal, so a "
+                f"groups {list(names)}; S is block-diagonal, so a "
                 "grouped block takes one entry per latent. Name every "
                 f"member, or drop {key}: and let each latent's own prior: "
                 f"drive the solve ({declared} declare one)."
             )
         return {name: _number(run, f"{key}.{name}", value[name], kind=float,
                               minimum=minimum)
-                for name in block.names}
+                for name in names}
     number = _number(run, key, value, kind=float, minimum=minimum)
-    if len(block.names) == 1:
-        return {block.names[0]: number}
+    if len(names) == 1:
+        return {names[0]: number}
     raise ConfigError(
         f"{where}: {key}: {value!r} is one number for a block grouping "
-        f"{list(block.names)}, and S is block-diagonal rather than a "
+        f"{list(names)}, and S is block-diagonal rather than a "
         "multiple of the identity: their widths differ by orders of "
         "magnitude and a block-diagonal S returns a finite, "
         "correctly-shaped, wrongly-regularised answer with no residual "
         f"signature (check A51). Write one entry per latent -- {key}: "
-        f"{{{block.names[0]}: ...}} -- or drop the key and let each "
+        f"{{{names[0]}: ...}} -- or drop the key and let each "
         "latent's own prior: drive the solve."
     )
 
@@ -191,11 +207,17 @@ def _prior_kwargs(run: Any, built: Any, block: Any,
     ``space.latent(name).prior`` (plan section 3.1).
     """
     space = _space(run, built)
-    return {key: _one_prior(run, where, key, run.options[key], block, space)
+    return {key: _one_prior(run, where, key, run.options[key], block.names,
+                            space)
             for key in ("prior_std", "prior_mean") if key in run.options}
 
 
-def _knobs(run: Any, specs: tuple) -> dict[str, Any]:
+def _knobs(
+    run: Any,
+    specs: tuple,
+    *,
+    context: Any | None = None,
+) -> dict[str, Any]:
     """The knobs among ``specs`` this document declared, coerced.
 
     A knob the document omits is omitted from the call, so the package's own
@@ -209,11 +231,81 @@ def _knobs(run: Any, specs: tuple) -> dict[str, Any]:
     """
     resolved: dict[str, Any] = {}
     for key, cast, floor, nullable in specs:
-        if key not in run.options:
-            continue                  # the package's own default stands
-        value = run.options[key]
+        if key in run.options:
+            value = run.options[key]
+        elif context is not None:
+            value = context.configured_run.context.use_default(
+                f"runs[].options.{key}",
+                _KNOB_DEFAULTS[key],
+            )
+            if key == "reweight_tol" and value is None:
+                # ``None`` is the package's omission sentinel and derives a
+                # tolerance from ``tol``.  It is recorded in resolved YAML,
+                # but not inserted into the parser view because an explicit
+                # document ``reweight_tol: null`` remains invalid.
+                continue
+        else:
+            continue
         if value is None and nullable:
             resolved[key] = None      # "no cap" / "no guard", as the package
             continue                  # spells them
         resolved[key] = _number(run, key, value, kind=cast, minimum=floor)
     return resolved
+
+
+# --- The parse-time half of the opening --------------------------------------
+#
+# Everything :func:`_conjugate_block` decides WITHOUT constructing the
+# operator, so a kind's parser can refuse a broken document before any
+# linear algebra exists.  The refusal order below is
+# :func:`_conjugate_block`'s own -- space, observed, sigma, check, names --
+# measured against it line by line; what the parse block never does is call
+# ``linear_operator`` or evaluate the twin.
+
+
+def _parsed_opening(spec: Any, options: Mapping, context: Any, *,
+                    needs_observed: bool = True,
+                    decides_sigma: bool = False) -> tuple[dict, Any]:
+    """The parse-time half of the shared opening -> (normalized, space).
+
+    Validates the space/observed/sigma statics, the ``check:`` boolean and
+    the ``names:`` grammar, and hands back the normalized fragment plus the
+    space the prior checks need for their messages.  ``decides_sigma`` runs
+    :func:`_decided_sigma` for the A27 message on the two kinds that solve
+    at a declared sigma; the array it computes is discarded here and
+    recomputed by :func:`_conjugate_block` at execute -- the evaluation is
+    the noise model's, never the twin's.
+    """
+    built = context.configured_run
+    where = f"runs[{spec.name!r}]"
+    space = _space(spec, built)
+    if needs_observed:
+        _observed(spec, built)
+    if decides_sigma:
+        _decided_sigma(spec, built)
+    normalized: dict[str, Any] = {}
+    if "check" in options:
+        check = options["check"]
+        if not isinstance(check, bool):
+            raise ConfigError(f"{where}: check: is a bool; got {check!r}.")
+        normalized["check"] = check
+    else:
+        normalized["check"] = built.context.use_default(
+            "runs[].options.check",
+            True,
+        )
+    normalized["names"] = _selected(spec, where)
+    return normalized, space
+
+
+def _parsed_priors(spec: Any, options: Mapping, space: Any, names: tuple,
+                   where: str,
+                   keys: tuple = ("prior_std", "prior_mean")) -> dict:
+    """The declared ``prior_`` mappings, shape-checked and coerced at parse.
+
+    The per-member mapping a parser stores is what :func:`_prior_kwargs`
+    re-derives from the built block at execute -- one grammar, two phases,
+    and the mapping branch is idempotent under it.
+    """
+    return {key: _one_prior(spec, where, key, options[key], names, space)
+            for key in keys if key in options}

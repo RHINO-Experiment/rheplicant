@@ -1,4 +1,4 @@
-"""inference: the section orchestrator -- checks, trainable, truth, sequence."""
+"""inference: addressed truth plus checks, trainable state, and sequencing."""
 
 import pytest
 

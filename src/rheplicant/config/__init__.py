@@ -102,9 +102,14 @@ than left as a surprise, because a reader of ``config.preflight.model`` gets
 an ``AttributeError`` and no explanation.
 """
 
+from rheplicant.config import dimension_catalog as _dimension_catalog  # noqa: F401
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.delivery import FieldSpec, deliver, field_specs
 from rheplicant.config.derive import DERIVATIONS
+from rheplicant.config.dimensions import (
+    register_dimension,
+    register_dimension_formula,
+)
 from rheplicant.config.document import ConfiguredRun, load_document, run_forward
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.files import FILE_FORMATS
@@ -174,6 +179,8 @@ __all__ = [
     "resolve_extent",
     "resolve_path_on",
     "resolve_value",
+    "register_dimension",
+    "register_dimension_formula",
     "run_document",
     "run_forward",
 ]

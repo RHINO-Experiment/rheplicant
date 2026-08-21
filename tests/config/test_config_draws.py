@@ -1,4 +1,4 @@
-"""Form 3: a drawn value, and the seed that makes it reproducible."""
+"""Form 3: a drawn value whose operands retain destination and seed authority."""
 
 import jax
 import jax.numpy as jnp

@@ -68,6 +68,8 @@ import numbers
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.inflight import Axes, register_axes
@@ -139,7 +141,9 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
     return routes
 
 
-def _static_number(node: Any, context: Any) -> float | None:
+def _static_number(
+    node: Any, context: Any, destination: DestinationDescriptor
+) -> float | None:
     """The number a STATIC field's value node carries, or ``None`` to stand down.
 
     **Only the scalar forms are resolved**, and that is a scope decision
@@ -168,13 +172,15 @@ def _static_number(node: Any, context: Any) -> float | None:
     elif not isinstance(node, (int, float, str)):
         return None
     try:
-        resolved = resolve_value(node, context)
+        resolved = resolve_value(node, context, destination=destination)
     except ConfigError:
         return None
     value = resolved.value
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return None
-    return float(value)
+    converted = float(value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return converted
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +363,15 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
 
     for where, entry in entries:
         lineshape = entry.get("lineshape", _tone_default("lineshape"))
-        width = _static_number(entry.get("line_width"), facts.context)
+        width = _static_number(
+            entry.get("line_width"),
+            facts.context,
+            DestinationDescriptor(
+                f"{where}.line_width",
+                "model_field",
+                "rheplicant.radio.instrument.calibration.CWCalibrationOperator.line_width",
+            ),
+        )
         if width is not None and lineshape in MIN_WIDTH_IN_CHANNELS:
             floor = MIN_WIDTH_IN_CHANNELS[lineshape] * spacing
             ceiling = max(MAX_WIDTH_IN_BAND_FRACTION * (high - low),
@@ -387,8 +401,24 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
                     "PEDESTAL over the whole band, every channel sits above "
                     "protect_floor of the peak, and the RFI flagger is "
                     f"switched off for the entire run. {_A13_TAIL} (check A13).")
-        centre = _static_number(entry.get("tone_freq"), facts.context)
-        drift = _static_number(entry.get("drift_rate"), facts.context)
+        centre = _static_number(
+            entry.get("tone_freq"),
+            facts.context,
+            DestinationDescriptor(
+                f"{where}.tone_freq",
+                "model_field",
+                "rheplicant.radio.instrument.calibration.CWCalibrationOperator.tone_freq",
+            ),
+        )
+        drift = _static_number(
+            entry.get("drift_rate"),
+            facts.context,
+            DestinationDescriptor(
+                f"{where}.drift_rate",
+                "model_field",
+                "rheplicant.radio.instrument.calibration.CWCalibrationOperator.drift_rate",
+            ),
+        )
         if centre is None:
             continue
         drift = 0.0 if drift is None else drift

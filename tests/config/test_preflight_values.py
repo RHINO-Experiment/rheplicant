@@ -908,7 +908,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         found = list(_pointing_none(doc))
         assert [(f.check, f.severity, f.where) for f in found] == [
             ("A52", REFUSE, "model.filters[0].projector")]
@@ -920,7 +921,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         [found] = list(_pointing_none(doc))
         assert found.message == (
             "model.filters[0].projector references a projector while "
@@ -1015,10 +1017,12 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3},
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}},
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.q"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         assert [f.where for f in _pointing_none(doc)] == [
             "model.filters[0].projector", "model.filters[1].projector"]
 
@@ -1057,7 +1061,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": {"lo-band": {
                 "type": "SkySpaceFilter",
                 "projector": {"ref": "resources.projectors.p"},
-                "regularization": 1e-3}}})
+                "regularization": {"value": 1e-3,
+                                    "unit": "dimensionless"}}}})
         [found] = list(_pointing_none(doc))
         assert found.where == "model.filters"
         assert found.message.startswith(
@@ -1078,7 +1083,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         assert list(_pointing_none(doc)) == []
 
     def test_a_drift_pointing_is_not_refused(self):
@@ -1095,7 +1101,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         assert list(_pointing_none(doc)) == []
 
     def test_a_declared_but_unreferenced_projector_is_not_refused(self):
@@ -1148,7 +1155,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         assert list(_pointing_none(doc)) == []
 
     def test_a_reference_to_something_else_is_not_a_projector(self):
@@ -1185,7 +1193,8 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         assert list(_pointing_none(doc)) == []
 
     def test_the_derivation_registry_still_has_no_site_route(self):
@@ -1218,7 +1227,8 @@ class TestAllThreeChecksReachThePass:
             model={**BASE_MODEL, "noise": NOISE, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]},
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]},
             inference={"twin": {"without": ["noise"]},
                        "observed": simulated()})
         found = [f for check in (_shadowed_literals, _simulated_fit_twin,
@@ -1270,7 +1280,8 @@ class TestAllThreeChecksReachThePass:
             model={**BASE_MODEL, "filters": [
                 {"type": "SkySpaceFilter",
                  "projector": {"ref": "resources.projectors.p"},
-                 "regularization": 1e-3}]})
+                 "regularization": {"value": 1e-3,
+                                     "unit": "dimensionless"}}]})
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A52" in str(caught.value)

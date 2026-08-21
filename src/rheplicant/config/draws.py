@@ -24,10 +24,11 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.symbols import resolve_shape
 from rheplicant.config.units import convert_to_canonical
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.values import ResolutionTarget, ResolvedValue, register_form
 
 _SEED_PREFIX = "runtime.seeds."
 
@@ -121,17 +122,53 @@ def _seed_name(spec: dict, form: str) -> str:
     return target[len(_SEED_PREFIX) :]
 
 
-def _resolve_operand(node: Any, context: ResolutionContext, default: float) -> Any:
-    from rheplicant.config.values import resolve_value
+def _resolve_operand(
+    node: Any,
+    context: ResolutionContext,
+    target: ResolutionTarget | None,
+    *,
+    segment: str,
+    formula: str,
+    role: str,
+    default: float,
+) -> Any:
+    from rheplicant.config.values import resolve_operand
 
-    if node is None:
-        return default
-    if isinstance(node, (int, float)):
-        return float(node)
-    return resolve_value(node, context).value
+    defaulted = node is None
+    if defaulted:
+        if role == "loc":
+            node = context.use_default("value.normal.loc", default)
+        elif role == "scale":
+            node = context.use_default("value.normal.scale", default)
+        elif role == "low":
+            node = context.use_default("value.uniform.low", default)
+        else:
+            node = context.use_default("value.uniform.high", default)
+    resolved = resolve_operand(
+        node,
+        context,
+        parent=target,
+        segment=segment,
+        formula=formula,
+        role=role,
+    )
+    if target is not None:
+        record_resolved_delivery(
+            context,
+            target.destination.nested(segment),
+            resolved.unit,
+            defaulted=defaulted,
+        )
+    return resolved.value
 
 
-def _draw(form: str, node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _draw(
+    form: str,
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     spec = node[form]
     if not isinstance(spec, dict):
         raise ConfigError(f"{form}: expects a mapping, got {type(spec).__name__} ({spec!r}).")
@@ -149,12 +186,44 @@ def _draw(form: str, node: dict, context: ResolutionContext, modifiers: dict) ->
         instead="A scalar draw is written with an empty shape, shape: [].",
     )
     if form == "normal":
-        loc = _resolve_operand(spec.get("loc"), context, 0.0)
-        scale = _resolve_operand(spec.get("scale"), context, 1.0)
+        loc = _resolve_operand(
+            spec.get("loc"),
+            context,
+            target,
+            segment="normal.loc",
+            formula="normal",
+            role="loc",
+            default=0.0,
+        )
+        scale = _resolve_operand(
+            spec.get("scale"),
+            context,
+            target,
+            segment="normal.scale",
+            formula="normal",
+            role="scale",
+            default=1.0,
+        )
         array = loc + scale * jax.random.normal(key, shape, dtype=context.dtype)
     else:
-        low = _resolve_operand(spec.get("low"), context, 0.0)
-        high = _resolve_operand(spec.get("high"), context, 1.0)
+        low = _resolve_operand(
+            spec.get("low"),
+            context,
+            target,
+            segment="uniform.low",
+            formula="uniform",
+            role="low",
+            default=0.0,
+        )
+        high = _resolve_operand(
+            spec.get("high"),
+            context,
+            target,
+            segment="uniform.high",
+            formula="uniform",
+            role="high",
+            default=1.0,
+        )
         array = jax.random.uniform(key, shape, dtype=context.dtype, minval=low, maxval=high)
     # Rebuilt rather than mutated, and on both branches: check A41's report
     # rides in the modifier dict (apply_modifiers passes over keys it does not
@@ -169,10 +238,10 @@ def _draw(form: str, node: dict, context: ResolutionContext, modifiers: dict) ->
 
 
 @register_form("normal")
-def _normal(node, context, modifiers):
-    return _draw("normal", node, context, modifiers)
+def _normal(node, context, modifiers, target):
+    return _draw("normal", node, context, modifiers, target)
 
 
 @register_form("uniform")
-def _uniform(node, context, modifiers):
-    return _draw("uniform", node, context, modifiers)
+def _uniform(node, context, modifiers, target):
+    return _draw("uniform", node, context, modifiers, target)

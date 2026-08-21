@@ -440,3 +440,26 @@ class TestNoiseFromGls:
             1.220735e-4, rel=1.0e-3)
         assert float(jnp.mean(product["draws"]["g"])) == pytest.approx(
             1.5, abs=1.0e-3)
+
+
+class TestTheExecutorReadsOnlyTheParsedView:
+    """Plan 4A Task 8: poisoning the raw mapping after parse changes nothing."""
+
+    def test_poisoning_the_raw_options_after_parse_changes_nothing(self):
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.document import load_document
+        from rheplicant.config.sections.exit_support import (
+            handler_for,
+            parse_run,
+        )
+        from rheplicant.config.sections.runs import parse_runs
+
+        doc = gcr_document({"n_draws": 2})
+        built = load_document(doc)
+        (spec,) = parse_runs(doc["runs"])
+        parsed = parse_run(spec, built, index=0,
+                           layer=LayerRef(kind="base", name=None, prefix="",
+                                          document={}, declared_runs=None))
+        spec.options["n_draws"] = 5  # poison AFTER the parse
+        product = handler_for("conjugate.gcr").execute(parsed, built, {})
+        assert product["draws"]["g"].shape[0] == 2

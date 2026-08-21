@@ -55,6 +55,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.layering import initial_merge
+from _rheplicant_bootstrap.types import Origin
+from _rheplicant_bootstrap.variants import LayerAttributor, enumerate_layers_once
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, Report
 from rheplicant.config.passes import binder, check_where, sweep
@@ -160,17 +163,9 @@ def preflight(document: Mapping[str, Any]) -> Report:
     Structural problems raise; everything else is collected, in registration
     order, and handed back for the caller to raise or emit.
 
-    The bookkeeping is ``document.py``'s layer memo, whose lifetime is exactly
-    one pass: the ELEVEN places that walk ``variants:`` -- ten
-    ``_task3_over_layers`` call sites across six of this package's eleven
-    modules, plus ``_variant_text``'s own merge -- share one merge instead of
-    paying for their own.  The entry is dropped on the way IN so that a document
-    edited between two passes -- R4's "apply the message's own advice" shape --
-    is read as it is now, and on the way OUT so that a process which loads one
-    config does not hold the document plus one deep merge of it per declared
-    variant for the rest of its life (777 kB on the cold guard's own document,
-    measured).  ``finally``, so a refusal from ``_structural`` or a check does
-    not leak the entry either.
+    One pass constructs one canonical base layer and one effective layer per
+    declared variant.  Every registered check is then swept layer-major with
+    one :class:`LayerAttributor`; no check applies or replays a variant.
 
     **It goes through the FOOT ALIAS, and that is not a style choice.**  A
     function-local ``from rheplicant.config.preflight import document`` also
@@ -183,12 +178,34 @@ def preflight(document: Mapping[str, Any]) -> Report:
     ``_document_checks`` is bound by that foot import and resolved at call
     time, so using it keeps the guard's only evidence the foot import itself.
     """
-    _document_checks._task3_forget_layers()
-    try:
-        _structural(document)
-        return sweep(CHECKS, document, label=_LABEL, sections=_SECTIONS)
-    finally:
-        _document_checks._task3_forget_layers()
+    from rheplicant.config.dimensions import using_dimension_registry_snapshot
+
+    with using_dimension_registry_snapshot():
+        return _preflight_with_registry_snapshot(document)
+
+
+def _preflight_with_registry_snapshot(document: Mapping[str, Any]) -> Report:
+    _structural(document)
+    merged = initial_merge(document, origin=Origin("user"))
+    enumeration = enumerate_layers_once(
+        merged.document, merged.origins, merged.deletions
+    )
+    attributor = LayerAttributor()
+    collected: list[Finding] = []
+    for layer in enumeration.layers:
+        layer_document = layer.mutable_document()
+        if layer.kind == "variant":
+            try:
+                _structural(layer_document)
+            except ConfigError:
+                raw = tuple(_document_checks._variant_text(layer_document))
+                collected.extend(attributor.attribute(layer, raw))
+                continue
+        report = sweep(
+            CHECKS, layer_document, label=_LABEL, sections=_SECTIONS
+        )
+        collected.extend(attributor.attribute(layer, report.findings))
+    return Report(findings=tuple(collected))
 
 
 def _check_where(check: str, finding: Finding) -> None:
@@ -242,6 +259,7 @@ def _check_where(check: str, finding: Finding) -> None:
 
 from rheplicant.config.preflight import beam_spill as _beam_spill_checks  # noqa: E402,F401
 from rheplicant.config.preflight import depends as _depends_checks  # noqa: E402,F401
+from rheplicant.config.preflight import dimensions as _dimension_checks  # noqa: E402,F401
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401
 from rheplicant.config.preflight import gated as _gated_checks  # noqa: E402,F401

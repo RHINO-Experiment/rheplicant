@@ -13,6 +13,9 @@ import textwrap
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.layering import initial_merge
+from _rheplicant_bootstrap.types import Origin
+from _rheplicant_bootstrap.variants import enumerate_layers_once
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.preflight import CHECKS, preflight
@@ -21,10 +24,9 @@ from rheplicant.config.preflight.document import (
     _CAPABILITY_KEYS,
     _TASK3_SPOKEN_FOR,
     _task3_allowed_run_options,
-    _task3_layers,
 )
-from rheplicant.config.sections import exits  # noqa: F401  -- fills EXECUTORS
-from rheplicant.config.sections.exit_support import EXECUTORS
+from rheplicant.config.sections import exits  # noqa: F401  -- fills PARSERS
+from rheplicant.config.sections.exit_support import PARSERS
 from rheplicant.config.sections.model import _pick_class
 from rheplicant.config.sections.parameters import parse_latents
 from tests.config.preflight_helpers import UNREADABLE_BEAM, preflight_document
@@ -42,6 +44,14 @@ _IDS = ("A1.runs", "A1.variants", "A1.horizon", "A38", "A39")
 def _findings(document, check):
     """Every finding ``preflight`` produces for one schema check id."""
     return [f for f in preflight(document).findings if f.check == check]
+
+
+def _layer_prefixes(document) -> list[str]:
+    merged = initial_merge(document, origin=Origin("user"))
+    enumeration = enumerate_layers_once(
+        merged.document, merged.origins, merged.deletions
+    )
+    return [layer.prefix for layer in enumeration.layers]
 
 
 def _beam_entry(name, **horizon):
@@ -82,8 +92,18 @@ def _allowed_set(node, scope):
 
 
 def _swept_by(kind: str) -> frozenset[str]:
-    """The allowed-key set the executor for ``kind`` actually sweeps with."""
-    fn = EXECUTORS[kind]
+    """The allowed-key set the registered PARSER for ``kind`` sweeps with.
+
+    The grammar's owner is the handler parser (Tasks 7-9), and that is what
+    this derives from: ``PARSERS[kind]``'s source, not the executor's.  Three
+    shapes and no fourth, which is what the sweep census measured: a
+    module-level name, a ternary over a ``spec.kind == "<literal>"`` flag
+    already resolved into ``scope``, and a ``frozenset(...)`` literal written
+    at the call site.  Resolved rather than ``eval``-ed so that a fourth shape
+    is a loud ``KeyError``/``AttributeError`` here instead of a silently
+    different set.
+    """
+    fn = PARSERS[kind]
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
     scope = dict(vars(sys.modules[fn.__module__]))
     for node in ast.walk(tree):
@@ -92,7 +112,7 @@ def _swept_by(kind: str) -> frozenset[str]:
                 and isinstance(node.value, ast.Compare)
                 and len(node.value.ops) == 1
                 and isinstance(node.value.ops[0], ast.Eq)
-                and ast.unparse(node.value.left) == "run.kind"
+                and ast.unparse(node.value.left) in ("run.kind", "spec.kind")
                 and isinstance(node.value.comparators[0], ast.Constant)):
             scope[node.targets[0].id] = kind == node.value.comparators[0].value
     calls = [node for node in ast.walk(tree)
@@ -192,40 +212,41 @@ class TestRunOptionKeys:
         assert _findings(preflight_document(
             runs=[{"kind": "not_an_exit", "tpyo": 1}]), "A1") == []
 
-    def test_every_registered_executor_has_a_table_entry(self):
+    def test_every_registered_handler_has_a_table_entry(self):
         """Kills a kind dropped from the table -- which would make its
         options unswept at P-1 with nothing to say so."""
-        assert set(_task3_allowed_run_options()) == set(EXECUTORS)
+        assert set(_task3_allowed_run_options()) == set(PARSERS)
 
-    def test_the_table_is_the_executors_own_allowed_sets(self):
+    def test_the_table_is_the_handlers_own_allowed_sets(self):
         """The anti-drift guard, and the reason this task did not restate
-        sixteen key lists.  It reads each executor's ONE `_sweep(run, X)` call
-        out of its source, resolves X in that module's globals -- binding the
-        `drawing`/`estimate` flags, which are `run.kind == "<literal>"` and so
-        are decidable from the kind alone -- and compares.
+        eighteen key lists.  It reads each registered parser's ONE
+        ``_sweep(spec, X)`` call out of its source, resolves X in that
+        module's globals -- binding the ``drawing``/``estimate`` flags, which
+        are ``spec.kind == "<literal>"`` and so are decidable from the kind
+        alone -- and compares.
 
-        Kills: a key added to an executor's own frozenset and not to this
+        Kills: a key added to a parser's own frozenset and not to this
         table; a table entry copied and then edited; and the two conditional
         sweeps resolved to the wrong branch."""
         table = _task3_allowed_run_options()
-        for kind in sorted(EXECUTORS):
+        for kind in sorted(PARSERS):
             assert table[kind] == _swept_by(kind), kind
 
-    def test_thirteen_of_the_sixteen_entries_are_the_executors_own_object(self):
-        """Not equality -- identity.  Thirteen kinds bind their allowed set to
+    def test_fifteen_of_the_eighteen_entries_are_the_handlers_own_object(self):
+        """Not equality -- identity.  Fifteen kinds bind their allowed set to
         a module-level name this table imports, so the two CANNOT drift.  The
-        other three (`forward`, `fisher`, `npe`) write theirs as a literal at
-        the `_sweep` call site and have no name to import; they are restated
-        here and the test above is what holds them.  The count is asserted so
-        that turning a fourteenth into a literal is a red test rather than a
-        silent loss of the identity guarantee."""
+        other three (``forward``, ``fisher``, ``npe``) write theirs as a
+        literal at the parser's ``_sweep`` call site and have no name to
+        import; they are restated, and the test above is what holds them.  The
+        count is asserted so that turning a sixteenth into a literal is a red
+        test rather than a silent loss of the identity guarantee."""
         table = _task3_allowed_run_options()
         by_name = 0
-        for kind, fn in EXECUTORS.items():
+        for kind, fn in PARSERS.items():
             module = sys.modules[fn.__module__]
             if any(value is table[kind] for value in vars(module).values()):
                 by_name += 1
-        assert by_name == 13
+        assert by_name == 15
 
     def test_a_key_its_executor_refuses_by_name_is_left_to_that_executor(self):
         """`condition` + `prior_mean:` is the shape `conjugate.py:580-582`
@@ -270,38 +291,39 @@ class TestRunOptionKeys:
             {"kind": "condition", "prior_mean": {"g": 1.0}, "tol": 1.0e-9}]),
             "A1") == []
 
-    def test_the_spoken_for_table_is_every_executor_that_raises_first(self):
-        """DERIVED, not restated.  Each executor is read with `ast`: a string
-        literal tested for membership in `run.options` BEFORE that executor's
-        one `_sweep(...)` call is a key the executor speaks about itself, and
-        those are exactly the keys P-1 must stand down on.
+    def test_the_spoken_for_table_is_every_handler_that_raises_first(self):
+        """DERIVED, not restated.  Each registered PARSER is read with `ast`:
+        a string literal tested for membership in the options BEFORE that
+        parser's one `_sweep(...)` call is a key the handler speaks about
+        itself, and those are exactly the keys P-1 must stand down on.
 
-        Kills a sixth such key shipping in an executor with
+        Kills a sixth such key shipping in a parser with
         `_TASK3_SPOKEN_FOR` untouched -- under which the generic sweep
         silently displaces a bespoke message again, in a phase no existing
         test covers.  A test that restated the five keys could not see that;
         this one goes red on the commit that adds the sixth.
 
         **The derivation follows one level of CALL**, into a helper defined in
-        the executor's own module, and that is not generality for its own
-        sake: plan 3A's Task 8 lifted three of these refusals to module level
-        so that `preflight/fitting.py` could call the same object from the raw
-        document (§2.2, one name, one binding, two call sites).  The BEHAVIOUR
-        is untouched -- `_run_plan` and `_run_npe` still refuse a `seed:`
-        before their sweep -- and only the line the comparison sits on moved.
-        A derivation that read the executor's body alone would have gone red
-        on a refactor that changed nothing it is about, and "update
-        `_TASK3_SPOKEN_FOR`" is the wrong repair for that: dropping
-        `plan.estimate: {seed}` would let A1's generic sweep displace the A29
-        message again, which is the very thing the table exists to stop.
-        Restricted to the SAME module, so an `exit_support` helper called
-        before the sweep does not drag its own membership tests in.
+        the parser's own module, and that is not generality for its own sake:
+        plan 3A's Task 8 lifted three of these refusals to module level so
+        that `preflight/fitting.py` could call the same object from the raw
+        document (§2.2, one name, one binding, two call sites), and Tasks 7-9
+        moved the call sites from the executors into the parsers without
+        touching the behaviour.  A derivation that read the parser's body
+        alone would have gone red on that refactor, which changed nothing the
+        table is about, and "update `_TASK3_SPOKEN_FOR`" is the wrong repair
+        for it: dropping `plan.estimate: {seed}` would let A1's generic sweep
+        displace the A29 message again, which is the very thing the table
+        exists to stop.  Restricted to the SAME module, so an `exit_support`
+        helper called before the sweep does not drag its own membership tests
+        in.
 
-        **Measured against `d3ab22e` and again after that refactor**: this
-        derivation returns exactly `{condition: {prior_mean}, npe: {seed},
-        plan.estimate: {seed}, plan.sample: {seed}, predict: {from}}` -- five
-        kinds, five keys, no extras -- which is the table in
-        `preflight/document.py` character for character."""
+        **Measured against `d3ab22e`, re-measured after that refactor, and
+        re-measured against the parsers at Task 10**: this derivation returns
+        exactly `{condition: {prior_mean}, npe: {seed}, plan.estimate:
+        {seed}, plan.sample: {seed}, predict: {from}}` -- five kinds, five
+        keys, no extras -- which is the table in `preflight/document.py`
+        character for character."""
 
         def options_membership(tree, cut):
             keys = set()
@@ -321,7 +343,7 @@ class TestRunOptionKeys:
             return keys
 
         derived: dict[str, frozenset[str]] = {}
-        for kind, fn in EXECUTORS.items():
+        for kind, fn in PARSERS.items():
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
             sweeps = [node.lineno for node in ast.walk(tree)
                       if isinstance(node, ast.Call)
@@ -345,7 +367,7 @@ class TestRunOptionKeys:
             if keys:
                 derived[kind] = frozenset(keys)
         assert derived == _TASK3_SPOKEN_FOR, (
-            "an executor's pre-sweep refusal changed; update "
+            "a handler parser's pre-sweep refusal changed; update "
             "_TASK3_SPOKEN_FOR in preflight/document.py")
 
 
@@ -355,44 +377,51 @@ class TestUnselectedVariants:
         for the run that selects the variant.  Kills the whole check."""
         found = _findings(preflight_document(
             variants={"sneaky": {"campaign": {}}}), "A1")
-        assert [f.where for f in found] == ["variants.sneaky"]
+        assert [f.where for f in found] == ["variants.sneaky.campaign"]
         assert "capability 4" in found[0].message
 
     def test_the_finding_names_the_offending_variant(self):
         """Shape 1.  Two variants, one bad: a check reporting `variants.good`
         or bare `variants` passes any membership test on the message and sends
         the reader to the wrong block."""
-        found = _findings(preflight_document(variants={
+        document = preflight_document(variants={
             "good": {"model": {"gain": {"gain": {"value": 1.0,
                                                  "unit": "dimensionless"}}}},
-            "bad": {"schema_version": 2}}), "A1")
-        assert [f.where for f in found] == ["variants.bad"]
-        assert "good" not in found[0].message
+            "bad": {"schema_version": 2}})
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variant 'bad' touches 'schema_version'. The version belongs to "
+            "the document; a patch that changes -- or deletes -- how the "
+            "document is read is not a patch."
+        )
+        assert "good" not in str(caught.value)
 
     def test_a_variant_deleting_a_required_section_is_caught(self):
         """`~model: null` is the delete form (layering.py:26-38).  Kills a
         check that only looks at the patch's own keys and never merges."""
         found = _findings(preflight_document(
             variants={"nomodel": {"~model": None}}), "A1")
-        assert [f.where for f in found] == ["variants.nomodel"]
+        assert [f.where for f in found] == ["variants.nomodel.model"]
         assert "missing ['model']" in found[0].message
 
-    @pytest.mark.parametrize("variants", [["a"], [], 0, ""],
-                             ids=["a-list", "an-empty-list", "a-zero",
-                                  "an-empty-string"])
-    def test_a_non_mapping_variants_section_is_reported(self, variants):
-        """apply_variant refuses this, but only when a variant is REQUESTED
-        (layering.py:50-54), so today it never fires at all.
-
-        The three FALSY rows are what kills `if not variants: return` -- a
-        one-character edit from the shipped `if variants is None`, and one
-        that reads as equivalent because `variants: null` and an absent
-        section really are the same thing here (`apply_variant` does
-        `document.get("variants") or {}`).  They are not equivalent for these
-        three, which are non-mappings a document can carry and which the
-        mutant lets through in silence."""
-        found = _findings(preflight_document(variants=variants), "A1")
-        assert [f.where for f in found] == ["variants"]
+    @pytest.mark.parametrize(("variants", "kind"), [
+        (["a"], "tuple"),
+        ([], "tuple"),
+        (0, "int"),
+        ("", "str"),
+        (None, "NoneType"),
+    ], ids=["a-list", "an-empty-list", "a-zero", "an-empty-string",
+            "an-explicit-null"])
+    def test_a_non_mapping_variants_section_is_rejected(self, variants, kind):
+        """Presence is significant: null and omission are not equivalent."""
+        document = preflight_document()
+        document["variants"] = variants
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variants: is a mapping of name -> patch; got " f"{kind}."
+        )
 
     def test_a_legal_variant_is_silent(self):
         """Kills a check that reports every variant it merges."""
@@ -402,17 +431,7 @@ class TestUnselectedVariants:
             "A1") == []
 
     def test_the_interior_of_an_unselected_variant_is_out_of_scope_here(self):
-        """A DECISION pinned, not an oversight.  `_variant_text` runs the
-        document-grammar checks -- apply_variant's four refusals and
-        `_structural`'s five -- on each merged variant.  It does NOT run the
-        model or section checks, because P-1 is defined (§2.1) over one
-        variant-applied document and a check that re-entered the registry per
-        variant would report every base-document finding n+1 times.
-
-        `model.ghost` is therefore silent HERE and is caught the moment the
-        variant is selected, by A2.  If a later plan closes that gap this test
-        goes red, which is the point: the residual is recorded in §6 and this
-        is the assertion that makes deleting the record visible."""
+        """A1 owns grammar only; the pass driver sends A2 over this layer."""
         assert _findings(preflight_document(
             variants={"unused": {"model": {"ghost": {}}}}), "A1") == []
 
@@ -811,7 +830,6 @@ class TestTheVariantRoute:
                                                "into": ["global_signal.depth",
                                                         "gain.gain"]}}}},
          "inference.parameters", "inference.parameters.d-1"),
-        ({"variants": {1: {"campaign": {}}}}, "variants", "variants.1"),
         ({"resources": {"beams": _beam_entry(
             "horn-a", apod_deg={"value": 0.1, "unit": "rad"})}},
          "resources.beams", "resources.beams.horn-a.horizon.apod_deg"),
@@ -828,7 +846,7 @@ class TestTheVariantRoute:
         ({"model": {"band-pass": {"type": "NeuralOperator"}}},
          "model", "model.band-pass.type"),
     ], ids=["a-variant-name", "a-variant-name-carrying-a-key", "a-latent-name",
-            "a-variant-name-yaml-read-as-an-int", "a-beam-name",
+            "a-beam-name",
             "a-latent-name-under-a-capability-key", "a-latent-name-under-scope",
             "a-model-node-name"])
     def test_a_name_the_path_grammar_cannot_spell_does_not_crash_the_pass(
@@ -859,6 +877,28 @@ class TestTheVariantRoute:
                  if f.check in ("A1", "A38", "A39")]
         assert [f.where for f in found] == [where]
         assert named in found[0].message
+
+    @pytest.mark.parametrize("unknown", ["bad-name", ".", "雪！"])
+    def test_a_variant_unknown_top_key_is_cut_back_only_after_attribution(
+            self, unknown):
+        """Keep the raw key until the variant prefix makes a legal path."""
+        found = [
+            finding
+            for finding in preflight(
+                preflight_document(variants={"x": {unknown: {}}})
+            ).findings
+            if finding.check == "A1"
+        ]
+
+        assert [finding.where for finding in found] == ["variants.x"]
+        assert unknown in found[0].message
+
+    def test_a_non_string_variant_name_is_rejected_in_source_order(self):
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document(variants={1: {"campaign": {}}}))
+        assert str(caught.value) == (
+            "initial_merge document: unsupported evidence mapping key type int."
+        )
 
     def test_a_base_finding_is_not_repeated_once_per_variant(self):
         """Kills the obvious implementation of the layer walk.  Three layers
@@ -909,26 +949,23 @@ class TestTheVariantRoute:
         is the base plus EVERY declared variant, this patch's two included."""
         document = preflight_document(variants={
             "a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}})
-        prefixes = [prefix for prefix, _ in _task3_layers(document)]
+        prefixes = _layer_prefixes(document)
         assert prefixes[0] == ""
         assert prefixes[1:] == [f"variants.{name}"
                                 for name in document["variants"]]
         assert {"variants.a", "variants.b"} <= set(prefixes)
 
-    def test_a_variant_apply_variant_refuses_is_dropped_from_the_walk(self):
-        """A patch that cannot be merged has one finding -- `_variant_text`'s
-        -- not four.  Kills a walk that lets apply_variant's ConfigError out
-        of the pass, which §2.3's TRAP says would abort it and hide every
-        later finding.
-
-        Asserted as an ABSENCE, because the merge keeps the base document's own
-        `variants: {unity_gain: ...}` and that layer is walked legitimately;
-        what this test is about is that `chained` is NOT."""
+    def test_a_variant_apply_variant_refuses_is_a_controlled_pass_refusal(self):
+        """The canonical enumerator never drops an invalid declared variant."""
         document = preflight_document(variants={"chained": {"variants": {}}})
-        prefixes = [prefix for prefix, _ in _task3_layers(document)]
-        assert "" in prefixes
-        assert "variants.chained" not in prefixes
-        assert len(_findings(document, "A1")) == 1
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        assert str(caught.value) == (
+            "variant 'chained' declares 'variants'. Layering is one level "
+            "deep by design: there is no ordering between variants and no "
+            "variant builds on another, so a comparison's halves cannot "
+            "drift apart through a chain."
+        )
 
 
 class TestASectionThisPassCannotRead:

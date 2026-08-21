@@ -19,10 +19,15 @@ axes under their own keys is the only protection there is.
 from typing import Any
 
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.resources import check_unknown_keys, register_kind
 from rheplicant.config.units import canonical_unit
-from rheplicant.config.values import ResolvedValue, register_form
+from rheplicant.config.values import (
+    ResolutionTarget,
+    ResolvedValue,
+    register_form,
+)
 from rheplicant.core.basis import BASIS_KINDS, SeparableBasis, basis_matrix
 
 
@@ -98,7 +103,12 @@ def build_basis(name: str, spec: dict, context: ResolutionContext) -> SeparableB
 
 
 @register_form("basis_fit")
-def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> ResolvedValue:
+def _basis_fit(
+    node: dict,
+    context: ResolutionContext,
+    modifiers: dict,
+    target: ResolutionTarget | None,
+) -> ResolvedValue:
     """Least-squares coefficients of a field on a named basis.
 
     ``SeparableBasis.fit`` is the package's own solver (``core/basis.py:381``),
@@ -106,7 +116,7 @@ def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> Resol
     would have to be given to reproduce the field.
     """
     from rheplicant.config.refs import resolve_reference
-    from rheplicant.config.values import resolve_value
+    from rheplicant.config.values import resolve_operand
 
     spec = node["basis_fit"]
     # The three checks below used to be one combined refusal; split so a
@@ -134,12 +144,33 @@ def _basis_fit(node: dict, context: ResolutionContext, modifiers: dict) -> Resol
         raise ConfigError(
             f"basis_fit: {reference['ref']!r} is {type(basis).__name__}, not SeparableBasis."
         )
-    field = resolve_value(spec["field"], context).value
+    resolved = resolve_operand(
+        spec["field"],
+        context,
+        parent=target,
+        segment="basis_fit.field",
+        formula="basis_fit",
+        role="field",
+    )
+    field = resolved.value
+    if target is not None:
+        record_resolved_delivery(
+            context, target.destination.nested("basis_fit.field"), resolved.unit
+        )
     # canonical_unit(), not convert_to_canonical(): this only LABELS the fit's
     # result, it does not scale it. That is safe only because every token in
     # ACCEPTED_UNITS is today an identity conversion (factor 1, offset 0) --
     # refs._delivered() is where an actual conversion happens for other forms.
     # If a non-identity unit is ever added to the table, this line must switch
     # to converting the field (or the fitted coefficients) through it too.
-    unit = canonical_unit(modifiers["unit"]) if "unit" in modifiers else None
+    if "unit" in modifiers:
+        unit_token = modifiers["unit"]
+    elif target is None:
+        unit_token = None
+    else:
+        unit_token = context.use_default(
+            f"{target.destination.document_path}.unit",
+            None,
+        )
+    unit = canonical_unit(unit_token) if unit_token is not None else None
     return ResolvedValue(basis.fit(field), unit, "basis_fit", modifiers)

@@ -1,0 +1,10 @@
+"model":  # from preset:n-62617365
+  "answer": 42  # from preset:n-62617365
+  "items":  # from user
+    - "x"  # from user
+    - []  # from rheplicant-default
+    - {}  # from variant:n-76
+    -  # from preset:n-6578747261
+      "雪": true  # from user
+"_rheplicant_resolved":  # from rheplicant-default
+  "format_version": 1  # from rheplicant-default

@@ -1,4 +1,4 @@
-"""Form 6: derivations, a closed registry, one entry per package function."""
+"""Form 6: destination-preserving derivations, one per package function."""
 
 import jax.numpy as jnp
 import pytest

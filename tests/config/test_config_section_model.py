@@ -7,6 +7,7 @@ import equinox as eqx
 import jax.numpy as jnp
 import pytest
 
+from _rheplicant_bootstrap.types import LayerIdentity, Origin
 from rheplicant.config import ConfigError, ResolutionContext
 from rheplicant.config.sections.model import (
     build_node_operator,
@@ -66,6 +67,36 @@ class TestFieldDelivery:
             context)
         assert isinstance(op, GlobalSignalOperator)
         assert float(op.centre) == pytest.approx(75e6)
+
+    def test_delivery_records_concrete_destination_and_origin(self, context):
+        class Trace:
+            def __init__(self):
+                self.deliveries = []
+
+            def record_delivery(self, layer, destination, **facts):
+                self.deliveries.append((layer, destination, facts))
+
+        trace = Trace()
+        configured = dataclasses.replace(
+            context,
+            layer=LayerIdentity("base", None),
+            trace=trace,
+            origin_lookup=lambda path: Origin("user"),
+        )
+        build_node_operator(
+            "adc",
+            {"scale": {"value": 2, "unit": "adc_count/K"}, "n_bits": 12},
+            configured,
+        )
+        layer, destination, facts = trace.deliveries[0]
+        assert layer == LayerIdentity("base", None)
+        assert destination.document_path == "model.adc.scale"
+        assert destination.selector.endswith("ADCOperator.scale")
+        assert facts == {
+            "dtype": "float32",
+            "origin": Origin("user"),
+            "unit": "adc_count/K",
+        }
 
     def test_an_unknown_field_is_refused_listing_the_real_ones(self, context):
         with pytest.raises(ConfigError, match="depth"):

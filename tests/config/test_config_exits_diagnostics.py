@@ -767,3 +767,29 @@ class TestScoreDirections:
         doc["inference"] = {}
         with pytest.raises(ConfigError, match="inference.parameters"):
             run_document(doc)
+
+
+class TestParsersRunNoScience:
+    """Plan 4A Task 9: the cheap diagnostics' parsers stay cheap."""
+
+    def test_identifiability_parses_with_the_package_exploded(
+            self, monkeypatch):
+        import rheplicant.inference as inference
+        from _rheplicant_bootstrap.variants import LayerRef
+        from rheplicant.config.sections.exit_support import parse_run
+        from rheplicant.config.sections.runs import RunSpec
+
+        def explode(*args, **kwargs):
+            raise AssertionError("science ran during parse")
+
+        monkeypatch.setattr(inference, "identifiability", explode)
+        monkeypatch.setattr(inference, "score_directions", explode)
+        built = load_document(diagnostic_document({"kind": "forward"}))
+        for kind in ("identifiability", "score_directions"):
+            parsed = parse_run(
+                RunSpec(name=kind, kind=kind, variant=None, on="primary",
+                        expect="ok", options={}),
+                built, index=0,
+                layer=LayerRef(kind="base", name=None, prefix="",
+                               document={}, declared_runs=None))
+            assert parsed.parsed.resolved is not None

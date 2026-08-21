@@ -20,10 +20,13 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
+from rheplicant.config.delivery import record_resolved_delivery
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.hatch import import_target
 from rheplicant.config.resources import check_unknown_keys, register_kind
+from rheplicant.config.units import convert_to_canonical
 from rheplicant.config.values import resolve_value
 from rheplicant.radio import MapSky, PowerLawSkyModel, UniformSkyModel
 
@@ -47,7 +50,16 @@ _ALLOWED_KEYS: dict[str, frozenset[str]] = {
 def _traced(spec: dict, key: str, context: ResolutionContext, name: str):
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for kind={spec.get('kind')!r}.")
-    return jnp.asarray(resolve_value(spec[key], context).value, dtype=context.dtype)
+    kind = spec["kind"]
+    destination = DestinationDescriptor(
+        f"{name}.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.sky_models.build_sky_model.{kind}.{key}",
+    )
+    resolved = resolve_value(spec[key], context, destination=destination)
+    value = jnp.asarray(resolved.value, dtype=context.dtype)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return value
 
 
 def _static_int(spec: dict, key: str, name: str) -> int:
@@ -66,7 +78,17 @@ def _static_int(spec: dict, key: str, name: str) -> int:
 def _static_float(spec: dict, key: str, context: ResolutionContext, name: str) -> float:
     if key not in spec:
         raise ConfigError(f"{name}: {key!r} is required for kind={spec.get('kind')!r}.")
-    resolved = resolve_value(spec[key], context)
+    kind = spec["kind"]
+    destination = DestinationDescriptor(
+        f"{name}.{key}",
+        "resource_field",
+        f"rheplicant.config.kinds.sky_models.build_sky_model.{kind}.{key}",
+    )
+    resolved = resolve_value(
+        spec[key],
+        context,
+        destination=destination,
+    )
     if resolved.source != "scalar":
         raise ConfigError(
             f"{name}: {key} is a static field and this value is a {resolved.source!r} "
@@ -75,7 +97,9 @@ def _static_float(spec: dict, key: str, context: ResolutionContext, name: str) -
             "even raise: the operator's `not self.ref_freq > 0` check passes, because "
             "`not Array(True)` is False."
         )
-    return float(resolved.value)
+    value = float(resolved.value)
+    record_resolved_delivery(context, destination, resolved.unit)
+    return value
 
 
 @register_kind("sky_models")
@@ -97,7 +121,10 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
         )
     if kind == "gdsm":
         check_unknown_keys(
-            name, spec, _ALLOWED_KEYS[kind], label="kind: gdsm",
+            name,
+            spec,
+            _ALLOWED_KEYS[kind],
+            label="kind: gdsm",
             note=(
                 "The sky IS the GSM16 model evaluated on the run's own frequency "
                 "grid -- there is no amplitude to scale and no grid to declare, "
@@ -146,8 +173,35 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "resolved through the value grammar and literal values are forwarded "
                 "untouched, so one argument cannot be both."
             )
+        from rheplicant.config.values import make_resolution_target
+
+        for key, value in args.items():
+            make_resolution_target(
+                value,
+                DestinationDescriptor(
+                    f"{name}.args.{key}",
+                    "resource_field",
+                    "rheplicant.config.kinds.sky_models.build_sky_model.python.args.*",
+                ),
+                context.dimensions,
+            )
+        if context.audit is not None:
+            context.audit.python_target(f"{name}.python", target)
         factory = import_target(target)
-        arguments = {key: resolve_value(value, context).value for key, value in args.items()}
+        arguments = {}
+        for key, value in args.items():
+            destination = DestinationDescriptor(
+                f"{name}.args.{key}",
+                "resource_field",
+                "rheplicant.config.kinds.sky_models.build_sky_model.python.args.*",
+            )
+            resolved = resolve_value(
+                value,
+                context,
+                destination=destination,
+            )
+            arguments[key] = resolved.value
+            record_resolved_delivery(context, destination, resolved.unit)
         arguments.update(literal)
         return factory(**arguments)
     return _build_maps(name, spec, context)
@@ -155,7 +209,11 @@ def build_sky_model(name: str, spec: dict, context: ResolutionContext) -> Any:
 
 def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
     nside = _static_int(spec, "nside", name)
-    order = spec.get("order", "ring")
+    order = (
+        spec["order"]
+        if "order" in spec
+        else context.use_default("resources.sky_models[].order", "ring")
+    )
     if order != "ring":
         raise ConfigError(
             f"{name}: order={order!r}. This package reads HEALPix RING throughout -- "
@@ -164,8 +222,41 @@ def _build_maps(name: str, spec: dict, context: ResolutionContext) -> MapSky:
             "would be read as RING: same shape, same statistics, every pixel in the "
             "wrong place. Reorder it before declaring it."
         )
-    maps = jnp.asarray(resolve_value(spec.get("maps", {}), context).value, dtype=context.dtype)
-    freq = jnp.asarray(resolve_value(spec.get("freq", {}), context).value)
+    maps_destination = DestinationDescriptor(
+        f"{name}.maps",
+        "resource_field",
+        "rheplicant.config.kinds.sky_models.build_sky_model.maps.maps",
+    )
+    maps_node = (
+        spec["maps"] if "maps" in spec else context.use_default("resources.sky_models[].maps", {})
+    )
+    resolved_maps = resolve_value(
+        maps_node,
+        context,
+        destination=maps_destination,
+    )
+    maps_value = resolved_maps.value
+    if "unit" in spec:
+        if resolved_maps.unit is not None:
+            raise ConfigError(
+                f"{name}: maps declares unit twice -- on maps: and beside it. Keep one declaration."
+            )
+        maps_value, maps_unit = convert_to_canonical(maps_value, spec["unit"])
+    else:
+        maps_unit = resolved_maps.unit
+    maps = jnp.asarray(maps_value, dtype=context.dtype)
+    record_resolved_delivery(context, maps_destination, maps_unit)
+    freq_destination = DestinationDescriptor(
+        f"{name}.freq",
+        "resource_field",
+        "rheplicant.config.kinds.sky_models.build_sky_model.maps.freq",
+    )
+    freq_node = (
+        spec["freq"] if "freq" in spec else context.use_default("resources.sky_models[].freq", {})
+    )
+    resolved_freq = resolve_value(freq_node, context, destination=freq_destination)
+    freq = jnp.asarray(resolved_freq.value)
+    record_resolved_delivery(context, freq_destination, resolved_freq.unit)
     expected_pix = 12 * nside * nside
     if maps.ndim != 2:
         raise ConfigError(
@@ -254,5 +345,6 @@ def _build_gdsm(name: str, spec: dict, context: ResolutionContext) -> MapSky:
     # what dtype is requested here -- but it is the one thing enforcing the
     # run's own dtype once x64 is enabled, or if pygdsm's own return dtype ever
     # changes, so it stays rather than being deleted as apparently-dead code.
-    return MapSky(maps=jnp.asarray(np.stack(rows), dtype=context.dtype),
-                  freq=jnp.asarray(context.freq))
+    return MapSky(
+        maps=jnp.asarray(np.stack(rows), dtype=context.dtype), freq=jnp.asarray(context.freq)
+    )

@@ -156,7 +156,7 @@ class Report:
         """The schema §6 ids that fired.  A finding with no id is not one."""
         return frozenset(one.check for one in self.findings if one.check)
 
-    def raise_if_refused(self) -> None:
+    def raise_if_refused(self, *, cumulative: Report | None = None) -> None:
         """The first refusal, verbatim, as the ``ConfigError`` it always was.
 
         The tail is appended, never prepended, and the module docstring
@@ -175,7 +175,7 @@ class Report:
                 f"{'' if len(rest) == 1 else 's'}, at "
                 f"{', '.join(one.where for one in rest)}.)"
             )
-        raise ConfigError(message)
+        raise ConfigError(message, report=self if cumulative is None else cumulative)
 
     def emit_warnings(self) -> None:
         """Say the warnings out loud, one ``warnings.warn`` each, as

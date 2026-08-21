@@ -54,12 +54,20 @@ issue nobody reading this file would find.
 import hashlib
 import os
 import pathlib
+import tempfile
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 
+from _rheplicant_bootstrap.capture import (
+    CaptureService,
+    ManifestEnumerator,
+    register_capture_route,
+)
+from _rheplicant_bootstrap.types import DestinationDescriptor
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.registry import LiveNames
@@ -89,6 +97,7 @@ def register_reader(name: str, extra_keys: frozenset[str] = frozenset(), *, arra
 
     def _register(fn):
         _READERS[name] = (fn, extra_keys, array)
+        register_capture_route(name, owner=f"value-reader:{name}")
         return fn
 
     return _register
@@ -96,6 +105,65 @@ def register_reader(name: str, extra_keys: frozenset[str] = frozenset(), *, arra
 
 #: Every registered format, live. Plan 1B adds to it by importing its module.
 FILE_FORMATS = LiveNames(_READERS)
+
+
+def regular_reader_names() -> tuple[str, ...]:
+    return tuple(sorted(_READERS))
+
+
+@contextmanager
+def _capture_for(context: ResolutionContext):
+    if context.capture is not None:
+        yield context.capture
+        return
+    root = pathlib.Path(tempfile.mkdtemp(prefix="rheplicant-capture-"))
+    service = CaptureService(root)
+    try:
+        yield service
+    finally:
+        service.close()
+
+
+def consume_captured_file(
+    source: pathlib.Path,
+    context: ResolutionContext,
+    *,
+    destination: DestinationDescriptor,
+    format: str,
+    reader: Callable[[pathlib.Path], Any],
+    declared_sha256: str | None = None,
+):
+    with _capture_for(context) as service:
+        return service.consume_file(
+            source,
+            layer=context.layer,
+            destination=destination,
+            format=format,
+            reader=reader,
+            declared_sha256=declared_sha256,
+        )
+
+
+def consume_captured_directory(
+    source: pathlib.Path,
+    context: ResolutionContext,
+    *,
+    destination: DestinationDescriptor,
+    format: str,
+    enumerate_manifest: ManifestEnumerator,
+    reader: Callable[[pathlib.Path], Any],
+    declared_sha256: str | None = None,
+):
+    with _capture_for(context) as service:
+        return service.consume_directory(
+            source,
+            layer=context.layer,
+            destination=destination,
+            format=format,
+            enumerate_manifest=enumerate_manifest,
+            reader=reader,
+            declared_sha256=declared_sha256,
+        )
 
 
 def resolve_file_path(
@@ -194,7 +262,15 @@ def _read_csv(path: pathlib.Path, spec: dict):
     return np.stack([data[name] for name in columns], axis=-1)
 
 
-def _read(reader, path: pathlib.Path, spec: dict, fmt: str, *, as_array: bool = True):
+def _read(
+    reader,
+    path: pathlib.Path,
+    spec: dict,
+    fmt: str,
+    *,
+    as_array: bool = True,
+    diagnostic_path: pathlib.Path | None = None,
+):
     """Call one reader, and let nothing out of it without the document's context.
 
     One wrapper here rather than a ``try`` inside each reader, for the reason
@@ -228,8 +304,9 @@ def _read(reader, path: pathlib.Path, spec: dict, fmt: str, *, as_array: bool = 
         # remedy. Re-wrapping it would bury that under advice about delimiters.
         raise
     except Exception as exc:
+        shown = path if diagnostic_path is None else diagnostic_path
         raise ConfigError(
-            f"{path} could not be read as format {fmt!r}. The reader raised "
+            f"{shown} could not be read as format {fmt!r}. The reader raised "
             f"{type(exc).__name__}: {exc}. That message is the library's: it knows the "
             "file, and nothing about the document, the value node, or the keys that "
             "decided how the file would be parsed -- and one document may reference "
@@ -264,10 +341,13 @@ def _refuse_healpix(spec: dict) -> None:
 
 
 @register_form("file")
-def _file(node, context, modifiers):
-    spec = node["file"]
-    if not isinstance(spec, dict):
-        raise ConfigError(f"file: expects a mapping, got {type(spec).__name__} ({spec!r}).")
+def _file(node, context, modifiers, target):
+    raw_spec = node["file"]
+    if not isinstance(raw_spec, dict):
+        raise ConfigError(
+            f"file: expects a mapping, got {type(raw_spec).__name__} ({raw_spec!r})."
+        )
+    spec = dict(raw_spec)
     for required in ("path", "format"):
         if required not in spec:
             raise ConfigError(
@@ -306,18 +386,49 @@ def _file(node, context, modifiers):
             f"sha256 it takes {sorted(extra)}."
         )
 
-    path = resolve_file_path(spec["path"], context)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    declared = spec.get("sha256")
-    if declared is not None and declared != digest:
-        raise ConfigError(
-            f"{path} hashes to {digest}, and this reference declares {declared}. The "
-            "file has changed since the declaration was written, or the declaration "
-            "came from a different copy. A run against different bytes than the ones "
-            "recorded is not the run the artefact describes."
+    destination = (
+        target.destination
+        if target is not None
+        else DestinationDescriptor("file", "config_path", "file")
+    )
+    if fmt == "txt" and "skiprows" not in spec:
+        spec["skiprows"] = context.use_default(
+            f"{destination.document_path}.file.skiprows",
+            0,
         )
+    if fmt == "csv":
+        if "delimiter" not in spec:
+            spec["delimiter"] = context.use_default(
+                f"{destination.document_path}.file.delimiter",
+                ",",
+            )
+        if "columns" not in spec:
+            spec["columns"] = context.use_default(
+                f"{destination.document_path}.file.columns",
+                None,
+            )
+    path = resolve_file_path(spec["path"], context)
 
-    result = _read(reader, path, spec, fmt, as_array=is_array)
+    def read_snapshot(snapshot: pathlib.Path):
+        result = _read(
+            reader,
+            snapshot,
+            spec,
+            fmt,
+            as_array=is_array,
+            diagnostic_path=path,
+        )
+        digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        return result, digest
+
+    result, digest = consume_captured_file(
+        path,
+        context,
+        destination=destination,
+        format=fmt,
+        reader=read_snapshot,
+        declared_sha256=spec.get("sha256"),
+    )
     carried = {**modifiers, "_sha256": digest, "_path": str(path)}
     if not is_array:
         # Modifiers describe what an array's numbers ARE (unit, part, scale,
@@ -333,7 +444,11 @@ def _file(node, context, modifiers):
             )
         return ResolvedValue(result, None, "file", carried)
 
-    unit_token = modifiers.get("unit")
+    unit_token = (
+        modifiers["unit"]
+        if "unit" in modifiers
+        else context.use_default(f"{destination.document_path}.unit", None)
+    )
     if unit_token is None:
         return ResolvedValue(result, None, "file", carried)
     converted, unit = convert_to_canonical(result, unit_token)
