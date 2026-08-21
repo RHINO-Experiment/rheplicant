@@ -119,3 +119,53 @@ class TestEveryModelFieldIsDocumented:
         )
 
         assert total == 66
+
+
+class TestTheSentenceIsPlainTextByTheTimeItLeaves:
+    """The docstrings are reStructuredText; the inspector is not a renderer.
+
+    Before this, the browser showed ``mode  ``"extract"`` (repeating
+    structure)`` -- double backticks and all -- and a ``sky_model`` field
+    offered the reader
+    ``:class:`~rheplicant.radio.sky.model.AbstractSkyModel```. Measured across
+    the 66 fields: 56 inline literals in 32 of them, and 5 cross-reference
+    roles in 3.
+    """
+
+    def test_an_inline_literal_keeps_its_text_and_loses_its_markup(self):
+        class Marked:
+            """One line.
+
+            Attributes:
+                mode: ``"extract"`` (keep) or ``"remove"`` (notch).
+            """
+
+        assert field_help(Marked)["mode"] == '"extract" (keep) or "remove" (notch).'
+
+    def test_a_role_with_a_tilde_shows_only_the_last_component(self):
+        """Sphinx's ``~`` means "print the final segment", and a reader of a
+        one-line field description wants the class name, not its import
+        path."""
+        class Referring:
+            """One line.
+
+            Attributes:
+                a: see :class:`~rheplicant.radio.sky.model.AbstractSkyModel`.
+                b: see :func:`rheplicant.radio.rhino.cal_load_operators`.
+            """
+
+        assert field_help(Referring)["a"] == "see AbstractSkyModel."
+        assert field_help(Referring)["b"] == "see rheplicant.radio.rhino.cal_load_operators."
+
+    def test_no_shipped_field_carries_markup_to_the_browser(self):
+        """The census, which is what makes the whole class impossible: not one
+        of the 66 sentences may still hold a backtick or a role."""
+        offenders = [
+            f"{cls.__name__}.{name}: {sentence}"
+            for classes in operator_table().values()
+            for cls in classes
+            for name, sentence in field_help(cls).items()
+            if name in field_specs(cls) and ("`" in sentence or ":class:" in sentence)
+        ]
+
+        assert offenders == []
