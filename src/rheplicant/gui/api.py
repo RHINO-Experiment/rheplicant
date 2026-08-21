@@ -20,8 +20,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from _rheplicant_bootstrap.errors import ConfigError
+from _rheplicant_bootstrap.gui_limits import MAX_RETAINED_JOBS
 from rheplicant.gui.document import EditorSnapshot, set_node, snapshot
-from rheplicant.gui.jobs import JobKind, JobRunner, JobStore, execute_job, yaml_digest
+from rheplicant.gui.jobs import (
+    JobKind,
+    JobRunner,
+    JobStore,
+    execute_job,
+    projection_body,
+    yaml_digest,
+)
 from rheplicant.gui.outputs import project_output_workflow, read_audit_artifact
 from rheplicant.gui.session import (
     EditorSession,
@@ -205,7 +213,7 @@ def _session_body(
         "can_undo": session.can_undo,
         "can_redo": session.can_redo,
         "jobs": [
-            dataclasses.asdict(row)
+            projection_body(row)
             for row in store.jobs.project(session_id, digest)
         ],
         "outputs": dataclasses.asdict(project_output_workflow(session.yaml_text)),
@@ -218,13 +226,19 @@ def _jobs_body(
     session_id: str,
     session: EditorSession,
 ) -> dict[str, object]:
+    """The poll body, built without copying any result it carries.
+
+    ``useJobPolling`` calls this continuously while a job is active, and
+    ``dataclasses.asdict`` deep-copied every projection it was handed -- a
+    second full copy of results ``project`` had already copied once.
+    """
     digest = yaml_digest(session.yaml_text)
     return {
         "session_id": session_id,
         "revision": session.revision,
         "yaml_digest": digest,
         "jobs": [
-            dataclasses.asdict(row)
+            projection_body(row)
             for row in store.jobs.project(session_id, digest)
         ],
     }
@@ -235,6 +249,35 @@ def _not_found(session_id: str) -> HTTPException:
         status_code=404,
         detail=f"Editor session {session_id!r} does not exist.",
     )
+
+
+def _job_unavailable(store: SessionStore, job_id: str) -> HTTPException:
+    """Refuse a link into a job this server no longer holds, saying which it is.
+
+    Bounded retention has one user-visible price and this is it: an audit link
+    the GUI handed out keeps working only while the job behind it is retained.
+    The two absences are not the same claim, so they do not share an answer --
+    ``410`` says the job existed here and its links are no longer served, and
+    names the window, so a reader can tell an expired link from a wrong one.
+    The bundle the link pointed at is untouched on disk; only this server's
+    route into it has been given up.
+
+    ``404`` is the answer that claims least, and is therefore what a store
+    that cannot say otherwise gets: an id never issued and an id retired long
+    enough ago to have fallen out of the store's bounded memory are
+    indistinguishable, and calling both "retired" would be a guess.
+    """
+    if store.jobs.retired(job_id):
+        return HTTPException(
+            status_code=410,
+            detail=(
+                f"Job {job_id!r} was retired: this server keeps the results of "
+                f"its {MAX_RETAINED_JOBS} most recent finished jobs, so audit "
+                "links into older ones are no longer served. The audit bundle "
+                "itself is untouched on disk."
+            ),
+        )
+    return HTTPException(status_code=404, detail=f"Job {job_id!r} does not exist.")
 
 
 def _apply(
@@ -597,7 +640,7 @@ def create_app(
         try:
             job = store.jobs.get(job_id)
         except KeyError:
-            raise HTTPException(status_code=404, detail=f"Job {job_id!r} does not exist.") from None
+            raise _job_unavailable(store, job_id) from None
         if job.session_id != session_id:
             raise HTTPException(status_code=404, detail=f"Job {job_id!r} does not exist.")
         result = job.result
