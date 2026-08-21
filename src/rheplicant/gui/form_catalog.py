@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Any
 
 from _rheplicant_bootstrap.process import _RUNTIME_KEYS
@@ -103,80 +102,25 @@ from rheplicant.config.sections.twin import _TWIN_KEYS
 from rheplicant.config.units import UNIT_SPELLINGS
 from rheplicant.config.values import _SHORTHAND as SHORTHAND
 from rheplicant.config.values import VALUE_FORMS, VALUE_MODIFIERS
+from rheplicant.gui.form_rules import (
+    _ENUMS,
+    _all,
+    _default_value,
+    _label,
+    _rule,
+    _section_for,
+)
 from rheplicant.gui.forms import (
     FormCatalog,
     FormRule,
     SourceRef,
     WidgetMetadata,
 )
-from rheplicant.radio.filters.base import _MODES as FILTER_MODES
 from rheplicant.radio.graph import RADIO_GRAPH
-from rheplicant.radio.instrument.calibration import LINESHAPES
 
 _NO_DEFAULT = object()
 _RUN_HANDLER_REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
-#: Class-path selector -> the members a ``static_str`` field accepts.
-#:
-#: Keyed by the same selector the dimension registry uses, so the two are
-#: comparable by construction: ``tests/gui/test_forms.py`` asserts this table
-#: is EXACTLY the live ``model_field`` rows whose disposition is structural
-#: and whose reason is ``"enum"``, which makes a new enum field impossible to
-#: ship with an empty select.
-#:
-#: The members are the operators' own constants rather than copies. Both are
-#: what the operator validates against -- ``filters/base.py`` and
-#: ``instrument/calibration.py`` raise on anything else -- so a select built
-#: from them cannot offer a member the constructor would refuse.
-_ENUMS: dict[str, tuple[str, ...]] = {
-    "rheplicant.radio.filters.fourier.FourierBandFilter.mode": FILTER_MODES,
-    "rheplicant.radio.filters.sidereal.SiderealFilter.mode": FILTER_MODES,
-    "rheplicant.radio.filters.skyspace.SkySpaceFilter.mode": FILTER_MODES,
-    "rheplicant.radio.instrument.calibration.CWCalibrationOperator.lineshape": LINESHAPES,
-}
-
-
-def _rule(path: str, operator: str, expected: object = None) -> FormRule:
-    return FormRule(path=path, operator=operator, expected=expected)  # type: ignore[arg-type]
-
-
-def _all(*rules: FormRule) -> FormRule:
-    return FormRule(path=None, operator="all", rules=tuple(rules))
-
-
-def _any(*rules: FormRule) -> FormRule:
-    return FormRule(path=None, operator="any", rules=tuple(rules))
-
-
-def _label(path: str) -> str:
-    tail = path.rsplit(".", 1)[-1].replace("[]", "").replace("*", "entry")
-    return tail.replace("_", " ")
-
-
-def _section_for(path: str) -> str:
-    if path.startswith("resources.sky_models") or path.startswith("resources.projectors"):
-        return "sky"
-    if path.startswith("resources.beams"):
-        return "beam"
-    if path.startswith("resources"):
-        return "resources"
-    if path.startswith("model"):
-        # A list node's instance prefix spells the node ``filters[]``, which is
-        # not a node id: without the trim every field of every list node falls
-        # through to the Instrument default, and ``filters`` is `processing`.
-        node = path.split(".")[1].removesuffix("[]") if "." in path else ""
-        spec = RADIO_GRAPH.nodes.get(node)
-        return "backend" if spec is not None and spec.segment == "processing" else "instrument"
-    if (
-        path.startswith("schema_version")
-        or path.startswith("defaults")
-        or path.startswith("plugins")
-    ):
-        return "runtime"
-    root = path.split(".", 1)[0].removesuffix("[]")
-    # The catch-all hatch-argument destination is a value-form concern rather
-    # than a thirteenth view; Resources owns the generic value-node palette.
-    return "resources" if root == "python" else root
 
 
 #: A non-empty mapping, so :func:`_is_fan` keeps answering correctly if the
@@ -208,16 +152,6 @@ def _instance_prefix(node_id: str) -> str:
     if not RADIO_GRAPH.nodes[node_id].many:
         return f"model.{node_id}"
     return f"model.{node_id}.*" if _is_fan(node_id) else f"model.{node_id}[]"
-
-
-def _default_value(value: object) -> object:
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, Mapping):
-        return {str(key): _default_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return tuple(_default_value(item) for item in value)
-    return repr(value)
 
 
 def _units(dimension: str | None, unit_policy: str | None) -> tuple[str, ...]:

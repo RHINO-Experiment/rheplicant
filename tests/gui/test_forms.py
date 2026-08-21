@@ -330,7 +330,7 @@ class TestEnumMembersReachTheWidget:
 
     def test_the_enum_table_is_exactly_the_live_enum_dimension_rows(self):
         from rheplicant.config.dimensions import registered_dimension_rows
-        from rheplicant.gui.form_catalog import _ENUMS
+        from rheplicant.gui.form_rules import _ENUMS
 
         live = {
             selector.selector
@@ -342,7 +342,7 @@ class TestEnumMembersReachTheWidget:
         assert set(_ENUMS) == live, "an enum field without members ships an empty select"
 
     def test_the_members_are_the_operators_own_constants(self):
-        from rheplicant.gui.form_catalog import _ENUMS
+        from rheplicant.gui.form_rules import _ENUMS
         from rheplicant.radio.filters.base import _MODES
         from rheplicant.radio.instrument.calibration import LINESHAPES
 
