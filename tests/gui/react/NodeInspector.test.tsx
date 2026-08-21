@@ -38,6 +38,8 @@ function field(overrides: Partial<NodeField> = {}): NodeField {
     units: ["K", "celsius"],
     choices: [],
     delivery: "traced",
+    help: "trough depth [K] (positive number gives absorption).",
+    resource_kind: null,
     forms: ["bare", "shorthand", "quantity"],
     typed: true,
     present: true,
@@ -828,5 +830,100 @@ describe("re-spelling one field", () => {
     });
 
     expect(textarea()).toHaveValue(JSON.stringify({ depth: 0.7 }, null, 2));
+  });
+});
+
+describe("help text and resource pickers", () => {
+  it("shows the sentence the operator writes about each field", () => {
+    render(<Harness selected={card()} />);
+
+    expect(
+      screen.getByText("trough depth [K] (positive number gives absorption)."),
+    ).toBeVisible();
+  });
+
+  it("says nothing where the operator says nothing", () => {
+    render(<Harness selected={card({ fields: [field({ help: "" })] })} />);
+
+    expect(screen.getByRole("group", { name: "global_signal typed fields" }))
+      .toBeVisible();
+    expect(screen.queryByText(/trough depth/)).toBeNull();
+  });
+
+  it("offers the declared resources and writes a ref", () => {
+    render(<Harness selected={card({
+      node_id: "observed_astro_sky",
+      settings: {},
+      fields: [field({
+        name: "projector", label: "projector", path: "model.observed_astro_sky.projector",
+        control: "resource", resource_kind: "projectors",
+        choices: ["resources.projectors.drift", "resources.projectors.second"],
+        dimension: "structural", unit_policy: "forbidden", units: [], forms: ["bare"],
+        present: false, form: "absent", number: null, unit: null, written: null,
+        help: "the projector this sky is convolved with.",
+      })],
+    })} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "projector" }), {
+      target: { value: "resources.projectors.second" },
+    });
+
+    expect(textarea()).toHaveValue(
+      JSON.stringify({ projector: { ref: "resources.projectors.second" } }, null, 2),
+    );
+  });
+
+  it("shows the reference already written", () => {
+    render(<Harness selected={card({
+      node_id: "observed_astro_sky",
+      settings: { projector: { ref: "resources.projectors.drift" } },
+      fields: [field({
+        name: "projector", label: "projector", path: "model.observed_astro_sky.projector",
+        control: "resource", resource_kind: "projectors",
+        choices: ["resources.projectors.drift"],
+        unit_policy: "forbidden", units: [], forms: ["bare"],
+        form: "ref", number: null, unit: null,
+        written: { ref: "resources.projectors.drift" },
+      })],
+    })} />);
+
+    expect(screen.getByRole("combobox", { name: "projector" }))
+      .toHaveValue("resources.projectors.drift");
+  });
+
+  it("clearing the picker removes the key rather than writing an empty ref", () => {
+    render(<Harness selected={card({
+      node_id: "observed_astro_sky",
+      settings: { projector: { ref: "resources.projectors.drift" } },
+      fields: [field({
+        name: "projector", label: "projector", path: "model.observed_astro_sky.projector",
+        control: "resource", resource_kind: "projectors",
+        choices: ["resources.projectors.drift"],
+        unit_policy: "forbidden", units: [], forms: ["bare"],
+        form: "ref", number: null, unit: null,
+        written: { ref: "resources.projectors.drift" },
+      })],
+    })} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "projector" }), {
+      target: { value: "" },
+    });
+
+    expect(textarea()).toHaveValue("{}");
+  });
+
+  it("says so when the document has declared nothing to pick", () => {
+    render(<Harness selected={card({
+      node_id: "observed_astro_sky",
+      settings: {},
+      fields: [field({
+        name: "projector", label: "projector", control: "resource",
+        resource_kind: "projectors", choices: [],
+        unit_policy: "forbidden", units: [], forms: ["bare"],
+        present: false, form: "absent", number: null, unit: null, written: null,
+      })],
+    })} />);
+
+    expect(screen.getByText(/no projectors declared/)).toBeVisible();
   });
 });

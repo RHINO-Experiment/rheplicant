@@ -63,7 +63,11 @@ tabs replace the main panel without changing YAML:
   layer can read back; the number is carried through verbatim, and every
   other value form stays a YAML edit. Those switchers are collapsed behind a
   per-set `value spellings` checkbox, because most edits change a number
-  rather than the shape it is written in.
+  rather than the shape it is written in. Each control carries the sentence
+  its operator's own `Attributes:` block writes about that field, and a field
+  that takes a declared resource by `{ref: ...}` offers the entries of that
+  kind the document declares -- the layer the card was resolved against, so a
+  variant offers its own.
 - **Config** shows one of the 12 server-projected sections at a time. Missing
   required choices come first, followed by current and optional values. Safe
   select, toggle, integer and text controls are applied by Python; complex

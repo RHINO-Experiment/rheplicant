@@ -267,7 +267,10 @@ def _claims(model: Mapping[str, object], graph: SignalGraph) -> tuple[str, ...]:
 
 
 def _instances(
-    node_id: str, value: object, catalog: FormCatalog | None = None
+    node_id: str,
+    value: object,
+    catalog: FormCatalog | None = None,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeInstance, ...]:
     """The ordered instances of a ``many`` node, each with its typed view.
 
@@ -276,7 +279,7 @@ def _instances(
     than each deciding separately what an instance is.
     """
     catalog = widget_catalog() if catalog is None else catalog
-    projected = project_node_instances(node_id, value, catalog)
+    projected = project_node_instances(node_id, value, catalog, resources=resources)
     if node_id == "cal_loads" and isinstance(value, Mapping):
         identities = [(str(label), str(label), settings) for label, settings in value.items()]
     elif not isinstance(value, str | bytes) and isinstance(value, Sequence):
@@ -307,7 +310,10 @@ def _instances(
 
 
 def _stages(
-    node_id: str, value: object, catalog: FormCatalog
+    node_id: str,
+    value: object,
+    catalog: FormCatalog,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeInstance, ...]:
     """A composed node's stages, each with the typed view of its operator.
 
@@ -315,7 +321,7 @@ def _stages(
     it in the path grammar, so the name is its label here rather than one of
     its fields.
     """
-    projected = project_compose_stages(node_id, value, catalog)
+    projected = project_compose_stages(node_id, value, catalog, resources=resources)
     if not projected:
         return ()
     stages = value["stages"] if isinstance(value, Mapping) else []
@@ -386,8 +392,23 @@ def _explanation(node_id: str, *, kind: str, reserved: bool, many: bool, doc: st
     return doc
 
 
+def _declared_resources(document: Mapping[str, object]) -> Mapping[str, object]:
+    """The ``resources:`` block, or an empty one.
+
+    A resource picker offers what the DOCUMENT declares, so a name it lists is
+    always one the build can resolve. Read defensively: an invalid
+    ``resources:`` is refused elsewhere, and a picker is not the place to
+    raise about it.
+    """
+    found = document.get("resources")
+    return found if isinstance(found, Mapping) else {}
+
+
 def _node_cards(
-    model: Mapping[str, object], graph: SignalGraph, catalog: FormCatalog | None = None
+    model: Mapping[str, object],
+    graph: SignalGraph,
+    catalog: FormCatalog | None = None,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeCard, ...]:
     lit = set(_claims(model, graph))
     # Built once for all 33 cards. It is the whole widget census -- about
@@ -429,9 +450,11 @@ def _node_cards(
             fields=typed.fields,
             extra_keys=typed.extra_keys,
             removed_by_type=typed.removed_by_type,
-            instances=_instances(node_id, model.get(node_id), catalog),
-            stages=_stages(node_id, settings, catalog),
-            from_fields=from_route_fields(node_id, settings, catalog),
+            instances=_instances(node_id, model.get(node_id), catalog, resources),
+            stages=_stages(node_id, settings, catalog, resources),
+            from_fields=from_route_fields(
+                node_id, settings, catalog, resources=resources
+            ),
             stage_names=tuple(
                 str(stage.get("name"))
                 for stage in model.get(node_id, {}).get("stages", ())
@@ -443,7 +466,9 @@ def _node_cards(
         for node_id in graph._topo
         for spec in (graph.nodes[node_id],)
         for settings in (_plain(model[node_id]) if node_id in model else None,)
-        for typed in (project_node_fields(node_id, settings, catalog),)
+        for typed in (
+            project_node_fields(node_id, settings, catalog, resources=resources),
+        )
     )
 
 
@@ -483,8 +508,9 @@ def _diagram(
     *,
     changed_nodes: tuple[str, ...] = (),
     catalog: FormCatalog | None = None,
+    resources: Mapping[str, object] | None = None,
 ) -> GraphDiagram:
-    nodes = _node_cards(model, graph, catalog)
+    nodes = _node_cards(model, graph, catalog, resources)
     lit = tuple(node.node_id for node in nodes if node.lit)
     counts = {node.node_id: node.count for node in nodes if node.many and node.count > 1}
     return GraphDiagram(
@@ -514,6 +540,7 @@ def _variant_diagrams(
     document: Mapping[str, object],
     base_model: Mapping[str, object],
     catalog: FormCatalog | None = None,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[GraphDiagram, ...]:
     variants = document.get("variants", {})
     if not isinstance(variants, Mapping):
@@ -531,6 +558,7 @@ def _variant_diagrams(
                 RADIO_GRAPH,
                 changed_nodes=_changed_nodes(base_model, variant_model),
                 catalog=catalog,
+                resources=_declared_resources(resolved),
             )
         )
     return tuple(diagrams)
@@ -541,8 +569,13 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
     # One census for every diagram this snapshot builds: base, backend and
     # one per variant.
     catalog = widget_catalog()
-    base = _diagram("base", model, RADIO_GRAPH, catalog=catalog)
-    backend = _diagram("backend", model, _PROCESSING_GRAPH, catalog=catalog)
+    # A variant may declare its own resources, so each diagram reads the
+    # resources of the layer it was resolved against rather than the base's.
+    resources = _declared_resources(document)
+    base = _diagram("base", model, RADIO_GRAPH, catalog=catalog, resources=resources)
+    backend = _diagram(
+        "backend", model, _PROCESSING_GRAPH, catalog=catalog, resources=resources
+    )
     forms = project_forms(document)
     return EditorSnapshot(
         yaml_text=yaml_text,
@@ -554,7 +587,7 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
         validation=validate_document(yaml_text, document, forms),
         base_diagram=base,
         backend_diagram=backend,
-        variant_diagrams=_variant_diagrams(document, model, catalog),
+        variant_diagrams=_variant_diagrams(document, model, catalog, resources),
     )
 
 

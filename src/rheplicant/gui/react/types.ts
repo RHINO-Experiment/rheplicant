@@ -54,7 +54,8 @@ export type NodeFieldControl =
   | "text"
   | "select"
   | "toggle"
-  | "opaque";
+  | "opaque"
+  | "resource";
 
 export interface NodeField {
   name: string;
@@ -69,6 +70,11 @@ export interface NodeField {
   units: string[];
   choices: string[];
   delivery: string | null;
+  /** The sentence the owning operator's `Attributes:` block writes about this
+   *  field, or empty when it has none. */
+  help: string;
+  /** The `resources:` kind this field takes by `{ref: ...}`, or null. */
+  resource_kind: string | null;
   /** The shapes this control can WRITE, in the order a switcher offers them:
    *  `bare`, `shorthand`, `quantity`. Only the three this layer round-trips.
    */

@@ -64,7 +64,11 @@ from rheplicant.config.sections.exits import (
 )
 from rheplicant.config.sections.inference import _INFERENCE_KEYS, _TRAINABLE_KEYS, MODES
 from rheplicant.config.sections.ingest import _FROM_FILE_KEYS
-from rheplicant.config.sections.model import FROM_ROUTES, operator_table
+from rheplicant.config.sections.model import (
+    FROM_ROUTES,
+    _object_fields,
+    operator_table,
+)
 from rheplicant.config.sections.noise import _KIND_KEYS as NOISE_KIND_KEYS
 from rheplicant.config.sections.npe import (
     _BANK_KEYS,
@@ -832,6 +836,7 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
 #: ``form_catalog_finalize`` takes the same route for the same reason.
 __all__ = [
     "FROM_ROUTES",
+    "_object_fields",
     "SHORTHAND",
     "_instance_prefix",
     "_is_fan",

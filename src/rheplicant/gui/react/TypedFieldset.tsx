@@ -12,6 +12,7 @@ export interface TypedFieldsetProps {
   shownNumber: (field: NodeField) => string;
   shownUnit: (field: NodeField) => string;
   shownForm: (field: NodeField) => string;
+  shownReference: (field: NodeField) => string;
   /** Whether the value-spelling switchers are open. Off by default: a select
    *  under every field doubles the height of the set to offer something most
    *  edits never need. */
@@ -20,6 +21,7 @@ export interface TypedFieldsetProps {
   onNumber: (field: NodeField, text: string) => void;
   onUnit: (field: NodeField, unit: string) => void;
   onForm: (field: NodeField, form: string) => void;
+  onReference: (field: NodeField, dotted: string) => void;
   onText: (field: NodeField, value: string) => void;
   /** A class chosen but not yet confirmed, or null. */
   pendingType: string | null;
@@ -41,11 +43,13 @@ export function TypedFieldset({
   shownNumber,
   shownUnit,
   shownForm,
+  shownReference,
   showForms,
   onToggleForms,
   onNumber,
   onUnit,
   onForm,
+  onReference,
   onText,
   pendingType,
   onChooseType,
@@ -95,7 +99,19 @@ export function TypedFieldset({
         <p key={field.name}>
           <label>
             {field.label}{field.required ? " (required)" : ""}
-            {field.control === "select" ? (
+            {field.control === "resource" ? (
+              <select
+                aria-label={field.label}
+                value={shownReference(field)}
+                disabled={disabled || !field.typed || field.choices.length === 0}
+                onChange={(event) => onReference(field, event.target.value)}
+              >
+                <option value="">not set</option>
+                {field.choices.map((choice) => (
+                  <option key={choice} value={choice}>{choice}</option>
+                ))}
+              </select>
+            ) : field.control === "select" ? (
               <select
                 aria-label={field.label}
                 value={shownNumber(field)}
@@ -135,6 +151,9 @@ export function TypedFieldset({
               ))}
             </select>
           )}
+          {field.control === "resource" && field.choices.length === 0 && (
+            <span> no {field.resource_kind} declared: add one under resources:</span>
+          )}
           {showForms && field.forms.length > 1 && (
             <select
               aria-label={`${field.label} form`}
@@ -148,6 +167,7 @@ export function TypedFieldset({
             </select>
           )}
           {!field.typed && <span> written as {field.form}: edit it in the JSON below</span>}
+          {field.help !== "" && <span className="field-help"> {field.help}</span>}
         </p>
       ))}
       {owner.typed_form && respellable && (

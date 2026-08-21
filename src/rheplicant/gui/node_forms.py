@@ -29,6 +29,7 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from rheplicant.gui.field_help import field_help
 from rheplicant.gui.form_catalog import (
     FROM_ROUTES,
     SHORTHAND,
@@ -36,6 +37,7 @@ from rheplicant.gui.form_catalog import (
     VALUE_MODIFIERS,
     _instance_prefix,
     _is_fan,
+    _object_fields,
     operator_table,
 )
 from rheplicant.gui.forms import FormCatalog, WidgetMetadata
@@ -54,9 +56,28 @@ _ENVELOPE = frozenset({"value", "unit"})
 #: Settings keys that are never operator fields.
 _TYPE_KEY = "type"
 
+#: Object-field name -> the ``resources:`` kind it takes by ``{ref: ...}``.
+#:
+#: Keyed by field NAME, which is unambiguous across the five sites that have
+#: one: ``_object_fields`` names three of them and the two ``from:`` routes
+#: name the other two. ``tests/gui/test_node_forms.py`` asserts this covers
+#: every object field the config layer knows about, so a new one cannot ship
+#: a picker that offers nothing.
+#:
+#: The kind is not derivable: ``resolve_reference`` resolves any
+#: ``resources.<kind>.<name>`` and leaves the type to the constructor, so
+#: there is no table upstream to read.
+_RESOURCE_KINDS: dict[str, str] = {
+    "sky_model": "sky_models",
+    "projector": "projectors",
+    "basis": "bases",
+}
+
 _SHAPE_REASON = "Node settings are not a mapping; edit them as YAML."
 
-Control = Literal["quantity", "integer", "text", "select", "toggle", "opaque"]
+Control = Literal[
+    "quantity", "integer", "text", "select", "toggle", "opaque", "resource"
+]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -90,6 +111,11 @@ class NodeField:
     units: tuple[str, ...]
     choices: tuple[str, ...]
     delivery: str | None
+    #: The sentence the owning operator's ``Attributes:`` block writes about
+    #: this field, or empty when it has none.
+    help: str
+    #: The ``resources:`` kind this field takes by ``{ref: ...}``, or None.
+    resource_kind: str | None
     #: The shapes this control can WRITE, in the order a switcher offers them.
     #: Only the three this layer round-trips: re-spelling a value is safe
     #: exactly where the classifier can read the result back.
@@ -178,6 +204,16 @@ def classify_value(value: object) -> ValueReading:
     return ValueReading("unknown", None, None)
 
 
+def _object_field_names() -> frozenset[str]:
+    """Every field name the config layer treats as a resource reference."""
+    return frozenset(
+        name
+        for classes in operator_table().values()
+        for cls in classes
+        for name in _object_fields(cls)
+    ) | {"projector", "basis"}
+
+
 def _removed_by_type(
     *, written: Sequence[str], current: frozenset[str], candidate: frozenset[str]
 ) -> tuple[str, ...]:
@@ -194,7 +230,7 @@ def _removed_by_type(
     return tuple(key for key in written if key in current and key not in candidate)
 
 
-def _control(widget: WidgetMetadata) -> Control:
+def _control(widget: WidgetMetadata, resource_kind: str | None = None) -> Control:
     """Which control edits this field.
 
     Delivery decides first and disposition second, which is why a
@@ -208,6 +244,8 @@ def _control(widget: WidgetMetadata) -> Control:
     declared so the first boolean field gets a checkbox rather than silently
     falling through to a quantity control it cannot fill.
     """
+    if resource_kind is not None:
+        return "resource"
     if widget.delivery == "static_bool":
         return "toggle"
     if widget.delivery == "static_int":
@@ -250,6 +288,10 @@ def _typed(control: Control, reading: ValueReading, written: object) -> bool:
     """
     if reading.form == "absent":
         return True
+    if control == "resource":
+        return reading.form == "ref"
+    if reading.form == "ref":
+        return control == "resource"
     if reading.form in ("quantity", "shorthand"):
         return control == "quantity"
     if reading.form != "bare":
@@ -311,7 +353,11 @@ def _refused(node_id: str, reason: str, type_choices: tuple[str, ...] = ()) -> N
 
 
 def project_node_fields(
-    node_id: str, settings: object, catalog: FormCatalog
+    node_id: str,
+    settings: object,
+    catalog: FormCatalog,
+    *,
+    resources: Mapping[str, object] | None = None,
 ) -> NodeFieldSet:
     """Project one node's settings as typed controls, or say why not.
 
@@ -353,11 +399,15 @@ def project_node_fields(
         return _refused(node_id, _SHAPE_REASON)
 
     written: Mapping[str, object] = settings if isinstance(settings, Mapping) else {}
-    return _operator_settings(node_id, written, catalog)
+    return _operator_settings(node_id, written, catalog, resources)
 
 
 def project_instance_fields(
-    node_id: str, settings: object, catalog: FormCatalog
+    node_id: str,
+    settings: object,
+    catalog: FormCatalog,
+    *,
+    resources: Mapping[str, object] | None = None,
 ) -> NodeFieldSet:
     """ONE instance of a ``many`` node, as typed controls or a reason.
 
@@ -370,12 +420,16 @@ def project_instance_fields(
     if settings is not None and not isinstance(settings, Mapping):
         return _refused(node_id, _SHAPE_REASON)
     return _operator_settings(
-        node_id, settings if isinstance(settings, Mapping) else {}, catalog
+        node_id, settings if isinstance(settings, Mapping) else {}, catalog, resources
     )
 
 
 def project_node_instances(
-    node_id: str, settings: object, catalog: FormCatalog
+    node_id: str,
+    settings: object,
+    catalog: FormCatalog,
+    *,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeFieldSet, ...]:
     """Every instance of a ``many`` node, in the order the document wrote them.
 
@@ -392,7 +446,8 @@ def project_node_instances(
             return ()
         return tuple(
             dataclasses.replace(
-                project_instance_fields(node_id, entry, catalog), slot=(str(label),)
+                project_instance_fields(node_id, entry, catalog, resources=resources),
+                slot=(str(label),),
             )
             for label, entry in settings.items()
         )
@@ -400,14 +455,19 @@ def project_node_instances(
         return ()
     return tuple(
         dataclasses.replace(
-            project_instance_fields(node_id, entry, catalog), slot=(str(index),)
+            project_instance_fields(node_id, entry, catalog, resources=resources),
+            slot=(str(index),),
         )
         for index, entry in enumerate(settings)
     )
 
 
 def from_route_fields(
-    node_id: str, settings: object, catalog: FormCatalog
+    node_id: str,
+    settings: object,
+    catalog: FormCatalog,
+    *,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeField, ...]:
     """The keys one ``from:`` route takes, as controls, in the route's order.
 
@@ -435,14 +495,19 @@ def from_route_fields(
         for widget in _field_widgets(node_id, catalog)
     }
     return tuple(
-        _project_field(declared[key], settings)
+        _project_field(declared[key], settings, None, resources)
         if key in declared
-        else _route_field(node_id, key, settings)
+        else _route_field(node_id, key, settings, resources)
         for key in keys
     )
 
 
-def _route_field(node_id: str, name: str, settings: Mapping[str, object]) -> NodeField:
+def _route_field(
+    node_id: str,
+    name: str,
+    settings: Mapping[str, object],
+    resources: Mapping[str, object] | None = None,
+) -> NodeField:
     """One ``from:`` key that no widget describes.
 
     ``projector:`` and ``basis:`` take a resource by ``{ref: ...}`` identity
@@ -451,10 +516,11 @@ def _route_field(node_id: str, name: str, settings: Mapping[str, object]) -> Nod
     read-only and point at the textarea while the label is a text box.
     """
     reference = name in ("projector", "basis")
+    kind = _RESOURCE_KINDS.get(name) if reference else None
     value = settings.get(name, _ABSENT)
     present = value is not _ABSENT
     reading = classify_value(value) if present else ValueReading("absent", None, None)
-    control: Control = "opaque" if reference else "text"
+    control: Control = "resource" if reference else "text"
     return NodeField(
         name=name,
         path=f"model.{node_id}.{name}",
@@ -466,8 +532,10 @@ def _route_field(node_id: str, name: str, settings: Mapping[str, object]) -> Nod
         dimension="structural",
         unit_policy="forbidden",
         units=(),
-        choices=(),
+        choices=_resource_choices(kind, resources),
         delivery=None,
+        help="",
+        resource_kind=kind,
         forms=("bare",),
         typed=_typed(control, reading, value),
         present=present,
@@ -479,7 +547,11 @@ def _route_field(node_id: str, name: str, settings: Mapping[str, object]) -> Nod
 
 
 def project_compose_stages(
-    node_id: str, settings: object, catalog: FormCatalog
+    node_id: str,
+    settings: object,
+    catalog: FormCatalog,
+    *,
+    resources: Mapping[str, object] | None = None,
 ) -> tuple[NodeFieldSet, ...]:
     """Every stage of a composed node, in the order the document wrote them.
 
@@ -507,6 +579,7 @@ def project_compose_stages(
                 if isinstance(stage, Mapping)
                 else stage,
                 catalog,
+                resources=resources,
             ),
             slot=("stages", str(index)),
         )
@@ -515,7 +588,10 @@ def project_compose_stages(
 
 
 def _operator_settings(
-    node_id: str, written: Mapping[str, object], catalog: FormCatalog
+    node_id: str,
+    written: Mapping[str, object],
+    catalog: FormCatalog,
+    resources: Mapping[str, object] | None = None,
 ) -> NodeFieldSet:
     """Gates 4 to 9, and the field set they let through."""
     if "compose" in written:
@@ -550,7 +626,7 @@ def _operator_settings(
 
     fields = (
         tuple(
-            _project_field(widget, written)
+            _project_field(widget, written, selected, resources)
             for widget in _field_widgets(node_id, catalog)
             if any(_class_of(source.selector) == selected for source in widget.sources)
         )
@@ -584,12 +660,50 @@ def _operator_settings(
     )
 
 
-def _project_field(widget: WidgetMetadata, written: Mapping[str, object]) -> NodeField:
+def _resource_choices(kind: str | None, resources: Mapping[str, object] | None) -> tuple[str, ...]:
+    """The dotted refs of one kind that this document actually declares.
+
+    Empty when the document declares none: a picker with no options says
+    truthfully that there is nothing to pick, where a picker listing names
+    that are not in the file would offer a reference the build then refuses.
+    """
+    if kind is None or not isinstance(resources, Mapping):
+        return ()
+    entries = resources.get(kind)
+    if not isinstance(entries, Mapping):
+        return ()
+    return tuple(f"resources.{kind}.{name}" for name in entries if isinstance(name, str))
+
+
+def _owning_class(widget: WidgetMetadata, selected: str | None) -> type | None:
+    """The class whose docstring describes this field.
+
+    A widget shared by several classes -- ``filters[].mode`` is owned by all
+    three filters -- takes the selected one, because that is the class the
+    document has chosen and whose sentence therefore applies.
+    """
+    names = {_class_of(source.selector) for source in widget.sources}
+    wanted = selected if selected in names else next(iter(sorted(names)), None)
+    for classes in operator_table().values():
+        for cls in classes:
+            if cls.__name__ == wanted:
+                return cls
+    return None
+
+
+def _project_field(
+    widget: WidgetMetadata,
+    written: Mapping[str, object],
+    selected: str | None = None,
+    resources: Mapping[str, object] | None = None,
+) -> NodeField:
     name = widget.path.rsplit(".", 1)[-1]
     value = written.get(name, _ABSENT)
     present = value is not _ABSENT
     reading = classify_value(value) if present else ValueReading("absent", None, None)
-    control = _control(widget)
+    resource_kind = _RESOURCE_KINDS.get(name) if name in _object_field_names() else None
+    control = _control(widget, resource_kind)
+    owner = _owning_class(widget, selected)
     return NodeField(
         name=name,
         path=widget.path,
@@ -601,8 +715,10 @@ def _project_field(widget: WidgetMetadata, written: Mapping[str, object]) -> Nod
         dimension=widget.dimension,
         unit_policy=widget.unit_policy,
         units=widget.units,
-        choices=widget.choices,
         delivery=widget.delivery,
+        help=field_help(owner).get(name, "") if owner is not None else "",
+        resource_kind=resource_kind,
+        choices=_resource_choices(resource_kind, resources) if resource_kind else widget.choices,
         forms=_forms(widget, control),
         typed=_typed(control, reading, value),
         present=present,
