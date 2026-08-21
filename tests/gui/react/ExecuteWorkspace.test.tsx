@@ -289,7 +289,7 @@ describe("progressive execute workspace", () => {
     api.setOutputReport = vi.fn(async () => accepted);
     let accept: ((next: EditorSession) => void) | undefined;
     let captured: (() => Promise<EditorSession>) | undefined;
-    const onRun = vi.fn((action: () => Promise<EditorSession>) => { captured = action; });
+    const onRun = vi.fn((action: () => Promise<EditorSession>, _message: string) => { captured = action; });
     function Harness() {
       const [session, setSession] = useState(initial);
       accept = setSession;

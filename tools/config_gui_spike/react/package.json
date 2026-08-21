@@ -8,6 +8,7 @@
     "build:production": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.production.config.ts",
     "build:session": "tsc --noEmit -p tsconfig.session.json && vite build --config vite.session.config.ts",
     "check:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "check:tests": "tsc --noEmit -p tsconfig.tests.json",
     "dev": "vite",
     "test": "vitest",
     "test:session": "vitest --config vite.session.config.ts",
