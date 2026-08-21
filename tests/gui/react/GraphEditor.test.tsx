@@ -38,6 +38,8 @@ const NO_TYPED: TypedFields = {
 };
 
 const GAIN: NodeCard = {
+  stages: [],
+  from_fields: [],
   node_id: "gain",
   label: "gain",
   kind: "transform",
@@ -75,8 +77,8 @@ const FILTERS: NodeCard = {
   configuration: "chain",
   settings: [{ name: "first" }, { name: "second" }],
   instances: [
-    { instance_id: "filters_1", label: "filters 1", settings: { name: "first" }, ...NO_TYPED },
-    { instance_id: "filters_2", label: "filters 2", settings: { name: "second" }, ...NO_TYPED },
+    { instance_id: "filters_1", label: "filters 1", settings: { name: "first" }, slot: ["0"], ...NO_TYPED },
+    { instance_id: "filters_2", label: "filters 2", settings: { name: "second" }, slot: ["1"], ...NO_TYPED },
   ],
 };
 

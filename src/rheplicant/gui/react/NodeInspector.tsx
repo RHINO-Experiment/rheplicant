@@ -35,53 +35,53 @@ function parseObject(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-/** What one typed control writes back, in the shape the field already had.
- *
- *  A field written as the `<number> <unit>` shorthand stays shorthand and one
- *  written as the `{value, unit}` envelope stays an envelope: normalising
- *  between them would rewrite a line the user did not touch. The number is
- *  carried through verbatim -- changing a unit NEVER scales it, because
- *  `celsius` is affine and a silent conversion is a finite, correctly-shaped
- *  wrong answer. */
-function quantityValue(field: NodeField, numberText: string, unit: string) {
-  const parsed = Number(numberText);
-  if (!unit) return parsed;
-  if (field.form === "shorthand") return `${numberText} ${unit}`;
-  return { value: parsed, unit };
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** One operator's settings inside the draft: the whole object for a
- *  single-slot node, one list entry or one FAN label for a `many` one.
+ *  single-slot node, one list entry or FAN label for a `many` one, one stage
+ *  of a composition one level deeper again.
  *
- *  Which of the two a key means is read off the DRAFT rather than off the
- *  graph -- an array indexes, a mapping keys -- so a FAN label that happens to
+ *  A PATH rather than one key, and each step is read against the DRAFT'S own
+ *  shape -- an array indexes, a mapping keys -- so a FAN label that happens to
  *  look like a number still finds its own entry. */
-function readSlot(source: string, slot: string | null): Record<string, unknown> | null {
-  let parsed: unknown;
+function readSlot(source: string, slot: readonly string[]): Record<string, unknown> | null {
+  let cursor: unknown;
   try {
-    parsed = JSON.parse(source);
+    cursor = JSON.parse(source);
   } catch {
     return null;
   }
-  if (slot === null) return isPlainObject(parsed) ? parsed : null;
-  if (Array.isArray(parsed)) {
-    const entry: unknown = parsed[Number(slot)];
-    return isPlainObject(entry) ? entry : null;
+  for (const step of slot) {
+    if (Array.isArray(cursor)) cursor = cursor[Number(step)];
+    else if (isPlainObject(cursor)) cursor = cursor[step];
+    else return null;
   }
-  if (isPlainObject(parsed)) {
-    const entry = parsed[slot];
-    return isPlainObject(entry) ? entry : null;
+  return isPlainObject(cursor) ? cursor : null;
+}
+
+function replaceAt(
+  container: unknown,
+  slot: readonly string[],
+  next: Record<string, unknown>,
+): unknown {
+  if (slot.length === 0) return next;
+  const [step, ...rest] = slot;
+  if (Array.isArray(container)) {
+    const index = Number(step);
+    return container.map((entry: unknown, at: number) =>
+      (at === index ? replaceAt(entry, rest, next) : entry));
   }
-  return null;
+  if (isPlainObject(container)) {
+    return { ...container, [step]: replaceAt(container[step], rest, next) };
+  }
+  return container;
 }
 
 function replaceSlot(
   source: string,
-  slot: string | null,
+  slot: readonly string[],
   next: Record<string, unknown>,
 ): string | null {
   let parsed: unknown;
@@ -90,17 +90,18 @@ function replaceSlot(
   } catch {
     return null;
   }
-  if (slot === null) return JSON.stringify(next, null, 2);
-  if (Array.isArray(parsed)) {
-    const index = Number(slot);
-    return JSON.stringify(
-      parsed.map((entry: unknown, at: number) => (at === index ? next : entry)),
-      null,
-      2,
-    );
-  }
-  if (isPlainObject(parsed)) return JSON.stringify({ ...parsed, [slot]: next }, null, 2);
-  return null;
+  return JSON.stringify(replaceAt(parsed, slot, next), null, 2);
+}
+
+/** What one field looks like once written in `form`.
+ *
+ *  The number is carried through VERBATIM in every shape: re-spelling a value
+ *  and changing it are two different edits, and a control that did both at
+ *  once would be the one that silently rescaled a temperature. */
+function shapeValue(form: string, numberText: string, unit: string): unknown {
+  if (form === "bare") return Number(numberText);
+  if (form === "shorthand") return `${numberText} ${unit}`;
+  return unit ? { value: Number(numberText), unit } : { value: Number(numberText) };
 }
 
 function parseSettings(text: string): unknown {
@@ -135,12 +136,16 @@ export function NodeInspector({
   // is a second authority on what a document says.
   // Keyed by slot and field name together, so two instances of one node
   // editing fields of the same name do not share a control's value.
-  const [typedEdits, setTypedEdits] = useState<Record<string, { number?: string; unit?: string }>>({});
+  const [typedEdits, setTypedEdits] = useState<
+    Record<string, { number?: string; unit?: string; form?: string }>
+  >({});
   // A class the user has picked but not yet confirmed. Held here rather than
   // written straight through, because the two classes at a node share no
   // fields: changing one destroys every value written for the other, and a
   // control that does that silently is a control that loses work.
   const [pendingTypes, setPendingTypes] = useState<Record<string, string>>({});
+  // Which field sets have their value-spelling switchers open.
+  const [openSpellings, setOpenSpellings] = useState<Record<string, boolean>>({});
 
   const selectedAt = selected?.settings && typeof selected.settings === "object"
     ? (selected.settings as { at?: unknown }).at
@@ -180,6 +185,7 @@ export function NodeInspector({
   useEffect(() => {
     setTypedEdits({});
     setPendingTypes({});
+    setOpenSpellings({});
   }, [selected?.node_id, activeVariant, session.revision]);
 
   if (!selected) {
@@ -399,11 +405,11 @@ export function NodeInspector({
     }
   })();
 
-  function editKey(slot: string | null, name: string) {
-    return `${slot ?? ""}\u0000${name}`;
+  function editKey(slot: readonly string[], name: string) {
+    return [...slot, name].join("\u0000");
   }
 
-  function shownNumber(slot: string | null, field: NodeField) {
+  function shownNumber(slot: readonly string[], field: NodeField) {
     const edited = typedEdits[editKey(slot, field.name)]?.number;
     if (edited !== undefined) return edited;
     if (field.control === "select" || field.control === "text") {
@@ -412,20 +418,36 @@ export function NodeInspector({
     return field.number === null ? "" : String(field.number);
   }
 
-  function shownUnit(slot: string | null, field: NodeField) {
+  function shownUnit(slot: readonly string[], field: NodeField) {
     const edited = typedEdits[editKey(slot, field.name)]?.unit;
     if (edited !== undefined) return edited;
     return field.unit ?? (field.units[0] ?? "");
   }
 
-  function remember(slot: string | null, field: NodeField, patch: { number?: string; unit?: string }) {
+  /** The spelling the controls will write. The one already in the document
+   *  wins, so editing a number never re-spells the line it is on; an absent
+   *  field prefers the envelope, which is the only shape that cannot lose a
+   *  unit the user has chosen. */
+  function shownForm(slot: readonly string[], field: NodeField) {
+    const edited = typedEdits[editKey(slot, field.name)]?.form;
+    if (edited !== undefined) return edited;
+    if (field.forms.includes(field.form)) return field.form;
+    if (field.forms.includes("quantity")) return "quantity";
+    return field.forms[0] ?? "bare";
+  }
+
+  function remember(
+    slot: readonly string[],
+    field: NodeField,
+    patch: { number?: string; unit?: string; form?: string },
+  ) {
     setTypedEdits((current) => ({
       ...current,
       [editKey(slot, field.name)]: { ...current[editKey(slot, field.name)], ...patch },
     }));
   }
 
-  function writeTypedField(slot: string | null, name: string, value: unknown) {
+  function writeTypedField(slot: readonly string[], name: string, value: unknown) {
     const current = readSlot(settingsSource, slot);
     if (current === null) return;
     const next = { ...current };
@@ -436,7 +458,7 @@ export function NodeInspector({
     updateRawGraph(settingsPath, text, setSettingsText);
   }
 
-  function editNumber(slot: string | null, field: NodeField, text: string) {
+  function editNumber(slot: readonly string[], field: NodeField, text: string) {
     remember(slot, field, { number: text });
     if (text === "") {
       writeTypedField(slot, field.name, undefined);
@@ -444,26 +466,33 @@ export function NodeInspector({
     }
     if (!Number.isFinite(Number(text))) return;
     const value = field.control === "quantity"
-      ? quantityValue(field, text, shownUnit(slot, field))
+      ? shapeValue(shownForm(slot, field), text, shownUnit(slot, field))
       : Number(text);
     writeTypedField(slot, field.name, value);
   }
 
-  function editUnit(slot: string | null, field: NodeField, unit: string) {
+  function editUnit(slot: readonly string[], field: NodeField, unit: string) {
     remember(slot, field, { unit });
     const number = shownNumber(slot, field);
     // Nothing to hang a unit on yet. A lone `{unit: K}` is not a value node,
     // so the choice is remembered and written with the first number.
     if (number === "" || !Number.isFinite(Number(number))) return;
-    writeTypedField(slot, field.name, quantityValue(field, number, unit));
+    writeTypedField(slot, field.name, shapeValue(shownForm(slot, field), number, unit));
   }
 
-  function editText(slot: string | null, field: NodeField, value: string) {
+  function editForm(slot: readonly string[], field: NodeField, form: string) {
+    remember(slot, field, { form });
+    const number = shownNumber(slot, field);
+    if (number === "" || !Number.isFinite(Number(number))) return;
+    writeTypedField(slot, field.name, shapeValue(form, number, shownUnit(slot, field)));
+  }
+
+  function editText(slot: readonly string[], field: NodeField, value: string) {
     remember(slot, field, { number: value });
     writeTypedField(slot, field.name, value === "" ? undefined : value);
   }
 
-  function writeType(slot: string | null, next: string, removed: string[]) {
+  function writeType(slot: readonly string[], next: string, removed: string[]) {
     const current = readSlot(settingsSource, slot);
     if (current === null) return;
     // Rebuilt by iteration rather than by delete-and-reassign so `type:` keeps
@@ -480,8 +509,8 @@ export function NodeInspector({
     updateRawGraph(settingsPath, text, setSettingsText);
   }
 
-  function chooseType(slot: string | null, owner: TypedFields, next: string) {
-    const key = slot ?? "";
+  function chooseType(slot: readonly string[], owner: TypedFields, next: string) {
+    const key = slot.join("\u0000");
     if (next === "" || next === owner.selected_type) {
       setPendingTypes(({ [key]: _dropped, ...rest }) => rest);
       return;
@@ -495,8 +524,8 @@ export function NodeInspector({
     setPendingTypes((current) => ({ ...current, [key]: next }));
   }
 
-  function fieldsetProps(owner: TypedFields, subject: string, slot: string | null) {
-    const key = slot ?? "";
+  function fieldsetProps(owner: TypedFields, subject: string, slot: readonly string[]) {
+    const key = slot.join("\u0000");
     const pending = pendingTypes[key] ?? null;
     return {
       owner,
@@ -506,8 +535,15 @@ export function NodeInspector({
         || graphControlDisabled(settingsPath),
       shownNumber: (field: NodeField) => shownNumber(slot, field),
       shownUnit: (field: NodeField) => shownUnit(slot, field),
+      shownForm: (field: NodeField) => shownForm(slot, field),
+      showForms: openSpellings[key] ?? false,
+      onToggleForms: () => setOpenSpellings((current) => ({
+        ...current,
+        [key]: !(current[key] ?? false),
+      })),
       onNumber: (field: NodeField, text: string) => editNumber(slot, field, text),
       onUnit: (field: NodeField, unit: string) => editUnit(slot, field, unit),
+      onForm: (field: NodeField, form: string) => editForm(slot, field, form),
       onText: (field: NodeField, value: string) => editText(slot, field, value),
       pendingType: pending,
       onChooseType: (next: string) => chooseType(slot, owner, next),
@@ -519,6 +555,19 @@ export function NodeInspector({
       onCancelType: () => setPendingTypes(({ [key]: _dropped, ...rest }) => rest),
     };
   }
+
+  /** A `from:` route's keys, dressed as a field set so one component renders
+   *  them. They sit at the ROOT of the node's settings -- `projector:` and
+   *  `t_ground:` are siblings of `from:` -- so their slot is the node's own. */
+  const routeOwner: TypedFields = {
+    typed_form: true,
+    typed_form_reason: null,
+    type_choices: [],
+    selected_type: null,
+    fields: node.from_fields,
+    extra_keys: [],
+    removed_by_type: {},
+  };
 
   const stagesPath = path("stages");
   const placementPath = path("placement");
@@ -544,17 +593,14 @@ export function NodeInspector({
           {draftError !== null && (
             <p>Typed fields need valid JSON: {draftError}</p>
           )}
-          <TypedFieldset {...fieldsetProps(selected, selected.node_id, null)} />
-          {selected.instances.map((instance, index) => (
+          <TypedFieldset {...fieldsetProps(selected, selected.node_id, [])} />
+          {selected.from_fields.length > 0 && (
+            <TypedFieldset {...fieldsetProps(routeOwner, `${selected.node_id} route`, [])} />
+          )}
+          {[...selected.instances, ...selected.stages].map((entry) => (
             <TypedFieldset
-              key={instance.instance_id}
-              {...fieldsetProps(
-                instance,
-                instance.label,
-                // The FAN keys by label and the list by position, and the
-                // draft itself decides which of the two this is.
-                selected.configuration === "fan" ? instance.instance_id : String(index),
-              )}
+              key={entry.instance_id}
+              {...fieldsetProps(entry, entry.label, entry.slot)}
             />
           ))}
           <label>

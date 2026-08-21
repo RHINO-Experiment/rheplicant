@@ -38,6 +38,7 @@ function field(overrides: Partial<NodeField> = {}): NodeField {
     units: ["K", "celsius"],
     choices: [],
     delivery: "traced",
+    forms: ["bare", "shorthand", "quantity"],
     typed: true,
     present: true,
     form: "quantity",
@@ -72,6 +73,8 @@ function card(overrides: Partial<NodeCard> = {}): NodeCard {
     fields: [field()],
     extra_keys: [],
   removed_by_type: {},
+  stages: [],
+  from_fields: [],
     ...overrides,
   };
 }
@@ -116,6 +119,10 @@ function Harness({
       onStatus={vi.fn()}
     />
   );
+}
+
+function openSpellings(subject: string) {
+  fireEvent.click(screen.getByRole("checkbox", { name: `${subject} value spellings` }));
 }
 
 function textarea() {
@@ -460,6 +467,7 @@ function filtersCard(overrides: Partial<NodeCard> = {}): NodeCard {
     instance_id: "filters_1",
     label: "filters 1",
     settings: { type: "SiderealFilter", n_days: 3, mode: "extract" },
+    slot: ["0"],
     typed_form: true,
     typed_form_reason: null,
     type_choices: ["FourierBandFilter", "SiderealFilter", "SkySpaceFilter"],
@@ -481,6 +489,7 @@ function filtersCard(overrides: Partial<NodeCard> = {}): NodeCard {
     ...sidereal,
     instance_id: "filters_2",
     label: "filters 2",
+    slot: ["1"],
     settings: { type: "FourierBandFilter", axis: "time" },
     selected_type: "FourierBandFilter",
     fields: [
@@ -569,6 +578,7 @@ describe("a many node's instances", () => {
       ...first,
       instance_id: "filters_2",
       label: "filters 2",
+      slot: ["1"],
       settings: { type: "SiderealFilter", n_days: 5 },
       fields: [{ ...first.fields[0], number: 5, written: 5 }],
     };
@@ -598,6 +608,7 @@ describe("a many node's instances", () => {
       ...filtersCard().instances[0],
       instance_id: "hot",
       label: "hot",
+      slot: ["hot"],
       settings: { t_load: { value: 350, unit: "K" } },
       selected_type: "CalLoadOperator",
       type_choices: ["CalLoadOperator"],
@@ -620,5 +631,202 @@ describe("a many node's instances", () => {
     expect(textarea()).toHaveValue(
       JSON.stringify({ hot: { t_load: { value: 400, unit: "K" } } }, null, 2),
     );
+  });
+});
+
+/** A composed node: two GainOperator stages one level deeper than an
+ *  instance, at `settings.stages[i]`. */
+function composedCard(): NodeCard {
+  const stage = (name: string, gain: number, index: number): NodeInstance => ({
+    ...filtersCard().instances[0],
+    instance_id: `gain_stage_${index + 1}`,
+    label: name,
+    slot: ["stages", String(index)],
+    settings: { name, type: "GainOperator", gain },
+    type_choices: ["GainOperator"],
+    selected_type: "GainOperator",
+    fields: [field({
+      name: "gain", label: "gain", path: "model.gain.gain",
+      dimension: "dimensionless", units: ["dimensionless"],
+      forms: ["bare", "shorthand", "quantity"],
+      number: gain, unit: null, form: "bare", written: gain,
+    })],
+    removed_by_type: { GainOperator: [] },
+  });
+  return card({
+    node_id: "gain",
+    settings: {
+      compose: "cascade",
+      stages: [
+        { name: "coarse", type: "GainOperator", gain: 1.1 },
+        { name: "fine", type: "GainOperator", gain: 1.01 },
+      ],
+    },
+    typed_form: false,
+    typed_form_reason: "Composed node: the stages own the fields.",
+    type_choices: [],
+    selected_type: null,
+    fields: [],
+    stages: [stage("coarse", 1.1, 0), stage("fine", 1.01, 1)],
+  });
+}
+
+describe("a composed node's stages", () => {
+  it("gives each stage its own fieldset, named after the stage", () => {
+    render(<Harness selected={composedCard()} />);
+
+    expect(screen.getByText("Composed node: the stages own the fields.")).toBeVisible();
+    expect(screen.getByRole("group", { name: "coarse typed fields" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "fine typed fields" })).toBeVisible();
+  });
+
+  it("writes a stage's edit one level deeper, into that stage alone", () => {
+    render(<Harness selected={composedCard()} />);
+    const fine = screen.getByRole("group", { name: "fine typed fields" });
+
+    fireEvent.change(within(fine).getByRole("spinbutton", { name: "gain" }), {
+      target: { value: "1.02" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({
+      compose: "cascade",
+      stages: [
+        { name: "coarse", type: "GainOperator", gain: 1.1 },
+        { name: "fine", type: "GainOperator", gain: 1.02 },
+      ],
+    }, null, 2));
+  });
+
+  it("never offers the stage name as a field", () => {
+    render(<Harness selected={composedCard()} />);
+
+    expect(screen.queryByRole("textbox", { name: "name" })).toBeNull();
+  });
+});
+
+describe("a from: route", () => {
+  it("offers the route's own keys beside the reason it is not a field set", () => {
+    render(<Harness selected={card({
+      node_id: "beam_spill",
+      settings: { from: "projector", t_ground: { value: 300, unit: "K" } },
+      typed_form: false,
+      typed_form_reason: "from: projector is a constructor route, not a field set.",
+      type_choices: [],
+      selected_type: null,
+      fields: [],
+      from_fields: [
+        field({
+          name: "projector", label: "projector", path: "model.beam_spill.projector",
+          control: "opaque", dimension: "structural", unit_policy: "forbidden",
+          units: [], forms: ["bare"], typed: false, present: false,
+          form: "absent", number: null, unit: null, written: null,
+        }),
+        field({
+          name: "t_ground", label: "t ground", path: "model.beam_spill.t_ground",
+          units: ["K", "celsius"], forms: ["bare", "shorthand", "quantity"],
+          number: 300, unit: "K", written: { value: 300, unit: "K" },
+        }),
+      ],
+    })} />);
+
+    expect(
+      screen.getByText("from: projector is a constructor route, not a field set."),
+    ).toBeVisible();
+    const route = screen.getByRole("group", { name: "beam_spill route typed fields" });
+    expect(within(route).getByRole("spinbutton", { name: "t ground" })).toHaveValue(300);
+    expect(within(route).getByRole("textbox", { name: "projector" })).toBeDisabled();
+  });
+});
+
+describe("re-spelling one field", () => {
+  it("stays out of the way until it is asked for", () => {
+    render(<Harness selected={card()} />);
+
+    expect(screen.queryByRole("combobox", { name: "depth form" })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "global_signal value spellings" }))
+      .not.toBeChecked();
+  });
+
+  it("offers no toggle where no field has a second spelling", () => {
+    render(<Harness selected={card({
+      fields: [field({ unit_policy: "forbidden", units: [], forms: ["bare"] })],
+    })} />);
+
+    expect(screen.queryByRole("checkbox", { name: "global_signal value spellings" }))
+      .toBeNull();
+  });
+
+  it("offers only the shapes this layer can read back", () => {
+    render(<Harness selected={card()} />);
+    openSpellings("global_signal");
+
+    const form = screen.getByRole("combobox", { name: "depth form" });
+    expect(within(form).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["bare", "shorthand", "quantity"]);
+    expect(form).toHaveValue("quantity");
+  });
+
+  it("re-spells the envelope as the shorthand without touching the number", () => {
+    render(<Harness selected={card()} />);
+    openSpellings("global_signal");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "depth form" }), {
+      target: { value: "shorthand" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({ depth: "0.5 K" }, null, 2));
+  });
+
+  it("re-spells it as a bare scalar, and the unit goes with the spelling", () => {
+    render(<Harness selected={card()} />);
+    openSpellings("global_signal");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "depth form" }), {
+      target: { value: "bare" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({ depth: 0.5 }, null, 2));
+  });
+
+  it("keeps a later number edit in the chosen spelling", () => {
+    render(<Harness selected={card()} />);
+    openSpellings("global_signal");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "depth form" }), {
+      target: { value: "shorthand" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "depth" }), {
+      target: { value: "0.9" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({ depth: "0.9 K" }, null, 2));
+  });
+
+  it("offers no switcher for a field with one shape even when opened", () => {
+    render(<Harness selected={card({
+      fields: [
+        field({ name: "sigma", label: "sigma" }),
+        field({ name: "mode", label: "mode", unit_policy: "forbidden", units: [], forms: ["bare"] }),
+      ],
+    })} />);
+    openSpellings("global_signal");
+
+    expect(screen.getByRole("combobox", { name: "sigma form" })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "mode form" })).toBeNull();
+  });
+
+  it("leaves a bare number bare when only its value changes", () => {
+    /** P0 turned a bare number into an envelope the moment it was edited,
+     *  because a unit was offered. The written spelling is the default now. */
+    render(<Harness selected={card({
+      settings: { depth: 0.5 },
+      fields: [field({ form: "bare", number: 0.5, unit: null, written: 0.5 })],
+    })} />);
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "depth" }), {
+      target: { value: "0.7" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify({ depth: 0.7 }, null, 2));
   });
 });

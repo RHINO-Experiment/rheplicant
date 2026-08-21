@@ -163,6 +163,8 @@ const GAIN: NodeCard = {
   fields: [],
   extra_keys: [],
   removed_by_type: {},
+  stages: [],
+  from_fields: [],
 };
 
 function documentState(yamlText = YAML) {

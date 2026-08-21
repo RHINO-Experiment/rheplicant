@@ -55,7 +55,15 @@ tabs replace the main panel without changing YAML:
   rather than its class -- `snapshot_before:`, `eqx_leaves:` -- are never
   among them. A `many` node has no field set of its own -- it is a list or a
   label mapping -- so each of its instances gets one instead, named after the
-  instance, and an edit reaches that entry alone.
+  instance, and an edit reaches that entry alone. A composed node's stages
+  work the same way, named after the stage; a `from:` route offers the keys
+  that route takes beside the reason it is not a field set. A field written
+  as a bare scalar, the `<number> <unit>` shorthand or the `{value, unit}`
+  envelope can be re-spelled between those three, which are the shapes this
+  layer can read back; the number is carried through verbatim, and every
+  other value form stays a YAML edit. Those switchers are collapsed behind a
+  per-set `value spellings` checkbox, because most edits change a number
+  rather than the shape it is written in.
 - **Config** shows one of the 12 server-projected sections at a time. Missing
   required choices come first, followed by current and optional values. Safe
   select, toggle, integer and text controls are applied by Python; complex

@@ -25,6 +25,10 @@ export interface NodeCard extends TypedFields {
   settings: unknown;
   instances: NodeInstance[];
   stage_names: string[];
+  /** A composed node's stages, and the keys a `from:` route takes. Both sit
+   *  beside the node's refusal rather than replacing it. */
+  stages: NodeInstance[];
+  from_fields: NodeField[];
 }
 
 /** The typed view of one operator's settings.
@@ -65,6 +69,10 @@ export interface NodeField {
   units: string[];
   choices: string[];
   delivery: string | null;
+  /** The shapes this control can WRITE, in the order a switcher offers them:
+   *  `bare`, `shorthand`, `quantity`. Only the three this layer round-trips.
+   */
+  forms: string[];
   /** False when the written value is a shape no control can represent. The
    *  control goes read-only and the raw JSON textarea stays the only way to
    *  edit it -- a control that half-understands a value overwrites the half
@@ -81,6 +89,11 @@ export interface NodeInstance extends TypedFields {
   instance_id: string;
   label: string;
   settings: unknown;
+  /** Where these settings live inside the node's own: `["0"]` for a list
+   *  entry, `["hot"]` for a FAN label, `["stages", "0"]` for a stage. Sent by
+   *  the server, so the browser never decides again whether a key is an index
+   *  or a label. */
+  slot: string[];
 }
 
 export interface GraphCounts {
