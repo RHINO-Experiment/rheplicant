@@ -1,4 +1,6 @@
-export interface NodeCard {
+/** A node's typed view rides on the card because the card is what a
+ *  variant re-resolves; a `many` node's rides on each instance. */
+export interface NodeCard extends TypedFields {
   node_id: string;
   label: string;
   kind: "source" | "transform" | "junction" | "selector";
@@ -23,8 +25,13 @@ export interface NodeCard {
   settings: unknown;
   instances: NodeInstance[];
   stage_names: string[];
-  /** The typed view of the same `settings`, or the reason there is not one.
-   *  It rides on the card because the card is what a variant re-resolves. */
+}
+
+/** The typed view of one operator's settings.
+ *
+ *  A single-slot node has exactly one, on its card. A `many` node has none of
+ *  its own -- it is a list or a label mapping -- and one per instance. */
+export interface TypedFields {
   typed_form: boolean;
   typed_form_reason: string | null;
   type_choices: string[];
@@ -70,7 +77,7 @@ export interface NodeField {
   written: unknown;
 }
 
-export interface NodeInstance {
+export interface NodeInstance extends TypedFields {
   instance_id: string;
   label: string;
   settings: unknown;

@@ -12,6 +12,7 @@ import type {
   EditorSession,
   NodeCard,
   NodeField,
+  NodeInstance,
   SessionTransport,
 } from "../../../src/rheplicant/gui/react/types";
 
@@ -448,5 +449,176 @@ describe("changing the operator class", () => {
 
     expect(seen.map((envelope) => envelope.kind === "graph" && envelope.path))
       .toEqual(["base:noise:settings"]);
+  });
+});
+
+/** A CHAIN of two filters. The node itself has no fields -- it is the list --
+ *  and each entry carries its own. All three filter classes own `mode`, so a
+ *  type change here keeps it. */
+function filtersCard(overrides: Partial<NodeCard> = {}): NodeCard {
+  const sidereal: NodeInstance = {
+    instance_id: "filters_1",
+    label: "filters 1",
+    settings: { type: "SiderealFilter", n_days: 3, mode: "extract" },
+    typed_form: true,
+    typed_form_reason: null,
+    type_choices: ["FourierBandFilter", "SiderealFilter", "SkySpaceFilter"],
+    selected_type: "SiderealFilter",
+    fields: [
+      field({
+        name: "n_days", label: "n days", path: "model.filters[].n_days",
+        control: "integer", delivery: "static_int", dimension: "count",
+        unit_policy: "optional", units: [], number: 3, unit: null,
+        form: "bare", written: 3,
+      }),
+    ],
+    extra_keys: [],
+    removed_by_type: {
+      FourierBandFilter: ["n_days"], SiderealFilter: [], SkySpaceFilter: ["n_days"],
+    },
+  };
+  const fourier: NodeInstance = {
+    ...sidereal,
+    instance_id: "filters_2",
+    label: "filters 2",
+    settings: { type: "FourierBandFilter", axis: "time" },
+    selected_type: "FourierBandFilter",
+    fields: [
+      field({
+        name: "axis", label: "axis", path: "model.filters[].axis",
+        control: "text", delivery: "static_str", dimension: "structural",
+        unit_policy: "forbidden", units: [], number: null, unit: null,
+        form: "bare", written: "time",
+      }),
+    ],
+    removed_by_type: {
+      FourierBandFilter: [], SiderealFilter: ["axis"], SkySpaceFilter: ["axis"],
+    },
+  };
+  return card({
+    node_id: "filters",
+    label: "filters",
+    kind: "transform",
+    many: true,
+    configuration: "chain",
+    count: 2,
+    settings: [sidereal.settings, fourier.settings],
+    typed_form: false,
+    typed_form_reason: "Many node: each instance carries its own fields.",
+    type_choices: [],
+    selected_type: null,
+    fields: [],
+    instances: [sidereal, fourier],
+    ...overrides,
+  });
+}
+
+describe("a many node's instances", () => {
+  it("gives each entry its own fieldset and the node the reason it has none", () => {
+    render(<Harness selected={filtersCard()} />);
+
+    expect(screen.getByText("Many node: each instance carries its own fields.")).toBeVisible();
+    expect(screen.getByRole("group", { name: "filters 1 typed fields" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "filters 2 typed fields" })).toBeVisible();
+  });
+
+  it("writes an entry's edit into that entry alone", () => {
+    render(<Harness selected={filtersCard()} />);
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "n days" }), {
+      target: { value: "7" },
+    });
+
+    expect(textarea()).toHaveValue(JSON.stringify([
+      { type: "SiderealFilter", n_days: 7, mode: "extract" },
+      { type: "FourierBandFilter", axis: "time" },
+    ], null, 2));
+  });
+
+  it("keeps the entries apart when two fields share a name", () => {
+    render(<Harness selected={filtersCard()} />);
+    const first = screen.getByRole("group", { name: "filters 1 typed fields" });
+    const second = screen.getByRole("group", { name: "filters 2 typed fields" });
+
+    expect(within(first).getByRole("spinbutton", { name: "n days" })).toHaveValue(3);
+    expect(within(second).getByRole("textbox", { name: "axis" })).toHaveValue("time");
+  });
+
+  it("confirms a type change inside one entry and leaves the other alone", () => {
+    render(<Harness selected={filtersCard()} />);
+    const first = screen.getByRole("group", { name: "filters 1 typed fields" });
+
+    fireEvent.change(within(first).getByRole("combobox", { name: "filters 1 type" }), {
+      target: { value: "FourierBandFilter" },
+    });
+    expect(within(first).getByText(/n_days/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Change filters 1 to FourierBandFilter" }));
+
+    expect(textarea()).toHaveValue(JSON.stringify([
+      { type: "FourierBandFilter", mode: "extract" },
+      { type: "FourierBandFilter", axis: "time" },
+    ], null, 2));
+  });
+
+  it("keeps two entries of the SAME class apart", () => {
+    /** The fixtures above have differently-named fields, so a control state
+     *  shared across instances would be invisible in them. Two SiderealFilters
+     *  both own `n_days`, and that is the case that can see it. */
+    const first = filtersCard().instances[0];
+    const second: NodeInstance = {
+      ...first,
+      instance_id: "filters_2",
+      label: "filters 2",
+      settings: { type: "SiderealFilter", n_days: 5 },
+      fields: [{ ...first.fields[0], number: 5, written: 5 }],
+    };
+    render(<Harness selected={filtersCard({
+      settings: [first.settings, second.settings],
+      instances: [first, second],
+    })} />);
+    const groups = ["filters 1", "filters 2"].map((name) =>
+      screen.getByRole("group", { name: `${name} typed fields` }));
+
+    expect(within(groups[0]).getByRole("spinbutton", { name: "n days" })).toHaveValue(3);
+    expect(within(groups[1]).getByRole("spinbutton", { name: "n days" })).toHaveValue(5);
+
+    fireEvent.change(within(groups[1]).getByRole("spinbutton", { name: "n days" }), {
+      target: { value: "9" },
+    });
+
+    expect(within(groups[0]).getByRole("spinbutton", { name: "n days" })).toHaveValue(3);
+    expect(textarea()).toHaveValue(JSON.stringify([
+      { type: "SiderealFilter", n_days: 3, mode: "extract" },
+      { type: "SiderealFilter", n_days: 9 },
+    ], null, 2));
+  });
+
+  it("edits a FAN label through its own name rather than an index", () => {
+    const hot: NodeInstance = {
+      ...filtersCard().instances[0],
+      instance_id: "hot",
+      label: "hot",
+      settings: { t_load: { value: 350, unit: "K" } },
+      selected_type: "CalLoadOperator",
+      type_choices: ["CalLoadOperator"],
+      fields: [field({ name: "t_load", label: "t load", path: "model.cal_loads.*.t_load",
+                       number: 350, unit: "K", written: { value: 350, unit: "K" } })],
+      removed_by_type: { CalLoadOperator: [] },
+    };
+    render(<Harness selected={filtersCard({
+      node_id: "cal_loads",
+      configuration: "fan",
+      count: 1,
+      settings: { hot: hot.settings },
+      instances: [hot],
+    })} />);
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "t load" }), {
+      target: { value: "400" },
+    });
+
+    expect(textarea()).toHaveValue(
+      JSON.stringify({ hot: { t_load: { value: 400, unit: "K" } } }, null, 2),
+    );
   });
 });

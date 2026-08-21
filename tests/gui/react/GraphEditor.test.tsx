@@ -20,9 +20,22 @@ import type {
   GraphDiagram,
   NodeCard,
   SessionTransport,
+  TypedFields,
 } from "../../../src/rheplicant/gui/react/types";
 
 afterEach(cleanup);
+
+/** A card or instance with no typed view -- what every node looked like
+ *  before typed fields, and what these graph-structure fixtures still mean. */
+const NO_TYPED: TypedFields = {
+  typed_form: false,
+  typed_form_reason: null,
+  type_choices: [],
+  selected_type: null,
+  fields: [],
+  extra_keys: [],
+  removed_by_type: {},
+};
 
 const GAIN: NodeCard = {
   node_id: "gain",
@@ -62,8 +75,8 @@ const FILTERS: NodeCard = {
   configuration: "chain",
   settings: [{ name: "first" }, { name: "second" }],
   instances: [
-    { instance_id: "filters_1", label: "filters 1", settings: { name: "first" } },
-    { instance_id: "filters_2", label: "filters 2", settings: { name: "second" } },
+    { instance_id: "filters_1", label: "filters 1", settings: { name: "first" }, ...NO_TYPED },
+    { instance_id: "filters_2", label: "filters 2", settings: { name: "second" }, ...NO_TYPED },
   ],
 };
 
