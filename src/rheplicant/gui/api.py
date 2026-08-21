@@ -21,7 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.gui_limits import MAX_RETAINED_JOBS
-from rheplicant.gui.document import EditorSnapshot, set_node, snapshot
+from rheplicant.gui.document import EditorSnapshot, snapshot
+from rheplicant.gui.document_edits import set_node
 from rheplicant.gui.jobs import (
     JobKind,
     JobRunner,

@@ -6,14 +6,16 @@ from rheplicant.gui.document import (
     GraphDiagram,
     NodeCard,
     NodeInstance,
+    replace_yaml,
+    snapshot,
+)
+from rheplicant.gui.document_edits import (
     compose_node,
     move_node_instance,
     place_node,
-    replace_yaml,
     set_many_node,
     set_node,
     set_snapshot_before,
-    snapshot,
 )
 from rheplicant.gui.forms import (
     CatalogDrift,

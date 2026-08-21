@@ -15,11 +15,11 @@ from hashlib import sha256
 from pathlib import Path
 
 from _rheplicant_bootstrap.errors import ConfigError
-from rheplicant.gui.document import (
+from rheplicant.gui.document import replace_yaml
+from rheplicant.gui.document_edits import (
     compose_node,
     move_node_instance,
     place_node,
-    replace_yaml,
     set_many_node,
     set_node,
     set_snapshot_before,
