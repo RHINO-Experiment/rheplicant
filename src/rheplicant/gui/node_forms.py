@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from rheplicant.gui.form_catalog import (
+    FROM_ROUTES,
     SHORTHAND,
     VALUE_FORMS,
     VALUE_MODIFIERS,
@@ -89,6 +90,10 @@ class NodeField:
     units: tuple[str, ...]
     choices: tuple[str, ...]
     delivery: str | None
+    #: The shapes this control can WRITE, in the order a switcher offers them.
+    #: Only the three this layer round-trips: re-spelling a value is safe
+    #: exactly where the classifier can read the result back.
+    forms: tuple[str, ...]
     #: True when the control can represent what is written and may therefore
     #: replace it. False leaves the field read-only and sends the user to the
     #: textarea -- the value is a shape this release has no control for.
@@ -120,10 +125,12 @@ class NodeFieldSet:
     #: knows which key belongs to which class, and a confirmation that names
     #: the wrong keys is worse than no confirmation at all.
     removed_by_type: dict[str, tuple[str, ...]]
-    #: Which instance of a ``many`` node this is -- the list index as a
-    #: string, or the FAN label. ``None`` for the twenty-nine nodes that hold
-    #: one instance and for the node-level answer of a ``many`` one.
-    instance_key: str | None = None
+    #: Where these settings live inside the node's own settings: empty for a
+    #: single-slot node, ``("0",)`` for a list entry, ``("hot",)`` for a FAN
+    #: label, ``("stages", "0")`` for a compose stage. A PATH rather than one
+    #: key so the browser is handed the address instead of re-deriving it,
+    #: which is one fewer place for the FAN and the list to be confused.
+    slot: tuple[str, ...] = ()
 
 
 def classify_value(value: object) -> ValueReading:
@@ -212,6 +219,23 @@ def _control(widget: WidgetMetadata) -> Control:
     if widget.dimension in ("structural", "open"):
         return "opaque"
     return "quantity"
+
+
+def _forms(widget: WidgetMetadata, control: Control) -> tuple[str, ...]:
+    """Which of the three round-trippable shapes this field may be written in.
+
+    A quantity control can always be a bare number or a ``{value, unit}``
+    envelope. The ``<number> <unit>`` shorthand needs a unit TOKEN to write,
+    so a quotient dimension like ``adc_count/K`` -- an accepted unit but not
+    an atom, and therefore with no spelling to offer -- cannot take it.
+    Everything else is a bare scalar: an integer or a string has no unit to
+    pair with, and re-spelling it buys nothing.
+    """
+    if control != "quantity" or widget.unit_policy == "forbidden":
+        return ("bare",)
+    if not widget.units:
+        return ("bare", "quantity")
+    return ("bare", "shorthand", "quantity")
 
 
 def _typed(control: Control, reading: ValueReading, written: object) -> bool:
@@ -368,7 +392,7 @@ def project_node_instances(
             return ()
         return tuple(
             dataclasses.replace(
-                project_instance_fields(node_id, entry, catalog), instance_key=str(label)
+                project_instance_fields(node_id, entry, catalog), slot=(str(label),)
             )
             for label, entry in settings.items()
         )
@@ -376,9 +400,117 @@ def project_node_instances(
         return ()
     return tuple(
         dataclasses.replace(
-            project_instance_fields(node_id, entry, catalog), instance_key=str(index)
+            project_instance_fields(node_id, entry, catalog), slot=(str(index),)
         )
         for index, entry in enumerate(settings)
+    )
+
+
+def from_route_fields(
+    node_id: str, settings: object, catalog: FormCatalog
+) -> tuple[NodeField, ...]:
+    """The keys one ``from:`` route takes, as controls, in the route's order.
+
+    Empty for a node and route the config layer does not pair, so a document
+    that names a route no node offers gets the refusal it already had rather
+    than a form for something that cannot be built.
+
+    The route table is :data:`~rheplicant.config.sections.model.FROM_ROUTES`,
+    which is what ``_from_route`` itself reads, so a form here cannot offer a
+    key that function would refuse. Two of the five keys -- ``t_ground`` and
+    ``coeff`` -- are the shipped operator's own fields and come out of the
+    catalog with their dimensions; the other three are a resource reference or
+    a plain label and are described here, because no widget declares them.
+    """
+    if not isinstance(settings, Mapping):
+        return ()
+    route = settings.get("from")
+    if not isinstance(route, str):
+        return ()
+    keys = FROM_ROUTES.get((node_id, route))
+    if keys is None:
+        return ()
+    declared = {
+        widget.path.rsplit(".", 1)[-1]: widget
+        for widget in _field_widgets(node_id, catalog)
+    }
+    return tuple(
+        _project_field(declared[key], settings)
+        if key in declared
+        else _route_field(node_id, key, settings)
+        for key in keys
+    )
+
+
+def _route_field(node_id: str, name: str, settings: Mapping[str, object]) -> NodeField:
+    """One ``from:`` key that no widget describes.
+
+    ``projector:`` and ``basis:`` take a resource by ``{ref: ...}`` identity
+    and ``label:`` takes a switch label. All three are required -- the route
+    refuses without them -- and none is a quantity, so the ``ref`` pair stay
+    read-only and point at the textarea while the label is a text box.
+    """
+    reference = name in ("projector", "basis")
+    value = settings.get(name, _ABSENT)
+    present = value is not _ABSENT
+    reading = classify_value(value) if present else ValueReading("absent", None, None)
+    control: Control = "opaque" if reference else "text"
+    return NodeField(
+        name=name,
+        path=f"model.{node_id}.{name}",
+        label=name.replace("_", " "),
+        control=control,
+        required=True,
+        has_default=False,
+        default=None,
+        dimension="structural",
+        unit_policy="forbidden",
+        units=(),
+        choices=(),
+        delivery=None,
+        forms=("bare",),
+        typed=_typed(control, reading, value),
+        present=present,
+        form=reading.form,
+        number=reading.number,
+        unit=reading.unit,
+        written=value if present else None,
+    )
+
+
+def project_compose_stages(
+    node_id: str, settings: object, catalog: FormCatalog
+) -> tuple[NodeFieldSet, ...]:
+    """Every stage of a composed node, in the order the document wrote them.
+
+    ``compose:`` stacks several operators at ONE node, so a stage is one
+    operator's settings exactly as an instance is -- and picks from the same
+    classes, because it is the same node. ``name:`` is stripped first: it
+    addresses the stage in the path grammar rather than being one of the
+    operator's own settings, so offering it as a field or reporting it as an
+    unknown key would both be wrong.
+    """
+    if not isinstance(settings, Mapping) or "compose" not in settings:
+        return ()
+    stages = settings.get("stages")
+    # A Sequence rather than a list: the parser hands out immutable tuples and
+    # `document._plain` hands out lists, and a projection that only knew one
+    # of them would work through one caller and silently return nothing
+    # through the other.
+    if isinstance(stages, (str, bytes)) or not isinstance(stages, Sequence):
+        return ()
+    return tuple(
+        dataclasses.replace(
+            project_instance_fields(
+                node_id,
+                {key: value for key, value in stage.items() if key != "name"}
+                if isinstance(stage, Mapping)
+                else stage,
+                catalog,
+            ),
+            slot=("stages", str(index)),
+        )
+        for index, stage in enumerate(stages)
     )
 
 
@@ -471,6 +603,7 @@ def _project_field(widget: WidgetMetadata, written: Mapping[str, object]) -> Nod
         units=widget.units,
         choices=widget.choices,
         delivery=widget.delivery,
+        forms=_forms(widget, control),
         typed=_typed(control, reading, value),
         present=present,
         form=reading.form,
@@ -482,6 +615,8 @@ def _project_field(widget: WidgetMetadata, written: Mapping[str, object]) -> Nod
 
 __all__ = [
     "Control",
+    "from_route_fields",
+    "project_compose_stages",
     "project_instance_fields",
     "project_node_instances",
     "NodeField",

@@ -26,6 +26,8 @@ from rheplicant.gui.forms import (
 )
 from rheplicant.gui.node_forms import (
     NodeField,
+    from_route_fields,
+    project_compose_stages,
     project_node_fields,
     project_node_instances,
 )
@@ -59,6 +61,11 @@ class NodeInstance:
     instance_id: str
     label: str
     settings: object
+    #: Where these settings live inside the node's own: ``("0",)`` for a list
+    #: entry, ``("hot",)`` for a FAN label, ``("stages", "0")`` for a stage.
+    #: Sent rather than re-derived, so the browser never has to decide again
+    #: whether a key is an index or a label.
+    slot: tuple[str, ...]
     typed_form: bool
     typed_form_reason: str | None
     type_choices: tuple[str, ...]
@@ -108,6 +115,11 @@ class NodeCard:
     settings: object | None
     instances: tuple[NodeInstance, ...]
     stage_names: tuple[str, ...]
+    #: A composed node's stages, and the keys a ``from:`` route takes. Both
+    #: sit beside the node's refusal rather than replacing it: the node still
+    #: has no field set of its own.
+    stages: tuple[NodeInstance, ...]
+    from_fields: tuple[NodeField, ...]
     #: The typed view of the same ``settings``. It rides on the card because
     #: the card is what a variant re-resolves: ``EditorSnapshot.forms``
     #: projects the BASE document only, so a typed form driven off that would
@@ -281,6 +293,7 @@ def _instances(
             instance_id=instance_id,
             label=label,
             settings=_plain(settings),
+            slot=typed.slot,
             typed_form=typed.typed_form,
             typed_form_reason=typed.typed_form_reason,
             type_choices=typed.type_choices,
@@ -290,6 +303,41 @@ def _instances(
             removed_by_type=typed.removed_by_type,
         )
         for (instance_id, label, settings), typed in zip(identities, projected, strict=True)
+    )
+
+
+def _stages(
+    node_id: str, value: object, catalog: FormCatalog
+) -> tuple[NodeInstance, ...]:
+    """A composed node's stages, each with the typed view of its operator.
+
+    A stage is one operator's settings and carries a ``name:`` that addresses
+    it in the path grammar, so the name is its label here rather than one of
+    its fields.
+    """
+    projected = project_compose_stages(node_id, value, catalog)
+    if not projected:
+        return ()
+    stages = value["stages"] if isinstance(value, Mapping) else []
+    return tuple(
+        NodeInstance(
+            instance_id=f"{node_id}_stage_{index + 1}",
+            label=(
+                stage["name"]
+                if isinstance(stage, Mapping) and isinstance(stage.get("name"), str)
+                else f"stage {index + 1}"
+            ),
+            settings=_plain(stage),
+            slot=typed.slot,
+            typed_form=typed.typed_form,
+            typed_form_reason=typed.typed_form_reason,
+            type_choices=typed.type_choices,
+            selected_type=typed.selected_type,
+            fields=typed.fields,
+            extra_keys=typed.extra_keys,
+            removed_by_type=typed.removed_by_type,
+        )
+        for index, (stage, typed) in enumerate(zip(stages, projected, strict=True))
     )
 
 
@@ -382,6 +430,8 @@ def _node_cards(
             extra_keys=typed.extra_keys,
             removed_by_type=typed.removed_by_type,
             instances=_instances(node_id, model.get(node_id), catalog),
+            stages=_stages(node_id, settings, catalog),
+            from_fields=from_route_fields(node_id, settings, catalog),
             stage_names=tuple(
                 str(stage.get("name"))
                 for stage in model.get(node_id, {}).get("stages", ())

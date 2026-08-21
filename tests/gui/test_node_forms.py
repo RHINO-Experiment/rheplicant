@@ -20,6 +20,7 @@ from rheplicant.gui.forms import widget_catalog
 from rheplicant.gui.node_forms import (
     NodeFieldSet,
     classify_value,
+    from_route_fields,
     project_node_fields,
 )
 from rheplicant.radio.graph import RADIO_GRAPH
@@ -550,7 +551,7 @@ class TestOneFieldSetPerInstance:
     def test_a_chain_projects_one_set_per_entry_in_order(self):
         first, second = _instances("filters", FILTERS)
 
-        assert (first.instance_key, second.instance_key) == ("0", "1")
+        assert (first.slot, second.slot) == (("0",), ("1",))
         assert first.selected_type == "SiderealFilter"
         assert second.selected_type == "FourierBandFilter"
         assert {f.name for f in first.fields} == {"n_days", "mode"}
@@ -569,7 +570,7 @@ class TestOneFieldSetPerInstance:
     def test_a_fan_projects_one_set_per_label_in_document_order(self):
         hot, cold = _instances("cal_loads", CAL_LOADS)
 
-        assert (hot.instance_key, cold.instance_key) == ("hot", "cold")
+        assert (hot.slot, cold.slot) == (("hot",), ("cold",))
         assert _field(hot, "t_load").number == 350.0
         assert _field(cold, "t_load").present is False
         assert _field(cold, "t_load").typed is True
@@ -607,3 +608,192 @@ class TestOneFieldSetPerInstance:
         assert first.removed_by_type["FourierBandFilter"] == ("n_days",)
         assert "mode" not in first.removed_by_type["FourierBandFilter"]
         assert first.removed_by_type["SkySpaceFilter"] == ("n_days",)
+
+
+COMPOSED = {
+    "compose": "cascade",
+    "stages": [
+        {"name": "coarse", "type": "GainOperator", "gain": 1.1},
+        {"name": "fine", "type": "GainOperator", "gain": {"value": 1.01, "unit": "dimensionless"}},
+    ],
+}
+
+
+def _stages(node_id: str, settings: object):
+    from rheplicant.gui.node_forms import project_compose_stages
+
+    return project_compose_stages(node_id, settings, CATALOG)
+
+
+class TestOneFieldSetPerComposeStage:
+    """``compose:`` stacks several operators at one node. Each stage is one
+    operator's settings -- the same thing an instance is -- so each gets the
+    same typed view, addressed one level deeper."""
+
+    def test_the_node_says_its_stages_own_the_fields(self):
+        found = _project("gain", COMPOSED)
+
+        assert found.typed_form is False
+        assert found.typed_form_reason == COMPOSE_REASON
+        assert found.fields == ()
+
+    def test_each_stage_is_addressed_by_its_place_in_the_list(self):
+        first, second = _stages("gain", COMPOSED)
+
+        assert (first.slot, second.slot) == (("stages", "0"), ("stages", "1"))
+        assert first.typed_form is True
+        assert first.selected_type == "GainOperator"
+
+    def test_each_stage_reads_its_own_value(self):
+        first, second = _stages("gain", COMPOSED)
+
+        assert _field(first, "gain").number == 1.1
+        assert _field(first, "gain").form == "bare"
+        assert _field(second, "gain").number == 1.01
+        assert _field(second, "gain").form == "quantity"
+
+    def test_the_stage_name_is_not_offered_as_a_field_or_an_extra_key(self):
+        """``name:`` addresses the stage in the path grammar; it is the
+        stage's identity rather than one of its operator's settings."""
+        first, _second = _stages("gain", COMPOSED)
+
+        assert "name" not in {field.name for field in first.fields}
+        assert first.extra_keys == ()
+
+    def test_a_stage_answers_the_gates_on_its_own(self):
+        gated = _stages(
+            "gain",
+            {
+                "compose": "cascade",
+                "stages": [
+                    {"name": "hatch", "python": {"target": PYTHON_TARGET}},
+                    {"name": "plain", "type": "GainOperator", "gain": 1.0},
+                ],
+            },
+        )
+
+        assert gated[0].typed_form is False
+        assert gated[0].typed_form_reason == PYTHON_REASON
+        assert gated[1].typed_form is True
+
+    def test_a_node_that_is_not_composed_has_no_stages(self):
+        assert _stages("gain", {"gain": 1.0}) == ()
+        assert _stages("gain", None) == ()
+
+    def test_a_malformed_stage_list_projects_nothing(self):
+        assert _stages("gain", {"compose": "cascade", "stages": "not a list"}) == ()
+        assert _stages("gain", {"compose": "cascade"}) == ()
+
+    def test_a_tuple_of_stages_projects_the_same_as_a_list(self):
+        """The parser hands out immutable tuples and ``document._plain`` hands
+        out lists. A projection that knew only one of them would work through
+        one caller and return nothing through the other -- measured, and it
+        did exactly that."""
+        spec = {"compose": "cascade", "stages": tuple(COMPOSED["stages"])}
+
+        assert len(_stages("gain", spec)) == 2
+
+    def test_a_stage_that_is_not_a_mapping_still_answers(self):
+        found = _stages("gain", {"compose": "cascade", "stages": [7, {"name": "ok"}]})
+
+        assert found[0].typed_form is False
+        assert found[0].typed_form_reason == SHAPE_REASON
+
+
+class TestTheThreeFromRoutes:
+    """``from:`` is a constructor route, not a field set -- but each of the
+    three shipped routes takes a CLOSED set of keys, so the form offers those
+    and nothing else. The table is the config layer's own
+    (``sections/model.FROM_ROUTES``), so a fourth route cannot appear here
+    without appearing there."""
+
+    def test_the_routes_are_the_config_layers_own(self):
+        from rheplicant.config.sections.model import FROM_ROUTES
+        from rheplicant.gui.node_forms import from_route_fields
+
+        assert set(FROM_ROUTES) == {
+            ("beam_spill", "projector"),
+            ("t_sys_extra", "basis"),
+            ("cal_loads", "thermistors"),
+        }
+        for (node_id, route), keys in FROM_ROUTES.items():
+            offered = from_route_fields(node_id, {"from": route}, CATALOG)
+            assert tuple(entry.name for entry in offered) == keys, node_id
+
+    def test_a_route_reads_the_values_already_written(self):
+        offered = from_route_fields(
+            "t_sys_extra",
+            {"from": "basis", "basis": {"ref": "resources.bases.poly"},
+             "coeff": {"value": 2.0, "unit": "K"}},
+            CATALOG,
+        )
+
+        basis, coeff = offered
+        assert basis.written == {"ref": "resources.bases.poly"}
+        assert basis.typed is False, "a resource reference is not a typed control"
+        assert coeff.number == 2.0
+        assert coeff.typed is True
+
+    def test_the_label_a_thermistor_route_needs_is_a_plain_string(self):
+        offered = from_route_fields("cal_loads", {"from": "thermistors", "label": "hot"}, CATALOG)
+
+        assert [entry.name for entry in offered] == ["label"]
+        assert offered[0].written == "hot"
+        assert offered[0].typed is True
+        assert offered[0].required is True
+
+    def test_a_route_no_node_offers_gets_no_form(self):
+        assert from_route_fields("gain", {"from": "preset"}, CATALOG) == ()
+        assert from_route_fields("beam_spill", {"from": "basis"}, CATALOG) == ()
+        assert from_route_fields("beam_spill", {}, CATALOG) == ()
+
+    def test_the_node_still_says_it_is_a_route_rather_than_a_field_set(self):
+        """The gate does not move. The route's own keys are a second, smaller
+        form beside the reason, not a replacement for it."""
+        found = _project("beam_spill", {"from": "projector"})
+
+        assert found.typed_form is False
+        assert found.typed_form_reason == (
+            "from: projector is a constructor route, not a field set."
+        )
+
+
+class TestWhichFormsAControlCanWrite:
+    """A field can be re-spelled between the three shapes this layer can
+    round-trip, and no further. Switching INTO ``{file: ...}`` or
+    ``{linspace: ...}`` is not offered: each has its own required keys, the
+    GUI has no catalog of them, and a control that half-writes a form is the
+    one that loses the other half."""
+
+    def test_a_quantity_with_spellings_can_take_all_three(self):
+        found = _project("global_signal", {"depth": {"value": 0.5, "unit": "K"}})
+
+        assert _field(found, "depth").forms == ("bare", "shorthand", "quantity")
+
+    def test_a_quantity_with_no_spelling_to_offer_cannot_be_shorthand(self):
+        """``adc.scale`` is ``adc_count/K``, a quotient rather than an atom.
+        The shorthand needs a unit token to write, and there is none."""
+        found = _project("adc", {})
+        scale = _field(found, "scale")
+
+        assert scale.dimension == "adc_count/K"
+        assert scale.units == ()
+        assert scale.forms == ("bare", "quantity")
+
+    def test_a_field_that_refuses_units_is_a_bare_scalar_only(self):
+        assert _field(_project("cw_tone", {}), "lineshape").forms == ("bare",)
+        assert _field(_project("noise_wave", {}), "switch_key").forms == ("bare",)
+
+    def test_an_integer_is_a_bare_scalar_only(self):
+        """``{value: 12}`` is a legal value node, but an integer control has
+        no unit to pair with it and re-spelling it buys nothing."""
+        assert _field(_project("adc", {}), "n_bits").forms == ("bare",)
+
+    def test_every_field_can_write_the_form_it_is_already_written_in(self):
+        """The switcher must never be the reason a value cannot be put back."""
+        found = _project("global_signal", {
+            "depth": {"value": 0.5, "unit": "K"}, "centre": "75 MHz", "width": 5.0,
+        })
+        for name in ("depth", "centre", "width"):
+            field = _field(found, name)
+            assert field.form in field.forms, name

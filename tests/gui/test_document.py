@@ -334,3 +334,56 @@ class TestEveryInstanceCarriesItsOwnFields:
         card = _card(snapshot(MANY_YAML).base_diagram, "filters")
 
         assert card.instances[0].removed_by_type["FourierBandFilter"] == ("n_days",)
+
+
+COMPOSED_YAML = """\
+schema_version: 1
+model:
+  gain:
+    compose: cascade
+    stages:
+      - {name: coarse, type: GainOperator, gain: 1.1}
+      - {name: fine, type: GainOperator, gain: 1.01}
+  beam_spill:
+    from: projector
+    projector: {ref: resources.projectors.drift}
+    t_ground: {value: 300.0, unit: K}
+runs:
+  - name: forward
+    kind: forward
+"""
+
+
+class TestStagesAndRoutesReachTheCard:
+    def test_each_stage_is_named_and_addressed(self):
+        card = _card(snapshot(COMPOSED_YAML).base_diagram, "gain")
+
+        assert card.typed_form is False
+        assert [stage.label for stage in card.stages] == ["coarse", "fine"]
+        assert [stage.slot for stage in card.stages] == [("stages", "0"), ("stages", "1")]
+        assert next(f for f in card.stages[0].fields if f.name == "gain").number == 1.1
+        assert next(f for f in card.stages[1].fields if f.name == "gain").number == 1.01
+
+    def test_a_from_route_offers_its_own_keys_beside_the_reason(self):
+        card = _card(snapshot(COMPOSED_YAML).base_diagram, "beam_spill")
+
+        assert card.typed_form is False
+        assert card.typed_form_reason.startswith("from: projector")
+        assert [entry.name for entry in card.from_fields] == ["projector", "t_ground"]
+        assert next(e for e in card.from_fields if e.name == "t_ground").number == 300.0
+
+    def test_a_plain_node_has_neither(self):
+        card = _card(snapshot(COMPOSED_YAML).base_diagram, "noise")
+
+        assert card.stages == ()
+        assert card.from_fields == ()
+
+    def test_an_instance_knows_where_it_lives(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "filters")
+
+        assert [instance.slot for instance in card.instances] == [("0",), ("1",)]
+
+    def test_a_fan_instance_is_addressed_by_label(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "cal_loads")
+
+        assert [instance.slot for instance in card.instances] == [("hot",), ("cold",)]

@@ -11,8 +11,15 @@ export interface TypedFieldsetProps {
   disabled: boolean;
   shownNumber: (field: NodeField) => string;
   shownUnit: (field: NodeField) => string;
+  shownForm: (field: NodeField) => string;
+  /** Whether the value-spelling switchers are open. Off by default: a select
+   *  under every field doubles the height of the set to offer something most
+   *  edits never need. */
+  showForms: boolean;
+  onToggleForms: () => void;
   onNumber: (field: NodeField, text: string) => void;
   onUnit: (field: NodeField, unit: string) => void;
+  onForm: (field: NodeField, form: string) => void;
   onText: (field: NodeField, value: string) => void;
   /** A class chosen but not yet confirmed, or null. */
   pendingType: string | null;
@@ -33,8 +40,12 @@ export function TypedFieldset({
   disabled,
   shownNumber,
   shownUnit,
+  shownForm,
+  showForms,
+  onToggleForms,
   onNumber,
   onUnit,
+  onForm,
   onText,
   pendingType,
   onChooseType,
@@ -42,6 +53,7 @@ export function TypedFieldset({
   onCancelType,
 }: TypedFieldsetProps) {
   const removed = pendingType === null ? [] : owner.removed_by_type[pendingType] ?? [];
+  const respellable = owner.fields.some((field) => field.forms.length > 1);
   return (
     <fieldset aria-label={`${subject} typed fields`}>
       <legend>Typed fields</legend>
@@ -123,9 +135,33 @@ export function TypedFieldset({
               ))}
             </select>
           )}
+          {showForms && field.forms.length > 1 && (
+            <select
+              aria-label={`${field.label} form`}
+              value={shownForm(field)}
+              disabled={disabled || !field.typed}
+              onChange={(event) => onForm(field, event.target.value)}
+            >
+              {field.forms.map((form) => (
+                <option key={form} value={form}>{form}</option>
+              ))}
+            </select>
+          )}
           {!field.typed && <span> written as {field.form}: edit it in the JSON below</span>}
         </p>
       ))}
+      {owner.typed_form && respellable && (
+        <label>
+          <input
+            type="checkbox"
+            aria-label={`${subject} value spellings`}
+            checked={showForms}
+            disabled={disabled}
+            onChange={onToggleForms}
+          />
+          value spellings
+        </label>
+      )}
       {owner.typed_form && owner.extra_keys.length > 0 && (
         <p>Also written: {owner.extra_keys.join(", ")}. Edit those in the JSON below.</p>
       )}

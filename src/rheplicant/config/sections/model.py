@@ -273,12 +273,27 @@ def _c7_beam_spill(ref: str, projector: Any, t_ground: Any, context: ResolutionC
         raise ConfigError(f"model.beam_spill.projector: {exc}") from exc
 
 
+#: ``(node, route)`` -> the keys that route takes besides ``from:`` itself,
+#: in the order a form should offer them. The three branches below read this
+#: rather than spelling their key sets twice each, so a fourth reader -- the
+#: GUI's ``from:`` form -- cannot drift from what this function accepts.
+FROM_ROUTES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("beam_spill", "projector"): ("projector", "t_ground"),
+    ("t_sys_extra", "basis"): ("basis", "coeff"),
+    ("cal_loads", "thermistors"): ("label",),
+}
+
+
+def _unknown_from_keys(node_id: str, route: str, spec: Mapping) -> list[str]:
+    return sorted(set(spec) - {"from", *FROM_ROUTES[(node_id, route)]})
+
+
 def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
     route = spec["from"]
     if node_id == "beam_spill" and route == "projector":
         from rheplicant.radio import BeamSpillOperator
 
-        unknown = sorted(set(spec) - {"from", "projector", "t_ground"})
+        unknown = _unknown_from_keys(node_id, route, spec)
         if unknown:
             raise ConfigError(
                 f"model.beam_spill: from: projector does not take {unknown}; "
@@ -301,7 +316,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
     if node_id == "t_sys_extra" and route == "basis":
         from rheplicant.radio import BasisTemperatureOperator
 
-        unknown = sorted(set(spec) - {"from", "basis", "coeff"})
+        unknown = _unknown_from_keys(node_id, route, spec)
         if unknown:
             raise ConfigError(
                 f"model.t_sys_extra: from: basis does not take {unknown}; it "
@@ -321,7 +336,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
         )
         return BasisTemperatureOperator.from_basis(basis, coeff)
     if node_id == "cal_loads" and route == "thermistors":
-        unknown = sorted(set(spec) - {"from", "label"})
+        unknown = _unknown_from_keys(node_id, route, spec)
         if unknown:
             raise ConfigError(
                 f"model.cal_loads: from: thermistors does not take "
