@@ -832,6 +832,8 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
 #: ``form_catalog_finalize`` takes the same route for the same reason.
 __all__ = [
     "SHORTHAND",
+    "_instance_prefix",
+    "_is_fan",
     "VALUE_FORMS",
     "VALUE_MODIFIERS",
     "build_catalog",

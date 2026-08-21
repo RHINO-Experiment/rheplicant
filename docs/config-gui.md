@@ -53,7 +53,9 @@ tabs replace the main panel without changing YAML:
   node share no fields, changing one is confirmed first and the confirmation
   names every written value the change would remove. Keys the node owns
   rather than its class -- `snapshot_before:`, `eqx_leaves:` -- are never
-  among them.
+  among them. A `many` node has no field set of its own -- it is a list or a
+  label mapping -- so each of its instances gets one instead, named after the
+  instance, and an edit reaches that entry alone.
 - **Config** shows one of the 12 server-projected sections at a time. Missing
   required choices come first, followed by current and optional values. Safe
   select, toggle, integer and text controls are applied by Python; complex

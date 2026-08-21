@@ -283,3 +283,54 @@ class TestTheCardCarriesWhatATypeChangeCosts:
         with nothing at all would be a lookup on undefined."""
         for card in snapshot(VARIANT_YAML).base_diagram.nodes:
             assert set(card.removed_by_type) == set(card.type_choices)
+
+
+MANY_YAML = """\
+schema_version: 1
+observation:
+  switching: {mode: cycle, order: [antenna, hot, cold]}
+model:
+  filters:
+    - {type: SiderealFilter, n_days: 3, mode: extract}
+    - {type: FourierBandFilter, axis: time, low: 0 Hz, high: 1 Hz}
+  cal_loads:
+    hot: {t_load: {value: 350.0, unit: K}}
+    cold: {}
+runs:
+  - name: forward
+    kind: forward
+"""
+
+
+class TestEveryInstanceCarriesItsOwnFields:
+    def test_a_chain_entry_answers_for_itself(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "filters")
+
+        assert card.typed_form is False, "the node has no single field set"
+        assert [instance.instance_id for instance in card.instances] == [
+            "filters_1", "filters_2"
+        ]
+        first, second = card.instances
+        assert first.selected_type == "SiderealFilter"
+        assert second.selected_type == "FourierBandFilter"
+        assert {f.name for f in first.fields} == {"n_days", "mode"}
+        assert next(f for f in second.fields if f.name == "low").number == 0.0
+
+    def test_a_fan_label_answers_for_itself(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "cal_loads")
+
+        hot, cold = card.instances
+        assert (hot.label, cold.label) == ("hot", "cold")
+        assert next(f for f in hot.fields if f.name == "t_load").number == 350.0
+        assert next(f for f in cold.fields if f.name == "t_load").present is False
+
+    def test_a_single_slot_node_still_has_no_instances(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "gain")
+
+        assert card.instances == ()
+        assert card.typed_form is True
+
+    def test_a_chain_entry_keeps_the_field_every_filter_owns(self):
+        card = _card(snapshot(MANY_YAML).base_diagram, "filters")
+
+        assert card.instances[0].removed_by_type["FourierBandFilter"] == ("n_days",)

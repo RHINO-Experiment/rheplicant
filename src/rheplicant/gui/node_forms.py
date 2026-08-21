@@ -33,6 +33,8 @@ from rheplicant.gui.form_catalog import (
     SHORTHAND,
     VALUE_FORMS,
     VALUE_MODIFIERS,
+    _instance_prefix,
+    _is_fan,
     operator_table,
 )
 from rheplicant.gui.forms import FormCatalog, WidgetMetadata
@@ -50,6 +52,8 @@ _ENVELOPE = frozenset({"value", "unit"})
 
 #: Settings keys that are never operator fields.
 _TYPE_KEY = "type"
+
+_SHAPE_REASON = "Node settings are not a mapping; edit them as YAML."
 
 Control = Literal["quantity", "integer", "text", "select", "toggle", "opaque"]
 
@@ -116,6 +120,10 @@ class NodeFieldSet:
     #: knows which key belongs to which class, and a confirmation that names
     #: the wrong keys is worse than no confirmation at all.
     removed_by_type: dict[str, tuple[str, ...]]
+    #: Which instance of a ``many`` node this is -- the list index as a
+    #: string, or the FAN label. ``None`` for the twenty-nine nodes that hold
+    #: one instance and for the node-level answer of a ``many`` one.
+    instance_key: str | None = None
 
 
 def classify_value(value: object) -> ValueReading:
@@ -251,14 +259,17 @@ def _class_fields(node_id: str, class_name: str, catalog: FormCatalog) -> tuple[
 
 
 def _field_widgets(node_id: str, catalog: FormCatalog) -> tuple[WidgetMetadata, ...]:
-    prefix = f"model.{node_id}."
+    # `model.gain.`, `model.filters[].` or `model.cal_loads.*.` -- whichever
+    # one this node's instances live under. Matching the prefix and then
+    # refusing any further dot keeps `model.*.eqx_leaves`, which shares the
+    # root, out of every node's field list.
+    prefix = f"{_instance_prefix(node_id)}."
     return tuple(
         widget
         for widget in catalog.widgets
-        # Exactly three segments: a node's fields are its immediate children,
-        # and `model.*.eqx_leaves` is a different widget that shares the root.
-        if widget.path.startswith(prefix) and widget.path.count(".") == 2
-        and widget.path.rsplit(".", 1)[-1] not in (_TYPE_KEY, "eqx_leaves")
+        if widget.path.startswith(prefix)
+        and "." not in widget.path[len(prefix):]
+        and widget.path[len(prefix):] not in (_TYPE_KEY, "eqx_leaves")
     )
 
 
@@ -309,18 +320,77 @@ def project_node_fields(
         )
     # 3. Asked of the GRAPH, not of the settings. `cal_loads` is a label-keyed
     #    mapping, so a shape test alone would pass it through and then read
-    #    its LABELS as field names.
+    #    its LABELS as field names. The node itself has no field set -- it is
+    #    the list or the mapping -- and `project_node_instances` is where its
+    #    entries get theirs.
     if spec.many:
-        return _refused(node_id, "Many node: one card per instance is not in this release.")
+        return _refused(node_id, "Many node: each instance carries its own fields.")
     if settings is not None and not isinstance(settings, Mapping):
-        return _refused(node_id, "Node settings are not a mapping; edit them as YAML.")
+        return _refused(node_id, _SHAPE_REASON)
 
     written: Mapping[str, object] = settings if isinstance(settings, Mapping) else {}
+    return _operator_settings(node_id, written, catalog)
+
+
+def project_instance_fields(
+    node_id: str, settings: object, catalog: FormCatalog
+) -> NodeFieldSet:
+    """ONE instance of a ``many`` node, as typed controls or a reason.
+
+    Gates 1 to 3 are the node's question and were answered before this was
+    called; what arrives here is one operator's settings, so gates 4 to 9 are
+    asked of it exactly as they are asked of a single-slot node. Gate 5 in
+    particular: a ``python:`` entry inside a chain is still a module the
+    document names.
+    """
+    if settings is not None and not isinstance(settings, Mapping):
+        return _refused(node_id, _SHAPE_REASON)
+    return _operator_settings(
+        node_id, settings if isinstance(settings, Mapping) else {}, catalog
+    )
+
+
+def project_node_instances(
+    node_id: str, settings: object, catalog: FormCatalog
+) -> tuple[NodeFieldSet, ...]:
+    """Every instance of a ``many`` node, in the order the document wrote them.
+
+    Empty for a single-slot node, and empty for a ``many`` node whose settings
+    are the wrong shape -- a list where the FAN wants a label mapping, or the
+    other way round. That is a refusal ``document._model`` already makes; this
+    declines to guess rather than making it twice in different words.
+    """
+    spec = RADIO_GRAPH.nodes.get(node_id)
+    if spec is None or not spec.many:
+        return ()
+    if _is_fan(node_id):
+        if not isinstance(settings, Mapping):
+            return ()
+        return tuple(
+            dataclasses.replace(
+                project_instance_fields(node_id, entry, catalog), instance_key=str(label)
+            )
+            for label, entry in settings.items()
+        )
+    if isinstance(settings, (str, bytes)) or not isinstance(settings, Sequence):
+        return ()
+    return tuple(
+        dataclasses.replace(
+            project_instance_fields(node_id, entry, catalog), instance_key=str(index)
+        )
+        for index, entry in enumerate(settings)
+    )
+
+
+def _operator_settings(
+    node_id: str, written: Mapping[str, object], catalog: FormCatalog
+) -> NodeFieldSet:
+    """Gates 4 to 9, and the field set they let through."""
     if "compose" in written:
         return _refused(node_id, "Composed node: the stages own the fields.")
-    # 5. THE SECURITY GATE. Ahead of every remaining key, including `type:`,
-    #    so the order the document happened to write them in cannot change
-    #    the answer.
+    # THE SECURITY GATE. Ahead of every remaining key, including `type:`, so
+    # the order the document happened to write them in cannot change the
+    # answer.
     if "python" in written:
         return _refused(node_id, "python: target; its class is not resolved in the browser.")
     if "at" in written:
@@ -330,7 +400,6 @@ def project_node_fields(
             node_id,
             f"from: {written['from']} is a constructor route, not a field set.",
         )
-
     classes = operator_table().get(node_id, ())
     if not classes:
         return _refused(
@@ -413,6 +482,8 @@ def _project_field(widget: WidgetMetadata, written: Mapping[str, object]) -> Nod
 
 __all__ = [
     "Control",
+    "project_instance_fields",
+    "project_node_instances",
     "NodeField",
     "NodeFieldSet",
     "ValueReading",

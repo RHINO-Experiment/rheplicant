@@ -51,7 +51,7 @@ COMPOSITION_REASON = "Automatic junction or selector: not an operator slot."
 RESERVED_REASON = (
     "Reserved graph slot with no shipped operator; configure it through python:."
 )
-MANY_REASON = "Many node: one card per instance is not in this release."
+MANY_REASON = "Many node: each instance carries its own fields."
 SHAPE_REASON = "Node settings are not a mapping; edit them as YAML."
 COMPOSE_REASON = "Composed node: the stages own the fields."
 PYTHON_REASON = "python: target; its class is not resolved in the browser."
@@ -521,3 +521,89 @@ class TestWhatAChangeOfTypeWouldCost:
         for node_id in TWO_CLASSES:
             first, second = operator_table()[node_id]
             assert not set(field_specs(first)) & set(field_specs(second)), node_id
+
+
+FILTERS = [
+    {"type": "SiderealFilter", "n_days": 3, "mode": "extract"},
+    {"type": "FourierBandFilter", "axis": "time", "low": "0 Hz", "high": "1 Hz"},
+]
+CAL_LOADS = {"hot": {"t_load": {"value": 350.0, "unit": "K"}}, "cold": {}}
+
+
+def _instances(node_id: str, settings: object):
+    from rheplicant.gui.node_forms import project_node_instances
+
+    return project_node_instances(node_id, settings, CATALOG)
+
+
+class TestOneFieldSetPerInstance:
+    """A ``many`` node has no single field set -- that is what gate 3 says --
+    but each of its instances is one operator's settings and has one."""
+
+    def test_the_node_itself_points_at_its_instances(self):
+        found = _project("filters", FILTERS)
+
+        assert found.typed_form is False
+        assert found.typed_form_reason == MANY_REASON
+        assert found.fields == ()
+
+    def test_a_chain_projects_one_set_per_entry_in_order(self):
+        first, second = _instances("filters", FILTERS)
+
+        assert (first.instance_key, second.instance_key) == ("0", "1")
+        assert first.selected_type == "SiderealFilter"
+        assert second.selected_type == "FourierBandFilter"
+        assert {f.name for f in first.fields} == {"n_days", "mode"}
+        assert {f.name for f in second.fields} == {
+            "axis", "low", "high", "mode",
+        }
+
+    def test_each_entry_reads_its_own_values(self):
+        first, second = _instances("filters", FILTERS)
+
+        assert _field(first, "n_days").number == 3
+        assert _field(first, "mode").written == "extract"
+        assert _field(second, "low").number == 0.0
+        assert _field(second, "low").unit == "Hz"
+
+    def test_a_fan_projects_one_set_per_label_in_document_order(self):
+        hot, cold = _instances("cal_loads", CAL_LOADS)
+
+        assert (hot.instance_key, cold.instance_key) == ("hot", "cold")
+        assert _field(hot, "t_load").number == 350.0
+        assert _field(cold, "t_load").present is False
+        assert _field(cold, "t_load").typed is True
+
+    def test_a_shape_that_is_neither_projects_nothing(self):
+        assert _instances("filters", {"not": "a list"}) == ()
+        assert _instances("cal_loads", [{"t_load": 1.0}]) == ()
+        assert _instances("filters", None) == ()
+
+    def test_a_single_slot_node_has_no_instances(self):
+        assert _instances("gain", {"gain": 1.0}) == ()
+
+    def test_an_instance_answers_the_gates_on_its_own(self):
+        """Each entry is one operator's settings, so gates 4 to 9 are asked of
+        it rather than of the node. Gate 5 in particular: a ``python:`` entry
+        in a chain is still a module the document names."""
+        gated = _instances(
+            "filters",
+            [
+                {"python": {"target": PYTHON_TARGET}},
+                {"type": "SiderealFilter", "n_days": 1},
+            ],
+        )
+
+        assert gated[0].typed_form is False
+        assert gated[0].typed_form_reason == PYTHON_REASON
+        assert gated[1].typed_form is True
+
+    def test_a_field_every_class_owns_survives_a_type_change_here(self):
+        """The end-to-end case P1 could only assert on the rule: all three
+        filters own ``mode``, so changing one entry's class keeps it and
+        drops only what the new class has no field for."""
+        first, _second = _instances("filters", FILTERS)
+
+        assert first.removed_by_type["FourierBandFilter"] == ("n_days",)
+        assert "mode" not in first.removed_by_type["FourierBandFilter"]
+        assert first.removed_by_type["SkySpaceFilter"] == ("n_days",)

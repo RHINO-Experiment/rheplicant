@@ -24,7 +24,11 @@ from rheplicant.gui.forms import (
     project_forms,
     widget_catalog,
 )
-from rheplicant.gui.node_forms import NodeField, project_node_fields
+from rheplicant.gui.node_forms import (
+    NodeField,
+    project_node_fields,
+    project_node_instances,
+)
 from rheplicant.gui.previews import PreviewProjection, project_previews
 from rheplicant.gui.validation import ValidationProjection, validate_document
 from rheplicant.radio.graph import RADIO_GRAPH
@@ -45,11 +49,23 @@ _PROCESSING_GRAPH = SignalGraph(
 )
 @dataclass(frozen=True, slots=True)
 class NodeInstance:
-    """One ordered instance at a ``many`` node."""
+    """One ordered instance at a ``many`` node.
+
+    It carries the same typed view a single-slot :class:`NodeCard` does,
+    because an instance IS one operator's settings -- the node above it is
+    the list or the label mapping, which has no fields of its own.
+    """
 
     instance_id: str
     label: str
     settings: object
+    typed_form: bool
+    typed_form_reason: str | None
+    type_choices: tuple[str, ...]
+    selected_type: str | None
+    fields: tuple[NodeField, ...]
+    extra_keys: tuple[str, ...]
+    removed_by_type: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,18 +254,43 @@ def _claims(model: Mapping[str, object], graph: SignalGraph) -> tuple[str, ...]:
     return tuple(node_id for node_id in graph._topo if node_id in claimed)
 
 
-def _instances(node_id: str, value: object) -> tuple[NodeInstance, ...]:
+def _instances(
+    node_id: str, value: object, catalog: FormCatalog | None = None
+) -> tuple[NodeInstance, ...]:
+    """The ordered instances of a ``many`` node, each with its typed view.
+
+    The identities stay here and the field sets come from the projector, which
+    walks the same settings in the same order -- so the two are zipped rather
+    than each deciding separately what an instance is.
+    """
+    catalog = widget_catalog() if catalog is None else catalog
+    projected = project_node_instances(node_id, value, catalog)
     if node_id == "cal_loads" and isinstance(value, Mapping):
-        return tuple(
-            NodeInstance(str(label), str(label), _plain(settings))
-            for label, settings in value.items()
-        )
-    if not isinstance(value, str | bytes) and isinstance(value, Sequence):
-        return tuple(
-            NodeInstance(f"{node_id}_{index}", f"{node_id.replace('_', ' ')} {index}", _plain(item))
+        identities = [(str(label), str(label), settings) for label, settings in value.items()]
+    elif not isinstance(value, str | bytes) and isinstance(value, Sequence):
+        identities = [
+            (f"{node_id}_{index}", f"{node_id.replace('_', ' ')} {index}", item)
             for index, item in enumerate(value, start=1)
+        ]
+    else:
+        return ()
+    if len(projected) != len(identities):
+        return ()
+    return tuple(
+        NodeInstance(
+            instance_id=instance_id,
+            label=label,
+            settings=_plain(settings),
+            typed_form=typed.typed_form,
+            typed_form_reason=typed.typed_form_reason,
+            type_choices=typed.type_choices,
+            selected_type=typed.selected_type,
+            fields=typed.fields,
+            extra_keys=typed.extra_keys,
+            removed_by_type=typed.removed_by_type,
         )
-    return ()
+        for (instance_id, label, settings), typed in zip(identities, projected, strict=True)
+    )
 
 
 def _configuration(
@@ -340,7 +381,7 @@ def _node_cards(
             fields=typed.fields,
             extra_keys=typed.extra_keys,
             removed_by_type=typed.removed_by_type,
-            instances=_instances(node_id, model.get(node_id)),
+            instances=_instances(node_id, model.get(node_id), catalog),
             stage_names=tuple(
                 str(stage.get("name"))
                 for stage in model.get(node_id, {}).get("stages", ())
