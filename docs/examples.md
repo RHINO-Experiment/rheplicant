@@ -1,6 +1,6 @@
 # Examples
 
-Fourteen runnable scripts in
+Fifteen runnable scripts in
 [`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
 Each prints its own results; none needs a real recording. Every wall clock below
 was measured by running the script, on CPU.
@@ -43,6 +43,13 @@ other script finishes in under ten seconds.
     optimisation, not an approximation — then times it at ~230× and
     differentiates through the beam
   - **61 s**
+  - —
+* - `diy_global_signal.py`
+  - Replaces the placeholder global signal with the EDGES flattened Gaussian:
+    `graph_node` is all `assemble()` needs, a document reaches it through
+    `python:` rather than `type:`, and the two dimension registrations that
+    route asks for are answered beside the refusal each one lifts
+  - 1.4 s
   - —
 :::
 

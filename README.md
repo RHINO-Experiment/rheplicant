@@ -191,7 +191,7 @@ compose them, call the result. What that `twin` then plugs into — gradients,
 NUTS posteriors, Fisher forecasts, exact conjugate draws, neural surrogates —
 is one worked example carried end to end in
 **[the guided tour](https://rheplicant.readthedocs.io/en/latest/tour.html)**,
-and fourteen runnable scripts with measured wall clocks in
+and fifteen runnable scripts with measured wall clocks in
 [`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
 
 ## What is in the box
