@@ -21,6 +21,31 @@ import re
 #: next section below.
 _FIELD = re.compile(r"^ {4}(\w+)\s*:\s*(.*)$")
 
+#: ``:class:`~pkg.mod.Thing``` and friends. Sphinx's leading ``~`` means
+#: "print the final segment only", and a one-line field description wants the
+#: class name rather than its import path -- so the tilde is honoured here
+#: exactly as it would be in the rendered documentation.
+_ROLE = re.compile(r":[a-z]+:`(~?)([^`]+)`")
+
+#: An inline literal. The text inside is the part a reader needs; the markup
+#: is for a renderer this inspector is not.
+_LITERAL = re.compile(r"``([^`]+)``")
+
+
+def _plain(sentence: str) -> str:
+    """One ``Attributes:`` sentence with its reStructuredText taken off.
+
+    Measured over the 66 shipped fields: 56 inline literals in 32 of them and
+    5 cross-reference roles in 3. Both reached the browser verbatim before
+    this, so a select for ``mode`` was labelled with the double backticks
+    around its own members.
+    """
+    sentence = _ROLE.sub(
+        lambda m: m.group(2).rsplit(".", 1)[-1] if m.group(1) else m.group(2),
+        sentence,
+    )
+    return _LITERAL.sub(r"\1", sentence)
+
 
 def field_help(owner: type) -> dict[str, str]:
     """Field name -> its one-line description, or an empty mapping.
@@ -54,7 +79,7 @@ def field_help(owner: type) -> dict[str, str]:
             found[current] = match.group(2).strip()
         elif current is not None:
             found[current] = f"{found[current]} {line.strip()}".strip()
-    return found
+    return {name: _plain(sentence) for name, sentence in found.items()}
 
 
 __all__ = ["field_help"]
