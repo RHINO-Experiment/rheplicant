@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/*": ["node_modules/@types/react/*"],
+      "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "vitest": ["node_modules/vitest"],
+      "@testing-library/react": ["node_modules/@testing-library/react"],
+      "@testing-library/user-event": ["node_modules/@testing-library/user-event"],
+      "@testing-library/jest-dom": ["node_modules/@testing-library/jest-dom"],
+      "@testing-library/jest-dom/*": ["node_modules/@testing-library/jest-dom/*"]
+    },
+    "typeRoots": ["node_modules/@types"]
+  },
+  "include": [
+    "src/test-setup.ts",
+    "../../../tests/gui/react/**/*.ts",
+    "../../../tests/gui/react/**/*.tsx"
+  ]
+}

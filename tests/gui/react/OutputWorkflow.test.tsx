@@ -260,7 +260,11 @@ describe("output request editor", () => {
     const nextMessageAlert = nextMessageLabel.closest("[role]");
     expect(nextMessageAlert).not.toBe(nextStateAlert);
     expect(nextMessageAlert).toHaveTextContent(nextMessage.state_message);
-    expect(nextMessageAlert).toHaveTextContent(nextMessage.target_path);
+    // `target_path` is nullable on the projection, and a null would otherwise
+    // reach the matcher as the string "null" and pass against nothing.
+    const nextPath = nextMessage.target_path;
+    if (nextPath === null) throw new Error("this fixture must carry a target path");
+    expect(nextMessageAlert).toHaveTextContent(nextPath);
 
     view.rerender(<OutputTargetCard output={{ ...nextMessage, target_path: "/new/target.results" }} />);
     const nextPathLabel = screen.getByText("Recovery needs review");

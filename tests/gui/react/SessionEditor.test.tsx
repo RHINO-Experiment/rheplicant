@@ -475,13 +475,19 @@ async function findVisibleEvidence(
   tone?: "neutral" | "success" | "warning" | "danger" | "stale" | "disabled",
 ) {
   await screen.findByText(label);
-  let evidence: Element | null = null;
-  await waitFor(() => {
-    evidence = screen.getByText(label).closest("[role]");
-    expect(evidence).toHaveAttribute("role", role);
-    if (tone) expect(evidence).toHaveClass(`status-${tone}`);
+  const evidence = await waitFor(() => {
+    const found = screen.getByText(label).closest("[role]");
+    expect(found).toHaveAttribute("role", role);
+    if (tone) expect(found).toHaveClass(`status-${tone}`);
+    return found;
   });
-  return evidence as HTMLElement;
+  // A runtime check rather than a cast: `closest` returns null when nothing in
+  // the ancestry carries a role, and casting that away is how a helper starts
+  // handing `null` to every caller that believes it received an element.
+  if (!(evidence instanceof HTMLElement)) {
+    throw new Error(`no element with role ${role} above ${String(label)}`);
+  }
+  return evidence;
 }
 
 describe("durable React editor session", () => {
@@ -1664,7 +1670,7 @@ describe("durable React editor session", () => {
     expect(failure).toHaveTextContent("jobs endpoint offline");
     expect(failure).toHaveTextContent("Retrying in 1 second");
     expect(failure).toHaveAttribute("aria-live", "assertive");
-    candidateApi.transport.refreshJobs.mockClear();
+    candidateApi.refreshJobs.mockClear();
     fireEvent.click(within(drawer).getByRole("button", { name: "Refresh jobs" }));
 
     await waitFor(() => expect(candidateApi.transport.refreshJobs).toHaveBeenCalledWith(
