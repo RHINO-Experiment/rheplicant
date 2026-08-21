@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OutputWorkflow } from "../../../src/rheplicant/gui/react/OutputWorkflow";
+import { OutputWorkflow as OutputRequestSurface, type OutputRequestEditorProps } from "../../../src/rheplicant/gui/react/OutputWorkflow";
+import { CLOSED_PRODUCT_VIEW, type ProductView } from "../../../src/rheplicant/gui/react/ProductSelector";
 import { OutputTargetCard } from "../../../src/rheplicant/gui/react/OutputTargetCard";
 import type {
   EditorSession,
@@ -118,6 +120,14 @@ function transport(): SessionTransport {
     setOutputReport: vi.fn(unchanged),
     submitJob: vi.fn(unchanged),
   };
+}
+
+// The editor is controlled: useExecuteWorkspace owns the picker view in the app, and this
+// harness owns it here so every existing case below renders unchanged.
+function OutputWorkflow(props: Omit<OutputRequestEditorProps, "productView" | "onProductView" | "comparisonOpen" | "onComparisonOpen">) {
+  const [productView, setProductView] = useState<ProductView>(CLOSED_PRODUCT_VIEW);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  return <OutputRequestSurface {...props} productView={productView} onProductView={setProductView} comparisonOpen={comparisonOpen} onComparisonOpen={setComparisonOpen} />;
 }
 
 describe("output request editor", () => {
@@ -305,6 +315,61 @@ describe("output request editor", () => {
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Report row compare" }));
     expect(onRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders the picker straight from its props and reports every view change upward", () => {
+    // Kills a regression that restores local picker or expanded-product state inside the output request editor.
+    const onProductView = vi.fn();
+    render(
+      <OutputRequestSurface
+        session={state()}
+        transport={transport()}
+        onRun={vi.fn()}
+        productView={{ open: true, query: "CHA", activeIndex: 0, expanded: null }}
+        onProductView={onProductView}
+        comparisonOpen={false}
+        onComparisonOpen={vi.fn()}
+      />,
+    );
+
+    const picker = screen.getByRole("listbox", { name: "Available products" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual(["chains"]);
+    fireEvent.click(within(picker).getByRole("option", { name: "chains" }));
+    expect(onProductView).toHaveBeenCalledWith({ open: false, query: "", activeIndex: 0, expanded: "chains" });
+    expect(screen.queryByRole("group", { name: "chains product settings" })).toBeNull();
+  });
+
+  it("makes each disclosed YAML block a named tab stop rather than an unreachable scroll container", () => {
+    // Kills dropping tabIndex, the role, or the accessible name from either <pre>.
+    // `.rheplicant-editor pre` caps the height at 32rem, so a real document leaves roughly 1100
+    // and 1300 pixels below the fold. Only Chromium focuses a scroll container for free, so in
+    // Firefox and WebKit those pixels are keyboard-unreachable: WCAG 2.1.1 Level A, and axe
+    // 4.10.3 reports it as scrollable-region-focusable at impact "serious" on both nodes.
+    render(
+      <OutputWorkflow
+        session={state()}
+        transport={transport()}
+        onRun={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: "Requested YAML source" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Requested and resolved YAML" }));
+
+    for (const [name, content] of [
+      ["Requested YAML source", OUTPUTS.requested_yaml],
+      ["Preset-resolved YAML source", OUTPUTS.resolved_yaml],
+    ] as const) {
+      const block = screen.getByRole("region", { name });
+      expect(block.tagName).toBe("PRE");
+      expect(block).toHaveAttribute("tabindex", "0");
+      expect(block).toHaveTextContent(content.trim().split("\n")[0]);
+      block.focus();
+      expect(block).toHaveFocus();
+    }
+    // The two names are distinct, so a screen-reader user landing in one knows which it is.
+    expect(screen.getByRole("region", { name: "Requested YAML source" }))
+      .not.toBe(screen.getByRole("region", { name: "Preset-resolved YAML source" }));
   });
 
   it("shows a product's predictable paths only when its request is expanded", () => {

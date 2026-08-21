@@ -7,6 +7,7 @@ import {
   expectTextContrast,
   gotoWorkbench,
   loadYaml,
+  openWorkspace,
   svgTextContrast,
 } from "./helpers";
 
@@ -54,6 +55,50 @@ for (const colorScheme of ["light", "dark"] as const) {
       foregrounds.locator("text"),
       foregrounds.locator("rect"),
     )).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test(`${colorScheme} the expanded YAML comparison and the open product picker have no serious or critical WCAG 2.2 AA axe findings`, async ({
+    page,
+  }) => {
+    // The default scan never opens either surface: the disclosure is collapsed and the picker is
+    // closed on load, so two scrollable, unnamed, unfocusable YAML blocks and a whole listbox were
+    // outside every scan this file ran. Progressive disclosure hides content from axe exactly as
+    // it hides it from the user.
+    await page.emulateMedia({ colorScheme });
+    await gotoWorkbench(page);
+    await openWorkspace(page, "Execute");
+
+    await page.getByRole("button", { name: "Requested and resolved YAML" }).click();
+    const blocks = [
+      page.getByRole("region", { name: "Requested YAML", exact: true }).locator("pre"),
+      page.getByRole("region", { name: "Preset-resolved YAML", exact: true }).locator("pre"),
+    ];
+    for (const block of blocks) {
+      await expect(block).toBeVisible();
+      // The premise of the scan below: a block that does not overflow is not a scroll container,
+      // and scrollable-region-focusable would have nothing to say about it.
+      expect(await block.evaluate((element) => element.scrollHeight - element.clientHeight))
+        .toBeGreaterThan(0);
+    }
+
+    await page.getByRole("button", { name: "Add product" }).click();
+    await expect(page.getByRole("listbox", { name: "Available products" })).toBeVisible();
+
+    const results = await new AxeBuilder({ page })
+      .include(".rheplicant-editor")
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+      .analyze();
+    expect(results.violations.filter((violation) => (
+      violation.impact === "serious" || violation.impact === "critical"
+    ))).toEqual([]);
+
+    // The remedy itself, pinned separately from the scan: WCAG 2.1.1 is satisfied by a tab stop
+    // with a name, and Chromium's keyboard-focusable-scroll-containers feature would otherwise
+    // let this pass here while Firefox and WebKit left ~1100 and ~1300 pixels unreachable.
+    for (const block of blocks) {
+      await expect(block).toHaveAttribute("tabindex", "0");
+      await expect(block).toHaveAccessibleName(/YAML/);
+    }
   });
 
   test(`${colorScheme} comparison graphs expose one non-interactive fitted named image each`, async ({

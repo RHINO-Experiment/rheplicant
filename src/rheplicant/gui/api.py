@@ -573,7 +573,18 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except ConfigError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        body = _session_body(store, session_id, session)
+        try:
+            body = _session_body(store, session_id, session)
+        except BaseException as error:  # noqa: BLE001 -- re-raised below
+            # ``submit_job`` inserted the row as ``queued`` and the task that
+            # runs it is registered only once the body exists.  ``queued`` is
+            # an active status and no route cancels a job, so a failure on this
+            # line would refuse every identical resubmission for the life of
+            # the process.  Registering the task first would not help: a route
+            # that raises is answered by an error response, and Starlette runs
+            # background tasks only for the response the route returned.
+            store.jobs.abandon(job_id, error)
+            raise
         background_tasks.add_task(store.jobs.run, job_id, job_runner)
         return body
 

@@ -457,3 +457,231 @@ def test_refused_job_retains_its_published_audit_bundle_links(tmp_path):
     assert finished.result["output"]["target_device"] == target.stat().st_dev
     assert finished.result["output"]["target_inode"] == target.stat().st_ino
     assert finished.result["output"]["audit_files"] == ["config.resolved.yaml"]
+
+
+# --- Finding 7: atomic duplicate job suppression -------------------------
+
+
+def test_an_identical_active_job_is_refused_rather_than_queued_twice():
+    """The React guard is a convenience; the backend owns the invariant."""
+    store = JobStore(id_factory=iter(("job-a", "job-b")).__next__)
+    first = store.submit("session-1", "validate", 3, YAML)
+
+    with pytest.raises(ConfigError) as refusal:
+        store.submit("session-1", "validate", 3, YAML)
+
+    message = str(refusal.value)
+    assert "'validate'" in message
+    assert "revision 3" in message
+    assert yaml_digest(YAML)[:12] in message
+    assert yaml_digest(YAML) not in message
+    assert "schema_version" not in message
+    assert len(message) <= 200
+    assert [row.job_id for row in store.project("session-1", yaml_digest(YAML))] == [
+        first.job_id
+    ]
+
+
+def test_only_the_exact_kind_revision_document_and_session_is_a_duplicate():
+    ids = iter(("job-a", "job-b", "job-c", "job-d", "job-e"))
+    store = JobStore(id_factory=lambda: next(ids))
+
+    store.submit("session-1", "validate", 3, YAML)
+    store.submit("session-1", "preview_forward", 3, YAML)
+    store.submit("session-1", "validate", 4, YAML)
+    store.submit("session-1", "validate", 3, YAML + "# edit\n")
+    store.submit("session-2", "validate", 3, YAML)
+
+    assert len(store.project("session-1", yaml_digest(YAML))) == 4
+    assert len(store.project("session-2", yaml_digest(YAML))) == 1
+
+
+def test_a_running_job_still_blocks_an_identical_submission():
+    ids = iter(("job-a", "job-b"))
+    store = JobStore(id_factory=lambda: next(ids))
+    row = store.submit("session-1", "validate", 3, YAML)
+    refusals = []
+
+    def runner(_kind, _yaml):
+        try:
+            store.submit("session-1", "validate", 3, YAML)
+        except ConfigError as error:
+            refusals.append(str(error))
+        return {"findings": []}
+
+    store.run(row.job_id, runner)
+
+    assert len(refusals) == 1
+    assert "already running" in refusals[0]
+    assert len(store.project("session-1", yaml_digest(YAML))) == 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "runner"),
+    [
+        ("succeeded", lambda _kind, _yaml: {"findings": []}),
+        (
+            "refused",
+            lambda _kind, _yaml: (_ for _ in ()).throw(ConfigError("priced refusal")),
+        ),
+        (
+            "error",
+            lambda _kind, _yaml: (_ for _ in ()).throw(RuntimeError("boom")),
+        ),
+    ],
+)
+def test_an_identical_re_run_is_allowed_once_the_first_job_is_terminal(
+    outcome, runner
+):
+    ids = iter(("job-a", "job-b"))
+    store = JobStore(id_factory=lambda: next(ids))
+    first = store.submit("session-1", "validate", 3, YAML)
+    store.run(first.job_id, runner)
+    assert store.get("job-a").status == outcome
+
+    second = store.submit("session-1", "validate", 3, YAML)
+
+    assert second.job_id == "job-b"
+    assert second.status == "queued"
+    assert len(store.project("session-1", yaml_digest(YAML))) == 2
+
+
+def test_concurrent_identical_submissions_create_exactly_one_job():
+    """The check and the insert must be ONE lock acquisition.
+
+    Passing is deterministic: while the check and the insert share a single
+    acquisition, no interleaving can admit two identical jobs, so this test
+    cannot fail unless that invariant is really broken.  Catching a check
+    taken *outside* the insert's lock is not deterministic -- it turns on
+    which thread wins the lock in the gap the released check opens -- so the
+    store is loaded first to widen the scan held under the lock, the
+    interpreter is told to change hands often, and the race is run many times.
+    """
+    import itertools
+    import sys
+    import threading
+
+    workers, rounds, seeded = 24, 60, 1000
+    counter = itertools.count()
+    guard = threading.Lock()
+
+    def identifier():
+        with guard:
+            return f"job-{next(counter)}"
+
+    def one_race():
+        store = JobStore(id_factory=identifier)
+        for index in range(seeded):
+            store.submit(f"other-{index}", "validate", 3, YAML)
+        barrier = threading.Barrier(workers)
+        accepted: list[object] = []
+        unexpected: list[BaseException] = []
+
+        def submit():
+            try:
+                barrier.wait(timeout=30)
+                accepted.append(store.submit("session-1", "validate", 3, YAML))
+            except ConfigError:
+                pass
+            except BaseException as error:  # noqa: BLE001 -- reported by the test
+                unexpected.append(error)
+
+        threads = [threading.Thread(target=submit) for _ in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert unexpected == []
+        return len(accepted), len(store.project("session-1", yaml_digest(YAML)))
+
+    was = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        outcomes = [one_race() for _ in range(rounds)]
+    finally:
+        sys.setswitchinterval(was)
+
+    assert outcomes == [(1, 1)] * rounds
+
+
+# --- a job reaches a terminal status even when its failure fails ---------
+
+
+def _stranding_refusal():
+    """A refusal whose findings cannot be read: ``_error_result`` raises."""
+    error = ConfigError("priced refusal")
+    error.report = SimpleNamespace(findings=3)
+    return error
+
+
+class _UnreadableResult(dict):
+    """A success whose mapping cannot be walked: ``bounded_result`` raises."""
+
+    def items(self):
+        raise TypeError("'int' object is not iterable")
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        pytest.param(
+            lambda _kind, _yaml: (_ for _ in ()).throw(_stranding_refusal()),
+            id="refusal-whose-findings-cannot-be-bounded",
+        ),
+        pytest.param(
+            lambda _kind, _yaml: _UnreadableResult(),
+            id="result-that-cannot-be-bounded",
+        ),
+    ],
+)
+def test_a_failure_inside_a_failure_still_leaves_the_job_terminal(runner):
+    """Recording the outcome is inside the guarantee, not after it.
+
+    Before duplicate suppression a stranded ``running`` row was cosmetic.
+    Now ``_active_duplicate`` reads it and no route cancels or deletes a job,
+    so a row left running refuses every identical resubmission for the life
+    of the process.
+    """
+    ids = iter(("job-a", "job-b"))
+    store = JobStore(id_factory=lambda: next(ids))
+    row = store.submit("session-1", "validate", 3, YAML)
+
+    with pytest.raises(TypeError):
+        store.run(row.job_id, runner)
+
+    finished = store.get("job-a")
+    assert finished.status == "error"
+    assert finished.message.startswith("the job recorded no terminal result: ")
+    assert "TypeError" in finished.message
+    resubmitted = store.submit("session-1", "validate", 3, YAML)
+    assert resubmitted.status == "queued"
+
+
+def test_a_base_exception_leaves_the_job_terminal_and_still_propagates():
+    ids = iter(("job-a", "job-b"))
+    store = JobStore(id_factory=lambda: next(ids))
+    row = store.submit("session-1", "validate", 3, YAML)
+
+    with pytest.raises(KeyboardInterrupt):
+        store.run(
+            row.job_id,
+            lambda _kind, _yaml: (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+
+    finished = store.get("job-a")
+    assert finished.status == "error"
+    assert "KeyboardInterrupt" in finished.message
+    assert store.submit("session-1", "validate", 3, YAML).status == "queued"
+
+
+def test_a_terminal_record_is_written_once_and_keeps_the_first_outcome():
+    """The guarantee adds a record; it must not add a second one."""
+    store = JobStore(id_factory=lambda: "job-a")
+    row = store.submit("session-1", "validate", 3, YAML)
+
+    store.run(row.job_id, lambda _kind, _yaml: {"findings": []})
+
+    finished = store.get("job-a")
+    assert finished.status == "succeeded"
+    assert finished.result == {"findings": []}
+    assert finished.message is None

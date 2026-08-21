@@ -1,6 +1,7 @@
 import { ValidationLedger } from "./ValidationLedger";
 import { StatusChip, type StatusTone } from "./StatusChip";
 import { useWorkbenchModal } from "./WorkbenchShell";
+import { FULL_VALIDATION_TONE, NO_DETAIL, NO_REASON, deriveFullValidation, type FullValidation } from "./fullValidation";
 import type {
   EditorSession,
   JobProjection,
@@ -39,29 +40,31 @@ function fullFindings(job: JobProjection | null): LedgerFinding[] {
   });
 }
 
-function latestValidation(session: EditorSession): JobProjection | null {
-  const validations = session.jobs.filter((job) => job.kind === "validate");
-  const matching = validations.filter((job) => !job.stale);
-  return matching.at(-1) ?? validations.at(-1) ?? null;
-}
-
-function validationState(job: JobProjection | null): {
+// Diagnostics renders its own words; the state behind them comes from the one shared derivation.
+// The switch is exhaustive on purpose: an eighth state must be a compile error HERE too, not a
+// silent fall-through to the green "current" label an unknown state has no right to.
+function validationState(full: FullValidation): {
   label: string;
   tone: StatusTone;
 } {
-  if (!job) return { label: "Not run for this YAML", tone: "neutral" };
-  if (job.stale) return { label: "Stale for this YAML", tone: "stale" };
-  if (job.status === "queued") return { label: "Queued", tone: "neutral" };
-  if (job.status === "running") return { label: "Running", tone: "neutral" };
-  if (job.status === "refused") return {
-    label: `Refused${job.message ? ` · ${job.message}` : ""}`,
-    tone: "danger",
-  };
-  if (job.status === "error") return {
-    label: `Internal error${job.message ? ` · ${job.message}` : ""}`,
-    tone: "danger",
-  };
-  return { label: `Current for revision ${job.revision}`, tone: "success" };
+  const tone = FULL_VALIDATION_TONE[full.state];
+  switch (full.state) {
+    case "not-run": return { label: "Not run for this YAML", tone };
+    case "stale": return { label: "Stale for this YAML", tone };
+    case "queued": return { label: "Queued", tone };
+    case "running": return { label: "Running", tone };
+    // The same words for an absent message as Execute: a bare "Refused" left the user unable to
+    // tell a reason withheld from a reason never reported.
+    // `||`, never `??`: `bounded_text(error)` is "" for an exception raised with no args and the
+    // frame validator only asks whether it is a string, so `??` rendered a bare "Refused · ".
+    case "refused": return { label: `Refused · ${full.job.message || NO_REASON}`, tone };
+    case "error": return { label: `Internal error · ${full.job.message || NO_DETAIL}`, tone };
+    case "current": return { label: `Current for revision ${full.job.revision}`, tone };
+    default: {
+      const unreachable: never = full;
+      return unreachable;
+    }
+  }
 }
 
 export function DiagnosticsDrawer({
@@ -72,7 +75,7 @@ export function DiagnosticsDrawer({
 }: DiagnosticsDrawerProps) {
   const { dialogRef, closeModal, handleModalKeyDown } = useWorkbenchModal(onClose);
 
-  const validationJob = latestValidation(session);
+  const fullValidation = deriveFullValidation(session.jobs, session.yaml_digest);
   const projectedPaths = new Set(session.document.forms.sections.flatMap(
     (section) => section.widgets.map((widget) => widget.path),
   ));
@@ -81,13 +84,13 @@ export function DiagnosticsDrawer({
     else onOpenYamlPath(finding.where);
   };
   const fullProjection: ValidationProjection = {
-    findings: fullFindings(validationJob),
+    findings: fullFindings(fullValidation.job),
     section_badges: [],
     selected_presets: [],
     preset_changes: [],
     run_blocked: false,
   };
-  const fullState = validationState(validationJob);
+  const fullState = validationState(fullValidation);
 
   return (
     <aside

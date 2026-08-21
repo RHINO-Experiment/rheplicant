@@ -903,3 +903,180 @@ def test_formal_job_api_projects_closed_unsafe_output_refusal(tmp_path, monkeypa
             "target_path": str(target),
         }
     }
+
+
+# --- Finding 7: the API refuses an identical active job with a bounded 422 ---
+
+
+def test_an_identical_active_job_is_refused_by_the_api_with_a_bounded_422():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import SessionStore, create_app
+
+    store = SessionStore()
+    text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
+    session_id, session = store.create(text)
+    store.jobs.submit(session_id, "validate", session.revision, session.yaml_text)
+    client = TestClient(create_app(session_store=store))
+
+    response = client.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": session.revision, "kind": "validate"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "'validate'" in detail
+    assert f"revision {session.revision}" in detail
+    assert "schema_version" not in detail
+    assert len(detail) <= 200
+    assert len(client.get(f"/api/sessions/{session_id}").json()["jobs"]) == 1
+
+
+def test_two_concurrent_api_submissions_of_one_action_create_exactly_one_job():
+    """Two live HTTP submissions overlap: the first job is still running."""
+    import threading
+
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from rheplicant.gui.api import create_app
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(kind, _yaml_text):
+        started.set()
+        assert release.wait(timeout=30)
+        return {"kind": kind}
+
+    client = TestClient(create_app(job_runner=runner))
+    text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
+    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()[
+        "session_id"
+    ]
+    outcome: dict[str, object] = {}
+
+    def submit_first():
+        outcome["first"] = client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": "run"},
+        ).status_code
+
+    worker = threading.Thread(target=submit_first)
+    worker.start()
+    try:
+        assert started.wait(timeout=30)
+        second = client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": "run"},
+        )
+    finally:
+        release.set()
+        worker.join(timeout=30)
+
+    assert outcome["first"] == 202
+    assert second.status_code == 422
+    assert "already running" in second.json()["detail"]
+    jobs = client.get(f"/api/sessions/{session_id}").json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "succeeded"
+
+
+# --- Finding 8: a megabyte failure cannot become a megabyte response --------
+
+
+def test_a_megabyte_job_failure_leaves_the_api_response_bounded():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx2")
+    from fastapi.testclient import TestClient
+
+    from _rheplicant_bootstrap.gui_limits import (
+        MAX_TEXT_CHARACTERS,
+        TRUNCATION_MARKER,
+    )
+
+    # Pinned literal, not the constant: an emptied constant must not make the
+    # presence assertion below pass by accident.
+    marker = "…[truncated]"
+    assert TRUNCATION_MARKER == marker
+    from rheplicant.gui.api import create_app
+
+    def runner(_kind, _yaml_text):
+        raise RuntimeError("x" * 2_000_000)
+
+    client = TestClient(create_app(job_runner=runner))
+    text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
+    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()[
+        "session_id"
+    ]
+
+    submitted = client.post(
+        f"/api/sessions/{session_id}/jobs",
+        json={"expected_revision": 0, "kind": "validate"},
+    )
+    assert submitted.status_code == 202
+
+    response = client.get(f"/api/sessions/{session_id}/jobs")
+    row = response.json()["jobs"][0]
+    assert row["status"] == "error"
+    assert row["message"].startswith("RuntimeError: ")
+    assert len(row["message"]) <= MAX_TEXT_CHARACTERS
+    assert marker in row["message"]
+    assert len(response.content) < 100_000
+    assert len(client.get(f"/api/sessions/{session_id}").content) < 1_000_000
+
+
+def test_a_submission_that_fails_after_the_insert_leaves_no_queued_ghost(
+    job_client, monkeypatch
+):
+    """Nothing between the insert and the response may strand a ``queued`` row.
+
+    ``submit_job`` inserts the row as ``queued`` and the background task is
+    registered only after the response body is built.  ``queued`` is one of
+    ``_ACTIVE_STATUSES`` and no route cancels or deletes a job, so a row that
+    never reaches ``run`` refuses every identical resubmission for the life of
+    the process -- the same defect already closed for ``running``, on the half
+    that was left open.
+    """
+    from rheplicant.gui import api
+
+    document = preflight_document(variants={})
+    created = job_client.post(
+        "/api/sessions",
+        json={"yaml_text": yaml.safe_dump(document, sort_keys=False)},
+    ).json()
+    session_id = created["session_id"]
+    real_session_body = api._session_body
+    failures = {"left": 1}
+
+    def failing_session_body(store, wanted_id, session):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise RuntimeError("projecting the session body failed")
+        return real_session_body(store, wanted_id, session)
+
+    monkeypatch.setattr(api, "_session_body", failing_session_body)
+
+    with pytest.raises(RuntimeError, match="projecting the session body failed"):
+        job_client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": "validate"},
+        )
+
+    # The row the failed submission inserted must already be terminal, so the
+    # identical resubmission below is a new question rather than a duplicate.
+    stranded = job_client.get(f"/api/sessions/{session_id}/jobs").json()["jobs"]
+    assert len(stranded) == 1
+    assert stranded[0]["status"] == "error"
+    assert stranded[0]["message"]
+
+    for _ in range(2):
+        again = job_client.post(
+            f"/api/sessions/{session_id}/jobs",
+            json={"expected_revision": 0, "kind": "validate"},
+        )
+        assert again.status_code == 202, again.json()

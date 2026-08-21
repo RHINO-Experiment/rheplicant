@@ -1,13 +1,12 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ExecutionActions, type ExecutionActionsProps } from "../../../src/rheplicant/gui/react/ExecutionActions";
+import { ExecutionActions as ExecutionActionsSurface, type ExecutionActionsProps } from "../../../src/rheplicant/gui/react/ExecutionActions";
 import { useExecuteWorkspace, type ExecuteWorkspaceProps } from "../../../src/rheplicant/gui/react/ExecuteWorkspace";
 import { OutputTargetCard } from "../../../src/rheplicant/gui/react/OutputTargetCard";
 import type { EditorSession, JobProjection, OutputProductProjection, SessionTransport } from "../../../src/rheplicant/gui/react/types";
-import { NO_DRAFT } from "../../../src/rheplicant/gui/react/drafts";
 
 afterEach(cleanup);
 
@@ -59,8 +58,8 @@ function transport(): SessionTransport {
 }
 
 const executeProps: ExecuteWorkspaceProps = {
-  session: state(), jobs: [], transport: transport(), drafts: { draft: NO_DRAFT, begin: () => true, update: () => undefined, clear: () => undefined },
-  disabledReason: null, onAccept: vi.fn(), onSubmit: vi.fn(), onRun: vi.fn(),
+  session: state(), jobs: [], transport: transport(),
+  disabledReason: null, onSubmit: vi.fn(), onRun: vi.fn(),
 };
 
 function renderExecute(overrides: Partial<ExecuteWorkspaceProps> = {}) {
@@ -72,6 +71,40 @@ function renderExecute(overrides: Partial<ExecuteWorkspaceProps> = {}) {
 }
 
 describe("progressive execute workspace", () => {
+  it.each([
+    [[], "Full validation not run", "neutral"],
+    [[queuedJob({ kind: "validate", status: "queued" })], "Full validation queued for revision 4", "neutral"],
+    [[queuedJob({ kind: "validate", status: "running" })], "Full validation running for revision 4", "neutral"],
+    [[queuedJob({ kind: "validate", status: "succeeded" })], "Full validation current for revision 4", "success"],
+    [[queuedJob({ kind: "validate", status: "succeeded", revision: 3, yaml_digest: "old", stale: false })], "Full validation stale from revision 3", "stale"],
+    [[queuedJob({ kind: "validate", status: "refused", message: "repair validation" })], "Full validation refused: repair validation", "danger"],
+    [[queuedJob({ kind: "validate", status: "error", message: "bounded failure" })], "Full validation internal error: bounded failure", "danger"],
+  ] as const)("shows the latest content-bound Full validation state %#", (jobs, label, tone) => {
+    // Kills collapsing Full validation into the Quick gate or ignoring revision/digest identity.
+    renderExecute({ jobs: [...jobs] });
+    const evidence = screen.getByText(label).closest("[role]");
+    expect(evidence).toHaveAttribute("role", "status");
+    expect(evidence).toHaveClass(`status-${tone}`);
+  });
+
+  it("reads the newest validate job rather than the first", () => {
+    // Kills a regression that reports the first validate job and hides a newer refusal behind an older success.
+    renderExecute({ jobs: [
+      queuedJob({ job_id: "older-validate", kind: "validate", status: "succeeded" }),
+      queuedJob({ job_id: "newer-validate", kind: "validate", status: "refused", message: "repair validation" }),
+    ] });
+    expect(screen.getByText("Full validation refused: repair validation").closest("[role]")).toHaveClass("status-danger");
+    expect(screen.queryByText("Full validation current for revision 4")).toBeNull();
+  });
+
+  it("reports Quick checks separately from the latest Full validation", () => {
+    // Kills the former unconditional "Quick and full validation are ready" claim.
+    const blocked = state({ document: { ...state().document, validation: { ...state().document.validation, run_blocked: true } } });
+    renderExecute({ session: blocked, jobs: [] });
+    expect(screen.getByText("Quick checks need attention").closest("[role]")).toHaveClass("status-danger");
+    expect(screen.getByText("Full validation not run").closest("[role]")).toHaveClass("status-neutral");
+  });
+
   it("discovers every product but mounts settings only for the selected product", async () => {
     // Kills a regression that eagerly mounts all product controls and makes a 22-product session unwieldy.
     const user = userEvent.setup();
@@ -133,6 +166,81 @@ describe("progressive execute workspace", () => {
     expect(screen.getByRole("group", { name: "aux product settings" })).toBeInTheDocument();
   });
 
+  it("keeps a preview current across a Save that bumps the revision without changing the YAML", () => {
+    // Kills reinstating `job.revision === revision` on the preview identity. `mark_saved` bumps
+    // the revision and leaves `yaml_text` — and so the digest — untouched, and `Save YAML` calls
+    // it, so one Save retired a verdict that still described this exact document and made this
+    // reader disagree with OnboardingChecklist and with deriveFullValidation about the same job.
+    const preview = queuedJob({
+      kind: "preview_forward", status: "succeeded", revision: 3, yaml_digest: "current", stale: false,
+    });
+    renderExecute({ jobs: [preview] });
+
+    expect(screen.getByRole("button", { name: "Run" })).toHaveClass("primary-action");
+    expect(screen.getByRole("button", { name: "Preview forward" })).not.toHaveClass("primary-action");
+  });
+
+  it("retires a preview whose YAML digest the document has moved past, whatever its revision", () => {
+    // The other side of the same identity: dropping the digest comparison would promote Run from
+    // a preview of text this document no longer holds.
+    const preview = queuedJob({
+      kind: "preview_forward", status: "succeeded", revision: 4, yaml_digest: "old", stale: false,
+    });
+    renderExecute({ jobs: [preview] });
+
+    expect(screen.getByRole("button", { name: "Preview forward" })).toHaveClass("primary-action");
+    expect(screen.getByRole("button", { name: "Run" })).not.toHaveClass("primary-action");
+  });
+
+  it("describes a blocked action with every reason that holds, not the first one to hold", () => {
+    // Kills `runBlocked ? "run-blocked-reason" : disabledReason`. Both causes can hold at once,
+    // and picking one left the blocker the user can actually clear — the unsaved draft —
+    // undescribed on every action button.
+    const blocked = state({ document: { ...state().document, validation: { ...state().document.validation, run_blocked: true } } });
+    function Harness() {
+      const surface = useExecuteWorkspace({
+        ...executeProps, session: blocked, disabledReason: "draft-blocked-reason",
+      });
+      return <>
+        <p id="draft-blocked-reason">Editing is blocked by an unsaved draft.</p>
+        {surface.main}
+      </>;
+    }
+    render(<Harness />);
+
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toBeDisabled();
+    const described = (run.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+    expect(described).toEqual(["draft-blocked-reason", "run-blocked-reason"]);
+    for (const id of described) expect(document.getElementById(id)).not.toBeNull();
+    expect(run).toHaveAccessibleDescription(
+      "Editing is blocked by an unsaved draft. Run is blocked until validation is repaired.",
+    );
+  });
+
+  it("lists the enabled products alone and leaves the other twenty to the Add product search", () => {
+    // Kills replacing `products.filter((product) => product.enabled)` with `products`. §7.3 splits
+    // this surface in two — the enabled products in view, all 22 reachable through search — and
+    // asserting only that the two enabled ones are present cannot tell the split from no split.
+    const session = state({ outputs: { ...state().outputs, products: productNames.map((name) => product(name, name === "arrays" || name === "chains")) } });
+    renderExecute({ session });
+
+    const enabled = screen.getByRole("list", { name: "Enabled products" });
+    expect(within(enabled).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(["Expand arrays product settings", "Expand chains product settings"]);
+    for (const name of productNames.filter((name) => name !== "arrays" && name !== "chains")) {
+      expect(screen.queryByRole("button", { name: `Expand ${name} product settings` })).toBeNull();
+    }
+  });
+
+  it("renders no enabled-products list at all when nothing is enabled", () => {
+    // The other side of the same split: an empty list is a heading over nothing.
+    renderExecute();
+
+    expect(screen.queryByRole("list", { name: "Enabled products" })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /^Expand .* product settings$/ })).toHaveLength(0);
+  });
+
   it("keeps enabled product summaries compact until exactly one is expanded", async () => {
     // Kills a regression that mounts a full settings group for every enabled output product.
     const user = userEvent.setup();
@@ -185,7 +293,7 @@ describe("progressive execute workspace", () => {
     function Harness() {
       const [session, setSession] = useState(initial);
       accept = setSession;
-      const surface = useExecuteWorkspace({ ...executeProps, session, transport: api, jobs: [], onRun, onAccept: vi.fn() });
+      const surface = useExecuteWorkspace({ ...executeProps, session, transport: api, jobs: [], onRun });
       return <>{surface.main}{surface.inspector}</>;
     }
     const user = userEvent.setup();
@@ -222,7 +330,14 @@ describe("progressive execute workspace", () => {
   });
 });
 
-const actionDefaults: ExecutionActionsProps = {
+// Advanced disclosure is controlled: useExecuteWorkspace owns it in the app, and this harness
+// owns it here so every existing case below renders unchanged.
+function ExecutionActions(props: Omit<ExecutionActionsProps, "advanced" | "onAdvanced">) {
+  const [advanced, setAdvanced] = useState(false);
+  return <ExecutionActionsSurface {...props} advanced={advanced} onAdvanced={setAdvanced} />;
+}
+
+const actionDefaults: Omit<ExecutionActionsProps, "advanced" | "onAdvanced"> = {
   jobs: [], revision: 4, yamlDigest: "current", previewCurrent: false, runDeclared: true,
   targetRunnable: true, declaredKinds: ["run"], disabledReason: null, onSubmit: vi.fn(),
 };
@@ -284,9 +399,423 @@ describe("execution action priority", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
+  it("renders one control and one active reason for a kind declared twice", async () => {
+    // Kills taking declaredKinds as given: a duplicate produced two buttons under one React key
+    // and two spans sharing the id `execution-compare-active`, so the button's aria-describedby
+    // named an ambiguous element and the same queued job was announced twice.
+    const user = userEvent.setup();
+    const { container } = renderExecutionActions({
+      jobs: [queuedJob({ kind: "compare", revision: 4, yaml_digest: "current" })],
+      declaredKinds: ["run", "compare", "compare"],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Advanced actions" }));
+    expect(screen.getAllByRole("button", { name: "Compare" })).toHaveLength(1);
+    expect(container.querySelectorAll("#execution-compare-active")).toHaveLength(1);
+    expect(screen.getAllByText("Queued Compare at revision 4")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Compare" }))
+      .toHaveAccessibleDescription("Queued Compare at revision 4");
+  });
+
   it("does not disclose advanced controls for undeclared jobs", () => {
     // Kills a regression that invents compare or benchmark actions absent from the accepted declaration.
     renderExecutionActions({ declaredKinds: ["run"] });
     expect(screen.queryByRole("button", { name: "Advanced actions" })).toBeNull();
+  });
+});
+
+function renderSwitchable(overrides: Partial<ExecuteWorkspaceProps> = {}) {
+  function Harness() {
+    // Mirrors SessionEditor: every workspace hook runs on every render, only the surface is swapped.
+    const [active, setActive] = useState(true);
+    const surface = useExecuteWorkspace({ ...executeProps, ...overrides });
+    return (
+      <>
+        <button type="button" onClick={() => setActive((value) => !value)}>Toggle workspace</button>
+        {active ? <>{surface.main}{surface.inspector}</> : <p>Another workspace</p>}
+      </>
+    );
+  }
+  return render(<Harness />);
+}
+
+const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole("button", { name: "Add product" }));
+  return screen.getByRole("searchbox", { name: "Filter products" });
+};
+
+describe("execute product picker search", () => {
+  it("exposes all 22 products for an empty query and restores them when the query is cleared", async () => {
+    // Kills a regression that hides the catalogue behind a query and breaks spec 7.3 discoverability.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    expect(screen.getAllByRole("option")).toHaveLength(22);
+    await user.type(filter, "chain");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["chains"]);
+    await user.clear(filter);
+    expect(screen.getAllByRole("option")).toHaveLength(22);
+  });
+
+  it("filters case-insensitively on a substring of the product name", async () => {
+    // Kills a regression that anchors the match at the start of the name or compares case-sensitively.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "PRE");
+    expect(screen.getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["prediction_bands", "posterior_predictives"]);
+  });
+
+  it("roves the keyboard over the filtered options rather than the whole catalogue", async () => {
+    // Kills a regression that indexes Arrow/Home/End into the unfiltered 22 and lands outside the filtered list.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.keyboard("{End}");
+    expect(screen.getAllByRole("option")[21]).toHaveFocus();
+    await user.click(filter);
+    await user.type(filter, "PRE");
+    const filtered = screen.getAllByRole("option");
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0]).toHaveAttribute("tabindex", "0");
+    expect(filtered[1]).toHaveAttribute("tabindex", "-1");
+    await user.keyboard("{ArrowDown}");
+    expect(filtered[0]).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(filtered[1]).toHaveFocus();
+    expect(filtered[1]).toHaveAttribute("tabindex", "0");
+    await user.keyboard("{ArrowDown}");
+    expect(filtered[0]).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(filtered[1]).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(filtered[0]).toHaveFocus();
+  });
+
+  it("announces an empty result instead of leaving a silent blank listbox", async () => {
+    // Kills a regression that renders an empty listbox with no readable, announced explanation.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "zzz");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    const empty = screen.getByText('No products match "zzz"');
+    expect(empty).toBeVisible();
+    expect(empty.closest("[role]")).toHaveAttribute("role", "status");
+  });
+
+  it("selects the active filtered option with Enter", async () => {
+    // Kills a regression that drops Enter selection once the list is filtered.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "CHAIN");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("group", { name: "chains product settings" })).toBeInTheDocument();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("selects the active filtered option with Space", async () => {
+    // Kills dropping Space as a selection key; a bare keydown carries no synthesised button click behind it.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "CHAIN");
+    await user.keyboard("{ArrowDown}");
+    const active = screen.getByRole("option", { name: "chains" });
+    expect(active).toHaveFocus();
+    fireEvent.keyDown(active, { key: " " });
+    expect(screen.getByRole("group", { name: "chains product settings" })).toBeInTheDocument();
+  });
+
+  it("selects a clicked filtered option with the mouse", async () => {
+    // Kills a regression that maps the click index onto the unfiltered catalogue and opens the wrong product.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "recov");
+    await user.click(screen.getByRole("option", { name: "recovery" }));
+    expect(screen.getByRole("group", { name: "recovery product settings" })).toBeInTheDocument();
+  });
+
+  it("returns focus to the opener after a selection rather than dropping it on the document body", async () => {
+    // Kills a regression that closes the picker without restoring focus and strands keyboard users on <body>.
+    const user = userEvent.setup();
+    renderExecute();
+    const opener = screen.getByRole("button", { name: "Add product" });
+    await user.click(opener);
+    await user.click(screen.getByRole("option", { name: "arrays" }));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(opener).toHaveFocus();
+  });
+});
+
+describe("execute view state ownership", () => {
+  it("keeps the open picker and its query across a workspace switch", async () => {
+    // Kills a regression that parks picker disclosure inside the unmounted surface and loses it on every switch.
+    const user = userEvent.setup();
+    renderSwitchable();
+    const filter = await openPicker(user);
+    await user.type(filter, "PRE");
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.queryByRole("listbox", { name: "Available products" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.getByRole("searchbox", { name: "Filter products" })).toHaveValue("PRE");
+    expect(screen.getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["prediction_bands", "posterior_predictives"]);
+  });
+
+  it("keeps the expanded product across a workspace switch", async () => {
+    // Kills a regression that returns the expanded-product state to a component the workspace switch unmounts.
+    const user = userEvent.setup();
+    renderSwitchable();
+    await openPicker(user);
+    await user.click(screen.getByRole("option", { name: "timings" }));
+    expect(screen.getByRole("group", { name: "timings product settings" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.queryByRole("group", { name: /product settings/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.getByRole("group", { name: "timings product settings" })).toBeInTheDocument();
+  });
+});
+
+const REQUESTED_YAML = "outputs:\n  clobber: false\n\n  # trailing comment\n";
+const RESOLVED_YAML = "runtime:\n  jax_enable_x64: true\noutputs:\n  clobber: false\n";
+const RESOLUTION_NOTE = "Preset-merged preview; the final resolved audit file appears after Run.";
+const comparisonSession = () => state({
+  outputs: { ...state().outputs, requested_yaml: REQUESTED_YAML, resolved_yaml: RESOLVED_YAML, resolution_note: RESOLUTION_NOTE },
+});
+
+describe("execute advanced disclosure ownership", () => {
+  it("takes advanced action disclosure from its props and reports the toggle upward", async () => {
+    // Kills a regression that restores a local advanced useState inside ExecutionActions.
+    const user = userEvent.setup();
+    const onAdvanced = vi.fn();
+    render(<ExecutionActionsSurface {...actionDefaults} declaredKinds={["run", "compare", "benchmark"]} advanced onAdvanced={onAdvanced} />);
+    expect(screen.getByRole("button", { name: "Compare" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Advanced actions" })).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByRole("button", { name: "Advanced actions" }));
+    expect(onAdvanced).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Compare" })).toBeInTheDocument();
+  });
+
+  it("keeps advanced action disclosure across a workspace switch", async () => {
+    // Kills a regression that parks advanced disclosure inside the surface the workspace switch unmounts.
+    const user = userEvent.setup();
+    renderSwitchable();
+    await user.click(screen.getByRole("button", { name: "Advanced actions" }));
+    expect(screen.getByRole("button", { name: "Compare" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.queryByRole("button", { name: "Compare" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.getByRole("button", { name: "Advanced actions" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Compare" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Benchmark" })).toBeInTheDocument();
+  });
+});
+
+describe("advanced requested and resolved comparison", () => {
+  it("stays collapsed by default and sits last in the output request, ahead of the action bar", () => {
+    // Kills a regression that promotes the advanced comparison above the primary Execute order or opens it eagerly.
+    renderExecute({ session: comparisonSession() });
+    const toggle = screen.getByRole("button", { name: "Requested and resolved YAML" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Requested YAML" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Preset-resolved YAML" })).toBeNull();
+    expect(screen.queryByText(RESOLUTION_NOTE)).toBeNull();
+    expect(screen.queryByText(REQUESTED_YAML)).toBeNull();
+    expect(screen.queryByText(RESOLVED_YAML)).toBeNull();
+    const products = screen.getByRole("region", { name: "Scientific product selectors" });
+    const report = screen.getByRole("button", { name: "Write report" });
+    const actions = screen.getByRole("region", { name: "Execution actions" });
+    expect(products.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(report.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the exact requested YAML, resolved YAML and resolution note under their own labels", async () => {
+    // Kills a regression that mislabels, swaps, reformats or re-serialises the two scientific YAML texts.
+    const user = userEvent.setup();
+    renderExecute({ session: comparisonSession() });
+    await user.click(screen.getByRole("button", { name: "Requested and resolved YAML" }));
+    expect(screen.getByRole("button", { name: "Requested and resolved YAML" })).toHaveAttribute("aria-expanded", "true");
+
+    const requested = screen.getByRole("region", { name: "Requested YAML" });
+    const resolved = screen.getByRole("region", { name: "Preset-resolved YAML" });
+    const note = screen.getByRole("region", { name: "Resolution note" });
+    expect(within(requested).getByRole("heading", { name: "Requested YAML" })).toBeVisible();
+    expect(within(resolved).getByRole("heading", { name: "Preset-resolved YAML" })).toBeVisible();
+    expect(within(note).getByRole("heading", { name: "Resolution note" })).toBeVisible();
+    expect(requested.querySelector("pre")?.textContent).toBe(REQUESTED_YAML);
+    expect(resolved.querySelector("pre")?.textContent).toBe(RESOLVED_YAML);
+    expect(requested.querySelector("pre")?.textContent).not.toBe(RESOLVED_YAML);
+    expect(resolved.querySelector("pre")?.textContent).not.toBe(REQUESTED_YAML);
+    expect(within(note).getByText(RESOLUTION_NOTE)).toBeVisible();
+  });
+
+  it("restores the comparison without resurrecting the deleted legacy artefact surface", async () => {
+    // Kills a regression that brings back the artefact tablist, audit-bundle region or audit file links.
+    const user = userEvent.setup();
+    renderExecute({ session: comparisonSession() });
+    await user.click(screen.getByRole("button", { name: "Requested and resolved YAML" }));
+    expect(screen.queryByRole("tablist", { name: "Configuration artefacts" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Completed audit bundles" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "config.resolved.yaml" })).toBeNull();
+  });
+
+  it("keeps the comparison disclosure across a workspace switch", async () => {
+    // Kills a regression that parks the comparison disclosure in a component the workspace switch unmounts.
+    const user = userEvent.setup();
+    renderSwitchable({ session: comparisonSession() });
+    await user.click(screen.getByRole("button", { name: "Requested and resolved YAML" }));
+    expect(screen.getByRole("region", { name: "Requested YAML" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.queryByRole("region", { name: "Requested YAML" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
+    expect(screen.getByRole("button", { name: "Requested and resolved YAML" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Requested YAML" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Preset-resolved YAML" })).toBeInTheDocument();
+  });
+});
+
+describe("execute full validation staleness", () => {
+  it.each([
+    ["the server stale flag alone", queuedJob({ kind: "validate", status: "succeeded", stale: true }), "Full validation stale from revision 4"],
+    ["a digest the document has moved past", queuedJob({ kind: "validate", status: "succeeded", revision: 3, yaml_digest: "old", stale: false }), "Full validation stale from revision 3"],
+    ["a refusal the repair superseded", queuedJob({ kind: "validate", status: "refused", revision: 3, yaml_digest: "old", stale: true, message: "repair validation" }), "Full validation stale from revision 3"],
+    ["an internal error the repair superseded", queuedJob({ kind: "validate", status: "error", revision: 3, yaml_digest: "old", stale: true, message: "bounded failure" }), "Full validation stale from revision 3"],
+    ["a queued job the repair superseded", queuedJob({ kind: "validate", status: "queued", stale: true }), "Full validation stale from revision 4"],
+    ["a running job the repair superseded", queuedJob({ kind: "validate", status: "running", stale: true }), "Full validation stale from revision 4"],
+  ] as const)("reports %s as stale rather than as progress on this document", (_case, job, label) => {
+    // Kills applying staleness on the succeeded path alone, which claimed a superseded verdict for a repaired document.
+    renderExecute({ jobs: [job] });
+    const evidence = screen.getByText(label).closest("[role]");
+    expect(evidence).toHaveAttribute("role", "status");
+    expect(evidence).toHaveClass("status-stale");
+  });
+
+  it("never renders a superseded refusal as a refusal of the repaired document", () => {
+    // Kills the release blocker: Execute showed red "refused" for a document the server had already marked stale.
+    renderExecute({ jobs: [queuedJob({
+      kind: "validate", status: "refused", revision: 3, yaml_digest: "old", stale: true, message: "repair validation",
+    })] });
+    expect(screen.queryByText("Full validation refused: repair validation")).toBeNull();
+    expect(screen.queryByText(/Full validation refused/)).toBeNull();
+    expect(screen.getByText("Full validation stale from revision 3").closest("[role]")).toHaveClass("status-stale");
+  });
+
+  it("prefers the last non-stale validate job over a newer stale one", () => {
+    // Kills selecting the last validate job in array order and hiding a bound verdict behind a superseded one.
+    renderExecute({ jobs: [
+      queuedJob({ job_id: "bound", kind: "validate", status: "succeeded" }),
+      queuedJob({ job_id: "superseded", kind: "validate", status: "refused", revision: 5, yaml_digest: "next", stale: true, message: "repair validation" }),
+    ] });
+    expect(screen.getByText("Full validation current for revision 4").closest("[role]")).toHaveClass("status-success");
+    expect(screen.queryByText(/Full validation refused/)).toBeNull();
+  });
+});
+
+describe("execute product picker dismissal", () => {
+  it("declares the popup it opens on the opener itself", () => {
+    // Kills an opener that expands a listbox while telling assistive technology nothing about it.
+    renderExecute();
+    const opener = screen.getByRole("button", { name: "Add product" });
+    expect(opener).toHaveAttribute("aria-haspopup", "listbox");
+    expect(opener).toHaveAttribute("aria-expanded", "false");
+    expect(opener).toHaveAttribute("aria-controls", "available-products");
+  });
+
+  it("reports the picker as expanded and names the listbox it controls", async () => {
+    // Kills a static aria-expanded that never follows the disclosure it claims to describe.
+    const user = userEvent.setup();
+    renderExecute();
+    await openPicker(user);
+    const opener = screen.getByRole("button", { name: "Add product" });
+    expect(opener).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("listbox", { name: "Available products" }).id)
+      .toBe(opener.getAttribute("aria-controls"));
+  });
+
+  it("dismisses the picker with Escape from the filter and returns focus to the opener", async () => {
+    // Kills a picker whose only exit is committing a product the user never wanted.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.click(filter);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Available products" })).toBeNull();
+    expect(screen.queryByRole("group", { name: /product settings/i })).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: "Add product" })).toHaveFocus();
+  });
+
+  it("dismisses the picker with Escape from an option and returns focus to the opener", async () => {
+    // Kills an Escape bound to the filter alone, which strands a keyboard user roving the listbox.
+    const user = userEvent.setup();
+    renderExecute();
+    await openPicker(user);
+    expect(screen.getAllByRole("option")[0]).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Available products" })).toBeNull();
+    expect(screen.queryByRole("group", { name: /product settings/i })).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: "Add product" })).toHaveFocus();
+  });
+
+  it("dismisses the picker with Escape when the query matches nothing", async () => {
+    // Kills an Escape parked behind the empty-match guard, which is exactly when the user wants out.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.click(filter);
+    await user.type(filter, "zzz");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Available products" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add product" })).toHaveFocus();
+  });
+
+  it("collapses the picker when the opener is pressed again", async () => {
+    // Kills an opener that reports aria-expanded while a second press only wipes the query.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.type(filter, "PRE");
+    const opener = screen.getByRole("button", { name: "Add product" });
+    await user.click(opener);
+    expect(screen.queryByRole("listbox", { name: "Available products" })).toBeNull();
+    expect(opener).toHaveAttribute("aria-expanded", "false");
+    expect(opener).toHaveFocus();
+    await user.click(opener);
+    expect(screen.getByRole("listbox", { name: "Available products" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Filter products" })).toHaveValue("");
+  });
+
+  it("leaves Home and End to the filter caret while the arrows still enter the list", async () => {
+    // Kills binding Home/End on the textbox, which steals the caret keys the combobox pattern reserves for it.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.click(filter);
+    await user.type(filter, "PRE");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(fireEvent.keyDown(filter, { key: "Home" })).toBe(true);
+    expect(filter).toHaveFocus();
+    expect(fireEvent.keyDown(filter, { key: "End" })).toBe(true);
+    expect(filter).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getAllByRole("option")[0]).toHaveFocus();
+  });
+
+  it("still reaches the last option with ArrowUp from the filter", async () => {
+    // Kills dropping the arrow entry points along with the Home/End bindings.
+    const user = userEvent.setup();
+    renderExecute();
+    const filter = await openPicker(user);
+    await user.click(filter);
+    await user.type(filter, "PRE");
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getAllByRole("option")[1]).toHaveFocus();
   });
 });

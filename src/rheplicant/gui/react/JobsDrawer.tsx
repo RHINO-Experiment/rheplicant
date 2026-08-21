@@ -18,6 +18,18 @@ function isTerminal(job: JobProjection) {
   return !isActive(job);
 }
 
+function identity(job: JobProjection) {
+  return `${job.job_id}:${job.status}`;
+}
+
+// The transition the drawer is currently reporting. `urgent` separates "this is the news"
+// from "this alerts": §7.4 shows the most recent terminal transition whatever it was, while
+// only a refusal or an internal error interrupts with role="alert".
+interface TerminalEvidence {
+  key: string;
+  urgent: boolean;
+}
+
 function jobState(job: JobProjection): {
   label: string;
   tone: StatusTone;
@@ -58,16 +70,28 @@ export function JobsDrawer({
   disabled = false,
   disabledReasonId,
 }: JobsDrawerProps) {
-  const knownStatuses = useRef(new Map(jobs.map((job) => [job.job_id, job.status])));
-  const [urgentJob, setUrgentJob] = useState<string | null>(null);
+  // Initialised once, lazily: useRef keeps only the first argument, so building the Map inline
+  // rebuilt and discarded one on every render for the whole life of the drawer.
+  const knownStatuses = useRef<Map<string, JobProjection["status"]> | null>(null);
+  if (knownStatuses.current === null) {
+    knownStatuses.current = new Map(jobs.map((job) => [job.job_id, job.status]));
+  }
+  const [evidence, setEvidence] = useState<TerminalEvidence | null>(null);
   const active = jobs.filter(isActive);
-  const latestTerminal = jobs.filter(isTerminal).at(-1);
-  const urgentTerminal = urgentJob === null
+  // Only a fallback: the backend orders jobs by submission, so array position names the most
+  // recent completion only until an actual transition has been observed to retain.
+  const arrayLatestTerminal = jobs.filter(isTerminal).at(-1);
+  // No isTerminal test here, and none is possible: `identity` carries the status, and an evidence
+  // key is only ever minted from a terminal job, so a job whose identity equals the key IS that
+  // terminal job at that terminal status. The `isTerminal(job) &&` this line used to carry was a
+  // second copy of an invariant the key already holds — unreachable by construction, which is why
+  // no fixture could kill its removal. What keeps the key honest is the test that the identity
+  // must not lose its status ("stands down when a job_id comes back at a status it never alerted
+  // on"), plus the row census that no non-terminal row is ever reported as the latest completion.
+  const transitionedTerminal = evidence === null
     ? undefined
-    : jobs.find((job) => (
-      isTerminal(job) && `${job.job_id}:${job.status}` === urgentJob
-    ));
-  const visibleTerminal = urgentTerminal ?? latestTerminal;
+    : jobs.find((job) => identity(job) === evidence.key);
+  const visibleTerminal = transitionedTerminal ?? arrayLatestTerminal;
   const visible = visibleTerminal === undefined ? active : [...active, visibleTerminal];
   const retrySeconds = nextRetryMs === null ? null : nextRetryMs / 1000;
 
@@ -77,22 +101,22 @@ export function JobsDrawer({
     for (const job of jobs) {
       if (
         isTerminal(job)
-        && knownStatuses.current.get(job.job_id) !== job.status
+        && knownStatuses.current?.get(job.job_id) !== job.status
       ) {
         terminalTransition = job;
         if (job.status === "refused" || job.status === "error") dangerTransition = job;
       }
     }
     knownStatuses.current = new Map(jobs.map((job) => [job.job_id, job.status]));
-    setUrgentJob((current) => {
+    setEvidence((current) => {
       if (dangerTransition !== undefined) {
-        return `${dangerTransition.job_id}:${dangerTransition.status}`;
+        return { key: identity(dangerTransition), urgent: true };
       }
       if (terminalTransition !== undefined) {
-        return null;
+        return { key: identity(terminalTransition), urgent: false };
       }
       if (current === null) return null;
-      return jobs.some((job) => `${job.job_id}:${job.status}` === current) ? current : null;
+      return jobs.some((job) => identity(job) === current.key) ? current : null;
     });
   }, [jobs]);
 
@@ -133,7 +157,7 @@ export function JobsDrawer({
                 <StatusChip
                   tone={presentation.tone}
                   label={presentation.label}
-                  urgent={urgentJob === `${job.job_id}:${job.status}`}
+                  urgent={evidence !== null && evidence.urgent && evidence.key === identity(job)}
                 />
               </li>
             );

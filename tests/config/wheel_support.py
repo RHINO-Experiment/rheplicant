@@ -14,6 +14,8 @@ from typing import Protocol
 
 import pytest
 
+from _rheplicant_bootstrap import gui_child
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UV = "uv"
 
@@ -179,24 +181,43 @@ def wait_for_url(
         time.sleep(0.1)
 
 
+#: How long a TERMed process group may take to drain before the survivors are
+#: killed.  Kept here rather than taken from ``gui_child`` so a test can shorten
+#: the wait it is measuring; the sweep itself is the production one.
+_GROUP_GRACE_SECONDS = gui_child.GROUP_GRACE_SECONDS
+
+# The GUI server sweeps its own job workers by process group -- see
+# ``_rheplicant_bootstrap.gui_child`` -- and this sweeps the server the same
+# way.  The reasoning about which groups are ours to signal, why the pid must be
+# type-tested rather than caught, and why ``EPERM`` is swallowed, lives there
+# once; a second copy would be a second behaviour the first time one of them was
+# corrected.  These names stay bound in this module because the tests that pin
+# the sweep substitute them here.
+_process_group = gui_child.process_group
+_signal_group = gui_child.signal_group
+_stop_child = gui_child.stop_child
+
+
+def _reap_group(group: int | None) -> None:
+    """Wait a bounded time for a TERMed group to drain, then kill the rest."""
+    gui_child.reap_group(group, grace_seconds=_GROUP_GRACE_SECONDS)
+
+
 def _stop_process(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        process.terminate()
-    except ProcessLookupError:
-        return
-    try:
-        process.wait(timeout=10)
-        return
-    except subprocess.TimeoutExpired:
-        if process.poll() is not None:
-            return
-    try:
-        process.kill()
-    except ProcessLookupError:
-        return
-    process.wait(timeout=5)
+    """Stop the server AND everything it spawned.
+
+    The server spawns a scientific worker for the life of every job -- see
+    ``_rheplicant_bootstrap.gui_child.drained_run`` -- so signalling only the
+    direct child leaves that worker holding its outputs, memory and CPU long
+    after the test has reported green.  The whole group is the unit of cleanup.
+    """
+    gui_child.stop_process_group(
+        process,
+        # Named through this module rather than passed straight through, so a
+        # test that substitutes ``_stop_child`` still substitutes what runs.
+        stop=lambda child: _stop_child(child),
+        grace_seconds=_GROUP_GRACE_SECONDS,
+    )
 
 
 @contextmanager
@@ -225,6 +246,11 @@ def running_gui(install: Install) -> Iterator[str]:
             stdout=stdout,
             stderr=stderr,
             text=True,
+            # The server's own children -- one scientific worker per job -- are
+            # only reachable at teardown as a GROUP, and a group that is ours to
+            # signal is one we created. Without this the server would share
+            # pytest's group and there would be nothing safe to signal.
+            start_new_session=True,
         )
         base_url = f"http://127.0.0.1:{port}"
         primary_error: BaseException | None = None

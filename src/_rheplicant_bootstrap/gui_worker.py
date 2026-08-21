@@ -8,7 +8,6 @@ worker account's authority.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
 from collections.abc import Mapping, Sequence
@@ -18,6 +17,13 @@ from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.execution_environment import (
     prepare_execution_environment,
+)
+from _rheplicant_bootstrap.gui_limits import (
+    bounded_findings,
+    bounded_frame,
+    bounded_result,
+    bounded_stream_text,
+    bounded_text,
 )
 from _rheplicant_bootstrap.output.manager import parse_output_grammar
 from _rheplicant_bootstrap.prepare import PreparedConfig, prepare_config
@@ -66,11 +72,13 @@ def _run_validation(yaml_text: str) -> dict[str, object]:
         warning_written=False,
     )
     try:
-        findings = [
-            _finding(row, layer.layer.prefix or "base")
-            for layer in execution.document.layers
-            for row in layer.configured.report.findings
-        ]
+        findings = bounded_findings(
+            [
+                _finding(row, layer.layer.prefix or "base")
+                for layer in execution.document.layers
+                for row in layer.configured.report.findings
+            ]
+        )
         return {
             "findings": findings,
             "layers": len(execution.document.layers),
@@ -184,6 +192,24 @@ def _run_forward_preview(yaml_text: str) -> dict[str, object]:
         execution.close()
 
 
+_AUDIT_PREFIXES = ("refused audit: ", "error audit: ")
+
+
+def _published_audit(stderr_text: str) -> str | None:
+    """Find the failure bundle a run published, before the tail is taken.
+
+    ``entry`` writes this line when it publishes the sibling and only then
+    lets the failure unwind and print itself, so a long traceback pushes the
+    one line the parent's ``/artifacts/`` links come from out of any bounded
+    excerpt.  Read it from the whole stream while the whole stream exists.
+    """
+    for line in reversed(stderr_text.splitlines()):
+        for prefix in _AUDIT_PREFIXES:
+            if line.startswith(prefix):
+                return bounded_text(line.removeprefix(prefix))
+    return None
+
+
 def _run_formal(yaml_text: str) -> dict[str, object]:
     from _rheplicant_bootstrap.entry import dispatch_request
 
@@ -195,17 +221,23 @@ def _run_formal(yaml_text: str) -> dict[str, object]:
         stdout=stdout,
         stderr=stderr,
     )
-    return {
+    # Bounded here rather than in the parent: the frame this feeds must be
+    # bounded before it is written, not after it has been received.
+    stderr_text = stderr.getvalue()
+    result: dict[str, object] = {
         "exit_code": exit_code,
-        "stdout": stdout.getvalue(),
-        "stderr": stderr.getvalue(),
+        "stdout": bounded_stream_text(stdout.getvalue()),
+        "stderr": bounded_stream_text(stderr_text),
     }
+    audit = _published_audit(stderr_text)
+    if audit is not None:
+        result["failure_audit"] = audit
+    return result
 
 
 def _write_frame(frame: Mapping[str, object]) -> None:
     sys.stdout.flush()
-    encoded = json.dumps(frame, sort_keys=True).encode("utf-8", "strict")
-    sys.stdout.buffer.write(_FRAME_PREFIX + encoded + b"\n")
+    sys.stdout.buffer.write(_FRAME_PREFIX + bounded_frame(frame) + b"\n")
     sys.stdout.buffer.flush()
 
 
@@ -224,16 +256,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = _run_forward_preview(yaml_text)
         else:
             result = _run_formal(yaml_text)
-        frame = {"status": "ok", "result": result}
+        frame = {"status": "ok", "result": bounded_result(result)}
     except ConfigError as error:
-        frame = {"status": "refused", "message": str(error)}
+        frame = {"status": "refused", "message": bounded_text(error)}
     except Exception as error:  # noqa: BLE001 -- one bounded terminal frame
         frame = {
             "status": "error",
-            "exception_type": type(error).__name__,
-            "message": str(error),
+            "exception_type": bounded_text(type(error).__name__),
+            "message": bounded_text(error),
         }
-    _write_frame(frame)
+    try:
+        _write_frame(frame)
+    except Exception as error:  # noqa: BLE001 -- a frame is written regardless
+        # Writing is part of the job, not something after it: a worker that
+        # returns without a frame is read by the parent as a job that
+        # finished with no result, which is the one thing it did not do.
+        _write_frame(
+            {
+                "status": "error",
+                "exception_type": "GuiFrameUnwritable",
+                "message": bounded_text(error),
+            }
+        )
     return 0
 
 

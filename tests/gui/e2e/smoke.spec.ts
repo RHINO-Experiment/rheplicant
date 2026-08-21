@@ -82,9 +82,7 @@ test("package scripts and development dependencies retain exact pins", async () 
 
   expect(manifest.scripts["test:e2e"]).toBe("playwright test");
   expect(manifest.scripts["test:e2e:update"]).toBe("playwright test --update-snapshots");
-  expect(manifest.scripts["check:e2e"]).toBe(
-    "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --types node playwright.config.ts ../../../tests/gui/e2e/fixtures.ts ../../../tests/gui/e2e/helpers.ts ../../../tests/gui/e2e/smoke.spec.ts ../../../tests/gui/e2e/editor-journeys.spec.ts ../../../tests/gui/e2e/execution-results.spec.ts ../../../tests/gui/e2e/responsive.spec.ts ../../../tests/gui/e2e/accessibility.spec.ts",
-  );
+  expect(manifest.scripts["check:e2e"]).toBe("tsc --noEmit -p tsconfig.e2e.json");
   expect(manifest.devDependencies["@playwright/test"]).toBe("1.62.1");
   expect(manifest.devDependencies["@axe-core/playwright"]).toBe("4.10.2");
   expect(manifest.devDependencies["@types/node"]).toBe("25.9.5");

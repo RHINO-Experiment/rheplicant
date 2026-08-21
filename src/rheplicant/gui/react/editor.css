@@ -110,6 +110,17 @@ body {
   gap: var(--rh-space-3);
 }
 
+.rheplicant-editor .product-picker [role="listbox"] {
+  display: grid;
+  gap: var(--rh-space-2);
+  max-height: 18rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--rh-space-2);
+  border: 1px solid var(--rh-border);
+  border-radius: var(--rh-radius-md);
+}
+
 .rheplicant-editor :where(input, select, textarea) {
   box-sizing: border-box;
   max-width: 100%;

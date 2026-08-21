@@ -18,31 +18,90 @@ function output(job: JobProjection) {
   return job.result.output;
 }
 
-function findings(job: JobProjection): Finding[] {
+// Defence in depth, never a substitute: the backend bounds the same things by
+// the same numbers in _rheplicant_bootstrap/gui_limits.py. These mirror it so
+// one unbounded payload cannot reach the DOM even if it reaches the browser.
+//
+// Nearly every server string this module renders passes through boundedText: the
+// job message, the four finding fields, the output state message and target
+// path, the array dtype and statistic, and the tap and uniform-sky probe names.
+// The output and waterfall paths were the exception once, and one megabyte in
+// state_message plus one in target_path put 2,000,140 characters in the DOM.
+//
+// Two server strings still reach the DOM unbounded: `job_id` and `kind`. Both
+// come from the job row rather than from a result payload — the id is a uuid the
+// server mints and the kind is one of a closed set — so neither is a channel an
+// oversized payload can travel down. Everything else left unbounded is a number
+// or a member of the fixed `outputStates` set.
+const TRUNCATION_MARKER = "…[truncated]";
+const MAX_RENDERED_CHARACTERS = 4000;
+const MAX_RENDERED_FINDINGS = 100;
+
+// Counted in code points, as Python's len() counts them, so the JS bound and the
+// backend bound in gui_limits.py mean the same thing for non-BMP text — and so a
+// cut never lands between the halves of a surrogate pair and emits a lone
+// surrogate. UTF-16 length is an upper bound on the code-point count, which is
+// what makes the cheap first test sound.
+function boundedText(value: string) {
+  if (value.length <= MAX_RENDERED_CHARACTERS) return value;
+  const points = [...value];
+  if (points.length <= MAX_RENDERED_CHARACTERS) return value;
+  return points.slice(0, MAX_RENDERED_CHARACTERS - TRUNCATION_MARKER.length).join("")
+    + TRUNCATION_MARKER;
+}
+
+function rawFindings(job: JobProjection): unknown[] {
   if (!isRecord(job.result) || !Array.isArray(job.result.findings)) return [];
-  return job.result.findings.flatMap((candidate): Finding[] => {
-    if (
-      !isRecord(candidate)
-      || typeof candidate.check !== "string"
-      || (candidate.severity !== "refuse"
-        && candidate.severity !== "warn"
-        && candidate.severity !== "report")
-      || typeof candidate.where !== "string"
-      || typeof candidate.message !== "string"
-      || typeof candidate.layer !== "string"
-    ) return [];
+  return job.result.findings;
+}
+
+/**
+ * Everything the payload carried that the DOM does not show: the rows past the cap AND the rows
+ * inside it too malformed to render. Counting the overflow alone under-reports exactly the rows
+ * the user has no other way of learning about.
+ */
+function droppedFindings(job: JobProjection, rendered: number) {
+  return Math.max(0, rawFindings(job).length - rendered);
+}
+
+/**
+ * One predicate for "is this row a finding at all", so what the list renders and what the
+ * headline label reports can never disagree about which rows count.
+ */
+function isFindingRow(candidate: unknown): candidate is Finding {
+  return isRecord(candidate)
+    && typeof candidate.check === "string"
+    && (candidate.severity === "refuse"
+      || candidate.severity === "warn"
+      || candidate.severity === "report")
+    && typeof candidate.where === "string"
+    && typeof candidate.message === "string"
+    && typeof candidate.layer === "string";
+}
+
+function findings(job: JobProjection): Finding[] {
+  // Sliced before the map: mapping the whole array is the unbounded step.
+  return rawFindings(job).slice(0, MAX_RENDERED_FINDINGS).flatMap((candidate): Finding[] => {
+    if (!isFindingRow(candidate)) return [];
     return [{
-      check: candidate.check,
+      check: boundedText(candidate.check),
       severity: candidate.severity,
-      where: candidate.where,
-      message: candidate.message,
-      layer: candidate.layer,
+      where: boundedText(candidate.where),
+      message: boundedText(candidate.message),
+      layer: boundedText(candidate.layer),
     }];
   });
 }
 
+/**
+ * Asked of the WHOLE payload, never of the rendered slice. MAX_RENDERED_FINDINGS bounds what the
+ * DOM holds; it does not bound what the job means. Reading the slice labelled a succeeded job
+ * whose only `warn` sat at index 150 a green "Succeeded" and withheld §9's corrective action,
+ * "Review the warning before continuing." — the one instruction that state exists to carry.
+ * Scanning costs a severity test per row and puts nothing extra in the DOM.
+ */
 function hasWarning(job: JobProjection) {
-  return findings(job).some((finding) => finding.severity === "warn");
+  return rawFindings(job).some((candidate) => isFindingRow(candidate) && candidate.severity === "warn");
 }
 
 export function resultLabel(job: JobProjection) {
@@ -95,8 +154,8 @@ function arraySummary(value: unknown, includeValues: boolean): ArraySummary | nu
     && value.shape.every((item) => typeof item === "number")
     ? value.shape
     : null;
-  const dtype = typeof value.dtype === "string" ? value.dtype : null;
-  const statistic = typeof value.statistic === "string" ? value.statistic : null;
+  const dtype = typeof value.dtype === "string" ? boundedText(value.dtype) : null;
+  const statistic = typeof value.statistic === "string" ? boundedText(value.statistic) : null;
   const number = (key: "minimum" | "maximum" | "mean") => (
     typeof value[key] === "number" ? value[key] : null
   );
@@ -128,16 +187,20 @@ function WaterfallSummary({ result }: { result: unknown }) {
   const numbers = (["minimum", "maximum", "mean"] as const).flatMap((key) => (
     waterfall[key] === null ? [] : [[key, waterfall[key]] as const]
   ));
-  const taps = isRecord(result.taps)
-    ? Object.entries(result.taps).slice(0, MAX_PREVIEW_DIMENSION).flatMap(([name, value]) => {
-      const summary = arraySummary(value, false);
-      return summary === null ? [] : [[name, summary] as const];
-    })
-    : [];
-  const uniform = isRecord(result.uniform_sky_mean)
-    ? Object.entries(result.uniform_sky_mean).slice(0, MAX_PREVIEW_DIMENSION)
-      .filter((entry): entry is [string, number] => typeof entry[1] === "number")
-    : [];
+  const rawTaps = isRecord(result.taps) ? Object.entries(result.taps) : [];
+  const taps = rawTaps.slice(0, MAX_PREVIEW_DIMENSION).flatMap(([name, value]) => {
+    const summary = arraySummary(value, false);
+    return summary === null ? [] : [[name, summary] as const];
+  });
+  const rawUniform = isRecord(result.uniform_sky_mean) ? Object.entries(result.uniform_sky_mean) : [];
+  const uniform = rawUniform.slice(0, MAX_PREVIEW_DIMENSION)
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number");
+  // The same evidence the finding list already gives: MAX_PREVIEW_DIMENSION is 64 while the
+  // backend forwards up to 256, so a preview with 200 taps dropped 136 of them and said nothing
+  // at all — silence a reader has no way to tell apart from "the model declared 64 taps".
+  // Counted like droppedFindings: rows past the cap AND rows inside it too malformed to render.
+  const droppedTaps = Math.max(0, rawTaps.length - taps.length);
+  const droppedUniform = Math.max(0, rawUniform.length - uniform.length);
   const saturation = typeof result.saturated_fraction === "number"
     ? `${(100 * result.saturated_fraction).toFixed(2)}%`
     : "unavailable";
@@ -160,12 +223,19 @@ function WaterfallSummary({ result }: { result: unknown }) {
         </table>
       )}
       <p>saturation {saturation}</p>
+      {/* The key stays the raw name: two names that truncate alike must not collide as one row. */}
       {taps.length > 0 && <ul aria-label="Forward taps">{taps.map(([name, tap]) => (
-        <li key={name}>{name}: {tap.shape?.join(" × ") ?? "unknown"} {tap.dtype ?? "unknown"}</li>
+        <li key={name}>{boundedText(name)}: {tap.shape?.join(" × ") ?? "unknown"} {tap.dtype ?? "unknown"}</li>
       ))}</ul>}
+      {droppedTaps > 0 && (
+        <p>{`${droppedTaps} further forward taps were not rendered ${TRUNCATION_MARKER}`}</p>
+      )}
       {uniform.length > 0 && <ul aria-label="Uniform-sky probes">{uniform.map(([name, value]) => (
-        <li key={name}>{name}: {value}</li>
+        <li key={name}>{boundedText(name)}: {value}</li>
       ))}</ul>}
+      {droppedUniform > 0 && (
+        <p>{`${droppedUniform} further uniform-sky probes were not rendered ${TRUNCATION_MARKER}`}</p>
+      )}
     </section>
   );
 }
@@ -186,8 +256,8 @@ function OutputSummary({ job }: { job: JobProjection }) {
   const state = typeof found.state === "string" && outputStates.has(found.state)
     ? found.state
     : null;
-  const stateMessage = typeof found.state_message === "string" ? found.state_message : null;
-  const target = typeof found.target_path === "string" ? found.target_path : null;
+  const stateMessage = typeof found.state_message === "string" ? boundedText(found.state_message) : null;
+  const target = typeof found.target_path === "string" ? boundedText(found.target_path) : null;
   if (state === null && stateMessage === null && target === null) return null;
   return (
     <section aria-label="Published output summary">
@@ -201,6 +271,7 @@ function OutputSummary({ job }: { job: JobProjection }) {
 
 export function ResultSummary({ job }: { job: JobProjection }) {
   const knownFindings = findings(job);
+  const dropped = droppedFindings(job, knownFindings.length);
   const result = isRecord(job.result) ? job.result : null;
   const exitCode = result !== null && typeof result.exit_code === "number"
     ? result.exit_code
@@ -217,19 +288,24 @@ export function ResultSummary({ job }: { job: JobProjection }) {
       {job.stale && (
         <StatusChip tone="stale" label={`From revision ${job.revision}`} />
       )}
-      {job.message !== null && <p>{job.message}</p>}
+      {job.message !== null && <p>{boundedText(job.message)}</p>}
       {help !== null && <p>{help}</p>}
       {exitCode !== null && <p>Exit code {exitCode}</p>}
-      {knownFindings.length > 0 && (
+      {/* The count is evidence in its own right: a payload whose every row was malformed renders
+          no list at all, and silence there reads as "nothing was found". */}
+      {(knownFindings.length > 0 || dropped > 0) && (
         <section aria-label="Job findings">
           <h3>Findings</h3>
-          <ol>{knownFindings.map((finding, index) => (
+          {knownFindings.length > 0 && <ol>{knownFindings.map((finding, index) => (
             <li key={`${finding.layer}:${finding.where}:${finding.check}:${index}`}>
               <strong>{finding.severity}</strong> {finding.check}
               <span> · {finding.layer} · {finding.where}</span>
               <p>{finding.message}</p>
             </li>
-          ))}</ol>
+          ))}</ol>}
+          {dropped > 0 && (
+            <p>{`${dropped} further findings were not rendered ${TRUNCATION_MARKER}`}</p>
+          )}
         </section>
       )}
       <WaterfallSummary result={job.result} />
