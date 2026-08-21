@@ -1109,6 +1109,30 @@ def signature_label(value: DimensionSignature) -> str:
     return repr(value)
 
 
+def describe_signature(value: DimensionSignature) -> str:
+    """A signature as a refusal should say it: ``"a length (m)"``.
+
+    The signature already carries the dimension's NAME -- ``length``,
+    ``impedance`` -- so this invents nothing; before it existed, a refusal
+    printed the dataclass and a user reading ``requires
+    DimensionSignature(physical=(('length', 1),), quantity=())`` learned only
+    that something was wrong.
+
+    One dimension at exponent one is named with its article, which is the
+    wording ``kinds/s_params.py`` was already using where it could raise its
+    own refusal. Anything else -- a quotient, or the dimensionless and
+    counting signatures that have no physical name at all -- is given as the
+    token, because ``a adc_count per temperature`` reads worse than
+    ``adc_count/K`` and the token is what the user has to type.
+    """
+    components = (*value.physical, *value.quantity)
+    if len(components) != 1 or components[0][1] != 1:
+        return signature_token(value)
+    name = components[0][0]
+    article = "an" if name[0] in "aeiou" else "a"
+    return f"{article} {name} ({signature_token(value)})"
+
+
 def signature_token(value: DimensionSignature) -> str:
     """The accepted canonical spelling for a catalog signature."""
     for token in (

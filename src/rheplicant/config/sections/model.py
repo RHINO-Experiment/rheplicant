@@ -438,7 +438,16 @@ def _read_eqx_leaves(path, spec: dict):
         )
     import equinox as eqx
 
-    return eqx.tree_deserialise_leaves(path, like=template)
+    # A HANDLE, not the path. `equinox._serialisation._with_suffix` appends
+    # `.eqx` to any path whose suffix is empty, and every file this layer
+    # reads arrives as a capture slot -- `capture-00000001`, deliberately
+    # extensionless, because the run must read the bytes that were hashed and
+    # not the document's own name for them. Handed the path, equinox looks for
+    # `capture-00000001.eqx` and raises FileNotFoundError. It passes file
+    # objects through untouched, so opening it here is what lets the two
+    # designs coexist.
+    with open(path, "rb") as handle:
+        return eqx.tree_deserialise_leaves(handle, like=template)
 
 
 def build_node_operator(node_id: str, spec: Any, context: ResolutionContext):
