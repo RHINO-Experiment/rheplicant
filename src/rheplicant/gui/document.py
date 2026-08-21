@@ -282,6 +282,12 @@ def _instances(
     The identities stay here and the field sets come from the projector, which
     walks the same settings in the same order -- so the two are zipped rather
     than each deciding separately what an instance is.
+
+    ``value`` must already be PLAIN. ``NodeField.written`` carries what the
+    document wrote, verbatim, and ``api.py`` returns the whole snapshot
+    through ``dataclasses.asdict``, which DEEP-COPIES: a parser-owned
+    ``mappingproxy`` arriving here failed the copy and took the entire session
+    route down with a 500, for any document that configured a many node.
     """
     catalog = widget_catalog() if catalog is None else catalog
     projected = project_node_instances(node_id, value, catalog, resources=resources)
@@ -455,7 +461,7 @@ def _node_cards(
             fields=typed.fields,
             extra_keys=typed.extra_keys,
             removed_by_type=typed.removed_by_type,
-            instances=_instances(node_id, model.get(node_id), catalog, resources),
+            instances=_instances(node_id, settings, catalog, resources),
             stages=_stages(node_id, settings, catalog, resources),
             from_fields=from_route_fields(
                 node_id, settings, catalog, resources=resources
