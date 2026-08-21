@@ -263,3 +263,23 @@ class TestTheTypedNodeFormRidesOnTheNodeCard:
 
         assert card["fields"][0]["units"] == ("dimensionless",)
         assert card["fields"][0]["written"] == {"value": 1.1, "unit": "dimensionless"}
+
+
+class TestTheCardCarriesWhatATypeChangeCosts:
+    def test_a_two_class_node_names_what_each_choice_would_remove(self):
+        text = VARIANT_YAML.replace(
+            "  bandpass:\n", "  noise:\n    type: NoiseOperator\n    sigma: 0.05\n  bandpass:\n"
+        )
+        card = _card(snapshot(text).base_diagram, "noise")
+
+        assert card.selected_type == "NoiseOperator"
+        assert card.removed_by_type == {
+            "NoiseOperator": (),
+            "RadiometerNoiseOperator": ("sigma",),
+        }
+
+    def test_a_refused_node_still_answers_with_empty_costs(self):
+        """The client reads this map for every card. A card that answered
+        with nothing at all would be a lookup on undefined."""
+        for card in snapshot(VARIANT_YAML).base_diagram.nodes:
+            assert set(card.removed_by_type) == set(card.type_choices)

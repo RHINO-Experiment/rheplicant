@@ -444,3 +444,80 @@ class TestExtraKeysNeverDisableTheTypedForm:
         found = _project("gain", {"nonsense": 1})
 
         assert found.extra_keys == ("nonsense",)
+
+
+class TestWhatAChangeOfTypeWouldCost:
+    """Changing ``type:`` is confirm-and-clear, and the confirmation has to
+    name what it clears. The server computes that: it owns the catalog, so it
+    is the only side that knows which written keys belong to which class."""
+
+    def test_it_names_the_keys_the_other_class_has_no_place_for(self):
+        found = _project(
+            "noise", {"type": "NoiseOperator", "sigma": {"value": 0.05, "unit": "K"}}
+        )
+
+        assert found.removed_by_type == {
+            "NoiseOperator": (),
+            "RadiometerNoiseOperator": ("sigma",),
+        }
+
+    def test_an_unwritten_field_costs_nothing_to_abandon(self):
+        found = _project("noise", {"type": "NoiseOperator"})
+
+        assert found.removed_by_type == {"NoiseOperator": (), "RadiometerNoiseOperator": ()}
+
+    def test_keys_no_class_owns_are_never_offered_up(self):
+        """``snapshot_before`` and ``eqx_leaves`` belong to the node, not to
+        its operator class, and an unknown key belongs to nobody. A type
+        change has no business removing any of them."""
+        found = _project(
+            "flagging",
+            {
+                "type": "FlaggingOperator",
+                "threshold": 5.0,
+                "snapshot_before": "pre_flag",
+                "eqx_leaves": "leaves.eqx",
+                "nonsense": 1,
+            },
+        )
+
+        assert found.removed_by_type["MomentRFIFlaggingOperator"] == ("threshold",)
+        assert set(found.extra_keys) == {"snapshot_before", "eqx_leaves", "nonsense"}
+
+    def test_a_document_that_has_chosen_no_class_can_lose_nothing(self):
+        found = _project("noise", {"sigma": {"value": 0.05, "unit": "K"}})
+
+        assert found.selected_type is None
+        assert found.removed_by_type == {"NoiseOperator": (), "RadiometerNoiseOperator": ()}
+
+    @pytest.mark.parametrize("node_id", ONE_CLASS)
+    def test_a_single_class_node_has_one_entry_and_nothing_to_lose(self, node_id):
+        found = _project(node_id, {})
+
+        assert list(found.removed_by_type) == list(found.type_choices)
+        assert all(cost == () for cost in found.removed_by_type.values())
+
+    def test_a_field_both_classes_own_survives_the_change(self):
+        """Asserted on the rule itself, because no node this release can reach
+        exercises it: both two-class nodes share NO fields, so today the
+        subtraction below is a no-op on every live node. The overlap does
+        exist in the catalog -- all three filters own ``mode`` -- and becomes
+        reachable the moment many-node cards arrive."""
+        from rheplicant.gui.node_forms import _removed_by_type
+
+        assert _removed_by_type(
+            written=("mode", "axis", "low", "snapshot_before"),
+            current=frozenset({"mode", "axis", "low", "high"}),
+            candidate=frozenset({"mode", "n_days"}),
+        ) == ("axis", "low")
+
+    def test_todays_two_class_nodes_really_do_share_nothing(self):
+        """The census the test above is excused by. If this goes red, an
+        end-to-end test of the shared-field rule is now possible and should
+        be written."""
+        from rheplicant.config.delivery import field_specs
+        from rheplicant.gui.form_catalog import operator_table
+
+        for node_id in TWO_CLASSES:
+            first, second = operator_table()[node_id]
+            assert not set(field_specs(first)) & set(field_specs(second)), node_id

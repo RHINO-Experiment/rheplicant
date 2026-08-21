@@ -74,6 +74,11 @@ export function NodeInspector({
   // would need a second value-form parser in the browser, and a second parser
   // is a second authority on what a document says.
   const [typedEdits, setTypedEdits] = useState<Record<string, { number?: string; unit?: string }>>({});
+  // A class the user has picked but not yet confirmed. Held here rather than
+  // written straight through, because the two classes at a node share no
+  // fields: changing one destroys every value written for the other, and a
+  // control that does that silently is a control that loses work.
+  const [pendingType, setPendingType] = useState<string | null>(null);
 
   const selectedAt = selected?.settings && typeof selected.settings === "object"
     ? (selected.settings as { at?: unknown }).at
@@ -112,6 +117,7 @@ export function NodeInspector({
 
   useEffect(() => {
     setTypedEdits({});
+    setPendingType(null);
   }, [selected?.node_id, activeVariant, session.revision]);
 
   if (!selected) {
@@ -393,6 +399,39 @@ export function NodeInspector({
     return !field.typed || typedParseError !== null || graphControlDisabled(settingsPath);
   }
 
+  function writeType(next: string, removed: string[]) {
+    let current: Record<string, unknown>;
+    try {
+      current = parseObject(settingsSource);
+    } catch {
+      return;
+    }
+    // Rebuilt by iteration rather than by delete-and-reassign so `type:` keeps
+    // the line it was written on instead of moving to the end of the mapping.
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(current)) {
+      if (key === "type") out[key] = next;
+      else if (!removed.includes(key)) out[key] = value;
+    }
+    if (!("type" in out)) out.type = next;
+    setTypedEdits({});
+    updateRawGraph(settingsPath, JSON.stringify(out, null, 2), setSettingsText);
+  }
+
+  function chooseType(next: string) {
+    if (next === "" || next === node.selected_type) {
+      setPendingType(null);
+      return;
+    }
+    const removed = node.removed_by_type[next] ?? [];
+    if (removed.length === 0) {
+      setPendingType(null);
+      writeType(next, removed);
+      return;
+    }
+    setPendingType(next);
+  }
+
   const stagesPath = path("stages");
   const placementPath = path("placement");
   const snapshotPath = path("snapshot");
@@ -418,11 +457,45 @@ export function NodeInspector({
             <legend>Typed fields</legend>
             {!selected.typed_form && <p>{selected.typed_form_reason}</p>}
             {selected.typed_form && selected.type_choices.length > 1 && (
-              <p>
-                {selected.selected_type
-                  ? `Class: ${selected.selected_type}`
-                  : `Choose a type in the JSON below: ${selected.type_choices.join(", ")}`}
-              </p>
+              <>
+                <label>
+                  type
+                  <select
+                    aria-label={`${selected.node_id} type`}
+                    value={pendingType ?? selected.selected_type ?? ""}
+                    disabled={typedParseError !== null || graphControlDisabled(settingsPath)}
+                    onChange={(event) => chooseType(event.target.value)}
+                  >
+                    {selected.selected_type === null && <option value="">not chosen</option>}
+                    {selected.type_choices.map((choice) => (
+                      <option key={choice} value={choice}>{choice}</option>
+                    ))}
+                  </select>
+                </label>
+                {pendingType !== null && (
+                  <div role="group" aria-label={`${selected.node_id} type change`}>
+                    <p>
+                      {pendingType} has no field for{" "}
+                      {(selected.removed_by_type[pendingType] ?? []).join(", ")}. Changing
+                      the type removes {(selected.removed_by_type[pendingType] ?? []).length > 1
+                        ? "those values"
+                        : "that value"} from the draft.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        writeType(pendingType, selected.removed_by_type[pendingType] ?? []);
+                        setPendingType(null);
+                      }}
+                    >
+                      Change {selected.node_id} to {pendingType}
+                    </button>
+                    <button type="button" onClick={() => setPendingType(null)}>
+                      Keep {selected.selected_type ?? "the current type"}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
             {typedParseError !== null && <p>Typed fields need valid JSON: {typedParseError}</p>}
             {selected.typed_form && selected.fields.map((field) => (
