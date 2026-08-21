@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 
 import pytest
 import yaml
@@ -438,3 +439,52 @@ class TestAPickerOffersWhatTheDocumentDeclares:
         card = _card(snapshot(RESOURCE_YAML).base_diagram, "observed_astro_sky")
 
         assert all(entry.help for entry in card.fields)
+
+
+class TestTheSnapshotSurvivesTheApisSerialisation:
+    """``api.py`` returns `dataclasses.asdict(snapshot(...))`, and `asdict`
+    DEEP-COPIES every value it walks. The parser hands out ``mappingproxy``
+    for a nested mapping and a mappingproxy cannot be deep-copied, so any
+    value carried through verbatim must be plain first.
+
+    ``_node_cards`` passed ``_plain(...)`` and ``_instances`` passed the raw
+    model value, so a document with a configured ``filters`` or ``cal_loads``
+    reached the browser as a **500** -- the whole session route, not one
+    field. Caught by opening the GUI, not by the suite: every earlier test
+    read `.number` off an instance and never serialised one.
+    """
+
+    def test_a_many_node_document_serialises(self):
+        found = dataclasses.asdict(snapshot(MANY_YAML))
+
+        card = next(n for n in found["base_diagram"]["nodes"] if n["node_id"] == "filters")
+        first = card["instances"][0]
+        assert first["settings"] == {"type": "SiderealFilter", "n_days": 3, "mode": "extract"}
+        assert next(f for f in first["fields"] if f["name"] == "n_days")["written"] == 3
+
+    def test_a_fan_instances_written_value_is_plain(self):
+        found = dataclasses.asdict(snapshot(MANY_YAML))
+
+        card = next(n for n in found["base_diagram"]["nodes"] if n["node_id"] == "cal_loads")
+        hot = card["instances"][0]
+        written = next(f for f in hot["fields"] if f["name"] == "t_load")["written"]
+        assert written == {"value": 350.0, "unit": "K"}
+        assert type(written) is dict, "a mappingproxy here is what asdict cannot copy"
+
+    def test_every_written_value_in_a_rich_document_is_plain(self):
+        """The property, over the whole projection rather than two samples:
+        nothing a card or an instance carries may be a parser-owned mapping."""
+        import types
+
+        def walk(value):
+            if isinstance(value, types.MappingProxyType):
+                raise AssertionError(f"mappingproxy reached the API: {value!r}")
+            if isinstance(value, Mapping):
+                for item in value.values():
+                    walk(item)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    walk(item)
+
+        walk(dataclasses.asdict(snapshot(MANY_YAML)))
+        walk(dataclasses.asdict(snapshot(COMPOSED_YAML)))
