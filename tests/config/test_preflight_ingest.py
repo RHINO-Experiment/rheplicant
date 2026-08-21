@@ -1590,9 +1590,20 @@ class TestTheRegistry:
         *inside* its functions for exactly that reason; this asserts it rather
         than trusting the comment.
 
-        ``preflight.document`` IS head-imported, for ``_task3_where``, and
-        that is deliberate and allowed -- it is named here so the day someone
-        adds a second head import the failure says which one and why.
+        ``preflight.document`` MAY be head-imported and is not required to
+        be. It was, for ``_task3_where``; that call moved into
+        ``document._task3_over_layers`` at ``5ceb327`` and the head import
+        went with it, at which point this assertion -- then an EQUALITY --
+        started failing for a module that had done nothing wrong. It went
+        unseen for three days because this module stands down without
+        ``h5py``.
+
+        The equality is now a subset, which is what the paragraph above always
+        described: what must not happen is a head import of a sibling whose
+        ``@register`` ids would land before this module's own. Whether
+        ``document`` is among them is an implementation detail of where
+        ``_task3_where`` is called, and pinning it was pinning the wrong
+        thing.
 
         Only module-level statements count: ``ast.walk`` would descend into
         the function bodies and report the very imports whose placement is the
@@ -1623,11 +1634,20 @@ class TestTheRegistry:
             elif isinstance(node, ast.Import):
                 siblings.update(a.name for a in node.names
                                 if a.name.startswith(f"{package}."))
-        assert siblings == {"rheplicant.config.preflight.document"}, (
-            f"{module.__name__}'s module-level preflight imports are "
-            f"{sorted(siblings)}; only `document` (for `_task3_where`) is "
-            "allowed, because a head import registers that sibling's ids "
-            "before this module's own")
+        allowed = {f"{package}.document"}
+        extra = sorted(siblings - allowed)
+        assert not extra, (
+            f"{module.__name__} head-imports {extra}; a head import runs that "
+            "sibling's @register decorators before this module's own, so its "
+            "ids land earlier in CHECKS -- which is run order. Import it "
+            "inside the function that needs it, as the foot-import block does."
+        )
+        for forbidden in ("model", "observing"):
+            assert f"{package}.{forbidden}" not in siblings, (
+                f"{module.__name__} head-imports `{forbidden}`, which is the "
+                "exact pair this module's own source says it imports inside "
+                "its functions to keep out of the registration order."
+            )
 
     def test_the_foot_import_is_what_registers_them(self):
         """R1: deleting the foot import leaves this file's own tests green.

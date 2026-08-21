@@ -514,3 +514,56 @@ def test_ref_distinguishes_an_absent_fixed_binding_from_bound_open_unknown():
         open_unknown.dimensions, "resources.arrays.a", None
     )
     assert resolve_value({"ref": "resources.arrays.a"}, open_unknown).value == 1.0
+
+
+class TestASignatureIsDescribedInWords:
+    """A refusal names the dimension it wanted, not its dataclass.
+
+    ``validate_declared_unit`` printed ``target.expected`` directly, so a user
+    who wrote the wrong unit got
+    ``requires DimensionSignature(physical=(('length', 1),), quantity=())``.
+    The signature already carries the WORD -- ``length`` -- so nothing had to
+    be invented to say it; it simply was not rendered.
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "described"),
+        [
+            ("m", "a length (m)"),
+            ("K", "a temperature (K)"),
+            ("Hz", "a frequency (Hz)"),
+            ("s", "a time (s)"),
+            ("ohm", "an impedance (ohm)"),
+            ("deg", "an angle (deg)"),
+            ("count", "a count (count)"),
+            ("samples", "a samples (samples)"),
+        ],
+    )
+    def test_one_dimension_is_named_with_its_article(self, token, described):
+        from rheplicant.config.dimensions import describe_signature
+
+        assert describe_signature(signature(token)) == described
+
+    @pytest.mark.parametrize("token", ["adc_count/K", "Hz/s", "cycles/samples"])
+    def test_a_quotient_is_named_by_its_token_alone(self, token):
+        """``a adc_count per temperature`` reads worse than ``adc_count/K``,
+        which is also what the user has to type."""
+        from rheplicant.config.dimensions import describe_signature
+
+        assert describe_signature(signature(token)) == token
+
+    def test_dimensionless_has_no_dimension_to_name(self):
+        from rheplicant.config.dimensions import describe_signature
+
+        assert describe_signature(signature("dimensionless")) == "dimensionless"
+
+    def test_every_shipped_token_describes_without_leaking_a_repr(self):
+        """The property that matters: no accepted unit may reach a user as a
+        dataclass. Asserted over the whole alphabet rather than a sample."""
+        from rheplicant.config.dimensions import describe_signature
+        from rheplicant.config.units import ACCEPTED_UNITS
+
+        for token in ACCEPTED_UNITS:
+            described = describe_signature(signature(token))
+            assert "DimensionSignature" not in described, token
+            assert described

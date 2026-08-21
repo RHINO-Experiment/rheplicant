@@ -20,6 +20,7 @@ from rheplicant.config.dimensions import (
     DimensionEnvironment,
     DimensionSignature,
     DimensionSpec,
+    describe_signature,
     dimension_for,
     dimension_of,
     dimension_spec_for,
@@ -159,7 +160,7 @@ def validate_declared_unit(node: object, target: ResolutionTarget) -> Resolution
     if unit is not None and target.expected is not None and dimension_of(unit) != target.expected:
         raise ConfigError(
             f"dimensions: {target.destination.document_path!r} declares {token!r}, "
-            f"but requires {target.expected}"
+            f"but requires {describe_signature(target.expected)}"
         )
     return dataclasses.replace(target, explicit_unit=unit)
 
