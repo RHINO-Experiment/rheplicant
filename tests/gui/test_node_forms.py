@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from rheplicant.gui.form_catalog import operator_table
 from rheplicant.gui.forms import widget_catalog
 from rheplicant.gui.node_forms import (
     NodeFieldSet,
@@ -730,7 +731,12 @@ class TestTheThreeFromRoutes:
 
         basis, coeff = offered
         assert basis.written == {"ref": "resources.bases.poly"}
-        assert basis.typed is False, "a resource reference is not a typed control"
+        # P3 asserted this was NOT typed, because nothing could produce a
+        # `{ref: ...}`. P4's picker can, so a written reference is now exactly
+        # what its control writes.
+        assert basis.control == "resource"
+        assert basis.resource_kind == "bases"
+        assert basis.typed is True
         assert coeff.number == 2.0
         assert coeff.typed is True
 
@@ -797,3 +803,119 @@ class TestWhichFormsAControlCanWrite:
         for name in ("depth", "centre", "width"):
             field = _field(found, name)
             assert field.form in field.forms, name
+
+
+class TestHelpTextAndResourcePickers:
+    """P4: the sentence the operator already writes about each field, and the
+    resources a document has actually declared."""
+
+    def test_a_field_carries_its_own_operators_sentence(self):
+        found = _project("global_signal", {})
+
+        assert _field(found, "depth").help == (
+            "trough depth [K] (positive number gives absorption)."
+        )
+        assert _field(found, "centre").help == "trough centre frequency [Hz]."
+
+    def test_the_sentence_follows_the_selected_class(self):
+        """``noise`` holds two classes with no field in common; each field's
+        help has to come from the class that owns it, not from whichever was
+        registered first."""
+        plain = _project("noise", {"type": "NoiseOperator"})
+        radiometer = _project("noise", {"type": "RadiometerNoiseOperator"})
+
+        assert _field(plain, "sigma").help
+        assert _field(radiometer, "channel_width").help
+        assert _field(plain, "sigma").help != _field(radiometer, "channel_width").help
+
+    def test_a_field_several_classes_own_takes_the_selected_one_s_sentence(self):
+        """The only field on this graph that more than one class owns, and it
+        is documented three different ways. Caught by mutation H2, which
+        survived a test whose two fields each had exactly one owner -- so
+        "selected class" and "first class" were the same answer.
+
+        ``mode`` reaches this test only through an INSTANCE: ``filters`` is a
+        many node, so the node itself has no fields."""
+        sidereal, fourier, sky = (
+            _instances("filters", [{"type": name, "mode": "extract"}])[0]
+            for name in ("SiderealFilter", "FourierBandFilter", "SkySpaceFilter")
+        )
+
+        sentences = {
+            _field(sidereal, "mode").help,
+            _field(fourier, "mode").help,
+            _field(sky, "mode").help,
+        }
+        assert len(sentences) == 3, "each class documents mode its own way"
+        assert "repeating structure" in _field(sidereal, "mode").help
+        assert "keep band" in _field(fourier, "mode").help
+        assert "sky-locked" in _field(sky, "mode").help
+
+    def test_every_projected_model_field_has_help(self):
+        for node_id in ONE_CLASS:
+            found = _project(node_id, {})
+            for entry in found.fields:
+                assert entry.help, f"{node_id}.{entry.name}"
+
+    def test_an_object_field_names_the_resource_kind_it_takes(self):
+        found = _project("observed_astro_sky", {})
+
+        assert _field(found, "sky_model").resource_kind == "sky_models"
+        assert _field(found, "projector").resource_kind == "projectors"
+        assert _field(found, "depth" if False else "sky_model").control == "resource"
+
+    def test_a_value_field_names_no_resource_kind(self):
+        assert _field(_project("global_signal", {}), "depth").resource_kind is None
+
+    def test_the_picker_offers_what_the_document_declares(self):
+        found = project_node_fields(
+            "observed_astro_sky",
+            {"sky_model": {"ref": "resources.sky_models.gsm"}},
+            CATALOG,
+            resources={
+                "sky_models": {"gsm": {}, "point": {}},
+                "projectors": {"drift": {}},
+                "beams": {"horn": {}},
+            },
+        )
+
+        assert _field(found, "sky_model").choices == (
+            "resources.sky_models.gsm",
+            "resources.sky_models.point",
+        )
+        assert _field(found, "projector").choices == ("resources.projectors.drift",)
+
+    def test_a_written_reference_reads_as_typed_now(self):
+        found = project_node_fields(
+            "observed_astro_sky",
+            {"sky_model": {"ref": "resources.sky_models.gsm"}},
+            CATALOG,
+            resources={"sky_models": {"gsm": {}}},
+        )
+        sky = _field(found, "sky_model")
+
+        assert sky.form == "ref"
+        assert sky.typed is True
+        assert sky.written == {"ref": "resources.sky_models.gsm"}
+
+    def test_no_declared_resources_means_nothing_to_pick(self):
+        found = _project("observed_astro_sky", {})
+
+        assert _field(found, "sky_model").choices == ()
+        assert _field(found, "sky_model").typed is True
+
+    def test_every_object_field_the_config_layer_knows_has_a_kind(self):
+        """The closure that keeps the picker honest: a new object field with
+        no kind here would render a select offering nothing."""
+        from rheplicant.config.sections.model import FROM_ROUTES, _object_fields
+        from rheplicant.gui.node_forms import _RESOURCE_KINDS
+
+        owned = {
+            name
+            for classes in operator_table().values()
+            for cls in classes
+            for name in _object_fields(cls)
+        }
+        owned |= {"projector", "basis"}  # the two `from:` routes' reference keys
+        assert owned <= set(_RESOURCE_KINDS), sorted(owned - set(_RESOURCE_KINDS))
+        assert set(FROM_ROUTES)  # the routes above are still the shipped three

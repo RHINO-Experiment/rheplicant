@@ -487,6 +487,21 @@ export function NodeInspector({
     writeTypedField(slot, field.name, shapeValue(form, number, shownUnit(slot, field)));
   }
 
+  /** A resource field is written as `{ref: <dotted>}` and nothing else, so
+   *  the picker reads and writes that one key rather than a scalar. */
+  function shownReference(slot: readonly string[], field: NodeField) {
+    const edited = typedEdits[editKey(slot, field.name)]?.number;
+    if (edited !== undefined) return edited;
+    const written = field.written;
+    if (isPlainObject(written) && typeof written.ref === "string") return written.ref;
+    return "";
+  }
+
+  function editReference(slot: readonly string[], field: NodeField, dotted: string) {
+    remember(slot, field, { number: dotted });
+    writeTypedField(slot, field.name, dotted === "" ? undefined : { ref: dotted });
+  }
+
   function editText(slot: readonly string[], field: NodeField, value: string) {
     remember(slot, field, { number: value });
     writeTypedField(slot, field.name, value === "" ? undefined : value);
@@ -536,6 +551,7 @@ export function NodeInspector({
       shownNumber: (field: NodeField) => shownNumber(slot, field),
       shownUnit: (field: NodeField) => shownUnit(slot, field),
       shownForm: (field: NodeField) => shownForm(slot, field),
+      shownReference: (field: NodeField) => shownReference(slot, field),
       showForms: openSpellings[key] ?? false,
       onToggleForms: () => setOpenSpellings((current) => ({
         ...current,
@@ -544,6 +560,8 @@ export function NodeInspector({
       onNumber: (field: NodeField, text: string) => editNumber(slot, field, text),
       onUnit: (field: NodeField, unit: string) => editUnit(slot, field, unit),
       onForm: (field: NodeField, form: string) => editForm(slot, field, form),
+      onReference: (field: NodeField, dotted: string) =>
+        editReference(slot, field, dotted),
       onText: (field: NodeField, value: string) => editText(slot, field, value),
       pendingType: pending,
       onChooseType: (next: string) => chooseType(slot, owner, next),

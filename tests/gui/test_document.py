@@ -387,3 +387,54 @@ class TestStagesAndRoutesReachTheCard:
         card = _card(snapshot(MANY_YAML).base_diagram, "cal_loads")
 
         assert [instance.slot for instance in card.instances] == [("hot",), ("cold",)]
+
+
+RESOURCE_YAML = """\
+schema_version: 1
+resources:
+  projectors:
+    drift: {lmax: 8, optimizations: []}
+    second: {lmax: 8, optimizations: []}
+  beams:
+    horn: {nside: 8}
+model:
+  observed_astro_sky:
+    projector: {ref: resources.projectors.drift}
+variants:
+  other:
+    resources:
+      projectors:
+        third: {lmax: 8, optimizations: []}
+runs:
+  - name: forward
+    kind: forward
+"""
+
+
+class TestAPickerOffersWhatTheDocumentDeclares:
+    def test_it_lists_the_declared_names_of_that_kind_only(self):
+        card = _card(snapshot(RESOURCE_YAML).base_diagram, "observed_astro_sky")
+        projector = next(f for f in card.fields if f.name == "projector")
+
+        assert projector.control == "resource"
+        assert projector.choices == (
+            "resources.projectors.drift",
+            "resources.projectors.second",
+        )
+        assert projector.written == {"ref": "resources.projectors.drift"}
+
+    def test_a_variant_offers_the_resources_of_its_own_layer(self):
+        """A variant may declare resources the base does not. Offering the
+        base's list under a variant's name would propose a reference that
+        layer cannot resolve."""
+        found = snapshot(RESOURCE_YAML)
+        variant = next(d for d in found.variant_diagrams if d.name == "other")
+        card = next(n for n in variant.nodes if n.node_id == "observed_astro_sky")
+        projector = next(f for f in card.fields if f.name == "projector")
+
+        assert "resources.projectors.third" in projector.choices
+
+    def test_every_field_carries_the_sentence_its_operator_writes(self):
+        card = _card(snapshot(RESOURCE_YAML).base_diagram, "observed_astro_sky")
+
+        assert all(entry.help for entry in card.fields)
