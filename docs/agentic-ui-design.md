@@ -1,6 +1,10 @@
 # Agentic UI design
 
-Status: **draft for review**. Not yet linked from the documentation index.
+Status: **draft for review** — P0, P1, and the host side of P2 are implemented and
+verified (typecheck-clean plus four integration tests); the independent-harness
+distribution boots a real `dsh --profile rheplicant` without any API key, and the
+`ui-analysis` client bundle builds and is served by the web runtime. Not yet
+linked from the documentation index.
 
 An **agentic surface** over rheplicant, built on DeepSeek Harness (`dsh`). A chat
 session in which the agent drafts, edits, and reads back one analysis, and a
@@ -63,8 +67,22 @@ back.
 | repo | holds | depends on |
 |---|---|---|
 | `rheplicant` | core / radio / inference / config, unchanged | nothing |
-| `deepseek-harness` | the harness, consumed as published `@deepseek-ai/dsh-*` npm packages, never forked | nothing |
+| `deepseek-harness` | the harness, consumed as `@deepseek-ai/dsh-*` packages (published, or packed locally via `release:pack`), never forked | nothing |
 | `rheplicant-agent` | the Python compute service and the `packages/rheplicant/` plugin group plus a bundle/profile | `rheplicant` (pip), `@deepseek-ai/dsh-*` (npm) |
+
+The harness side runs as its own installation, independent of any dsh
+development checkout: `release:pack` turns the `deepseek-harness` families into
+tarballs, those tarballs plus the `rheplicant-agent` packages install into a
+fresh harness home (its own `DSH_HOME`, profile, and `node_modules`), and a
+`rheplicant` profile composes `dsh-base` + `dsh-headless` + the rheplicant plugin
+group. Model choice is the user's settings document (`llm-pi-ai`), never a
+DeepSeek default baked into the profile; the harness boots without any API key
+and needs one only when a model is actually called.
+
+The published `@deepseek-ai/*` npm packages are stale (`0.0.1-rc.1`, baseline
+only), so the tarball path is the current consumption route; publishing current
+versions replaces the tarballs with `npm install` and removes the checkout
+dependency entirely.
 
 A user who does not want the AI layer never installs `rheplicant-agent`.
 rheplicant carries no server, no network, and no harness reference. The compute
@@ -342,11 +360,11 @@ a step will take minutes before it is committed to a background job.
 
 ## Reproducibility and the session log
 
-Model-visible means logged. A `rheplicant_run` writes the document to the
-workspace and records a durable session event carrying the file reference and the
-`RunOutcome`, so fork, replay, and audit all derive from the log. The document
-already carries `runtime.seed`; provenance and one-seed-reproduces-one-run hold
-across the boundary unchanged.
+Model-visible means logged. `rheplicant_run` records a durable `rheplicant/run`
+session event carrying the document, the transport, and the `RunOutcome`, so
+fork, replay, and audit all derive from the log. The document already carries
+`runtime.seed`; provenance and one-seed-reproduces-one-run hold across the
+boundary unchanged.
 
 ## Phasing
 
@@ -356,6 +374,16 @@ across the boundary unchanged.
 | P1 | `tool-validate`, `tool-gates`, `tool-schema`, `ui-analysis` | "check identifiability, then estimate the gain" becomes a step list with diagnostics, approvable before expensive runs |
 | P2 | `dsh-rheplicant-ssh`, `dsh-rheplicant-http`, `ui-compute`, `ui-document` | local ↔ cluster switches per session; form and chat edit one document |
 | P3 | `ui-brand`, `analysis`/`developer` presets, jobs-backed long runs, daemon lifecycle | a cold start shows the analysis console, long runs do not block |
+
+P0, P1, and the host side of P2 are implemented and verified. The verification
+runs inside a dsh checkout: a client test folds a synthetic `rheplicant/run`
+event into a node, a host test runs a real `forward` and asserts the emitted
+event, and an assembled-turn test drives a mock-LLM tool call to the same end.
+The `ui-analysis` client bundle also builds and is served by the web runtime at
+`/plugins/@deepseek-ai/dsh-client-rheplicant-ui-analysis/client.js`; rendering it
+in a live transcript still needs a session that carries a `rheplicant/run` event
+(host tools in a web profile plus a model turn or replay). `ui-compute` and
+`ui-document` remain.
 
 ## Open decisions
 
