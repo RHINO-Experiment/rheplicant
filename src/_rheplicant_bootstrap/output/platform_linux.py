@@ -83,7 +83,7 @@ class LinuxOutputPlatform:
             row = os.fstat(directory_fd)
         except OSError as error:
             return AccessInspection(
-                parent_path, os.geteuid(), -1, 0, False, False, False, str(error)
+                parent_path, os.geteuid(), -1, 0, False, False, True, False, str(error)
             )
         access_trivial, access_reliable, access_reason = self._access_acl(directory_fd)
         default_trivial, default_reliable, default_reason = self._default_acl(directory_fd)
@@ -96,6 +96,10 @@ class LinuxOutputPlatform:
             stat.S_IMODE(row.st_mode),
             access_trivial,
             default_trivial,
+            # POSIX ACLs are ALLOW-based: an extra entry can only ever hand
+            # someone a right. There is no deny-only case to recognise here,
+            # so non-trivial means "may grant", exactly as before.
+            not access_trivial,
             reliable,
             reason,
         )
@@ -113,7 +117,7 @@ class LinuxOutputPlatform:
         writable = bool(stat.S_IMODE(containing.st_mode) & 0o022)
         rename_protected = (
             access.reliable
-            and access.access_acl_is_trivial
+            and not access.access_acl_grants_others
             and access.default_acl_is_trivial
             and (not writable or (sticky and child_stat.st_uid == os.geteuid()))
         )

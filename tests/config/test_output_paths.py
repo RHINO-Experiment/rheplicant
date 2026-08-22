@@ -38,6 +38,7 @@ class SafePlatform:
             stat.S_IMODE(row.st_mode),
             True,
             True,
+            False,
             True,
             None,
         )

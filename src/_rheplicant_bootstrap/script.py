@@ -119,7 +119,7 @@ def _walk_parent(path: str, platform: OutputPlatform) -> tuple[int, str, str]:
             not access.reliable
             or access.owner_uid != access.effective_uid
             or access.mode & 0o022
-            or not access.access_acl_is_trivial
+            or access.access_acl_grants_others
             or not access.default_acl_is_trivial
         ):
             raise ConfigError(

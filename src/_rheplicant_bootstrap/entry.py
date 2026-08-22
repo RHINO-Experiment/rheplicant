@@ -417,7 +417,7 @@ def _validate_explicit_output(
         raise ConfigError("output parent has the wrong effective uid owner.")
     if access.mode & 0o022:
         raise ConfigError("output parent is group or other writable.")
-    if not access.access_acl_is_trivial or not access.default_acl_is_trivial:
+    if access.access_acl_grants_others or not access.default_acl_is_trivial:
         raise ConfigError(access.reason or "output parent has non-trivial access control.")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     nearest_fd = os.open(inspection.nearest_existing_ancestor, flags)

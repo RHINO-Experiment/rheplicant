@@ -75,8 +75,21 @@ class AccessInspection:
     effective_uid: int
     owner_uid: int
     mode: int
+    #: Whether the access ACL is trivial in the ACL sense: no extended entries
+    #: at all, so the mode bits are the whole story.
     access_acl_is_trivial: bool
     default_acl_is_trivial: bool
+    #: Whether the access ACL grants any right to anyone beyond what the mode
+    #: bits already say -- which is the question every caller is really asking.
+    #:
+    #: Not the same as "non-trivial". A DENY-only ACL is non-trivial and grants
+    #: nothing; macOS puts exactly one on every home directory
+    #: (`group:everyone deny delete`), and it only ADDS protection. Treating
+    #: it as unverifiable refused every project under `~`.
+    #:
+    #: Unverifiable counts as granting: a platform that cannot read its own
+    #: ACLs sets `reliable` False, and callers must not proceed on a guess.
+    access_acl_grants_others: bool
     reliable: bool
     reason: str | None
 
