@@ -208,3 +208,103 @@ def test_output_package_imports_no_main_or_science_modules():
 def test_document_must_be_a_mapping(source):
     with pytest.raises(ConfigError, match="root must be a mapping"):
         parse_output_request([], source=source, command="run")  # type: ignore[arg-type]
+
+
+def test_invocation_override_places_the_target_and_is_explicit(source, tmp_path):
+    target = tmp_path / "elsewhere" / "20260822T134501Z-3f9ac2b1-k7m2xq"
+    request = resolve_output_request(
+        parse_output_grammar({}),
+        source=source,
+        command="run",
+        invocation_dir=str(target),
+    )
+    assert request.target_path == str(target)
+    assert request.explicit_dir is True
+
+
+def test_invocation_override_leaves_a_document_without_one_untouched(source, tmp_path):
+    # The point of the override: the bytes that ran carry no outputs section,
+    # so the document's digest still describes what the author wrote.
+    parsed = parse_output_grammar({})
+    assert parsed.directory is None
+    request = resolve_output_request(
+        parsed,
+        source=source,
+        command="run",
+        invocation_dir=str(tmp_path / "out"),
+    )
+    assert request.target_path == str(tmp_path / "out")
+
+
+def test_invocation_override_refuses_an_authored_directory(source, tmp_path):
+    with pytest.raises(ConfigError, match="outputs_dir: the document already sets"):
+        resolve_output_request(
+            parse_output_grammar({"dir": "authored"}),
+            source=source,
+            command="run",
+            invocation_dir=str(tmp_path / "override"),
+        )
+
+
+@pytest.mark.parametrize("value", ("relative/out", "./out", "~/out", "$HOME/out"))
+def test_invocation_override_must_be_absolute(value, source):
+    # An invocation parameter has no document directory to resolve against, so
+    # neither joining nor expanding it would be defensible; it refuses instead.
+    with pytest.raises(ConfigError, match="outputs_dir: must be absolute"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_dir=value,
+        )
+
+
+@pytest.mark.parametrize("value", (b"/out", 1, True, ""))
+def test_invocation_override_must_be_nonempty_text(value, source):
+    with pytest.raises(ConfigError, match="outputs_dir: must be a non-empty string"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_dir=value,
+        )
+
+
+def test_invocation_override_refuses_nul(source):
+    with pytest.raises(ConfigError, match="outputs_dir: contains NUL"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_dir="/out\0/x",
+        )
+
+
+def test_invocation_override_meets_the_same_final_refusals(source):
+    # The same guards the document form meets, reported against the field the
+    # caller actually used rather than an `outputs.dir` they never wrote.
+    with pytest.raises(ConfigError, match="outputs_dir: must end in a non-empty"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_dir=os.sep,
+        )
+    with pytest.raises(ConfigError, match="outputs_dir: cannot equal the configuration"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_dir=source.base_dir,
+        )
+
+
+def test_invocation_override_gives_a_stdin_run_a_directory(source, tmp_path):
+    stdin = SourceInput(b"{}", "<stdin>", None, "<stdin>", source.base_dir, "cli")
+    request = resolve_output_request(
+        parse_output_grammar({}),
+        source=stdin,
+        command="run",
+        invocation_dir=str(tmp_path / "piped"),
+    )
+    assert request.target_path == str(tmp_path / "piped")

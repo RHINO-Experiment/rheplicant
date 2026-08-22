@@ -100,6 +100,7 @@ def snapshot(status="ok"):
             "source_path": "/work/config.yaml",
             "source_realpath": "/work/config.yaml",
             "base_dir": "/work",
+            "invocation_outputs_dir": None,
         }
     )
     trace.record_software(software_row())

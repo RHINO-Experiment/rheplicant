@@ -112,7 +112,8 @@
         "source_name",
         "source_path",
         "source_realpath",
-        "base_dir"
+        "base_dir",
+        "invocation_outputs_dir"
       ],
       "properties": {
         "protocol_version": {"type": "integer", "minimum": 1},
@@ -122,7 +123,8 @@
         "source_name": {"type": "string"},
         "source_path": {"type": "string"},
         "source_realpath": {"type": ["string", "null"]},
-        "base_dir": {"type": "string"}
+        "base_dir": {"type": "string"},
+        "invocation_outputs_dir": {"type": ["string", "null"]}
       }
     },
     "projectSoftware": {

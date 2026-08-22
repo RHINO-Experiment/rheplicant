@@ -85,8 +85,15 @@ def _record_error_once(trace: AuditTrace, error: BaseException) -> None:
         trace.record_error(_exception_row(error))
 
 
-def _bootstrap_row(prepared: PreparedConfig) -> dict[str, object]:
+def _bootstrap_row(
+    prepared: PreparedConfig,
+    *,
+    outputs_dir: str | None = None,
+) -> dict[str, object]:
     manifest = prepared.source.bootstrap_manifest
+    # Key order is load-bearing: `provenance._exact_mapping` compares this
+    # mapping's keys as a TUPLE against `_BOOTSTRAP_KEYS`, so a field added
+    # here must be added at the same position there.
     return {
         "protocol_version": manifest.protocol_version,
         "launch_mode": manifest.launch_mode,
@@ -96,6 +103,7 @@ def _bootstrap_row(prepared: PreparedConfig) -> dict[str, object]:
         "source_path": manifest.source_path,
         "source_realpath": manifest.source_realpath,
         "base_dir": manifest.base_dir,
+        "invocation_outputs_dir": outputs_dir,
     }
 
 
@@ -456,8 +464,15 @@ def dispatch_request(
     stderr: TextIO,
     preset_provider: Callable[[str], PresetSnapshot] = read_installed_preset,
     platform: OutputPlatform | None = None,
+    outputs_dir: str | None = None,
 ) -> int:
-    """Execute validate/run in the sole normative order."""
+    """Execute validate/run in the sole normative order.
+
+    ``outputs_dir`` is the invocation-level output override (see
+    ``resolve_output_request``): an absolute directory chosen by the caller
+    instead of by the document, recorded in provenance as an invocation
+    parameter so a published tree says why it is where it is.
+    """
     if command not in ("validate", "run"):
         raise ConfigError(f"unknown dispatcher command {command!r}.")
     chosen_platform = platform_adapter() if platform is None else platform
@@ -469,11 +484,16 @@ def dispatch_request(
         parse_outputs=parse_output_grammar,
         boundary_completed=trace.boundary_completed,
     )
-    trace.record_bootstrap(_bootstrap_row(prepared))
+    trace.record_bootstrap(_bootstrap_row(prepared, outputs_dir=outputs_dir))
     outputs = prepared.process.outputs
     if type(outputs) is not ParsedOutputSection:
         raise ConfigError("effective outputs are not a parsed output section.")
-    request = resolve_output_request(outputs, source=source, command=command)
+    request = resolve_output_request(
+        outputs,
+        source=source,
+        command=command,
+        invocation_dir=outputs_dir,
+    )
     run_names = _declared_run_names(prepared.source.layered_document)
     variant_names = _declared_variant_names(prepared)
     warning_written = False
@@ -766,10 +786,15 @@ def run_embedded_config(
     presets: Sequence[Mapping[str, object]],
     input_bytes_b64: str | None = None,
     input_bytes: bytes | None = None,
+    outputs_dir: str | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
-    """Rebuild immutable embedded snapshots and enter the ordinary run path."""
+    """Rebuild immutable embedded snapshots and enter the ordinary run path.
+
+    ``outputs_dir`` overrides where this invocation publishes without touching
+    the document, so the embedded bytes and their digest stay the author's.
+    """
     import sys
 
     chosen_stdout = sys.stdout if stdout is None else stdout
@@ -809,6 +834,7 @@ def run_embedded_config(
             stdout=chosen_stdout,
             stderr=chosen_stderr,
             preset_provider=provider,
+            outputs_dir=outputs_dir,
         )
     except ConfigError as error:
         return _render_exception(error, chosen_stderr, traceback_error=False)

@@ -346,20 +346,62 @@ def parse_output_grammar(raw_outputs: object) -> ParsedOutputSection:
     )
 
 
+def _invocation_directory(value: object, *, parsed: ParsedOutputSection) -> str | None:
+    """Validate the invocation-level output override, or report its absence.
+
+    The override exists so a caller can place one run's tree without editing
+    the document: the bytes that ran stay the bytes the author wrote, which is
+    what makes ``config.input.yaml`` and its digest mean anything.  Two rules
+    keep it honest.  It refuses rather than replaces an authored
+    ``outputs.dir``, because silently discarding a path someone wrote is the
+    wrongness this layer exists to catch.  And it must be absolute: a document
+    path resolves against the document's own directory, while an invocation
+    parameter arrives from a caller whose directory this layer does not know,
+    so there is no defensible base to join it to.
+    """
+    if value is None:
+        return None
+    if parsed.directory is not None:
+        raise ConfigError(
+            "outputs_dir: the document already sets outputs.dir; an invocation "
+            "override refuses rather than replaces an authored path."
+        )
+    if not static_isinstance(value, str) or not str.__str__(value):
+        raise ConfigError("outputs_dir: must be a non-empty string.")
+    directory = str.__str__(value)
+    if "\0" in directory:
+        raise ConfigError("outputs_dir: contains NUL.")
+    if not os.path.isabs(directory):
+        raise ConfigError(
+            "outputs_dir: must be absolute -- an invocation override has no "
+            "document directory to resolve against."
+        )
+    if os.path.basename(directory) == "":
+        raise ConfigError("outputs_dir: must end in a non-empty component.")
+    return directory
+
+
 def resolve_output_request(
     parsed: ParsedOutputSection,
     *,
     source: SourceInput,
     command: str,
+    invocation_dir: str | None = None,
 ) -> OutputRequest:
     """Resolve lexical output path facts without following a symlink."""
     if type(parsed) is not ParsedOutputSection or type(source) is not SourceInput:
         raise ConfigError("output resolution requires exact parsed and source records.")
     if command not in _COMMANDS:
         raise ConfigError(f"unknown output command {command!r}.")
-    explicit = parsed.directory is not None
+    override = _invocation_directory(invocation_dir, parsed=parsed)
+    explicit = parsed.directory is not None or override is not None
+    # The override is already absolute and lexically checked, so it skips the
+    # expansion the document form needs; both then meet the same final refusals.
+    where = "outputs.dir" if override is None else "outputs_dir"
     raw_target = parsed.directory
-    if raw_target is None:
+    if override is not None:
+        target = override
+    elif raw_target is None:
         if command == "validate":
             target = None
         elif source.source_path == "<stdin>":
@@ -383,11 +425,11 @@ def resolve_output_request(
         try:
             target = os.path.abspath(target)
         except Exception:
-            raise ConfigError("outputs.dir: cannot normalize path.") from None
+            raise ConfigError(f"{where}: cannot normalize path.") from None
         if target == os.path.abspath(os.sep):
-            raise ConfigError("outputs.dir: filesystem root is not an output target.")
+            raise ConfigError(f"{where}: filesystem root is not an output target.")
         if target == os.path.abspath(source.base_dir):
-            raise ConfigError("outputs.dir: cannot equal the configuration base directory.")
+            raise ConfigError(f"{where}: cannot equal the configuration base directory.")
     return OutputRequest(
         command=cast(str, command),
         target_path=target,

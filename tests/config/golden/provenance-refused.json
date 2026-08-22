@@ -54,6 +54,7 @@
   "bootstrap": {
     "base_dir": "/work",
     "input_sha256": "5c9536c0f64193f535c425baf9f2c7431b89eb46bab5fb85d4bfcffabb565f43",
+    "invocation_outputs_dir": null,
     "launch_mode": "cli",
     "presets": [],
     "protocol_version": 1,

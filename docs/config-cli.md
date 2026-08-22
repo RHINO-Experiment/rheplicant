@@ -26,6 +26,8 @@ does not create an output parent, lock, journal, result, or failure directory.
 order, and publishes the audit tree plus any requested scientific products. A file named `config.yaml`
 defaults to `config.results/`; an explicit relative `outputs.dir` is resolved
 against the config file's directory. `run -` needs an explicit `outputs.dir`.
+A program embedding a document can override the directory per invocation
+instead — see "Placing one run's tree without editing the document".
 
 | Status | Meaning |
 |---|---|
@@ -196,3 +198,29 @@ and source path facts, then calls the shared
 builder or executor. `-o` uses a same-directory fsynced temporary and an atomic
 no-replace link; an existing destination is always refused, independently of
 `outputs.clobber`.
+
+## Placing one run's tree without editing the document
+
+`run_embedded_config` and `dispatch_request` accept `outputs_dir=`, an
+invocation-level override of where that one invocation publishes. It exists for
+programs that run a document many times and need each tree kept apart — the
+document, and therefore `config.input.yaml` and its digest, stay exactly what
+the author wrote, because nothing is injected into it.
+
+There is no command-line flag for it: the command line runs a document as
+written, and a person who wants a different directory can write one.
+
+Three rules keep the override honest.
+
+- **It must be absolute.** `outputs.dir` resolves against the *document's*
+  directory; an invocation parameter arrives from a caller whose directory this
+  layer does not know, so there is no defensible base to join it to. A relative
+  path, a `~`, or a `$VAR` is refused rather than expanded.
+- **It refuses an authored `outputs.dir` rather than replacing it.** A document
+  that chose a directory and a caller that chose another is a disagreement, and
+  silently resolving it in the caller's favour would discard a decision someone
+  wrote down.
+- **It is recorded.** `provenance.json` carries
+  `bootstrap.invocation_outputs_dir`, so a published tree says whether it landed
+  where the document asked or where an invocation put it. It is `null` when the
+  document decided.
