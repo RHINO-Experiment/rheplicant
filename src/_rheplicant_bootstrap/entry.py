@@ -89,6 +89,7 @@ def _bootstrap_row(
     prepared: PreparedConfig,
     *,
     outputs_dir: str | None = None,
+    outputs_write: Sequence[str] | None = None,
 ) -> dict[str, object]:
     manifest = prepared.source.bootstrap_manifest
     # Key order is load-bearing: `provenance._exact_mapping` compares this
@@ -104,6 +105,9 @@ def _bootstrap_row(
         "source_realpath": manifest.source_realpath,
         "base_dir": manifest.base_dir,
         "invocation_outputs_dir": outputs_dir,
+        "invocation_outputs_write": (
+            None if outputs_write is None else tuple(str(name) for name in outputs_write)
+        ),
     }
 
 
@@ -465,13 +469,17 @@ def dispatch_request(
     preset_provider: Callable[[str], PresetSnapshot] = read_installed_preset,
     platform: OutputPlatform | None = None,
     outputs_dir: str | None = None,
+    outputs_write: Sequence[str] | None = None,
 ) -> int:
     """Execute validate/run in the sole normative order.
 
     ``outputs_dir`` is the invocation-level output override (see
     ``resolve_output_request``): an absolute directory chosen by the caller
     instead of by the document, recorded in provenance as an invocation
-    parameter so a published tree says why it is where it is.
+    parameter so a published tree says why it is where it is.  ``outputs_write``
+    is its companion: the Plan 4B selectors this invocation wants kept, at their
+    default formats, for a caller that decides whether to persist the arrays
+    without editing a document about the science.
     """
     if command not in ("validate", "run"):
         raise ConfigError(f"unknown dispatcher command {command!r}.")
@@ -484,7 +492,9 @@ def dispatch_request(
         parse_outputs=parse_output_grammar,
         boundary_completed=trace.boundary_completed,
     )
-    trace.record_bootstrap(_bootstrap_row(prepared, outputs_dir=outputs_dir))
+    trace.record_bootstrap(
+        _bootstrap_row(prepared, outputs_dir=outputs_dir, outputs_write=outputs_write)
+    )
     outputs = prepared.process.outputs
     if type(outputs) is not ParsedOutputSection:
         raise ConfigError("effective outputs are not a parsed output section.")
@@ -493,6 +503,7 @@ def dispatch_request(
         source=source,
         command=command,
         invocation_dir=outputs_dir,
+        invocation_write=outputs_write,
     )
     run_names = _declared_run_names(prepared.source.layered_document)
     variant_names = _declared_variant_names(prepared)
@@ -787,6 +798,7 @@ def run_embedded_config(
     input_bytes_b64: str | None = None,
     input_bytes: bytes | None = None,
     outputs_dir: str | None = None,
+    outputs_write: Sequence[str] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
@@ -835,6 +847,7 @@ def run_embedded_config(
             stderr=chosen_stderr,
             preset_provider=provider,
             outputs_dir=outputs_dir,
+            outputs_write=outputs_write,
         )
     except ConfigError as error:
         return _render_exception(error, chosen_stderr, traceback_error=False)

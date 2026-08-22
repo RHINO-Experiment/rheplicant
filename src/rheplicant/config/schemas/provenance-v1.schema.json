@@ -113,7 +113,8 @@
         "source_path",
         "source_realpath",
         "base_dir",
-        "invocation_outputs_dir"
+        "invocation_outputs_dir",
+        "invocation_outputs_write"
       ],
       "properties": {
         "protocol_version": {"type": "integer", "minimum": 1},
@@ -124,7 +125,10 @@
         "source_path": {"type": "string"},
         "source_realpath": {"type": ["string", "null"]},
         "base_dir": {"type": "string"},
-        "invocation_outputs_dir": {"type": ["string", "null"]}
+        "invocation_outputs_dir": {"type": ["string", "null"]},
+        "invocation_outputs_write": {
+          "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]
+        }
       }
     },
     "projectSoftware": {

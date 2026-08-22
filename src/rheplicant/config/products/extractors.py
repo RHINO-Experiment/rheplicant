@@ -220,6 +220,119 @@ def _json_value(value: object) -> object:
     raise ConfigError(f"scientific record contains unsupported {type(value).__name__} data.")
 
 
+#: The vocabulary of quality signals a run product may carry.  Deliberately a
+#: vocabulary rather than a per-kind field list: the records differ (a NUTS
+#: product spells ``divergences``, a GLS result spells ``iterations``/``delta``,
+#: a plan nests a ``PlanDiagnostics``), and a per-kind list is the copy that
+#: goes stale when a kind gains a field, because nothing renders the two side
+#: by side.  A name absent from a product is simply absent from the artefact;
+#: nothing is null-filled.
+DIAGNOSTIC_FIELDS = (
+    "converged",
+    "rhat",
+    "r_hat",
+    "chi2",
+    "divergences",
+    "n_eff",
+    "iterations",
+    "delta",
+    "rank",
+    "nullity",
+    "weakest_identified",
+    "sweeps",
+    "warmup",
+    "best_step",
+    "n_draw",
+    "n_chain",
+    "noise_depends_on_prediction",
+    "block_residuals",
+    "engines",
+)
+
+
+def _diagnostic_json(value: object) -> object:
+    """``_json_value``, except that a non-finite number becomes ``null``.
+
+    Everywhere else a NaN in a scientific record is corruption and refusing is
+    right.  Here it is a *finding*: numpyro reports ``r_hat`` and ``n_eff`` as
+    NaN for a chain that degenerated, and a run diverging on every transition
+    is exactly the run whose diagnostics someone needs to read.  Refusing would
+    publish nothing for the worst runs, which is backwards, so the undefined
+    value is recorded as JSON's own absence-of-a-number rather than dropped.
+    """
+    if type(value) is float and not np.isfinite(value):
+        return None
+    if isinstance(value, np.generic):
+        return _diagnostic_json(value.item())
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        array = _array(value, where="diagnostic record array")
+        if array.dtype.kind == "c":
+            raise ConfigError("complex arrays belong in NPZ, not a JSON record.")
+        return _diagnostic_json(array.tolist())
+    if isinstance(value, Mapping):
+        return {str(key): _diagnostic_json(child) for key, child in value.items()}
+    if type(value) in (tuple, list):
+        return [_diagnostic_json(child) for child in value]
+    return _json_value(value)
+
+
+def _diagnostic_lookup(record: object, name: str) -> object:
+    """One field of a product record, by key or by attribute, or ``None``.
+
+    Products come in three shapes -- NamedTuple, frozen dataclass, plain dict --
+    and one field that matters is a computed property
+    (``IdentifiabilityReport.weakest_identified``), invisible to ``vars()`` but
+    reachable by ``getattr``.  Reading through both is what lets one extractor
+    serve every kind.
+    """
+    if isinstance(record, Mapping):
+        try:
+            return record.get(name)
+        except Exception:
+            return None
+    return getattr(record, name, None)
+
+
+def _run_diagnostics(product: object, _configured: object, _options: Mapping[str, object]):
+    """Whatever quality signals this run measured about its own trustworthiness.
+
+    These are the numbers that say whether an answer is what it looks like --
+    ``r_hat``, ``divergences``, the joint chi-squared, a conditioning number --
+    and until now they lived only on the in-memory product, so a published tree
+    recorded that a run happened and not whether to believe it.
+
+    A run whose product carries none of them raises, which the bundle records as
+    an omission for that run rather than a failure: asking for diagnostics from
+    a forward simulation is not an error, it just has none.
+    """
+    found: dict[str, object] = {}
+    for name in DIAGNOSTIC_FIELDS:
+        value = _diagnostic_lookup(product, name)
+        if value is not None:
+            found[name] = _diagnostic_json(value)
+    nested = _diagnostic_lookup(product, "diagnostics")
+    if isinstance(nested, Mapping):
+        # NUTS nests {latent: {"r_hat": ..., "n_eff": ...}}; keep it per-latent
+        # rather than collapsing, because a single bad latent is the finding.
+        if nested:
+            found["per_latent"] = _diagnostic_json(nested)
+    elif nested is not None:
+        for name in DIAGNOSTIC_FIELDS:
+            if name in found:
+                continue
+            value = _diagnostic_lookup(nested, name)
+            if value is not None:
+                found[name] = _diagnostic_json(value)
+    if not found:
+        raise ConfigError("this run's product carries no diagnostic fields.")
+    return ExtractedProduct("json", found)
+
+
+def _condition_diagnostics(product: object, _configured: object, _options: Mapping[str, object]):
+    """``condition``'s product IS the conditioning number, not a record."""
+    return ExtractedProduct("json", {"kappa": _diagnostic_json(np.asarray(product))})
+
+
 def _identifiability(product: object, _configured: object, _options: Mapping[str, object]):
     fields = (
         "names", "shapes", "spans", "n_par", "n_data", "rank", "nullity",
@@ -342,24 +455,33 @@ def _benchmark_record(product: object, _configured: object, _options: Mapping[st
 RUN_KIND_SELECTORS = {
     "forward": ("arrays", "aux", "taps"),
     "fisher": ("arrays", "covariance"),
-    "optimize": ("arrays", "parameters", "losses", "training_history"),
-    "plan.estimate": ("arrays", "estimates", "parameters", "recovery"),
-    "plan.sample": ("arrays", "draws", "parameters", "chains", "recovery"),
-    "conjugate.wiener": ("arrays", "estimates", "parameters", "covariance", "recovery"),
-    "conjugate.gcr": ("arrays", "draws", "chains"),
-    "conjugate.gls": ("arrays", "estimates", "parameters", "recovery"),
-    "condition": ("arrays",),
-    "identifiability": ("arrays", "identifiability"),
+    "optimize": ("arrays", "parameters", "losses", "training_history", "run_diagnostics"),
+    "plan.estimate": ("arrays", "estimates", "parameters", "recovery", "run_diagnostics"),
+    "plan.sample": ("arrays", "draws", "parameters", "chains", "recovery", "run_diagnostics"),
+    "conjugate.wiener": (
+        "arrays", "estimates", "parameters", "covariance", "recovery", "run_diagnostics",
+    ),
+    "conjugate.gcr": ("arrays", "draws", "chains", "run_diagnostics"),
+    "conjugate.gls": ("arrays", "estimates", "parameters", "recovery", "run_diagnostics"),
+    "condition": ("arrays", "run_diagnostics"),
+    "identifiability": ("arrays", "identifiability", "run_diagnostics"),
     "score_directions": ("arrays", "scores"),
     "gradient": ("arrays", "gradients"),
     "mmodes": ("arrays",),
     "predict": ("arrays", "prediction_bands", "posterior_predictives"),
-    "nuts": ("arrays", "draws", "parameters", "chains", "recovery"),
-    "npe": ("arrays", "draws", "parameters", "chains", "training_history", "recovery"),
+    "nuts": ("arrays", "draws", "parameters", "chains", "recovery", "run_diagnostics"),
+    "npe": (
+        "arrays", "draws", "parameters", "chains", "training_history", "recovery",
+        "run_diagnostics",
+    ),
     "compare": ("compare",),
     "benchmark": ("benchmark",),
 }
 
+
+_DIAGNOSTIC_KINDS = tuple(
+    kind for kind, selectors in RUN_KIND_SELECTORS.items() if "run_diagnostics" in selectors
+)
 
 EXTRACTOR_REGISTRY: dict[tuple[str, str], Callable] = {
     ("forward", "arrays"): _forward_arrays,
@@ -411,6 +533,18 @@ EXTRACTOR_REGISTRY: dict[tuple[str, str], Callable] = {
     ("compare", "compare"): _compare_record,
     ("benchmark", "benchmark"): _benchmark_record,
 }
+
+# One generic extractor serves every declaring kind, so a kind that gains a
+# diagnostic field needs no edit here; `condition` is the exception because its
+# product IS the conditioning number rather than a record carrying one.
+EXTRACTOR_REGISTRY.update(
+    {
+        (kind, "run_diagnostics"): (
+            _condition_diagnostics if kind == "condition" else _run_diagnostics
+        )
+        for kind in _DIAGNOSTIC_KINDS
+    }
+)
 
 
 def _recovery(product: object, configured: object, kind: str) -> ExtractedProduct:

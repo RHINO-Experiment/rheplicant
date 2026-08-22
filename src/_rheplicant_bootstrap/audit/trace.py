@@ -133,6 +133,7 @@ _BOOTSTRAP_ROW_KEYS = (
     "source_realpath",
     "base_dir",
     "invocation_outputs_dir",
+    "invocation_outputs_write",
 )
 _PATH_ENCODING_KEYS = ("kind", "document_name", "encoded_name")
 _ERROR_KEYS = ("exception_type", "message")
@@ -768,7 +769,11 @@ class AuditTrace:
             _text(item["source_realpath"], where="bootstrap.source_realpath")
         if item["invocation_outputs_dir"] is not None:
             _text(item["invocation_outputs_dir"], where="bootstrap.invocation_outputs_dir")
+        write = item["invocation_outputs_write"]
+        if write is not None:
+            write = _string_sequence(write, where="bootstrap.invocation_outputs_write")
         projected = dict(item)
+        projected["invocation_outputs_write"] = write
         projected["presets"] = presets
         frozen = cast(Mapping[str, JsonValue], _freeze_json(projected, where="bootstrap"))
         with self._lock:

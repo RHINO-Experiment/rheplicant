@@ -224,3 +224,44 @@ Three rules keep the override honest.
   `bootstrap.invocation_outputs_dir`, so a published tree says whether it landed
   where the document asked or where an invocation put it. It is `null` when the
   document decided.
+
+`outputs_write=` is its companion, and answers the other half of the question: a
+sequence of Plan 4B selector names, taken at their default formats, that this
+invocation wants kept. Same three rules, with one deliberate difference.
+
+- It refuses a document that already requests products under `outputs.write`
+  rather than merging, because a merge would produce a tree matching neither
+  what the author asked for nor what the caller did.
+- It is recorded as `bootstrap.invocation_outputs_write`, `null` when the
+  document decided.
+- **Unlike the document form, a selector nothing produced is an omission, not a
+  refusal.** A document naming `draws` when no run samples has made a mistake
+  worth reporting. A caller saying "keep whatever these runs can produce" has
+  not: whether a given forward run yields `aux` or `taps` is a fact about that
+  document, not about its run kinds, so no caller can know it in advance. Every
+  skipped run is recorded in `products.json`'s `omissions`, so nothing is
+  silently dropped either way.
+
+Together the two mean a task document can be about the science and nothing else,
+while the program running it decides where the tree goes and what is kept in it.
+
+## Quality signals: `outputs.write.run_diagnostics`
+
+`diagnostics.json` records whether a run *happened* correctly -- its status,
+kind, wall time, the gates it tripped. It does not record whether to believe the
+answer. Those numbers -- `r_hat`, `n_eff`, `divergences`, the joint chi-squared,
+a conditioning number, whether a solver converged -- live on the product, and
+before this selector existed they were reachable only in-process, so a published
+tree could not say whether its own contents were trustworthy.
+
+`outputs.write.run_diagnostics` writes them per run as
+`runs/<run>/run_diagnostics.json`. One generic extractor serves every kind: it
+lifts whichever names from a fixed vocabulary the product carries, and a kind
+that gains a diagnostic field needs no new code. A run whose product carries
+none is recorded as an omission, because a forward simulation having no
+convergence diagnostics is not an error.
+
+**A non-finite value is written as `null`, not refused.** numpyro reports
+`r_hat` and `n_eff` as NaN for a chain that degenerated, and a run diverging on
+every transition is exactly the run whose diagnostics someone needs to read;
+refusing would publish nothing for the worst runs.

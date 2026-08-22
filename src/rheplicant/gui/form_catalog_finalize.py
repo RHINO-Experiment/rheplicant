@@ -100,6 +100,7 @@ _EXPECTED_OUTPUT_PRODUCTS = (
     "compare",
     "benchmark",
     "chains",
+    "run_diagnostics",
 )
 
 
@@ -253,7 +254,7 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
     if catalog.graph_nodes != _EXPECTED_GRAPH_NODES:
         problems.append("graph nodes differ from the reviewed 33-node form contract")
     if tuple(_PLAN4B_WRITE) != _EXPECTED_OUTPUT_PRODUCTS:
-        problems.append("output product selectors differ from the reviewed 22-product contract")
+        problems.append("output product selectors differ from the reviewed 23-product contract")
     live_sources = {
         SourceRef(selector.domain, selector.selector)
         for selector, _spec in registered_dimension_rows()

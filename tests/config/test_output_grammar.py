@@ -53,6 +53,7 @@ PLAN4B_PATHS = (
     "outputs.write.compare",
     "outputs.write.benchmark",
     "outputs.write.chains",
+    "outputs.write.run_diagnostics",
 )
 
 
@@ -308,3 +309,75 @@ def test_invocation_override_gives_a_stdin_run_a_directory(source, tmp_path):
         invocation_dir=str(tmp_path / "piped"),
     )
     assert request.target_path == str(tmp_path / "piped")
+
+
+def test_invocation_write_requests_products_at_their_default_formats(source):
+    request = resolve_output_request(
+        parse_output_grammar({}),
+        source=source,
+        command="run",
+        invocation_write=("draws", "chains", "run_diagnostics"),
+    )
+    assert [(p.name, p.format) for p in request.products] == [
+        ("draws", "npz"),
+        ("chains", "npz"),
+        ("run_diagnostics", "json"),
+    ]
+
+
+def test_invocation_write_refuses_a_document_that_already_asks(source):
+    with pytest.raises(ConfigError, match="outputs_write: the document already requests"):
+        resolve_output_request(
+            parse_output_grammar({"write": {"draws": True}}),
+            source=source,
+            command="run",
+            invocation_write=("chains",),
+        )
+
+
+def test_invocation_write_leaves_the_mandatory_envelope_alone(source):
+    # config/provenance/diagnostics are the audit envelope, not Plan 4B
+    # products, so a document keeping its defaults is not "already asking".
+    request = resolve_output_request(
+        parse_output_grammar({"write": {"config": True, "provenance": True}}),
+        source=source,
+        command="run",
+        invocation_write=("draws",),
+    )
+    assert [p.name for p in request.products] == ["draws"]
+
+
+@pytest.mark.parametrize("value", ("draws", 1, None.__class__, object()))
+def test_invocation_write_must_be_a_sequence_of_names(value, source):
+    # A bare string is the trap worth naming: it is a Sequence, and iterating it
+    # would silently request the selectors 'd', 'r', 'a', ...
+    with pytest.raises(ConfigError, match="outputs_write: must be a sequence"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_write=value,
+        )
+
+
+@pytest.mark.parametrize("name", ("mystery", "config", "provenance", "dir"))
+def test_invocation_write_names_a_known_plan4b_selector(name, source):
+    with pytest.raises(ConfigError, match="outputs_write: .* is not one of"):
+        resolve_output_request(
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_write=(name,),
+        )
+
+
+def test_invocation_write_refuses_a_repeat_and_an_empty_set(source):
+    with pytest.raises(ConfigError, match="requested twice"):
+        resolve_output_request(
+            parse_output_grammar({}), source=source, command="run",
+            invocation_write=("draws", "draws"),
+        )
+    with pytest.raises(ConfigError, match="at least one selector"):
+        resolve_output_request(
+            parse_output_grammar({}), source=source, command="run", invocation_write=(),
+        )

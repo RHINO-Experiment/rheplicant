@@ -262,3 +262,44 @@ def test_fisher_prediction_is_a_band_but_not_a_posterior_predictive():
 def test_all_eighteen_kinds_have_a_product_registry_row():
     assert tuple(RUN_KIND_SELECTORS)[-2:] == ("compare", "benchmark")
     assert len(RUN_KIND_SELECTORS) == 18
+
+
+def test_a_document_request_nothing_produced_is_still_a_refusal():
+    # The document form is unchanged: naming a selector no run can produce is a
+    # mistake in the document, and saying so is the point.
+    execution = record([row("forward", "forward", SimpleNamespace(data=np.array([1]), aux={}))])
+    with pytest.raises(ConfigError, match="no executed run can produce"):
+        build_product_bundle(
+            execution,
+            requests=(ProductRequest("draws", "npz", (), ()),),
+            report=None,
+            component_limit=255,
+        )
+
+
+def test_an_invocation_request_nothing_produced_is_omitted_not_refused():
+    # An invocation saying "keep what these runs can produce" has made no
+    # mistake when a run happens not to produce one: whether a forward run
+    # yields `aux` is a fact about the document, not about its run kinds, so a
+    # caller cannot know it in advance. Measured: deriving the selector set
+    # from RUN_KIND_SELECTORS asks a forward run for `aux`, which this document
+    # has none of.
+    execution = record([row("forward", "forward", SimpleNamespace(data=np.array([1]), aux={}))])
+    bundle = build_product_bundle(
+        execution,
+        requests=(ProductRequest("draws", "npz", (), (), optional=True),),
+        report=None,
+        component_limit=255,
+    )
+    manifest = json.loads(bundle.manifest)
+    assert manifest["files"] == []
+    # Nothing is silently dropped: the run that could not produce it says so.
+    assert manifest["omissions"] == [
+        {
+            "kind": "forward",
+            "reason": "outputs.write.draws: is not compatible with kind: forward.",
+            "run": "forward",
+            "selector": "draws",
+        }
+    ]
+    validate_product_bundle(bundle, component_limit=255)

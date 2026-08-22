@@ -18,7 +18,7 @@
         "draws", "losses", "gradients", "covariance", "prediction_bands",
         "posterior_predictives", "identifiability", "scores", "recovery",
         "training_history", "timings", "refusals", "signal_paths", "compare",
-        "benchmark", "chains", "report"
+        "benchmark", "chains", "run_diagnostics", "report"
       ]
     },
     "format": {"enum": ["npz", "json", "txt", "svg", "html", "mermaid", "netcdf"]},

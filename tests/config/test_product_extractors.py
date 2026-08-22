@@ -172,3 +172,79 @@ def test_identifiability_record_is_json_and_arrays_are_explicit_lists():
     assert extracted.encoding == "json"
     assert extracted.value["singular_values"] == [2.0]
     assert extracted.value["rank"] == 1
+
+
+# --- run_diagnostics: the quality signals, published rather than in-memory ---
+
+
+def test_every_kind_declaring_run_diagnostics_has_an_extractor():
+    # One generic extractor serves the family, so this guard is what catches a
+    # kind added to the selector table with no row behind it.
+    declared = {
+        kind
+        for kind, selectors in RUN_KIND_SELECTORS.items()
+        if "run_diagnostics" in selectors
+    }
+    assert declared
+    for kind in declared:
+        assert (kind, "run_diagnostics") in EXTRACTOR_REGISTRY
+
+
+def test_run_diagnostics_lifts_the_vocabulary_a_product_carries():
+    product = SimpleNamespace(divergences=3, n_draw=200, n_chain=4, samples={"a": [1.0]})
+    extracted = EXTRACTOR_REGISTRY[("nuts", "run_diagnostics")](product, None, {})
+    assert extracted.encoding == "json"
+    # `samples` is bulk data claimed by another selector, not a quality signal.
+    assert extracted.value == {"divergences": 3, "n_draw": 200, "n_chain": 4}
+
+
+def test_run_diagnostics_keeps_nuts_signals_per_latent():
+    product = SimpleNamespace(
+        divergences=0,
+        diagnostics={"depth": {"r_hat": 1.01, "n_eff": 180.0}},
+    )
+    extracted = EXTRACTOR_REGISTRY[("nuts", "run_diagnostics")](product, None, {})
+    assert extracted.value["per_latent"] == {"depth": {"r_hat": 1.01, "n_eff": 180.0}}
+
+
+def test_run_diagnostics_reads_a_nested_record_field_by_field():
+    # plan.* nest a PlanDiagnostics record rather than a mapping of latents.
+    nested = SimpleNamespace(chi2=[9.0, 4.0], converged=True, rhat=1.002, sweeps=12)
+    product = SimpleNamespace(diagnostics=nested)
+    extracted = EXTRACTOR_REGISTRY[("plan.sample", "run_diagnostics")](product, None, {})
+    assert extracted.value == {
+        "converged": True,
+        "rhat": 1.002,
+        "chi2": [9.0, 4.0],
+        "sweeps": 12,
+    }
+
+
+@pytest.mark.parametrize("bad", (float("nan"), float("inf"), float("-inf")))
+def test_a_non_finite_diagnostic_is_recorded_as_null_not_refused(bad):
+    # Regression: numpyro reports r_hat/n_eff as NaN for a chain that
+    # degenerated, and a run diverging on every transition is exactly the run
+    # whose diagnostics someone needs. Refusing would publish nothing for the
+    # worst runs. Measured on a real 50/50-divergent NUTS run.
+    product = SimpleNamespace(divergences=50, diagnostics={"depth": {"r_hat": bad}})
+    extracted = EXTRACTOR_REGISTRY[("nuts", "run_diagnostics")](product, None, {})
+    assert extracted.value["per_latent"]["depth"]["r_hat"] is None
+    assert extracted.value["divergences"] == 50
+
+
+def test_a_product_with_no_quality_signals_refuses_so_the_run_is_omitted():
+    # The bundle turns this into a recorded omission for that run, not a
+    # failure: a forward simulation having no diagnostics is not an error.
+    with pytest.raises(ConfigError, match="no diagnostic fields"):
+        EXTRACTOR_REGISTRY[("nuts", "run_diagnostics")](
+            SimpleNamespace(samples={"a": [1.0]}), None, {}
+        )
+
+
+def test_condition_publishes_its_conditioning_number():
+    # `condition`'s product IS the number, not a record carrying one.
+    extracted = EXTRACTOR_REGISTRY[("condition", "run_diagnostics")](
+        np.float32(1234.5), None, {}
+    )
+    assert extracted.encoding == "json"
+    assert extracted.value["kappa"] == pytest.approx(1234.5)

@@ -276,7 +276,10 @@ def build_product_bundle(
                 continue
             files.extend(produced)
             emitted += len(produced)
-        if emitted == 0:
+        if emitted == 0 and not request.optional:
+            # An invocation request is exempt: a caller asking to keep whatever
+            # these runs produce has made no mistake when one of them produces
+            # nothing, and every skipped run is already an omission above.
             raise ConfigError(
                 f"outputs.write.{request.name}: no executed run can produce this product."
             )

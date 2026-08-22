@@ -125,7 +125,7 @@ test("one product, report, Run and audit bundle complete without traversing the 
 
   await page.getByRole("button", { name: "Add product" }).click();
   const products = page.getByRole("listbox", { name: "Available products" });
-  await expect(products.getByRole("option")).toHaveCount(22);
+  await expect(products.getByRole("option")).toHaveCount(23);
   await products.getByRole("option", { name: "timings" }).click();
   const timings = page.getByRole("group", { name: "timings product settings" });
   await timings.getByRole("checkbox", { name: "Write timings" }).click();

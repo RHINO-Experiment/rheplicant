@@ -734,7 +734,7 @@ def test_text_refusal_blocks_every_execution_job_but_not_the_free_projection(cli
 def test_output_product_and_report_routes_are_revision_checked(client):
     created = create_session(client)
     session_id = created["session_id"]
-    assert len(created["outputs"]["products"]) == 22
+    assert len(created["outputs"]["products"]) == 23
     assert created["outputs"]["requested_yaml"] == BASE
 
     product = client.put(

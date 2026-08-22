@@ -14,7 +14,7 @@ const productNames = [
   "arrays", "aux", "taps", "assembly", "estimates", "parameters", "draws", "losses",
   "gradients", "covariance", "prediction_bands", "posterior_predictives", "identifiability",
   "scores", "recovery", "training_history", "timings", "refusals", "signal_paths", "compare",
-  "benchmark", "chains",
+  "benchmark", "chains", "run_diagnostics",
 ];
 
 function product(name: string, enabled = false): OutputProductProjection {
@@ -106,12 +106,12 @@ describe("progressive execute workspace", () => {
   });
 
   it("discovers every product but mounts settings only for the selected product", async () => {
-    // Kills a regression that eagerly mounts all product controls and makes a 22-product session unwieldy.
+    // Kills a regression that eagerly mounts all product controls and makes a 23-product session unwieldy.
     const user = userEvent.setup();
     renderExecute();
     expect(screen.queryAllByRole("group", { name: /product settings/i })).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Add product" }));
-    expect(screen.getAllByRole("option")).toHaveLength(22);
+    expect(screen.getAllByRole("option")).toHaveLength(23);
     await user.click(screen.getByRole("option", { name: "arrays" }));
     expect(screen.getAllByRole("group", { name: /product settings/i })).toHaveLength(1);
   });
@@ -149,19 +149,22 @@ describe("progressive execute workspace", () => {
     expect(screen.getByRole("button", { name: "Run" })).toHaveAccessibleDescription("Run is blocked until validation is repaired.");
   });
 
-  it("keeps a 22-product listbox on one keyboard tab stop and selects from its roving focus", async () => {
+  it("keeps a 23-product listbox on one keyboard tab stop and selects from its roving focus", async () => {
     // Kills a regression that exposes listbox options without Arrow/Home/End navigation or a single roving focus stop.
     const user = userEvent.setup();
     renderExecute();
     await user.click(screen.getByRole("button", { name: "Add product" }));
     const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(22);
+    expect(options).toHaveLength(23);
     expect(options[0]).toHaveAttribute("tabindex", "0");
     for (const option of options.slice(1)) expect(option).toHaveAttribute("tabindex", "-1");
     expect(options[0]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(options[21]).toHaveFocus();
-    expect(options[21]).toHaveAttribute("tabindex", "0");
+    // The last option, not a fixed index: {End} means "the end of the list",
+    // and the length is pinned above, so this stays honest as the catalogue grows.
+    const last = options[options.length - 1];
+    expect(last).toHaveFocus();
+    expect(last).toHaveAttribute("tabindex", "0");
     await user.keyboard("{Home}{ArrowDown}{Enter}");
     expect(screen.getByRole("group", { name: "aux product settings" })).toBeInTheDocument();
   });
@@ -220,7 +223,7 @@ describe("progressive execute workspace", () => {
 
   it("lists the enabled products alone and leaves the other twenty to the Add product search", () => {
     // Kills replacing `products.filter((product) => product.enabled)` with `products`. §7.3 splits
-    // this surface in two — the enabled products in view, all 22 reachable through search — and
+    // this surface in two — the enabled products in view, all 23 reachable through search — and
     // asserting only that the two enabled ones are present cannot tell the split from no split.
     const session = state({ outputs: { ...state().outputs, products: productNames.map((name) => product(name, name === "arrays" || name === "chains")) } });
     renderExecute({ session });
@@ -445,16 +448,16 @@ const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 describe("execute product picker search", () => {
-  it("exposes all 22 products for an empty query and restores them when the query is cleared", async () => {
+  it("exposes all 23 products for an empty query and restores them when the query is cleared", async () => {
     // Kills a regression that hides the catalogue behind a query and breaks spec 7.3 discoverability.
     const user = userEvent.setup();
     renderExecute();
     const filter = await openPicker(user);
-    expect(screen.getAllByRole("option")).toHaveLength(22);
+    expect(screen.getAllByRole("option")).toHaveLength(23);
     await user.type(filter, "chain");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["chains"]);
     await user.clear(filter);
-    expect(screen.getAllByRole("option")).toHaveLength(22);
+    expect(screen.getAllByRole("option")).toHaveLength(23);
   });
 
   it("filters case-insensitively on a substring of the product name", async () => {
@@ -468,12 +471,13 @@ describe("execute product picker search", () => {
   });
 
   it("roves the keyboard over the filtered options rather than the whole catalogue", async () => {
-    // Kills a regression that indexes Arrow/Home/End into the unfiltered 22 and lands outside the filtered list.
+    // Kills a regression that indexes Arrow/Home/End into the unfiltered 23 and lands outside the filtered list.
     const user = userEvent.setup();
     renderExecute();
     const filter = await openPicker(user);
     await user.keyboard("{End}");
-    expect(screen.getAllByRole("option")[21]).toHaveFocus();
+    const unfiltered = screen.getAllByRole("option");
+    expect(unfiltered[unfiltered.length - 1]).toHaveFocus();
     await user.click(filter);
     await user.type(filter, "PRE");
     const filtered = screen.getAllByRole("option");

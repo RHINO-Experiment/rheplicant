@@ -35,6 +35,7 @@ PRODUCT_SELECTORS = (
     "compare",
     "benchmark",
     "chains",
+    "run_diagnostics",
     "report",
 )
 PRODUCT_FORMATS = ("npz", "json", "txt", "svg", "html", "mermaid", "netcdf")

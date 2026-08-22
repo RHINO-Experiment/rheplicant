@@ -86,6 +86,7 @@ _BOOTSTRAP_KEYS = (
     "source_realpath",
     "base_dir",
     "invocation_outputs_dir",
+    "invocation_outputs_write",
 )
 _METADATA = frozenset(("marker", "lock", "journal", "provenance", "diagnostics"))
 _SHA256 = re.compile(r"[0-9a-f]{64}")

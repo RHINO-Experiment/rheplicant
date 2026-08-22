@@ -50,7 +50,7 @@ def test_projection_keeps_requested_bytes_and_exposes_preset_merged_run_view():
     resolved = yaml.safe_load(found.resolved_yaml)
     assert resolved["observation"]["site"]["lat_deg"]["value"] == 53.2367
     assert found.resolution_note.startswith("Preset-merged preview")
-    assert len(found.products) == 22
+    assert len(found.products) == 23
     assert _product(found, "arrays").enabled is True
     assert _product(found, "arrays").runs == ("fit / one",)
     assert _product(found, "chains").formats == ("npz", "netcdf")
@@ -196,7 +196,7 @@ def test_invalid_output_grammar_remains_visible_as_an_editable_unavailable_proje
     assert found.requested_yaml == invalid
     assert found.state == "unavailable"
     assert "outputs.clobber" in found.state_message
-    assert len(found.products) == 22
+    assert len(found.products) == 23
 
 
 def _audit_target(tmp_path: Path) -> tuple[Path, str]:

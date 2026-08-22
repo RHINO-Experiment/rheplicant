@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import fcntl
 import json
 import os
 import re
 import stat
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import cast
 
 from _rheplicant_bootstrap.errors import ConfigError
@@ -64,6 +65,7 @@ _PLAN4B_WRITE = (
     "compare",
     "benchmark",
     "chains",
+    "run_diagnostics",
 )
 _PLAN4B_TOP = ("memory_archive", "posterior_net", "campaign")
 _PRODUCT_DEFAULT_FORMATS = {
@@ -89,6 +91,7 @@ _PRODUCT_DEFAULT_FORMATS = {
     "compare": "json",
     "benchmark": "json",
     "chains": "npz",
+    "run_diagnostics": "json",
 }
 _PRODUCT_FORMATS = {
     **{name: (format_,) for name, format_ in _PRODUCT_DEFAULT_FORMATS.items()},
@@ -381,12 +384,56 @@ def _invocation_directory(value: object, *, parsed: ParsedOutputSection) -> str 
     return directory
 
 
+def _invocation_write(
+    value: object, *, parsed: ParsedOutputSection
+) -> tuple[ProductRequest, ...] | None:
+    """Validate the invocation-level product request, or report its absence.
+
+    The companion to ``_invocation_directory``, and honest for the same reason:
+    a program that runs documents on someone's behalf decides *whether* to keep
+    the arrays, the same way it decides *where*, and neither decision belongs in
+    a document about the science.  Each name is a Plan 4B selector taken at its
+    default format, which is what an invocation can express without inventing a
+    second grammar; anything finer -- a format, a subset of runs -- is a
+    document's job.
+
+    It refuses a document that already asks for products rather than merging
+    with it, because a merge would silently produce a tree matching neither
+    what the author asked for nor what the caller did.
+    """
+    if value is None:
+        return None
+    if parsed.products:
+        raise ConfigError(
+            "outputs_write: the document already requests products under "
+            "outputs.write; an invocation override refuses rather than merges."
+        )
+    if static_isinstance(value, str) or not static_isinstance(value, Sequence):
+        raise ConfigError("outputs_write: must be a sequence of selector names.")
+    names: list[str] = []
+    for entry in value:
+        if not static_isinstance(entry, str) or str.__str__(entry) not in _PLAN4B_WRITE:
+            raise ConfigError(
+                f"outputs_write: {entry!r} is not one of {list(_PLAN4B_WRITE)}."
+            )
+        name = str.__str__(entry)
+        if name in names:
+            raise ConfigError(f"outputs_write: {name!r} is requested twice.")
+        names.append(name)
+    if not names:
+        raise ConfigError("outputs_write: must name at least one selector.")
+    return tuple(
+        dataclasses.replace(_product_request(name, True), optional=True) for name in names
+    )
+
+
 def resolve_output_request(
     parsed: ParsedOutputSection,
     *,
     source: SourceInput,
     command: str,
     invocation_dir: str | None = None,
+    invocation_write: Sequence[str] | None = None,
 ) -> OutputRequest:
     """Resolve lexical output path facts without following a symlink."""
     if type(parsed) is not ParsedOutputSection or type(source) is not SourceInput:
@@ -394,6 +441,7 @@ def resolve_output_request(
     if command not in _COMMANDS:
         raise ConfigError(f"unknown output command {command!r}.")
     override = _invocation_directory(invocation_dir, parsed=parsed)
+    products = _invocation_write(invocation_write, parsed=parsed)
     explicit = parsed.directory is not None or override is not None
     # The override is already absolute and lexically checked, so it skips the
     # expansion the document form needs; both then meet the same final refusals.
@@ -439,7 +487,7 @@ def resolve_output_request(
         write_config=parsed.write_config,
         write_provenance=parsed.write_provenance,
         write_diagnostics=parsed.write_diagnostics,
-        products=parsed.products,
+        products=parsed.products if products is None else products,
         report=parsed.report,
     )
 

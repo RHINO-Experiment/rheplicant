@@ -25,6 +25,13 @@ class ProductRequest:
     format: str
     runs: tuple[str, ...]
     options: tuple[tuple[str, object], ...]
+    #: True when this request came from an invocation parameter rather than the
+    #: document.  A document naming a selector nothing produced has made a
+    #: mistake worth refusing; a caller saying "keep what these runs can
+    #: produce" has not, because whether a given run yields `aux` or `taps` is a
+    #: fact about that document, not about its run kinds.  The difference is
+    #: recorded as an omission either way.
+    optional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
