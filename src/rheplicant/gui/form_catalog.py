@@ -721,6 +721,36 @@ def _run_widgets(builder: _Builder) -> None:
         "projector",
         "sky",
     }
+    #: The exits that require a key SOME of the exits accepting it require.
+    #:
+    #: ``required`` above is keyed by option NAME, which is the right shape for
+    #: a key every accepting exit demands -- ``of:`` is required by both
+    #: ``gradient`` (``diagnostics._parse_gradient``) and ``compare``
+    #: (``comparison``), so one flag says the truth.  It is the wrong shape
+    #: where the exits disagree, and two of them do:
+    #:
+    #: * ``seed`` -- ``plan.sample`` (``exits`` calls ``_seed_name``
+    #:   unconditionally), ``conjugate.gcr`` (refuses its absence by name) and
+    #:   ``nuts`` (same unconditional call) require it; ``condition`` guards
+    #:   with ``if "seed" in options`` and does not.
+    #: * ``names`` -- the four exits reaching ``_parsed_opening`` require it,
+    #:   because the conjugate block always builds the GROUPED operator;
+    #:   ``identifiability`` and ``score_directions`` read it through
+    #:   ``diagnostics._names``, which answers ``None`` when it is absent.
+    #:
+    #: A key listed here becomes conditional rather than flat: ``required`` is
+    #: left False and the demand is carried by ``required_when``, which
+    #: ``forms._project`` ORs into the flag for the document in hand.  Keying
+    #: the WIDGET by ``(kind, name)`` instead would be the wrong fix -- a
+    #: widget path is a document path, ``runs[].seed`` is one of them, and
+    #: ``form_catalog_finalize.catalog_drift`` requires widget paths to be
+    #: unique.
+    required_by_kind = {
+        "seed": frozenset({"plan.sample", "conjugate.gcr", "nuts"}),
+        "names": frozenset(
+            {"conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition"}
+        ),
+    }
     all_keys = set().union(*tables.values())
     for key in sorted(all_keys):
         kinds = tuple(kind for kind, keys in tables.items() if key in keys)
@@ -738,11 +768,20 @@ def _run_widgets(builder: _Builder) -> None:
         visibility: FormRule = _rule("runs[].kind", "in", kinds)
         if key in _ADAM_DEFAULTS:
             visibility = _all(visibility, _rule("runs[].optimizer", "equals", "adam"))
+        # Only the exits that actually demand the key carry the demand. The
+        # intersection is not defensive tidying: it keeps the rule from naming
+        # an exit that does not accept the key at all, which would make the
+        # sentence unreadable the day a key table moves.
+        demanding = required_by_kind.get(key)
+        demanded_by = () if demanding is None else tuple(k for k in kinds if k in demanding)
         builder.add(
             f"runs[].{key}",
             widget="select" if choices else "value",
             choices=tuple(choices),
-            required=key in required,
+            required=demanding is None and key in required,
+            required_when=(
+                None if not demanded_by else _rule("runs[].kind", "in", demanded_by)
+            ),
             default=defaults.get(key, _NO_DEFAULT),
             visible_when=visibility,
         )

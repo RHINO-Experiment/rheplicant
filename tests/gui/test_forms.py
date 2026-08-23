@@ -21,6 +21,7 @@ from rheplicant.gui.forms import (
     project_forms,
     widget_catalog,
 )
+from rheplicant.gui.starter import STARTER_YAML
 from rheplicant.radio.graph import RADIO_GRAPH
 
 
@@ -362,3 +363,43 @@ class TestEnumMembersReachTheWidget:
         resource reference: both are structural, neither is closed."""
         assert _widget("model.noise_wave.switch_key").choices == ()
         assert _widget("model.filters[].projector").choices == ()
+
+
+#: Which run kinds actually demand an option several kinds accept, and which
+#: merely accept it. Each row is the section that decides, so a reader can
+#: check the claim without running anything:
+#:
+#: * ``seed`` -- ``plan.sample``/``nuts`` call ``draws._seed_name``
+#:   unconditionally and ``conjugate.gcr`` refuses its absence by name, while
+#:   ``condition`` guards with ``if "seed" in options``.
+#: * ``names`` -- the conjugate opening validates it and raises, while
+#:   ``identifiability``/``score_directions`` read it through
+#:   ``diagnostics._names``, which answers ``None`` when it is absent.
+#:
+#: ``required`` on the widget is keyed by option NAME, so before these rows
+#: existed one exit's demand was published as every accepting exit's.
+_RUN_OPTION_DEMAND = [
+    ("seed", "plan.sample", True),
+    ("seed", "conjugate.gcr", True),
+    ("seed", "nuts", True),
+    ("seed", "condition", False),
+    ("names", "conjugate.wiener", True),
+    ("names", "conjugate.gcr", True),
+    ("names", "conjugate.gls", True),
+    ("names", "condition", True),
+    ("names", "identifiability", False),
+    ("names", "score_directions", False),
+    # ``of`` is required by BOTH exits that accept it, so a flat flag says the
+    # truth for it -- pinned here so a future rewrite does not "fix" it into a
+    # conditional that quietly stops demanding one of them.
+    ("of", "gradient", True),
+    ("of", "compare", True),
+]
+
+
+@pytest.mark.parametrize(("option", "kind", "demanded"), _RUN_OPTION_DEMAND)
+def test_run_option_is_demanded_only_by_the_exits_that_require_it(option, kind, demanded):
+    document = yaml.safe_load(STARTER_YAML)
+    document["runs"] = [{"name": "probe", "kind": kind}]
+    missing = project_forms(document).missing_required
+    assert (f"runs[0].{option}" in missing) is demanded
