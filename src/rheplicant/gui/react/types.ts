@@ -186,6 +186,9 @@ export interface ProjectedWidget {
   value: unknown;
   dimension: string | null;
   unit_policy: string | null;
+  /** Every spelling the alphabet accepts for `dimension`, canonical first, or
+   *  empty where it has no second spelling to offer or refuses a unit. */
+  units: string[];
   delivery: string | null;
   disabled: boolean;
   reason: string | null;
