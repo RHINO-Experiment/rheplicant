@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Any
 
 from _rheplicant_bootstrap.process import _RUNTIME_KEYS
@@ -80,6 +81,7 @@ from rheplicant.config.sections.npe import (
 from rheplicant.config.sections.npe import (
     _SAMPLE_KEYS as NPE_SAMPLE_KEYS,
 )
+from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
 from rheplicant.config.sections.nuts import _INITS, _NUTS_DEFAULTS, _NUTS_KEYS
 from rheplicant.config.sections.observation import (
     _AUX_KEYS,
@@ -667,6 +669,40 @@ def _inference_widgets(builder: _Builder) -> None:
         builder.add(f"inference.npe.{key}", visible_when=npe_visible)
 
 
+def _contested(key: str, owners: tuple[Mapping, ...]) -> bool:
+    """Whether the exits owning ``key`` disagree about its default.
+
+    One widget carries one ``default``, because a widget path is a DOCUMENT
+    path and ``runs[].tol`` is one of them.  Where the exits accepting a key
+    agree, that single slot says the truth.  Where they disagree it cannot,
+    and today one key disagrees: ``plan.estimate`` defaults ``tol`` to 1e-8
+    (``exits._ESTIMATE_DEFAULTS``) while the three ``conjugate.*`` solves
+    default it to 1e-6 (``conjugate_support._KNOB_DEFAULTS``).  Publishing
+    either number tells three exits, or one, a plausible wrong figure about a
+    solver tolerance -- and a plausible wrong figure is the one kind of error
+    that survives being looked at.
+
+    So a contested key publishes NO default.  ``has_default`` exists for
+    exactly this, and it costs nothing downstream: ``forms._project`` reads it
+    only for ``must_decide``, which also requires ``required``, and no
+    contested key is required.  The resolution layer still applies each exit's
+    own default to a document that omits the key; what goes away is a display
+    hint that was wrong for most of the exits that saw it.
+
+    Computed rather than listed, so the next divergence -- a moved key table, a
+    retuned solver -- drops its default instead of quietly publishing a stale
+    one.  A ``default_when`` beside ``visible_when``/``required_when`` is the
+    fuller answer and is deliberately not built for a population of one; when a
+    second key contests, it will have two callers and a reason.
+
+    :param key: the run option, without its ``runs[].`` prefix.
+    :param owners: every mapping that may declare a default for it.
+    :returns: True when two owners declare different values.
+    """
+    declared = [owner[key] for owner in owners if key in owner]
+    return len({repr(value) for value in declared}) > 1
+
+
 def _run_widgets(builder: _Builder) -> None:
     for key in sorted(_RUN_KEYS):
         choices = tuple(RUN_KINDS) if key == "kind" else ("ok", "refuse") if key == "expect" else ()
@@ -705,6 +741,14 @@ def _run_widgets(builder: _Builder) -> None:
         "benchmark": _BENCHMARK_KEYS,
     }
     defaults = {**_ADAM_DEFAULTS, **_ESTIMATE_DEFAULTS, **_SAMPLE_DEFAULTS, **_NUTS_DEFAULTS}
+    #: Every map that owns a default for a run option, INCLUDING the conjugate
+    #: knobs the merge above never consulted.  Read only to notice disagreement
+    #: -- never merged in, because merging would hand the catalog defaults for
+    #: keys it has always published as having none (``iterations``, ``maxiter``
+    #: and the reweight knobs), which is a larger claim than this makes.
+    default_owners = (
+        _ADAM_DEFAULTS, _ESTIMATE_DEFAULTS, _SAMPLE_DEFAULTS, _NUTS_DEFAULTS, _KNOB_DEFAULTS,
+    )
     required = {
         "optimizer",
         "learning_rate",
@@ -782,7 +826,7 @@ def _run_widgets(builder: _Builder) -> None:
             required_when=(
                 None if not demanded_by else _rule("runs[].kind", "in", demanded_by)
             ),
-            default=defaults.get(key, _NO_DEFAULT),
+            default=_NO_DEFAULT if _contested(key, default_owners) else defaults.get(key, _NO_DEFAULT),
             visible_when=visibility,
         )
 

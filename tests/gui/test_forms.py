@@ -403,3 +403,47 @@ def test_run_option_is_demanded_only_by_the_exits_that_require_it(option, kind, 
     document["runs"] = [{"name": "probe", "kind": kind}]
     missing = project_forms(document).missing_required
     assert (f"runs[0].{option}" in missing) is demanded
+
+
+def test_an_option_its_exits_disagree_about_publishes_no_default():
+    """``tol`` is 1e-8 for ``plan.estimate`` and 1e-6 for the conjugate solves.
+
+    One widget carries one default because a widget path is a document path,
+    so the slot cannot hold both. Publishing either tells three exits, or one,
+    a plausible wrong figure about a solver tolerance -- and a plausible wrong
+    figure is the one kind of error that survives being looked at.
+    """
+    tol = _widget("runs[].tol")
+    assert tol.has_default is False
+    assert tol.default is None
+    # The disagreement it is standing in for is real, and named at both ends.
+    from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
+    from rheplicant.config.sections.exits import _ESTIMATE_DEFAULTS
+
+    assert _ESTIMATE_DEFAULTS["tol"] != _KNOB_DEFAULTS["tol"]
+
+
+@pytest.mark.parametrize(
+    ("path", "default"),
+    [
+        ("runs[].check_identifiability", "once"),
+        ("runs[].solve_guard", 0.001),
+        ("runs[].solve_tol", 1e-6),
+    ],
+)
+def test_an_option_its_exits_agree_about_keeps_its_default(path, default):
+    """Dropping a CONTESTED default must not drop the uncontested ones with it."""
+    found = _widget(path)
+    assert found.has_default is True
+    assert found.default == default
+
+
+@pytest.mark.parametrize("path", ["runs[].iterations", "runs[].maxiter"])
+def test_reading_the_conjugate_knobs_does_not_hand_them_defaults(path):
+    """The knob map is consulted to notice disagreement, never merged in.
+
+    Merging it would publish defaults for keys the catalog has always reported
+    as having none -- and ``iterations`` is required, so a default there would
+    silently stop ``condition`` having to decide it.
+    """
+    assert _widget(path).has_default is False
