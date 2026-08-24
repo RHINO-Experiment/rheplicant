@@ -327,6 +327,56 @@ def test_worker_main_routes_every_job_kind(monkeypatch, kind, runner_name):
     ]
 
 
+def test_worker_refuses_stdin_over_the_bounded_limit(monkeypatch):
+    """A worker fed more than the shared limit refuses with the limit named.
+
+    The worker must read stdin through the same bounded reader the CLI path
+    uses (``_rheplicant_bootstrap.source``), not an unbounded ``.read()`` --
+    see A7.2. The limit is shrunk here so the test stays fast rather than
+    actually sending 16 MiB.
+    """
+    monkeypatch.setattr(gui_worker, "_input_limit", lambda: 8)
+    monkeypatch.setattr(
+        gui_worker.sys,
+        "stdin",
+        SimpleNamespace(buffer=BytesIO(b"123456789")),
+    )
+    frames = []
+    monkeypatch.setattr(
+        gui_worker, "_write_frame", lambda frame: frames.append(frame)
+    )
+
+    assert gui_worker.main(["validate"]) == 0
+    assert len(frames) == 1
+    assert frames[0]["status"] == "refused"
+    assert "exceeds limit 8" in frames[0]["message"]
+
+
+def test_worker_accepts_stdin_up_to_the_bounded_limit(monkeypatch):
+    """A payload exactly at the (shrunk) limit is still read and dispatched."""
+    monkeypatch.setattr(gui_worker, "_input_limit", lambda: 8)
+    monkeypatch.setattr(
+        gui_worker.sys,
+        "stdin",
+        SimpleNamespace(buffer=BytesIO(b"12345678")),
+    )
+    calls = []
+    monkeypatch.setattr(
+        gui_worker,
+        "_run_validation",
+        lambda yaml_text: calls.append(yaml_text) or {"findings": []},
+    )
+    monkeypatch.setattr(
+        gui_worker, "_write_frame", lambda frame: calls.append(frame)
+    )
+
+    assert gui_worker.main(["validate"]) == 0
+    assert calls == [
+        "12345678",
+        {"status": "ok", "result": {"findings": []}},
+    ]
+
+
 def test_formal_worker_calls_plan4_dispatcher_with_exact_bytes(monkeypatch):
     from _rheplicant_bootstrap import entry
 

@@ -9,6 +9,7 @@ held it, so these tests measure where the bound actually bites.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import pathlib
@@ -1323,6 +1324,64 @@ def test_a_descriptor_a_live_reader_still_holds_is_never_handed_on():
         release.set()
         os.close(write)
         reader.finish(10.0)
+
+
+@_POSIX_ONLY
+def test_a_failed_second_pipe_leaks_no_descriptor_from_the_first(monkeypatch):
+    """A7.3: a partial pipe/thread setup must hand back everything it opened.
+
+    ``drained_run`` used to open its two pipes and start both readers as an
+    unguarded sequence: a failure on the second ``os.pipe()`` call left the
+    first pipe's two descriptors -- already allocated, never referenced again
+    -- open for the life of the server.  Four such failures cost eight
+    descriptors that nothing would ever reclaim.
+
+    Verified by tracking the exact fds the patched ``os.pipe`` handed out and
+    asserting each is closed afterward, rather than by counting
+    ``/dev/fd`` entries: a raw fd count could stay stable by coincidence if
+    something else in the process opens or closes a descriptor around the
+    same moment, while checking that each specific fd came back closed
+    (``os.fstat`` raising ``OSError(EBADF)``) cannot be fooled that way.
+    """
+    # The anchor (``_group_anchor``) opens ``subprocess.Popen(..., stdin=PIPE)``
+    # under the hood, which calls the real ``os.pipe`` at least once on its
+    # own before ``drained_run`` ever reaches its own two calls.  Declining
+    # the anchor keeps the count that matters -- "the Nth call `drained_run`
+    # itself makes" -- unambiguous.
+    monkeypatch.setattr(gui_child, "_group_anchor", lambda: None)
+
+    real_pipe = os.pipe
+    opened: list[int] = []
+    calls = 0
+
+    def failing_pipe():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError(errno.EMFILE, "too many open files")
+        ends = real_pipe()
+        opened.extend(ends)
+        return ends
+
+    monkeypatch.setattr(gui_child.os, "pipe", failing_pipe)
+
+    with pytest.raises(OSError):
+        gui_child.drained_run(
+            [sys.executable, "-c", "pass"],
+            input_bytes=b"",
+            stdout=gui_child.StreamTail(limit=64),
+            stderr=gui_child.StreamTail(limit=64),
+            timeout=5,
+        )
+
+    assert calls == 2, "the second os.pipe() call was never reached"
+    assert len(opened) == 2, "the first pipe should have opened exactly once"
+    for fd in opened:
+        with pytest.raises(OSError) as excinfo:
+            os.fstat(fd)
+        assert excinfo.value.errno == errno.EBADF, (
+            f"descriptor {fd} from the first pipe was never closed"
+        )
 
 
 @pytest.mark.parametrize(

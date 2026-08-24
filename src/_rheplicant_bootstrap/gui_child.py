@@ -573,14 +573,37 @@ def drained_run(
     # pipes or starting a reader is itself what failed and there is no child.
     try:
         group = None if anchor is None else process_group(anchor)
-        out_read, out_write = os.pipe()
-        err_read, err_write = os.pipe()
-        readers = (
-            _StreamReader(out_read, stdout),
-            _StreamReader(err_read, stderr),
-        )
-        for reader in readers:
-            reader.start()
+        readers: tuple[_StreamReader, ...] = ()
+        reader_handles: tuple[int, ...] = ()
+        opened_fds: list[int] = []
+        started = 0
+        try:
+            out_read, out_write = os.pipe()
+            opened_fds.extend((out_read, out_write))
+            err_read, err_write = os.pipe()
+            opened_fds.extend((err_read, err_write))
+            reader_handles = (out_read, err_read)
+            readers = (
+                _StreamReader(out_read, stdout),
+                _StreamReader(err_read, stderr),
+            )
+            for reader in readers:
+                reader.start()
+                started += 1
+        except BaseException:
+            # A failure partway through this sequence must not leak every
+            # descriptor opened before it -- see A7.3. A reader that has
+            # already been started owns its read handle and closes it itself
+            # once asked to stop; everything else opened so far is closed
+            # here, because nothing else will ever close it.
+            started_handles = set(reader_handles[:started])
+            for reader in readers[:started]:
+                reader.finish(0.0)
+            for fd in opened_fds:
+                if fd not in started_handles:
+                    with suppress(OSError):
+                        os.close(fd)
+            raise
         try:
             completed = subprocess.run(
                 list(argv),

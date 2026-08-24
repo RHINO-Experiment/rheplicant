@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import dataclasses
-import datetime as dt
 import hashlib
 import json
 import os
@@ -29,6 +28,7 @@ from .paths import (
     TRANSACTION_PHASES,
     backup_name,
     decode_journal_temp,
+    failure_name,
     journal_temp_name,
     require_component_budget,
     staging_name,
@@ -595,11 +595,6 @@ def _advance_journal(
     _fsync_directory(lease.parent_fd)
 
 
-def _timestamped_failure_name(lease: OutputLease, publication: str) -> str:
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-    return f"{lease.target_name}.{publication}-{stamp}-{os.getpid()}"
-
-
 def _interrupted(
     operation: str,
     transaction_id: str | None,
@@ -694,7 +689,13 @@ def stage_bundle(
         publish_name = (
             lease.target_name
             if publication == "success"
-            else _timestamped_failure_name(lease, publication)
+            # Transaction-id based, not timestamp-based: A7.6 -- a name that
+            # does not vary with ``transaction_id`` collides with itself on
+            # every retry of this very loop, so the loop can never make
+            # progress past a first collision.  ``transaction_id`` above is
+            # freshly drawn from ``uuid.uuid4()`` on every attempt, exactly
+            # like ``staged``, ``backup`` and ``temporary_names`` already are.
+            else failure_name(lease.request.target_path, publication, transaction_id)
         )
         temporary_names = tuple(
             journal_temp_name(lease.request.target_path, transaction_id, phase)

@@ -25,6 +25,7 @@ from _rheplicant_bootstrap.output import (
 )
 from _rheplicant_bootstrap.output.paths import (
     TRANSACTION_PHASES,
+    failure_name,
     journal_temp_name,
     staging_name,
 )
@@ -118,6 +119,65 @@ def test_prejournal_candidate_collision_selects_a_fresh_transaction_id(
         close_output_lease(lease)
 
 
+def test_two_colliding_failure_first_choices_still_publish_distinct_siblings(
+    tmp_path, monkeypatch
+):
+    """A7.6: a collision on the failure sibling's name must not repeat itself.
+
+    ``publish_name`` for a refused/error sibling used to be built from a
+    wall-clock timestamp and the process id -- neither of which the retry
+    loop's freshly drawn ``transaction_id`` has any influence over.  Two
+    failures whose first-choice name collided therefore collided on every
+    one of the retry loop's 128 attempts too: the candidate name never
+    changed between attempts, so ``stage_bundle`` raised "could not select a
+    collision-free transaction id" instead of ever trying a name the
+    collision could not repeat.
+
+    Reproduced by pinning the SECOND failure's first-drawn transaction id to
+    the value the FIRST failure already published under -- exactly what a
+    second failure whose first choice repeats the first one's puts a real
+    caller through -- and checking both still publish, in two distinct
+    directories, without exhausting the retry loop.
+    """
+    _target, platform, lease, publication, _verified = lease_for(tmp_path)
+    first_choice = "0" * 32
+    second_choice = "1" * 32
+    marker_id = transaction.uuid.UUID("22222222-2222-4222-8222-222222222222")
+    ids = iter(
+        (
+            transaction.uuid.UUID(hex=first_choice),
+            marker_id,
+            transaction.uuid.UUID(hex=first_choice),  # collides with the first
+            transaction.uuid.UUID(hex=second_choice),
+            marker_id,
+        )
+    )
+    monkeypatch.setattr(transaction.uuid, "uuid4", lambda: next(ids))
+
+    try:
+        first_candidate = bundle("error")
+        first_handle, _ = stage_bundle(
+            publication, first_candidate, platform, publication="error"
+        )
+        replace_staged_metadata(first_handle, first_candidate, platform)
+        first_path = Path(publish_failure(first_handle, platform))
+
+        second_candidate = bundle("error")
+        second_handle, _ = stage_bundle(
+            publication, second_candidate, platform, publication="error"
+        )
+        replace_staged_metadata(second_handle, second_candidate, platform)
+        second_path = Path(publish_failure(second_handle, platform))
+    finally:
+        close_output_lease(lease)
+
+    assert first_handle.transaction_id == first_choice
+    assert second_handle.transaction_id == second_choice
+    assert first_path != second_path
+    assert first_path.is_dir()
+    assert second_path.is_dir()
+
+
 def test_staging_requires_a_typed_view_and_the_lease_platform(tmp_path):
     _target, platform, lease, _publication, verified = lease_for(tmp_path)
     try:
@@ -165,8 +225,10 @@ def test_exact_success_budget_passes_and_one_byte_short_failure_budget_is_pure(
         )
         replace_staged_metadata(handle, candidate, platform)
         publish_success(handle, platform)
-        failure_name = transaction._timestamped_failure_name(lease, "error")
-        failure_limit = len(os.fsencode(failure_name)) - 1
+        worst_case_failure_name = failure_name(
+            lease.request.target_path, "error", identifier
+        )
+        failure_limit = len(os.fsencode(worst_case_failure_name)) - 1
         assert failure_limit >= success_limit
         object.__setattr__(lease, "component_limit", failure_limit)
         object.__setattr__(publication, "component_limit", failure_limit)

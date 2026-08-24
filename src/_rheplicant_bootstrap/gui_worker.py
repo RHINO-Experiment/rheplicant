@@ -42,6 +42,7 @@ from _rheplicant_bootstrap.gui_limits import (
 from _rheplicant_bootstrap.output.manager import parse_output_grammar
 from _rheplicant_bootstrap.prepare import PreparedConfig, prepare_config
 from _rheplicant_bootstrap.presets import read_installed_preset
+from _rheplicant_bootstrap.source import _input_limit, _read_bounded_forward
 from _rheplicant_bootstrap.types import SourceInput
 
 _FRAME_PREFIX = b"\x1eRHEPLICANT_GUI_JOB "
@@ -419,7 +420,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _framed_job(kind: str) -> int:
     """Run one job and write exactly one frame for it, whatever it did."""
     try:
-        yaml_text = sys.stdin.buffer.read().decode("utf-8", "strict")
+        # Bounded the same way the CLI path reads a source: one shared limit
+        # (``_input_limit``), not a second cap invented for the worker. An
+        # unbounded ``.read()`` here let a hostile or runaway parent hand the
+        # worker an arbitrarily large body before any science began.
+        yaml_bytes = _read_bounded_forward(
+            sys.stdin.buffer,
+            source_name="<gui-worker-stdin>",
+            limit=_input_limit(),
+        )
+        yaml_text = yaml_bytes.decode("utf-8", "strict")
         if kind == "validate":
             result = _run_validation(yaml_text)
         elif kind == "preview_forward":
