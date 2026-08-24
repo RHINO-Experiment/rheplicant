@@ -1,4 +1,42 @@
-"""Strict projection of an audit snapshot into provenance JSON."""
+"""Strict projection of an audit snapshot into provenance JSON.
+
+THIS FILE'S SHAPE IS A PUBLISHED, CLOSED, VERSIONED CONTRACT
+------------------------------------------------------------
+``rheplicant/config/schemas/provenance-v1.schema.json`` ships in the wheel,
+declares ``"format_version": {"const": 1}``, and sets
+``additionalProperties: false`` with every property ``required`` on **every**
+object it defines. ``tests/config/test_audit_schemas.py`` enforces it.
+
+So a field cannot be added here, and cannot be removed here, without a
+``format_version`` bump -- and the shape is served verbatim by an out-of-repo
+consumer (``rheplicant-compute``'s schema RPC), so the bump is a cross-repository
+change rather than a local one.
+
+Three separate review findings collided with this in one sitting, each filed as
+a small independent fix, none of them small:
+
+* record a ``products`` artefact row so provenance alone can enumerate the tree;
+* record ``{name, sha256}`` per preset instead of the name alone;
+* move ``wall_time_ns`` out, so provenance is byte-reproducible for identical
+  inputs.
+
+Two of the three were answered **without** touching this contract, and that is
+the route to prefer: :mod:`_rheplicant_bootstrap.audit.integrity` writes an
+``integrity.json`` covering every published file, which makes the tree
+enumerable and digest-anchored from the file whose job that is; and preset
+SOURCES are published under ``presets/``, which is strictly more recoverable
+than a digest and inherits one from the same manifest.
+
+What still genuinely needs the bump: ``provenance.json`` being self-sufficient,
+and the tree's root digest being a function of the inputs alone (``wall_time_ns``
+is in each ``runs[]`` item's ``required`` array, so it cannot simply leave).
+Neither is urgent -- the anchor detects tampering of the tree it describes
+whether or not a second run would reproduce it.
+
+**Before adding a field here, read this paragraph rather than the schema.** The
+schema will tell you the field is refused; it will not tell you that two of the
+three reasons people want to add one already have an answer elsewhere.
+"""
 
 from __future__ import annotations
 
