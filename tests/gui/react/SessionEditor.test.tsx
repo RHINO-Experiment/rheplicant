@@ -356,6 +356,7 @@ function fullyDistinctSession(): EditorSession {
             value: 17,
             dimension: "time",
             unit_policy: "seconds",
+            units: [],
             delivery: "static",
             disabled: false,
             reason: "Accepted widget reason",
