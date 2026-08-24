@@ -780,7 +780,7 @@ class TestCapabilityKeys:
         unexecutable for these two without editing `_structural`, which is
         Task 2's file.  §6 carries it."""
         for key in ("memory_archive", "posterior_net"):
-            with pytest.raises(ConfigError, match="Plan 4"):
+            with pytest.raises(ConfigError, match="command line"):
                 _document_sweep({"schema_version": 1,
                                  "outputs": {"write": {key: {}}}})
 

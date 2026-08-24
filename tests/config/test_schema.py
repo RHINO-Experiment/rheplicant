@@ -188,7 +188,7 @@ class TestStatusAgreesWithTheLoader:
             assert "is reserved" in message
         else:
             assert statuses[name] == "deferred"
-            assert "is not read by this layer yet" in message
+            assert "is not read by this layer" in message
 
 
 class TestExits:

@@ -78,13 +78,21 @@ class TestLoadDocument:
             load_document({**synthetic_document(), "observations": {}})
 
     @pytest.mark.parametrize(
-        ("section", "route"),
-        [("outputs", "Plan 4"),
-         ("defaults", "Plan 4"), ("plugins", "Plan 4")],
+        "section", ["outputs", "defaults", "plugins"]
     )
-    def test_not_yet_owned_sections_name_their_plan(self, section, route):
-        with pytest.raises(ConfigError, match=route):
+    def test_not_yet_owned_sections_name_where_they_are_handled(self, section):
+        """Not "which plan will add it" -- that named internal history in a
+        message a user reads, and it had gone stale: the work it pointed at
+        shipped as the command line these three are handled by.
+
+        Matched against the loader's own routing table rather than a quoted
+        sentence, so re-wording the prose is free and re-routing a section is
+        not."""
+        from rheplicant.config.preflight import _NOT_YET
+
+        with pytest.raises(ConfigError, match="command line") as excinfo:
             load_document({**synthetic_document(), section: {}})
+        assert _NOT_YET[section] in str(excinfo.value)
 
     def test_campaign_names_the_deferred_capability(self):
         with pytest.raises(ConfigError, match="capability 4"):
@@ -122,7 +130,7 @@ class TestLoadDocument:
         patch injecting a not-yet-owned section is still refused."""
         doc = synthetic_document()
         doc["variants"]["sneaky"] = {"outputs": {}}
-        with pytest.raises(ConfigError, match="Plan 4"):
+        with pytest.raises(ConfigError, match="command line"):
             load_document(doc, variant="sneaky")
 
 

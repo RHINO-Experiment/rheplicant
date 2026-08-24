@@ -720,15 +720,17 @@ class TestTheStructuralSweepMoved:
          "campaign: is reserved with capability 4 (streaming evidence, "
          "schema §8.2) and refused in v1."),
         ({"outputs": {}},
-         "outputs: is not read by this layer yet -- it arrives with Plan 4 "
-         "(outputs, provenance, the CLI)."),
+         "outputs: is not read by this layer -- it is handled by the command "
+         "line, which owns the output tree, its provenance and its audit "
+         "trail."),
         ({"defaults": {}},
-         "defaults: is not read by this layer yet -- it arrives with Plan 4 "
-         "(presets are YAML files, and the CLI is where YAML first comes off "
-         "disk)."),
+         "defaults: is not read by this layer -- it is handled by the command "
+         "line -- presets are YAML files, and that is where YAML first comes "
+         "off disk."),
         ({"plugins": {}},
-         "plugins: is not read by this layer yet -- it arrives with Plan 4 "
-         "(plugin import belongs to the process entry point)."),
+         "plugins: is not read by this layer -- it is handled by the command "
+         "line -- importing a plugin belongs to the process entry point, not "
+         "to a mapping."),
         ({"schema_version": 2},
          "schema_version: 1 is required (got 2); it is what lets a later "
          "loader read an older document on purpose rather than by luck."),
@@ -2759,6 +2761,27 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
     _HOLE + ": kind: " + _HOLE
     + " arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
         "test_config_exit_support.py::test_compare_and_benchmark_are_both_live",
+    # The three _NOT_YET routes, reworded on purpose. They named an internal
+    # plan number in a message a USER reads, and the number had gone stale: the
+    # work it pointed at has shipped, so a reader was told to wait for the
+    # command line that was already installed alongside them. The replacements
+    # say where the section is handled instead, and are equality-pinned in the
+    # structural sweep's own table above.
+    "Plan 4 (outputs, provenance, the CLI)":
+        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+    "Plan 4 (presets are YAML files, and the CLI is where YAML "
+    "first comes off disk)":
+        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+    "Plan 4 (plugin import belongs to the process entry point)":
+        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+    # Two harvested forms of one sentence: the f-string's own pieces, and the
+    # hole-decorated whole. Forgiving one and not the other leaves half the
+    # rewording unchecked, which is what the first two attempts at this entry
+    # each did in turn.
+    _HOLE + ": is not read by this layer yet -- it arrives with " + _HOLE + ".":
+        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+    ": is not read by this layer yet -- it arrives with":
+        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
 }
 
 

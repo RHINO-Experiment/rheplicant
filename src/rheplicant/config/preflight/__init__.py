@@ -87,11 +87,20 @@ _DECORATOR = "register"
 _SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
              "resources", "model", "variants", "inference", "runs", "outputs",
              "campaign")
+#: Sections this layer does not read, and WHERE THEY ARE READ INSTEAD.
+#:
+#: These used to name an internal plan number. That was development history in
+#: a user-facing refusal -- and worse, it went stale: the work in question has
+#: shipped, so a reader was told to wait for something that already exists. The
+#: values now say where to go, because a refusal a reader can act on is the
+#: whole point of refusing loudly.
 _NOT_YET = {
-    "outputs": "Plan 4 (outputs, provenance, the CLI)",
-    "defaults": "Plan 4 (presets are YAML files, and the CLI is where YAML "
-                "first comes off disk)",
-    "plugins": "Plan 4 (plugin import belongs to the process entry point)",
+    "outputs": "the command line, which owns the output tree, its provenance "
+               "and its audit trail",
+    "defaults": "the command line -- presets are YAML files, and that is where "
+                "YAML first comes off disk",
+    "plugins": "the command line -- importing a plugin belongs to the process "
+               "entry point, not to a mapping",
 }
 _REQUIRED = ("runtime", "observation", "model", "runs")
 
@@ -148,7 +157,7 @@ def _structural(document: Mapping[str, Any]) -> None:
     for section, route in _NOT_YET.items():
         if section in document:
             raise ConfigError(
-                f"{section}: is not read by this layer yet -- it arrives with "
+                f"{section}: is not read by this layer -- it is handled by "
                 f"{route}."
             )
     version = document.get("schema_version")
