@@ -670,6 +670,30 @@ def _inference_widgets(builder: _Builder) -> None:
         builder.add(f"inference.npe.{key}", visible_when=npe_visible)
 
 
+#: Every map that owns a default for a run option, INCLUDING the conjugate
+#: knobs :func:`_run_widgets` never merges in.  Read only to notice
+#: disagreement -- never merged, because merging would hand the catalog
+#: defaults for keys it has always published as having none (``iterations``,
+#: ``maxiter`` and the reweight knobs), which is a larger claim than this
+#: makes.
+#:
+#: Module-level and keyed by NAME because two readers need it and a second
+#: copy is the one that goes stale.  ``_contested`` sweeps it; so does
+#: ``tests/gui/test_forms.py::test_no_call_site_default_contradicts_its_map``,
+#: which compares call-site literals against the maps the census reads -- and
+#: spelling that list out a second time would reopen, one level up, the very
+#: hole that test exists to close: a map dropped from the census here would
+#: stay in the scan's copy, and the scan would keep passing on it.
+_DEFAULT_OWNERS: Mapping[str, Mapping] = {
+    "_ADAM_DEFAULTS": _ADAM_DEFAULTS,
+    "_ESTIMATE_DEFAULTS": _ESTIMATE_DEFAULTS,
+    "_SAMPLE_DEFAULTS": _SAMPLE_DEFAULTS,
+    "_NUTS_DEFAULTS": _NUTS_DEFAULTS,
+    "_KNOB_DEFAULTS": _KNOB_DEFAULTS,
+    "_BENCHMARK_DEFAULTS": _BENCHMARK_DEFAULTS,
+}
+
+
 def _contested(key: str, owners: tuple[Mapping, ...]) -> bool:
     """Whether the exits owning ``key`` disagree about its default.
 
@@ -703,11 +727,31 @@ def _contested(key: str, owners: tuple[Mapping, ...]) -> bool:
 
     Computed rather than listed, so the next divergence -- a moved key table, a
     retuned solver -- drops its default instead of quietly publishing a stale
-    one.  A ``default_when`` beside ``visible_when``/``required_when`` is the
-    fuller answer, and the population is two now rather than one, which is the
-    condition this note set for building it.  It is still not built here: that
-    is a design decision about the widget contract, and this change is the one
-    that makes the population honest rather than the one that acts on it.
+    one.
+
+    **A ``default_when`` beside ``visible_when``/``required_when`` is the
+    fuller answer, and it is deliberately still not built.**  The condition
+    this note originally set -- a population of two rather than one -- is met,
+    and it was the wrong condition: it asks how many exits PRODUCE a default
+    and never asks who READS one.  On this route, nobody does.
+    ``WidgetMetadata.default`` has exactly one reader,
+    ``node_forms._project_field``, reached only through
+    ``_field_widgets(node_id, ...)`` -- model-node fields, never a ``runs[].``
+    widget -- and ``forms.ProjectedWidget`` carries no default at all, so the
+    sixty-two run widgets reach the API with none.  Nineteen of them publish
+    an UNCONTESTED default today and nothing renders those either: the missing
+    surface predates contestation rather than following from it.
+
+    So the drop costs nothing a reader could notice, and building the table
+    now would mean first giving this route a default surface it has never had,
+    purely so a third rule kind had something to feed.  In a package whose
+    recurring defect is a guard that has stopped being able to fail, an
+    unevaluated rule is the worst thing to add.  What forces the decision is a
+    contested key becoming REQUIRED -- then ``must_decide`` fires on a
+    document omitting a value its own exit defaults perfectly well, and the
+    flat ``has_default`` is wrong exactly as the flat ``required`` was before
+    ``required_by_kind``.  Both conditions are guarded, in
+    ``tests/gui/test_forms.py::TestAContestedDefaultReachesNoReader``.
 
     :param key: the run option, without its ``runs[].`` prefix.
     :param owners: every mapping that may declare a default for it.
@@ -755,15 +799,7 @@ def _run_widgets(builder: _Builder) -> None:
         "benchmark": _BENCHMARK_KEYS,
     }
     defaults = {**_ADAM_DEFAULTS, **_ESTIMATE_DEFAULTS, **_SAMPLE_DEFAULTS, **_NUTS_DEFAULTS}
-    #: Every map that owns a default for a run option, INCLUDING the conjugate
-    #: knobs the merge above never consulted.  Read only to notice disagreement
-    #: -- never merged in, because merging would hand the catalog defaults for
-    #: keys it has always published as having none (``iterations``, ``maxiter``
-    #: and the reweight knobs), which is a larger claim than this makes.
-    default_owners = (
-        _ADAM_DEFAULTS, _ESTIMATE_DEFAULTS, _SAMPLE_DEFAULTS, _NUTS_DEFAULTS, _KNOB_DEFAULTS,
-        _BENCHMARK_DEFAULTS,
-    )
+    default_owners = tuple(_DEFAULT_OWNERS.values())
     required = {
         "optimizer",
         "learning_rate",

@@ -15,8 +15,10 @@ from rheplicant.config.sections.exit_support import (
     PARSERS,
     PRE_EXECUTORS,
 )
+from rheplicant.gui.form_catalog import _DEFAULT_OWNERS, _contested
 from rheplicant.gui.forms import (
     CatalogDrift,
+    ProjectedWidget,
     WidgetMetadata,
     assert_catalog_closed,
     project_forms,
@@ -474,6 +476,105 @@ def test_reading_the_conjugate_knobs_does_not_hand_them_defaults(path):
     assert _widget(path).has_default is False
 
 
+
+class TestAContestedDefaultReachesNoReader:
+    """Why ``default_when`` is still not built, stated so it can go stale loudly.
+
+    ``_contested`` set ONE condition for building a ``default_when`` beside
+    ``visible_when``/``required_when``: that two keys disagree rather than one.
+    ``warmup`` met it.  That condition is about the PRODUCERS, and the
+    question it never asked is who READS a published default.  Measured on
+    this tree: nobody, on this route.
+
+    ``WidgetMetadata.default`` has exactly one reader,
+    ``node_forms._project_field``, which is reached only through
+    ``_field_widgets(node_id, ...)`` -- model-node fields, never a
+    ``runs[].`` widget.  ``ProjectedWidget`` carries no default at all, so
+    the sixty-two run widgets reach the API with none: nineteen of them
+    publish an UNCONTESTED default today and nothing renders those either.
+    The missing surface is not a consequence of contestation; it predates it.
+
+    So dropping a contested default costs nothing a reader could notice, and
+    a per-kind default table would be a third rule kind that nothing
+    evaluates -- which, in a package where the recurring defect is a guard
+    that has stopped being able to fail, is the worst thing to add.
+
+    Both halves below are tripwires on that reasoning rather than on the
+    catalog: each fails on the day ``default_when`` stops being optional, and
+    each fails for its own reason.
+    """
+
+    def test_the_projection_publishes_no_default_for_a_run_widget(self):
+        """A default surface on this route is what would make the drop visible.
+
+        Derived from the dataclass rather than listed, so it notices a field
+        under any of the names the catalog uses for the same idea.
+        """
+        projected = {field.name for field in dataclasses.fields(ProjectedWidget)}
+        carried = {
+            field.name
+            for field in dataclasses.fields(WidgetMetadata)
+            if field.name in {"default", "has_default"}
+        }
+        assert carried, "WidgetMetadata stopped carrying a default; this guard is moot"
+        assert projected & carried == set(), (
+            "the form projection now carries a default, so a contested key's "
+            "dropped default is something a reader can see. Revisit "
+            "form_catalog._contested and the default_when it defers: "
+            f"{sorted(projected & carried)}"
+        )
+
+    def test_no_contested_option_is_required_under_any_kind(self):
+        """A contested key that becomes required is when ``default_when`` is forced.
+
+        ``must_decide`` is the only consumer of ``has_default``, and it also
+        demands ``required``, which is why dropping the default is free while
+        no contested key is required.  Make one required -- flat or by kind --
+        and a document omitting it must decide a value its own exit already
+        defaults perfectly well, and the flat ``has_default`` is wrong in
+        exactly the way the flat ``required`` was before ``required_by_kind``.
+
+        The contested set is computed through ``_contested`` itself over the
+        census's own owner list, so a seventh owner map is covered the day it
+        is added rather than the day someone remembers this test.
+        """
+        contested = sorted(
+            key
+            for key in {key for owner in _DEFAULT_OWNERS.values() for key in owner}
+            if _contested(key, tuple(_DEFAULT_OWNERS.values()))
+        )
+        assert contested == ["tol", "warmup"], (
+            "the contested population changed; the reasoning in "
+            f"_contested is about this set: {contested}"
+        )
+        for key in contested:
+            widget = _widget(f"runs[].{key}")
+            assert widget.required is False and widget.required_when is None, (
+                f"runs[].{key} is contested AND required, so a document omitting "
+                "it must decide a value its own exit defaults. This is the case "
+                "default_when exists for -- build it."
+            )
+
+    def test_the_call_site_scan_reads_the_census_own_owner_list(self):
+        """The scan must compare against what the census reads, not a copy.
+
+        ``test_no_call_site_default_contradicts_its_map`` exists because a
+        default the census cannot read cannot be contested.  Spelling its map
+        list out a second time reopens the same hole one level up: drop a map
+        from ``_DEFAULT_OWNERS`` and the scan would keep comparing against it
+        and keep passing.  It reads that constant now, and this asserts the
+        constant still names what it did when the scan was written.
+        """
+        assert set(_DEFAULT_OWNERS) == {
+            "_ADAM_DEFAULTS",
+            "_ESTIMATE_DEFAULTS",
+            "_SAMPLE_DEFAULTS",
+            "_NUTS_DEFAULTS",
+            "_KNOB_DEFAULTS",
+            "_BENCHMARK_DEFAULTS",
+        }, f"the census's owner list changed: {sorted(_DEFAULT_OWNERS)}"
+
+
 def _sections_dir() -> str:
     """``rheplicant/config/sections/``, located through the package it is in."""
     import rheplicant.config.sections as sections
@@ -506,23 +607,11 @@ def test_no_call_site_default_contradicts_its_map():
     import ast
     import pathlib
 
-    from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS
-    from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
-    from rheplicant.config.sections.exits import (
-        _ADAM_DEFAULTS,
-        _ESTIMATE_DEFAULTS,
-        _SAMPLE_DEFAULTS,
-    )
-    from rheplicant.config.sections.nuts import _NUTS_DEFAULTS
-
-    maps = {
-        "_ADAM_DEFAULTS": _ADAM_DEFAULTS,
-        "_ESTIMATE_DEFAULTS": _ESTIMATE_DEFAULTS,
-        "_SAMPLE_DEFAULTS": _SAMPLE_DEFAULTS,
-        "_NUTS_DEFAULTS": _NUTS_DEFAULTS,
-        "_KNOB_DEFAULTS": _KNOB_DEFAULTS,
-        "_BENCHMARK_DEFAULTS": _BENCHMARK_DEFAULTS,
-    }
+    #: The census's OWN owner list, not a copy of it. A second spelling would
+    #: reopen this test's own hole one level up: a map dropped from the census
+    #: would stay in the copy, and this scan would keep comparing against a map
+    #: ``_contested`` no longer reads.
+    maps = _DEFAULT_OWNERS
     sections = pathlib.Path(_sections_dir())
     sites, offenders = 0, []
     for path in sorted(sections.glob("*.py")):
