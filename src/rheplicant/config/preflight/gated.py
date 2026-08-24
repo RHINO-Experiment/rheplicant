@@ -195,16 +195,23 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     single-record form is ``primary``; otherwise a record literally named
     ``primary``, else the only one, else none at all.
 
-    **BLOCKER 2 (Plan 3C fix round), recorded rather than widened -- owed to
-    Plan 4.**  That last case -- two or more NAMED records, none of them
-    literally called ``primary`` -- resolves no primary at all, and this
-    function returns ``False`` on it exactly as it does on a document with no
-    ``observed:`` section whatsoever.  Both C18 bindings share this scope:
-    this one (the family check, C18.kind) and
-    :func:`~rheplicant.config.postflight.noise._t6_generating_twin` (the
-    numeric check, bare C18) both read ``observed.primary`` alone, so a
-    document that trips this stands the numeric check down too, silently, on
-    a document ``load_document`` accepts. Measured:
+    **This function's own CONTRACT is frozen at "a single primary-alone
+    bool" and this fix (A1.2) does not touch it.**
+    ``tests/config/test_postflight_noise.py`` imports and calls this exact
+    function to compare the two C18 vantage points (this text check and the
+    built ``_t6_generating_twin`` in ``postflight/noise.py``), and that
+    module is out of scope for A1.2 -- so widening what THIS function returns
+    would silently change what that other test file asserts.  The widening
+    lives beside it instead, in :func:`_t2c_generating_records`, which this
+    function now feeds through the shared :func:`_t2c_record_generated`.
+
+    **BLOCKER 2 (Plan 3C fix round) -- the multi-named-no-``primary`` case,
+    fixed for C18.kind by A1.2; still open for the bare (numeric) C18.**  Two
+    or more NAMED records, none of them literally called ``primary``, resolve
+    no primary at all, and THIS function still returns ``False`` on that case
+    exactly as it does on a document with no ``observed:`` section
+    whatsoever -- unchanged, per the contract note above. Measured, before
+    A1.2:
 
     .. code-block:: text
 
@@ -221,17 +228,19 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     and it is the same shape D-C17 exists to name: *"finite, correctly
     shaped, wrong, and invisible to every diagnostic."*
 
-    **Decision: record it, do not widen the readers.** Widening C18 from
-    per-document to per-record is a contract change that needs its own
-    adversarial pass, which this fix round does not have; both bindings share
-    the boundary, so the two vantage points (text here, built twin in
-    ``postflight/noise.py``) stay in agreement rather than one silently
-    covering more than the other; and ``postflight/noise.py``'s own
-    Known-scope-edges block already records the adjacent case (a primary
-    ``from: file`` while a sibling record simulates) using the same
-    primary-alone read. See ``postflight/noise.py``'s module docstring for
-    the matching entry and the plan's §6 residues for the standing decision
-    record.
+    **A1.2's decision: widen the READER that decides which records C18.kind
+    checks, not this function.**  :func:`_sigma_families` no longer calls
+    THIS function to decide whether to run at all; it calls
+    :func:`_t2c_generating_records`, which reproduces this function's exact
+    single-record answer on every row above except the fourth, and on the
+    fourth now runs the per-record test once per named record instead of
+    returning nothing.  The two C18 vantage points now agree everywhere they
+    did before AND diverge on exactly the fourth row: C18.kind (this module)
+    now reports it, per record; the bare, numeric C18 in
+    ``postflight/noise.py`` still reads ``observed.primary`` alone and stays
+    silent on it, because widening THAT check is out of scope here.  See
+    ``postflight/noise.py``'s module docstring for the matching entry and the
+    plan's §6 residues for the standing decision record.
     """
     section = document.get("inference")
     if not isinstance(section, Mapping):
@@ -250,11 +259,67 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
             record = next(iter(named.values()))
         else:
             return False
+    return _t2c_record_generated(record, section)
+
+
+def _t2c_record_generated(record: Mapping[str, Any],
+                          section: Mapping[str, Any]) -> bool:
+    """Did the TWIN generate THIS record specifically?
+
+    The per-record half of :func:`_t2c_generated`'s own test (``from:
+    simulation``, then :data:`_T2C_GENERATING_TWIN` or an unrepaired ``twin:
+    fit``), pulled out so :func:`_t2c_generating_records` can run it once per
+    NAMED record without re-deriving it, and so :func:`_t2c_generated` keeps
+    answering exactly as it always has by calling this on the one record it
+    resolves.
+    """
     if record.get("from") != "simulation":
         return False
     if record.get("twin", _T2C_GENERATING_TWIN) == _T2C_GENERATING_TWIN:
         return True
     return not _t2c_repaired(section)
+
+
+def _t2c_generating_records(
+        document: Mapping[str, Any]) -> tuple[str | None, ...]:
+    """Which record(s) :func:`_sigma_families` must check -- BLOCKER 2's own
+    fix, threaded WITHOUT changing :func:`_t2c_generated`'s contract (see its
+    docstring for why that function itself stays untouched).
+
+    Returns one entry per record to check, so a finding can name which one
+    disagreed:
+
+    * every case :func:`_t2c_generated` already resolves to a SINGLE record
+      -- the single-record legacy form, a literally-named ``primary``, or the
+      lone named record -- widens to nothing: ``(None,)`` when the twin
+      generated it, ``()`` otherwise.  The ``None`` name carries no
+      record-naming text, so the finding this earns is byte-identical to the
+      one C18.kind shipped before A1.2.
+    * two or more NAMED records with none of them literally called
+      ``primary`` -- the case that used to fall through to
+      :func:`_t2c_generated`'s own ``return False``, standing this check down
+      exactly as an absent ``observed:`` does.  This runs
+      :func:`_t2c_record_generated` once per named record instead, and
+      returns the NAME of every one the twin generated: zero, one, or all of
+      them.  A record from a file, or one whose fit twin was actually
+      repaired, is simply not in the tuple -- there is no second sigma to
+      disagree with for that one, exactly as :func:`_t2c_generated` reads a
+      single such record.
+    """
+    section = document.get("inference")
+    if not isinstance(section, Mapping):
+        return ()
+    observed = section.get("observed")
+    if not isinstance(observed, Mapping):
+        return ()
+    if "from" in observed or "file" in observed:
+        return (None,) if _t2c_generated(document) else ()
+    named = {name: spec for name, spec in observed.items()
+             if isinstance(spec, Mapping)}
+    if "primary" in named or len(named) == 1:
+        return (None,) if _t2c_generated(document) else ()
+    return tuple(name for name, record in named.items()
+                 if _t2c_record_generated(record, section))
 
 
 def _t2c_repaired(section: Mapping[str, Any]) -> bool:
@@ -278,6 +343,21 @@ def _t2c_repaired(section: Mapping[str, Any]) -> bool:
         return True
     replace = twin.get("replace")
     return isinstance(replace, Mapping) and _T2C_NOISE_NODE in replace
+
+
+def _t2c_subject(name: str | None) -> str:
+    """The finding message's own noun phrase for WHOSE data disagreed.
+
+    ``None`` is every :func:`_t2c_generating_records` subject that resolves
+    to a single record with nothing to widen -- the single-record legacy
+    form, a literal ``primary``, or the lone named record -- and reads
+    exactly as the sentence did before A1.2: *"this document's data"*.  A
+    NAME is BLOCKER 2's own widened case: two or more named records, none
+    literally called ``primary``, so the sentence must say WHICH one it read.
+    """
+    if name is None:
+        return "this document's data"
+    return f"the data of observed record {name!r}"
 
 
 @register("C18.kind")
@@ -329,12 +409,20 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
     document's default: that fixture WORKS AROUND this ordering rather than
     resolving it.
 
-    Yields at most one finding.
+    **A1.2: widened to one call per record when ``observed:`` names two or
+    more records and none of them is literally ``primary`` (BLOCKER 2, see
+    :func:`_t2c_generating_records`), so "yields at most one finding" is now
+    true only per RECORD.**  Every document this module shipped before A1.2
+    still resolves to exactly one subject (``None``, unnamed) and still
+    yields at most one finding; a document that trips BLOCKER 2's own case
+    can now yield one finding per named record the twin generated, each
+    naming the record it is about.
     """
     drawn = _t2c_drawn(document)
     if drawn not in _DRAWING_TYPES:
         return ()
-    if not _t2c_generated(document):
+    subjects = _t2c_generating_records(document)
+    if not subjects:
         return ()
     where = f"model.{_T2C_NOISE_NODE}"
     agrees = _DRAWING_TYPES[drawn]
@@ -348,8 +436,8 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
         fitting = _a30_exits(document)
         if not fitting:
             return ()
-        return (warn("C18", where, (
-            f"model.{_T2C_NOISE_NODE} draws this document's data with "
+        return tuple(warn("C18", where, (
+            f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with "
             f"{drawn}, and inference.noise: says nothing -- so {list(fitting)} "
             "weighs every channel equally over data that carries noise. The "
             "fit still returns a finite, correctly-shaped answer; its error "
@@ -357,7 +445,8 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
             f"inference.noise: {{kind: {sorted(agrees)[0]}}} to weigh what "
             f"you draw, or drop model.{_T2C_NOISE_NODE} -- and the "
             f"inference.twin.without: [{_T2C_NOISE_NODE}] that repairs it -- "
-            "if this data is meant to be noise-free (check C18).")),)
+            "if this data is meant to be noise-free (check C18)."))
+            for name in subjects)
     other = sorted(
         name for name, kinds in _DRAWING_TYPES.items() if weighed in kinds)
     if not other:
@@ -370,8 +459,8 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
         # turns into "check 'C18.kind' RAISED" and which discards every other
         # finding in the report.
         return ()
-    return (refuse("C18", where, (
-        f"model.{_T2C_NOISE_NODE} draws this document's data with {drawn}, "
+    return tuple(refuse("C18", where, (
+        f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with {drawn}, "
         f"and inference.noise.kind: {weighed} weighs the likelihood with a "
         "different noise model. They are not two spellings of one sigma, so "
         "there is no number to compare: the fit is weighted against a scatter "
@@ -379,7 +468,8 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
         "correctly-shaped answer whose error bars are wrong by whatever the "
         f"two models differ by. Write model.{_T2C_NOISE_NODE}.type: "
         f"{other[0]} to draw what you weigh, or inference.noise.kind: "
-        f"{sorted(agrees)[0]} to weigh what you draw (check C18).")),)
+        f"{sorted(agrees)[0]} to weigh what you draw (check C18)."))
+        for name in subjects)
 
 
 # `_A30_NOT_FITTING` is imported rather than re-derived (§3.1's one-name-one-
