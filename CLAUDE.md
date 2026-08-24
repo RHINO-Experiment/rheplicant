@@ -17,9 +17,15 @@ Redirect to a file and read `$?`:
 .venv/bin/python -m pytest -n 8 > run.log 2>&1; echo "EXIT=$?"; tail -5 run.log
 ```
 
-**Partial runs need `--no-cov`.** `addopts` carries `--cov-fail-under=80`
-measured over the whole package, so running one file exits non-zero on the
-gate even when every test in it passes.
+**Partial runs no longer need `--no-cov`** — this reversed, and the old habit
+is widespread enough to be worth stating. `addopts` is now just `-q`.
+Coverage moved out of it into a serial CI job, because `-n 8` and
+`-p no:xdist` do not measure the same suite: 88.32 % against 82.26 % on one
+tree with every test passing, a six-point gap concentrated in the
+bootstrap/CLI modules. A figure that depends on the worker count is not a
+property of the code, so the reported one comes from the run that has no
+worker count. Measured on this tree: `pytest tests/test_docs_links.py` with
+no flags exits 0.
 
 **The suite is two pytest sessions.** The evidence layer needs float64 while
 other tests assert refusals only float32 forces, and `jax_enable_x64` is
@@ -42,7 +48,9 @@ behind those modules the whole time. If it skips, complete the environment
 rather than reading it as green.
 
 The coverage figure in `README.md` is **truncated**, never rounded — the same
-guard treats it as a floor and compares it against `--cov-fail-under`.
+guard treats it as a floor and compares it against `[tool.coverage.report]
+fail_under` in `pyproject.toml` (currently 82). That is the only place the
+floor lives; the `--cov-fail-under` flag it used to read is gone.
 
 ## The config layer's boundary is textual
 
