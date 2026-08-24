@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Literal, cast
 
 from _rheplicant_bootstrap.audit.bundle import AuditBundle, validate_serialized_bundle
+from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME, integrity_bytes
 from _rheplicant_bootstrap.audit.types import ArtefactMaterialization
 from _rheplicant_bootstrap.errors import ConfigError
 
@@ -410,9 +411,16 @@ def _bundle_rows(bundle: AuditBundle) -> tuple[tuple[str, bytes], ...]:
     prefix = ["config.input.yaml"]
     prefix.extend(row.relative_path for row in bundle.resolved)
     names = [name for name, _payload in rows]
+    # integrity.json joins the two metadata files at the tail because it shares
+    # their timing, not their kind: all three can only be written once every
+    # other file is final, and all three are replaced together below. It is
+    # optional so that a bundle assembled by an older caller still validates.
+    tail = ["provenance.json", "diagnostics.json"]
+    if names[-3:-2] == [INTEGRITY_NAME]:
+        tail = [INTEGRITY_NAME, *tail]
     if (
         names[: len(prefix)] != prefix
-        or names[-2:] != ["provenance.json", "diagnostics.json"]
+        or names[-len(tail) :] != tail
     ):
         raise ConfigError("audit bundle file order or paths are inconsistent.")
     if any(type(name) is not str or type(payload) is not bytes for name, payload in rows):
@@ -839,8 +847,9 @@ def replace_staged_metadata(
         if not _identity_matches(observed, journal.staging_identity):
             raise ConfigError("owned staging identity changed before metadata replacement.")
         staging_fd = _open_directory(handle.lease.parent_fd, handle.staging_name)
+        replaceable = ("provenance.json", "diagnostics.json", INTEGRITY_NAME)
         for relative, payload in rows:
-            if relative in ("provenance.json", "diagnostics.json"):
+            if relative in replaceable:
                 continue
             if _read_relative_file(staging_fd, relative) != payload:
                 raise ConfigError(
@@ -848,6 +857,28 @@ def replace_staged_metadata(
                 )
         _replace_file(staging_fd, "provenance.json", final.provenance)
         _replace_file(staging_fd, "diagnostics.json", final.diagnostics)
+        if INTEGRITY_NAME in dict(rows):
+            # Computed LAST, over the rows as they now stand -- which is the
+            # whole point. An integrity file written at staging time would
+            # describe the provenance and diagnostics this call just replaced.
+            #
+            # The ownership marker is read back from the staging directory
+            # rather than taken from the bundle, because it is not a bundle
+            # file: the transaction writes it. Covering it anyway is what lets
+            # a verifier treat ANY unlisted path as an addition, instead of
+            # carrying a list of paths it agrees not to look at -- which is the
+            # shape that quietly grows until it covers the thing you needed.
+            covered = [
+                (relative, payload)
+                for relative, payload in rows
+                if relative != INTEGRITY_NAME
+            ]
+            covered.append(
+                (_MARKER_NAME, _read_exact_file(staging_fd, _MARKER_NAME))
+            )
+            _replace_file(
+                staging_fd, INTEGRITY_NAME, integrity_bytes(tuple(covered))
+            )
         if _read_exact_file(staging_fd, "provenance.json") != final.provenance:
             raise ConfigError("staged provenance verification failed.")
         if _read_exact_file(staging_fd, "diagnostics.json") != final.diagnostics:

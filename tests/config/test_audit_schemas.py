@@ -44,6 +44,38 @@ def test_every_golden_validates_against_packaged_schema(kind, status):
     jsonschema.validate(value, schema)
 
 
+def test_the_presets_shape_is_covered_by_a_populated_case():
+    """An empty array validates against ANY item type, so `presets: []` proves
+    nothing about the shape the producer emits.
+
+    All three goldens carry ``"presets": []``. Measured 2026-08-24: the
+    producer at ``entry.py`` was changed from emitting preset NAMES to emitting
+    ``{"name", "sha256"}`` objects -- a format_version 1 breaking change
+    against a closed schema -- and `tests/bootstrap`, `test_audit_envelopes`,
+    `test_resolved_document` and every test in this module stayed GREEN. The
+    violation was found by reading the schema, not by running anything.
+
+    This is the missing half: one populated case in each direction, so the
+    array's ITEM type is pinned rather than merely its presence. If the preset
+    record is ever widened to carry a digest, this test is the one that must be
+    updated deliberately -- alongside a schema version bump -- rather than
+    discovering afterwards that nothing noticed.
+    """
+    schema = load_schema("provenance-v1")
+    value = json.loads((GOLDEN / "provenance-ok.json").read_bytes())
+
+    populated = copy.deepcopy(value)
+    populated["bootstrap"]["presets"] = ["rhino_v1", "rhino_v1_extended"]
+    jsonschema.validate(populated, schema)
+
+    widened = copy.deepcopy(value)
+    widened["bootstrap"]["presets"] = [
+        {"name": "rhino_v1", "sha256": "0" * 64}
+    ]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(widened, schema)
+
+
 def test_schema_vocabularies_are_the_runtime_vocabularies():
     provenance = load_schema("provenance-v1")
     diagnostics = load_schema("diagnostics-v1")

@@ -13,6 +13,7 @@ from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
     merge_bundle_files,
+    with_integrity,
     serialize_bundle,
     terminal_reserialization_snapshot,
 )
@@ -83,6 +84,34 @@ def _exception_row(error: BaseException) -> dict[str, str]:
 def _record_error_once(trace: AuditTrace, error: BaseException) -> None:
     if trace.snapshot().error is None:
         trace.record_error(_exception_row(error))
+
+
+#: Where preset sources are published inside the audit tree. A directory of
+#: its own so a preset can never collide with a scientific product path.
+PRESETS_DIRECTORY = "presets"
+
+
+def presets_bundle_files(prepared: PreparedConfig) -> dict[str, bytes]:
+    """The layered preset sources, by published path.
+
+    Byte-exact rather than by digest, for the reason the input document is
+    embedded byte-exact: a digest proves a file has not changed, and only the
+    bytes let a reader reconstruct the run when the installed preset already
+    has. Presets are small in-package resources, so the cost of archiving them
+    is a few kilobytes against a claim of recoverability.
+
+    ``PresetSnapshot.sha256`` was already validated against ``input_bytes``
+    when the snapshot was built (``presets.py``), and integrity.json hashes
+    every published file, so the digest arrives without being written twice.
+    """
+    manifest = prepared.source.bootstrap_manifest
+    files: dict[str, bytes] = {}
+    for row in manifest.presets:
+        relative_path = f"{PRESETS_DIRECTORY}/{row.snapshot.name}.yaml"
+        if relative_path in files:
+            raise ConfigError(f"preset path {relative_path!r} is duplicated.")
+        files[relative_path] = row.snapshot.input_bytes
+    return files
 
 
 def _bootstrap_row(
@@ -253,6 +282,9 @@ def _publish_transaction(
     )
     if additional_files is not None:
         initial = merge_bundle_files(initial, additional_files)
+    # Last, so it covers the products merged above. Recomputed and replaced in
+    # replace_staged_metadata once provenance and diagnostics are final.
+    initial = with_integrity(initial)
     try:
         handle, materialized = stage_bundle(
             authorization,
@@ -278,6 +310,7 @@ def _publish_transaction(
         )
         if additional_files is not None:
             final = merge_bundle_files(final, additional_files)
+        final = with_integrity(final)
         replace_staged_metadata(handle, final, platform)
         if not already_serialized:
             trace.boundary_completed("serialization")
@@ -638,6 +671,19 @@ def dispatch_request(
                 stderr=stderr,
             )
         additional_files: dict[str, bytes] | None = None
+        # M5: the preset BYTES, not just the names.
+        #
+        # The input document is embedded byte-exact and the presets layered
+        # under it were not, so a historical tree said only "rhino_v1" while
+        # the thing that name resolved to was free to change underneath it.
+        # Recording the digest in provenance.json would need a format bump
+        # (`presets` is `{"items": {"type": "string"}}` in the closed
+        # provenance-v1 schema); publishing the bytes instead needs neither,
+        # is strictly more recoverable than a digest, and inherits a digest
+        # anyway because integrity.json covers every published file.
+        presets = presets_bundle_files(prepared)
+        if presets:
+            additional_files = dict(presets)
         if request.products or request.report is not None:
             try:
                 scientific = orchestration.build_product_bundle(
@@ -647,9 +693,10 @@ def dispatch_request(
                     component_limit=publication.component_limit,
                 )
                 additional_files = {
-                    row.relative_path: row.payload for row in scientific.files
+                    **(additional_files or {}),
+                    **{row.relative_path: row.payload for row in scientific.files},
                 }
-                if len(additional_files) != len(scientific.files):
+                if len(additional_files) != len(scientific.files) + len(presets):
                     raise ConfigError("scientific product paths are duplicated.")
                 if "products.json" in additional_files:
                     raise ConfigError("scientific product path 'products.json' is reserved.")

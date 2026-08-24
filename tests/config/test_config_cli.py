@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -47,6 +48,129 @@ def test_run_publishes_the_mandatory_audit_tree(tmp_path, capsys):
     diagnostics = json.loads((target / "diagnostics.json").read_bytes())
     assert provenance["status"] == diagnostics["status"] == "ok"
     assert "configuration run complete:" in capsys.readouterr().out
+
+
+def _published(target: Path) -> dict[str, bytes]:
+    """Every published file by relative path, as the verifier wants it."""
+    return {
+        str(path.relative_to(target)): path.read_bytes()
+        for path in sorted(target.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_the_published_tree_carries_one_digest_over_all_of_it(tmp_path):
+    """M3: before this, every artefact was hashed and nothing hashed the set.
+
+    ``provenance.json`` records a sha256 per content artefact but is itself a
+    metadata row, which ``audit/provenance.py`` forbids from carrying a digest
+    at all. So a publisher could rewrite a file AND the provenance row naming
+    it and produce a tree that agrees with itself everywhere -- because no
+    file's digest depended on any other file's bytes.
+    """
+    from _rheplicant_bootstrap.audit.integrity import (
+        INTEGRITY_NAME,
+        root_digest,
+        verify_tree,
+    )
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+
+    published = _published(target)
+    assert INTEGRITY_NAME in published, sorted(published)
+    assert verify_tree(published) == ()
+
+    manifest = json.loads(published[INTEGRITY_NAME])
+    listed = {row["relative_path"] for row in manifest["files"]}
+    # It covers the metadata files, which is the half that was impossible
+    # before: they can only be hashed by something written after them.
+    assert {"config.input.yaml", "provenance.json", "diagnostics.json"} <= listed
+    # And it covers everything else in the tree except itself.
+    assert listed == set(published) - {INTEGRITY_NAME}
+
+    covered = tuple((name, published[name]) for name in sorted(listed))
+    assert manifest["root_sha256"] == root_digest(covered)
+
+
+def test_a_file_rewritten_together_with_its_provenance_row_is_still_caught(tmp_path):
+    """The tamper this exists for, done properly rather than clumsily.
+
+    Rewriting a recorded file alone was always detectable -- its provenance row
+    disagreed. The attack that worked was rewriting the file AND the sha256 in
+    the row that names it: the tree then agreed with itself completely. This
+    test performs exactly that forgery and requires it to be caught.
+    """
+    from _rheplicant_bootstrap.audit.integrity import verify_tree
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+    assert verify_tree(_published(target)) == ()
+
+    forged = b"# not what was run\n"
+    (target / "config.input.yaml").write_bytes(forged)
+    provenance = json.loads((target / "provenance.json").read_bytes())
+    row = provenance["artefacts"]["input"]
+    row["sha256"] = hashlib.sha256(forged).hexdigest()
+    row["bytes"] = len(forged)
+    (target / "provenance.json").write_bytes(
+        json.dumps(provenance, sort_keys=True, ensure_ascii=False).encode()
+    )
+
+    problems = verify_tree(_published(target))
+    assert problems, "the self-consistent forgery went undetected"
+    assert any("config.input.yaml" in problem for problem in problems), problems
+
+
+def test_editing_the_manifest_to_match_the_forgery_does_not_help_either(tmp_path):
+    """The next move up, and why the root digest is a separate value.
+
+    A forger who also edits the manifest's row must edit ``root_sha256`` to
+    match; one that edits the row and leaves the root is caught by the manifest
+    disagreeing with itself, before any file is read.
+    """
+    from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME, verify_tree
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+
+    forged = b"# not what was run\n"
+    (target / "config.input.yaml").write_bytes(forged)
+    manifest = json.loads((target / INTEGRITY_NAME).read_bytes())
+    for row in manifest["files"]:
+        if row["relative_path"] == "config.input.yaml":
+            row["sha256"] = hashlib.sha256(forged).hexdigest()
+            row["bytes"] = len(forged)
+    (target / INTEGRITY_NAME).write_bytes(
+        json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode()
+    )
+
+    problems = verify_tree(_published(target))
+    assert any("root_sha256" in problem for problem in problems), problems
+
+
+def test_a_file_added_after_publication_is_reported(tmp_path):
+    """Absence from the manifest is a finding, not a gap in coverage."""
+    from _rheplicant_bootstrap.audit.integrity import verify_tree
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+
+    (target / "extra.txt").write_bytes(b"added later\n")
+    problems = verify_tree(_published(target))
+    assert any("extra.txt" in problem for problem in problems), problems
 
 
 def test_stdout_none_suppresses_success_only(tmp_path, capsys):

@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME, integrity_bytes
 from _rheplicant_bootstrap.audit.resolved import ResolvedArtefact
 from _rheplicant_bootstrap.audit.types import AuditSnapshot, ResolvedLayerRecord
 from _rheplicant_bootstrap.errors import ConfigError
@@ -40,6 +41,37 @@ def _validate_file_pair(relative_path: object, payload: object) -> None:
     parts = relative_path.split("/")
     if not parts or any(part in ("", ".", "..") for part in parts):
         raise ConfigError("bundle file path is not a portable relative path.")
+
+
+def with_integrity(bundle: AuditBundle) -> AuditBundle:
+    """Append ``integrity.json``, covering every other file in the bundle.
+
+    Placed immediately before the two metadata files, so the tail of a staged
+    tree reads ``integrity.json, provenance.json, diagnostics.json`` -- the
+    three that can only be written once everything else is final.
+
+    The payload written here describes the bundle as it stands NOW, which for a
+    staged bundle means the provenance and diagnostics of the staging pass.
+    ``replace_staged_metadata`` recomputes and replaces it once those two are
+    final; this call exists so the file has a slot to be replaced in, since a
+    transaction refuses to add a path it did not stage.
+
+    Calling it twice is refused rather than tolerated: a second manifest would
+    silently cover the first, and "the digest list covers everything except
+    itself" would stop being true.
+    """
+    validate_serialized_bundle(bundle)
+    rows = tuple(bundle.files.items())
+    if any(name == INTEGRITY_NAME for name, _payload in rows):
+        raise ConfigError(f"{INTEGRITY_NAME} is already present in the bundle.")
+    covered = rows[:-2]
+    files = dict(covered)
+    files[INTEGRITY_NAME] = integrity_bytes(rows)
+    files["provenance.json"] = bundle.provenance
+    files["diagnostics.json"] = bundle.diagnostics
+    merged = dataclasses.replace(bundle, files=MappingProxyType(files))
+    validate_serialized_bundle(merged)
+    return merged
 
 
 def merge_bundle_files(

@@ -475,6 +475,58 @@ def test_source_scalar_subclasses_and_mutable_bytes_are_copied_without_hooks():
     assert type(prepared.source.bootstrap_manifest.launch_mode) is str
 
 
+def test_preset_sources_are_published_by_bytes_not_only_by_name():
+    """M5: a historical tree said only "rhino_v1" while the name was free to
+    resolve to something else later.
+
+    The digest could not go into ``provenance.json`` without a format bump --
+    ``presets`` is ``{"items": {"type": "string"}}`` in the closed
+    ``provenance-v1`` schema, and adding a key to the ``bootstrap`` object is
+    refused by its ``additionalProperties: false``. Publishing the BYTES needs
+    neither, is strictly more recoverable than a digest, and inherits a digest
+    anyway because ``integrity.json`` covers every published file.
+    """
+    from types import SimpleNamespace
+
+    from _rheplicant_bootstrap.entry import PRESETS_DIRECTORY, presets_bundle_files
+
+    raw = b"runtime:\n  jax_enable_x64: true\n"
+    one = SelectedPreset(PresetRequest("rhino_v1", None), snapshot("rhino_v1", raw=raw))
+    two = SelectedPreset(PresetRequest("extra", None), snapshot("extra", raw=b"other\n"))
+    prepared = SimpleNamespace(
+        source=SimpleNamespace(
+            bootstrap_manifest=SimpleNamespace(presets=(one, two))
+        )
+    )
+
+    files = presets_bundle_files(prepared)
+    assert set(files) == {
+        f"{PRESETS_DIRECTORY}/rhino_v1.yaml",
+        f"{PRESETS_DIRECTORY}/extra.yaml",
+    }
+    # The bytes, verbatim -- not a re-serialisation of the parsed document,
+    # which would silently normalise whatever the installed file actually said.
+    assert files[f"{PRESETS_DIRECTORY}/rhino_v1.yaml"] == raw
+
+    # And the digest that arrives for free is the one the snapshot validated.
+    assert (
+        hashlib.sha256(files[f"{PRESETS_DIRECTORY}/rhino_v1.yaml"]).hexdigest()
+        == one.snapshot.sha256
+    )
+
+
+def test_no_presets_publishes_no_preset_directory():
+    """An empty mapping, so a run without presets gains no empty directory."""
+    from types import SimpleNamespace
+
+    from _rheplicant_bootstrap.entry import presets_bundle_files
+
+    prepared = SimpleNamespace(
+        source=SimpleNamespace(bootstrap_manifest=SimpleNamespace(presets=()))
+    )
+    assert presets_bundle_files(prepared) == {}
+
+
 def test_manifest_direct_construction_validates_scalars_and_nested_records():
     valid = dict(
         protocol_version=1,
