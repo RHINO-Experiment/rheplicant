@@ -77,7 +77,7 @@ def test_bundled_app_serves_the_editor_and_api_from_one_origin() -> None:
 def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatch) -> None:
     calls: list[tuple[str, int, str]] = []
 
-    def fake_serve(*, host: str, port: int, log_level: str) -> None:
+    def fake_serve(*, host: str, port: int, log_level: str, allow_remote: bool = False) -> None:
         calls.append((host, port, log_level))
 
     monkeypatch.setattr(launcher, "serve", fake_serve)
@@ -92,3 +92,77 @@ def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatc
     assert launcher.main(
         ["--host", "0.0.0.0", "--allow-remote", "--port", "9125"]
     ) == 0
+
+
+def test_serve_refuses_a_non_loopback_bind_without_acknowledgement(monkeypatch) -> None:
+    """serve() is the programmatic entry point: a caller who imports it
+    directly, bypassing main()'s own early check, must still be refused a
+    non-loopback bind without acknowledgement. Before this test the guard
+    lived only in main(), so `from rheplicant.gui.launcher import serve;
+    serve(host="0.0.0.0", ...)` bound every interface with no authentication
+    and no acknowledgement at all.
+
+    uvicorn.run is monkeypatched, not serve() itself, so this exercises the
+    real function body -- including the guard -- rather than a stand-in.
+    """
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        launcher.serve(host="0.0.0.0", port=8000, log_level="info")
+    assert str(excinfo.value) == (
+        "Refusing a non-loopback bind without --allow-remote: the editor "
+        "has no authentication or multi-user isolation."
+    )
+    assert calls == []
+
+
+def test_serve_allows_a_non_loopback_bind_when_remote_is_acknowledged(monkeypatch) -> None:
+    """The acknowledgement is the `allow_remote=True` keyword, not merely the
+    absence of an exception: serve() must actually reach uvicorn.run once a
+    caller has explicitly accepted the risk.
+    """
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    launcher.serve(host="0.0.0.0", port=8000, log_level="info", allow_remote=True)
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["host"] == "0.0.0.0"
+    assert kwargs["port"] == 8000
+    assert kwargs["log_level"] == "info"
+
+
+def test_serve_allows_loopback_ipv4_without_acknowledgement(monkeypatch) -> None:
+    """A loopback bind carries no remote-exposure risk, so serve() must not
+    demand allow_remote for it.
+    """
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    launcher.serve(host="127.0.0.1", port=8000, log_level="info")
+    assert len(calls) == 1
+
+
+def test_serve_allows_localhost_without_acknowledgement(monkeypatch) -> None:
+    """"localhost" is not a literal loopback address but `_is_loopback`
+    treats it as one; serve() must honour the same exemption rather than
+    only recognising numeric loopback addresses.
+    """
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    launcher.serve(host="localhost", port=8000, log_level="info")
+    assert len(calls) == 1
