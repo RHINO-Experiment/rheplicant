@@ -42,6 +42,23 @@ _PLACEHOLDER_WORDING = re.compile(
 PLACEHOLDER = frozenset({
     "ADCOperator",
     "ApplyCalibrationOperator",
+    # Moved BACK from REAL, deliberately, after the criterion for that list was
+    # written out and found not to hold. The argument for promoting them was
+    # that their contract and placement are real -- and both are: ground pickup
+    # reads env.temperature with a documented t_ground fallback and sits in the
+    # antenna-temperature sum; atmospheric emission sits before the
+    # receiver_input switch and before the noise-wave stage, for reasons its
+    # module docstring argues from radiative transfer.
+    #
+    # But that criterion does not SEPARATE the two lists: ReceiverOperator,
+    # GainOperator and CalLoadOperator are on this side and their contracts are
+    # load-bearing enough that README calls them out by name. Whatever divides
+    # the lists has to be a claim about the BODY, and by that standard
+    # `coupling * T_amb` and a constant `t_atm` are stand-ins -- which is what
+    # both module docstrings had gone on saying while the class docstrings were
+    # cleaned to move them.
+    "AtmosphericEmissionOperator",
+    "GroundPickupOperator",
     "BackendOperator",
     "CalLoadOperator",
     "EMIOperator",
@@ -66,12 +83,10 @@ REAL = frozenset({
     # bridges to the numpy MomentRFI package and is the permanent integration.
     "MomentRFIFlaggingOperator",
     "AntennaLossOperator",
-    "AtmosphericEmissionOperator",
     "BasisTemperatureOperator",
     "BeamSpillOperator",
     "CWCalibrationOperator",
     "FourierBandFilter",
-    "GroundPickupOperator",
     "NeuralOperator",
     "NoiseWaveOperator",
     "RadiometerNoiseOperator",

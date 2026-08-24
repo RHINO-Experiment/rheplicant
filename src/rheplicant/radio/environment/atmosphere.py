@@ -34,6 +34,18 @@ from rheplicant.core.state import State
 class AtmosphericEmissionOperator(AbstractOperator):
     """Produce the beam-averaged atmospheric emission contribution [K].
 
+    The BODY is a placeholder: a constant effective temperature, optionally per
+    channel, with no opacity, no elevation dependence and no weather. The
+    contract is not. What is real here is the placement argument -- before the
+    ``receiver_input`` switch, because calibration loads do not see the sky,
+    and before the noise-wave stage, because emission arriving through the
+    antenna suffers the ``(1-|Gamma|^2)`` reflection loss -- and that argument
+    survives whatever replaces the body.
+
+    Real physics to come: emission from an opacity profile along the line of
+    sight, elevation-dependent through the airmass, which is the ``atmosphere_field``
+    node reserved below.
+
     Source-type: a branch of the antenna-temperature ``SumOperator``,
     producing its own ``(n_time, n_freq)`` contribution on the shared grid.
 

@@ -27,6 +27,17 @@ from rheplicant.core.state import State
 class GroundPickupOperator(AbstractOperator):
     """Produce a ground-pickup contribution coupled to ambient temperature.
 
+    The BODY is a placeholder: one scalar coupling times one temperature, with
+    no dependence on where the sidelobes actually point. The contract is not.
+    What is real here is the environment-coupling seam -- an ambient
+    temperature read from the traced state with a declared parameter fallback,
+    and a placement in the antenna-temperature sum parallel to atmospheric
+    emission -- and that seam does not change when the physics arrives.
+
+    Real physics to come: a sidelobe-weighted topographic template modulated by
+    smooth functions of alt/az, which couples this operator to the beam model
+    and makes ``coupling`` a field rather than a scalar.
+
     Contribution: ``coupling * T_amb`` where ``T_amb`` comes from
     ``state.env.temperature`` (scalar or per-time) if present, else from the
     ``t_ground`` fallback parameter.

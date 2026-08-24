@@ -225,9 +225,9 @@ arrived when is in
 The architecture and inference layer are complete and tested end-to-end
 (10216 tests, 87.1 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
-*physics* is deliberately placeholder where the docstring says so — 15 of the
+*physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
-and friends. The other fourteen no longer carry that wording: the sky engines
+and friends. The other twelve no longer carry that wording: the sky engines
 are real (a general differentiable limTOD port and a drift-scan m-mode fast
 path that agrees with it to float64 roundoff while running ~1000x faster on
 RHINO's geometry — see
@@ -237,7 +237,7 @@ terms of the noise-wave data model, the CW calibration tone, and the
 separable-basis antenna temperature; the Touchstone and RHINO-HDF5 readers are
 an ingestion layer, not a stand-in for one.
 
-Three of the fifteen are load-bearing even so. `ReceiverOperator`,
+Three of the seventeen are load-bearing even so. `ReceiverOperator`,
 `GainOperator` and `CalLoadOperator` have placeholder *bodies* — no flicker,
 no measured band shape, no load reflection or telemetry — but real shape and
 contract: the receiver module's `unit_mean_bandpass` / `unit_mean_free` are the
