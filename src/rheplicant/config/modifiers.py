@@ -102,6 +102,9 @@ def apply_modifiers(
     if "part" in modifiers:
         value = _part(value, modifiers["part"], was_complex=was_complex)
         if modifiers["part"] == "angle":
+            # Tagged ``deg`` because ``_part`` computed the angle IN degrees
+            # (see ``_angle_deg``) -- the tag and the value are decided
+            # together, in one place, so they cannot disagree.
             modifiers["unit"] = "deg"
     if "scale" in modifiers or "offset" in modifiers:
         if "scale" in modifiers:
@@ -158,7 +161,18 @@ def _part(value: Any, part: str, *, was_complex: bool):
     array = jnp.asarray(value)
     if part == "im" and not was_complex:
         raise ConfigError(_no_imaginary_part_message(array.dtype))
-    return {"re": jnp.real, "im": jnp.imag, "abs": jnp.abs, "angle": jnp.angle}[part](array)
+    return {"re": jnp.real, "im": jnp.imag, "abs": jnp.abs, "angle": _angle_deg}[part](array)
+
+
+def _angle_deg(array: Any):
+    """The phase, in degrees -- because the caller tags the result ``unit:
+    deg`` immediately after ``part: angle`` runs (see ``apply_modifiers``
+    above). ``jnp.angle`` alone returns radians; converting here, in the one
+    function that computes the value, is what keeps the number and its label
+    from drifting apart again. Do not scale elsewhere -- there is exactly one
+    place this decision is made.
+    """
+    return jnp.degrees(jnp.angle(array))
 
 
 def _no_imaginary_part_message(dtype: Any) -> str:

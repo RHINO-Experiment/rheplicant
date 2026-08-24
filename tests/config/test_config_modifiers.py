@@ -99,11 +99,18 @@ class TestScaleAndOffset:
 
 
 class TestPart:
-    def test_angle_emits_canonical_degree_metadata(self, context):
+    def test_angle_emits_a_value_in_degrees_with_matching_unit_metadata(self, context):
+        """The value and its ``unit:`` tag are decided together in
+        ``_part``/``_angle_deg`` precisely so this cannot come apart: a test
+        that only checked one half (the radian value, or the ``deg`` label)
+        would stay green even if the two disagreed by a factor of 180/pi --
+        which is exactly the bug this pins against.
+        """
         got = resolve_value(
             {"value": 1.0 + 1.0j, "unit": "dimensionless", "part": "angle"},
             context,
         )
+        assert float(got.value) == pytest.approx(math.degrees(math.atan2(1.0, 1.0)))
         assert got.modifiers["unit"] == "deg"
 
     def test_each_part_of_a_complex_value(self, context):
@@ -113,6 +120,10 @@ class TestPart:
         TypeError. A complex value gets here from ref:, python: or file: (the
         touchstone reader's S-parameters are the reason part: exists), and a
         scalar node carrying one stands in for those.
+
+        ``angle`` is asserted in degrees, not radians -- ``part: angle``
+        always tags its result ``unit: deg``, so the value it returns must
+        already be in degrees or the tag would be a lie.
         """
         node = {"value": 1.0 + 2.0j}
         assert float(resolve_value({**node, "part": "re"}, context).value) == pytest.approx(1.0)
@@ -121,7 +132,7 @@ class TestPart:
             5.0**0.5
         )
         assert float(resolve_value({**node, "part": "angle"}, context).value) == pytest.approx(
-            math.atan2(2.0, 1.0)
+            math.degrees(math.atan2(2.0, 1.0))
         )
 
     def test_the_part_is_taken_before_the_scale_and_the_offset(self, context):
@@ -168,7 +179,7 @@ class TestPartImOnAValueThatIsNotComplex:
 
     @pytest.mark.parametrize(
         ("part", "expected"),
-        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [math.pi, 0.0])],
+        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [180.0, 0.0])],
     )
     def test_the_other_three_parts_stay_legal_on_a_real_value(self, part, expected, context):
         """The point of the refusal is that it is narrow. `re` is a no-op an
@@ -230,7 +241,7 @@ class TestPartImAfterAWideningDtype:
 
     @pytest.mark.parametrize(
         ("part", "expected"),
-        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [math.pi, 0.0])],
+        [("re", [-3.0, 4.0]), ("abs", [3.0, 4.0]), ("angle", [180.0, 0.0])],
     )
     def test_the_other_three_parts_stay_legal_through_a_widening_dtype(
         self, part, expected, context
