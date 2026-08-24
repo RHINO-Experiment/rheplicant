@@ -44,6 +44,11 @@ def _declared_error_names() -> set[str]:
 #: written down.)
 OWNERS = {
     "ParameterSpaceError": "rheplicant.inference",
+    # Its subclass, and the same argument: a reader who wants the numbers a
+    # refused ``check_linearity`` measured needs to name the class, and the
+    # layer they already import ``check_linearity`` from is the one that
+    # should hand it to them.
+    "LinearityRefused": "rheplicant.inference",
 }
 DEFAULT_OWNER = "rheplicant.core"
 

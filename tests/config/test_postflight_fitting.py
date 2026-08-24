@@ -41,6 +41,7 @@ naming neither the check nor the gate.
 
 import dataclasses
 import importlib
+import math
 import types
 import warnings
 
@@ -54,6 +55,7 @@ from rheplicant.config.findings import REFUSE, REPORT, WARN, ConfigWarning
 from rheplicant.config.gating import AUTO_SKIP, CHECK_ID
 from rheplicant.config.postflight import CHECKS
 from rheplicant.config.postflight import fitting as fitting_module
+from rheplicant.core.errors import LinearityRefused
 from rheplicant.inference.identifiability import ParameterSpaceError
 from rheplicant.inference.parameters import Latent, ParameterSpace
 from rheplicant.inference.uncertainty import StateValidationError
@@ -387,6 +389,132 @@ class TestC12:
         assert found.where == "inference.parameters.w"
         assert "not affine" in found.message
         assert found.message.endswith("(check C12).")
+
+    # ------------------------------------------- the numbers, not the prose --
+
+    def test_C12_carries_its_numbers_on_the_PASSING_branch(self):
+        """Both latents, every scale, as numbers beside the sentence.
+
+        The pairs are checked against what the message RENDERS, so the
+        attribute and the prose cannot drift into describing different runs.
+        """
+        found = priced_only(
+            _two_latent_document(
+                checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+        assert found.departure is not None
+        assert [name for name, _ in found.departure] == ["d", "a"]
+        for _name, pairs in found.departure:
+            assert [scale for scale, _ in pairs] == [1e-3, 1.0, 1e3]
+            for scale, error in pairs:
+                assert f"{scale:g}x -> {error:.2e}" in found.message
+
+    def test_C12_carries_its_numbers_on_the_REFUSING_branch_TOO(self):
+        """The gap this field exists to close, and the half that was missing.
+
+        ``check_linearity`` RETURNS its measurement when the latent really is
+        affine -- where every value is 0.0 -- and used to render-and-drop it
+        when the latent is not.  So the outcome worth reading was the only one
+        with nothing structured to read, and a field fed by the passing branch
+        alone would have surfaced a row of zeros.
+        """
+        found = priced_only(
+            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        assert found.severity == REFUSE
+        assert found.departure is not None
+        assert [name for name, _ in found.departure] == ["w"]
+        pairs = dict(found.departure[0][1])
+        assert set(pairs) == {1e-3, 1.0, 1e3}
+        for scale, error in pairs.items():
+            assert f"{scale:g}x -> {error:.2e}" in found.message
+
+    def test_a_departure_may_be_NON_FINITE_and_that_is_a_result(self):
+        """Measured on the shipped refusing document, and load-bearing
+        downstream.
+
+        ``NONLINEAR_LATENT``'s ``w`` gives ``nan`` at all three scales: the
+        prediction's own arithmetic is unusable there, which
+        ``_affinity_errors`` counts as a FAILURE rather than a pass (``nan >
+        rtol`` is False, so a naive comparison would read it as evidence of
+        linearity).  Kept rather than filtered -- "the linearization could not
+        be evaluated here" is a diagnosis, and dropping the row would leave a
+        table that looks like it measured fewer scales than it probed.
+
+        The consumer contract this pins: a departure is a float that MAY be
+        non-finite, so anything encoding it must have an answer for that, and
+        the answer is not zero.  Asserted as a PAIR with the passing document,
+        whose table is finite throughout -- one alone would leave "non-finite
+        is possible" and "non-finite is all this ever produces"
+        indistinguishable.
+        """
+        passing = priced_only(
+            _two_latent_document(
+                checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+        refusing = priced_only(
+            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        assert all(math.isfinite(error) for _, pairs in passing.departure
+                   for _, error in pairs)
+        assert not any(math.isfinite(error) for _, pairs in refusing.departure
+                       for _, error in pairs)
+
+    def test_C12_reads_the_refusals_OWN_numbers_and_does_not_re_measure(
+            self, monkeypatch):
+        """The seam: ``fitting`` takes what ``LinearityRefused`` carries.
+
+        Stubbed with a table nothing could compute, so a re-measurement here
+        would produce different values rather than these.
+        """
+        counter = []
+        _stub_all(monkeypatch, counter, linearity_raises=LinearityRefused(
+            "the package's own words", errors={0.5: 0.25, 2.0: 0.75},
+            rtol=1e-9, failed=(2.0,)))
+        found = priced_only(_two_latent_document(
+            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12")
+        assert found.severity == REFUSE
+        assert found.departure == (("d", ((0.5, 0.25), (2.0, 0.75))),
+                                   ("a", ((0.5, 0.25), (2.0, 0.75))))
+
+    def test_a_refusal_that_measured_NOTHING_carries_no_table_at_all(
+            self, monkeypatch):
+        """``None``, and not an empty table, and never a table of zeros.
+
+        C12's ``except`` catches three refusals wider than
+        ``LinearityRefused`` -- a ``StateValidationError``, and the bind
+        refusal this module's docstring warns about, which arrives as a plain
+        ``ParameterSpaceError``.  Neither measured anything, and "not
+        measured" is a different fact from "measured 0.0" -- which a latent
+        that really is affine genuinely does.
+        """
+        counter = []
+        _stub_all(monkeypatch, counter,
+                  linearity_raises=ParameterSpaceError("the package's own words"))
+        found = priced_only(_two_latent_document(
+            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12")
+        assert found.severity == REFUSE
+        assert found.departure is None
+
+    def test_a_latent_that_PASSED_is_left_out_of_a_refusals_table(
+            self, monkeypatch):
+        """The table names what the finding is ABOUT.
+
+        ``where`` and ``message`` on the refusing branch both speak for the
+        latents that failed; a passing latent's zeros riding along would put a
+        latent in the diagnosis that has nothing wrong with it.
+        """
+        counter = []
+
+        def one_bad(space, pipeline, state, name=None, **options):
+            counter.append(("check_linearity", name, options))
+            if name == "a":
+                raise LinearityRefused("the package's own words",
+                                       errors={1.0: 0.5}, rtol=1e-9, failed=(1.0,))
+            return {1.0: 0.0}
+
+        monkeypatch.setattr(_LINEAR, "check_linearity", one_bad)
+        found = priced_only(_two_latent_document(
+            checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+        assert found.severity == REFUSE
+        assert found.where == "inference.parameters.a"
+        assert found.departure == (("a", ((1.0, 0.5),)),)
 
     def test_C12_stands_down_when_the_same_model_makes_no_claim(self):
         """The anti-vacuity partner of the test above: the SAME non-affine

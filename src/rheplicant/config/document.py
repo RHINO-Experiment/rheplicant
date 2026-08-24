@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.findings import Report
+from rheplicant.config.findings import Report, audit_record
 from rheplicant.config.gating import gates
 from rheplicant.config.inflight import Axes, Built, axes, built
 from rheplicant.config.layering import apply_variant
@@ -135,7 +135,7 @@ def _complete_report_boundary(
     cumulative = Report(findings=previous.findings + current.findings)
     if trace is not None:
         trace.record_findings(
-            stage, layer, tuple(dataclasses.asdict(row) for row in current.findings)
+            stage, layer, tuple(audit_record(row) for row in current.findings)
         )
         trace.boundary_completed(stage, layer)
     return cumulative

@@ -51,9 +51,18 @@ document's top level is well formed.
 
 ## What a Report carries
 
-A `Finding` is four fields: `check` (the schema §6 id, or `""`), `severity`,
+A `Finding` is five fields: `check` (the schema §6 id, or `""`), `severity`,
 `where` — **a path into your document**, the line to edit, never a path into
-the package — and `message`, one sentence carrying the fix.
+the package — `message`, one sentence carrying the fix, and `departure`.
+
+`departure` is the one field that is not prose. Only C12 sets it, and it
+carries the per-latent, per-scale relative departure from linearity that the
+message renders — `(("g", ((0.001, 1.3e-4), (1.0, 4.9e-1))), …)`, scales
+ascending — so a reader that needs the number does not have to parse the
+sentence back out. It is `None` when nothing was measured, which is not a
+table of zeros: a latent that really is affine measures `0.0` at every scale,
+and that is a result. A value may be non-finite, meaning the linearization
+could not be evaluated at that probe.
 
 | method | what it gives |
 |---|---|

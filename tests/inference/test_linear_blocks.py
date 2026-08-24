@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import pytest
 
 from rheplicant.core.combinators import SumOperator
-from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import (
@@ -517,6 +517,117 @@ class TestCheckLinearity:
         # naming one is enough
         block = linear_operator(space, twin, template_state, name="amp_a")
         assert jnp.allclose(block.offset, SKY_B * GAIN)
+
+    @pytest.fixture
+    def exponential_space(self):
+        """Nonlinear at every probe -- the simplest thing that refuses."""
+        return ParameterSpace.direct(
+            "log_amp", init=jnp.log(SKY_A), into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=jnp.exp, linear=True,
+        )
+
+    def test_the_refusal_is_a_parameter_space_error_and_stays_one(
+        self, twin, exponential_space, template_state
+    ):
+        """The entire back-compatibility claim, in one place.
+
+        The refusal carries numbers now (below), and it does that by being a
+        SUBCLASS with an unchanged message -- so every
+        ``pytest.raises(ParameterSpaceError, match=...)`` in this suite and
+        every ``except ParameterSpaceError`` outside it keeps working, and
+        neither had to be touched.  Both halves are asserted here because
+        either one alone can be lost by a later edit: re-parenting the class
+        breaks the first, rewording the sentence breaks the second, and
+        nothing else in this file would notice.
+        """
+        with pytest.raises(ParameterSpaceError, match="not affine") as caught:
+            check_linearity(exponential_space, twin, template_state)
+        assert type(caught.value) is LinearityRefused
+
+    def test_the_refusal_carries_the_numbers_its_sentence_only_renders(
+        self, twin, exponential_space, template_state
+    ):
+        """The reason this class exists.
+
+        The passing branch RETURNS ``{scale: error}``; the failing branch used
+        to format the same measurement into prose and drop it, so the outcome
+        with something to report was the only one a caller could not read.
+        Anything downstream wanting the number had to parse the sentence.
+
+        The loop is the load-bearing assertion: it pins that the attribute and
+        the sentence are the SAME measurement rendered twice, so the two
+        cannot drift into disagreeing about what was measured.
+        """
+        with pytest.raises(LinearityRefused) as caught:
+            check_linearity(exponential_space, twin, template_state)
+        refused = caught.value
+
+        assert set(refused.errors) == {1e-3, 1.0, 1e3}
+        assert refused.failed
+        assert set(refused.failed) <= set(refused.errors)
+        for scale, error in refused.errors.items():
+            assert f"{scale:g}x -> {error:.2e}" in str(refused)
+        assert f"rtol={refused.rtol:.2e}" in str(refused)
+
+    def test_the_carried_numbers_keep_the_TREND_a_single_worst_case_loses(
+        self, twin, saturating_space, template_state
+    ):
+        """Why the whole table is carried, and not a maximum.
+
+        Measured on this block at scales ``(1e-3, 1e2, 1e4)``, seeds 0-5, all
+        identical: ``failed == (100.0, 10000.0)`` with the small probe clean at
+        ~1e-5.  "Affine until the probe reaches the knee" and "not affine
+        anywhere" are different faults with different fixes, and a scalar
+        summary cannot tell them apart -- so the summary is not what is
+        carried.
+        """
+        for seed in range(6):
+            with pytest.raises(LinearityRefused) as caught:
+                check_linearity(saturating_space, twin, template_state,
+                                scales=(1e-3, 1e2, 1e4), key=jax.random.key(seed))
+            refused = caught.value
+            assert 1e-3 not in refused.failed
+            assert set(refused.failed) == {1e2, 1e4}
+            assert refused.errors[1e-3] < refused.errors[1e4]
+
+    def test_the_refusal_is_importable_from_the_layer_that_raises_it(self):
+        """A caller who wants the numbers must be able to name the class.
+
+        ``rheplicant.core`` deliberately does not carry ``ParameterSpaceError``
+        -- a parameter space is not a concept ``core`` has -- so
+        ``rheplicant.inference`` is where a ``check_linearity`` caller already
+        imports from, and an exception reachable only through
+        ``rheplicant.core.errors`` would be the one name in this family that
+        contradicts that.
+        """
+        import rheplicant.inference as inference
+
+        assert inference.LinearityRefused is LinearityRefused
+        assert "LinearityRefused" in inference.__all__
+
+    def test_the_refusal_cannot_be_raised_without_its_numbers(self):
+        """Required keyword arguments, and NOT ``ConfigError.report``'s
+        optional payload.
+
+        A ``LinearityRefused`` carrying no measurement is precisely the state
+        this class exists to abolish -- the message-only refusal it replaced --
+        and a default would let one back in without anything going red.
+        """
+        with pytest.raises(TypeError):
+            LinearityRefused("Latent 'g' ... is not affine in it")
+
+    def test_the_refusal_copies_the_table_it_is_handed(self):
+        """A caught exception must not be a live handle on its raiser's state.
+
+        One line of production code (``dict(errors)``), and nothing else in
+        the suite would notice it being dropped: ``check_linearity`` hands over
+        a dict it is finished with, so the aliasing is invisible until some
+        caller sorts or prunes ``errors`` in place.
+        """
+        mine = {1.0: 0.5}
+        refused = LinearityRefused("x", errors=mine, rtol=1e-3, failed=(1.0,))
+        mine[1.0] = 0.0
+        assert refused.errors == {1.0: 0.5}
 
 
 def _dense_posterior(block, noise_std, prior_std):

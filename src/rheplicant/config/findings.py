@@ -64,8 +64,13 @@ import warnings
 
 from rheplicant.config.errors import ConfigError
 
-__all__ = ["REFUSE", "REPORT", "SEVERITIES", "WARN", "ConfigWarning",
-           "Finding", "Report", "refuse", "report", "warn"]
+__all__ = ["AUDIT_KEYS", "REFUSE", "REPORT", "SEVERITIES", "WARN",
+           "ConfigWarning", "Departure", "Finding", "Report", "audit_record",
+           "refuse", "report", "warn"]
+
+#: :attr:`Finding.departure`'s shape, named once so the four places that pass
+#: one through do not each re-spell it.
+Departure = tuple[tuple[str, tuple[tuple[float, float], ...]], ...]
 
 #: The document cannot be run as written.
 REFUSE: str = "refuse"
@@ -105,6 +110,19 @@ class Finding:
     #: One complete sentence carrying the fix, in this layer's voice.  Ends
     #: with ``"(check A30)."`` when :attr:`check` is set.
     message: str
+    #: The per-scale departure from linearity a check MEASURED, when it
+    #: measured one: ``((latent, ((scale, error), ...)), ...)``, scales
+    #: ascending.  Only C12 sets it today.
+    #:
+    #: **Nested tuples and not a mapping**, because this class is
+    #: ``frozen=True, slots=True`` and its own tests pin
+    #: ``hash(finding)``: a ``dict`` field is unhashable and mutable, and
+    #: would quietly cost both.
+    #:
+    #: ``None`` is "no number was measured" and is NOT an empty table, which
+    #: in turn is not a table of zeros -- a linear latent really does measure
+    #: 0.0 at every scale, and that is a result.
+    departure: Departure | None = None
 
     def __post_init__(self) -> None:
         # A severity outside the three is a bug in a CHECK, never a fault of
@@ -211,16 +229,51 @@ class Report:
         return bool(self.findings)
 
 
-def refuse(check: str, where: str, message: str) -> Finding:
+def refuse(check: str, where: str, message: str, *,
+           departure: Departure | None = None) -> Finding:
     """This document cannot be run as written."""
-    return Finding(check=check, severity=REFUSE, where=where, message=message)
+    return Finding(check=check, severity=REFUSE, where=where, message=message,
+                   departure=departure)
 
 
-def warn(check: str, where: str, message: str) -> Finding:
+def warn(check: str, where: str, message: str, *,
+         departure: Departure | None = None) -> Finding:
     """This document will run and is probably not what its author meant."""
-    return Finding(check=check, severity=WARN, where=where, message=message)
+    return Finding(check=check, severity=WARN, where=where, message=message,
+                   departure=departure)
 
 
-def report(check: str, where: str, message: str) -> Finding:
+def report(check: str, where: str, message: str, *,
+           departure: Departure | None = None) -> Finding:
     """Worth recording beside the run; not worth interrupting anyone over."""
-    return Finding(check=check, severity=REPORT, where=where, message=message)
+    return Finding(check=check, severity=REPORT, where=where, message=message,
+                   departure=departure)
+
+
+#: The keys ONE finding contributes to the audit trace -- and, through it, to
+#: ``diagnostics.json``.
+#:
+#: **A closed, versioned contract, and not a projection of this dataclass.**
+#: ``rheplicant/config/schemas/diagnostics-v1.schema.json`` declares
+#: ``"format_version": {"const": 1}`` and sets ``additionalProperties: false``
+#: on its ``finding`` object; ``_rheplicant_bootstrap.audit.trace`` enforces the
+#: same thing eagerly, refusing any mapping whose keys are not EXACTLY these
+#: four.  So the two boundaries that feed it must project explicitly.  They
+#: used ``dataclasses.asdict``, which silently tied a published v1 shape to
+#: whatever fields this class happens to carry: the first field added -- this
+#: is that field -- turned every audited run into "audit finding[0] must have
+#: exactly keys ('check', 'severity', 'where', 'message')".
+AUDIT_KEYS: tuple[str, ...] = ("check", "severity", "where", "message")
+
+
+def audit_record(finding: Finding) -> dict[str, str]:
+    """One finding as the audit trace's four keys, and nothing else.
+
+    See :data:`AUDIT_KEYS` for why this is written out rather than derived.
+    """
+    return {
+        "check": finding.check,
+        "severity": finding.severity,
+        "where": finding.where,
+        "message": finding.message,
+    }

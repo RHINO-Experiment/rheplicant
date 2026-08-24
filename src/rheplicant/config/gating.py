@@ -354,7 +354,8 @@ def auto_skipped(gate: Gate, reason: str) -> Gate:
     return gate._replace(state=AUTO_SKIP, record=False, reason=reason)
 
 
-def verdict(gate: Gate, *, failed: bool, where: str, message: str) -> findings.Finding | None:
+def verdict(gate: Gate, *, failed: bool, where: str, message: str,
+            departure: findings.Departure | None = None) -> findings.Finding | None:
     """The cross-product of a mode and a ``report:``, in one place.
 
     **AT MOST ONE finding, ever.**  A failure with ``report: true`` is ONE
@@ -369,7 +370,14 @@ def verdict(gate: Gate, *, failed: bool, where: str, message: str) -> findings.F
             ``model.adc``) -- the line that caused this, not the gate's own.
             ``gate.where()`` is one hop away in the message.
         message: the sentence for THIS outcome, composed by the caller, which
-            is the only place the numbers live.
+            is the only place the PROSE lives.
+        departure: the per-scale departure from linearity the caller MEASURED,
+            when it measured one, carried through untouched.  It duplicates
+            what ``message`` renders and that is the point: a consumer that
+            needs the number must not have to parse the sentence back.  The
+            auto-skip branch below never sets it -- a check that produced no
+            answer measured nothing, and ``None`` says so where a table of
+            zeros would lie.
 
     Returns:
         The one finding, or ``None`` when this outcome says nothing.  A gate
@@ -388,10 +396,10 @@ def verdict(gate: Gate, *, failed: bool, where: str, message: str) -> findings.F
     check = CHECK_ID[gate.name]
     if failed:
         if gate.state == "refuse":
-            return findings.refuse(check, where, message)
+            return findings.refuse(check, where, message, departure=departure)
         if gate.state == "warn":
-            return findings.warn(check, where, message)
-        return findings.report(check, where, message)
+            return findings.warn(check, where, message, departure=departure)
+        return findings.report(check, where, message, departure=departure)
     if gate.record:
-        return findings.report(check, where, message)
+        return findings.report(check, where, message, departure=departure)
     return None

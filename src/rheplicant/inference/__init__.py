@@ -1,6 +1,6 @@
 """Inference / calibration layer: treats a Pipeline as data, never lives inside it."""
 
-from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.inference.archive import load_memory, save_memory
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
 from rheplicant.inference.chain import (
@@ -131,6 +131,7 @@ __all__ = [
     "MIN_DRAWS",
     "DISTRIBUTE",
     "REQUIRED_TERM_MEMBERS",
+    "LinearityRefused",
     "ParameterSpaceError",
     "AdamCalibrator",
     "AmbiguousFanWarning",

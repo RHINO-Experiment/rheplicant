@@ -86,7 +86,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
@@ -505,8 +505,12 @@ def check_linearity(
         is, not only whether it passes.
 
     Raises:
-        ParameterSpaceError: if ``name`` and ``names`` are both given, or if any
-            scale departs from affinity by more than ``rtol``.
+        ParameterSpaceError: if ``name`` and ``names`` are both given.
+        LinearityRefused: if any scale departs from affinity by more than
+            ``rtol``. It IS a ``ParameterSpaceError`` -- an existing
+            ``except ParameterSpaceError`` needs no change -- and it carries
+            the same per-scale numbers this returns on the passing branch, so
+            a caller can report the departure instead of quoting the sentence.
     """
     if name is not None and names is not None:
         raise ParameterSpaceError(f"check_linearity() {_BOTH_SPELLINGS}")
@@ -567,10 +571,17 @@ def check_linearity(
     errors, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
-        raise ParameterSpaceError(
+        # The subclass, and the SAME sentence: `detail` renders the numbers for
+        # a reader, and `errors=` hands the same numbers to a caller that has
+        # to do something with them. Rendering them only would leave parsing
+        # this string as the one route to a number this function already has.
+        raise LinearityRefused(
             f"{subject}: departure from its own linearization exceeds rtol={rtol:.2e} "
             f"(above the per-probe roundoff floor) at {failed} times {scale_of} "
-            f"({detail}). {remedy}"
+            f"({detail}). {remedy}",
+            errors=errors,
+            rtol=rtol,
+            failed=failed,
         )
     return errors
 

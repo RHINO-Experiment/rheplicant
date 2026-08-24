@@ -50,6 +50,11 @@ working.
   - `ValueError`
   - a parameter space was declared inconsistently — the one member of the
     family that is **not** on `rheplicant.core`'s surface (see below)
+* - `LinearityRefused`
+  - `ParameterSpaceError`
+  - `check_linearity` measured a departure from linearity. Catch it as a
+    `ParameterSpaceError` as before; catch it by name to read `.errors`,
+    `.rtol` and `.failed` instead of its sentence
 :::
 
 Four of them, raised by four different layers and caught by one clause:

@@ -6,6 +6,10 @@ the closest builtin (``ValueError`` / ``RuntimeError``) so generic handlers
 keep working.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+
 from _rheplicant_bootstrap.errors import DirtError
 
 
@@ -37,6 +41,52 @@ class ParameterSpaceError(DirtError, ValueError):
     Every one of these would otherwise yield a finite, correctly-shaped, wrong
     inference — so they are errors, not warnings.
     """
+
+
+class LinearityRefused(ParameterSpaceError):
+    """``check_linearity`` measured a departure from linearity, and refused.
+
+    A SUBCLASS and not a new member of the family, deliberately: every
+    ``except ParameterSpaceError`` already written against
+    :func:`~rheplicant.inference.linear.check_linearity` keeps catching this,
+    and the refusal's message is unchanged, so the
+    ``pytest.raises(ParameterSpaceError, match=...)`` sites keep matching too.
+    Nothing about the refusal itself is new.
+
+    What is new is that the per-probe departures the message *renders* are
+    also carried as NUMBERS.  Before this class the failing branch put them in
+    a sentence and dropped them, while the passing branch -- where every value
+    is 0.0 -- returned them structured, so the only path with something to say
+    was the only path with nothing to read.  A consumer that wanted the
+    numbers had to parse the prose, which is a mapping this package's own
+    source would not defend.
+
+    Attributes:
+        errors: ``{scale: relative departure}`` at every probed scale, PASSING
+            probes included -- the trend across scales is the diagnostic, and
+            "departs at 1x and 1000x but not at 0.001x" is a different fault
+            from "departs everywhere".
+        rtol: the tolerance the comparison actually used, which is derived
+            from the prediction's dtype when the caller passes none.
+        failed: the scales that exceeded it, ascending -- a subset of
+            ``errors``' keys, and the same tuple the message names.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        errors: Mapping[float, float],
+        rtol: float,
+        failed: Sequence[float],
+    ) -> None:
+        super().__init__(*args)
+        # Copied rather than aliased: the caller's ``errors`` is the same dict
+        # ``check_linearity`` returns on the passing branch, and an exception
+        # that shares mutable state with its raiser is a trap for whoever
+        # catches it.
+        self.errors = dict(errors)
+        self.rtol = float(rtol)
+        self.failed = tuple(float(scale) for scale in failed)
 
 
 class DataIngestionError(DirtError, ValueError):

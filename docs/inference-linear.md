@@ -205,6 +205,38 @@ would be worse than no check, because the cure a user reaches for is to switch
 the check off.
 :::
 
+:::{admonition} The refusal carries its numbers, so nothing has to parse it
+:class: tip
+
+`check_linearity` **returns** `{scale: relative departure}` when the block
+passes. When it does not, it raises `LinearityRefused` — a
+`ParameterSpaceError`, with the same message it always had, so an existing
+`except ParameterSpaceError` needs no change — and the same measurement is on
+the exception:
+
+```python
+from rheplicant.inference import LinearityRefused
+
+try:
+    errors = check_linearity(space, twin, state, name="amp")
+except LinearityRefused as refused:
+    errors = refused.errors        # {scale: departure}, every probe
+    refused.failed                 # the scales that exceeded rtol, ascending
+    refused.rtol                   # the tolerance actually used
+```
+
+Read the **trend**, not a worst case. "Departs at 1× and 10³× but not at
+10⁻³×" is a knee or a saturation and points at the regime; "departs
+everywhere" is a wrong parameterization. A maximum over the table cannot tell
+those apart, which is why the whole table is what is carried.
+
+A departure may be **non-finite**: if the prediction's own arithmetic breaks
+down at a probe, that probe is counted as a failure — `nan > rtol` is `False`,
+so treating it as a pass would be exactly backwards — and `nan` is what the
+table holds for it. It means "the linearization could not be evaluated here",
+which is not zero.
+:::
+
 `linear_operator` never forms a matrix: `A` comes from `jax.linearize` and `Aᵀ`
 from `jax.vjp`, so applying a 10⁶-dimensional block costs one forward
 evaluation.

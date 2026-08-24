@@ -89,7 +89,7 @@ from rheplicant.config.document import (
     _through_priced,
 )
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.findings import Report
+from rheplicant.config.findings import Report, audit_record
 from rheplicant.config.layering import apply_variant
 from rheplicant.config.passes import sweep
 from rheplicant.config.preflight import _LABEL, _SECTIONS, CHECKS, _structural
@@ -356,7 +356,7 @@ def _run_text_preflight_all_layers(
         combined.extend(slice_)
         if trace is not None:
             trace.record_findings(
-                "preflight", layer.identity, tuple(dataclasses.asdict(row) for row in slice_)
+                "preflight", layer.identity, tuple(audit_record(row) for row in slice_)
             )
             trace.boundary_completed("preflight", layer.identity)
     report = Report(findings=tuple(combined))

@@ -21,6 +21,7 @@ import pytest
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import (
+    AUDIT_KEYS,
     REFUSE,
     REPORT,
     SEVERITIES,
@@ -28,6 +29,7 @@ from rheplicant.config.findings import (
     ConfigWarning,
     Finding,
     Report,
+    audit_record,
     refuse,
     report,
     warn,
@@ -109,8 +111,51 @@ class TestTheThreeSeverities:
         in a failure message and ``dataclasses.astuple`` all read.
         """
         assert [one.name for one in dataclasses.fields(Finding)] == [
-            "check", "severity", "where", "message",
+            "check", "severity", "where", "message", "departure",
         ]
+
+    def test_departure_is_last_and_defaulted_so_the_four_stay_positional(self):
+        """The field added for C12 must not move the four above it.
+
+        Every positional ``Finding(check, severity, where, message)`` in this
+        suite -- and ``test_both_dataclasses_carry_slots`` below is one --
+        keeps working precisely because the new field is LAST and has a
+        default.  Inserting it anywhere else silently re-binds those four.
+        """
+        field = dataclasses.fields(Finding)[-1]
+        assert field.name == "departure"
+        assert field.default is None
+        assert Finding("A1", REFUSE, "model", "x.").departure is None
+
+    def test_a_finding_carrying_a_departure_is_still_hashable(self):
+        """Why the table is nested TUPLES and not the ``dict`` that
+        ``check_linearity`` measures.
+
+        ``test_a_finding_is_frozen_and_hashable`` below is the rule this
+        obeys; a mapping field would satisfy ``frozen=True`` and then fail
+        ``hash()``, so the failure would land on ``Report.checks()`` rather
+        than on the field that caused it.
+        """
+        table = (("g", ((0.001, 1.32e-4), (1.0, 4.89e-1), (1000.0, 9.95e-1))),)
+        one = refuse("C12", "inference.parameters.g", "x.", departure=table)
+        assert one.departure == table
+        assert hash(one) == hash(
+            refuse("C12", "inference.parameters.g", "x.", departure=table))
+        assert hash(one) != hash(refuse("C12", "inference.parameters.g", "x."))
+
+    @pytest.mark.parametrize(
+        ("make", "severity"),
+        [(refuse, REFUSE), (warn, WARN), (report, REPORT)],
+        ids=["refuse", "warn", "report"],
+    )
+    def test_every_constructor_carries_a_departure_through(self, make, severity):
+        """All three, because ``gating.verdict`` reaches all three: the same
+        C12 measurement is a refusal, a warning or a report depending only on
+        the gate's mode, and a number that survived one mode and not another
+        would be the mode deciding what is knowable."""
+        table = (("g", ((1.0, 0.5),)),)
+        one = make("C12", "inference.parameters.g", "x.", departure=table)
+        assert (one.severity, one.departure) == (severity, table)
 
     def test_a_finding_refuses_a_severity_outside_the_three(self):
         with pytest.raises(ValueError, match=r"Finding\.severity is one of"):
@@ -196,6 +241,75 @@ class TestTheThreeSeverities:
                       message="model.x: a parsed severity (check A1).")
         with pytest.raises(ConfigError, match="a parsed severity"):
             Report(findings=(one,)).raise_if_refused()
+
+
+class TestTheAuditRecord:
+    """The four keys one finding contributes to ``diagnostics.json``.
+
+    A CLOSED, versioned shape and not a projection of the dataclass:
+    ``diagnostics-v1.schema.json`` pins ``"format_version": {"const": 1}`` and
+    ``additionalProperties: false`` on its ``finding`` object, and
+    ``_rheplicant_bootstrap.audit.trace`` refuses -- eagerly, at the boundary --
+    any mapping whose keys are not exactly these.
+
+    Both call sites used ``dataclasses.asdict``, which tied that published
+    shape to whatever fields ``Finding`` happens to carry.  The first field
+    added was ``departure``, and it turned every audited run into "audit
+    finding[0] must have exactly keys (...)" -- a failure with nothing in its
+    message about the field that caused it.
+    """
+
+    TABLE = (("g", ((0.001, 1.32e-4), (1.0, 4.89e-1))),)
+
+    def test_the_record_is_exactly_the_declared_keys(self):
+        one = refuse("C12", "inference.parameters.g", "It is not affine.",
+                     departure=self.TABLE)
+        assert audit_record(one) == {
+            "check": "C12",
+            "severity": REFUSE,
+            "where": "inference.parameters.g",
+            "message": "It is not affine.",
+        }
+        assert tuple(audit_record(one)) == AUDIT_KEYS
+
+    def test_the_record_is_NOT_what_asdict_would_produce(self):
+        """The regression guard, and the whole reason the function exists.
+
+        Reverting ``audit_record`` to ``dataclasses.asdict`` reds this line
+        and nothing else in this module -- which is exactly the point, because
+        the damage lands three layers away in the audit trace.
+        """
+        one = refuse("C12", "inference.parameters.g", "x.", departure=self.TABLE)
+        assert set(dataclasses.asdict(one)) != set(AUDIT_KEYS)
+        assert "departure" in dataclasses.asdict(one)
+
+    def test_the_real_trace_accepts_the_record_and_refuses_asdict(self):
+        """Proved able to fail before being trusted.
+
+        The two assertions are a PAIR on one trace and one finding: the
+        projection is accepted, and the ``asdict`` this replaced is refused in
+        the boundary's own words.  Asserting only the first would leave "the
+        projection is unnecessary" indistinguishable from "the projection is
+        what makes this work".
+        """
+        from _rheplicant_bootstrap.audit import AuditTrace
+        from _rheplicant_bootstrap.errors import ConfigError as BootstrapConfigError
+        from _rheplicant_bootstrap.types import LayerIdentity
+
+        one = refuse("C12", "inference.parameters.g", "x.", departure=self.TABLE)
+        base = LayerIdentity("base", None)
+
+        AuditTrace().record_findings("postflight", base, [audit_record(one)])
+
+        with pytest.raises(BootstrapConfigError, match="exactly keys"):
+            AuditTrace().record_findings(
+                "postflight", base, [dataclasses.asdict(one)])
+
+    def test_a_finding_with_no_departure_records_the_same_four(self):
+        """The keys do not depend on whether the optional field is set: an
+        audit shape that varied by finding would be a schema with a hole in
+        it rather than a closed one."""
+        assert tuple(audit_record(refuse("A30", "model.noise", "x."))) == AUDIT_KEYS
 
 
 class TestTheReport:

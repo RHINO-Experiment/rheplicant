@@ -109,11 +109,15 @@ from typing import Any
 
 import jax.numpy as jnp
 
-from rheplicant.config.findings import Finding
+from rheplicant.config.findings import Departure, Finding
 from rheplicant.config.gating import Gate, auto_skipped, verdict
 from rheplicant.config.postflight import Priced, register
 from rheplicant.config.sections.noise import decided_noise
-from rheplicant.core.errors import ParameterSpaceError, StateValidationError
+from rheplicant.core.errors import (
+    LinearityRefused,
+    ParameterSpaceError,
+    StateValidationError,
+)
 
 #: The document path a finding about the whole parameter space points at.  A
 #: finding about ONE latent points at ``{_PARAMETERS}.{name}`` instead --
@@ -209,6 +213,41 @@ def _unlinearisable(space: Any,
     """
     return {name: dtype for name, dtype in _dtypes(space, names).items()
             if not jnp.issubdtype(jnp.dtype(dtype), jnp.inexact)}
+
+
+def _departure(measured: Mapping[str, Mapping[float, float]],
+               names: Iterable[str]) -> Departure | None:
+    """The measured per-scale departures for ``names``, as C12's own numbers.
+
+    Nested tuples, scales ascending, in ``names``' order -- the shape
+    :attr:`~rheplicant.config.findings.Finding.departure` declares, and the
+    reason it is tuples is that a ``Finding`` is frozen and hashable.
+
+    A latent with no measurement is ABSENT rather than present-and-empty.
+    ``check_linearity`` can refuse for reasons that carry no numbers at all --
+    a ``StateValidationError``, or the bind refusal this module's docstring
+    warns about, which arrives as a plain ``ParameterSpaceError`` -- and an
+    empty row would read as "measured, and found nothing".
+
+    ``None`` when nothing was measured, which is not a table of zeros: a
+    latent that really IS affine measures 0.0 at every scale, and that is a
+    result rather than the absence of one.
+
+    A NON-FINITE departure is kept.  Measured on the shipped refusing
+    document, ``w`` gives ``nan`` at all three scales -- the prediction's own
+    arithmetic is unusable there, which ``_affinity_errors`` counts as a
+    failure precisely because ``nan > rtol`` is False and a naive comparison
+    would read it as evidence of linearity.  Filtering it here would leave a
+    table that appears to have probed fewer scales than it did, so whatever
+    encodes this downstream needs an answer for a non-finite float, and that
+    answer is not zero.
+    """
+    table = tuple(
+        (name, tuple((float(scale), float(error))
+                     for scale, error in sorted(measured[name].items())))
+        for name in names if name in measured
+    )
+    return table or None
 
 
 def _auto_skip(gate: Gate, blocked: Mapping[str, str],
@@ -313,27 +352,41 @@ def _linearity(payload: Priced) -> Iterable[Finding]:
 
     from rheplicant.inference.linear import check_linearity
 
-    margins: dict[str, dict[float, float]] = {}
+    # ONE table, written by BOTH outcomes.  ``check_linearity`` RETURNS the
+    # per-scale departures when the latent really is affine -- every value
+    # 0.0 -- and ``LinearityRefused`` carries the same measurement when it is
+    # not.  Until it did, the branch with something to report was the only one
+    # with nothing structured to report it with, and the numbers survived
+    # solely inside a sentence.
+    measured: dict[str, dict[float, float]] = {}
     failures: list[tuple[str, str]] = []
     for name in claimed:
         try:
-            margins[name] = check_linearity(space, payload.run.inference.fit_twin,
-                                            payload.run.state, name=name)
+            measured[name] = check_linearity(space, payload.run.inference.fit_twin,
+                                             payload.run.state, name=name)
         except (ParameterSpaceError, StateValidationError) as refused:
             failures.append((name, str(refused)))
+            # Only this ONE refusal measured anything.  The others -- a
+            # StateValidationError, or the bind refusal this module's
+            # docstring warns about -- reach here with no numbers at all, and
+            # `_departure` leaves those latents out rather than showing zeros.
+            if isinstance(refused, LinearityRefused):
+                measured[name] = refused.errors
 
     if failures:
+        refused_names = [name for name, _ in failures]
         detail = " ".join(f"{name}: {sentence}"
                           for name, sentence in failures)
         message = _tagged("C12", (
-            f"{_where([name for name, _ in failures])}: the prediction is not "
+            f"{_where(refused_names)}: the prediction is not "
             "affine in a latent this document declares linear: true, so the "
             "claim does not hold and every conjugate exit built on it is "
             f"solving the wrong problem. check_linearity refuses it in its "
             f"own words -- {detail} {_escape(gate)}"))
         found = verdict(gate, failed=True,
-                        where=_where([name for name, _ in failures]),
-                        message=message)
+                        where=_where(refused_names),
+                        message=message,
+                        departure=_departure(measured, refused_names))
         if found is not None:
             yield found
         return
@@ -341,12 +394,13 @@ def _linearity(payload: Priced) -> Iterable[Finding]:
     detail = "; ".join(
         f"{name}: " + ", ".join(f"{scale:g}x -> {error:.2e}"
                                 for scale, error in sorted(errors.items()))
-        for name, errors in margins.items())
+        for name, errors in measured.items())
     message = _tagged("C12", (
         f"{_where(claimed)}: check_linearity holds for every latent this "
         f"document declares linear: true -- relative departure from each "
         f"one's own linearization at {detail}. {_escape(gate)}"))
-    found = verdict(gate, failed=False, where=_where(claimed), message=message)
+    found = verdict(gate, failed=False, where=_where(claimed), message=message,
+                    departure=_departure(measured, claimed))
     if found is not None:
         yield found
 
