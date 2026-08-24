@@ -5,8 +5,10 @@ fragment. This page is the two pieces built on top of it: **resources**, a
 `resources:` section that names objects the package's own constructors build
 — a beam, a sky model, a projector — and **paths**, the dotted strings that
 address a leaf of an assembled twin for `inference.parameters`. Both are
-exercised directly, the same way the value grammar is, because the document
-loader that reads a whole YAML file is not shipped yet:
+exercised directly below, the same way the value grammar is, because one
+section reads clearer alone than buried in a whole document — loading a whole
+one is `load_document`, and reading a whole YAML file off disk is [the command
+line](config-cli.md):
 
 ```bash
 .venv/bin/python -c "
