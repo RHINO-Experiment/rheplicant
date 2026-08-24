@@ -494,6 +494,26 @@ def parameter_covariance(fisher: FlatMatrix, jitter: float = 0.0) -> FlatMatrix:
             prior of width ``1/sqrt(jitter)``, chosen for numerical comfort
             rather than declared. ``fisher_information(..., space=...)`` is the
             same regularization with the prior written down.
+
+    Note:
+        **This function does not gate on conditioning, and in float32 that is
+        a real exposure.** ``F = J^T N^-1 J`` SQUARES the design's condition
+        number, so an ordinary model reaches the arithmetic's limit: measured
+        at ``kappa(J) = 1e3``, the float32 covariance is 2.4% wrong while the
+        float64 one is wrong by 1.08e-12, and neither says so.
+
+        The gate lives in ``bayesmith.exact.fisher.parameter_covariance``
+        rather than here -- deliberately one implementation, not two -- as a
+        ceiling of ``1/sqrt(eps)`` read from the values' own dtype (float32:
+        2.90e+03, float64: 6.71e+07), which is the point where inverting has
+        spent half the digits available.
+
+        Note what the remedy is NOT: wrapping this ``inv`` in ``with
+        jax.enable_x64(True):`` recovers nothing. The context does not widen
+        an array traced outside it, and even forcing the upcast leaves the
+        error at 2.45e-02 against 2.41e-02 for doing nothing, because the
+        digits were spent forming ``F``. The arithmetic has to be widened
+        around building the model.
     """
     n = fisher.matrix.shape[0]
     return FlatMatrix(
