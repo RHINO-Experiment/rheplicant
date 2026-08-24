@@ -28,7 +28,7 @@ def json_schema() -> dict[str, Any]:
         VALUE_FORMS,
         VALUE_MODIFIERS,
     )
-    from rheplicant.config.preflight import _REQUIRED, _SECTIONS
+    from rheplicant.config.preflight import _NOT_YET, _REQUIRED, _RESERVED, _SECTIONS
 
     exits: list[str] = []
     try:
@@ -45,10 +45,24 @@ def json_schema() -> dict[str, Any]:
         transforms = []
 
     required = set(_REQUIRED)
+    # Derived, not re-spelled: `_NOT_YET` and `_RESERVED` are preflight's own
+    # refusal tables (`_structural`, in this same package), so a section that
+    # moves from deferred to accepted -- or grows a fifth refused name --
+    # updates this schema automatically instead of drifting from it.
+    deferred = set(_NOT_YET)
+    reserved = set(_RESERVED)
+
+    def _status(name: str) -> str:
+        if name in reserved:
+            return "reserved"
+        if name in deferred:
+            return "deferred"
+        return "accepted"
+
     return {
         "schemaVersion": "1",
         "sections": [
-            {"name": name, "required": name in required}
+            {"name": name, "required": name in required, "status": _status(name)}
             for name in _SECTIONS
         ],
         "exits": exits,

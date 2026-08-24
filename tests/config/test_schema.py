@@ -15,9 +15,11 @@ from rheplicant.config import (
     VALUE_MODIFIERS,
 )
 from rheplicant.config.dimensions import _FORMULA_REGISTRY
-from rheplicant.config.preflight import _REQUIRED, _SECTIONS
+from rheplicant.config.errors import ConfigError
+from rheplicant.config.preflight import _NOT_YET, _REQUIRED, _RESERVED, _SECTIONS, preflight
 from rheplicant.config.schema import json_schema
 from rheplicant.config.sections.runs import _KINDS as _EXIT_KINDS
+from tests.config.preflight_helpers import preflight_document
 
 
 def test_the_top_level_keys_are_exactly_the_six_the_rpc_promises():
@@ -50,14 +52,15 @@ def test_the_whole_document_round_trips_through_json():
 
 
 class TestSections:
-    def test_every_entry_is_a_name_required_pair_and_nothing_else(self):
-        """Kills an entry that grows a third key (e.g. a description) that
+    def test_every_entry_is_a_name_required_status_triple_and_nothing_else(self):
+        """Kills an entry that grows a fourth key (e.g. a description) that
         no consumer asked for and that this schema does not otherwise
-        document, and kills an entry that loses `required`."""
+        document, and kills an entry that loses `required` or `status`."""
         for entry in json_schema()["sections"]:
-            assert set(entry) == {"name", "required"}
+            assert set(entry) == {"name", "required", "status"}
             assert isinstance(entry["name"], str)
             assert isinstance(entry["required"], bool)
+            assert isinstance(entry["status"], str)
 
     def test_the_required_section_names_are_exactly_four(self):
         """Pinned as a set equality, not membership: a fifth section
@@ -83,6 +86,109 @@ class TestSections:
         assert {entry["name"] for entry in sections if entry["required"]} == (
             set(_REQUIRED)
         )
+
+    def test_every_status_is_one_of_the_three_known_values(self):
+        """`status` is a closed vocabulary -- "accepted", "deferred" or
+        "reserved" -- not a free-form string a consumer would have to
+        special-case defensively."""
+        for entry in json_schema()["sections"]:
+            assert entry["status"] in {"accepted", "deferred", "reserved"}
+
+    def test_the_four_refused_sections_carry_a_non_accepted_status(self):
+        """`defaults`, `plugins` and `outputs` are refused by `_NOT_YET`
+        (`config/preflight/__init__.py`); `campaign` is refused by its own
+        clause in the same function, reserved for a later capability rather
+        than merely not-yet-implemented. All four must read as something
+        other than "accepted", or a form/UI rendered from this schema
+        offers a section that can only ever produce an error."""
+        statuses = {entry["name"]: entry["status"]
+                    for entry in json_schema()["sections"]}
+        for name in ("defaults", "plugins", "outputs"):
+            assert statuses[name] == "deferred", (name, statuses[name])
+        assert statuses["campaign"] == "reserved"
+
+    def test_status_is_computed_from_preflight_s_own_refusal_tables(self):
+        """Derive, do not re-spell, weak form: the schema's non-accepted set
+        is computed from the very objects `_structural` refuses from --
+        `_NOT_YET` (three sections, each routed to a named plan) and
+        `_RESERVED` (`campaign`, routed to its own clause) -- and not from a
+        fourth list of names written independently in `schema.py`. This is
+        the mechanical guard that a name added to, or dropped from, either
+        table changes the schema without anyone editing `schema.py` by hand.
+        See `TestStatusAgreesWithTheLoader` below for the stronger claim,
+        that these tables are what the loader itself actually refuses on --
+        this test alone would stay green even if `_structural`'s logic were
+        rewired to ignore both tables while `schema.py` kept importing them."""
+        sections = json_schema()["sections"]
+        non_accepted = {entry["name"] for entry in sections
+                         if entry["status"] != "accepted"}
+        assert non_accepted == set(_NOT_YET) | set(_RESERVED)
+        deferred = {entry["name"] for entry in sections
+                    if entry["status"] == "deferred"}
+        assert deferred == set(_NOT_YET)
+        reserved = {entry["name"] for entry in sections
+                    if entry["status"] == "reserved"}
+        assert reserved == set(_RESERVED)
+
+
+class TestStatusAgreesWithTheLoader:
+    """The important check (see the task brief): agreement between the
+    schema's derived `status` and what `preflight()` -- the real,
+    production loader entry point, not a re-implementation of its refusal
+    rule -- actually does with a document carrying that section.
+
+    `test_status_is_computed_from_preflight_s_own_refusal_tables` above only
+    proves the schema reads the same TABLES `_structural` reads; it would
+    stay green even if `_structural`'s own logic stopped consulting those
+    tables. Driving an actual `preflight()` call is the stronger claim: the
+    sections this schema calls "accepted" truly are accepted by the code
+    that decides, and the others truly are refused, and specifically for
+    being unknown-to-this-layer, not-yet-read or reserved -- not for some
+    unrelated reason -- which is what the message-substring assertions below
+    check for.
+
+    `tests.config.preflight_helpers.preflight_document()` builds the one
+    valid base document every pre-flight test in this package is a patch of.
+    Its own docstring guarantees it "carries all eight sections" this schema
+    calls accepted (`schema_version`, `runtime`, `observation`, `resources`,
+    `model`, `variants`, `inference`, `runs`) and that the base "MUST EARN NO
+    FINDING OF ITS OWN" -- so the unpatched base is exactly the fixture that
+    shows the eight accepted sections pass the real loader together, and
+    patching in one of the other four is exactly how the fixture reaches
+    `_structural`'s refusal for that one section and nothing else.
+    """
+
+    def test_the_accepted_sections_are_exactly_what_the_base_document_carries(self):
+        assert set(preflight_document()) == {
+            entry["name"] for entry in json_schema()["sections"]
+            if entry["status"] == "accepted"
+        }
+
+    def test_the_unpatched_document_is_accepted_by_the_real_loader(self):
+        """No `ConfigError`, no findings: every section this schema calls
+        accepted passes `preflight()` when present together, which is the
+        loader's own definition of "accepted"."""
+        assert preflight(preflight_document()).findings == ()
+
+    @pytest.mark.parametrize("name", ["outputs", "defaults", "plugins", "campaign"])
+    def test_a_non_accepted_section_is_refused_by_the_real_loader(self, name):
+        """Adding exactly the section this schema calls non-accepted to the
+        otherwise-clean base document is what reaches `_structural`'s
+        refusal -- the same function, the same call, that `json_schema()`
+        never touches."""
+        statuses = {entry["name"]: entry["status"]
+                    for entry in json_schema()["sections"]}
+        assert statuses[name] != "accepted"
+        document = preflight_document(**{name: {}})
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        message = str(caught.value)
+        if name == "campaign":
+            assert statuses[name] == "reserved"
+            assert "is reserved" in message
+        else:
+            assert statuses[name] == "deferred"
+            assert "is not read by this layer yet" in message
 
 
 class TestExits:

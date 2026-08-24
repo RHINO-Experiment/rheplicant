@@ -95,6 +95,16 @@ _NOT_YET = {
 }
 _REQUIRED = ("runtime", "observation", "model", "runs")
 
+#: The one section refused by a clause of its own in ``_structural`` (its
+#: ``campaign`` branch, below) rather than by :data:`_NOT_YET` -- reserved
+#: for a named future capability (streaming evidence, schema §8.2) instead
+#: of deferred to a later plan.  ``_structural``'s own raise keeps its
+#: pinned message literal untouched; this constant exists only so a
+#: consumer outside this module (``config/schema.py``, which projects the
+#: refused sections into the machine-readable schema) can tell "reserved"
+#: apart from "deferred" without re-spelling the section name itself.
+_RESERVED = frozenset({"campaign"})
+
 #: id -> the function.  **Insertion order IS run order**, which is what
 #: §2.6's "A20 and A21 before A23" rests on: the first refusal is the one a
 #: user reads, and A23's would contradict A20's if it came first.
