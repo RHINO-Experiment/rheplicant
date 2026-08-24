@@ -33,6 +33,7 @@ warning. This module does the same thing one step earlier.
 
 import dataclasses
 import numbers
+import types
 import typing
 from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
@@ -124,11 +125,47 @@ def field_specs(cls: type) -> dict[str, FieldSpec]:
     }
 
 
+def _optional_payload(annotation: Any) -> tuple[Any, bool]:
+    """Reduce ``T | None`` to ``(T, True)``. Anything else is ``(it, False)``.
+
+    ``field_specs`` resolves annotations with ``typing.get_type_hints``, so a
+    field written ``int | None`` arrives as a ``types.UnionType`` rather than
+    as ``int``. Classified by identity against ``bool``/``int``/``float``/
+    ``str`` it matches nothing, and before this reduction existed it fell
+    through to ``static_other`` -- the mode reserved for objects the value
+    grammar cannot express, which delivers its payload UNTOUCHED. Measured on
+    ``DriftScanProjector.freq_chunk`` (``int | None``): ``true`` was delivered
+    as Python ``True``, a numpy scalar was delivered as a numpy scalar, and
+    the string ``"eight"`` was delivered as a string -- while the same three
+    values written to the plainly-typed ``mask_iterations: int`` beside it
+    were each refused by name. The field was not weakly guarded; it had no
+    guard at all.
+
+    ``None`` stays legal, because that is what the annotation says: the
+    reduction narrows how a NON-``None`` value is checked and takes nothing
+    away.
+    """
+    origin = typing.get_origin(annotation)
+    if origin is not types.UnionType and origin is not typing.Union:
+        return annotation, False
+    members = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+    if len(members) == 1:
+        return members[0], True
+    return annotation, False
+
+
 def mode_of(spec: FieldSpec) -> str:
     """The delivery mode a field's own declaration implies."""
     if not spec.static:
         return "traced"
-    annotation = spec.annotation
+    annotation, _ = _optional_payload(spec.annotation)
+    if typing.get_origin(annotation) in (types.UnionType, typing.Union):
+        # A genuine multi-member union such as ``int | str``. Not refused here
+        # -- mode_of is called to ENUMERATE fields (the schema and the GUI walk
+        # every field of every operator), and a package-authoring mistake must
+        # not make enumeration explode. It is refused in deliver_checked, at
+        # the moment something is actually written to it.
+        return "static_union"
     # Identity, not isinstance: bool subclasses int, so issubclass(bool, int)
     # is True and an isinstance-style test would classify a bool field as an
     # int one. Identity checks are mutually exclusive, so the order of the
@@ -308,6 +345,21 @@ def deliver_checked(
             )
     if mode != "traced" and source in ARRAY_FORMS:
         _refuse_array_form(spec, source)
+
+    if mode == "static_union":
+        raise ConfigError(
+            f"Field {spec.name!r} is declared {spec.annotation!r} -- a static "
+            "field with more than one non-None type. This layer has no rule for "
+            "choosing between them, and guessing is how a value arrives finite, "
+            "correctly shaped and wrong. Give the field one type."
+        )
+    if mode != "traced":
+        _, optional = _optional_payload(spec.annotation)
+        if optional and value is None:
+            # The annotation says ``T | None``; None is the declared way to
+            # mean "leave this at its default", so it is delivered as itself
+            # rather than pushed through T's guard.
+            return None
 
     if mode == "traced":
         return _as_traced(value, spec, dtype)

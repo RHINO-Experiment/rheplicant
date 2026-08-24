@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import equinox as eqx
 import jax
+import numpy
 import jax.numpy as jnp
 import pytest
 
@@ -20,6 +21,7 @@ from rheplicant.config.delivery import (
     FieldSpec,
     deliver,
     field_specs,
+    mode_of,
     origin_for_delivery,
 )
 from rheplicant.config.orchestration import _origin_lookup_for
@@ -30,6 +32,7 @@ from rheplicant.radio.backend.flagging import MomentRFIFlaggingOperator
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
 from rheplicant.radio.sky.foregrounds import ForegroundOperator
+from rheplicant.radio.sky.driftscan import DriftScanProjector
 from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 
 
@@ -351,6 +354,91 @@ class TestStaticDelivery:
         nested Module and raise somewhere with no field name in it."""
         spec = FieldSpec("fn", Callable, True, None, True)
         assert deliver(len, spec, dtype="float32") is len
+
+
+class TestOptionalStaticFieldsAreGuardedLikePlainOnes:
+    """``int | None`` is guarded exactly as ``int`` is, and ``None`` stays legal.
+
+    This class exists because these fields once had NO delivery guard at all.
+    ``field_specs`` resolves annotations with ``typing.get_type_hints``, so
+    ``int | None`` arrives as a ``types.UnionType``; classified by identity
+    against ``bool``/``int``/``float``/``str`` it matched nothing and fell to
+    ``static_other`` -- the mode for callables and nested Modules, which
+    returns its payload untouched.
+
+    The measured consequence, on three live writable fields of
+    ``DriftScanProjector``: ``freq_chunk: true`` was delivered as Python
+    ``True`` (and ``isinstance(True, int)`` accepts it downstream, giving
+    ``freq_chunk == 1``), a numpy scalar was delivered as a numpy scalar past
+    ``_reject_numpy``, and ``freq_chunk: eight`` was delivered as the STRING
+    ``"eight"``. The same three values written to ``mask_iterations: int``,
+    declared two lines above in the same class, were each refused by name.
+
+    Each test below asserts on the VALUE THAT ARRIVES, not merely that no
+    exception was raised. An assert-no-raise test is what a silent landing
+    walks straight past.
+    """
+
+    @pytest.mark.parametrize(
+        "field, bad, expected_in_message",
+        [
+            ("freq_chunk", True, "bool"),
+            ("freq_chunk", "eight", "str"),
+            ("lst_ref_deg", True, "bool"),
+        ],
+    )
+    def test_a_wrongly_typed_value_is_refused(self, field, bad, expected_in_message):
+        spec = field_specs(DriftScanProjector)[field]
+        with pytest.raises(ConfigError) as excinfo:
+            deliver(bad, spec, dtype="float32")
+        message = str(excinfo.value)
+        assert field in message and expected_in_message in message
+
+    def test_a_numpy_scalar_is_refused_as_it_is_on_a_plain_static_field(self):
+        spec = field_specs(DriftScanProjector)["lst_ref_deg"]
+        with pytest.raises(ConfigError, match="numpy"):
+            deliver(numpy.float64(1.5), spec, dtype="float32")
+
+    @pytest.mark.parametrize(
+        "field, good, kind",
+        [("freq_chunk", 8, int), ("lst_ref_deg", 12.5, float)],
+    )
+    def test_a_well_typed_value_arrives_as_the_python_type(self, field, good, kind):
+        spec = field_specs(DriftScanProjector)[field]
+        value = deliver(good, spec, dtype="float32")
+        assert value == good and type(value) is kind
+
+    @pytest.mark.parametrize("field", ["freq_chunk", "lst_ref_deg", "beam_ref_lst_deg"])
+    def test_none_stays_legal_because_the_annotation_says_so(self, field):
+        """The reduction narrows how a non-None value is checked and takes
+        nothing away: ``T | None`` still accepts None, which is how a document
+        says "leave this at its default"."""
+        spec = field_specs(DriftScanProjector)[field]
+        assert deliver(None, spec, dtype="float32") is None
+
+    def test_the_value_reaches_the_operator_it_was_written_for(self):
+        """The half an assert-no-raise test cannot see.
+
+        A guard that refuses the bad values but silently drops the good one
+        would pass every test above.
+        """
+        specs = field_specs(DriftScanProjector)
+        assert deliver(8, specs["freq_chunk"], dtype="float32") == 8
+        assert deliver(30.0, specs["lst_ref_deg"], dtype="float32") == 30.0
+
+    def test_a_genuine_multi_type_static_field_is_refused_at_delivery(self):
+        """``int | str`` has no single guard, and guessing is the failure this
+        layer exists to prevent. Refused when written to, not when enumerated
+        -- the schema and the GUI walk every field of every operator, and a
+        package-authoring mistake must not break enumeration."""
+
+        class Ambiguous(eqx.Module):
+            either: int | str = eqx.field(static=True, default=0)
+
+        spec = field_specs(Ambiguous)["either"]
+        assert mode_of(spec) == "static_union"
+        with pytest.raises(ConfigError, match="more than one non-None type"):
+            deliver(3, spec, dtype="float32")
 
 
 class TestCheckA40:
