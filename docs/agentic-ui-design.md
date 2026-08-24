@@ -1,3 +1,5 @@
+:orphan:
+
 # Agentic UI design
 
 Status: **draft for review** — P0, P1, and the host side of P2 are implemented and

@@ -55,10 +55,9 @@ built.resources["resources.arrays.left"] is built.resources["resources.arrays.ri
 # => True
 ```
 
-`built.shared_objects` records every such group — grouped by `id()` — because
-schema §2.1.6 promises a `shared_objects:` map in `config.resolved.yaml`:
-identity should be visible in the artefact a run produces, not only in the
-spec that produced it. Order in the document does not matter; a cycle
+`built.shared_objects` records every such group — grouped by `id()` — so that
+a `shared_objects:` map reaches `config.resolved.yaml`: identity should be
+visible in the artefact a run produces, not only in the spec that produced it. Order in the document does not matter; a cycle
 (`a` referencing `b` referencing `a`) is refused by name, because
 `resources.<kind>.<name>` is a let-binding and a let-binding that refers to
 itself has no value.
@@ -305,7 +304,7 @@ incomplete parent.
    gives `{kind: termination, termination: open, z0: {value: 75.0, unit:
    ohm}}` — `termination:` is inherited, `z0.value:` is overridden.
 
-2. **Lists replace, they do not merge.** This is schema §5 rule 4, and the
+2. **Lists replace, they do not merge.** This is a layering rule, and the
    reason is a whole comparison forced into one document: split across two
    files, the halves of a list can silently disagree in exactly the keys the
    comparison is about. Child `{optimizations: [cache_beam_rotation]}` over
@@ -342,8 +341,8 @@ Resolution is also **eager**: `resolve_path_on` walks the path against a
 tagged twin immediately, before the forward model is built and anything is
 traced — because the alternative is the same refusal arriving from
 `ParameterSpace` once a CST directory has already been read and analysed,
-which is exactly the class of failure schema §6's "before any expensive work"
-promise exists to prevent.
+which is exactly the class of failure the "before any expensive work"
+ordering exists to prevent.
 
 Every refusal below quotes **both spellings** — the path as the document
 wrote it (`"gain.gain"`) and the path as the twin's own machinery renders it

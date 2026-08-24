@@ -833,6 +833,62 @@ class TestThePagesSayWhatTheLayerDoes:
             f"config-inference.md do not mention check A28: {missing}"
         )
 
+    def test_the_overview_pages_section_table_is_the_loaders_own_tables(self):
+        """``config.md``'s section table is derived, or it is a second copy.
+
+        The page states which of the twelve section names are required, which
+        are accepted, which the mapping API refuses to the command line, and
+        which is reserved. Every one of those four sets already exists in
+        ``config/preflight``: ``_SECTIONS``, ``_REQUIRED``, ``_NOT_YET``, and
+        the campaign clause that ``json_schema()`` reports as
+        ``status: reserved``. Prose that restates them is the shape this
+        repository's own notes name as the origin of every drift it has had --
+        so it is asserted against them here rather than proofread.
+
+        Names are read out of the table's backticked cells, so re-wording the
+        surrounding sentences is free and moving a name between rows is not.
+        """
+        from rheplicant.config.preflight import _NOT_YET, _REQUIRED, _SECTIONS
+
+        body = _block(_page("config.md"), "## The document, section by section")
+        rows = _rows(body)
+        assert rows, "the section table is gone from config.md"
+
+        stated: dict[str, set[str]] = {}
+        for cells in rows:
+            names = set(re.findall(r"`([a-z_]+)`", cells[0]))
+            if not names:
+                continue
+            verdict = cells[-1].lower()
+            if "required" in verdict:
+                key = "required"
+            elif "reserved" in verdict:
+                key = "reserved"
+            elif "command line" in verdict or "refus" in verdict:
+                key = "cli_only"
+            else:
+                key = "accepted"
+            stated.setdefault(key, set()).update(names)
+
+        assert stated.get("required") == set(_REQUIRED), (
+            f"config.md says these sections are required: "
+            f"{sorted(stated.get('required', ()))}; the loader says "
+            f"{sorted(_REQUIRED)}."
+        )
+        assert stated.get("cli_only") == set(_NOT_YET), (
+            f"config.md says the command line handles "
+            f"{sorted(stated.get('cli_only', ()))}; _NOT_YET is "
+            f"{sorted(_NOT_YET)}."
+        )
+        assert stated.get("reserved") == {"campaign"}, stated.get("reserved")
+
+        named = set().union(*stated.values())
+        assert named == set(_SECTIONS), (
+            f"config.md's table names {sorted(named)}; the loader recognises "
+            f"{sorted(_SECTIONS)}. A section missing from the page is one a "
+            "reader will not know exists."
+        )
+
     def test_every_config_page_is_reachable_from_a_toctree(self):
         """A page in no toctree is a sphinx warning and nothing else.
 
@@ -842,13 +898,29 @@ class TestThePagesSayWhatTheLayerDoes:
         contributor has to remember. ``test_docs_links.py`` checks that a page
         is tracked by git and that its anchors resolve, never that anyone can
         reach it.
+
+        **The scan reads every toctree under ``docs/``, not only the one in
+        ``index.md``.** Sphinx does not care which page carries the toctree,
+        and ``inference.md`` already nests four pages under a ``:hidden:``
+        one -- so an implementation that looked only at ``index.md`` was
+        narrower than the property this test is named for, and would have
+        refused the same nesting for the config family purely because of
+        where the guard happened to look.
         """
-        index = _page("index.md")
-        listed = set(re.findall(r"^(config-[a-z-]+)$", index, re.MULTILINE))
+        listed: set[str] = set()
+        for path in sorted(_DOCS.glob("*.md")):
+            for body in re.findall(
+                r"^```\{toctree\}\n(.*?)^```", path.read_text(), re.M | re.S
+            ):
+                listed |= {
+                    line.strip()
+                    for line in body.splitlines()
+                    if line.strip() and not line.lstrip().startswith(":")
+                }
         pages = {path.stem for path in _DOCS.glob("config-*.md")}
         assert pages, "no config-*.md pages found; the glob has drifted"
         assert pages <= listed, (
-            f"these pages are in no toctree in docs/index.md and will each "
+            f"these pages are in no toctree anywhere under docs/ and will each "
             f"cost one nitpicky sphinx warning: {sorted(pages - listed)}"
         )
 

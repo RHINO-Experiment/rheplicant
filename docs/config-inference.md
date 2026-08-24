@@ -316,8 +316,8 @@ rather than failing.
   config-layer refusal, so seeing one from a document is not a bug in this
   layer. What this layer *does* refuse in its own voice is a projector with
   `normalize_beam: true`, quoting the code's own `measured ~18x off` — the
-  `x` is ASCII there and `×` in schema §4.7.9, and the message follows the
-  source rather than the schema.
+  `x` is ASCII in the source and `×` in the design schema, and the message
+  follows the source rather than the schema.
 - `predict` — push a fitted posterior back out to data space, choosing its
   route from what `reuse:` names — a `fisher` run, or a `plan.sample`, `nuts`
   or `npe` run, and nothing else (any other kind is refused by name, and so is

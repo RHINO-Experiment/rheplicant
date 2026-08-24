@@ -51,7 +51,8 @@ document's top level is well formed.
 
 ## What a Report carries
 
-A `Finding` is five fields: `check` (the schema §6 id, or `""`), `severity`,
+A `Finding` is five fields: `check` (the check's own id, such as `A28` or
+`C18`, or `""` where a finding belongs to no numbered check), `severity`,
 `where` — **a path into your document**, the line to edit, never a path into
 the package — `message`, one sentence carrying the fix, and `departure`.
 
@@ -343,9 +344,9 @@ finding from all four passes, in pass order.
 
 Closing the gap needs either a `ConfigError` that carries the `Report` or a
 `load_document` that returns before raising. Both are API changes and both
-belong to the plan that writes `diagnostics.json`, which **still does not
-exist**: schema §4.7.8 names it twice, and `outputs:` is refused wholesale
-until Plan 4.
+belong to the work that writes `diagnostics.json`, which **still does not
+exist** at this layer: `outputs:` is refused wholesale by the mapping API and
+handled by the [command line](config-cli.md) instead.
 
 **Four unrelated things in this layer are spelled "report", and conflating
 any two of them is the likeliest way to ship something that reads right:**
@@ -462,5 +463,5 @@ report.raise_if_refused()
 
 `load_document` and `run_document` call the pass for you, so a document that
 reaches either has already been through it — the explicit call is for a
-front-end that wants the whole list rather than the first refusal, which is
-what schema §10's "Validate" button is.
+front-end that wants the whole list rather than the first refusal — which is
+exactly what the [workbench](config-gui.md)'s Validate button asks for.

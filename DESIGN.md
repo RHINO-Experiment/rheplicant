@@ -311,6 +311,36 @@ runtime concepts:
   stalls/collapses on MLP weights (the `exp` parametrization has a
   vanishing-gradient region) while Adam recovers a rippled bandpass to <1%.
 
+### D13 — Atmosphere is an equivalent-entry pair, not a trunk stage
+
+Graph v1.1 placed `atmosphere` as a trunk transform between `t_ant_sum` and
+the `receiver_input` switch. The position satisfied the two hard boundary
+constraints (calibration loads must not see the sky; atmospheric emission
+arrives through the antenna and suffers the `(1-|Gamma|^2)` reflection loss)
+— but the argument for *trunk transform* over *sum branch* was an intended
+upgrade to radiative transfer `T' = e^(-τ) T_ant + T_atm (1 - e^(-τ))`, and
+that upgrade is wrong physics at that position: opacity applied to the whole
+antenna-temperature sum would attenuate `ground_pickup`, which never crosses
+the atmosphere. (Spotted by Zheng: "atmosphere 应该跟 t_sys_extra 平行".)
+
+Graph v1.2 therefore treats the atmosphere exactly like ground spill — one
+physical effect, two equivalent entrances:
+
+- `atmosphere` — **source leaf** into `t_ant_sum`, parallel to
+  `ground_pickup`/`t_sys_extra`: the beam-averaged emission as an additive
+  effective temperature (`AtmosphericEmissionOperator`, in
+  `radio/environment/atmosphere.py`). Both boundary constraints still hold —
+  every `t_ant_sum` branch sits before the switch and the noise-wave stage.
+- `atmosphere_field` — **reserved transform** on the astro branch between
+  `ionosphere` and `field_sum`: strict radiative transfer
+  (`e^(-τ sec z) T_sky + T_atm (1 - e^(-τ sec z))` inside the beam integral),
+  acting only on the signal that actually crosses the atmosphere — not on
+  `rfi_field`, `ground_field`, or `ground_pickup`.
+
+For a purely additive emission term the leaf form is mathematically identical
+to the old trunk form (sum commutativity), so this is a semantic fix with no
+numerical change to existing twins.
+
 ### D14 — Parameter spaces: what is inferred vs how it enters
 
 The positional-prior scheme (D12) could only infer a quantity the pipeline
@@ -394,36 +424,6 @@ Fisher matrices over a space carry their rows' names (`cov.sigma("fwhm")`,
 flattening rather than an assumed dict ordering. `FlatMatrix.kind`
 distinguishes Fisher from covariance so `sigma()` refuses on the former:
 `sqrt(diag(F))` looks exactly like an error bar and ignores every degeneracy.
-
-### D13 — Atmosphere is an equivalent-entry pair, not a trunk stage
-
-Graph v1.1 placed `atmosphere` as a trunk transform between `t_ant_sum` and
-the `receiver_input` switch. The position satisfied the two hard boundary
-constraints (calibration loads must not see the sky; atmospheric emission
-arrives through the antenna and suffers the `(1-|Gamma|^2)` reflection loss)
-— but the argument for *trunk transform* over *sum branch* was an intended
-upgrade to radiative transfer `T' = e^(-τ) T_ant + T_atm (1 - e^(-τ))`, and
-that upgrade is wrong physics at that position: opacity applied to the whole
-antenna-temperature sum would attenuate `ground_pickup`, which never crosses
-the atmosphere. (Spotted by Zheng: "atmosphere 应该跟 t_sys_extra 平行".)
-
-Graph v1.2 therefore treats the atmosphere exactly like ground spill — one
-physical effect, two equivalent entrances:
-
-- `atmosphere` — **source leaf** into `t_ant_sum`, parallel to
-  `ground_pickup`/`t_sys_extra`: the beam-averaged emission as an additive
-  effective temperature (`AtmosphericEmissionOperator`, in
-  `radio/environment/atmosphere.py`). Both boundary constraints still hold —
-  every `t_ant_sum` branch sits before the switch and the noise-wave stage.
-- `atmosphere_field` — **reserved transform** on the astro branch between
-  `ionosphere` and `field_sum`: strict radiative transfer
-  (`e^(-τ sec z) T_sky + T_atm (1 - e^(-τ sec z))` inside the beam integral),
-  acting only on the signal that actually crosses the atmosphere — not on
-  `rfi_field`, `ground_field`, or `ground_pickup`.
-
-For a purely additive emission term the leaf form is mathematically identical
-to the old trunk form (sum commutativity), so this is a semantic fix with no
-numerical change to existing twins.
 
 ### D15 — The noise-wave data model is an imported package, not a rheplicant module
 
