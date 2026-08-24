@@ -301,3 +301,216 @@ def test_lease_dataclass_has_no_original_target_field():
     from _rheplicant_bootstrap.output.types import OutputLease
 
     assert "original" not in {field.name for field in fields(OutputLease)}
+
+
+class TestARecordOwnsItsOwnBinding:
+    """The adapter binding and the closed flag belong to one record each.
+
+    They used to live in three module-level registries keyed on ``id()``.
+    ``id()`` is unique only among objects alive at the SAME moment, so those
+    keys outlived their objects -- ``_INSPECTION_PLATFORMS`` and
+    ``_CLOSED_LEASES`` were never pruned at all -- and CPython hands a freed
+    address straight to the next record of that shape.
+
+    Measured before the change, on this fixture: build an inspection through
+    ``inspect_output_path``, drop the only reference, construct another
+    directly on the next statement. The new one landed at the old one's
+    address (reproduced on demand; about 2 in 50 when other allocations
+    intervene), inherited the entry, and ``acquire_output_lease`` handed it a
+    real lease -- passing a guard it had never been registered for.
+
+    That reproduction is deliberately NOT an assertion here: it depends on the
+    allocator, so a test built on it would demonstrate the hazard only
+    sometimes. What is asserted instead is the property that makes the address
+    irrelevant -- a binding is reachable only through the record that owns it.
+    """
+
+    def test_an_inspection_built_by_hand_carries_no_adapter(self, tmp_path):
+        """Whatever address it lands on, and that is the point.
+
+        Under the old registry this passed or failed according to where CPython
+        put the object.
+        """
+        target = tmp_path / "result"
+        platform = SafePlatform()
+        original = manager.inspect_output_path(run_request(target), platform)
+        forged = manager.OutputPathInspection(
+            original.request,
+            original.absolute_target,
+            original.nearest_existing_ancestor,
+            original.missing_components,
+            original.parent_path,
+            original.target_name,
+            original.target,
+            original.access,
+            original.ancestry,
+            original.recovery,
+            original.component_limit,
+        )
+
+        assert forged.binding.platform is None
+        with pytest.raises(ConfigError, match="same platform adapter"):
+            acquire_output_lease(forged, platform)
+
+    def test_a_lease_built_by_hand_reads_as_closed(self, tmp_path):
+        """The descriptors in a forged lease are never fstat'ed.
+
+        ``parent_fd=1`` and ``lock_fd=2`` are open in every process, so a lease
+        that got past the binding check would go on to operate on stdout and
+        stderr. The refusal has to come before that, from the binding.
+        """
+        target = tmp_path / "result"
+        platform = SafePlatform()
+        real = acquire_output_lease(
+            manager.inspect_output_path(run_request(target), platform), platform
+        )
+        try:
+            forged = manager.OutputLease(
+                real.request, 1, "/", "result", 2, ".lock", ".journal",
+                real.ancestry, real.component_limit,
+            )
+            with pytest.raises(ConfigError, match="lease is closed"):
+                manager.require_open_output_lease(forged, platform)
+        finally:
+            close_output_lease(real)
+
+    def test_two_adapters_that_compare_equal_are_still_two_adapters(self, tmp_path):
+        """The check is identity, and an equality test would not say so.
+
+        ``SafePlatform`` inherits identity equality, so ``is not`` and ``!=``
+        agree on it and neither the old id() comparison nor a new one would be
+        caught choosing wrongly. An adapter that declares itself equal to
+        everything separates them: it is still not the object that walked the
+        ancestry under those descriptors.
+        """
+        class AgreeablePlatform(SafePlatform):
+            def __eq__(self, other):
+                return True
+
+            __hash__ = None
+
+        target = tmp_path / "result"
+        first = AgreeablePlatform()
+        second = AgreeablePlatform()
+        inspection = manager.inspect_output_path(run_request(target), first)
+
+        assert first == second
+        with pytest.raises(ConfigError, match="same platform adapter"):
+            acquire_output_lease(inspection, second)
+
+        lease = acquire_output_lease(inspection, first)
+        try:
+            with pytest.raises(ConfigError, match="lease platform adapter"):
+                manager.require_open_output_lease(lease, second)
+        finally:
+            close_output_lease(lease)
+
+    def test_no_module_level_container_grows_with_records(self, tmp_path):
+        """The general form: reintroducing any id-keyed registry fails here.
+
+        Both dictionaries this finds today are constant format tables. A guard
+        on their names would have to be updated to stay true; a guard on "did
+        anything module-level grow" does not.
+        """
+        platform = SafePlatform()
+
+        def census():
+            return {
+                name: len(value)
+                for name, value in vars(manager).items()
+                if isinstance(value, (dict, set, list)) and not name.startswith("__")
+            }
+
+        before = census()
+        for index in range(8):
+            target = tmp_path / f"result{index}"
+            lease = acquire_output_lease(
+                manager.inspect_output_path(run_request(target), platform), platform
+            )
+            close_output_lease(lease)
+            del lease
+
+        assert census() == before, (
+            "Something module-level in manager.py grew once per record. That is "
+            "the shape of an id()-keyed registry, whose keys outlive the objects "
+            "they name."
+        )
+
+    def test_each_record_gets_a_binding_of_its_own(self, tmp_path):
+        """The invariant the whole change rests on, asserted directly.
+
+        A default shared between records would pass every test above -- forged
+        records would still carry no adapter -- while making one close mark
+        them all closed. Caught by mutating the default factory to hand out a
+        single module-level instance; the two halves below are the object
+        check and the behaviour it buys.
+        """
+        platform = SafePlatform()
+        first = acquire_output_lease(
+            manager.inspect_output_path(run_request(tmp_path / "one"), platform), platform
+        )
+        second = acquire_output_lease(
+            manager.inspect_output_path(run_request(tmp_path / "two"), platform), platform
+        )
+        try:
+            assert first.binding is not second.binding
+            close_output_lease(first)
+            manager.require_open_output_lease(second, platform)
+        finally:
+            close_output_lease(second)
+
+        template = (second.request, 1, "/", "x", 2, ".l", ".j", second.ancestry, 255)
+        assert manager.OutputLease(*template).binding is not manager.OutputLease(*template).binding
+
+    def test_a_lease_taken_after_a_close_is_open(self, tmp_path):
+        """Regression for a workaround that was deleted with its cause.
+
+        ``_open_lease`` used to discard the new lease's id from the closed set,
+        because a recycled id could arrive already marked closed. A binding is
+        born open and belongs to one lease, so the discard has nothing to do --
+        but the behaviour it protected still has to hold.
+        """
+        target = tmp_path / "result"
+        platform = SafePlatform()
+        first = acquire_output_lease(
+            manager.inspect_output_path(run_request(target), platform), platform
+        )
+        close_output_lease(first)
+
+        second = acquire_output_lease(
+            manager.inspect_output_path(run_request(target), platform), platform
+        )
+        try:
+            manager.require_open_output_lease(second, platform)
+        finally:
+            close_output_lease(second)
+
+    def test_closing_twice_closes_the_descriptors_once(self, tmp_path):
+        """An fd number is recycled exactly as an id() is.
+
+        A second close that got past the flag would call ``os.close`` on numbers
+        the kernel has already handed to something else. The early return is
+        what stands between this and closing another component's file.
+        """
+        target = tmp_path / "result"
+        platform = SafePlatform()
+        lease = acquire_output_lease(
+            manager.inspect_output_path(run_request(target), platform), platform
+        )
+        closed = []
+        original = manager.os.close
+
+        def record(fd):
+            closed.append(fd)
+            return original(fd)
+
+        manager.os.close = record
+        try:
+            close_output_lease(lease)
+            close_output_lease(lease)
+        finally:
+            manager.os.close = original
+
+        assert sorted(closed) == sorted({lease.lock_fd, lease.parent_fd})
+        assert lease.binding.closed is True
+        assert lease.binding.platform is None

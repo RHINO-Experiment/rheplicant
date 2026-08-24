@@ -27,6 +27,7 @@ from .paths import (
 from .platform import OutputPlatform
 from .types import (
     AncestorEntryInspection,
+    OutputBinding,
     OutputLease,
     OutputMarker,
     OutputPathInspection,
@@ -113,10 +114,12 @@ _OPEN_DIRECTORY = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
+#: Serialises the one mutable field an output record owns -- a lease's
+#: ``binding.closed`` -- so that two threads closing the same lease unlock and
+#: close its descriptors exactly once. It used to guard three module-level
+#: registries keyed on ``id()``; see :class:`~.types.OutputBinding` for why
+#: those are gone and what replaced them.
 _STATE_LOCK = threading.Lock()
-_CLOSED_LEASES: set[int] = set()
-_LEASE_PLATFORMS: dict[int, int] = {}
-_INSPECTION_PLATFORMS: dict[int, int] = {}
 
 
 def _mapping(value: object, *, where: str) -> Mapping[object, object]:
@@ -646,11 +649,10 @@ def inspect_output_path(
             tuple(ancestry),
             recovery,
             limit,
+            OutputBinding(platform),
         )
     finally:
         os.close(current_fd)
-    with _STATE_LOCK:
-        _INSPECTION_PLATFORMS[id(inspection)] = id(platform)
     return inspection
 
 
@@ -709,9 +711,11 @@ def acquire_output_lease(
     """For run only, create permitted parents and acquire the persistent lock."""
     if type(inspection) is not OutputPathInspection or inspection.request.command != "run":
         raise ConfigError("only run output inspections can acquire a lease.")
-    with _STATE_LOCK:
-        expected_platform = _INSPECTION_PLATFORMS.get(id(inspection))
-    if expected_platform != id(platform):
+    # No lock: an inspection's binding is written once, before the record is
+    # returned, and never again. An inspection built by hand carries a default
+    # binding whose platform is None, which is refused here exactly as an
+    # unregistered one was.
+    if inspection.binding.platform is not platform:
         raise ConfigError("output inspection and lease require the same platform adapter.")
 
     absolute = inspection.absolute_target
@@ -783,6 +787,7 @@ def acquire_output_lease(
             chosen_journal_name,
             tuple(ancestry),
             limit,
+            OutputBinding(platform),
         )
         current_fd = -1
         lock_fd = -1
@@ -795,9 +800,9 @@ def acquire_output_lease(
             os.close(lock_fd)
         if current_fd >= 0:
             os.close(current_fd)
-    with _STATE_LOCK:
-        _LEASE_PLATFORMS[id(lease)] = id(platform)
-        _CLOSED_LEASES.discard(id(lease))
+    # The discard of a stale closed-flag that used to stand here existed only
+    # because a recycled id could arrive already marked closed. A binding is
+    # born open and belongs to this lease alone, so there is nothing to clear.
     return lease
 
 
@@ -807,12 +812,15 @@ def require_open_output_lease(
 ) -> None:
     if type(lease) is not OutputLease:
         raise ConfigError("output operation requires an exact OutputLease.")
+    binding = lease.binding
     with _STATE_LOCK:
-        closed = id(lease) in _CLOSED_LEASES
-        expected_platform = _LEASE_PLATFORMS.get(id(lease))
-    if closed or expected_platform is None:
+        closed, bound = binding.closed, binding.platform
+    # Closing drops the adapter as well as setting the flag, so a lease built
+    # by hand -- whose binding never had one -- reads as closed here, which is
+    # what an unregistered lease has always reported.
+    if closed or bound is None:
         raise ConfigError("output lease is closed.")
-    if platform is not None and expected_platform != id(platform):
+    if platform is not None and bound is not platform:
         raise ConfigError("output operation requires the lease platform adapter.")
     try:
         os.fstat(lease.parent_fd)
@@ -824,12 +832,12 @@ def require_open_output_lease(
 def close_output_lease(lease: OutputLease) -> None:
     if type(lease) is not OutputLease:
         raise ConfigError("close requires an exact OutputLease.")
+    binding = lease.binding
     with _STATE_LOCK:
-        identity = id(lease)
-        if identity in _CLOSED_LEASES:
+        if binding.closed:
             return
-        _CLOSED_LEASES.add(identity)
-        _LEASE_PLATFORMS.pop(identity, None)
+        binding.closed = True
+        binding.platform = None
     try:
         fcntl.flock(lease.lock_fd, fcntl.LOCK_UN)
     except OSError:

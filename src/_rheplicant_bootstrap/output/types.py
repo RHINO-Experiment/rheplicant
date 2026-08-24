@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
 from _rheplicant_bootstrap.audit.types import ArtefactMaterialization
@@ -17,6 +17,37 @@ TransactionPhase: TypeAlias = Literal[
     "target_durable",
     "backup_removed",
 ]
+
+
+class OutputBinding:
+    """Per-record state that lives and dies with exactly one record.
+
+    Two facts have to travel with an inspection or a lease and cannot live in
+    the frozen record itself: which platform adapter produced it, and (for a
+    lease) whether it has been closed. They used to live in module-level
+    dictionaries keyed on ``id()``.
+
+    ``id()`` is unique only among objects alive at the SAME moment, so such a
+    key outlives the object it names, and CPython hands the address straight to
+    the next record of that shape. Measured: build an ``OutputPathInspection``
+    through :func:`~..manager.inspect_output_path`, drop the only reference,
+    and construct another directly -- the new one lands at the old one's
+    address, inherits the entry, and passes the "same platform adapter" guard
+    it was never registered for. The registries also grew without bound, but
+    that was the smaller half.
+
+    An instance owned by one record has neither problem: it is reachable only
+    through that record, so it is collected with it, and no second record can
+    reach it. Forging one is still possible -- this is in-process Python and
+    nothing here is an integrity boundary -- but it has to be done on purpose,
+    which is the same standard the exact-type checks in ``manager`` hold to.
+    """
+
+    __slots__ = ("platform", "closed")
+
+    def __init__(self, platform: object | None = None) -> None:
+        self.platform = platform
+        self.closed = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +175,9 @@ class OutputPathInspection:
     ancestry: tuple[AncestorEntryInspection, ...]
     recovery: RecoveryInspection
     component_limit: int
+    binding: OutputBinding = field(
+        default_factory=OutputBinding, compare=False, repr=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +191,9 @@ class OutputLease:
     journal_name: str
     ancestry: tuple[AncestorEntryInspection, ...]
     component_limit: int
+    binding: OutputBinding = field(
+        default_factory=OutputBinding, compare=False, repr=False
+    )
 
     def __enter__(self) -> OutputLease:
         from .manager import require_open_output_lease
@@ -249,6 +286,7 @@ __all__ = [
     "AccessInspection",
     "AncestorEntryInspection",
     "CommandMode",
+    "OutputBinding",
     "OutputLease",
     "OutputMarker",
     "OutputPathInspection",
