@@ -347,10 +347,14 @@ class TestWhatReachesTheLoop:
         # residual that loose tol leaves -- an eqx.error_if from inside jit,
         # whose text names BOTH exits whichever was called.  It says tol
         # arrived; the second says require_convergence: null did too, since
-        # without it this same call raises rather than returning.
+        # with the guard asked for this same call raises rather than returning.
+        #
+        # Both halves DECLARE the key: the shipped default became null when
+        # kappa became a bound (inference/linear.py::_condition_bound), so
+        # omitting it would make the two halves the same call.
         with pytest.raises(eqx.EquinoxRuntimeError,
                            match="wiener_solve/gcr_sample"):
-            gls_product({"tol": 2.0})
+            gls_product({"tol": 2.0, "require_convergence": 1e-3})
         product = gls_product({"tol": 2.0, "require_convergence": None})
         assert float(jnp.max(jnp.abs(product.noise_std))) == 0.0
         assert product.delta == 0.0

@@ -281,7 +281,7 @@ _SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability", "solve_tol
 #: The parser-injected defaults behind the passthrough tuples, measured
 #: against ``SamplingPlan``'s own signatures (``DEFAULT_MAX_ITER``,
 #: ``DEFAULT_CHI2_TOL``, ``MIN_SWEEPS``, ``CHECK_ONCE``, ``solve_tol=1e-6``,
-#: ``solve_guard=1e-3``; ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an
+#: ``solve_guard=None``; ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an
 #: explicit keyword is byte-identical to today's omission.  A warm start
 #: gets none: its passthrough has always been declared-only.
 _ESTIMATE_DEFAULTS = {
@@ -290,14 +290,14 @@ _ESTIMATE_DEFAULTS = {
     "min_sweeps": 3,
     "check_identifiability": "once",
     "solve_tol": 1e-6,
-    "solve_guard": 0.001,
+    "solve_guard": None,
 }
 _SAMPLE_DEFAULTS = {
     "warmup": None,
     "rhat_max": 1.05,
     "check_identifiability": "once",
     "solve_tol": 1e-6,
-    "solve_guard": 0.001,
+    "solve_guard": None,
 }
 
 

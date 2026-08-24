@@ -427,7 +427,7 @@ def test_an_option_its_exits_disagree_about_publishes_no_default():
     ("path", "default"),
     [
         ("runs[].check_identifiability", "once"),
-        ("runs[].solve_guard", 0.001),
+        ("runs[].solve_guard", None),
         ("runs[].solve_tol", 1e-6),
     ],
 )

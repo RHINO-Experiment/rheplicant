@@ -53,6 +53,7 @@ from rheplicant.inference.likelihood import (
 from rheplicant.inference.linear import (
     LinearBlock,
     check_linearity,
+    condition_bound,
     condition_estimate,
     gcr_sample,
     linear_operator,
@@ -185,6 +186,7 @@ __all__ = [
     "compress",
     "compress_linear",
     "compress_reduced_basis",
+    "condition_bound",
     "condition_estimate",
     "epoch_residuals",
     "fisher_information",

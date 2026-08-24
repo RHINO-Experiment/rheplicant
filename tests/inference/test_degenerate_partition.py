@@ -184,7 +184,14 @@ class TestTheGuardsCannotSeeIt:
     def test_every_per_block_guard_reads_green_regardless(
         self, gain_scale, t_ant_scale, expected_rms
     ):
-        """Including on the row that is 2962 K wrong, and on the row that is right."""
+        """Including on the row that is 2962 K wrong, and on the row that is right.
+
+        ``condition_estimate`` is the MEASURED kappa, which is what this class
+        is about: a reading of ~1 across a four-decade spread of error.
+        ``condition_bound`` is a different number and would read ~1e+12 on
+        every row here -- also uninformative, and not what a caller looking at
+        a partition consults. See ``inference/linear.py``'s two functions.
+        """
         got = _alternating_solve(gain_scale, t_ant_scale)
         assert not got["linearity_refused"], "check_linearity refused; it should not"
         assert got["residual"] < 1e-5, got["residual"]

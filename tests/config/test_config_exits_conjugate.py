@@ -154,18 +154,21 @@ class TestTheSolve:
                                                               rel=1e-3)
 
     def test_require_convergence_null_reaches_the_solve(self):
-        # The two-latent block is ill-conditioned enough that the package's
-        # own guard (require_convergence=1e-3, its default) fires -- as an
-        # eqx.error_if from inside jit, so an EquinoxRuntimeError and NOT a
-        # ParameterSpaceError, and its text names both exits whichever was
-        # called.  Declaring require_convergence: null turns the guard off,
-        # so this pair pins that the declared key travelled: an executor that
-        # dropped it raises on the second call, one that hard-coded null
-        # never raises on the first.
+        # The two-latent block is ill-conditioned enough that the guard fires
+        # once it is asked for -- as an eqx.error_if from inside jit, so an
+        # EquinoxRuntimeError and NOT a ParameterSpaceError, and its text names
+        # both exits whichever was called.  Declaring require_convergence: null
+        # turns it off, so this pair pins that the declared key travelled: an
+        # executor that dropped it raises on the second call, one that
+        # hard-coded null never raises on the first.
+        #
+        # 1e-3 is DECLARED rather than defaulted: the shipped default became
+        # null when kappa became a bound (inference/linear.py::_condition_bound),
+        # so leaving it out would make both halves of this pair the same call.
         with pytest.raises(eqx.EquinoxRuntimeError,
                            match="wiener_solve/gcr_sample"):
-            run_document(two_latent_document({**WIENER,
-                                              "names": ["dep", "c"]}))
+            run_document(two_latent_document(
+                {**WIENER, "names": ["dep", "c"], "require_convergence": 1e-3}))
         product = run_product(two_latent_document(
             {**WIENER, "names": ["dep", "c"], "require_convergence": None}))
         assert float(product["mean"]["dep"]) == pytest.approx(1.0, abs=1e-3)

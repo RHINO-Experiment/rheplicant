@@ -164,14 +164,17 @@ class TestGcrDraws:
         # change from <= to < in jax's stopping rule would move it into the
         # one-iteration branch (boundary-validation.md).
         #
-        # The first half is the package's own convergence guard firing on the
-        # residual that loose tol leaves -- an eqx.error_if from inside jit,
+        # The first half is the convergence guard firing on the residual that
+        # loose tol leaves -- an eqx.error_if from inside jit,
         # so an EquinoxRuntimeError whose text names BOTH exits whichever was
         # called.  It says tol arrived; the second half says
         # require_convergence: null did too, and pins what the draw becomes.
+        # Both halves DECLARE the key now: the shipped default became null
+        # when kappa became a bound (inference/linear.py::_condition_bound).
         with pytest.raises(eqx.EquinoxRuntimeError,
                            match="wiener_solve/gcr_sample"):
-            gcr_product({"n_draws": 4, "tol": 2.0})
+            gcr_product({"n_draws": 4, "tol": 2.0,
+                         "require_convergence": 1e-3})
         product = gcr_product(
             {"n_draws": 4, "tol": 2.0, "require_convergence": None})
         assert float(jnp.max(jnp.abs(product["draws"]["g"]))) < 1.0e-6

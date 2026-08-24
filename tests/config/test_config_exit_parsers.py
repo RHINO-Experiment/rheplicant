@@ -848,7 +848,7 @@ class TestBaseKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "blocks": [{"names": ["g"]}], "check_identifiability": False,
             "max_iter": 100, "tol": 1e-8, "min_sweeps": 3,
-            "solve_tol": 1e-6, "solve_guard": 0.001}
+            "solve_tol": 1e-6, "solve_guard": None}
         blocks = parsed.parsed.execution["blocks"]
         assert type(blocks) is tuple and len(blocks) == 1
 
@@ -858,7 +858,7 @@ class TestBaseKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "blocks": [{"names": ["g"]}], "seed": 11, "n_sweeps": 6,
             "check_identifiability": False, "warmup": None,
-            "rhat_max": 1.05, "solve_tol": 1e-6, "solve_guard": 0.001}
+            "rhat_max": 1.05, "solve_tol": 1e-6, "solve_guard": None}
 
     def test_a_warm_start_is_normalized_not_estimated(self, base_configured):
         parsed = _parse_base(
@@ -1059,7 +1059,7 @@ class TestConjugateKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "tol": 1e-6,
             "maxiter": None,
-            "require_convergence": 1e-3,
+            "require_convergence": None,
             "check": True,
             "names": ["g"],
             "width": "none",
@@ -1073,7 +1073,7 @@ class TestConjugateKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "tol": 1e-6,
             "maxiter": None,
-            "require_convergence": 1e-3,
+            "require_convergence": None,
             "check": True,
             "names": ["g"],
             "seed": 7,
@@ -1087,7 +1087,7 @@ class TestConjugateKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "tol": 1e-6,
             "maxiter": None,
-            "require_convergence": 1e-3,
+            "require_convergence": None,
             "check": True,
             "names": ["g"],
             "acknowledge_unconverged_covariance": False,
@@ -1104,7 +1104,7 @@ class TestConjugateKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "tol": 1e-6,
             "maxiter": None,
-            "require_convergence": 1e-3,
+            "require_convergence": None,
             "check": True,
             "names": ["g"],
             "seed": 7,
@@ -1133,7 +1133,7 @@ class TestConjugateKindsNormalizeTheirDefaults:
             width="fisher", prior_std={"g": 1.0}, tol=1e-9, maxiter=None)
         assert _plain(parsed.parsed.resolved) == {
             "names": ["g"], "width": "fisher", "prior_std": {"g": 1.0},
-            "tol": 1e-9, "maxiter": None, "require_convergence": 1e-3,
+            "tol": 1e-9, "maxiter": None, "require_convergence": None,
             "check": True}
 
 

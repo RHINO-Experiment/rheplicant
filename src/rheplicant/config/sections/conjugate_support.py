@@ -67,7 +67,7 @@ _SOLVER_KNOBS = (("tol", float, 0.0, False),
 _KNOB_DEFAULTS = {
     "tol": 1e-6,
     "maxiter": None,
-    "require_convergence": 1e-3,
+    "require_convergence": None,
     "reweight_tol": None,
     "min_reweights": 5,
     "max_reweights": 100,

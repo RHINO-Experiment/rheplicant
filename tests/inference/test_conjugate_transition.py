@@ -82,6 +82,21 @@ def block():
     return cond, {"gain": jnp.array(1.0)}
 
 
+#: A ``require_convergence`` this fixture can actually meet at float32.
+#:
+#: Measured on this fixture: the bound is 4.69e+07, and CG lands at the
+#: single-precision residual floor -- 1.12e-07 for the mean and 2.23e-07 for
+#: the draw, whose right-hand side carries the two fluctuation terms. So the
+#: error bounds are 5.24 and 10.47, and no target below the larger of them can
+#: be certified here at float32.
+#:
+#: It used to be 1e-3 throughout this file, back when kappa was a measurement
+#: biased low; since ``_condition_number`` became a rigorous upper bound, 1e-3
+#: is unreachable on this block rather than merely demanding. See that
+#: function's docstring for why the measurement had to go.
+REACHABLE = 20.0
+
+
 def _reference(cond, names, values, *, key):
     """The update as it read before the jit, rebuilt so the test owns the baseline."""
     operator = linear_operator(
@@ -92,7 +107,7 @@ def _reference(cond, names, values, *, key):
     extra = {} if key is None else {"key": key}
     solved, _ = solve(
         operator, cond.observed, noise_std=cond.sigma(values),
-        tol=1e-8, maxiter=None, require_convergence=1e-3, **extra,
+        tol=1e-8, maxiter=None, require_convergence=REACHABLE, **extra,
     )
     return solved
 
@@ -100,7 +115,8 @@ def _reference(cond, names, values, *, key):
 def test_the_mean_matches_the_unjitted_solve(block) -> None:
     cond, values = block
     got, _ = conjugate_estimate(
-        cond, ("gain",), values, tol=1e-8, maxiter=None, require_convergence=1e-3
+        cond, ("gain",), values, tol=1e-8, maxiter=None,
+        require_convergence=REACHABLE,
     )
     want = _reference(cond, ("gain",), values, key=None)
     assert float(got["gain"]) == pytest.approx(float(want["gain"]), rel=CLOSE)
@@ -112,7 +128,7 @@ def test_the_draw_matches_the_unjitted_draw(block) -> None:
     key = jax.random.key(7)
     got, _ = conjugate_draw(
         cond, ("gain",), values, key=key, tol=1e-8, maxiter=None,
-        require_convergence=1e-3,
+        require_convergence=REACHABLE,
     )
     want = _reference(cond, ("gain",), values, key=key)
     assert float(got["gain"]) == pytest.approx(float(want["gain"]), rel=CLOSE), (
@@ -146,14 +162,29 @@ def test_the_conjugate_convergence_guard_still_raises_equinox(block) -> None:
     )
 
 
-def test_a_converging_solve_does_not_trip_the_guard(block) -> None:
-    """Otherwise the test above would pass on a guard that refuses everything."""
+def test_a_reachable_target_does_not_trip_the_guard(block) -> None:
+    """Otherwise the test above would pass on a guard that refuses everything.
+
+    The counterweight still exists; what changed is what counts as reachable.
+    At ``REACHABLE`` the bound certifies the solve and the guard is silent; at
+    1e-3 it refuses, and on this fixture at float32 that refusal is CORRECT --
+    the draw's error bound really is 10.47 and no tolerance moves it. Both halves are
+    asserted, so this cannot pass on a guard that has stopped firing either.
+    """
     cond, values = block
     got, _ = conjugate_draw(
         cond, ("gain",), values, key=jax.random.key(1), tol=1e-8, maxiter=None,
-        require_convergence=1e-3,
+        require_convergence=REACHABLE,
     )
     assert jnp.isfinite(got["gain"])
+
+    from equinox import EquinoxRuntimeError
+
+    with pytest.raises(EquinoxRuntimeError):
+        conjugate_draw(
+            cond, ("gain",), values, key=jax.random.key(1), tol=1e-8,
+            maxiter=None, require_convergence=1e-3,
+        )
 
 
 def test_the_cache_holds_one_program_per_branch(block) -> None:
@@ -168,16 +199,16 @@ def test_the_cache_holds_one_program_per_branch(block) -> None:
     for sweep in range(4):
         conjugate_estimate(
             cond, ("gain",), values, tol=1e-8, maxiter=None,
-            require_convergence=1e-3, programs=programs,
+            require_convergence=REACHABLE, programs=programs,
         )
         conjugate_draw(
             cond, ("gain",), values, key=jax.random.key(sweep), tol=1e-8,
-            maxiter=None, require_convergence=1e-3, programs=programs,
+            maxiter=None, require_convergence=REACHABLE, programs=programs,
         )
     assert sorted(programs) == sorted(
         [
-            (("gain",), False, 1e-8, None, 1e-3),
-            (("gain",), True, 1e-8, None, 1e-3),
+            (("gain",), False, 1e-8, None, REACHABLE),
+            (("gain",), True, 1e-8, None, REACHABLE),
         ]
     ), (
         f"Expected one program for the mean and one for the draw, got "

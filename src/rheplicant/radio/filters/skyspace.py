@@ -29,9 +29,9 @@ top is set by the data. CG then stops on a tiny residual with those pixels still
 at their starting value. So the guard estimates kappa by power iteration
 (:mod:`rheplicant.core.conditioning`) and limits ``kappa * residual``, the bound
 on the relative error. It is off by default: unlike a Wiener solve, which runs
-once, a filter runs on every evaluation of the signal path, and the estimate
-costs a fixed ``2 * POWER_ITERATIONS`` unrolled applications of the normal
-operator on top of the one the residual needs.
+once, a filter runs on every evaluation of the signal path, and the bound costs
+a fixed ``POWER_ITERATIONS`` unrolled applications of the normal operator on
+top of the one the residual needs.
 
 Noise weighting: if ``state.aux["flags"]`` exists (e.g. from
 MomentRFI flagging), flagged samples get zero weight in ``N^-1``.
@@ -45,7 +45,7 @@ import jax.numpy as jnp
 
 from rheplicant.core.conditioning import (
     POWER_ITERATIONS,
-    extreme_eigenvalues,
+    largest_eigenvalue,
     tree_norm,
 )
 from rheplicant.core.errors import StateValidationError
@@ -123,32 +123,40 @@ class SkySpaceFilter(AbstractLinearFilter):
         """``sky_hat`` again, refusing if its relative error cannot be bounded.
 
         The residual costs one more application of ``normal_op`` because JAX's
-        ``cg`` discards it; kappa costs ``2 * POWER_ITERATIONS`` more. The
-        verdict is on ``kappa * residual`` — see the module docstring for why
-        the residual alone decides nothing here.
+        ``cg`` discards it; kappa costs ``POWER_ITERATIONS`` more. The verdict
+        is on ``kappa * residual`` — see the module docstring for why the
+        residual alone decides nothing here.
 
         ``eqx.error_if`` rather than a Python ``if``, because the comparison is
         on traced values and this filter is meant to run under ``jit``.
 
-        **The verdict is one-sided.** ``POWER_ITERATIONS`` steps reach lambda_min
-        from ABOVE, so the kappa here is a lower bound on the true one, and so is
-        the error bound built from it. A refusal is therefore sound; a pass is
-        not a certificate. Measured on a five-pixel map with one pixel the scan
-        never touches and a ridge of 1e-8: the true kappa is about 5e+09 and
-        twelve iterations report 3.0e+04. Both refuse a 1e-4 target, which is
-        why the under-estimate does not hide this case -- but a caller who needs
-        the number rather than the verdict should not read it off this guard.
+        **kappa is bounded, not estimated, and the difference is the whole
+        safety of this guard.** ``lam_min(A^T W A + lam I) >= min(lam)``
+        exactly, because ``A^T W A`` is positive semi-definite -- so
+        ``lam_max / min(lam)`` bounds kappa from ABOVE and the error bound
+        built on it can only be too large, never too small. A refusal and a
+        pass are both sound.
+
+        This function shipped measuring ``lam_min`` with
+        ``extreme_eigenvalues`` and flooring the measurement, which gave a
+        kappa that was a LOWER bound: on the five-pixel fixture with one pixel
+        the scan never touches and a ridge of 1e-8, the true kappa is about
+        5e+09 and twelve iterations reported 3.0e+04. That case was refused
+        anyway, so nothing here was observably wrong -- but a guard whose
+        number leans toward silence is one defect away from being useless, and
+        ``inference/linear.py::_condition_number`` carries the same correction
+        and the measurements that forced it.
         """
         misfit = normal_op(sky_hat) - rhs
         residual = tree_norm(misfit) / jnp.maximum(tree_norm(rhs), 1e-30)
-        largest, smallest = extreme_eigenvalues(
+        largest = largest_eigenvalue(
             normal_op, rhs, jax.random.key(0), POWER_ITERATIONS
         )
         # A^T W A is positive semi-definite, so lam_min cannot fall below the
         # ridge however little of the sky the scan actually saw. Taking the
         # smallest entry keeps the floor a true lower bound for a per-pixel lam.
         floor = jnp.min(self.regularization)
-        kappa = largest / jnp.maximum(smallest, floor)
+        kappa = largest / floor
         bad = jnp.logical_or(
             ~jnp.isfinite(residual), residual * kappa > self.require_convergence
         )

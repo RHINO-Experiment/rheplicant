@@ -27,6 +27,7 @@ from rheplicant.inference import (
     Latent,
     ParameterSpace,
     check_linearity,
+    condition_bound,
     condition_estimate,
     gcr_sample,
     linear_operator,
@@ -1009,10 +1010,15 @@ class TestUnderDeterminedBlocks:
     ):
         """The reported bug. CG stops at a relative residual of ~1e-7 with the
         blind directions still unresolved; the guard has to notice that a
-        residual that small means nothing when κ is this large."""
+        residual that small means nothing when κ is this large.
+
+        ``require_convergence`` is passed rather than defaulted: it stopped
+        being on by default when κ became a bound. See
+        ``inference/linear.py::_condition_number``."""
         with pytest.raises(RuntimeError, match="condition number"):
             gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
-                       prior_std=LOAD_PRIOR, key=jax.random.key(0))
+                       prior_std=LOAD_PRIOR, key=jax.random.key(0),
+                       require_convergence=1e-3)
 
     def test_the_mean_is_refused_once_the_prior_has_something_to_say(
         self, one_load_block, one_load_observed
@@ -1029,7 +1035,8 @@ class TestUnderDeterminedBlocks:
         """
         with pytest.raises(RuntimeError, match="condition number"):
             wiener_solve(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
-                         prior_std=LOAD_PRIOR, prior_mean=250.0)
+                         prior_std=LOAD_PRIOR, prior_mean=250.0,
+                         require_convergence=1e-3)
 
     def test_the_zero_centred_mean_is_not_refused(
         self, one_load_block, one_load_observed
@@ -1056,15 +1063,27 @@ class TestUnderDeterminedBlocks:
         with pytest.raises(RuntimeError, match="precision|condition number"):
             gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
                        prior_std=LOAD_PRIOR, key=jax.random.key(0),
-                       tol=1e-12, maxiter=5000)
+                       tol=1e-12, maxiter=5000, require_convergence=1e-3)
 
     def test_a_well_conditioned_block_is_not_refused(self, twin, template_state):
-        """The guard must not fire on healthy solves.
+        """The default must not fire on healthy solves, and it does not.
 
-        A bound that assumed the worst about ``λ_min`` (all it is entitled to
-        assume without measuring is ``λ_min ≥ 1/prior_std²``) would report
-        κ~5e7 for THIS block, whose true κ is ~1, and would reject every solve
-        in the suite. The conditioning has to be measured, not bounded.
+        **This docstring used to argue the opposite of what shipped, and both
+        halves of the argument were right.** It said: a bound that assumed the
+        worst about ``λ_min`` -- all it is entitled to assume without measuring
+        is ``λ_min ≥ 1/prior_std²`` -- would report κ~5e7 for THIS block, whose
+        true κ is ~1, and would reject every solve in the suite, so the
+        conditioning has to be MEASURED. That is correct and it is measured
+        here: the bound reads 1.44e+06 against a true κ under 10.
+
+        What it could not know is that the measurement is unsound in the one
+        direction a guard cannot afford -- biased high on ``λ_min``, so low on
+        κ, so silent where it should speak (bayesmith's port measured 34x on a
+        κ=1e4 spectrum and ~700x at 1e7). So κ is a bound now, and the thing
+        that gave way is the DEFAULT rather than the soundness: the guard is
+        opt-in, and this test is what keeps the default honest.
+
+        The cost is real and is its own test below.
         """
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
@@ -1095,17 +1114,78 @@ class TestUnderDeterminedBlocks:
                                        prior_std=LOAD_PRIOR)
         assert float(estimated) == pytest.approx(float(expected), rel=0.1)
 
-    def test_the_condition_estimate_is_near_one_for_a_healthy_block(
-        self, twin, template_state
-    ):
+    def _healthy_block(self, twin, template_state):
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
-        block = linear_operator(
+        return linear_operator(
             ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
                                   into=lambda p: p["gain"].gain, linear=True),
             wide, template_state,
         )
-        assert float(condition_estimate(block, noise_std=1.0, prior_std=5.0)) < 10.0
+
+    def test_the_bound_is_loose_by_five_decades_on_a_healthy_block(
+        self, twin, template_state
+    ):
+        """The price of soundness, as a number rather than a caveat.
+
+        This asserted ``< 10.0`` while κ was measured, and the measurement was
+        right about THIS block: the data constrains every direction, so the
+        true λ_min is set by the data and is five decades above the prior
+        floor the bound is entitled to assume. The bound cannot see that and
+        must not pretend to.
+
+        Pinned as a range rather than a value: the point is the DECADES, and a
+        tighter pin would break on any retuning of the fixture.
+        """
+        block = self._healthy_block(twin, template_state)
+        bound = float(condition_bound(block, noise_std=1.0, prior_std=5.0))
+        measured = float(condition_estimate(block, noise_std=1.0, prior_std=5.0))
+
+        assert 1e5 < bound < 1e8, bound
+        assert measured < 10.0, measured
+
+    def test_a_correct_answer_is_refused_once_the_guard_is_asked_for(
+        self, twin, template_state
+    ):
+        """What being off by default buys, said out loud and with numbers.
+
+        The solve below matches a dense reference to 1e-3 -- it is the same
+        block and the same call ``TestWienerSolve.test_matches_a_dense_solve``
+        asserts that of. Its residual is 3.6e-08, which is the float32 floor
+        and cannot be tightened. Against a bound of 1.44e+06 the error bound is
+        5.2e-02, so a 1e-3 target is refused.
+
+        Nothing here is a defect. The bound is right that it cannot PROVE 1e-3;
+        the answer is right anyway. A guard that says so is honest and a guard
+        that says so by default is unusable, which is the whole trade this
+        change made.
+
+        A large bound alone never condemns, and that matters: the healthy block
+        above whose CG lands on an exact zero residual passes this same guard.
+        It takes a nonzero residual, however small, for the bound to bite.
+        """
+        n_time = template_state.coords.time.shape[0]
+        # `TestWienerSolve.gain_truth`'s own gradient. A CONSTANT truth lands
+        # exactly in the operator's range and CG returns it with a residual of
+        # exactly zero -- which is the case above, and which no bound can
+        # condemn. It takes a truth that needs real iterations to reach the
+        # float32 residual floor this test is about.
+        truth = GAIN + 0.1 * jnp.arange(n_time, dtype=float)
+        block = self._healthy_block(twin, template_state)
+        observed = block.offset + block.forward(truth)
+
+        solved, residual = wiener_solve(block, observed, noise_std=1.0,
+                                        prior_std=5.0)
+        bound = float(condition_bound(block, noise_std=1.0, prior_std=5.0))
+        expected = _dense_reference(block, observed, 1.0, 5.0)
+
+        assert 0.0 < float(residual) < 1e-6, float(residual)
+        assert float(residual) * bound > 1e-3, (float(residual), bound)
+        assert jnp.allclose(solved, expected, rtol=1e-3, atol=1e-3), solved
+
+        with pytest.raises(RuntimeError, match="precision|condition number"):
+            wiener_solve(block, observed, noise_std=1.0, prior_std=5.0,
+                         require_convergence=1e-3)
 
     def test_x64_subprocess_recovers_the_prior_in_the_blind_directions(self):
         """The quantitative claim, at the precision that can support it.

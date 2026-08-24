@@ -111,7 +111,7 @@ def iterative_gls(
     reweight_tol: float | None = None,
     min_reweights: int = MIN_REWEIGHTS,
     max_reweights: int = MAX_REWEIGHTS,
-    require_convergence: float | None = 1e-3,
+    require_convergence: float | None = None,
 ) -> GLSResult:
     """Find the covariance a prediction-dependent noise model implies.
 
@@ -153,7 +153,7 @@ def iterative_gls(
         require_convergence: bound on the relative error of the **final** solve,
             as for :func:`wiener_solve`. Deliberately applied once, at the
             converged covariance, and not inside the loop: the guard costs
-            ``2 * POWER_ITERATIONS`` extra operator applications, which is the
+            ``POWER_ITERATIONS`` extra operator applications, which is the
             same bargain :func:`wiener_solve`'s own docstring recommends for a
             Gibbs sweep. It bounds the error of what is returned; it says
             nothing about the intermediate steps, which do not need it.

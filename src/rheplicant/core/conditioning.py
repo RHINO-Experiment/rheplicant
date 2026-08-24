@@ -26,10 +26,12 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-#: Power-iteration steps per end of the spectrum, for callers that guard a
-#: solve with :func:`extreme_eigenvalues`. Both ends typically settle within
-#: three; this leaves margin at a fixed cost of ``2 * POWER_ITERATIONS``
-#: operator applications per guarded solve.
+#: Power-iteration steps for :func:`largest_eigenvalue`, for callers that
+#: guard a solve with it. It typically settles within three; this leaves
+#: margin at a fixed cost of ``POWER_ITERATIONS`` operator applications per
+#: guarded solve. It was twice that while :func:`extreme_eigenvalues` was the
+#: one callers used -- see that function's own docstring for why nothing here
+#: uses it any more.
 POWER_ITERATIONS: int = 12
 
 

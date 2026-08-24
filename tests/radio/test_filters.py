@@ -238,9 +238,13 @@ class TestSkySpaceConvergenceGuard:
 
         This is the regime the guard exists for. Measured over 200 iterations
         at ``regularization=1e-8``: relative residual 1.4e-7 -- which reads as
-        converged against any sane target -- while kappa is 3.0e+04, so the
-        bound on the relative ERROR is 4.3e-3. Raising the ridge to 1.0 leaves
+        converged against any sane target -- while kappa is 4.9e+09, so the
+        bound on the relative ERROR is 7.1e+02. Raising the ridge to 1.0 leaves
         the residual where it was (8.8e-8) and drops kappa to 50.
+
+        kappa is ``lam_max / min(lam)``, a rigorous upper bound. It read
+        3.0e+04 here while the guard measured lam_min instead, which is the
+        correction ``inference/linear.py::_condition_number`` records.
         """
         base = jax.random.normal(jax.random.key(3), (24, self.N_PIX))
         return MatrixProjector(matrix=base.at[:, -1].multiply(1e-4))
@@ -304,7 +308,7 @@ class TestSkySpaceConvergenceGuard:
         A guard that compared the residual with ``require_convergence`` would
         wave this through -- the residual is three orders of magnitude inside
         the target. It is refused because the error bound, kappa times that
-        residual, is 4.3e-3. Pair this with the test below, which changes only
+        residual, is 7.1e+02. Pair this with the test below, which changes only
         ``regularization``: the residual is the same either way, so the residual
         cannot be what separates them.
         """
@@ -320,7 +324,7 @@ class TestSkySpaceConvergenceGuard:
         assert "at this precision" in str(caught.value)
 
     def test_the_same_residual_passes_once_the_ridge_conditions_it(self, barely_seen):
-        """Only ``regularization`` moves, from 1e-8 to 1.0. kappa: 3.0e+04 -> 50."""
+        """Only ``regularization`` moves, from 1e-8 to 1.0. kappa: 4.9e+09 -> 50."""
         out = SkySpaceFilter(
             projector=barely_seen, regularization=jnp.array(1.0),
             cg_maxiter=200, cg_tol=1e-12, mode="extract",

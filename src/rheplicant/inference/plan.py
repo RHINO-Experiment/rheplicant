@@ -872,7 +872,7 @@ class SamplingPlan:
         min_sweeps: int = MIN_SWEEPS,
         check_identifiability: Any = CHECK_ONCE,
         solve_tol: float = 1e-6,
-        solve_guard: float | None = 1e-3,
+        solve_guard: float | None = None,
     ) -> Estimate:
         """Best fit: block-coordinate descent to a fixed point of the whole model.
 
@@ -1019,7 +1019,7 @@ class SamplingPlan:
         check_identifiability: Any = CHECK_ONCE,
         rhat_max: float = DEFAULT_RHAT_MAX,
         solve_tol: float = 1e-6,
-        solve_guard: float | None = 1e-3,
+        solve_guard: float | None = None,
     ) -> Draws:
         """Posterior draws: a Gibbs sweep over the same partition.
 

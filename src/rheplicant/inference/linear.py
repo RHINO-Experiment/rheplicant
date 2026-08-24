@@ -89,6 +89,7 @@ import numpy as np
 from rheplicant.core.conditioning import (
     POWER_ITERATIONS,
     extreme_eigenvalues,
+    largest_eigenvalue,
     tree_norm,
 )
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
@@ -1155,7 +1156,7 @@ def wiener_solve(
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
-    require_convergence: float | None = 1e-3,
+    require_convergence: float | None = None,
 ) -> tuple[Any, jax.Array]:
     """Posterior mean of a linear-Gaussian block — the Wiener filter, by CG.
 
@@ -1224,12 +1225,12 @@ def wiener_solve(
             convergence status, so an unconverged solve otherwise comes back
             looking exactly like a converged one.
 
-            The bound is ``κ · relative_residual``, with ``κ`` estimated by
+            The bound is ``κ · relative_residual``, with ``κ`` bounded by
             :func:`condition_estimate`. Guarding on the residual alone would
             certify nothing in the regime that matters — see below — so this
-            costs ``2 · POWER_ITERATIONS`` extra operator applications. That is
-            not free: on a well-conditioned block, where CG itself converges in
-            a few iterations, it roughly DOUBLES the solve. In a Gibbs sweep,
+            costs ``POWER_ITERATIONS`` extra operator applications. That is not
+            free: on a well-conditioned block, where CG itself converges in a
+            few iterations, it is a real fraction of the solve. In a Gibbs sweep,
             where the conditioning barely moves from sweep to sweep, call
             :func:`condition_estimate` once outside the loop, choose ``tol``
             from it, and pass ``require_convergence=None`` inside — the same
@@ -1268,12 +1269,25 @@ def wiener_solve(
         looks converged, having left the prior-dominated directions at their
         starting value, and the draw comes back with far too little scatter.
 
-        This is exactly the regime these solvers exist for, so the guard is on
-        by default and the accuracy target is stated as an error, not a
-        residual. To solve rather than refuse, pass ``tol ≈
-        require_convergence / κ`` with a ``maxiter`` to match. Past ``κ · eps``
-        no tolerance helps and only precision does; the guard says so in its
-        own words.
+        This is exactly the regime these solvers exist for, so the accuracy
+        target is stated as an error and not a residual. To solve rather than
+        refuse, pass ``tol ≈ require_convergence / κ`` with a ``maxiter`` to
+        match. Past ``κ · eps`` no tolerance helps and only precision does; the
+        guard says so in its own words.
+
+        **It is OFF by default, and that is a recent, deliberate retreat.** The
+        guard shipped on, against a κ that :func:`_condition_estimate` has since
+        been shown to under-report by up to a factor of 700 — so what was on by
+        default was a promise to bound the error that did not bound it. The κ
+        here is now a rigorous UPPER bound, and the same measurement that made
+        it sound made it conservative: on a block the data DOES identify in
+        every direction it can read five orders of magnitude high (1.44e+06
+        measured against a true κ under 10, because λ_min is then set by the
+        data and not by the prior, which is all the bound knows about). On by
+        default, that refuses correct solves wholesale. So the choice is
+        yours to make per solve, and when you make it the answer means
+        something: a solve this guard passes has its error bounded, and one it
+        refuses may still be fine — the bound could not prove it.
 
     Note:
         **Where S comes from.** ``Latent(prior=dist.Normal(m, s))`` is the
@@ -1294,6 +1308,63 @@ def wiener_solve(
         block, observed, noise_std=noise_std, prior_std=prior_std,
         prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=None,
         require_convergence=require_convergence,
+    )
+
+
+def condition_bound(
+    block: LinearBlock,
+    *,
+    noise_std: Any,
+    prior_std: Any = None,
+    iterations: int = POWER_ITERATIONS,
+    key: jax.Array | None = None,
+) -> jax.Array:
+    """An UPPER BOUND on the conditioning of the system this block is solved with.
+
+    ``κ(AᵀN⁻¹A + S⁻¹)`` says how much a solver's residual understates its
+    error: for a solution ``x`` with relative residual ``r``,
+
+        ‖x - x*‖ / ‖x*‖  ≤  κ · r
+
+    so a residual of 1e-6 against κ=1e7 certifies nothing. **This is the number
+    to divide an accuracy target by** — for a target relative accuracy ``a``,
+    ask :func:`wiener_solve` or :func:`gcr_sample` for roughly ``tol = a /
+    condition_bound(...)`` — and it is the number ``require_convergence``
+    itself reads. :func:`condition_estimate` measures κ instead and is biased
+    LOW; a tolerance chosen from it is too loose by that bias.
+
+    ``λ_max · max(prior_variance)``. ``AᵀN⁻¹A`` is positive semi-definite, so
+    ``λ_min ≥ 1/max(prior_variance)`` exactly. ``λ_max`` is approached from
+    BELOW and geometrically, so the estimate can only make the bound smaller.
+
+    A large bound is not a defect; it is what the bound is entitled to say. On
+    a block whose data constrains every direction, λ_min is set by the data
+    rather than by the prior and this reads five decades high — measured, 1.44e+06
+    against a true κ under 10. It costs iterations, not correctness.
+
+    Costs ``iterations`` applications of the normal operator, half what
+    :func:`condition_estimate` costs, and forms no matrix.
+
+    Args:
+        block: from :func:`linear_operator`.
+        noise_std: as for :func:`condition_estimate`, with the same refusals.
+        prior_std: as for :func:`condition_estimate`.
+        iterations: power-iteration steps for ``λ_max``.
+        key: PRNG key for the starting vector. Fixed by default.
+
+    Returns:
+        The bound, as a scalar array.
+    """
+    check_noise_std_axis(noise_std, jnp.shape(block.offset), "condition_bound")
+    _refuse_a_noise_model_at_the_conjugate_seam(noise_std, "condition_bound")
+    _, prior_std = _resolve_prior(block, None, prior_std, "condition_bound")
+    _require_prior_std(block, prior_std, "condition_bound")
+    return _condition_bound(
+        block,
+        1.0 / jnp.asarray(noise_std) ** 2,
+        _variance_parts(block, prior_std),
+        jax.random.key(0) if key is None else key,
+        iterations,
     )
 
 
@@ -1324,10 +1395,28 @@ def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
     return normal
 
 
-def _condition_number(
+def _condition_estimate(
     block: LinearBlock, weight, prior_variance, key, iterations: int
 ) -> jax.Array:
-    """Estimated ``κ`` of ``AᵀN⁻¹A + S⁻¹``.
+    """MEASURED ``κ`` of ``AᵀN⁻¹A + S⁻¹``. A diagnostic, and not a bound.
+
+    ``λ_max`` over a measured ``λ_min``, floored by the prior's own curvature.
+
+    **Biased low, and therefore unsafe to guard on.** ``extreme_eigenvalues``
+    finds ``λ_min`` by a second power iteration on ``λ_max·I − M``, whose
+    leading eigenvalues crowd against ``λ_max`` with vanishing gaps on a graded
+    spectrum — so the ``λ_min`` it returns is too LARGE and this κ too SMALL.
+    Measured on a 20-point geometric spectrum at a true κ of 1e4: λ_min 33.9×
+    high, κ 33.9× low; at 1e7 over 50 points the factor was ~700 and 2000
+    iterations did not close it. Guarding on this number is guarding on
+    something that leans toward silence, which is why
+    :func:`_condition_bound` exists and is what the guard reads.
+
+    What it is good for is the thing a bound cannot do: it can SEE a
+    degeneracy. A near-degenerate partition shows up entirely in ``λ_min``, so
+    the joint operator's κ exceeds its members' by orders of magnitude here and
+    by a factor of 1.7 under the bound — see
+    ``tests/inference/test_linear_groups.py::TestGroupedVsAlternating``.
 
     For a group this is the JOINT condition number, and it is the number a
     per-block guard cannot produce: two latents the data barely distinguishes
@@ -1344,6 +1433,45 @@ def _condition_number(
     return largest / jnp.maximum(smallest, floor)
 
 
+def _condition_bound(
+    block: LinearBlock, weight, prior_variance, key, iterations: int
+) -> jax.Array:
+    """An UPPER BOUND on ``κ`` of ``AᵀN⁻¹A + S⁻¹``, not an estimate of it.
+
+    ``λ_max · max(prior_variance)``. ``AᵀN⁻¹A`` is positive semi-definite, so
+    ``λ_min ≥ λ_min(S⁻¹) = 1/max(prior_variance)`` exactly, and dividing
+    ``λ_max`` by that rigorous floor bounds the ratio from above.
+    :func:`_largest_variance` explains why the LOOSEST prior is the one that
+    bounds it.
+
+    **This is what the guard reads, and it did not always be.** The guard used
+    :func:`_condition_estimate` until bayesmith's port of this module measured
+    that number to be biased low — see that function for the factors. A guard
+    needs the error bounded from ABOVE or it certifies nothing, so it reads
+    this one, and :func:`condition_estimate`'s old advice to pick ``tol ≈ a/κ``
+    is safe only against this one too.
+
+    Found by ``bayesmith.exact.solve.condition_bound``, which is the same
+    formula; the cross-check harness in that repository keeps the two
+    comparable.
+
+    Half the cost of the estimate: ``iterations`` operator applications rather
+    than ``2 · iterations``, since only the top of the spectrum is measured.
+
+    **What it cannot do is see a degeneracy**, and that is why the estimate
+    survives beside it. λ_min is where a near-degenerate partition lives, and
+    this replaces λ_min with a prior floor that a group and its members share —
+    so the joint-versus-member comparison that the estimate resolves by a
+    factor of 30 collapses to 1.7 here.
+    """
+    split, _ = _real_parts(block)
+    template = split(_domain_zero(block))
+    largest = largest_eigenvalue(
+        _normal_operator(block, weight, prior_variance), template, key, iterations
+    )
+    return largest * _largest_variance(prior_variance)
+
+
 def condition_estimate(
     block: LinearBlock,
     *,
@@ -1352,7 +1480,7 @@ def condition_estimate(
     iterations: int = POWER_ITERATIONS,
     key: jax.Array | None = None,
 ) -> jax.Array:
-    """Condition number of the normal operator this block would be solved with.
+    """An upper bound on the conditioning of the system this block is solved with.
 
     ``κ(AᵀN⁻¹A + S⁻¹)`` is the number that says how much a solver's residual
     understates its error: for a solution ``x`` with relative residual ``r``,
@@ -1363,6 +1491,20 @@ def condition_estimate(
     pick ``tol`` for :func:`wiener_solve` and :func:`gcr_sample`: for a target
     relative accuracy ``a``, ask for roughly ``tol = a / κ``.
 
+    **A BOUND, and it has not always been one.** This returned ``λ_max`` over a
+    MEASURED ``λ_min`` until the measurement was shown to be biased high — see
+    :func:`_condition_estimate` for the numbers and where they came from. The
+    number here is now ``λ_max · max(prior_variance)``, which bounds κ from
+    above and is therefore safe to divide an accuracy target by; the old one
+    was too small by as much as a factor of 700, so the ``tol`` a reader
+    computed from it was too loose by the same. It is an over-estimate where
+    the data does constrain every direction, and that costs iterations rather
+    than correctness.
+
+    ``λ_max`` itself is approached from BELOW, geometrically, so the estimate
+    can only make the bound smaller — never larger than the truth by more than
+    that convergence leaves on the table.
+
     Large κ is not a defect here, it is the design: for a block the data does
     not fully identify, ``λ_min`` is exactly ``1/prior_std²`` while ``λ_max``
     is set by the data, so κ grows with how much better the data constrains
@@ -1370,6 +1512,7 @@ def condition_estimate(
 
     Costs ``2 · iterations`` applications of the normal operator — each the
     same JVP-plus-VJP a CG iteration costs — and no matrix is ever formed.
+    :func:`condition_bound` costs half that, measuring only the top.
 
     Args:
         block: from :func:`linear_operator`.
@@ -1388,19 +1531,20 @@ def condition_estimate(
         prior_std: as for :func:`wiener_solve` — it defaults to the latent's
             declared prior, so the κ reported here is the κ of the system those
             solves will build rather than of a system nobody solves.
-        iterations: power-iteration steps per end of the spectrum. The default
-            is comfortable; the estimate typically settles within three.
+        iterations: power-iteration steps per end of the spectrum. The
+            default is comfortable; the estimate typically settles within
+            three.
         key: PRNG key for the starting vectors. Fixed by default, so the
             estimate is reproducible.
 
     Returns:
-        The estimated condition number, as a scalar array.
+        The measured condition number, as a scalar array.
     """
     check_noise_std_axis(noise_std, jnp.shape(block.offset), "condition_estimate")
     _refuse_a_noise_model_at_the_conjugate_seam(noise_std, "condition_estimate")
     _, prior_std = _resolve_prior(block, None, prior_std, "condition_estimate")
     _require_prior_std(block, prior_std, "condition_estimate")
-    return _condition_number(
+    return _condition_estimate(
         block,
         1.0 / jnp.asarray(noise_std) ** 2,
         _variance_parts(block, prior_std),
@@ -1497,7 +1641,7 @@ def _conjugate_solve(
         # posterior scatter there is orders of magnitude too small. Guarding on
         # the residual certifies precisely nothing in the one regime these
         # solvers exist to serve.
-        kappa = _condition_number(
+        kappa = _condition_bound(
             block, weight, prior_variance, jax.random.key(0), POWER_ITERATIONS
         )
         error_bound = residual * kappa
@@ -1519,8 +1663,8 @@ def _conjugate_solve(
             "epsilon already exceeds it, so no tol or maxiter will help. This is "
             "the usual signature of a block the data does not identify. Enable "
             "jax_enable_x64, or strengthen the prior (prior_std bounds the "
-            "conditioning: κ ≈ ‖AᵀN⁻¹A‖·prior_std²). condition_estimate() reports "
-            "the number.",
+            "conditioning: κ ≈ ‖AᵀN⁻¹A‖·prior_std²). condition_bound() reports "
+            "the number this guard read.",
         )
         solution = eqx.error_if(
             solution,
@@ -1530,7 +1674,9 @@ def _conjugate_solve(
             "ERROR, which is what require_convergence limits — exceeds it. The "
             "residual alone looks converged; it is not, along the directions the "
             "prior dominates. Pass tol ≈ require_convergence/κ with a maxiter to "
-            "match, or strengthen the prior. condition_estimate() reports κ.",
+            "match, or strengthen the prior. condition_bound() reports the κ "
+            "this guard read; condition_estimate() measures a smaller one and "
+            "is not what to divide a target by.",
         )
     return join(solution), residual
 
@@ -1551,7 +1697,7 @@ def gcr_sample(
     prior_mean: Any = None,
     tol: float = 1e-6,
     maxiter: int | None = None,
-    require_convergence: float | None = 1e-3,
+    require_convergence: float | None = None,
 ) -> tuple[Any, jax.Array]:
     """Draw an EXACT posterior sample of a linear-Gaussian block.
 
@@ -1615,8 +1761,10 @@ def gcr_sample(
         ``(x, relative_residual)``. An unconverged CG returns a draw from the
         WRONG distribution — and a distribution that is too NARROW, since the
         directions left unresolved are the prior-dominated ones that should
-        have carried the most scatter — so ``require_convergence`` is on by
-        default here too.
+        have carried the most scatter. ``require_convergence`` is worth passing
+        here more than anywhere; it is off by default for the reason
+        :func:`wiener_solve` gives, which is about the bound's conservatism and
+        not about this risk being small.
 
         ``x`` carries the block's domain, dict or bare array, exactly as
         :func:`wiener_solve`'s does; see the note there, and
