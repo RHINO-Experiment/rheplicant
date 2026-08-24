@@ -84,6 +84,61 @@ class TestFourierBandFilter:
         with pytest.raises(StateValidationError, match="axis"):
             FourierBandFilter(axis=2, low=0.1, high=0.2)
 
+    def test_nyquist_is_reachable_when_high_equals_0_5(self):
+        """A band explicitly declared to reach Nyquist (``high=0.5``) must
+        actually be able to extract a signal that lives entirely at Nyquist.
+
+        Regression for a right edge that was strict (``f < high``) even at
+        ``high == 0.5``: the constructor accepts ``high=0.5`` (the docstring
+        calls it 'up to 0.5 = Nyquist'), but the Nyquist bin was silently
+        excluded from every band, no matter how it was written.
+        """
+        n = 8  # even, so fftfreq has an exact bin at |f| = 0.5
+        nyquist_tone = jnp.array([1.0, -1.0] * (n // 2))
+        data = nyquist_tone[:, None] * jnp.ones((1, 2))
+        # [0.4, 0.5] straddles no on-grid bin except the Nyquist one itself
+        # (bins are multiples of 1/8 = 0.125), so this isolates the edge.
+        out = FourierBandFilter(axis=0, low=0.4, high=0.5, mode="extract")(State(data=data))
+        # atol=1e-4: float32 FFT/IFFT round-trip noise floor (see
+        # test_removes_band_keeps_rest above, same tolerance).
+        assert jnp.allclose(out.data, data, atol=1e-4)
+
+    def test_interior_high_edge_is_still_exclusive(self):
+        """Only the Nyquist edge is closed. An interior boundary (``high <
+        0.5``) must stay half-open on the right, so that two abutting bands
+        ``[a, b)`` and ``[b, c)`` never both claim the bin at ``f = b`` -- this
+        is the guard on the guard: it must not regress when the Nyquist
+        special case is introduced (or later "simplified" into a general
+        closed edge).
+        """
+        n = 16
+        t = jnp.arange(n, dtype=jnp.float32)
+        boundary_tone = jnp.cos(2 * jnp.pi * 0.25 * t)  # on-grid bin at f = 0.25 exactly
+        data = boundary_tone[:, None] * jnp.ones((1, 2))
+        out = FourierBandFilter(axis=0, low=0.1, high=0.25, mode="extract")(State(data=data))
+        assert jnp.allclose(out.data, 0.0, atol=1e-4)
+
+    def test_odd_n_high_at_nyquist_does_not_crash(self):
+        """For odd n, ``fftfreq`` has no bin exactly at 0.5 -- the Nyquist
+        special case must be a no-op there, not a crash or a NaN."""
+        n = 7
+        data = jax.random.normal(jax.random.key(5), (n, 3))
+        out = FourierBandFilter(axis=0, low=0.1, high=0.5, mode="extract")(State(data=data))
+        assert out.data.shape == data.shape
+        assert jnp.all(jnp.isfinite(out.data))
+
+    def test_idempotent_extract_including_nyquist(self):
+        """A band filter is a projector: P(Pd) == Pd. If the Nyquist special
+        case were wired wrongly (e.g. it added energy instead of gating it),
+        applying the same extract band twice would drift from applying it
+        once."""
+        n = 8
+        data = jax.random.normal(jax.random.key(7), (n, 3))
+        filt = FourierBandFilter(axis=0, low=0.3, high=0.5, mode="extract")
+        once = filt(State(data=data))
+        twice = filt(State(data=once.data))
+        assert jnp.allclose(once.data, twice.data, atol=1e-4)
+
 
 class TestSkySpaceFilter:
     N_PIX = 5
