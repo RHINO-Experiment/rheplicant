@@ -154,10 +154,24 @@ class TestADCOperator:
 
 
 class TestBackendOperator:
-    def test_averages_time_chunks(self, data_state):
-        out = BackendOperator(n_chunk=4)(data_state)
+    def test_averages_time_chunks(self, template_state):
+        """A ramp, because a constant cannot tell an average from a passthrough.
+
+        This fixture used to be the shared constant-10.0 `data_state`, against
+        which mean, first, last, max and "return the input unchanged" all give
+        10.0. The assertion was `all(out.data == 10.0)` and every one of those
+        implementations passed it. A ramp separates them: the chunk means are
+        the only values that come out.
+        """
+        ramp = jnp.arange(N_TIME * N_FREQ, dtype=jnp.float32).reshape(N_TIME, N_FREQ)
+        out = BackendOperator(n_chunk=4)(template_state.with_data(ramp))
         assert out.data.shape == (N_TIME // 4, N_FREQ)
-        assert jnp.all(out.data == 10.0)
+        expected = ramp.reshape(N_TIME // 4, 4, N_FREQ).mean(axis=1)
+        assert jnp.allclose(out.data, expected)
+        # And it is not the first, last or max of each chunk.
+        for wrong in (ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, 0, :],
+                      ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, -1, :]):
+            assert not jnp.allclose(out.data, wrong)
 
     def test_updates_time_coordinate(self, data_state):
         out = BackendOperator(n_chunk=4)(data_state)

@@ -49,10 +49,16 @@ guard treats it as a floor and compares it against `--cov-fail-under`.
 `tests/config/test_config_surface.py::TestTheLayerBoundaryIsMechanical` scans
 the **text** of every `src/rheplicant/**/*.py` outside `config/` for
 `from rheplicant.config` or `import rheplicant.config`, and allows exactly
-five files:
+three files:
 
-    gui/form_catalog.py  gui/form_edits.py  gui/jobs.py
-    gui/outputs.py       gui/validation.py
+    gui/form_catalog.py  gui/form_edits.py  gui/validation.py
+
+It used to allow five. `gui/jobs.py` and `gui/outputs.py` held the permission
+and imported nothing from config -- they take the vocabulary from
+`form_catalog.py`'s `__all__` like every other GUI module -- so the allowlist
+now asserts in BOTH directions: an entry that does not use its permission
+fails, because an unused exemption is the one file that could start reaching
+into config with nothing to say so.
 
 Because it is a text scan, even a `TYPE_CHECKING` import or a docstring
 containing the phrase trips it. Any other GUI module that needs config

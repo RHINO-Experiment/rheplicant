@@ -369,10 +369,21 @@ class TestCompositionSymbols:
         for node_id, spec in both.nodes.items():
             assert svg.count(f'data-node-id="{node_id}"') == 1
             assert f'data-node-kind="{spec.kind}"' in svg
-        assert svg.count('role="button"') == 4
-        assert svg.count('tabindex="0"') == 4
-        assert 'data-node-id="sum" aria-disabled="true"' in svg
-        assert 'data-node-id="switch" aria-disabled="true"' in svg
+        # Derived from the fixture, not counted off it once and written down.
+        # The literals here were 4 and 4 -- the fixture's slot count -- which
+        # says nothing about WHICH nodes are focusable, and a renderer that
+        # made the junction focusable and the sink not would still read 4.
+        # The property is that a node is focusable exactly when it is not a
+        # junction or a selector, and it is asserted per node so a failure
+        # names the one that changed.
+        placed = {name for name, spec in both.nodes.items() if spec.kind not in (J, "selector")}
+        disabled = set(both.nodes) - placed
+        assert svg.count('role="button"') == len(placed)
+        assert svg.count('tabindex="0"') == len(placed)
+        for name in sorted(disabled):
+            assert f'data-node-id="{name}" aria-disabled="true"' in svg, name
+        for name in sorted(placed):
+            assert f'data-node-id="{name}" aria-disabled="true"' not in svg, name
         assert "source node p" in svg
         assert "junction node sum" in svg
 

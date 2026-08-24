@@ -192,13 +192,29 @@ class TestTheLayerBoundaryIsMechanical:
         core. Nothing below config may reach up into it; the GUI is above the
         config layer and gets explicit catalog and live-validation gateways."""
         src = pathlib.Path(rheplicant.__file__).parent
+        # Measured, not remembered: gui/jobs.py and gui/outputs.py held
+        # permission here and imported nothing from config -- they take the
+        # vocabulary from gui/form_catalog.py's __all__, which is what that
+        # re-export is for. A permission nobody uses is not free: it is the
+        # one file that could start reaching into config without anything
+        # saying so. The reverse assertion below keeps this list honest, so a
+        # future module that needs the permission is added deliberately rather
+        # than found to have had it all along.
         allowed_clients = {
             pathlib.Path("gui/form_catalog.py"),
             pathlib.Path("gui/form_edits.py"),
-            pathlib.Path("gui/jobs.py"),
-            pathlib.Path("gui/outputs.py"),
             pathlib.Path("gui/validation.py"),
         }
+        for allowed in sorted(allowed_clients):
+            text = (src / allowed).read_text()
+            assert (
+                "from rheplicant.config" in text
+                or "import rheplicant.config" in text
+            ), (
+                f"{allowed} is allowed to import config and does not. Remove "
+                "it from the allowlist -- an unused exemption is a hole "
+                "nothing is watching."
+            )
         offenders = [
             str(path.relative_to(src))
             for path in src.rglob("*.py")
@@ -380,7 +396,12 @@ class TestThePlan2CSurface:
             (spec,) = parse_runs([{"kind": kind}])
             assert spec.kind == kind, f"{kind} is not reachable by a document"
             assert kind in EXECUTORS, f"{kind} declares no executor"
-        assert len(_KINDS) == len(set(_KINDS)) == 18, sorted(_KINDS)
+        # Uniqueness is the property; the count is not asserted here because
+        # it is already derived twice below, against the prose that states it
+        # (`_NUMBER_WORDS` versus `len(_KINDS)`). A third literal is a number
+        # to update, not a guard: every kind is already checked for
+        # reachability and for declaring an executor by the loop above.
+        assert len(_KINDS) == len(set(_KINDS)), sorted(_KINDS)
 
     def test_nothing_is_deferred_to_plan_2c_any_more(self):
         """The audit of Tasks 2-11: the deferral tuple itself must be gone.
