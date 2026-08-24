@@ -81,6 +81,7 @@ from rheplicant.config.sections.npe import (
 from rheplicant.config.sections.npe import (
     _SAMPLE_KEYS as NPE_SAMPLE_KEYS,
 )
+from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS
 from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
 from rheplicant.config.sections.nuts import _INITS, _NUTS_DEFAULTS, _NUTS_KEYS
 from rheplicant.config.sections.observation import (
@@ -675,12 +676,23 @@ def _contested(key: str, owners: tuple[Mapping, ...]) -> bool:
     One widget carries one ``default``, because a widget path is a DOCUMENT
     path and ``runs[].tol`` is one of them.  Where the exits accepting a key
     agree, that single slot says the truth.  Where they disagree it cannot,
-    and today one key disagrees: ``plan.estimate`` defaults ``tol`` to 1e-8
+    and today TWO keys disagree.  ``plan.estimate`` defaults ``tol`` to 1e-8
     (``exits._ESTIMATE_DEFAULTS``) while the three ``conjugate.*`` solves
-    default it to 1e-6 (``conjugate_support._KNOB_DEFAULTS``).  Publishing
-    either number tells three exits, or one, a plausible wrong figure about a
-    solver tolerance -- and a plausible wrong figure is the one kind of error
-    that survives being looked at.
+    default it to 1e-6 (``conjugate_support._KNOB_DEFAULTS``); and
+    ``plan.sample`` defaults ``warmup`` to ``None``
+    (``exits._SAMPLE_DEFAULTS``) while ``benchmark`` defaults it to 1
+    (``benchmark._BENCHMARK_DEFAULTS``).  Publishing either number tells one
+    exit or the other a plausible wrong figure -- and a plausible wrong figure
+    is the one kind of error that survives being looked at.
+
+    **``warmup`` was contested all along and this census could not see it.**
+    ``benchmark`` wrote its 1 as a literal at the ``use_default`` call site,
+    which is in no map, so the sweep below found one owner, concluded the key
+    was uncontested, and published ``None``.  A default written where the
+    census cannot read it is a default that cannot be contested, which is why
+    ``_BENCHMARK_DEFAULTS`` exists and why
+    ``tests/gui/test_forms.py::test_no_call_site_default_contradicts_its_map``
+    now walks the call sites and compares them.
 
     So a contested key publishes NO default.  ``has_default`` exists for
     exactly this, and it costs nothing downstream: ``forms._project`` reads it
@@ -692,8 +704,10 @@ def _contested(key: str, owners: tuple[Mapping, ...]) -> bool:
     Computed rather than listed, so the next divergence -- a moved key table, a
     retuned solver -- drops its default instead of quietly publishing a stale
     one.  A ``default_when`` beside ``visible_when``/``required_when`` is the
-    fuller answer and is deliberately not built for a population of one; when a
-    second key contests, it will have two callers and a reason.
+    fuller answer, and the population is two now rather than one, which is the
+    condition this note set for building it.  It is still not built here: that
+    is a design decision about the widget contract, and this change is the one
+    that makes the population honest rather than the one that acts on it.
 
     :param key: the run option, without its ``runs[].`` prefix.
     :param owners: every mapping that may declare a default for it.
@@ -748,6 +762,7 @@ def _run_widgets(builder: _Builder) -> None:
     #: and the reweight knobs), which is a larger claim than this makes.
     default_owners = (
         _ADAM_DEFAULTS, _ESTIMATE_DEFAULTS, _SAMPLE_DEFAULTS, _NUTS_DEFAULTS, _KNOB_DEFAULTS,
+        _BENCHMARK_DEFAULTS,
     )
     required = {
         "optimizer",

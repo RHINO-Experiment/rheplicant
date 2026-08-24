@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import pathlib
 
 import pytest
 import yaml
@@ -423,6 +424,30 @@ def test_an_option_its_exits_disagree_about_publishes_no_default():
     assert _ESTIMATE_DEFAULTS["tol"] != _KNOB_DEFAULTS["tol"]
 
 
+def test_warmup_is_the_second_contested_option_and_publishes_no_default():
+    """``warmup`` is ``None`` for ``plan.sample`` and 1 for ``benchmark``.
+
+    It was contested all along and the census could not see it: ``benchmark``
+    wrote its 1 as a literal at the ``use_default`` call site, which is in no
+    map, so ``_contested`` found ONE owner, decided the key was uncontested,
+    and published ``None`` -- wrong for the exit that defaults it to 1.
+
+    Two things are asserted, because either alone can pass on the bug. The
+    published default is the one a reader sees; the map comparison is the
+    disagreement it stands for, and without it this test would still pass if
+    ``benchmark._BENCHMARK_DEFAULTS`` were dropped out of the census's owners
+    and the widget happened to publish nothing for another reason.
+    """
+    warmup = _widget("runs[].warmup")
+    assert warmup.has_default is False
+    assert warmup.default is None
+
+    from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS
+    from rheplicant.config.sections.exits import _SAMPLE_DEFAULTS
+
+    assert _SAMPLE_DEFAULTS["warmup"] != _BENCHMARK_DEFAULTS["warmup"]
+
+
 @pytest.mark.parametrize(
     ("path", "default"),
     [
@@ -447,3 +472,94 @@ def test_reading_the_conjugate_knobs_does_not_hand_them_defaults(path):
     silently stop ``condition`` having to decide it.
     """
     assert _widget(path).has_default is False
+
+
+def _sections_dir() -> str:
+    """``rheplicant/config/sections/``, located through the package it is in."""
+    import rheplicant.config.sections as sections
+
+    return str(pathlib.Path(sections.__file__).parent)
+
+
+def test_no_call_site_default_contradicts_its_map():
+    """A default the contested-key census cannot read is one nothing can contest.
+
+    ``_contested`` decides whether a widget may publish a default by comparing
+    the exits that own the key, and it compares MAPS. A ``use_default`` call
+    site that spells its default as a literal is invisible to it: the sweep
+    sees one owner, concludes the key is uncontested, and publishes a figure
+    that is wrong for every other exit.
+
+    That is not hypothetical. ``benchmark`` wrote ``warmup`` as a literal 1
+    while ``exits._SAMPLE_DEFAULTS`` said ``None``, and the catalog published
+    ``None`` for both -- the same family of defect as ``runs[].tol``, which
+    this file already guards, and invisible to that guard for exactly this
+    reason. Measured across the whole ``sections/`` package at the time this
+    was written: twenty call sites carry a literal, nineteen either match their
+    map or belong to no map at all, and ``warmup`` was the one that did not.
+
+    A call site whose key is in NO map is fine and is not flagged: the catalog
+    publishes nothing for it, so there is no wrong figure to publish. What is
+    refused is a literal that CONTRADICTS a map, because that is a
+    disagreement the census was built to notice and could not.
+    """
+    import ast
+    import pathlib
+
+    from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS
+    from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
+    from rheplicant.config.sections.exits import (
+        _ADAM_DEFAULTS,
+        _ESTIMATE_DEFAULTS,
+        _SAMPLE_DEFAULTS,
+    )
+    from rheplicant.config.sections.nuts import _NUTS_DEFAULTS
+
+    maps = {
+        "_ADAM_DEFAULTS": _ADAM_DEFAULTS,
+        "_ESTIMATE_DEFAULTS": _ESTIMATE_DEFAULTS,
+        "_SAMPLE_DEFAULTS": _SAMPLE_DEFAULTS,
+        "_NUTS_DEFAULTS": _NUTS_DEFAULTS,
+        "_KNOB_DEFAULTS": _KNOB_DEFAULTS,
+        "_BENCHMARK_DEFAULTS": _BENCHMARK_DEFAULTS,
+    }
+    sections = pathlib.Path(_sections_dir())
+    sites, offenders = 0, []
+    for path in sorted(sections.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "use_default"
+                and len(node.args) > 1
+            ):
+                continue
+            named = node.args[0]
+            if not (
+                isinstance(named, ast.Constant)
+                and isinstance(named.value, str)
+                and named.value.startswith("runs[].options.")
+            ):
+                continue
+            try:
+                literal = ast.literal_eval(node.args[1])
+            except ValueError:
+                continue  # forwarded from a map, or computed: nothing to compare
+            sites += 1
+            key = named.value.split(".", 2)[2]
+            for name, owned in maps.items():
+                if key in owned and owned[key] != literal:
+                    offenders.append(
+                        f"{path.name} defaults {key!r} to {literal!r} at the call "
+                        f"site while {name} says {owned[key]!r}"
+                    )
+
+    assert sites >= 15, (
+        f"only {sites} call-site defaults found; the scan has stopped matching "
+        "and would pass on anything"
+    )
+    assert offenders == [], (
+        "a default written at a use_default call site contradicts a map the "
+        "contested-key census reads, so the census cannot see the "
+        "disagreement:\n  " + "\n  ".join(offenders)
+    )

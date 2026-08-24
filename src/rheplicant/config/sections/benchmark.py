@@ -19,6 +19,27 @@ from rheplicant.config.sections.exit_support import (
 )
 
 _BENCHMARK_KEYS = frozenset({"variants", "repeats", "warmup", "metrics"})
+
+#: What this exit defaults each of its optional keys to.
+#:
+#: **Written as a map because a literal at the ``use_default`` call site is
+#: invisible to the one thing whose job is to notice a disagreement.**
+#: ``gui/form_catalog.py::_contested`` decides whether a widget may publish a
+#: default by comparing every exit that owns the key; it reads five maps and
+#: nothing else. ``warmup`` was 1 here and ``None`` in
+#: ``exits._SAMPLE_DEFAULTS``, so the census saw ONE owner, concluded the key
+#: was uncontested, and published ``None`` -- a plausible wrong figure for the
+#: exit that actually defaults it to 1, which is the one kind of error that
+#: survives being looked at. Measured: it was the only such disagreement in
+#: the layer, and the only one the census could not have seen.
+#:
+#: The map is read for that comparison and is also what the parser reads, so
+#: the two cannot drift: there is one number per key and it lives here.
+_BENCHMARK_DEFAULTS = {
+    "repeats": 5,
+    "warmup": 1,
+    "metrics": ("wall_time",),
+}
 _METRICS = ("wall_time", "peak_memory")
 _DEFERRED = ("benchmark.variants_available",)
 
@@ -148,19 +169,25 @@ def _parse_benchmark(options: Mapping[str, object], context: object):
     repeats_node = (
         options["repeats"]
         if "repeats" in options
-        else context.configured_run.context.use_default("runs[].options.repeats", 5)
+        else context.configured_run.context.use_default(
+            "runs[].options.repeats", _BENCHMARK_DEFAULTS["repeats"]
+        )
     )
     warmup_node = (
         options["warmup"]
         if "warmup" in options
-        else context.configured_run.context.use_default("runs[].options.warmup", 1)
+        else context.configured_run.context.use_default(
+            "runs[].options.warmup", _BENCHMARK_DEFAULTS["warmup"]
+        )
     )
     repeats = _number(spec, "repeats", repeats_node, kind=int, minimum=1)
     warmup = _number(spec, "warmup", warmup_node, kind=int, minimum=0)
     metrics_node = (
         options["metrics"]
         if "metrics" in options
-        else context.configured_run.context.use_default("runs[].options.metrics", ["wall_time"])
+        else context.configured_run.context.use_default(
+            "runs[].options.metrics", list(_BENCHMARK_DEFAULTS["metrics"])
+        )
     )
     metrics = _unique_names(metrics_node, where=f"{where}: metrics")
     for index, metric in enumerate(metrics):
