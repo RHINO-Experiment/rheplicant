@@ -21,8 +21,29 @@ from rheplicant.core.state import State
 class ADCOperator(AbstractOperator):
     """Scale and clip ``state.data`` to the ADC dynamic range (placeholder).
 
+    Note:
+        **Two things a real ADC does that this one does not**, stated so the
+        omission is not mistaken for the model:
+
+        1. *No kelvin-to-counts link.* ``scale`` is a free differentiable
+           number, not a calibrated conversion, so the output is in "counts"
+           only by assertion. Nothing checks that ``scale`` corresponds to the
+           front-end gain, and the clip limit ``2**(n_bits-1)`` is therefore
+           compared against a quantity whose units are whatever ``scale`` made
+           them.
+        2. *No quantization noise.* The body clips and does not round, so the
+           digitizer contributes no error at all. A real n-bit converter adds
+           roughly ``LSB/sqrt(12)`` of it, and for a global-signal experiment
+           quantization is one of the systematics the ADC exists to represent.
+
+        What IS real here is the clipping, and it is the part worth having: it
+        is where a mis-scaled model saturates rather than growing without
+        bound, and the gradient through the clipped region is zero, which is
+        visible in a fit.
+
     Attributes:
-        scale: pre-digitization scaling — differentiable scalar.
+        scale: pre-digitization scaling — differentiable scalar. Not a
+            calibrated K-to-counts conversion; see the note above.
         n_bits: ADC bit depth (static configuration; clip limit is 2**(n_bits-1)).
     """
 

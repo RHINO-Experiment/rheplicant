@@ -25,9 +25,27 @@ class EMIOperator(AbstractOperator):
 
     Every ``period``-th channel receives an extra ``amplitude``.
 
+    Note:
+        **``period`` counts CHANNELS, not hertz, and real EMI does not.** A
+        switching supply or a clock harmonic sits at a fixed frequency spacing;
+        this comb sits at a fixed channel spacing, so the same operator models
+        a different physical source at every channelisation. Re-bin the band
+        and the lines move.
+
+        The consequence to keep in mind while it is a stand-in: a fit that
+        constrains ``amplitude`` on one channelisation says nothing about the
+        same instrument read out at another. When the body becomes real,
+        ``period`` should become a frequency spacing in Hz and the comb should
+        be built from ``state.coords.freq`` rather than from ``arange``, which
+        is also what makes it independent of ``n_freq``.
+
+        The comb is also exactly periodic and infinitely sharp: no line width,
+        no per-line amplitude, no drift. Real EMI has all three.
+
     Attributes:
         amplitude: line amplitude [K-equivalent] — differentiable scalar.
-        period: channel spacing of the comb (static configuration).
+        period: channel spacing of the comb (static configuration). Channels,
+            not hertz — see the note above.
     """
 
     requires: ClassVar[tuple[str, ...]] = ("data",)

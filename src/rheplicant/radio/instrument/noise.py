@@ -30,8 +30,25 @@ class NoiseOperator(AbstractOperator):
     carries an *advanced* key, so repeated application gives fresh draws while
     a single seed reproduces the whole pipeline.
 
+    Note:
+        **The units do not close, and that is the placeholder.** ``sigma`` is
+        declared in kelvin, but this operator's ``graph_node`` places it after
+        the gain stage, where ``state.data`` is no longer a temperature. So it
+        adds a kelvin quantity to a power-unit array: dimensionally incoherent,
+        and finite, correctly shaped and wrong -- the class of accident this
+        package is built to refuse. It is tolerated here only because the body
+        is a stand-in.
+
+        The real radiometer noise on the signal path is
+        :class:`RadiometerNoiseOperator` below, whose multiplicative
+        ``d -> d (1 + f w)`` carries no units at all and is therefore correct
+        wherever it is placed. Prefer it. If this operator survives its
+        placeholder status, either ``sigma`` stops being kelvin or the node
+        moves ahead of the gain.
+
     Attributes:
-        sigma: noise standard deviation [K] — differentiable scalar.
+        sigma: noise standard deviation [K] — differentiable scalar. See the
+            note above: the kelvin is not honoured at this node.
     """
 
     requires: ClassVar[tuple[str, ...]] = ("data", "key")
