@@ -10,12 +10,14 @@ from pathlib import Path
 import pytest
 
 import _rheplicant_bootstrap.audit.bundle as audit_bundle
+from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME
 import _rheplicant_bootstrap.audit.software as audit_software
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
     merge_bundle_files,
     serialize_bundle,
+    with_integrity,
     terminal_reserialization_snapshot,
     validate_serialized_bundle,
 )
@@ -206,6 +208,64 @@ def test_serialized_bundle_validation_refuses_noncanonical_or_disagreeing_metada
         validate_serialized_bundle(
             dataclasses.replace(bundle, diagnostics=forged, files=files)
         )
+
+
+def test_every_path_the_transaction_writes_is_reserved_against_merged_files():
+    """Found in review rather than by a test, which is why it exists.
+
+    ``integrity.json`` was added to the bundle's tail and to the set of files
+    ``replace_staged_metadata`` rewrites, and NOT to the list that stops a
+    merged file claiming the same name. A scientific product called
+    ``integrity.json`` would have merged cleanly here and then failed inside
+    ``with_integrity`` with "already present in the bundle" -- a message naming
+    neither the product nor the collision, raised from a function whoever named
+    the product never called.
+
+    The reserved set is read from ``RESERVED_BUNDLE_PATHS`` rather than listed
+    again, so a fourth file written by the transaction is covered the moment it
+    is added there.
+    """
+    from _rheplicant_bootstrap.audit.bundle import RESERVED_BUNDLE_PATHS
+
+    assert INTEGRITY_NAME in RESERVED_BUNDLE_PATHS, RESERVED_BUNDLE_PATHS
+
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    for reserved in RESERVED_BUNDLE_PATHS:
+        with pytest.raises(ConfigError, match="reserved or duplicated"):
+            merge_bundle_files(bundle, {reserved: b"science"})
+
+
+def test_with_integrity_covers_every_other_file_and_refuses_to_run_twice():
+    """The manifest cannot contain itself, and a second one would silently
+    cover the first -- so the second call is refused rather than tolerated."""
+    _trace, initial = snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    merged = merge_bundle_files(bundle, {"runs/x/arrays.npz": b"science"})
+    anchored = with_integrity(merged)
+
+    assert tuple(anchored.files)[-3:] == (
+        INTEGRITY_NAME,
+        "provenance.json",
+        "diagnostics.json",
+    )
+    manifest = json.loads(anchored.files[INTEGRITY_NAME])
+    listed = {row["relative_path"] for row in manifest["files"]}
+    assert listed == set(merged.files), "the manifest and the bundle disagree"
+    assert INTEGRITY_NAME not in listed, "a file cannot digest itself"
+
+    with pytest.raises(ConfigError, match="already present"):
+        with_integrity(anchored)
 
 
 def test_scientific_files_are_inserted_before_the_two_fixed_metadata_files():

@@ -43,6 +43,21 @@ def _validate_file_pair(relative_path: object, payload: object) -> None:
         raise ConfigError("bundle file path is not a portable relative path.")
 
 
+#: Paths a detached bundle file may never claim. All three are written by the
+#: transaction after everything else is final, and all three are replaced
+#: together in ``replace_staged_metadata`` -- so a merged file sitting on one
+#: of these names would be overwritten without warning.
+#:
+#: ``integrity.json`` joined this tuple after review rather than with the
+#: feature: it was added to the tail of the bundle and to the replaceable set
+#: in the transaction, and NOT to the one list that stops something else
+#: claiming the name. A scientific product called ``integrity.json`` would have
+#: merged cleanly here and then failed inside :func:`with_integrity` with
+#: "already present in the bundle", which names neither the product nor the
+#: collision.
+RESERVED_BUNDLE_PATHS = ("provenance.json", "diagnostics.json", INTEGRITY_NAME)
+
+
 def with_integrity(bundle: AuditBundle) -> AuditBundle:
     """Append ``integrity.json``, covering every other file in the bundle.
 
@@ -90,7 +105,7 @@ def merge_bundle_files(
         raise ConfigError("additional bundle file traversal failed.") from None
     for relative_path, payload in additional_rows:
         _validate_file_pair(relative_path, payload)
-        if relative_path in files or relative_path in ("provenance.json", "diagnostics.json"):
+        if relative_path in files or relative_path in RESERVED_BUNDLE_PATHS:
             raise ConfigError(f"bundle file path {relative_path!r} is reserved or duplicated.")
         files[relative_path] = payload
     files["provenance.json"] = bundle.provenance

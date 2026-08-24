@@ -12,6 +12,7 @@ from typing import Literal, TextIO, cast
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
+    RESERVED_BUNDLE_PATHS,
     merge_bundle_files,
     with_integrity,
     serialize_bundle,
@@ -692,14 +693,32 @@ def dispatch_request(
                     report=request.report,
                     component_limit=publication.component_limit,
                 )
-                additional_files = {
-                    **(additional_files or {}),
-                    **{row.relative_path: row.payload for row in scientific.files},
+                product_files = {
+                    row.relative_path: row.payload for row in scientific.files
                 }
-                if len(additional_files) != len(scientific.files) + len(presets):
+                if len(product_files) != len(scientific.files):
                     raise ConfigError("scientific product paths are duplicated.")
-                if "products.json" in additional_files:
-                    raise ConfigError("scientific product path 'products.json' is reserved.")
+                # Named separately from the duplicate check above, because the
+                # two send a reader to different places: a duplicate is two
+                # products claiming one path, while this is a product landing
+                # on a path the audit tree already owns. One message for both
+                # would name the wrong one half the time.
+                collided = sorted(set(product_files) & set(presets))
+                if collided:
+                    raise ConfigError(
+                        f"scientific product path(s) {collided} collide with "
+                        f"the published preset sources under "
+                        f"{PRESETS_DIRECTORY}/."
+                    )
+                reserved = sorted(
+                    set(product_files) & {"products.json", *RESERVED_BUNDLE_PATHS}
+                )
+                if reserved:
+                    raise ConfigError(
+                        f"scientific product path(s) {reserved} are reserved by "
+                        "the audit tree."
+                    )
+                additional_files = {**(additional_files or {}), **product_files}
                 additional_files["products.json"] = scientific.manifest
             except Exception as original:
                 failure_status = (
