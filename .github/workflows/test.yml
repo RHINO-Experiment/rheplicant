@@ -1,0 +1,97 @@
+name: Tests
+
+# Why this file exists, in one measurement.
+#
+# Every quality claim in this repository rests on its guards actually running,
+# and on 2026-08-24 the README's own test-count guard was found RED on `main`
+# -- 10153 claimed, 10174 collected -- after two full-scale code reviews had
+# quoted the stale figure as current. Neither reviewer ran the suite. The guard
+# was not weak; it simply had nobody to fail in front of.
+#
+# `tests/radio/test_placeholder_census.py` documents the same failure one level
+# down: a machine missing two optional packages collected fewer tests of the
+# same suite for weeks, and three real failures sat behind the modules that no
+# longer collected. A skipping guard is not a passing one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: Suite (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Create the environment
+        # `uv venv` plus `uv pip install`, never `uv sync`: rhino-cal-jax is not
+        # on any index, so no lockfile exists or can be made (README, and
+        # docs/install.md say why `uv lock` cannot succeed here).
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e ".[rhino,numpyro]" --group dev
+
+      - name: Install the integrations that are not on an index
+        # `editables` is not decoration: rhino-cal-jax's editable hook needs it.
+        # The branch is not decoration either -- rhino_cal_jax/ lives only on
+        # feat/rhino-cal-jax, and the default branch has no pyproject.toml at
+        # all, so a URL without the ref installs nothing and fails at the build
+        # backend. Both are recorded in this repo's pyproject.toml.
+        continue-on-error: true
+        id: integrations
+        run: |
+          uv pip install editables
+          uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
+          uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Report environment completeness BEFORE judging any number
+        # The difference between what this environment collects and what the
+        # README claims IS the completeness report -- that is the design of
+        # tests/test_readme_counts.py, which SKIPS (loudly) rather than opining
+        # when a module fails to collect. Printed, never asserted on here: a
+        # public runner cannot hold the RHEPLICANT_RHINO_* datasets, so its
+        # count is legitimately lower and must not be written into the README.
+        run: |
+          .venv/bin/python -c "
+          import importlib
+          for name in ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'MomentRFI'):
+              try:
+                  importlib.import_module(name)
+                  print(f'{name:16s} present')
+              except Exception as error:
+                  print(f'{name:16s} ABSENT  ({type(error).__name__})')
+          "
+          .venv/bin/python -m pytest --collect-only -q --no-cov 2>/dev/null \
+            | awk -F': ' '/^tests\/.*: [0-9]+$/ {n += $2} END {print "collected:", n}'
+          grep -oE '\([0-9]+ tests, [0-9.]+ % coverage' README.md || true
+
+      - name: Run the suite
+        # Judged by pytest's own exit code. A pipe would report the exit status
+        # of the last command in it, which is how a collection error or a usage
+        # error reads as green.
+        run: .venv/bin/python -m pytest -n auto
+
+      - name: Coverage, printed and not asserted
+        # The percentage is measured, not stable: three identical `-n 8` runs on
+        # one tree gave 88.29 / 87.10 / 87.18 %, the extra misses concentrated in
+        # subprocess-driven modules whose data is intermittently not combined
+        # back. `--cov-fail-under=80` in addopts is the assertion that holds;
+        # this step exists so the drift is visible while that is settled.
+        if: always()
+        run: echo "See the coverage total in the step above; --cov-fail-under=80 is the gate."

@@ -223,11 +223,11 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(10196 tests, 88.1 % coverage, jit+grad+vmap through the full twin; assembly
+(10216 tests, 87.1 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 15 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
-and friends. The other twelve no longer carry that wording: the sky engines
+and friends. The other fourteen no longer carry that wording: the sky engines
 are real (a general differentiable limTOD port and a drift-scan m-mode fast
 path that agrees with it to float64 roundoff while running ~1000x faster on
 RHINO's geometry — see
@@ -248,7 +248,11 @@ nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
-No CI yet, and the suite is two pytest sessions rather than one — the evidence
+CI runs the suite on every push and pull request
+([`.github/workflows/test.yml`](https://github.com/RHINO-Experiment/rheplicant/blob/main/.github/workflows/test.yml)); it prints what the
+environment collects rather than asserting on it, because a public runner cannot
+hold the `RHEPLICANT_RHINO_*` datasets and so legitimately collects fewer tests
+than a complete machine. The suite is two pytest sessions rather than one — the evidence
 layer needs float64 while eighteen tests elsewhere assert refusals that only
 float32 forces, and `jax_enable_x64` is process-global. Plain `pytest` runs both
 for you. That split is also why the reported coverage is what it is rather than
