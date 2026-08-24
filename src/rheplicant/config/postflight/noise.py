@@ -123,21 +123,20 @@ Task 7.**
 
 * A multi-record ``inference.observed:`` whose PRIMARY is ``from: file``
   while a SIBLING record is ``from: simulation`` stands this check down
-  entirely: :func:`_t6_generating_twin` reads only ``observed.primary``, and
-  a primary that did not come from the twin is contract step 1's stand-down
-  regardless of what a sibling record did. ``preflight/gated.py::
-  _t2c_generated`` reads the same way (primary alone), so this is a scope
-  the two C18 slots share, not a divergence between them.
-* **BLOCKER 2 (Plan 3C fix round), recorded rather than widened -- owed to
-  Plan 4.** A multi-record ``inference.observed:`` with TWO OR MORE named
+  entirely: once a primary RESOLVES, :func:`_t6_generating_records` reads it
+  and nothing else, and a primary that did not come from the twin is contract
+  step 1's stand-down regardless of what a sibling record did.
+  ``preflight/gated.py::_t2c_generating_records`` widens on the same
+  condition and no other, so this is a scope the two C18 slots still share
+  rather than a divergence between them. Widening HERE would mean reporting a
+  record the text check has never looked at, which is the divergence the
+  entry below was written to close rather than to reopen from the other side.
+* **BLOCKER 2 (Plan 3C fix round) -- CLOSED here, and this is the second
+  half of it.** A multi-record ``inference.observed:`` with TWO OR MORE named
   records and NONE of them literally named ``primary`` resolves no primary at
-  all -- ``ObservedBuild.primary`` is ``None`` -- and :func:`_t6_generating_twin`
-  returns ``None`` on it exactly as it does on a document with no ``observed:``
-  section. **Both C18 bindings stand down together**: this numeric check and
-  ``preflight/gated.py::_t2c_generated`` (the family check, ``C18.kind``) read
-  ``observed.primary`` the same way, so the two-vantage-point agreement this
-  design relies on is not broken by this gap -- both are silent, together,
-  precisely because neither has a primary to read. Measured:
+  all -- ``ObservedBuild.primary`` is ``None`` -- and this check used to stand
+  down on it exactly as it does on a document with no ``observed:`` section.
+  Measured then:
 
   .. code-block:: text
 
@@ -146,14 +145,26 @@ Task 7.**
       named ``'alpha'`` ALONE (only record)        REFUSED
       named ``'alpha'`` + ``'beta'`` (no ``'primary'``)  LOADS, report=[]
 
-  The trigger is a record NAME, not a document property -- the fourth row can
-  carry the same tenfold sigma disagreement measured elsewhere in this module
-  and load clean, because the primary-resolution rule this check and its
-  sibling both depend on has nothing to resolve. **Decision: record it, do
-  not widen the readers** -- widening C18 to per-record is a contract change
-  that needs its own adversarial pass, which this fix round does not have.
-  See ``preflight/gated.py::_t2c_generated``'s own docstring for the matching
-  entry and the plan's §6 residues for the standing decision record.
+  The trigger is a record NAME, not a document property -- the fourth row
+  carries the same tenfold sigma disagreement as the first three. A1.2 closed
+  it for the family check (``C18.kind``,
+  ``preflight/gated.py::_t2c_generating_records``) and left the numeric half
+  reading ``observed.primary`` alone, so for one release the two vantage
+  points differed on exactly this shape: the text check reported it per
+  record and this one was silent. :func:`_t6_generating_records` is the
+  matching widening, built the same way -- ``_t6_generating_twin`` keeps its
+  single-primary contract untouched and the per-record reader lives beside
+  it, because ``tests/config/test_postflight_noise.py`` compares that
+  function against ``_t2c_generated`` on every shipped builder and widening
+  it would silently change what that comparison asserts.
+
+  **The two readers are compared at the widened level too**, by
+  ``test_the_two_vantage_points_agree_on_WHICH_records_they_check``, and the
+  comparator there is ``_t6_drawn_in`` rather than the bare twin -- for the
+  same reason ``TestTheStandDownRuleAgreesWithTask2`` uses ``_t6_drawn``:
+  ``_t2c_record_generated`` folds "does that twin still carry noise" into
+  itself, and on the built side only the node LOOKUP can see a
+  ``without: [noise]`` repair.
 * :attr:`~rheplicant.config.sections.noise.NoiseBuild.by_observation` (the
   per-observation frozen sigma ``radiometer_frozen`` with
   ``source: observed`` produces, one entry per named observation) is never
@@ -350,7 +361,22 @@ def _t6_generating_twin(payload: Priced) -> Any | None:
     if primary is None:
         return None
     record = observed.records.get(primary)
-    if not isinstance(record, Mapping) or record.get("from") != "simulation":
+    if not isinstance(record, Mapping):
+        return None
+    return _t6_record_twin(payload, record)
+
+
+def _t6_record_twin(payload: Priced, record: Mapping[str, Any]) -> Any | None:
+    """The Assembly that drew THIS record's data, or ``None``.
+
+    :func:`_t6_generating_twin`'s body, taken out so that
+    :func:`_t6_generating_records` can ask it of a record that is not the
+    primary. The mirror of ``preflight/gated.py::_t2c_record_generated``,
+    which was split out of ``_t2c_generated`` for the same reason and in the
+    same fix -- one rule, two vantage points, and the split has to happen on
+    both or the two stop being comparable.
+    """
+    if record.get("from") != "simulation":
         return None
     choice = record.get("twin", _T6_GENERATING_TWIN)
     if choice == _T6_GENERATING_TWIN:
@@ -393,13 +419,69 @@ def _t6_drawn(payload: Priced) -> Any | None:
     own test suite can construct -- the same shape D-20 records for Task 5's
     ``adc``.
     """
-    twin = _t6_generating_twin(payload)
+    return _t6_drawn_in(_t6_generating_twin(payload))
+
+
+def _t6_drawn_in(twin: Any | None) -> Any | None:
+    """:func:`_t6_drawn`'s node lookup, over a twin the caller already chose.
+
+    Split out for :func:`_t6_sigma_agreement`, which now has one twin per
+    record to look in. ``_t6_drawn`` keeps its name and its contract -- the
+    PRIMARY's twin, and only that -- because ``tests/config/
+    test_postflight_noise.py`` compares it against ``preflight/gated.py``'s
+    ``_t2c_generated`` on every shipped builder, and that comparison is
+    between two single-primary readers.
+    """
     if twin is None:
         return None
     try:
         return twin[_T6_NOISE_NODE]
     except (KeyError, AssemblyError):
         return None
+
+
+def _t6_generating_records(payload: Priced) -> tuple[tuple[str | None, Any], ...]:
+    """``(record name, the assembly that drew it)`` for every record to check.
+
+    The mirror of ``preflight/gated.py::_t2c_generating_records``, and BLOCKER
+    2's other half. Returns one entry per record, so a finding can name which
+    one disagreed:
+
+    * every case that resolves to a SINGLE record -- the single-record form, a
+      literally-named ``primary``, or the lone named record, all three of
+      which ``ObservedBuild`` has already reduced to ``observed.primary`` --
+      widens to nothing: ``((None, twin),)`` when the twin drew it, ``()``
+      otherwise. The ``None`` name carries no record-naming text, so the
+      finding this earns is byte-identical to the one C18 shipped before.
+    * two or more NAMED records with none of them literally called
+      ``primary``. ``ObservedBuild.primary`` is ``None`` on that document and
+      this check used to stand down on it exactly as it does on a document
+      with no ``observed:`` section at all. It now asks
+      :func:`_t6_record_twin` once per named record instead. A record from a
+      file, or one whose fit twin was actually repaired, is simply not in the
+      tuple -- there is no second sigma to disagree with for that one.
+
+    **The weighed side stays document-global, and that is not an oversight.**
+    ``inference.noise:`` is one section declaring one likelihood, so every
+    record here is compared against the same ``payload.run.inference.noise``.
+    What varies per record is which twin DREW it, since ``observed.<name>.
+    twin:`` is the record's own choice -- so two records can genuinely
+    disagree with one likelihood for two different reasons.
+    """
+    observed = payload.run.inference.observed
+    if observed is None:
+        return ()
+    if observed.primary is not None:
+        twin = _t6_generating_twin(payload)
+        return ((None, twin),) if twin is not None else ()
+    found = []
+    for name, record in observed.records.items():
+        if not isinstance(record, Mapping):
+            continue
+        twin = _t6_record_twin(payload, record)
+        if twin is not None:
+            found.append((name, twin))
+    return tuple(found)
 
 
 def _t6_agrees(drawn_value: Any, weighed_value: Any) -> bool:
@@ -499,7 +581,28 @@ def _t6_floor_clause(floor: float) -> str:
     )
 
 
-def _t6_radiometer(kind: str, drawn: Any, weighed: Any) -> Iterable[Finding]:
+def _t6_subject(name: str | None) -> str:
+    """The finding message's own noun phrase for WHOSE data disagreed.
+
+    ``None`` is every :func:`_t6_generating_records` subject that resolves to
+    a single record with nothing to widen, and reads exactly as the sentence
+    did before: *"this document's data"*. A NAME is BLOCKER 2's widened case,
+    where the sentence must say WHICH record it read.
+
+    Spelled out here rather than imported from
+    ``preflight/gated.py::_t2c_subject``, for the reason
+    :data:`_T6_NOISE_NODE` gives: a shared binding would let a mutation of
+    either module's wording look like it silently repaired both. The two are
+    held equal by a test that reads both, which is where a coupling between
+    two deliberately independent checks belongs.
+    """
+    if name is None:
+        return "this document's data"
+    return f"the data of observed record {name!r}"
+
+
+def _t6_radiometer(kind: str, drawn: Any, weighed: Any,
+                   name: str | None = None) -> Iterable[Finding]:
     """The ``RadiometerNoiseOperator`` family: compare the fractional scatter.
 
     Never the two fields -- ``(1 MHz, 2 s)`` on the operator and
@@ -512,7 +615,7 @@ def _t6_radiometer(kind: str, drawn: Any, weighed: Any) -> Iterable[Finding]:
         return ()
     floor_clause = _t6_floor_clause(_t6_radiometer_floor(kind, weighed))
     return (refuse("C18", f"model.{_T6_NOISE_NODE}", (
-        f"model.{_T6_NOISE_NODE} draws this document's data at a fractional "
+        f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} at a fractional "
         f"scatter (1 / sqrt(channel_width * integration_time)) of "
         f"{drawn_f!r}, and inference.noise (kind: {kind}) weighs it at a "
         f"different fractional scatter of {weighed_f!r}. The fit is weighted "
@@ -525,7 +628,8 @@ def _t6_radiometer(kind: str, drawn: Any, weighed: Any) -> Iterable[Finding]:
     )),)
 
 
-def _t6_homoscedastic(drawn: Any, weighed: Any) -> Iterable[Finding]:
+def _t6_homoscedastic(drawn: Any, weighed: Any,
+                      name: str | None = None) -> Iterable[Finding]:
     """The ``NoiseOperator`` family: compare sigma, broadcasting.
 
     ``weighed.model`` is unwrapped by :func:`_t6_unwrapped` first: ``flags:
@@ -539,7 +643,7 @@ def _t6_homoscedastic(drawn: Any, weighed: Any) -> Iterable[Finding]:
     if _t6_agrees(drawn_sigma, weighed_sigma):
         return ()
     return (refuse("C18", f"model.{_T6_NOISE_NODE}", (
-        f"model.{_T6_NOISE_NODE} draws this document's data with sigma = "
+        f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} with sigma = "
         f"{jnp.asarray(drawn_sigma)!r}, and inference.noise (kind: "
         f"homoscedastic) weighs it with a different sigma = "
         f"{jnp.asarray(weighed_sigma)!r}. The fit is weighted against a "
@@ -561,23 +665,36 @@ def _t6_sigma_agreement(payload: Priced) -> Iterable[Finding]:
     ``preflight/gated.py``'s ``C18.kind``, and a REFUSE there halts
     ``load_document`` long before this pass runs at all.
 
-    Yields at most one finding.
+    Yields at most one finding PER RECORD this check has a second sigma for
+    -- which is one finding for every document with a resolvable primary, and
+    was one finding for every document at all until BLOCKER 2 was closed here.
+    See :func:`_t6_generating_records`.
+
+    **The stand-down order below is the docstring's, kept literally**: steps 1
+    and 2 (no generating twin, no ``noise`` node in it) are decided per record
+    first, and step 3 (``inference.noise:`` absent or ``kind: none``) only
+    after. Neither yields a finding, so the order is invisible in the report
+    -- but the module docstring argues about which reason a reader is told,
+    and a body that decides them the other way round makes that argument
+    false about its own code.
     """
-    drawn = _t6_drawn(payload)
-    if drawn is None:
+    from rheplicant.radio import NoiseOperator, RadiometerNoiseOperator
+
+    subjects = [(name, drawn)
+                for name, twin in _t6_generating_records(payload)
+                if (drawn := _t6_drawn_in(twin)) is not None]
+    if not subjects:
         return ()
     weighed = payload.run.inference.noise
     if weighed.kind == _T6_NO_WEIGHT:
         return ()
 
-    from rheplicant.radio import NoiseOperator, RadiometerNoiseOperator
-
-    if isinstance(drawn, RadiometerNoiseOperator):
-        if weighed.kind not in _T6_RADIOMETER_KINDS:
-            return ()
-        return _t6_radiometer(weighed.kind, drawn, weighed)
-    if isinstance(drawn, NoiseOperator):
-        if weighed.kind != "homoscedastic":
-            return ()
-        return _t6_homoscedastic(drawn, weighed)
-    return ()
+    found: list[Finding] = []
+    for name, drawn in subjects:
+        if isinstance(drawn, RadiometerNoiseOperator):
+            if weighed.kind in _T6_RADIOMETER_KINDS:
+                found.extend(_t6_radiometer(weighed.kind, drawn, weighed, name))
+        elif isinstance(drawn, NoiseOperator):
+            if weighed.kind == "homoscedastic":
+                found.extend(_t6_homoscedastic(drawn, weighed, name))
+    return tuple(found)

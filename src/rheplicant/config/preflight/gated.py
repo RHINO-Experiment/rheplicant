@@ -206,7 +206,7 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     function now feeds through the shared :func:`_t2c_record_generated`.
 
     **BLOCKER 2 (Plan 3C fix round) -- the multi-named-no-``primary`` case,
-    fixed for C18.kind by A1.2; still open for the bare (numeric) C18.**  Two
+    fixed for C18.kind by A1.2 and for the bare (numeric) C18 since.**  Two
     or more NAMED records, none of them literally called ``primary``, resolve
     no primary at all, and THIS function still returns ``False`` on that case
     exactly as it does on a document with no ``observed:`` section
@@ -234,13 +234,14 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     :func:`_t2c_generating_records`, which reproduces this function's exact
     single-record answer on every row above except the fourth, and on the
     fourth now runs the per-record test once per named record instead of
-    returning nothing.  The two C18 vantage points now agree everywhere they
-    did before AND diverge on exactly the fourth row: C18.kind (this module)
-    now reports it, per record; the bare, numeric C18 in
-    ``postflight/noise.py`` still reads ``observed.primary`` alone and stays
-    silent on it, because widening THAT check is out of scope here.  See
-    ``postflight/noise.py``'s module docstring for the matching entry and the
-    plan's §6 residues for the standing decision record.
+    returning nothing.  The two C18 vantage points agree everywhere they did
+    before and, since the numeric half was widened to match, on the fourth row
+    as well: ``postflight/noise.py::_t6_generating_records`` is that function,
+    built the same way and sitting beside its own single-primary reader for
+    the same reason this one sits beside THIS function.  For one release they
+    differed here -- C18.kind reported the fourth row per record and the
+    numeric C18 was silent on it -- and that is recorded in the other module's
+    docstring rather than only in a plan.
     """
     section = document.get("inference")
     if not isinstance(section, Mapping):

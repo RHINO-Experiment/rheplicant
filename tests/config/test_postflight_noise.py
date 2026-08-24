@@ -24,6 +24,7 @@ standard as every other.
 """
 
 import dataclasses
+import re
 
 import jax.numpy as jnp
 import pytest
@@ -33,6 +34,8 @@ from rheplicant.config.errors import ConfigError
 from rheplicant.config.postflight.noise import (
     _T6_RTOL,
     _t6_drawn,
+    _t6_drawn_in,
+    _t6_generating_records,
     _t6_generating_twin,
     _t6_sigma_agreement,
 )
@@ -975,3 +978,187 @@ class TestTheRTOLMeasurement:
         op = RadiometerNoiseOperator(channel_width=1.0e6, integration_time=2.0)
         like = RadiometerNoise(channel_width=1.0e6, integration_time=2.0)
         assert op.fractional == like.fractional
+
+
+def _c18(document):
+    """Every ``C18`` finding the post-flight pass made, in slot order.
+
+    ``priced_only`` cannot be used below: the whole point of the widening is
+    that one document now earns MORE than one, and ``_only`` refuses that.
+    """
+    return tuple(found for found in priced_findings(document)
+                 if found.check == "C18")
+
+
+class TestARecordWithoutAPrimaryIsStillChecked:
+    """BLOCKER 2's other half: the numeric C18 widened to match ``C18.kind``.
+
+    Two or more NAMED ``inference.observed:`` records with none of them
+    literally called ``primary`` resolve no primary at all, and both C18
+    slots used to stand down on that document exactly as they do on one with
+    no ``observed:`` section. A1.2 closed it for the text half; the numeric
+    half kept reading ``observed.primary`` alone, so the two vantage points
+    diverged on this one shape -- recorded in both module docstrings as a
+    follow-up rather than a defect, because a check that is silent is not a
+    check that is wrong.
+
+    Measured before this change, on the tenfold sigma disagreement below::
+
+        single-record (``primary``)                       REFUSED
+        named 'primary' (+ a second)                      REFUSED
+        named 'alpha' ALONE (only record)                 REFUSED
+        named 'alpha' + 'beta' (no 'primary')             NO FINDINGS
+
+    The trigger is a record NAME, not a property of the document: the fourth
+    row carries the same tenfold disagreement as the first three.
+    """
+
+    SIM = {"from": "simulation", "twin": "full", "at": {"g": 1.5}}
+
+    def _observed(self, observed):
+        """The tenfold sigma disagreement, under one ``observed:`` shape.
+
+        Not through ``_pair``, which sets ``inference:`` itself and so cannot
+        also be given an ``observed:`` block.
+        """
+        base = preflight_document()
+        return repatch(
+            base,
+            model={**base["model"], "noise": SIGMA_MISMATCHED_K},
+            inference={**base["inference"], "noise": HOMOSCEDASTIC,
+                       "observed": observed},
+        )
+
+    def test_the_three_shapes_that_resolve_a_primary_still_earn_one_finding(self):
+        """The regression half. Widening must not double-report a document
+        that already worked, and must not change what it says."""
+        for observed in ({"from": "simulation", "twin": "full"},
+                         {"primary": self.SIM, "second": self.SIM},
+                         {"alpha": self.SIM}):
+            found = _c18(self._observed(observed))
+            assert len(found) == 1, (observed, [f.message for f in found])
+            assert "this document's data" in found[0].message
+
+    def test_two_named_records_without_a_primary_are_each_checked(self):
+        """The gap, closed: one finding per record, each naming its own."""
+        found = _c18(
+            self._observed({"alpha": self.SIM, "beta": self.SIM}))
+
+        assert len(found) == 2, [f.message for f in found]
+        assert {f.severity for f in found} == {"refuse"}
+        named = sorted(re.search(r"observed record '(\w+)'", f.message).group(1)
+                       for f in found)
+        assert named == ["alpha", "beta"]
+
+    def test_the_widened_message_is_pinned_whole(self):
+        """Equality, not a substring -- and for a reason specific to here.
+
+        ``TestNoMovedMessageWasReworded`` cannot see this rewording at all:
+        it harvests literals from ``src/rheplicant/config/`` at ``be2027b``,
+        and ``postflight/noise.py`` did not exist then, so the subject clause
+        moving from a literal to ``_t6_subject(name)`` is outside its corpus.
+        The pin below and the two whole-message pins in ``TestTheMessage``
+        are the whole of what holds these two sentences.
+        """
+        found = _c18(
+            self._observed({"alpha": self.SIM, "beta": self.SIM}))
+        alpha = next(f for f in found if "'alpha'" in f.message)
+
+        assert alpha.where == "model.noise"
+        assert alpha.message == (
+            "model.noise draws the data of observed record 'alpha' with "
+            "sigma = Array(0.5, dtype=float32), and inference.noise (kind: "
+            "homoscedastic) weighs it with a different sigma = "
+            "Array(0.05, dtype=float32). The fit is weighted against a "
+            "scatter its own data does not have, and it returns a finite, "
+            "correctly-shaped answer whose error bars are wrong by whatever "
+            "the two differ by. Make the two agree -- change model.noise"
+            ".sigma, or inference.noise.sigma -- so both sides declare the "
+            "same number (check C18)."
+        )
+
+    def test_a_sibling_whose_twin_no_longer_draws_is_not_checked(self):
+        """``twin: fit`` against this fixture's ``without: [noise]`` repair.
+
+        ``beta`` IS in :func:`_t6_generating_records` -- the record chose a
+        twin and that twin exists -- and it is the node LOOKUP that drops it,
+        which is the same division of labour ``_t2c_generated`` and
+        ``_t6_drawn`` have at the single-primary level.
+        """
+        found = _c18(self._observed({
+            "alpha": self.SIM,
+            "beta": {"from": "simulation", "twin": "fit"},
+        }))
+
+        assert [f.message.count("'alpha'") for f in found] == [1], (
+            [f.message for f in found]
+        )
+
+    def test_a_sibling_read_from_a_file_is_not_checked(self, tmp_path):
+        """A file-form record carries no second sigma to disagree with, so it
+        never enters :func:`_t6_generating_records` at all.
+
+        The complement of the test above, and the one that kills a widening
+        which merely reports every named record it finds: measured, dropping
+        the ``twin is not None`` filter leaves the case above untouched (its
+        twin is not ``None``) and makes THIS document earn a second finding.
+        """
+        import numpy as np
+
+        path = tmp_path / "d.npy"
+        np.save(path, np.zeros((16, 8), dtype=np.float32))
+        document = self._observed({
+            "alpha": self.SIM,
+            "beta": {"file": {"format": "npy", "path": str(path)}},
+        })
+
+        assert [name for name, _ in
+                _t6_generating_records(priced_run(document))] == ["alpha"]
+        found = _c18(document)
+        assert [f.message.count("'alpha'") for f in found] == [1], (
+            [f.message for f in found]
+        )
+
+    def test_the_two_vantage_points_agree_on_WHICH_records_they_check(self):
+        """``TestTheStandDownRuleAgreesWithTask2``, at the widened level.
+
+        That class compares the two single-primary readers, and its own
+        docstring records WHICH comparator makes them agree:
+        ``_t2c_generated`` folds "does the generating twin still carry noise"
+        into itself, so the built-side partner is ``_t6_drawn`` -- index the
+        node, stand down if it is gone -- and not ``_t6_generating_twin``,
+        which asks the narrower "is there an assembly to read at all".
+
+        The same is true one level up, and this test found it out the hard
+        way. Comparing the two ``_generating_records`` readers directly makes
+        ``{'alpha': twin full, 'beta': twin fit}`` disagree on this fixture,
+        whose ``inference.twin: {without: [noise]}`` repairs the fit twin:
+        the text reader excludes ``beta`` and the built one does not, because
+        stripping the node is something only the LOOKUP can see. Threading
+        ``_t6_drawn_in`` is what makes this the widened cousin of that class
+        rather than a differently-shaped question.
+        """
+        from rheplicant.config.preflight.gated import _t2c_generating_records
+
+        for observed in ({"from": "simulation", "twin": "full"},
+                         {"primary": self.SIM, "second": self.SIM},
+                         {"alpha": self.SIM},
+                         {"alpha": self.SIM, "beta": self.SIM},
+                         {"alpha": self.SIM,
+                          "beta": {"from": "simulation", "twin": "fit"}}):
+            document = self._observed(observed)
+            text = _t2c_generating_records(document)
+            built = tuple(name for name, twin in _t6_generating_records(
+                priced_run(document)) if _t6_drawn_in(twin) is not None)
+
+            assert text == built, (observed, text, built)
+
+    def test_both_checks_name_a_record_the_same_way(self):
+        """``_t6_subject`` is spelled out rather than imported from
+        ``_t2c_subject``, deliberately -- see its docstring. That leaves the
+        two free to drift, so this is what notices."""
+        from rheplicant.config.postflight.noise import _t6_subject
+        from rheplicant.config.preflight.gated import _t2c_subject
+
+        for name in (None, "alpha", "primary"):
+            assert _t6_subject(name) == _t2c_subject(name), name
