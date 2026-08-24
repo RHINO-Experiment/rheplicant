@@ -521,7 +521,7 @@ def _static_fields(layer: Mapping[str, Any]) -> Iterable[Finding]:
     ``_entries`` over both routes, so a ``many`` node's third filter and a
     ``compose:`` block's second stage are each reached at their own path.
     Measured with ``field_specs`` + ``mode_of`` over all 28 shipped operator
-    classes: 28 fields are static (15 float, 6 int, 5 str, 1 tuple, 1
+    classes: 29 fields are static (16 float, 6 int, 5 str, 1 tuple, 1
     mapping), and **zero** are ``static_bool``, which is why ``mode_of``'s
     identity-versus-``isinstance`` trap has no document that can reach it.
 

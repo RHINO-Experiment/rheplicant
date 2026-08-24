@@ -238,8 +238,8 @@ def _control(widget: WidgetMetadata, resource_kind: str | None = None) -> Contro
     gets a select or a text box rather than the opaque fallback: how a value
     is DELIVERED is what says whether a control can produce it.
 
-    ``toggle`` is unreachable today. The live census of all 66 model fields is
-    38 traced, 15 ``static_float``, 6 ``static_int``, 5 ``static_str``, 1
+    ``toggle`` is unreachable today. The live census of all 67 model fields is
+    38 traced, 16 ``static_float``, 6 ``static_int``, 5 ``static_str``, 1
     ``static_mapping``, 1 ``static_tuple`` and ZERO ``static_bool``. It is
     declared so the first boolean field gets a checkbox rather than silently
     falling through to a quantity control it cannot fill.

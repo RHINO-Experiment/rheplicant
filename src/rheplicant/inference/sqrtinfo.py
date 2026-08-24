@@ -19,7 +19,7 @@ depends on:
 
 The class knows nothing about epochs, priors or pipelines. That is deliberate:
 it keeps the numerics separable from the model machinery, as
-:mod:`rheplicant.inference.conditioning` does for spectral diagnostics.
+:mod:`rheplicant.core.conditioning` does for spectral diagnostics.
 """
 
 from collections.abc import Sequence

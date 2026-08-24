@@ -47,8 +47,8 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
+from rheplicant.core.conditioning import tree_norm
 from rheplicant.core.errors import ParameterSpaceError
-from rheplicant.inference.conditioning import tree_norm
 from rheplicant.inference.linear import (
     LinearBlock,
     _check_solve_arguments,

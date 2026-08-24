@@ -9,6 +9,14 @@ Everything here works on pytrees and takes the operator as a callable, so it
 knows nothing about :mod:`rheplicant.inference.linear`'s blocks. That is
 deliberate: it keeps the numerics separable from the model machinery, and the
 dependency pointing one way.
+
+**Why this lives in core.** Two layers need it and they may not see each other.
+:mod:`rheplicant.inference.linear` guards its Wiener solves with it, and
+:class:`~rheplicant.radio.filters.skyspace.SkySpaceFilter` guards its
+map-making CG with it — but ``radio`` may not import ``inference`` (DESIGN.md's
+hard rule; ``core.basis`` is here for the same reason, D28). The alternative was
+a second power iteration in ``radio``, and a second copy of a subtle numeric is
+the copy that goes stale.
 """
 
 from collections.abc import Callable
@@ -17,6 +25,12 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+
+#: Power-iteration steps per end of the spectrum, for callers that guard a
+#: solve with :func:`extreme_eigenvalues`. Both ends typically settle within
+#: three; this leaves margin at a fixed cost of ``2 * POWER_ITERATIONS``
+#: operator applications per guarded solve.
+POWER_ITERATIONS: int = 12
 
 
 def tree_norm(parts: Any) -> jax.Array:

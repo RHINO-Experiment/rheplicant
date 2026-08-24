@@ -78,6 +78,7 @@ MODEL_DIMENSIONS = (
     ("rheplicant.radio.filters.skyspace.SkySpaceFilter.regularization", "dimensionless"),
     ("rheplicant.radio.filters.skyspace.SkySpaceFilter.cg_tol", "dimensionless"),
     ("rheplicant.radio.filters.skyspace.SkySpaceFilter.cg_maxiter", "count"),
+    ("rheplicant.radio.filters.skyspace.SkySpaceFilter.require_convergence", "dimensionless"),
 )
 
 MODEL_REQUIRED_UNIT = frozenset(

@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from rheplicant.inference.conditioning import (
+from rheplicant.core.conditioning import (
     extreme_eigenvalues,
     largest_eigenvalue,
     tree_norm,

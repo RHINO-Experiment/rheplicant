@@ -33,7 +33,7 @@ from rheplicant.gui.form_catalog import (
 from rheplicant.gui.forms import FormCatalog, SectionMetadata, SourceRef
 from rheplicant.radio.graph import RADIO_GRAPH
 
-_EXPECTED_DIMENSIONS = {"model_field": 66, "resource_field": 49, "config_path": 56}
+_EXPECTED_DIMENSIONS = {"model_field": 67, "resource_field": 49, "config_path": 56}
 _EXPECTED_RESOURCE_KINDS = (
     "arrays",
     "bases",

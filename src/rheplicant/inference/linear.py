@@ -86,20 +86,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from rheplicant.core.conditioning import (
+    POWER_ITERATIONS,
+    extreme_eigenvalues,
+    tree_norm,
+)
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
-from rheplicant.inference.conditioning import extreme_eigenvalues, tree_norm
 from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.noise import NoiseModel, check_noise_std_axis
 from rheplicant.inference.parameters import ParameterSpace
 
 DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1.0, 1e3)
-
-#: Power-iteration steps per end of the spectrum in :func:`condition_estimate`.
-#: Both ends typically settle within three; this leaves margin at a fixed cost
-#: of ``2 * POWER_ITERATIONS`` operator applications per guarded solve.
-POWER_ITERATIONS: int = 12
 
 #: ``jax.ensure_compile_time_eval``, under the name of what it does at the one
 #: place it is used: run this comparison **now**, on the constants in hand,

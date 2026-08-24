@@ -275,3 +275,36 @@ def test_the_int_typed_settings_refuse_nan(build, expected):
     with pytest.raises(StateValidationError) as excinfo:
         build()
     assert expected in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# SkySpaceFilter.require_convergence -- a target, or nothing at all.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("require_convergence", [0, -1e-3, True, False, "1e-3", jnp.nan])
+def test_a_convergence_target_that_is_not_a_positive_number_is_refused(require_convergence):
+    """``True`` is the interesting one.
+
+    It is an ``int``, it is positive, and every isinstance-style check passes
+    it -- but what it would MEAN is "bound the relative error by 1", a target
+    so loose it certifies nothing while the field reads as switched on. The
+    same trap ``delivery.py::mode_of`` documents for ``static_bool``.
+    """
+    with pytest.raises(StateValidationError) as excinfo:
+        SkySpaceFilter(
+            projector=PROJECTOR,
+            regularization=jnp.array(1e-3),
+            require_convergence=require_convergence,
+        )
+    assert "require_convergence must be a positive number or None" in str(excinfo.value)
+
+
+def test_no_target_is_the_default_and_stays_legal():
+    """Otherwise the parametrized guard above could be passing by refusing all."""
+    filt = SkySpaceFilter(projector=PROJECTOR, regularization=jnp.array(1e-3))
+
+    assert filt.require_convergence is None
+    assert SkySpaceFilter(
+        projector=PROJECTOR, regularization=jnp.array(1e-3), require_convergence=1e-6
+    ).require_convergence == 1e-6

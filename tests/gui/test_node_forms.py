@@ -382,8 +382,8 @@ class TestTheSelectedClassDecidesTheFields:
 
 
 class TestControlDerivation:
-    """``toggle`` is deliberately unreachable: the live census of all 66 model
-    fields is 38 traced, 15 static_float, 6 static_int, 5 static_str, 1
+    """``toggle`` is deliberately unreachable: the live census of all 67 model
+    fields is 38 traced, 16 static_float, 6 static_int, 5 static_str, 1
     static_mapping, 1 static_tuple and ZERO static_bool. It is declared so the
     first boolean field gets a checkbox rather than a text box."""
 

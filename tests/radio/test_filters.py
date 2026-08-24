@@ -213,3 +213,159 @@ class TestApplyCalibration:
         out = analysis(data_state)
         assert jnp.array_equal(out.aux["snapshot/raw"], data_state.data)
         assert jnp.allclose(out.data, 0.0, atol=1e-6)  # uniform data is all-repeating
+
+
+class TestSkySpaceConvergenceGuard:
+    """``require_convergence``: what ``jax.scipy.sparse.linalg.cg`` will not say.
+
+    ``cg`` returns ``(x, None)``. Every test here exists because that ``None``
+    means an unconverged solve is indistinguishable from a converged one at the
+    call site, and ``mode="remove"`` subtracts it from the data either way.
+    """
+
+    N_PIX = 5
+
+    @pytest.fixture
+    def well_seen(self):
+        """Every pixel sampled. Measured: kappa = 3.6, so residual ~ error."""
+        return MatrixProjector(
+            matrix=jax.random.normal(jax.random.key(3), (24, self.N_PIX))
+        )
+
+    @pytest.fixture
+    def barely_seen(self):
+        """One pixel the scan hardly touches, so the ridge alone holds it.
+
+        This is the regime the guard exists for. Measured over 200 iterations
+        at ``regularization=1e-8``: relative residual 1.4e-7 -- which reads as
+        converged against any sane target -- while kappa is 3.0e+04, so the
+        bound on the relative ERROR is 4.3e-3. Raising the ridge to 1.0 leaves
+        the residual where it was (8.8e-8) and drops kappa to 50.
+        """
+        base = jax.random.normal(jax.random.key(3), (24, self.N_PIX))
+        return MatrixProjector(matrix=base.at[:, -1].multiply(1e-4))
+
+    def _state(self, projector):
+        return State(data=projector.forward(jnp.ones((N_FREQ, self.N_PIX)), None))
+
+    def test_a_hopeless_solve_still_returns_when_nothing_asks(self, well_seen):
+        """The default is off, and this is the test that pins it.
+
+        One iteration cannot solve this system. Without ``require_convergence``
+        the filter says nothing about that -- deliberately, because a filter
+        runs on every evaluation of the signal path and the check is not free.
+        """
+        out = SkySpaceFilter(
+            projector=well_seen, regularization=jnp.array(1.0),
+            cg_maxiter=1, mode="extract",
+        )(self._state(well_seen))
+
+        assert jnp.all(jnp.isfinite(out.data))
+
+    def test_a_solve_that_ran_out_of_iterations_is_refused(self, well_seen):
+        """Same filter, same one iteration, with a target attached."""
+        from equinox import EquinoxRuntimeError
+
+        with pytest.raises(EquinoxRuntimeError) as caught:
+            SkySpaceFilter(
+                projector=well_seen, regularization=jnp.array(1.0),
+                cg_maxiter=1, mode="extract", require_convergence=1e-4,
+            )(self._state(well_seen))
+
+        assert "did not converge" in str(caught.value)
+
+    def test_a_converged_solve_is_not_refused_and_is_not_altered(self, well_seen):
+        """Otherwise the test above would pass on a guard that refuses everything.
+
+        The equality is the second half: ``eqx.error_if`` threads the array
+        through, so switching the guard on must not move the answer.
+
+        **Its reach, stated:** the two sides share everything except the guard,
+        so this sees only what the guard path does. A change to the solve itself
+        moves both and is invisible here -- checked, by perturbing the returned
+        map by one part in 1e7 in each place: inside ``_checked`` this goes red,
+        in ``project`` it does not. The solve's own correctness is pinned by
+        ``TestSkySpaceFilter`` above, against a sky it can recover.
+        """
+        kwargs = dict(
+            projector=well_seen, regularization=jnp.array(1.0),
+            cg_maxiter=200, cg_tol=1e-10, mode="extract",
+        )
+        state = self._state(well_seen)
+
+        guarded = SkySpaceFilter(require_convergence=1e-4, **kwargs)(state)
+        unguarded = SkySpaceFilter(**kwargs)(state)
+
+        assert jnp.array_equal(guarded.data, unguarded.data)
+
+    def test_a_small_residual_does_not_certify_the_answer(self, barely_seen):
+        """The finding, stated as a test: 1.4e-7 of residual against a 1e-4 target.
+
+        A guard that compared the residual with ``require_convergence`` would
+        wave this through -- the residual is three orders of magnitude inside
+        the target. It is refused because the error bound, kappa times that
+        residual, is 4.3e-3. Pair this with the test below, which changes only
+        ``regularization``: the residual is the same either way, so the residual
+        cannot be what separates them.
+        """
+        from equinox import EquinoxRuntimeError
+
+        with pytest.raises(EquinoxRuntimeError) as caught:
+            SkySpaceFilter(
+                projector=barely_seen, regularization=jnp.array(1e-8),
+                cg_maxiter=200, cg_tol=1e-12, mode="extract",
+                require_convergence=1e-4,
+            )(self._state(barely_seen))
+
+        assert "at this precision" in str(caught.value)
+
+    def test_the_same_residual_passes_once_the_ridge_conditions_it(self, barely_seen):
+        """Only ``regularization`` moves, from 1e-8 to 1.0. kappa: 3.0e+04 -> 50."""
+        out = SkySpaceFilter(
+            projector=barely_seen, regularization=jnp.array(1.0),
+            cg_maxiter=200, cg_tol=1e-12, mode="extract",
+            require_convergence=1e-4,
+        )(self._state(barely_seen))
+
+        assert jnp.all(jnp.isfinite(out.data))
+
+    def test_the_two_verdicts_are_different_verdicts(self, well_seen, barely_seen):
+        """Each names its own remedy, and neither names the other's.
+
+        Telling a caller to raise ``cg_maxiter`` when float32 is what stands in
+        the way burns iterations to arrive somewhere equally wrong.
+        """
+        from equinox import EquinoxRuntimeError
+
+        with pytest.raises(EquinoxRuntimeError) as ran_out:
+            SkySpaceFilter(
+                projector=well_seen, regularization=jnp.array(1.0),
+                cg_maxiter=1, mode="extract", require_convergence=1e-4,
+            )(self._state(well_seen))
+        with pytest.raises(EquinoxRuntimeError) as too_coarse:
+            SkySpaceFilter(
+                projector=barely_seen, regularization=jnp.array(1e-8),
+                cg_maxiter=200, cg_tol=1e-12, mode="extract",
+                require_convergence=1e-4,
+            )(self._state(barely_seen))
+
+        assert "cg_maxiter to match" in str(ran_out.value)
+        assert "cg_maxiter to match" not in str(too_coarse.value)
+        assert "jax_enable_x64" in str(too_coarse.value)
+        assert "jax_enable_x64" not in str(ran_out.value)
+
+    def test_the_guard_does_not_cost_the_filter_its_gradient(self, well_seen):
+        """The whole point of the CG form is that it differentiates."""
+        state = self._state(well_seen)
+
+        def loss(filt):
+            return jnp.sum(filt(state).data ** 2)
+
+        filt = SkySpaceFilter(
+            projector=well_seen, regularization=jnp.array(1.0),
+            cg_maxiter=200, cg_tol=1e-10, mode="remove", require_convergence=1e-4,
+        )
+        grads = eqx.filter_grad(loss)(filt)
+
+        assert jnp.isfinite(grads.regularization)
+        assert grads.regularization != 0.0

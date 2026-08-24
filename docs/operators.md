@@ -239,7 +239,7 @@ their defaults are **an assumption to check, not a result**. Needs `healpy` and
 | `BackendOperator` *(P)* | `averaging` | time-chunk integration; updates `coords.time`, reduces `aux['flags']` and a 2-D `aux['protected']` over the chunk (`any`), and refuses an unknown per-time `aux` array rather than carrying it at the old length | shape-changing |
 | `ApplyCalibrationOperator` *(P)* | `apply_cal` | apply a gain solution (`data / gain`) | inference → analysis bridge |
 | `SiderealFilter` | `filters` (multi-instance) | day-repeating (sky-locked) subspace | `mode` extract/remove |
-| `SkySpaceFilter` | `filters` | CG map-make/re-project through any linear projector | flags-weighted; `regularization` differentiable |
+| `SkySpaceFilter` | `filters` | CG map-make/re-project through any linear projector | flags-weighted; `regularization` differentiable; `require_convergence` bounds the solve's relative *error*, off by default |
 | `FourierBandFilter` | `filters` | fringe-rate (`axis=0`) / delay (`axis=1`) band | `mode` extract/remove |
 
 ### Flagging, and where the flags go

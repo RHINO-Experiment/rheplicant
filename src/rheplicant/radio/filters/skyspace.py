@@ -15,6 +15,24 @@ The solve uses matrix-free conjugate gradients
 the whole filter is differentiable — filter transfer functions can be
 marginalised in inference.
 
+**Convergence has to be asked for, and CG will not volunteer it.** JAX's ``cg``
+returns ``(x, None)``: there is no status to read, so a solve that ran out of
+iterations comes back looking exactly like one that converged — and
+``mode="remove"`` subtracts it from the data all the same. ``require_convergence``
+turns that silence into a refusal.
+
+**A residual is not an accuracy**, which is why the knob is stated as an error.
+The two differ by the condition number of ``A^T W A + lam I``, and for map-making
+that number is large *by construction*: sky pixels the scan never touched are
+held by the ridge alone, so lam is exactly the bottom of the spectrum while the
+top is set by the data. CG then stops on a tiny residual with those pixels still
+at their starting value. So the guard estimates kappa by power iteration
+(:mod:`rheplicant.core.conditioning`) and limits ``kappa * residual``, the bound
+on the relative error. It is off by default: unlike a Wiener solve, which runs
+once, a filter runs on every evaluation of the signal path, and the estimate
+costs a fixed ``2 * POWER_ITERATIONS`` unrolled applications of the normal
+operator on top of the one the residual needs.
+
 Noise weighting: if ``state.aux["flags"]`` exists (e.g. from
 MomentRFI flagging), flagged samples get zero weight in ``N^-1``.
 """
@@ -25,6 +43,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.conditioning import (
+    POWER_ITERATIONS,
+    extreme_eigenvalues,
+    tree_norm,
+)
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.state import State
 from rheplicant.radio.backend.flagging import FLAGS_KEY
@@ -42,6 +65,9 @@ class SkySpaceFilter(AbstractLinearFilter):
         cg_tol: conjugate-gradient tolerance (static).
         cg_maxiter: conjugate-gradient iteration cap (static).
         mode: ``"extract"`` (sky-locked component) or ``"remove"`` (residual).
+        require_convergence: bound on the solve's relative ERROR, or ``None``
+            (the default) to run unchecked as before; see the module docstring
+            for why an error and not a residual, and what checking costs.
     """
 
     requires: ClassVar[tuple[str, ...]] = ("data", "coords")
@@ -52,6 +78,7 @@ class SkySpaceFilter(AbstractLinearFilter):
     cg_tol: float = eqx.field(static=True, default=1e-8)
     cg_maxiter: int = eqx.field(static=True, default=100)
     mode: str = eqx.field(static=True, default="remove")
+    require_convergence: float | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
         if not isinstance(self.projector, AbstractSkyProjector):
@@ -61,6 +88,17 @@ class SkySpaceFilter(AbstractLinearFilter):
         if not isinstance(self.cg_maxiter, int) or self.cg_maxiter < 1:
             raise StateValidationError(
                 f"cg_maxiter must be a positive int, got {self.cg_maxiter!r}."
+            )
+        # bool is an int, and True would read as "guard at a relative error of
+        # 1" -- a target so loose it certifies nothing while looking switched on.
+        if self.require_convergence is not None and (
+            isinstance(self.require_convergence, bool)
+            or not isinstance(self.require_convergence, (int, float))
+            or not self.require_convergence > 0
+        ):
+            raise StateValidationError(
+                "require_convergence must be a positive number or None, got "
+                f"{self.require_convergence!r}."
             )
 
     def project(self, data: jax.Array, state: State) -> jax.Array:
@@ -77,4 +115,70 @@ class SkySpaceFilter(AbstractLinearFilter):
         sky_hat, _ = jax.scipy.sparse.linalg.cg(
             normal_op, rhs, tol=self.cg_tol, maxiter=self.cg_maxiter
         )
+        if self.require_convergence is not None:
+            sky_hat = self._checked(sky_hat, normal_op, rhs)
         return self.projector.forward(sky_hat, coords)
+
+    def _checked(self, sky_hat, normal_op, rhs):
+        """``sky_hat`` again, refusing if its relative error cannot be bounded.
+
+        The residual costs one more application of ``normal_op`` because JAX's
+        ``cg`` discards it; kappa costs ``2 * POWER_ITERATIONS`` more. The
+        verdict is on ``kappa * residual`` — see the module docstring for why
+        the residual alone decides nothing here.
+
+        ``eqx.error_if`` rather than a Python ``if``, because the comparison is
+        on traced values and this filter is meant to run under ``jit``.
+
+        **The verdict is one-sided.** ``POWER_ITERATIONS`` steps reach lambda_min
+        from ABOVE, so the kappa here is a lower bound on the true one, and so is
+        the error bound built from it. A refusal is therefore sound; a pass is
+        not a certificate. Measured on a five-pixel map with one pixel the scan
+        never touches and a ridge of 1e-8: the true kappa is about 5e+09 and
+        twelve iterations report 3.0e+04. Both refuse a 1e-4 target, which is
+        why the under-estimate does not hide this case -- but a caller who needs
+        the number rather than the verdict should not read it off this guard.
+        """
+        misfit = normal_op(sky_hat) - rhs
+        residual = tree_norm(misfit) / jnp.maximum(tree_norm(rhs), 1e-30)
+        largest, smallest = extreme_eigenvalues(
+            normal_op, rhs, jax.random.key(0), POWER_ITERATIONS
+        )
+        # A^T W A is positive semi-definite, so lam_min cannot fall below the
+        # ridge however little of the sky the scan actually saw. Taking the
+        # smallest entry keeps the floor a true lower bound for a per-pixel lam.
+        floor = jnp.min(self.regularization)
+        kappa = largest / jnp.maximum(smallest, floor)
+        bad = jnp.logical_or(
+            ~jnp.isfinite(residual), residual * kappa > self.require_convergence
+        )
+
+        # Below kappa * eps the arithmetic cannot represent an answer that
+        # accurate, and the natural response to the other message -- tighten
+        # cg_tol, raise cg_maxiter -- burns iterations to arrive somewhere
+        # equally wrong. Worth its own verdict, because the remedy is different.
+        epsilon = float(jnp.finfo(jnp.asarray(rhs).dtype).eps)
+        unreachable = kappa * epsilon > self.require_convergence
+
+        sky_hat = eqx.error_if(
+            sky_hat,
+            jnp.logical_and(bad, unreachable),
+            "SkySpaceFilter cannot reach require_convergence at this precision: "
+            "the normal operator's condition number times the machine epsilon "
+            "already exceeds it, so no cg_tol or cg_maxiter will help. This is "
+            "the usual signature of a sky the scan does not constrain -- pixels "
+            "no sample touched are held by the ridge alone. Enable "
+            "jax_enable_x64, or raise regularization, which bounds the "
+            "conditioning (kappa is about ||A^T W A|| / regularization).",
+        )
+        return eqx.error_if(
+            sky_hat,
+            jnp.logical_and(bad, ~unreachable),
+            "SkySpaceFilter's map-making CG did not converge: the relative "
+            "residual times the normal operator's condition number -- the bound "
+            "on the RELATIVE ERROR, which is what require_convergence limits -- "
+            "exceeds it. The residual alone looks converged; it is not, along "
+            "the directions the ridge dominates. Pass cg_tol about "
+            "require_convergence/kappa with a cg_maxiter to match, or raise "
+            "regularization.",
+        )

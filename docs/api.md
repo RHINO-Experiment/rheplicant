@@ -56,6 +56,9 @@ it.
    :members:
    :show-inheritance:
 
+.. automodule:: rheplicant.core.conditioning
+   :members:
+
 .. automodule:: rheplicant.core.render
    :members:
 
@@ -224,9 +227,6 @@ coefficients the noise-wave model consumes.
 
 ```{eval-rst}
 .. automodule:: rheplicant.inference.linear
-   :members:
-
-.. automodule:: rheplicant.inference.conditioning
    :members:
 
 .. automodule:: rheplicant.inference.identifiability

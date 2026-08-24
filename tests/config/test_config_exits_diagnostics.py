@@ -205,7 +205,7 @@ class TestTheKnobsReachThePackage:
     def test_iterations_reaches_the_power_iteration(self):
         """One power iteration per end of the spectrum is not twelve.
 
-        POWER_ITERATIONS is 12 (linear.py:102) and the config layer never
+        POWER_ITERATIONS is 12 (core/conditioning.py) and the config layer never
         restates it -- iterations: is passed only when declared.  So a
         declared 1 must be VISIBLE in the answer, and it is: the estimate
         lands at 39% of the settled one (4.776e6 against 1.239e7).

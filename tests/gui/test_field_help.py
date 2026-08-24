@@ -99,7 +99,7 @@ class TestTheAttributesParser:
 
 
 class TestEveryModelFieldIsDocumented:
-    def test_all_sixty_six_of_them(self):
+    def test_all_sixty_seven_of_them(self):
         """The census this feature rests on. A new field with no
         ``Attributes:`` line turns the inspector's help text into a blank, so
         this goes red instead."""
@@ -113,12 +113,12 @@ class TestEveryModelFieldIsDocumented:
 
         assert undocumented == []
 
-    def test_the_count_is_the_sixty_six_the_catalog_declares(self):
+    def test_the_count_is_the_sixty_seven_the_catalog_declares(self):
         total = sum(
             len(field_specs(cls)) for classes in operator_table().values() for cls in classes
         )
 
-        assert total == 66
+        assert total == 67
 
 
 class TestTheSentenceIsPlainTextByTheTimeItLeaves:
@@ -128,7 +128,7 @@ class TestTheSentenceIsPlainTextByTheTimeItLeaves:
     structure)`` -- double backticks and all -- and a ``sky_model`` field
     offered the reader
     ``:class:`~rheplicant.radio.sky.model.AbstractSkyModel```. Measured across
-    the 66 fields: 56 inline literals in 32 of them, and 5 cross-reference
+    the 67 fields: 57 inline literals in 33 of them, and 5 cross-reference
     roles in 3.
     """
 
@@ -159,7 +159,7 @@ class TestTheSentenceIsPlainTextByTheTimeItLeaves:
 
     def test_no_shipped_field_carries_markup_to_the_browser(self):
         """The census, which is what makes the whole class impossible: not one
-        of the 66 sentences may still hold a backtick or a role."""
+        of the 67 sentences may still hold a backtick or a role."""
         offenders = [
             f"{cls.__name__}.{name}: {sentence}"
             for classes in operator_table().values()

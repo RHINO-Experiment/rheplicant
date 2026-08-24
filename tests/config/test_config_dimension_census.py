@@ -157,7 +157,7 @@ def _qualified(cls: type, field: str | None = None) -> str:
     return name if field is None else f"{name}.{field}"
 
 
-def test_model_catalog_covers_all_28_classes_and_66_fields():
+def test_model_catalog_covers_all_28_classes_and_67_fields():
     classes = {cls for choices in operator_table().values() for cls in choices}
     fields = {
         _qualified(cls, field.name)
@@ -166,8 +166,8 @@ def test_model_catalog_covers_all_28_classes_and_66_fields():
         if field.init
     }
     assert len(classes) == 28
-    assert len(fields) == 66
-    assert len(MODEL_DIMENSIONS) == 56
+    assert len(fields) == 67
+    assert len(MODEL_DIMENSIONS) == 57
     assert len(MODEL_SPECIAL) == 10
     assert fields == {row[0] for row in MODEL_DIMENSIONS} | set(MODEL_SPECIAL)
     assert set(MODEL_FORMULA_BINDINGS) == {_qualified(cls) for cls in classes}
