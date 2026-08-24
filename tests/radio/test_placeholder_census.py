@@ -162,3 +162,40 @@ class TestProseAgrees:
             f"'{len(PLACEHOLDER)} of the {len(PLACEHOLDER | REAL)}' concrete "
             f"operator classes; the census says it should."
         )
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        ["src/rheplicant/radio/__init__.py", "README.md"],
+    )
+    def test_the_complement_is_stated_correctly_where_it_is_stated(self, relative_path):
+        """The OTHER count -- the half that drifted while its partner held.
+
+        ``15 of the 29`` was pinned above and stayed right; the sentence after
+        it said "the other twelve" for as long as the census said fourteen,
+        because nothing derived the complement. Pinning one number and
+        remembering its complement is not two guards, it is one guard and one
+        opportunity.
+
+        Stated where it is stated: a file that does not use the phrase is not
+        required to, and this asserts nothing about it. Adding the phrase to a
+        file brings it under the guard automatically.
+        """
+        root = Path(__file__).resolve().parents[2]
+        text = (root / relative_path).read_text(encoding="utf-8")
+        words = {
+            10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen",
+            15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen",
+        }
+        assert len(REAL) in words, (
+            f"{len(REAL)} real operators -- extend the number words above"
+        )
+        stated = re.search(
+            r"[Tt]he other[\s\n]+([a-z]+)", text
+        )
+        if stated is None:
+            pytest.skip(f"{relative_path} does not state the complement")
+        assert stated.group(1) == words[len(REAL)], (
+            f"{relative_path} says 'the other {stated.group(1)}'; the census "
+            f"has {len(REAL)} operators outside PLACEHOLDER "
+            f"({words[len(REAL)]})."
+        )

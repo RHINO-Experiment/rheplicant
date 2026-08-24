@@ -72,9 +72,20 @@ class TestEndToEnd:
             return mean_squared_error(pipeline(template_state).data, observed * 1.05)
 
         grads = eqx.filter_grad(loss)(demo_pipeline)
-        leaves = jax.tree.leaves(eqx.filter(grads, eqx.is_inexact_array))
-        # amplitude, solid_angle, t_sys, bandpass, gain, sigma, adc-scale
-        assert len(leaves) == 6
+        filtered = eqx.filter(grads, eqx.is_inexact_array)
+        leaves = jax.tree.leaves(filtered)
+        # Name the leaves rather than counting them. The comment here used to
+        # list seven -- including `solid_angle` and `t_sys`, which this
+        # fixture's pipeline does not contain -- beside an assertion on the
+        # number 6. Both halves were unfalsifiable: a wrong name costs nothing
+        # in a comment, and a count cannot say WHICH parameter stopped
+        # receiving a gradient. Deriving the paths makes a lost leaf name
+        # itself in the failure.
+        paths = {
+            jax.tree_util.keystr(path)
+            for path, _ in jax.tree_util.tree_flatten_with_path(filtered)[0]
+        }
+        assert len(leaves) == len(paths) == 6, sorted(paths)
         assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
         assert any(jnp.any(leaf != 0) for leaf in leaves)
 

@@ -185,7 +185,7 @@ instrument is another template registered the same way.
 * - keep a campaign after the recordings are archived
   - [Evidence](evidence.md) — accumulate likelihood factors, discard the data
 * - run something and read its output
-  - [Examples](examples.md) — thirteen scripts, with measured wall clocks
+  - [Examples](examples.md) — fifteen scripts, with measured wall clocks
 * - look something up
   - [The API reference](api.md), [contracts between stages](contracts.md),
     [design decisions](design.md)

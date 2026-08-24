@@ -1,4 +1,4 @@
-"""The value grammar: eight forms, one dispatcher, one result type.
+"""The value grammar: eighteen form keys in eight families, one dispatcher, one result type.
 
 Resolution knows nothing about the destination. It turns a fragment of a
 document into a canonical-unit number and a record of which form produced it;

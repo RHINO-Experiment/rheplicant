@@ -60,8 +60,10 @@ class AbstractOperator(eqx.Module):
     operators shipped here: ``GroundPickupOperator`` declares
     ``"env.temperature"`` and documents a ``t_ground`` fallback for when it is
     missing, so its declaration means "reads if present". And ``provides`` is
-    ``("data",)`` on 26 of the 31 declaring classes, so threading it
-    distinguishes nothing the graph's own node kinds do not already say. These
+    ``("data",)`` on nearly every declaring class, so threading it
+    distinguishes nothing the graph's own node kinds do not already say -- the
+    measured ratio is in :mod:`rheplicant.core.contract`, which is the one
+    place that states it. These
     tuples therefore describe intent and carry exactly one enforced rule; they
     are not a checker waiting to be written.
 

@@ -331,7 +331,11 @@ def test_the_examples_page_states_the_real_count() -> None:
     }
     assert n in words, f"{n} example scripts -- extend the number words above"
     word = words[n]
-    for path in (DOCS / "examples.md", ROOT / "README.md"):
+    # index.md is here because it was NOT, and its count drifted to "thirteen"
+    # while the two pages below stayed correct. A guard that checks some of the
+    # places a claim is written reports "absent" for the rest, and absent reads
+    # as pass -- so the list of pages is the load-bearing part of this test.
+    for path in (DOCS / "examples.md", ROOT / "README.md", DOCS / "index.md"):
         text = path.read_text()
         # Case-insensitive: the count reads "Fourteen scripts" at the start of
         # a sentence and "fourteen runnable scripts" inside one, and both are

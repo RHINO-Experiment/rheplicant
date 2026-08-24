@@ -28,9 +28,9 @@ wherever the line falls between two channels. The tone's level is the one
 thing this operator knows; a total that moved with the channelisation would
 make the known quantity unknown, which is the whole calibration argument.
 The price is that the *peak channel* is no longer ``amplitude`` — a line
-sitting halfway between two channels keeps only ~0.42 of it (the classic
-half-bin scalloping loss of an unwindowed FFT, -3.8 dB), which is real and is
-exactly the bias a delta-on-one-channel model hides.
+sitting halfway between two channels keeps only ``(2/pi)^2 = 0.4053`` of it
+(the classic half-bin scalloping loss of an unwindowed FFT, -3.92 dB), which
+is real and is exactly the bias a delta-on-one-channel model hides.
 
 WHAT IS ESTABLISHED, AND WHAT IS ASSUMED
 ----------------------------------------
