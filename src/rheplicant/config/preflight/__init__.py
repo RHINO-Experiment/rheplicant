@@ -106,13 +106,55 @@ _REQUIRED = ("runtime", "observation", "model", "runs")
 
 #: The one section refused by a clause of its own in ``_structural`` (its
 #: ``campaign`` branch, below) rather than by :data:`_NOT_YET` -- reserved
-#: for a named future capability (streaming evidence, schema §8.2) instead
-#: of deferred to a later plan.  ``_structural``'s own raise keeps its
-#: pinned message literal untouched; this constant exists only so a
-#: consumer outside this module (``config/schema.py``, which projects the
-#: refused sections into the machine-readable schema) can tell "reserved"
-#: apart from "deferred" without re-spelling the section name itself.
-_RESERVED = frozenset({"campaign"})
+#: for a named future capability instead of deferred to a later plan.
+#:
+#: **section -> the clause that follows its name**, for the same reason
+#: :data:`_NOT_YET` maps rather than merely lists.  It was a ``frozenset``,
+#: which gave ``config/schema.py`` membership and nothing else: a consumer
+#: could tell "reserved" from "deferred" but had no sentence to show for
+#: either, and "reserved" alone is as unactionable as "deferred" alone.  The
+#: clause lives here now, so ``config/schema.py`` has a sentence to publish.
+#:
+#: ``_structural`` does NOT raise through it -- see the comment at its
+#: ``campaign`` branch.  That leaves the clause spelled twice, which is
+#: normally the shape that goes stale; here it cannot go stale unnoticed,
+#: because ``test_schema.py::TestReasonTravelsWithTheStatus`` compares the
+#: schema's ``reason`` against the message the real loader RAISES rather than
+#: against this constant.
+_RESERVED = {
+    "campaign": "is reserved with capability 4 (streaming evidence, "
+                "schema §8.2) and refused in v1.",
+}
+
+
+def deferred_clause(section: str) -> str:
+    """The sentence following a deferred section's name, without that name.
+
+    One template, two readers.  ``_structural`` raises ``f"{section}:
+    {deferred_clause(section)}"``; ``config/schema.py`` publishes the clause
+    as a section's ``reason``.  Spelling it at both ends would let a reworded
+    refusal and a stale schema disagree about the same fact -- and the schema
+    is regenerated downstream against a pinned ref, so the stale one would be
+    the one that ships.
+
+    :param section: a key of :data:`_NOT_YET`.
+    :returns: the clause, ending in a full stop.
+    """
+    return f"is not read by this layer -- it is handled by {_NOT_YET[section]}."
+
+
+def reserved_clause(section: str) -> str:
+    """The sentence following a reserved section's name, without that name.
+
+    The :func:`deferred_clause` counterpart, so a consumer projecting both
+    kinds of refusal has one shape to call rather than a lookup for one and
+    a function for the other.
+
+    :param section: a key of :data:`_RESERVED`.
+    :returns: the clause, ending in a full stop.
+    """
+    return _RESERVED[section]
+
 
 #: id -> the function.  **Insertion order IS run order**, which is what
 #: §2.6's "A20 and A21 before A23" rests on: the first refusal is the one a
@@ -150,16 +192,25 @@ def _structural(document: Mapping[str, Any]) -> None:
             f"{list(_SECTIONS)}."
         )
     if "campaign" in document:
+        # The literal, NOT `reserved_clause`, and deliberately so.  Three
+        # guards pin this sentence AS A LITERAL, one of them
+        # (`test_config_inflight.py::TestTheMessageBindingWalker`) on the
+        # contract that the whole flattened string appears in exactly one
+        # module -- campaign's refusal is its only once-bound specimen, so
+        # routing this through the helper would not merely churn the pins,
+        # it would delete the walker's own example.  `_RESERVED` therefore
+        # holds the clause a second time, and the cost of that second
+        # spelling is bounded by a BEHAVIOURAL guard rather than a textual
+        # one: `test_schema.py`'s `TestReasonTravelsWithTheStatus` drives
+        # this very call and demands the schema's `reason` equal what it
+        # raises, so the two cannot drift unnoticed.
         raise ConfigError(
             "campaign: is reserved with capability 4 (streaming evidence, "
             "schema §8.2) and refused in v1."
         )
-    for section, route in _NOT_YET.items():
+    for section in _NOT_YET:
         if section in document:
-            raise ConfigError(
-                f"{section}: is not read by this layer -- it is handled by "
-                f"{route}."
-            )
+            raise ConfigError(f"{section}: {deferred_clause(section)}")
     version = document.get("schema_version")
     if version != 1 or isinstance(version, bool):
         raise ConfigError(

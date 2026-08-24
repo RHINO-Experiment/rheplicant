@@ -28,7 +28,14 @@ def json_schema() -> dict[str, Any]:
         VALUE_FORMS,
         VALUE_MODIFIERS,
     )
-    from rheplicant.config.preflight import _NOT_YET, _REQUIRED, _RESERVED, _SECTIONS
+    from rheplicant.config.preflight import (
+        _NOT_YET,
+        _REQUIRED,
+        _RESERVED,
+        _SECTIONS,
+        deferred_clause,
+        reserved_clause,
+    )
 
     exits: list[str] = []
     try:
@@ -52,19 +59,50 @@ def json_schema() -> dict[str, Any]:
     deferred = set(_NOT_YET)
     reserved = set(_RESERVED)
 
-    def _status(name: str) -> str:
+    def _status(name: str) -> tuple[str, str | None]:
+        """The section's classification AND the sentence that makes it actionable.
+
+        ``_NOT_YET`` is a mapping, not a set: its value is WHO READS THE
+        SECTION INSTEAD, and ``_structural`` spends that value on the person
+        running the CLI.  Projecting membership alone handed this schema's
+        readers ``"deferred"`` and nothing else -- the most misreadable word
+        available for ``outputs:``, which is fully supported and merely read
+        elsewhere.  ``_NOT_YET``'s own docstring records that this exact
+        misreading was fixed once already on the Python side; keeping only
+        the classification recreated the loss for every consumer downstream.
+
+        The clause comes from preflight's own helpers rather than being
+        rebuilt here.  For ``deferred`` that makes the CLI's refusal and this
+        ``reason`` literally one template.  For ``reserved`` it does not:
+        ``_structural`` keeps its campaign literal, which three guards pin as
+        a literal, so the clause is spelled twice on purpose -- and the
+        agreement is enforced by a BEHAVIOURAL test rather than by sharing,
+        ``test_schema.py::TestReasonTravelsWithTheStatus``, which drives the
+        real loader and compares what it raises.  Either way the two readers
+        of one fact cannot diverge unnoticed; only the mechanism differs.
+
+        ``accepted`` has nothing to explain and says so with ``None`` rather
+        than an empty string, which a consumer would have to test for
+        separately.
+        """
         if name in reserved:
-            return "reserved"
+            return "reserved", reserved_clause(name)
         if name in deferred:
-            return "deferred"
-        return "accepted"
+            return "deferred", deferred_clause(name)
+        return "accepted", None
+
+    def _section(name: str) -> dict[str, Any]:
+        status, reason = _status(name)
+        return {
+            "name": name,
+            "required": name in required,
+            "status": status,
+            "reason": reason,
+        }
 
     return {
         "schemaVersion": "1",
-        "sections": [
-            {"name": name, "required": name in required, "status": _status(name)}
-            for name in _SECTIONS
-        ],
+        "sections": [_section(name) for name in _SECTIONS],
         "exits": exits,
         "operators": sorted(
             set(_list(VALUE_FORMS)) | set(_list(VALUE_MODIFIERS)) | set(_list(DERIVATIONS)),

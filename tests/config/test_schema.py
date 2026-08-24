@@ -52,15 +52,23 @@ def test_the_whole_document_round_trips_through_json():
 
 
 class TestSections:
-    def test_every_entry_is_a_name_required_status_triple_and_nothing_else(self):
-        """Kills an entry that grows a fourth key (e.g. a description) that
-        no consumer asked for and that this schema does not otherwise
-        document, and kills an entry that loses `required` or `status`."""
+    def test_every_entry_is_a_name_required_status_reason_quad_and_nothing_else(self):
+        """Kills an entry that grows a FIFTH key, and one that loses any of four.
+
+        This pinned a triple until `reason` was added, on the argument that a
+        fourth key was one "no consumer asked for". `reason` is the exception
+        that argument allowed for: a consumer did ask, and the key carries the
+        half of `_NOT_YET` that `status` alone throws away -- see
+        `TestReasonTravelsWithTheStatus`. The pin stays an equality for the
+        original reason, that a consumer treating the entry shape as closed
+        breaks on a key it has never seen.
+        """
         for entry in json_schema()["sections"]:
-            assert set(entry) == {"name", "required", "status"}
+            assert set(entry) == {"name", "required", "status", "reason"}
             assert isinstance(entry["name"], str)
             assert isinstance(entry["required"], bool)
             assert isinstance(entry["status"], str)
+            assert entry["reason"] is None or isinstance(entry["reason"], str)
 
     def test_the_required_section_names_are_exactly_four(self):
         """Pinned as a set equality, not membership: a fifth section
@@ -190,6 +198,108 @@ class TestStatusAgreesWithTheLoader:
             assert statuses[name] == "deferred"
             assert "is not read by this layer" in message
 
+
+
+class TestReasonTravelsWithTheStatus:
+    """A status without its reason is the actionable half thrown away.
+
+    ``_NOT_YET`` is not a set of names, it is ``{section: who reads it
+    instead}``, and ``_structural`` spends that value on the person running
+    the CLI: "outputs: is not read by this layer -- it is handled by the
+    command line, which owns the output tree, its provenance and its audit
+    trail."  Projecting membership alone left the schema's readers with
+    ``"deferred"`` -- and ``deferred`` is the single most misreadable word
+    available, because nothing about ``outputs:`` is pending.  It is fully
+    supported; it is read somewhere else.
+
+    ``_NOT_YET``'s own docstring records that this misreading was already
+    fixed once on the Python side: the values used to name an internal plan
+    number, which was development history in a user-facing refusal and went
+    stale when the work shipped.  A projection that keeps the classification
+    and drops the sentence recreates that loss for every consumer downstream.
+
+    ``campaign`` had the same amputation one level further down: ``_RESERVED``
+    was a ``frozenset``, so "reserved" had no sentence to carry either.
+
+    The precedent is the GUI's own, on the same section: ``SectionMetadata``
+    (``gui/forms.py``) puts ``disabled: bool`` next to ``reason: str | None``,
+    and ``form_catalog_finalize`` fills campaign's in.  The form catalog had
+    already paired the classification with the sentence; this schema had not.
+    """
+
+    def test_every_non_accepted_section_carries_the_sentence_its_reader_needs(self):
+        """Accepted sections have nothing to explain, so their reason is null."""
+        for entry in json_schema()["sections"]:
+            if entry["status"] == "accepted":
+                assert entry["reason"] is None, entry
+            else:
+                assert isinstance(entry["reason"], str) and entry["reason"], entry
+
+    @pytest.mark.parametrize("name", ["outputs", "defaults", "plugins", "campaign"])
+    def test_the_reason_is_the_clause_the_real_loader_raises(self, name):
+        """The strong form, and the reason this is not merely a docstring.
+
+        Two readers of one fact must get one sentence.  Asserting that the
+        schema's reason merely *mentions* the route would pass on a
+        paraphrase, and a paraphrase is what drifts.  So this drives the
+        production ``preflight()`` -- the same call
+        ``test_a_non_accepted_section_is_refused_by_the_real_loader`` uses --
+        and demands that the refusal a CLI user reads is the section name,
+        a colon, and the schema's own reason, byte for byte.
+
+        Rewording either end alone turns this red, which is the point:
+        ``json_schema()`` is a generated artifact downstream (rheplicant-agent
+        regenerates ``schema.ts`` against a pinned ref), so a paraphrase here
+        is a paraphrase shipped to a UI that renders it with no gloss.
+        """
+        reason = next(
+            entry["reason"]
+            for entry in json_schema()["sections"]
+            if entry["name"] == name
+        )
+        with pytest.raises(ConfigError) as caught:
+            preflight(preflight_document(**{name: {}}))
+        assert str(caught.value) == f"{name}: {reason}"
+
+    @pytest.mark.parametrize("name", ["outputs", "defaults", "plugins"])
+    def test_a_deferred_reason_carries_the_route_rather_than_paraphrasing_it(self, name):
+        """The route is the half that lets a reader act; it must survive intact.
+
+        Distinct from the test above, which pins schema-to-loader agreement:
+        both ends could agree on a sentence that had lost the route. This
+        reads ``_NOT_YET``'s value directly and demands it be present.
+        """
+        reason = next(
+            entry["reason"]
+            for entry in json_schema()["sections"]
+            if entry["name"] == name
+        )
+        assert _NOT_YET[name] in reason, (reason, _NOT_YET[name])
+
+    def test_the_reserved_reason_agrees_with_the_capability_table(self):
+        """``campaign``'s sentence and its capability row must not drift apart.
+
+        ``preflight._RESERVED`` cannot import ``preflight.document``'s
+        ``_CAPABILITY_KEYS`` -- ``document`` imports ``preflight`` for
+        ``register``, so deriving one from the other would be a cycle.  Two
+        tables therefore hold the same fact, which is precisely the shape
+        that goes stale, so it is checked here instead: the sentence must
+        name the capability and the schema section that ``_CAPABILITY_KEYS``
+        records for the same section.
+        """
+        from rheplicant.config.preflight.document import _CAPABILITY_KEYS
+
+        reason = next(
+            entry["reason"]
+            for entry in json_schema()["sections"]
+            if entry["name"] == "campaign"
+        )
+        capability, schema_section = _CAPABILITY_KEYS["campaign"]
+        # "capability 4 (streaming evidence)" -> both halves, however the
+        # sentence chooses to parenthesise them.
+        assert capability.rstrip(")").split(" (")[0] in reason, reason
+        assert capability.rstrip(")").split(" (")[1] in reason, reason
+        assert schema_section in reason, reason
 
 class TestExits:
     def test_exits_has_exactly_eighteen_entries(self):
