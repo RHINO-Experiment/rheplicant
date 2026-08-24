@@ -158,6 +158,24 @@ def test_editing_the_manifest_to_match_the_forgery_does_not_help_either(tmp_path
     assert any("root_sha256" in problem for problem in problems), problems
 
 
+def test_a_file_deleted_after_publication_is_reported(tmp_path):
+    """The likeliest archive failure of all, and the one a digest-per-file
+    scheme cannot see on its own: a file that is simply gone has no digest to
+    disagree with. Only a manifest that enumerates the tree can miss it."""
+    from _rheplicant_bootstrap.audit.integrity import verify_tree
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+
+    (target / "config.input.yaml").unlink()
+    problems = verify_tree(_published(target))
+    assert any("config.input.yaml" in problem for problem in problems), problems
+    assert any("absent" in problem for problem in problems), problems
+
+
 def test_a_file_added_after_publication_is_reported(tmp_path):
     """Absence from the manifest is a finding, not a gap in coverage."""
     from _rheplicant_bootstrap.audit.integrity import verify_tree

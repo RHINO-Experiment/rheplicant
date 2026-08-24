@@ -183,7 +183,7 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=rheplicant --cov=_rheplicant_bootstrap --cov-fail-under=80"
+addopts = "-q --cov=rheplicant --cov=_rheplicant_bootstrap --cov-fail-under=85"
 
 [tool.coverage.run]
 source = ["rheplicant", "_rheplicant_bootstrap"]
