@@ -92,7 +92,9 @@ def simulate_pairs(
             what is being sampled from.
         noise: supplies sigma at each simulated prediction. Under
             :class:`~rheplicant.inference.noise.RadiometerNoise` the scatter is
-            multiplicative, exactly as in the data.
+            multiplicative, exactly as in the data -- because the draw is
+            taken with the model's own ``realise``, so the simulator and the
+            likelihood cannot disagree about the law.
         key: PRNG key.
         n_simulations: how many pairs.
 
@@ -133,10 +135,18 @@ def simulate_pairs(
             for name in names
         }
         prediction = space.bind(pipeline, values)(state_template).data
+        # The scatter law comes from the noise model's OWN generator, not from
+        # a `prediction + std * normal` written here. They are not the same
+        # draw: RadiometerNoise realises `d (1 + f w)`, whose sign follows the
+        # prediction, while `std` returns `|d| f` and applies `floor` -- an
+        # absolute value and a reweighting remedy that a generator must not
+        # have. Simulating with one and weighting with the other is exactly the
+        # disagreement `realise` exists to make impossible.
         sigma = noise.std(prediction)
-        scatter = jnp.where(jnp.isfinite(sigma), sigma, 0.0)
-        observed = prediction + scatter * jax.random.normal(
-            index_key, jnp.shape(prediction)
+        observed = jnp.where(
+            jnp.isfinite(sigma),
+            noise.realise(prediction, key=index_key),
+            prediction,
         )
         flat = jnp.concatenate([jnp.ravel(jnp.asarray(values[n])) for n in names])
         return flat, observed

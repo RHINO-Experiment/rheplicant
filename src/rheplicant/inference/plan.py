@@ -110,6 +110,24 @@ prediction — the same GLS-versus-full-likelihood difference
 :mod:`rheplicant.inference.noise` gives in closed form.
 :attr:`PlanDiagnostics.noise_depends_on_prediction` records whether that
 applied.
+
+**The gradient blocks omit the same term, by a different route, and this is
+the half that used to go unsaid.** A conjugate block freezes sigma to keep its
+step linear; a gradient block does not freeze it -- sigma is re-evaluated at
+the current prediction inside
+:func:`~rheplicant.inference.engines.conditional_potential` -- but that
+potential is ``0.5 * chi2 - log_prior`` and ``chi2`` carries no
+``sum log sigma``. So when sigma depends on the prediction, a gradient block
+targets the density divided by ``prod sigma(theta)``: the GLS-flavoured
+posterior again, not the full one. The contrast to hold in mind is
+:func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`, whose
+observation site is a ``Normal`` whose ``log_prob`` carries ``-log scale``
+automatically -- so the ``nuts`` exit samples the full density while
+``plan.sample``'s gradient blocks sample the GLS-flavoured one, from the same
+declared model. The difference is ``O(f^2)`` with ``f = 1/sqrt(delta_nu tau)``
+and is small in most regimes, but it is the same distinction
+:class:`~rheplicant.inference.compressed.BayesMemory` refuses to mix under its
+``estimator`` field, so it is written here rather than left to be discovered.
 """
 
 import dataclasses

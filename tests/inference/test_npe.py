@@ -187,6 +187,50 @@ class TestSimulatePairs:
         fractional = ((data - clean) / clean).std()
         assert float(fractional) == pytest.approx(radiometer.fractional, rel=0.06)
 
+    def test_the_floor_is_a_weighting_remedy_and_never_reaches_the_generator(
+        self, twin, state, space
+    ):
+        """The simulator draws with ``realise``, not with ``std``.
+
+        The two are not the same law and this is the case that separates them.
+        ``RadiometerNoise.std`` returns ``max(|d|, floor) * f`` -- the floor is
+        a remedy for a reweighting iterate crossing zero -- while ``realise``
+        draws ``d (1 + f w)`` and applies no floor at all, "because a generator
+        has no iterate" (its own docstring). Simulating with ``std`` therefore
+        inflates the training bank's scatter by ``floor / |d|`` the moment a
+        floor is declared, and trains the network on data no instrument could
+        record.
+
+        ``test_a_multiplicative_noise_model_is_honoured`` above cannot see
+        this: its predictions are all positive and its floor is zero, so the
+        additive and multiplicative laws agree to the last bit there. This one
+        chooses a floor a thousand times the prediction, where they disagree by
+        that same factor.
+        """
+        f = RadiometerNoise(1e4, 1.0)
+        clean_scale = float(
+            jnp.abs(space.bind(twin, {"gain": jnp.asarray(TRUE_GAIN)})(state).data).mean()
+        )
+        floored = RadiometerNoise(1e4, 1.0, floor=1e3 * clean_scale)
+
+        thetas, data = simulate_pairs(
+            twin, state, space,
+            noise=floored, key=jax.random.key(3), n_simulations=2048,
+        )
+        clean = jax.vmap(
+            lambda t: space.bind(twin, {"gain": t[0]})(state).data
+        )(thetas)
+        fractional = float(((data - clean) / clean).std())
+
+        # The generator ignores the floor, so the scatter is the SAME as with
+        # no floor: f, not f * floor / |d| (which would be ~1000x larger).
+        assert fractional == pytest.approx(f.fractional, rel=0.06), (
+            f"fractional scatter {fractional:.4g}; the generator should be "
+            f"unaffected by floor= and give {f.fractional:.4g}. A value near "
+            f"{f.fractional * 1e3:.4g} means the bank was drawn with std() "
+            "instead of realise()."
+        )
+
     def test_a_prior_free_latent_is_refused(self, twin, state, noise):
         space = ParameterSpace.direct("gain", init=1.0, into=lambda p: p["gain"].gain)
         with pytest.raises(ParameterSpaceError, match="no prior"):
