@@ -203,13 +203,19 @@ def test_only_overlap_work_is_bounded_by_total_selector_segments():
             line_events += 1
         return count_lines
 
+    # Restore the PREVIOUS tracer, not None. coverage installs its CTracer
+    # through sys.settrace, so handing back None uninstalls the measurement
+    # from this thread permanently and pytest-cov never notices -- measured:
+    # 1982 consecutive tests then recorded nothing under a serial run, and
+    # plugins.py went from 88 % to 16 % on tests/bootstrap alone.
+    previous = sys.gettrace()
     sys.settrace(count_lines)
     try:
         result, _ = layer_presets(
             {}, (request,), preset_provider=_provider({"one": document})
         )
     finally:
-        sys.settrace(None)
+        sys.settrace(previous)
 
     assert len(result.document["resources"]) == count
     total_segments = count * 3

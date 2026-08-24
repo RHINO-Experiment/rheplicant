@@ -134,7 +134,7 @@ def test_explicit_editable_distribution_uses_the_unique_package_root(tmp_path, m
     monkeypatch.setattr(
         presets.importlib.util,
         "find_spec",
-        lambda _: SimpleNamespace(submodule_search_locations=(str(root),)),
+        lambda _: SimpleNamespace(submodule_search_locations=(str(root),), origin=None),
     )
 
     snapshot = read_installed_preset("rhino_v1")
@@ -165,7 +165,7 @@ def test_editable_metadata_text_is_canonicalized_before_truthiness(
     monkeypatch.setattr(
         presets.importlib.util,
         "find_spec",
-        lambda _: SimpleNamespace(submodule_search_locations=(str(tmp_path),)),
+        lambda _: SimpleNamespace(submodule_search_locations=(str(tmp_path),), origin=None),
     )
     monkeypatch.setattr(
         presets,
@@ -286,7 +286,7 @@ def test_editable_locations_truthiness_is_not_required(tmp_path, monkeypatch):
     monkeypatch.setattr(
         presets.importlib.util,
         "find_spec",
-        lambda _: SimpleNamespace(submodule_search_locations=Locations()),
+        lambda _: SimpleNamespace(submodule_search_locations=Locations(), origin=None),
     )
 
     assert read_installed_preset("rhino_v1").input_bytes == b"runtime: {}\n"
@@ -312,7 +312,7 @@ def test_editable_package_root_must_be_unique(monkeypatch):
     monkeypatch.setattr(
         presets.importlib.util,
         "find_spec",
-        lambda _: SimpleNamespace(submodule_search_locations=("first", "second")),
+        lambda _: SimpleNamespace(submodule_search_locations=("first", "second"), origin=None),
     )
 
     with pytest.raises(ConfigError, match="package root is not unique"):

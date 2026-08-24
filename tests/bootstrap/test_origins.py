@@ -603,13 +603,18 @@ def test_internal_merge_work_does_not_scale_with_an_untouched_branch():
                 line_events += 1
             return trace
 
+        # Restore the PREVIOUS tracer, not None -- see the same note in
+        # test_bootstrap_layering.py. coverage rides on sys.settrace, so
+        # handing back None switches measurement off for the rest of the
+        # session in this thread.
+        previous = sys.gettrace()
         sys.settrace(trace)
         try:
             result = merge_with_origins(
                 parent, {"added": 1}, origin=Origin("preset", "one")
             )
         finally:
-            sys.settrace(None)
+            sys.settrace(previous)
         assert result.document["untouched"] is parent.document["untouched"]
         assert (
             result.origins.children["untouched"]
