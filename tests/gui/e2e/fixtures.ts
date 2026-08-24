@@ -8,6 +8,7 @@ import {
   test as base,
   type Locator,
   type Page,
+  type Request,
 } from "../../../tools/config_gui_spike/react/node_modules/@playwright/test/index.js";
 
 export const STARTER_YAML = `schema_version: 1
@@ -204,4 +205,4 @@ export const test = base.extend<BrowserFixtures>({
 });
 
 export { AxeBuilder, expect };
-export type { Locator, Page };
+export type { Locator, Page, Request };

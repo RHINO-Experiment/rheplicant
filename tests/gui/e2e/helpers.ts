@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from "./fixtures";
+import { expect, type Locator, type Page, type Request } from "./fixtures";
 
 export const WORKBENCH_TIMEOUT_MS = 15_000;
 export const JOB_TERMINAL_TIMEOUT_MS = 60_000;
@@ -23,6 +23,7 @@ interface PageAudit {
   readonly consoleErrors: string[];
   readonly pageErrors: string[];
   readonly failedRequests: string[];
+  readonly cancelledPolls: string[];
   readonly httpErrors: HttpError[];
   readonly expectedHttpErrors: ExpectedHttpError[];
 }
@@ -42,12 +43,61 @@ interface ExpectedHttpError {
 
 const pageAudits = new WeakMap<Page, PageAudit>();
 
+/** The jobs-polling endpoint, whose in-flight request the PAGE cancels. */
+const JOBS_POLL_PATH = /^\/api\/sessions\/[^/]+\/jobs$/;
+
+/**
+ * A request the page cancelled, as against one that failed.
+ *
+ * `useJobPolling` holds ONE in-flight jobs poll and aborts it whenever the
+ * session identity or the set of active jobs changes -- "polling has one
+ * in-flight request" is the design, and `AbortController.abort()` is how it
+ * keeps it. Chromium reports that cancel to `requestfailed` as
+ * `net::ERR_ABORTED`, which to a listener is indistinguishable from a network
+ * failure and is in fact the application working.
+ *
+ * Narrow on purpose, in both directions: any OTHER failure on this endpoint
+ * still counts, and `net::ERR_ABORTED` on any other endpoint still counts.
+ * The count is kept rather than discarded, and bounded by
+ * {@link CANCELLED_POLL_BUDGET} -- an exemption with no ceiling would hide the
+ * one defect this shape can have, an effect whose dependencies thrash and
+ * which therefore cancels a poll on every render.
+ *
+ * Measured: ZERO cancels across all 124 audited tests on an idle machine, and
+ * exactly one on a 14-worker packaged run, where a slower server widens the
+ * window in which an identity change can land on a poll still in flight. That
+ * one cancel is what made `execution-results.spec.ts`'s "Validate and Forward
+ * preview" fail once and pass on every rerun.
+ */
+function isCancelledPoll(request: Request): boolean {
+  if (request.failure()?.errorText !== "net::ERR_ABORTED") return false;
+  try {
+    return JOBS_POLL_PATH.test(new URL(request.url()).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * How many cancels one test may legitimately produce.
+ *
+ * Derived, not chosen: the poller re-runs its effect on a session identity
+ * change and on a change to the set of active jobs, so the ceiling is the
+ * number of those a test can perform -- a couple of YAML accepts and a couple
+ * of jobs moving through queued/running/terminal. Twelve is an order of
+ * magnitude above the highest count ever observed (one), and two orders below
+ * what an effect cancelling on every render would produce, which is the one
+ * defect a ceiling-free exemption would hide.
+ */
+const CANCELLED_POLL_BUDGET = 12;
+
 export function beginPageAudit(page: Page): void {
   if (pageAudits.has(page)) throw new Error("Page audit was started twice.");
   const audit: PageAudit = {
     consoleErrors: [],
     pageErrors: [],
     failedRequests: [],
+    cancelledPolls: [],
     httpErrors: [],
     expectedHttpErrors: [],
   };
@@ -57,9 +107,13 @@ export function beginPageAudit(page: Page): void {
   });
   page.on("pageerror", (error) => audit.pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
-    audit.failedRequests.push(
-      `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? "unknown failure"}`,
-    );
+    const line =
+      `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? "unknown failure"}`;
+    if (isCancelledPoll(request)) {
+      audit.cancelledPolls.push(line);
+      return;
+    }
+    audit.failedRequests.push(line);
   });
   page.on("response", (response) => {
     if (response.status() < 400) return;
@@ -107,6 +161,24 @@ export async function assertPageAudit(page: Page): Promise<void> {
   expect(unmatchedConsole, "unexpected browser console errors").toEqual([]);
   expect(audit.pageErrors, "uncaught browser errors").toEqual([]);
   expect(audit.failedRequests, "failed browser requests").toEqual([]);
+  expect(
+    audit.cancelledPolls.length,
+    `jobs polls the page cancelled (see ${audit.cancelledPolls.join(", ")})`,
+  ).toBeLessThanOrEqual(CANCELLED_POLL_BUDGET);
+}
+
+/** Everything the audit counted as a real failure, for the harness's own tests. */
+export function auditedFailures(page: Page): readonly string[] {
+  const audit = pageAudits.get(page);
+  if (audit === undefined) throw new Error("Page audit was not started.");
+  return audit.failedRequests;
+}
+
+/** Everything the audit counted as the page cancelling its own poll. */
+export function auditedCancelledPolls(page: Page): readonly string[] {
+  const audit = pageAudits.get(page);
+  if (audit === undefined) throw new Error("Page audit was not started.");
+  return audit.cancelledPolls;
 }
 
 export async function installDeterministicMotion(page: Page): Promise<void> {

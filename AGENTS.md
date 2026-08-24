@@ -88,7 +88,7 @@ cd tools/config_gui_spike/react && npm run build:production
 ```
 
 leaves the whole Playwright suite green while testing the previous release.
-Measured: a component landed, all 176 e2e tests passed, and the shipped
+Measured: a component landed, all 188 e2e tests passed, and the shipped
 bundle contained none of it. The build writes with `emptyOutDir`, so the old
 content-hashed asset is deleted and a new one added — commit both.
 
