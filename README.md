@@ -223,7 +223,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(10225 tests, 88.3 % coverage, jit+grad+vmap through the full twin; assembly
+(10225 tests, 82.2 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -248,7 +248,7 @@ nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
-CI runs the suite on every push and pull request
+CI runs the suite on every push and pull request, and measures coverage in a separate **serial** job (a parallel run and a serial run of this suite do not measure the same thing)
 ([`.github/workflows/test.yml`](https://github.com/RHINO-Experiment/rheplicant/blob/main/.github/workflows/test.yml)); it prints what the
 environment collects rather than asserting on it, because a public runner cannot
 hold the `RHEPLICANT_RHINO_*` datasets and so legitimately collects fewer tests

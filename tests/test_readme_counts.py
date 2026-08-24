@@ -151,13 +151,19 @@ _ANY_COVERAGE = re.compile(r"(\d+(?:\.\d+)?) % coverage")
 
 def _cov_fail_under() -> int:
     """The floor ``pyproject.toml`` makes the suite actually enforce."""
-    found = re.search(r"--cov-fail-under=(\d+)",
-                      (ROOT / "pyproject.toml").read_text())
+    # Reads `[tool.coverage.report] fail_under`, not a --cov-fail-under flag.
+    # Coverage left the default addopts when it moved to its own serial job:
+    # a parallel and a serial run of this suite do not measure the same thing
+    # (88.32 % against 82.26 % on one tree, all tests passing), so the reported
+    # figure comes from the invocation with no worker count in it. The floor
+    # moved with it, and this is still the one place that holds it.
+    found = re.search(r"^fail_under\s*=\s*(\d+)",
+                      (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
     assert found, (
-        "pyproject.toml no longer carries --cov-fail-under. It is the only "
-        "thing that holds the coverage floor, and the README's figure is "
-        "compared against it below -- with it gone, that comparison would "
-        "either crash or, if softened, pass vacuously forever."
+        "pyproject.toml no longer carries [tool.coverage.report] fail_under. "
+        "It is the only thing that holds the coverage floor, and the README's "
+        "figure is compared against it below -- with it gone, that comparison "
+        "would either crash or, if softened, pass vacuously forever."
     )
     return int(found.group(1))
 

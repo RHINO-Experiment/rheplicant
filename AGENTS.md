@@ -17,9 +17,19 @@ Redirect to a file and read `$?`:
 .venv/bin/python -m pytest -n 8 > run.log 2>&1; echo "EXIT=$?"; tail -5 run.log
 ```
 
-**Partial runs need `--no-cov`.** `addopts` carries `--cov-fail-under=80`
-measured over the whole package, so running one file exits non-zero on the
-gate even when every test in it passes.
+**Partial runs no longer need `--no-cov`.** `addopts` used to carry
+`--cov=… --cov-fail-under=…`, so running one file exited non-zero on a
+whole-package gate even when every test in it passed. Coverage has moved to its
+own **serial** CI job and `addopts` is now just `-q`; `pytest <file>` is clean.
+
+**Coverage is measured serially, and that is not fussiness.** On one tree with
+all 9724 tests passing, `-n 8` reported **88.32 %** and `-p no:xdist` reported
+**82.26 %** — six points, concentrated in the bootstrap/CLI modules
+(`plugins.py` alone is 417 statements of the gap). The cause is not established.
+What is established is that the parallel figure depends on how the work happened
+to be distributed, so the number anyone quotes comes from the invocation with no
+worker count in it. The floor lives once, in `[tool.coverage.report]
+fail_under`, read by the job, by coverage, and by `tests/test_readme_counts.py`.
 
 **The suite is two pytest sessions.** The evidence layer needs float64 while
 other tests assert refusals only float32 forces, and `jax_enable_x64` is

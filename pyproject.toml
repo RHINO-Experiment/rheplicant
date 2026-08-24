@@ -183,12 +183,28 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=rheplicant --cov=_rheplicant_bootstrap --cov-fail-under=85"
+# Coverage is deliberately NOT here. It is measured by its own SERIAL job --
+# see .github/workflows/test.yml and fail_under below -- because a parallel run
+# and a serial run of this suite do not measure the same thing: on one tree with
+# all 9724 tests passing, `-n 8` reported 88.32 % and `-p no:xdist` reported
+# 82.26 %, a six-point gap concentrated in the bootstrap/CLI modules. Whatever
+# the cause, a figure that depends on the worker count is not a property of the
+# code, so the reported one comes from the invocation that has no worker count.
+#
+# The side benefit is the one every partial run used to pay for: `pytest <file>`
+# no longer trips a whole-package coverage gate, so `--no-cov` is no longer
+# needed just to run part of the suite.
+addopts = "-q"
 
 [tool.coverage.run]
 source = ["rheplicant", "_rheplicant_bootstrap"]
 
 [tool.coverage.report]
+# The floor the serial coverage job enforces. It lives here rather than in a
+# --cov-fail-under flag so that ONE number is read by the job, by coverage
+# itself, and by tests/test_readme_counts.py, which compares the README's
+# printed figure against it.
+fail_under = 82
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

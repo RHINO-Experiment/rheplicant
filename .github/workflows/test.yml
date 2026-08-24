@@ -87,11 +87,43 @@ jobs:
         # error reads as green.
         run: .venv/bin/python -m pytest -n auto
 
-      - name: Coverage, printed and not asserted
-        # The percentage is measured, not stable: three identical `-n 8` runs on
-        # one tree gave 88.29 / 87.10 / 87.18 %, the extra misses concentrated in
-        # subprocess-driven modules whose data is intermittently not combined
-        # back. `--cov-fail-under=80` in addopts is the assertion that holds;
-        # this step exists so the drift is visible while that is settled.
-        if: always()
-        run: echo "See the coverage total in the step above; --cov-fail-under=80 is the gate."
+  coverage:
+    name: Coverage (serial)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Create the environment
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[rhino,numpyro]" --group dev
+
+      - name: Install the integrations that are not on an index
+        continue-on-error: true
+        run: |
+          uv pip install editables
+          uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
+          uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Measure coverage serially
+        # SERIAL on purpose, and this job exists for that one word.
+        #
+        # Measured on one tree with all 9724 tests passing: `-n 8` reports
+        # 88.32 % and `-p no:xdist` reports 82.26 %. The six-point gap is
+        # concentrated in the bootstrap/CLI modules -- plugins.py alone accounts
+        # for 417 statements of it -- and the cause is NOT established. What is
+        # established is that the parallel figure depends on how the work
+        # happened to be distributed, and a number that moves with the worker
+        # count is not a property of the code.
+        #
+        # So the fast pass/fail signal keeps `-n auto` in the job above, and the
+        # figure anyone quotes comes from here. The floor is
+        # [tool.coverage.report] fail_under in pyproject.toml -- one number, read
+        # by this job, by coverage, and by tests/test_readme_counts.py.
+        #
+        # It is slow (~21 minutes locally against ~5). That is the price of a
+        # number that means the same thing twice.
+        run: |
+          .venv/bin/python -m pytest -p no:xdist \
+            --cov=rheplicant --cov=_rheplicant_bootstrap --cov-report=term
