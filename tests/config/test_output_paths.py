@@ -12,6 +12,7 @@ from _rheplicant_bootstrap.output.paths import (
     TRANSACTION_PHASES,
     backup_name,
     decode_journal_temp,
+    failure_name,
     internal_names,
     journal_name,
     journal_temp_name,
@@ -152,6 +153,66 @@ def test_every_budgeted_name_passes_at_max_and_fails_one_over(tmp_path):
     longest = max(names, key=lambda name: len(os.fsencode(name)))
     with pytest.raises(ConfigError, match="NAME_MAX"):
         require_component_budget((longest,), maximum - 1)
+
+
+def test_internal_names_is_an_exact_bound_on_what_a_transaction_publishes():
+    """Every name the runtime can write is budgeted, and budgeted exactly.
+
+    ``manager.py`` pre-flights the NAME_MAX budget from ``internal_names``
+    alone, so if that tuple under-bounds any name a transaction actually
+    creates, the check passes and the write fails later on a filesystem the
+    caller was told was fine.
+
+    It used to carry a second, hand-written list beside it --
+    ``_failure_budget_names`` -- spelling out a timestamp-and-pid failure
+    sibling scheme. A7.6 replaced that scheme with a transaction-id one and the
+    hand-written copy stayed, describing a format nothing produced any more.
+    Measured at the time: the stale copy's longest name was 40 characters past
+    the leaf against the real scheme's 41, so it could only have bound on a
+    system with a nine-digit pid, and Linux caps ``pid_max`` at 2**22 -- seven
+    digits. It was dead weight that could never fire, which is the worst kind:
+    it read as protection.
+
+    This is what replaces it. The bound is asserted EXACT rather than
+    sufficient, because a transaction id is always exactly 32 hex characters,
+    so ``internal_names``' ``"f" * 32`` is not a pessimistic stand-in -- it is
+    the same length as every real id, and a name that is longer here is a name
+    the budget genuinely does not cover.
+
+    **What this cannot see, measured rather than assumed.** ``internal_names``
+    calls the same constructors this test calls, so lengthening ``failure_name``
+    itself moves both sides together and the assertion stays green -- confirmed
+    by mutation. That is not a hole: it is derivation working, since a change
+    to a constructor propagates into the budget automatically. The failure this
+    guards is the budget DIVERGING from the real construction, and both shapes
+    of that are killed -- ``"f" * 32`` shortened to ``"f" * 16`` fails on
+    length, and dropping a name from the tuple fails on count.
+    """
+    target = "/work/result"
+    real = "0123456789abcdef" * 2
+    assert len(real) == 32, "a transaction id is fixed-length hex"
+
+    budget = {len(os.fsencode(name)) for name in internal_names(target)}
+    published = [
+        lock_name(target),
+        journal_name(target),
+        staging_name(target, real),
+        backup_name(target, real),
+        failure_name(target, "refused", real),
+        failure_name(target, "error", real),
+        *(journal_temp_name(target, real, phase) for phase in TRANSACTION_PHASES),
+    ]
+    assert len(published) == len(internal_names(target)), (
+        "internal_names and the names a transaction publishes have drifted "
+        "apart in COUNT; a name that exists in one and not the other is "
+        "either unbudgeted or budgeted and never written."
+    )
+    for name in published:
+        assert len(os.fsencode(name)) in budget, (
+            f"{name!r} is {len(os.fsencode(name))} bytes and internal_names "
+            f"budgets only {sorted(budget)}; the pre-flight NAME_MAX check "
+            "would pass and the write would fail."
+        )
 
 
 def test_recovery_census_is_read_only(tmp_path):

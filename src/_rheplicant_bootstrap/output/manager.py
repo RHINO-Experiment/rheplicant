@@ -119,15 +119,6 @@ _LEASE_PLATFORMS: dict[int, int] = {}
 _INSPECTION_PLATFORMS: dict[int, int] = {}
 
 
-def _failure_budget_names(target_name: str) -> tuple[str, str]:
-    stamp = "99999999T999999.999999Z"
-    process = os.getpid()
-    return (
-        f"{target_name}.refused-{stamp}-{process}",
-        f"{target_name}.error-{stamp}-{process}",
-    )
-
-
 def _mapping(value: object, *, where: str) -> Mapping[object, object]:
     if not static_isinstance(value, Mapping):
         raise ConfigError(f"{where}: must be a mapping.")
@@ -634,7 +625,6 @@ def inspect_output_path(
                 *missing,
                 target_name,
                 *internal_names(absolute),
-                *_failure_budget_names(target_name),
             ),
             limit,
         )
@@ -756,7 +746,6 @@ def acquire_output_lease(
                 *inspection.missing_components,
                 inspection.target_name,
                 *internal_names(absolute),
-                *_failure_budget_names(inspection.target_name),
             ),
             limit,
         )
