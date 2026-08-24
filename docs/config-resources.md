@@ -278,9 +278,9 @@ frequency grid without going through `kind: touchstone`'s own resource entry.
 
 `format: touchstone` is the first of three file formats registered with
 `register_reader(..., array=False)` — the other two are `rhino_hdf5`, a RHINO
-recording read as an object in [`observation:`](config-sections.md#observation),
+recording read as an object in [`observation:`](config-anatomy.md#observation),
 and `eqx_leaves`, a saved equinox file read onto a `model:` node's own
-template (see [config-sections.md](config-sections.md#model)). Every other
+template (see [the anatomy page](config-anatomy.md#model)). Every other
 reader's result is `jnp.asarray`'d before it reaches a field; a `Touchstone`
 is a dataclass of three fields (`freq_hz`, `s`, `z0`), and wrapping it in
 `jnp.asarray` would either mangle it or raise. `array=False` tells

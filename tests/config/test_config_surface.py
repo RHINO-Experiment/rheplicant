@@ -60,6 +60,18 @@ def _block(text: str, heading: str) -> str:
     return re.split(r"\n#{1,6} ", after)[0]
 
 
+#: Number words the pages count in. Not a general table -- it stops where the
+#: things these pages count stop, and a word outside it means something was
+#: resized past what these guards know. Module-level since Batch 5: the run
+#: kinds, the value forms and the tutorial's own claims are counted by three
+#: different classes, and a second copy is the copy that goes stale.
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                 "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                 "eleven": 11, "twelve": 12, "thirteen": 13,
+                 "fourteen": 14, "fifteen": 15, "sixteen": 16,
+                 "seventeen": 17, "eighteen": 18}
+
+
 def _rows(body: str) -> list[list[str]]:
     """Every data row of every markdown table in ``body``, as cell lists.
 
@@ -458,9 +470,9 @@ class TestThePagesSayWhatTheLayerDoes:
 
     That gap is not hypothetical. ``docs/config-inference.md`` said the nine
     2C kinds "are refused by name" for eleven commits after the first of them
-    shipped, ``docs/config-sections.md`` said the same, and every
-    documentation test stayed green throughout -- anchors resolved and counts
-    matched, because both of those really were fine.
+    shipped, ``docs/config-sections.md`` (now ``config-anatomy.md``) said the
+    same, and every documentation test stayed green throughout -- anchors
+    resolved and counts matched, because both of those really were fine.
 
     **What this class does NOT check, so the next author does not assume it
     does.** It checks which kinds are named as *deferred*, which transforms
@@ -474,8 +486,6 @@ class TestThePagesSayWhatTheLayerDoes:
     were found by reading the source, not by a red test. A new per-kind claim
     on either page is unguarded unless someone writes the guard.
     """
-
-    PAGES = ("config-inference.md", "config-sections.md")
 
     def _rows(self):
         table = _section(_page("config-inference.md"), "## Transforms")
@@ -690,15 +700,6 @@ class TestThePagesSayWhatTheLayerDoes:
                 ):
                     run_document(noiseless)
 
-    #: Number words the pages use to count kinds. Not a general table -- these
-    #: are the sizes the ``## Runs`` subsections actually come in, and a word
-    #: outside it means a subsection was resized past what this guard knows.
-    _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-                     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-                     "eleven": 11, "twelve": 12, "thirteen": 13,
-                     "fourteen": 14, "fifteen": 15, "sixteen": 16,
-                     "seventeen": 17, "eighteen": 18}
-
     #: A kind's own bullet under a ``### `` subsection: ``- `forward` — ``.
     #: The BULLET HEADS, never the body -- measured, the ``predict`` bullet
     #: names fisher/plan.sample/nuts/npe in its prose and the ``conjugate.gls``
@@ -765,13 +766,13 @@ class TestThePagesSayWhatTheLayerDoes:
         """
         counted = 0
         for heading, kinds in self._runs_subsections():
-            words = [word for word in self._NUMBER_WORDS
+            words = [word for word in _NUMBER_WORDS
                      if re.search(rf"\b{word}\b", heading, re.IGNORECASE)]
             if not words:
                 continue
             counted += 1
             assert len(words) == 1, f"{heading!r} carries {words}"
-            assert self._NUMBER_WORDS[words[0]] == len(kinds), (
+            assert _NUMBER_WORDS[words[0]] == len(kinds), (
                 f"{heading!r} says {words[0]} and bullets {len(kinds)}: "
                 f"{kinds}"
             )
@@ -781,7 +782,7 @@ class TestThePagesSayWhatTheLayerDoes:
         )
 
     def test_config_sections_states_how_many_kinds_runs_holds(self):
-        """``config-sections.md`` counts them in words and nothing read it.
+        """``config-anatomy.md`` counts them in words and nothing read it.
 
         It is right today -- 4B updated it from sixteen to eighteen -- and it
         was right by hand, which is the condition this repo has twice paid for
@@ -790,15 +791,15 @@ class TestThePagesSayWhatTheLayerDoes:
         from rheplicant.config.sections.runs import _KINDS
 
         stated = re.search(r"\[the (\w+) kinds it runs\]",
-                           _page("config-sections.md"))
+                           _page("config-anatomy.md"))
         assert stated, (
-            "config-sections.md no longer states how many kinds `runs:` holds "
+            "config-anatomy.md no longer states how many kinds `runs:` holds "
             "in the '[the N kinds it runs](...)' form this guard reads."
         )
         word = stated.group(1).lower()
-        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
-        assert self._NUMBER_WORDS[word] == len(_KINDS), (
-            f"config-sections.md says {word} kinds; runs.py declares "
+        assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
+        assert _NUMBER_WORDS[word] == len(_KINDS), (
+            f"config-anatomy.md says {word} kinds; runs.py declares "
             f"{len(_KINDS)}."
         )
 
@@ -889,6 +890,28 @@ class TestThePagesSayWhatTheLayerDoes:
             "reader will not know exists."
         )
 
+    def test_the_anatomy_pages_skeleton_names_every_section_and_no_other(self):
+        """The skeleton is a document shape, so it is parsed as one.
+
+        ``config.md``'s table says which sections are required and which are
+        refused; this fence says what the whole thing LOOKS like, which is the
+        one question a table cannot answer. Two pages carrying the same twelve
+        names is two places to forget one -- so both are read off the loader's
+        ``_SECTIONS`` rather than proofread against each other.
+
+        A section missing from the skeleton is a section a reader will not
+        know exists; a key in the skeleton the loader does not recognise is a
+        reader writing it and being refused by a page's own example.
+        """
+        from rheplicant.config.preflight import _SECTIONS
+
+        skeleton = _page_document("## The skeleton", "config-anatomy.md")
+
+        assert set(skeleton) == set(_SECTIONS), (
+            f"the skeleton on config-anatomy.md names {sorted(skeleton)}; the "
+            f"loader recognises {sorted(_SECTIONS)}."
+        )
+
     def test_every_config_page_is_reachable_from_a_toctree(self):
         """A page in no toctree is a sphinx warning and nothing else.
 
@@ -962,9 +985,9 @@ class TestThePagesSayWhatTheLayerDoes:
                           re.DOTALL)
         assert opens, "config-validation.md no longer counts a Finding's fields"
         word = opens.group(1).lower()
-        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
+        assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
         fields = {field.name for field in dataclasses.fields(Finding)}
-        assert self._NUMBER_WORDS[word] == len(fields), (
+        assert _NUMBER_WORDS[word] == len(fields), (
             f"the page says {word} fields; Finding has {len(fields)}."
         )
         named = set(re.findall(r"`(\w+)`", opens.group(2)))
@@ -1011,8 +1034,8 @@ class TestThePagesSayWhatTheLayerDoes:
                 f"in the {pattern!r} form this guard reads."
             )
             word = found.group(1).lower()
-            assert word in self._NUMBER_WORDS, f"{what}: unknown word {word!r}"
-            assert self._NUMBER_WORDS[word] == len(bullets), (
+            assert word in _NUMBER_WORDS, f"{what}: unknown word {word!r}"
+            assert _NUMBER_WORDS[word] == len(bullets), (
                 f"{what} says {word} and the section bullets {len(bullets)}."
             )
 
@@ -1058,8 +1081,8 @@ class TestThePagesSayWhatTheLayerDoes:
             "'N whole sections this layer does not read' form."
         )
         word = counted.group(1).lower()
-        assert word in self._NUMBER_WORDS, f"unknown number word {word!r}"
-        assert self._NUMBER_WORDS[word] == len(named), (
+        assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
+        assert _NUMBER_WORDS[word] == len(named), (
             f"config-validation.md says {word} sections and names "
             f"{len(named)}: {sorted(named)}."
         )
@@ -1237,11 +1260,11 @@ class TestTheCountsProseStatesAboutThisLayer:
                 "lists makes each plan's changelog count wrong by one."
             )
 
-    #: ``TestThePagesSayWhatTheLayerDoes``' table, plus the neighbourhood the
+    #: the module's :data:`_NUMBER_WORDS`, plus the neighbourhood the
     #: changelog's own number sits in. Extended rather than replaced: a
     #: reworded "thirty-two" must fail as a WRONG COUNT (32 != 31), where an
     #: unknown word would fail as a broken scan and read as this guard's bug.
-    _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
+    _WORDS = {**_NUMBER_WORDS,
               "twenty-nine": 29, "thirty": 30, "thirty-one": 31,
               "thirty-two": 32, "thirty-three": 33}
 
@@ -1596,13 +1619,13 @@ class TestPlan3CsSurfaceAndItsPage:
     SLOTS = "## The three later slots, and what each one buys"
     SPELLINGS = "### A refused document produces no record at all"
 
-    #: :data:`TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS` stops at eighteen
+    #: The module's :data:`_NUMBER_WORDS` stops at eighteen
     #: and later prose counts reach twenty. Extended here rather than
     #: widened there, for the reason
     #: :data:`TestTheCountsProseStatesAboutThisLayer._WORDS` gives: a reworded
     #: count must fail as a WRONG COUNT, where an unknown word fails as a
     #: broken scan and reads as this guard's own bug.
-    _WORDS = {**TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS,
+    _WORDS = {**_NUMBER_WORDS,
               "nineteen": 19, "twenty": 20}
 
     #: How the page's ``report:`` column expands into the cells it stands for.
@@ -2364,7 +2387,7 @@ class TestTheValidationPageDocument:
 
         report = preflight(self._document())
         text = f"{self.HEADING}\n{self._body()}"
-        words = TestThePagesSayWhatTheLayerDoes._NUMBER_WORDS
+        words = _NUMBER_WORDS
         for pattern, what in self._COUNT_CLAIMS:
             found = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
             assert found, (
@@ -2871,3 +2894,198 @@ class TestThePosteriorDocumentOnThePage:
         """
         assert list(results) == ["chain", "chain_spread", "amortized",
                                  "npe_spread"]
+
+
+class TestTheTutorialsTwoDocumentsRun:
+    """``docs/config-tutorial.md`` promises two runnable documents, so both run.
+
+    The page it was promoted from -- ``config-cli.md``'s *Minimal workflow* --
+    carried a fragment that said of itself that it was not runnable, which is
+    an honest thing for a reference page to do and a useless thing for a
+    tutorial. The promise this page makes instead ("copy either one into a file
+    and run it") is only worth making if something checks it, and
+    ``TestTheWorkedDocumentOnThePage`` records what happens when nothing does:
+    2B shipped a page whose document had errors in it that a hand-run found.
+
+    The fences are read off the page the way a reader reads them.
+    """
+
+    SIMULATES = "## A document that simulates"
+    FITS = "## A document that fits"
+
+    #: What the page tells the reader to expect. ``at: {g: 1.4}`` injects the
+    #: gain; 1.4002 is what the fit returns, measured against the shipped
+    #: package rather than derived from the prose.
+    INJECTED = 1.4
+    RECOVERED = 1.4002
+
+    def test_the_first_document_needs_only_the_four_required_sections(self):
+        """The page's claim is not "it runs" but "four sections is enough".
+
+        A fifth section creeping in would leave the document running and the
+        sentence above it false, which no execution check would notice.
+        """
+        from rheplicant.config.preflight import _REQUIRED
+
+        document = _page_document(self.SIMULATES, "config-tutorial.md")
+        optional = set(document) - set(_REQUIRED)
+
+        assert optional == {"schema_version"}, (
+            "the tutorial's first document is introduced as the four required "
+            f"sections plus schema_version; it also carries {sorted(optional)}."
+        )
+
+    def test_the_first_document_runs_and_has_the_shape_the_page_states(self):
+        """``(16, 8)`` is on the page, and it is the axes' own product.
+
+        Asserted against the grids rather than against the literal, so a page
+        that changed ``num: 16`` and forgot the sentence goes red here.
+        """
+        from rheplicant.config import run_document
+
+        document = _page_document(self.SIMULATES, "config-tutorial.md")
+        n_time = document["observation"]["time"]["grid"]["arange"]["num"]
+        n_freq = document["observation"]["freq"]["grid"]["linspace"]["num"]
+
+        results = run_document(document)
+
+        assert list(results) == ["simulate"]
+        assert results["simulate"].product.data.shape == (n_time, n_freq)
+        assert f"`({n_time}, {n_freq})`" in _page("config-tutorial.md"), (
+            "the page states the output shape in prose and it no longer "
+            f"matches the grids it declares, which are ({n_time}, {n_freq})."
+        )
+
+    def test_the_second_document_recovers_the_gain_it_injected(self):
+        """The number on the page, not merely a number near it.
+
+        A fit that never ran would hand back the declared ``init: 1.0``, which
+        is 0.4 away -- so the tolerance is tight enough to tell the two apart
+        and loose enough to survive a float32 re-realisation of the noise.
+        """
+        from rheplicant.config import run_document
+
+        document = _page_document(self.FITS, "config-tutorial.md")
+        assert document["inference"]["observed"]["at"] == {"g": self.INJECTED}
+        assert document["inference"]["parameters"]["g"]["init"] != self.INJECTED
+
+        results = run_document(document)
+
+        assert list(results) == ["simulate", "fit"], (
+            "runs must come back in declaration order"
+        )
+        fitted = float(results["fit"].product["params"]["g"])
+        assert fitted == pytest.approx(self.RECOVERED, abs=5e-4), (
+            f"the page says the fit lands on {self.RECOVERED}; it landed on "
+            f"{fitted}."
+        )
+        assert f"**{self.RECOVERED}**" in _page("config-tutorial.md")
+
+    def test_the_page_counts_the_keys_a_misspelling_is_refused_with(self):
+        """The page promises the refusal names the vocabulary, and counts it.
+
+        Both halves are checked by provoking the refusal the page describes:
+        ``steps`` where ``n_steps`` was meant.
+        """
+        from rheplicant.config import run_document
+        from rheplicant.config.errors import ConfigError
+        from rheplicant.config.sections.exits import _OPTIMIZE_KEYS
+
+        document = _page_document(self.FITS, "config-tutorial.md")
+        options = document["runs"][1]
+        options["steps"] = options.pop("n_steps")
+
+        with pytest.raises(ConfigError) as caught:
+            run_document(document)
+        for key in _OPTIMIZE_KEYS:
+            assert key in str(caught.value), (
+                f"the refusal for a misspelt option omits {key!r}, so the page's "
+                "claim that the vocabulary comes back with the complaint is "
+                f"false. Got: {caught.value}"
+            )
+
+        stated = re.search(r"lists the\s+(\w+) keys the kind does take",
+                           _page("config-tutorial.md"))
+        assert stated, "the tutorial no longer counts the optimize vocabulary"
+        assert _NUMBER_WORDS[stated.group(1).lower()] == len(_OPTIMIZE_KEYS), (
+            f"the tutorial says {stated.group(1)} keys; exits.py declares "
+            f"{len(_OPTIMIZE_KEYS)}."
+        )
+
+    def test_the_page_counts_the_run_kinds_the_same_way_every_page_does(self):
+        """A third page states this count. All three are read off ``_KINDS``."""
+        from rheplicant.config.sections.runs import _KINDS
+
+        stated = re.search(r"one of\s+(\w+) run kinds", _page("config-tutorial.md"))
+        assert stated, (
+            "config-tutorial.md no longer states how many run kinds exist in "
+            "the 'one of N run kinds' form this guard reads."
+        )
+        assert _NUMBER_WORDS[stated.group(1).lower()] == len(_KINDS)
+
+
+class TestEveryPageThatCountsTheValueFormsCountsThemRight:
+    """``Eighteen form keys in eight families`` was on a page and grounded nowhere.
+
+    It has been true since it was written, and it was true by hand -- the same
+    condition this repository has paid for three times (the README's test
+    count drifted by 759, the D range by three, and the placeholder census
+    remembered its own complement). The tutorial repeats both numbers, which
+    is the point at which proofreading stops being a plan.
+
+    The scan is over every page rather than a named one, so a fourth copy is
+    guarded by existing rather than by someone remembering this test.
+    """
+
+    def test_no_page_miscounts_the_form_keys(self):
+        from rheplicant.config.values import VALUE_FORMS
+
+        claims = []
+        for path in sorted(_DOCS.glob("*.md")):
+            text = path.read_text()
+            for pattern in (r"the\s+(\w+)\s+form keys",
+                            r"(\w+)\s+form keys\s+in\s+\w+\s+families"):
+                for word in re.findall(pattern, text):
+                    claims.append((path.name, word.lower()))
+        assert len(claims) >= 3, (
+            f"the form-key count scan found only {claims}; it used to reach "
+            "three sentences across two pages, so either a page dropped the "
+            "claim or the phrasing moved out from under this scan."
+        )
+
+        for page, word in claims:
+            assert word in _NUMBER_WORDS, f"{page} counts form keys in {word!r}"
+            assert _NUMBER_WORDS[word] == len(VALUE_FORMS), (
+                f"{page} says {word} form keys; values.py declares "
+                f"{len(VALUE_FORMS)}."
+            )
+
+    def test_no_page_miscounts_the_families_the_forms_come_in(self):
+        """The families are ``config-values.md``'s own numbered subsections.
+
+        There is no registry of families -- the grouping is editorial, made by
+        that page. So the page IS the source, and every page that counts them,
+        including that one's own heading, is checked against its subsections.
+        """
+        values_page = _page("config-values.md")
+        families = len(re.findall(r"^### \d+\. ", values_page, re.MULTILINE))
+        assert families > 1, "config-values.md's numbered subsections stopped parsing"
+
+        claims = [("config-values.md", word)
+                  for word in re.findall(r"^## The (\w+) forms", values_page,
+                                         re.MULTILINE)]
+        for path in sorted(_DOCS.glob("*.md")):
+            for word in re.findall(r"form keys\s+in\s+(\w+)\s+families",
+                                   path.read_text()):
+                claims.append((path.name, word))
+        assert len(claims) >= 2, (
+            f"the family count scan found only {claims}; both the heading on "
+            "config-values.md and the overview's sentence should be in it."
+        )
+
+        for page, word in claims:
+            assert word.lower() in _NUMBER_WORDS, f"{page} counts families in {word!r}"
+            assert _NUMBER_WORDS[word.lower()] == families, (
+                f"{page} says {word} families; config-values.md has "
+                f"{families} numbered subsections."
+            )

@@ -1,6 +1,9 @@
 # Configuration command line
 
-RHEPLICANT has one installed command and three forms:
+RHEPLICANT has one installed command and three forms. If you have not run one
+before, [the tutorial](config-tutorial.md#running-it-from-the-command-line)
+walks a document from `validate` to a published tree; this page is the
+reference for what each form does and what lands on disk.
 
 ```text
 rheplicant validate CONFIG [--base-dir DIR]
@@ -38,31 +41,6 @@ instead — see "Placing one run's tree without editing the document".
 `outputs.stdout` is `none`, `summary`, or `verbose` and defaults to `summary`.
 It controls success/progress text only. Warnings and errors always use standard
 error.
-
-## Minimal workflow
-
-```bash
-rheplicant validate observation.yaml
-rheplicant run observation.yaml
-```
-
-A package preset is an exact, hashed YAML layer rather than a replacement for
-the user document. `rhino_v1` intentionally leaves instrument-specific facts
-for the user:
-
-```yaml
-schema_version: 1
-defaults: [rhino_v1]
-runtime: {jax_enable_x64: true, platform: cpu, seed: 20260817}
-outputs:
-  dir: results/rhino-night-1
-  clobber: false
-runs:
-  - {name: simulate, kind: forward}
-```
-
-The remaining observation, beam-orientation, and model facts still have to be
-declared; `defaults: [rhino_v1]` alone is not a runnable observation.
 
 ## Audit and scientific output trees
 

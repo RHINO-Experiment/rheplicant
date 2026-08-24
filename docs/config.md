@@ -38,8 +38,9 @@ of the same orchestration.
 
 ## Reading order
 
-The pages below are written to be read in this order. The first three are the
-document's own grammar; the last two are the surfaces that consume it.
+Start with the tutorial if you have not written a document before. The four
+reference pages after it are the document's own grammar, in the order they
+build on each other; the last two are the surfaces that consume it.
 
 :::{list-table}
 :header-rows: 1
@@ -47,14 +48,18 @@ document's own grammar; the last two are the surfaces that consume it.
 
 * - Page
   - What it answers
+* - [Tutorial: your first configuration](config-tutorial.md)
+  - Two complete documents, one that simulates and one that fits, and the two
+    commands that validate and run them. Both are executed by the test suite.
+* - [The document's anatomy](config-anatomy.md)
+  - Every recognised section as one skeleton, the order they are built in, and
+    the two that describe the instrument in full.
 * - [Values and units](config-values.md)
   - How any single number, array or reference is written, and how a unit is
     checked rather than assumed. Eighteen form keys in eight families.
 * - [Resources and captured inputs](config-resources.md)
   - Where data comes from: files, beams, S-parameters, sky models, and how a
     path becomes a byte-exact recorded input.
-* - [Observation and model sections](config-sections.md)
-  - The build order, and the two sections that describe the instrument.
 * - [Inference, likelihoods and exits](config-inference.md)
   - The likelihood, the noise model, the parameters, and every run kind. A
     complete worked document lives here under *A complete document*.
@@ -81,9 +86,10 @@ document's own grammar; the last two are the surfaces that consume it.
 :maxdepth: 2
 :hidden:
 
+config-tutorial
+config-anatomy
 config-values
 config-resources
-config-sections
 config-inference
 config-validation
 config-cli

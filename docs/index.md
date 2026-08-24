@@ -168,8 +168,10 @@ instrument is another template registered the same way.
   - [The canonical signal path](signal-path.md), then
     [the operator catalog](operators.md)
 * - write or run a YAML configuration
-  - [Configuration](config.md) — what a document contains and what v1 covers,
-    then the [command line](config-cli.md) that validates and runs it
+  - [Configuration](config.md) — what a document contains and what v1 covers.
+    A first document, start to finish, is [the
+    tutorial](config-tutorial.md); the [command line](config-cli.md) is what
+    validates and runs it
 * - edit a YAML configuration in a browser
   - [Configuration workbench](config-gui.md) — Model, Config, Execute and
     Results over exact YAML, plus install and trusted-server boundaries
