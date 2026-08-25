@@ -109,16 +109,50 @@ jobs:
       - name: Measure coverage serially
         # SERIAL on purpose, and this job exists for that one word.
         #
-        # Measured on one tree with all 9724 tests passing: `-n 8` reports
-        # 88.32 % and `-p no:xdist` reports 82.26 %. The six-point gap is
-        # concentrated in the bootstrap/CLI modules -- plugins.py alone accounts
-        # for 417 statements of it -- and the cause is NOT established. What is
-        # established is that the parallel figure depends on how the work
-        # happened to be distributed, and a number that moves with the worker
-        # count is not a property of the code.
+        # The reason recorded here was a six-point gap between the runners --
+        # `-n 8` at 88.32 % against `-p no:xdist` at 82.26 %, concentrated in
+        # the bootstrap modules -- with the cause "NOT established". **It is
+        # established and fixed** (8307ff1): two tests installed a
+        # `sys.settrace` probe and handed back `None`, which uninstalls
+        # coverage's own CTracer for the rest of that thread's session. Serially
+        # that blacked out 1982 consecutive tests; under `-n 8` it cost only the
+        # one worker that drew them, which is why the PARALLEL figure was the
+        # closer of the two. `tests/test_coverage_instrument.py` refuses the
+        # shape now, and the runners agree at 89.22 % either way, one statement
+        # apart.
         #
-        # So the fast pass/fail signal keeps `-n auto` in the job above, and the
-        # figure anyone quotes comes from here. The floor is
+        # Re-measured by restoring the pre-fix shape on today's tree and running
+        # `-n 8` with coverage: 3533 missed against 3272, a 261-statement loss
+        # in exactly three files -- `_rheplicant_bootstrap/plugins.py` (+158),
+        # `layering.py` (+101), `frozen.py` (+2). One worker's remainder, and
+        # nothing else.
+        #
+        # THE INTERMITTENT WORKER DROPOUT IS A DIFFERENT FAULT, and that is now
+        # measured rather than asserted. The one on record (PROPOSAL_MERGED.md
+        # A0.3) lost 893 statements across 51 files, clustered on
+        # `config/products/*`, `gui_worker` and `gui_limits`. The settrace
+        # signature above is 261 statements across 3 files, all bootstrap. Same
+        # mechanism class -- one worker's contribution -- different worker and a
+        # disjoint file set.
+        #
+        # Six `-n 8` coverage runs on this tree did not reproduce it: 3272 of
+        # 30350 missed on every one, with NOT ONE file's missed-count differing
+        # between runs. **That is not evidence it is gone.** At the recorded
+        # one-run-in-ten, P(0 in 6) = 0.53; ~29 runs would be needed for 95 %
+        # confidence of seeing one. What the six runs do establish is that the
+        # normal case is exactly reproducible, to the statement.
+        #
+        # What has changed is the consequence. The floor was 85 against a true
+        # 88.3 when A0.3 was written -- three points of slack, which is what let
+        # a 893-statement loss pass as a green run. It is 89 against a measured
+        # 89.22 now, and the settrace mutant above FAILED the gate:
+        # "Required test coverage of 89.0% not reached. Total coverage: 88.36%".
+        # A recurrence of either fault now fails CI instead of being reported as
+        # a pass, which is the property that matters while the cause is open.
+        #
+        # This job stays serial anyway. The reason is now the smaller one and it
+        # stands on its own: one invocation, with no worker count in it, is what
+        # the quoted figure should come from. The floor is
         # [tool.coverage.report] fail_under in pyproject.toml -- one number, read
         # by this job, by coverage, and by tests/test_readme_counts.py.
         #
