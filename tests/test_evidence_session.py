@@ -9,14 +9,47 @@ subtraction at all: the quantity is annihilated, not merely imprecise. Every
 test under ``tests/evidence/`` therefore needs ``jax_enable_x64``.
 
 The flag cannot simply be switched on for the whole suite. float32 is this
-package's production dtype (s2fft and healpix bound it there), and eighteen
-tests assert refusals that only float32 forces -- measured, by running the
-whole suite with ``JAX_ENABLE_X64=1``: exactly eighteen fail, in
+package's production dtype (s2fft and healpix bound it there), and a population
+of tests elsewhere assert refusals that only float32 forces. **This module is
+the one place that population is written down**; everywhere else that mentions
+it -- ``README.md``, ``DESIGN.md``, ``docs/install.md``,
+``tests/evidence/conftest.py``, ``tests/inference/test_gradient_transition.py``
+-- points here rather than restating the number, because six copies of one
+measurement is six things to update and one thing that actually gets updated.
+
+**Measured 2026-08-25 on ``main`` 49eef1e: twenty-two**, in
 ``tests/core/test_coordinates.py`` (10), ``tests/radio/test_cw_time_axis.py``
-(3), ``tests/radio/test_rhino.py`` (1), ``tests/inference/test_gls.py`` (1),
-``tests/inference/test_loss_sense.py`` (1) and
-``tests/inference/test_stochastic_twin.py`` (2), and every one of them is right
-to. Nor can the flag be scoped to a block: jax 0.11.0 has no
+(3), ``tests/radio/test_filters.py`` (2),
+``tests/inference/test_stochastic_twin.py`` (2), ``tests/radio/test_rhino.py``
+(1), ``tests/inference/test_gls.py`` (1), ``tests/inference/test_loss_sense.py``
+(1), ``tests/inference/test_linear_blocks.py`` (1) and
+``tests/inference/test_conjugate_transition.py`` (1) -- and every one of them is
+right to fail. The command::
+
+    JAX_ENABLE_X64=1 .venv/bin/python -m pytest -n 8 --ignore=tests/config
+
+**``--ignore=tests/config`` is load-bearing, and it was not needed when this
+paragraph was first written.** The claim used to read "running the whole suite
+with ``JAX_ENABLE_X64=1`` fails exactly eighteen" and was true when measured
+(``a26c64d``, 2026-08-05). Thirteen days later ``52f3ea3`` added the bootstrap
+runtime audit, which refuses a document declaring ``runtime.jax_enable_x64:
+false`` inside a process that has it on -- correctly, and 1388 times, every one
+of them in ``tests/config``. So the unmodified command now reports 1137 failures
+and 316 errors, and the eighteen it was pointing at are a 1.2 % minority of the
+noise.
+
+Worth naming, because the shape is nastier than a wrong number: **the
+conclusion survived and only the reproduction died.** All eighteen originally
+listed still fail, still for the reason given; four more have joined since. A
+reader re-running the documented command does not find a claim that is subtly
+off, they find a swamp -- and the natural inference from a swamp is that the
+claim was wrong, which it was not. A stale count gets corrected; a stale recipe
+gets the correct finding discarded. (One further caveat, so a re-run is not
+misread: ``tests/gui/e2e/test_packaged_frontend.py`` drives 188 browser tests on
+14 workers and has been seen to fail under this command while passing in the
+default suite and in the unmodified x64 run. It is oversubscription, not dtype.)
+
+Nor can the flag be scoped to a block: jax 0.11.0 has no
 ``jax.experimental.enable_x64`` context manager, and the setting is read once,
 before the first array exists. A separate process carrying
 ``JAX_ENABLE_X64=1`` in its environment is the only mechanism available.
@@ -29,6 +62,30 @@ scanning the summary line. That is why the exit code is not the only thing
 asserted below -- a child that collected nothing, or skipped everything, exits
 0 exactly like a healthy one. Those two outcomes are the silent false green
 this file exists to close, so they are checked by name.
+
+**When the evidence layer migrates, this file goes -- and the twenty-two do
+not become anybody's problem.** The migration spec's §六 step 3 calls the merge
+of the two sessions "一个可能的红利", a possible dividend, and says to re-assess
+this module's reason to exist when it lands. Measured on 2026-08-25, ahead of
+that: ``tests/evidence/`` is the only directory in the suite carrying an x64
+collection gate, so once it leaves for bayesmith there is no x64 consumer left
+and the second session has nothing to run. The merge is therefore **"delete
+this file and that conftest"**, not "turn x64 on for the whole suite".
+
+The distinction is the whole point of measuring early, because the phrase "the
+two sessions merge" reads equally well as the second thing, and the second
+thing is a multi-day trap: it costs the twenty-two refusals above, and only six
+of them live under ``tests/inference/`` and leave with the migration. The other
+sixteen are in ``tests/core/`` and ``tests/radio/``, which are not migrating,
+and they are load-bearing -- float32 stays this instrument's production dtype
+whatever the inference layer does.
+
+What does NOT leave with the evidence layer is the x64 *child process* idiom:
+``tests/radio/test_driftscan_projector.py``, ``tests/radio/test_sky_abstraction.py``,
+``tests/config/test_config_delivery.py`` and ``tests/config/test_config_section_runtime.py``
+each spawn their own, and none of them is migrating. So "rheplicant stops
+needing float64" would be the wrong summary to carry forward; the accurate one
+is that it stops needing a float64 *pytest session*.
 """
 
 import os

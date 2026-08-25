@@ -199,7 +199,9 @@ fails.
 The evidence layer needs float64: a stored factor's offset scalar is the
 time–bandwidth product, ~7.2e11 for one night, against a difference of ~1e5 —
 which float32 annihilates rather than rounds. The rest of the suite must stay at
-float32, because eighteen tests assert refusals that only float32 forces. And
+float32, because a population of tests assert refusals that only float32 forces
+— `tests/test_evidence_session.py` names them and the command that reproduces
+them. And
 `jax_enable_x64` is process-global, so the two cannot share an interpreter.
 
 That split is also why the reported coverage is what it is: the second session

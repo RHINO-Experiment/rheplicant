@@ -16,6 +16,21 @@ unexplained after it was found and fixed.
 .venv/bin/python -m pytest -n 8
 ```
 
+**On a machine you are sharing, run it in two phases instead.** That one
+command has exhausted 96 GB and powered the machine off. No single test is
+the cause; three kinds of parallelism stack. The `-n 8` parent, the `-n 4`
+child `tests/test_evidence_session.py` spawns, and `tests/gui/e2e` shelling
+out to `playwright test`, which takes CPU/2 — **14 browser workers here** —
+for a peak near 27 heavy processes. Only the first is a pytest flag away.
+
+```bash
+.venv/bin/python -m pytest -n 4 --ignore=tests/gui/e2e
+.venv/bin/python -m pytest tests/gui/e2e -n 2
+```
+
+Measured: 337 s + 60 s split, against 258 s in one `-n 8` run, with memory
+flat at 95 % free throughout. About 55 % slower, and it finishes.
+
 **Judge by pytest's exit code, never a pipe's** — and the exit code you were
 handed is often not pytest's. Capture it to its own file, and read *that*:
 

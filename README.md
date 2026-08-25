@@ -43,6 +43,17 @@ the core is domain-agnostic by construction.
 None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
 
+**2 and 4 are being separated into a package of their own**, `bayesmith`,
+which does inference over a graph with no radio astronomy in it. Nothing has
+moved: `rheplicant.inference` is still the implementation, code written
+against it keeps working, and `bayesmith` is not released, so there is nothing
+to install and nothing to migrate to. The separation is designed to keep the
+sentence above rather than spend it — `bayesmith` reads a whole `Pipeline` as
+a single deterministic node, so the twin you fit stays the twin you simulate
+with. The
+[inference pages](https://rheplicant.readthedocs.io/en/latest/inference.html)
+carry the detail and will say when the timing is settled.
+
 ## Two nouns
 
 **`State`** — the complete scientific context: data, coordinates, environment,
@@ -223,7 +234,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(10412 tests, 89.2 % coverage, jit+grad+vmap through the full twin; assembly
+(10439 tests, 89.2 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
@@ -253,8 +264,9 @@ CI runs the suite on every push and pull request, and measures coverage in a sep
 environment collects rather than asserting on it, because a public runner cannot
 hold the `RHEPLICANT_RHINO_*` datasets and so legitimately collects fewer tests
 than a complete machine. The suite is two pytest sessions rather than one — the evidence
-layer needs float64 while eighteen tests elsewhere assert refusals that only
-float32 forces, and `jax_enable_x64` is process-global. Plain `pytest` runs both
+layer needs float64 while a population of tests elsewhere assert refusals that
+only float32 forces (`tests/test_evidence_session.py` records which, and the
+command that reproduces them), and `jax_enable_x64` is process-global. Plain `pytest` runs both
 for you. That split is also why the reported coverage is what it is rather than
 the 99.7 % it was before the evidence layer landed: the second session runs
 `--no-cov` in its own process, so its passing tests contribute nothing to the

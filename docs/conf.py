@@ -159,7 +159,11 @@ html_theme_options = {
     ],
 }
 
-exclude_patterns = ["_build", "superpowers", "_generated"]
+# `_migration-to-bayesmith.md` is a snippet five pages `{include}`, not a page.
+# Excluded so Sphinx does not also build it standalone and warn that it sits in
+# no toctree; `{include}` reads the file directly and is unaffected.
+exclude_patterns = ["_build", "superpowers", "_generated",
+                    "_migration-to-bayesmith.md"]
 
 # The signal path's PROSE is a tracked source file, `docs/signal-path.md`. Only
 # the artefacts it embeds are generated here: the mermaid diagram of the live

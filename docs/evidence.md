@@ -1,5 +1,8 @@
 # Evidence: keeping a campaign after the data is gone
 
+```{include} _migration-to-bayesmith.md
+```
+
 A night of recording is large and a likelihood factor is small. If the factor is
 sufficient, the recording can be archived and the campaign still sampled.
 
