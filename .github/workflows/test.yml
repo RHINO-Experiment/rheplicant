@@ -135,12 +135,24 @@ jobs:
         # mechanism class -- one worker's contribution -- different worker and a
         # disjoint file set.
         #
-        # Six `-n 8` coverage runs on this tree did not reproduce it: 3272 of
-        # 30350 missed on every one, with NOT ONE file's missed-count differing
-        # between runs. **That is not evidence it is gone.** At the recorded
-        # one-run-in-ten, P(0 in 6) = 0.53; ~29 runs would be needed for 95 %
-        # confidence of seeing one. What the six runs do establish is that the
-        # normal case is exactly reproducible, to the statement.
+        # THIRTY `-n 8` coverage runs on this tree did not reproduce it: 3272
+        # of 30350 missed on every one, and not one file's missed-count
+        # differed in any run, across ~600 files. Zero events in 30 puts a 95 %
+        # one-sided upper bound of 9.5 % on the rate, so the recorded
+        # one-run-in-ten is excluded at that confidence. It does NOT exclude a
+        # lower rate: 5 % would still show zero in 30 runs 21 % of the time.
+        #
+        # The settrace signature above was re-measured FOUR times and is
+        # deterministic -- the same 261 statements in the same three files
+        # every run. That is what makes comparing signatures valid: the
+        # scheduling worry (that xdist might scatter the loss differently each
+        # run, so one sample could not tell the two faults apart) was tested
+        # and does not hold here. Both the healthy case and the injected-fault
+        # case are exactly reproducible on this machine.
+        #
+        # Which is what leaves the recorded event genuinely anomalous: 893
+        # statements across 51 files is not a scheduling variant of 261 across
+        # 3, and nothing in 34 runs reproduces either the size or the file set.
         #
         # What has changed is the consequence. The floor was 85 against a true
         # 88.3 when A0.3 was written -- three points of slack, which is what let
