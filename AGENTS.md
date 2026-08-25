@@ -58,6 +58,14 @@ lie:
 
 Suspect a recorded SURVIVED before you suspect the test.
 
+And when a mutant does go red, check that the red is **your** assertion: a
+guard you did not know existed can kill the mutation first, leaving the one
+you just wrote unevaluated. No exit code separates those two — only the
+failure's own test name does. Both halves of this were measured: a
+`sorted()` mutation here was killed by an origin-shape cross-check three
+functions away, and the same mistake in the sibling repository recorded
+four mutants as killed by tests that never ran.
+
 **Count tests from `--junit-xml`, not from the terminal.** Counting dots
 misread a run as `892 passed, 2 skipped` when it was `892 passed, 0
 skipped`; the summary line is prose and the XML is the record.
