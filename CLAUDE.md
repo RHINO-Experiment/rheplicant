@@ -3,6 +3,13 @@
 Repo-specific facts that are expensive to rediscover. Everything here was
 measured in this checkout, not assumed. Keep it short enough to be read.
 
+**This file exists twice.** `CLAUDE.md` and `AGENTS.md` are one document for two
+tools, and `tests/test_docs_claims.py` holds them byte-identical. Edit both, or
+that test goes red with the diff. They were allowed to drift once and each ended
+up stale exactly where the other was current — this page's config allowlist said
+five files against a real three, while `AGENTS.md` still called the coverage gap
+unexplained after it was found and fixed.
+
 ## Running the tests
 
 ```bash
@@ -62,10 +69,16 @@ flag it used to read is gone.
 `tests/config/test_config_surface.py::TestTheLayerBoundaryIsMechanical` scans
 the **text** of every `src/rheplicant/**/*.py` outside `config/` for
 `from rheplicant.config` or `import rheplicant.config`, and allows exactly
-five files:
+three files:
 
-    gui/form_catalog.py  gui/form_edits.py  gui/jobs.py
-    gui/outputs.py       gui/validation.py
+    gui/form_catalog.py  gui/form_edits.py  gui/validation.py
+
+It used to allow five. `gui/jobs.py` and `gui/outputs.py` held the permission
+and imported nothing from config -- they take the vocabulary from
+`form_catalog.py`'s `__all__` like every other GUI module -- so the allowlist
+now asserts in BOTH directions: an entry that does not use its permission
+fails, because an unused exemption is the one file that could start reaching
+into config with nothing to say so.
 
 Because it is a text scan, even a `TYPE_CHECKING` import or a docstring
 containing the phrase trips it. Any other GUI module that needs config
