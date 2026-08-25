@@ -67,6 +67,13 @@ _ENGINE_KEYS: dict[str, frozenset[str]] = {
         {
             "engine",
             "beam",
+            # `beam_alms` and `nside` are the alms route: a driftscan entry may
+            # take a pre-computed analysis instead of running one. `nside` is
+            # inferred from the map length on the `beam:` route and cannot be
+            # inferred from alms, so it is written there and only there -- see
+            # the refusal in `build_projector`.
+            "beam_alms",
+            "nside",
             "lmax",
             "lat_deg",
             "az_deg",
@@ -335,10 +342,19 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
 
     beam_alms = None
     if "beam_alms" in spec:
+        if "beam" in spec:
+            raise ConfigError(
+                f"{name}: writes both beam: and beam_alms:, which are two sources "
+                "for one quantity. beam_alms is the analysis; beam is what the "
+                "analysis would be run on, and the entry can only be built from "
+                "one of them -- so whichever lost would be a declaration the "
+                "document makes and the build discards. Keep the one that is "
+                "authoritative here and delete the other."
+            )
         alms_destination = DestinationDescriptor(
             f"{name}.beam_alms",
             "resource_field",
-            "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
+            f"rheplicant.config.kinds.projectors.build_projector.{engine}.beam_alms",
         )
         resolved = resolve_value(spec["beam_alms"], context, destination=alms_destination)
         beam_alms = jnp.asarray(resolved.value)
@@ -367,17 +383,18 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
             normalize_beam=bool(spec["normalize_beam"]),
         )
 
-    if "nside" in spec:
+    if beam_alms is None and "nside" in spec:
         raise ConfigError(
-            f"{name}: nside is not written for engine: driftscan. from_beam_maps() "
-            "infers it from the map length -- nside is inferred, not declared -- and "
-            "passes it to the constructor itself, so a config that also passed it "
-            "raises 'got multiple values for keyword argument nside'. The beam's own "
-            "nside: is where the resolution is declared."
+            f"{name}: nside is not written for engine: driftscan with beam:. "
+            "from_beam_maps() infers it from the map length -- nside is inferred, "
+            "not declared -- and passes it to the constructor itself, so a config "
+            "that also passed it raises 'got multiple values for keyword argument "
+            "nside'. The beam's own nside: is where the resolution is declared. "
+            "(With beam_alms: it is the other way round: alms carry no pixel "
+            "count, so nside must be written.)"
         )
     check_unknown_keys(name, spec, _ENGINE_KEYS["driftscan"], label="engine: driftscan")
     _require(name, spec, "lmax", "driftscan", "the spherical-harmonic band limit")
-    beam = resolve_reference(_beam_ref(name, spec, "driftscan")["ref"], context)
     forwarded = {
         key: spec[key]
         for key in (
@@ -394,20 +411,54 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
     for key in ("selfrot_deg", "apod_deg", "lst_ref_deg"):
         if key in forwarded:
             forwarded[key] = _angle(spec, key, context, name, engine)
-    projector = DriftScanProjector.from_beam_maps(
-        beam.maps,
-        lat_deg=_angle(spec, "lat_deg", context, name, engine),
-        az_deg=_angle(spec, "az_deg", context, name, engine),
-        el_deg=_angle(spec, "el_deg", context, name, engine),
-        lmax=int(spec["lmax"]),
-        iterations=int(
-            spec["beam_iterations"]
-            if "beam_iterations" in spec
-            else context.use_default("resources.projectors[].beam_iterations", 3)
-        ),
-        normalize_beam=bool(spec["normalize_beam"]),
-        **forwarded,
-    )
+    pointing = {
+        "lat_deg": _angle(spec, "lat_deg", context, name, engine),
+        "az_deg": _angle(spec, "az_deg", context, name, engine),
+        "el_deg": _angle(spec, "el_deg", context, name, engine),
+    }
+    if beam_alms is not None:
+        # The alms route. `from_beam_maps` does exactly two things this
+        # constructor call does not: it infers `nside` from the map length and
+        # it runs `map2alm_iter`. Everything else it accepts -- selfrot_deg,
+        # horizon_mask, apod_deg, mask_iterations, uniform_sampling,
+        # freq_chunk, lst_ref_deg -- it forwards to the constructor untouched,
+        # so an entry built from alms keeps every one of them. Measured by
+        # reading it: the classmethod's body is a shape check, an nside
+        # derivation, one vmapped transform, and `cls(...)`.
+        if "beam_iterations" in spec:
+            raise ConfigError(
+                f"{name}: beam_iterations is written beside beam_alms, and there "
+                "is no analysis for it to iterate -- it is the healpy `iter` "
+                "equivalent of the map-to-alm transform this route skips. The "
+                "alms were analysed wherever they came from, at whatever "
+                "iteration count was used there. Delete it, or switch to beam: "
+                "and let the transform run here."
+            )
+        _require(
+            name, spec, "nside", "driftscan", "the HEALPix resolution the alms are used at"
+        )
+        projector = DriftScanProjector(
+            beam_alms=beam_alms,
+            lmax=int(spec["lmax"]),
+            nside=int(spec["nside"]),
+            normalize_beam=bool(spec["normalize_beam"]),
+            **pointing,
+            **forwarded,
+        )
+    else:
+        beam = resolve_reference(_beam_ref(name, spec, "driftscan")["ref"], context)
+        projector = DriftScanProjector.from_beam_maps(
+            beam.maps,
+            lmax=int(spec["lmax"]),
+            iterations=int(
+                spec["beam_iterations"]
+                if "beam_iterations" in spec
+                else context.use_default("resources.projectors[].beam_iterations", 3)
+            ),
+            normalize_beam=bool(spec["normalize_beam"]),
+            **pointing,
+            **forwarded,
+        )
     if "cache_beam_rotation" in optimizations:
         projector = projector.to_reference_frame()
     return projector

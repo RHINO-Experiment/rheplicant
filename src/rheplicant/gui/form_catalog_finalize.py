@@ -33,7 +33,13 @@ from rheplicant.gui.form_catalog import (
 from rheplicant.gui.forms import FormCatalog, SectionMetadata, SourceRef
 from rheplicant.radio.graph import RADIO_GRAPH
 
-_EXPECTED_DIMENSIONS = {"model_field": 67, "resource_field": 49, "config_path": 56}
+#: ``resource_field`` went 49 -> 51 when the driftscan engine gained the
+#: pre-computed-alms route (A8.6): ``beam_alms`` and ``nside`` became
+#: writable there, and each needs its own dimension selector because a
+#: destination path carries the engine. The census is what made that a
+#: decision rather than a side effect -- it refused collection until the
+#: new surface was acknowledged here.
+_EXPECTED_DIMENSIONS = {"model_field": 67, "resource_field": 51, "config_path": 56}
 _EXPECTED_RESOURCE_KINDS = (
     "arrays",
     "bases",

@@ -367,3 +367,161 @@ class TestPresenceRefusals:
                 "lmax": 8, "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}
         with pytest.raises(ConfigError, match=r"beam: is \{ref:"):
             build_projector("resources.projectors.p", spec, context)
+
+
+class TestDriftscanTakesPrecomputedAlms:
+    """A8.6: the driftscan engine can be handed an analysis instead of running one.
+
+    ``general_pointing`` has taken ``beam_alms:`` since it shipped, and
+    ``test_general_pointing_can_share_the_drift_engines_alms`` above is the
+    reason it matters -- two engines seeing the SAME analysis agree to 2e-16,
+    and re-analysing destroys that. The driftscan engine had no such route:
+    ``beam:`` only, always through ``from_beam_maps``. A user holding
+    audit-recovered alms had to redo the transform, and two driftscan entries
+    could not share one.
+
+    **Nothing is lost by skipping the classmethod**, which is what makes this
+    safe rather than a shortcut. Read against the source: ``from_beam_maps``
+    does exactly two things the constructor does not -- infer ``nside`` from
+    the map length, and run one vmapped ``map2alm_iter``. Every other keyword
+    it accepts (``selfrot_deg``, ``horizon_mask``, ``apod_deg``,
+    ``mask_iterations``, ``uniform_sampling``, ``freq_chunk``,
+    ``lst_ref_deg``) it forwards to the constructor untouched, and those are
+    applied during projection rather than to the maps.
+
+    So the alms route needs exactly the two things the transform used to
+    supply: ``nside`` becomes written instead of inferred, and
+    ``beam_iterations`` has nothing left to iterate.
+    """
+
+    def test_two_driftscan_entries_can_share_one_analysis(self, context):
+        """The capability, and the reason for it: object identity, not equal
+        values. ``{ref: ...}`` hands back the same array, so the two entries
+        cannot drift apart in a later edit the way two analyses would."""
+        doc = _doc()
+        doc["projectors"]["reused"] = {
+            "engine": "driftscan",
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "lmax": 8,
+            "nside": 4,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "az_deg": {"value": 0.0, "unit": "deg"},
+            "el_deg": {"value": 90.0, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": False,
+        }
+        built = build_resources(doc, context)
+        analysed = built.resources["resources.projectors.drift"]
+        reused = built.resources["resources.projectors.reused"]
+
+        assert reused.beam_alms is analysed.beam_alms
+        assert reused.nside == analysed.nside == 4
+        assert reused.lmax == analysed.lmax == 8
+
+    def test_the_map_domain_keywords_survive_the_alms_route(self, context):
+        """The claim in this class's docstring, asserted rather than trusted.
+
+        These are the keywords ``from_beam_maps`` forwards rather than
+        consumes; an alms-built entry must carry every one of them, or the two
+        routes would build different projectors from the same declaration.
+        """
+        doc = _doc()
+        doc["projectors"]["reused"] = {
+            "engine": "driftscan",
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "lmax": 8,
+            "nside": 4,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "az_deg": {"value": 0.0, "unit": "deg"},
+            "el_deg": {"value": 90.0, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": False,
+            "horizon_mask": True,
+            "apod_deg": {"value": 2.5, "unit": "deg"},
+            "mask_iterations": 5,
+            "selfrot_deg": {"value": 10.0, "unit": "deg"},
+            "uniform_sampling": True,
+            "freq_chunk": 1,
+        }
+        reused = build_resources(doc, context).resources["resources.projectors.reused"]
+
+        assert reused.horizon_mask is True
+        assert reused.apod_deg == pytest.approx(2.5)
+        assert reused.mask_iterations == 5
+        assert reused.selfrot_deg == pytest.approx(10.0)
+        assert reused.uniform_sampling is True
+        assert reused.freq_chunk == 1
+
+    def test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route(
+        self, context
+    ):
+        """The one thing that genuinely reverses between the two routes.
+
+        Alms carry no pixel count, so ``nside`` must be written; a map length
+        does, so writing it beside ``beam:`` is refused because
+        ``from_beam_maps`` would pass it too.
+        """
+        doc = _doc()
+        doc["projectors"]["reused"] = {
+            "engine": "driftscan",
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "lmax": 8,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "az_deg": {"value": 0.0, "unit": "deg"},
+            "el_deg": {"value": 90.0, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": False,
+        }
+        with pytest.raises(ConfigError, match="nside"):
+            build_resources(doc, context)
+
+        # ... and the beam: route still refuses it, with the reason updated
+        # rather than removed.
+        with pytest.raises(ConfigError, match="inferred, not declared"):
+            build_resources(_doc(nside=4), context)
+
+    def test_beam_iterations_beside_alms_is_refused(self, context):
+        """There is no transform for it to iterate. Silently ignoring it would
+        leave the document saying the analysis used five iterations when the
+        analysis did not happen here at all."""
+        doc = _doc()
+        doc["projectors"]["reused"] = {
+            "engine": "driftscan",
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "lmax": 8,
+            "nside": 4,
+            "beam_iterations": 5,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "az_deg": {"value": 0.0, "unit": "deg"},
+            "el_deg": {"value": 90.0, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": False,
+        }
+        with pytest.raises(ConfigError, match="no analysis for it to iterate"):
+            build_resources(doc, context)
+
+    @pytest.mark.parametrize("engine", ["driftscan", "general_pointing"])
+    def test_writing_both_beam_and_beam_alms_is_refused(self, context, engine):
+        """Two sources for one quantity, and before this the loser was
+        discarded in silence: ``general_pointing`` read ``beam_alms`` and never
+        looked at the ``beam:`` the document also declared. Refused on both
+        engines rather than on the new one only, since an asymmetry here would
+        be a second rule to remember.
+        """
+        doc = _doc()
+        entry = {
+            "engine": engine,
+            "beam": {"ref": "resources.beams.horn"},
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "lmax": 8,
+            "nside": 4,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": False,
+        }
+        if engine == "driftscan":
+            entry["az_deg"] = {"value": 0.0, "unit": "deg"}
+            entry["el_deg"] = {"value": 90.0, "unit": "deg"}
+        doc["projectors"]["both"] = entry
+        with pytest.raises(ConfigError, match="two sources for one quantity"):
+            build_resources(doc, context)
