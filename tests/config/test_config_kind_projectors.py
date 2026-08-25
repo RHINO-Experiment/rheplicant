@@ -476,9 +476,23 @@ class TestDriftscanTakesPrecomputedAlms:
             build_resources(doc, context)
 
         # ... and the beam: route still refuses it, with the reason updated
-        # rather than removed.
-        with pytest.raises(ConfigError, match="inferred, not declared"):
+        # rather than removed. Pinned by EQUALITY, not by a regex: the message
+        # ledger in `test_config_preflight.py` registers the pre-A8.6 wording
+        # as deliberately corrected, and its contract is that the replacement
+        # is held somewhere by equality -- a `match=` would let the sentence
+        # drift again under the same registration.
+        with pytest.raises(ConfigError) as refused:
             build_resources(_doc(nside=4), context)
+        assert str(refused.value) == (
+            "resources.projectors.drift: nside is not written for engine: "
+            "driftscan with beam:. from_beam_maps() infers it from the map "
+            "length -- nside is inferred, not declared -- and passes it to the "
+            "constructor itself, so a config that also passed it raises 'got "
+            "multiple values for keyword argument nside'. The beam's own "
+            "nside: is where the resolution is declared. (With beam_alms: it "
+            "is the other way round: alms carry no pixel count, so nside must "
+            "be written.)"
+        )
 
     def test_beam_iterations_beside_alms_is_refused(self, context):
         """There is no transform for it to iterate. Silently ignoring it would
@@ -501,12 +515,23 @@ class TestDriftscanTakesPrecomputedAlms:
             build_resources(doc, context)
 
     @pytest.mark.parametrize("engine", ["driftscan", "general_pointing"])
-    def test_writing_both_beam_and_beam_alms_is_refused(self, context, engine):
-        """Two sources for one quantity, and before this the loser was
-        discarded in silence: ``general_pointing`` read ``beam_alms`` and never
-        looked at the ``beam:`` the document also declared. Refused on both
-        engines rather than on the new one only, since an asymmetry here would
-        be a second rule to remember.
+    def test_beam_alms_takes_precedence_over_a_beam_that_is_also_written(
+        self, context, engine
+    ):
+        """Both keys together is PRECEDENCE, and this test replaces one that
+        asserted a refusal.
+
+        The refusal was written here on the grounds that two sources with one
+        silently discarded is the shape this package refuses everywhere else.
+        Measured, that reading is wrong: check B9's own advice tells a user to
+        add ``beam_alms: {ref: ...}`` to an entry that already carries
+        ``beam:``, and `tests/config/test_inflight_optics.py` drives exactly
+        that document to show the remedy works. A refusal here would have
+        refused this layer's own recommendation two gates later -- the R4
+        advice loop `inflight/optics.py` exists to avoid.
+
+        So the behaviour is pinned rather than changed, and the reasoning is
+        recorded so the "fix" is not attempted a second time.
         """
         doc = _doc()
         entry = {
@@ -523,5 +548,10 @@ class TestDriftscanTakesPrecomputedAlms:
             entry["az_deg"] = {"value": 0.0, "unit": "deg"}
             entry["el_deg"] = {"value": 90.0, "unit": "deg"}
         doc["projectors"]["both"] = entry
-        with pytest.raises(ConfigError, match="two sources for one quantity"):
-            build_resources(doc, context)
+
+        built = build_resources(doc, context)
+        drift = built.resources["resources.projectors.drift"]
+        both = built.resources["resources.projectors.both"]
+
+        # The alms won, and by identity -- so the beam: was not re-analysed.
+        assert both.beam_alms is drift.beam_alms

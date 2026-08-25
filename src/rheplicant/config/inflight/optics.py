@@ -386,49 +386,59 @@ def _beam_analysed_twice(run: Built) -> Iterable[Finding]:
             continue
         if all(one is alms[0] for one in alms[1:]):
             continue  # already one analysis: nothing was paid twice
-        engines = {specs[dotted][3] for dotted in members}
+        # The engine of the entry being ADVISED, not the set in the group:
+        # the advice tells that entry to write `beam_alms:`, so what it
+        # additionally needs is a property of it alone. A mixed pair advised
+        # on its general_pointing member needs no `nside:`; the same pair
+        # advised on its driftscan member does.
+        advised_engine = specs[members[1]][3]
         yield warn(
             "B9", members[1],
             f"{members[1]} and {members[0]} both analyse {ref} at lmax="
             f"{lmax} with beam_iterations={iterations}, and this run's two "
             "beam_alms are not the same array -- so the identical spherical "
             f"harmonic transform ran {len(members)} times. "
-            f"{_remedy(engines, members[0])} {_B9_TAIL} (check B9).")
+            f"{_remedy(advised_engine, members[0])} {_B9_TAIL} (check B9).")
 
 
-def _remedy(engines: set[str], first: str) -> str:
+def _remedy(advised_engine: str, first: str) -> str:
     """B9's advice, which exists on one engine and not on the other.
 
-    ``general_pointing`` takes ``beam_alms:``, so the second entry can point
-    at the first's and the analysis runs once -- measured, that route gives
-    ``is``-identity.  ``driftscan`` does not take the key, so on a driftscan
-    pair there is no edit that shares the array and this says so rather than
-    advising something the layer refuses two gates later (R4).
+    Both engines take ``beam_alms:``, so the second entry can point at the
+    first's and the analysis runs once -- measured, that route gives
+    ``is``-identity.
 
-    **TWO branches and no third, because ``_analysing`` admits exactly two
-    engines** (``build_projector`` refuses anything outside ``ENGINES``
-    outright, and ``matrix`` reads no beam so it carries no ``beam:`` to group
-    on).  So ``engines`` is a non-empty subset of the pair, and a MIXED group
-    -- one driftscan and one general_pointing over the same beam, which is
-    legal and which ``test_a_MIXED_engine_group…`` drives -- takes the
-    driftscan branch.  That is **conservative rather than exact**: the
-    general_pointing member could in principle take
-    ``beam_alms: {ref: <the driftscan entry>.beam_alms}``, since
-    ``DriftScanProjector`` does carry that field.  Saying "no edit" there
-    understates the options; saying the opposite on a pair that turned out to
-    be two driftscans would be the R4 loop this function exists to avoid, and
-    understating is the safe direction of the two.
+    **This used to be two branches, and the second one said there was no
+    edit at all.**  That was true when it was written: ``beam_alms:`` was a
+    ``general_pointing`` key, and a driftscan entry carrying it earned
+    ``engine: driftscan does not take ['beam_alms']`` two gates later, so
+    advising it would have been the R4 loop this file exists to avoid.  A8.6
+    opened the route, and the sentence became the last thing standing between
+    a user and a remedy that now exists -- which is the failure mode a
+    "measured" note is most prone to: the measurement stays quotable long
+    after the thing it measured has changed.  ``DriftScanProjector`` always
+    carried the field; only the config grammar did not.
+
+    The one asymmetry left is real and is stated in the advice rather than
+    branched on: alms carry no pixel count, so a driftscan entry taking them
+    must write ``nside:``, where the ``beam:`` route infers it from the map
+    length.
+
+    The clause turns on the engine of the entry being ADVISED rather than on
+    the set of engines in the group, which is what makes a MIXED pair -- one
+    driftscan and one general_pointing over the same beam, legal, and driven
+    by ``test_a_MIXED_engine_group…`` -- come out right rather than merely
+    safe. Advised on its general_pointing member it needs no ``nside:``;
+    advised on its driftscan member it does. The old code sent every mixed
+    group down the driftscan branch and called that conservative, which it
+    was, because the branch said there was nothing to do.
     """
-    if engines == {"general_pointing"}:
-        return (f"Write beam_alms: {{ref: {first}.beam_alms}} on the second "
-                "entry: measured, that route analyses the beam once and hands "
-                "both projectors the same array.")
-    return ("There is no edit that fixes this on engine: driftscan. "
-            "beam_alms: is a general_pointing key -- measured, a "
-            "driftscan entry carrying it earns 'engine: driftscan does "
-            "not take [beam_alms]' -- so the sharing route this layer has "
-            "is not open here, and this is a note about what the run "
-            "costs rather than something to act on. Two driftscan "
-            "projectors over one beam is a supported thing to want; "
-            "examples/driftscan_mmode.py builds exactly that pair on "
-            "purpose.")
+    advice = (f"Write beam_alms: {{ref: {first}.beam_alms}} on the second "
+              "entry: measured, that route analyses the beam once and hands "
+              "both projectors the same array.")
+    if advised_engine == "driftscan":
+        return advice + (" On engine: driftscan write nside: too -- alms "
+                         "carry no pixel count, so the resolution the beam "
+                         "route infers from the map length has to be "
+                         "declared on this one.")
+    return advice

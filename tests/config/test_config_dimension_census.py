@@ -98,6 +98,10 @@ _RESOURCE_SELECTORS = frozenset(
         "rheplicant.config.kinds.beams.build_beam.horizon.apod_deg",
         "rheplicant.config.kinds.projectors.build_projector.matrix.matrix",
         "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
+        # A8.6: the driftscan engine gained the same route, and a
+        # destination path carries the engine, so it needs its own pair.
+        "rheplicant.config.kinds.projectors.build_projector.driftscan.beam_alms",
+        "rheplicant.config.kinds.projectors.build_projector.driftscan.nside",
         "rheplicant.config.kinds.projectors.build_projector.general_pointing.lmax",
         "rheplicant.config.kinds.projectors.build_projector.general_pointing.nside",
         "rheplicant.config.kinds.projectors.build_projector.general_pointing.lat_deg",
@@ -192,7 +196,7 @@ def test_six_resource_parsers_and_outputs_are_independently_censused():
     assert set(RESOURCE_KINDS) == {
         "arrays", "bases", "beams", "projectors", "s_params", "sky_models"
     }
-    assert len(_RESOURCE_SELECTORS) == 49
+    assert len(_RESOURCE_SELECTORS) == 51  # 49 + driftscan's beam_alms and nside (A8.6)
     assert {selector for selector, _ in RESOURCE_DIMENSIONS} | set(RESOURCE_SPECIAL) == \
         _RESOURCE_SELECTORS
     assert set(RESOURCE_OUTPUTS) == {

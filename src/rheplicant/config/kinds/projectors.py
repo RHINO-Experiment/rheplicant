@@ -340,25 +340,15 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
     if problem is not None:
         raise ConfigError(problem)
 
-    beam_alms = None
-    if "beam_alms" in spec:
-        if "beam" in spec:
-            raise ConfigError(
-                f"{name}: writes both beam: and beam_alms:, which are two sources "
-                "for one quantity. beam_alms is the analysis; beam is what the "
-                "analysis would be run on, and the entry can only be built from "
-                "one of them -- so whichever lost would be a declaration the "
-                "document makes and the build discards. Keep the one that is "
-                "authoritative here and delete the other."
-            )
-        alms_destination = DestinationDescriptor(
-            f"{name}.beam_alms",
-            "resource_field",
-            f"rheplicant.config.kinds.projectors.build_projector.{engine}.beam_alms",
-        )
-        resolved = resolve_value(spec["beam_alms"], context, destination=alms_destination)
-        beam_alms = jnp.asarray(resolved.value)
-        record_resolved_delivery(context, alms_destination, resolved.unit)
+    # `beam:` beside `beam_alms:` is PRECEDENCE, not a conflict, and this was
+    # nearly "fixed" into a refusal on the grounds that two sources with one
+    # silently discarded is the shape this package refuses elsewhere. It is
+    # not that shape: check B9's own advice tells a user to add
+    # `beam_alms: {ref: ...}` to an entry that already carries `beam:`, and
+    # `tests/config/test_inflight_optics.py` drives exactly that document to
+    # show the remedy earns its keep. A refusal here would refuse the layer's
+    # own recommendation two gates later -- the R4 advice loop this file
+    # exists to avoid.
     if engine == "general_pointing":
         check_unknown_keys(
             name, spec, _ENGINE_KEYS["general_pointing"], label="engine: general_pointing"
@@ -367,6 +357,18 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
         _require(
             name, spec, "nside", "general_pointing", "the HEALPix resolution of the sampling grid"
         )
+        beam_alms = None
+        if "beam_alms" in spec:
+            alms_destination = DestinationDescriptor(
+                f"{name}.beam_alms",
+                "resource_field",
+                "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
+            )
+            resolved = resolve_value(
+                spec["beam_alms"], context, destination=alms_destination
+            )
+            beam_alms = jnp.asarray(resolved.value)
+            record_resolved_delivery(context, alms_destination, resolved.unit)
         if beam_alms is None:
             beam = resolve_reference(_beam_ref(name, spec, "general_pointing")["ref"], context)
             iterations = (
@@ -382,6 +384,24 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
             nside=int(spec["nside"]),
             normalize_beam=bool(spec["normalize_beam"]),
         )
+
+    # Each engine resolves its own beam_alms rather than sharing one prelude,
+    # and the duplication is what the destination census requires: it reads
+    # this source and resolves `destination=<name>` to the LAST
+    # DestinationDescriptor assigned to that name, so one shared call site can
+    # only ever register one destination. Two concrete destinations exist, so
+    # there are two literal call sites. Measured -- an f-string here, and then
+    # a conditional expression, each registered one unresolvable row.
+    beam_alms = None
+    if "beam_alms" in spec:
+        alms_destination = DestinationDescriptor(
+            f"{name}.beam_alms",
+            "resource_field",
+            "rheplicant.config.kinds.projectors.build_projector.driftscan.beam_alms",
+        )
+        resolved = resolve_value(spec["beam_alms"], context, destination=alms_destination)
+        beam_alms = jnp.asarray(resolved.value)
+        record_resolved_delivery(context, alms_destination, resolved.unit)
 
     if beam_alms is None and "nside" in spec:
         raise ConfigError(
