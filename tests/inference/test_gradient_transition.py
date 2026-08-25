@@ -60,7 +60,7 @@ ROUNDOFF = 1e-4
 
 #: No ``jax_enable_x64`` here, deliberately. The flag is process-global and the
 #: suite's production dtype is float32 -- ``tests/test_evidence_session.py``
-#: documents the eighteen tests that go red when it is on, and an earlier draft
+#: documents the tests that go red when it is on, and an earlier draft
 #: of this file switched it on in a module fixture and took
 #: ``test_linear_groups.py`` down with it. Nothing here needs the precision: the
 #: agreement at float32 is 3.0e-06 against a 1.7e-01 mutation, which is all the

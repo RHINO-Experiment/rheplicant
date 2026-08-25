@@ -1323,8 +1323,9 @@ and refuses on any mismatch.
 The layer requires float64 and the suite does not run there. A stored offset is
 the time–bandwidth product (~7.2e11 for one RHINO night) against a difference
 of ~1e5, which float32 annihilates rather than rounds; but float32 is this
-package's production dtype, and eighteen tests assert refusals only float32
-forces. `jax_enable_x64` is process-global with no scoped form in jax 0.11, so
+package's production dtype, and a population of tests assert refusals only
+float32 forces — `tests/test_evidence_session.py` is where that population is
+counted, dated and reproduced, so this page does not restate the number. `jax_enable_x64` is process-global with no scoped form in jax 0.11, so
 `tests/evidence/` is a second session, and `tests/test_evidence_session.py`
 runs it as a subprocess from the default suite — asserting a positive passed
 count and no skips, because a child that collected nothing exits 0 exactly like

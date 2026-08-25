@@ -3,15 +3,18 @@
 The evidence layer's arithmetic does not survive float32 -- a stored factor's
 offset scalar is the time-bandwidth product, ~7.2e11 for one RHINO night,
 against a difference of ~1e5 -- so these tests need x64. The rest of the suite
-must not get it: float32 is the package's production dtype, and eighteen tests
-elsewhere assert refusals that only float32 forces. That was measured, not
-assumed: running the whole suite with ``JAX_ENABLE_X64=1`` fails exactly those
-eighteen, and each is correct to fail.
+must not get it: float32 is the package's production dtype, and a population of
+tests elsewhere assert refusals that only float32 forces, each correct to fail.
+That population -- its size, its file-by-file breakdown, the date it was
+measured and the exact command that reproduces it -- is recorded in
+``tests/test_evidence_session.py`` and deliberately not repeated here. It used
+to be repeated here, and both copies went stale together on a day neither was
+edited.
 
 Which is why this file does NOT call
 ``jax.config.update("jax_enable_x64", True)``. A conftest in a subdirectory is
 imported while the whole session is being collected, so the update would land
-before those eighteen ever run and break every one of them. The flag arrives
+before any of those tests ran and break every one of them. The flag arrives
 from the environment or it does not arrive.
 
 Two further traps, both checked rather than assumed:

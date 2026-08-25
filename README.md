@@ -253,8 +253,9 @@ CI runs the suite on every push and pull request, and measures coverage in a sep
 environment collects rather than asserting on it, because a public runner cannot
 hold the `RHEPLICANT_RHINO_*` datasets and so legitimately collects fewer tests
 than a complete machine. The suite is two pytest sessions rather than one — the evidence
-layer needs float64 while eighteen tests elsewhere assert refusals that only
-float32 forces, and `jax_enable_x64` is process-global. Plain `pytest` runs both
+layer needs float64 while a population of tests elsewhere assert refusals that
+only float32 forces (`tests/test_evidence_session.py` records which, and the
+command that reproduces them), and `jax_enable_x64` is process-global. Plain `pytest` runs both
 for you. That split is also why the reported coverage is what it is rather than
 the 99.7 % it was before the evidence layer landed: the second session runs
 `--no-cov` in its own process, so its passing tests contribute nothing to the
