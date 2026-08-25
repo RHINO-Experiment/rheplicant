@@ -1,13 +1,16 @@
 # Values in a config document
 
-A twin is currently built in Python: you construct operators, hand them to
+A twin can be built in Python: you construct operators, hand them to
 [the graph](operators.md), and run it. `rheplicant.config` is the layer that
-lets a *document* say the same thing — and the part of it that ships today is
-the **value grammar**: the rules by which a fragment of YAML becomes a number,
+lets a *document* say the same thing — and underneath all of it is the
+**value grammar**: the rules by which a fragment of YAML becomes a number,
 an array, or an object a field can hold.
 
-What is not here yet is the loader that reads a whole file. So the grammar is
-exercised through its resolver rather than through a document:
+This page is that grammar and nothing above it. What a whole document is made
+of is [the anatomy](config-anatomy.md); turning a parsed one into a run is
+`load_document`, and reading a whole YAML file off disk is [the command
+line](config-cli.md). A single value node is small enough to exercise through
+the resolver alone, which is what this does:
 
 ```bash
 .venv/bin/python -c "
