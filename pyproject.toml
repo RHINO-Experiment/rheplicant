@@ -183,28 +183,54 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Coverage is deliberately NOT here. It is measured by its own SERIAL job --
-# see .github/workflows/test.yml and fail_under below -- because a parallel run
-# and a serial run of this suite do not measure the same thing: on one tree with
-# all 9724 tests passing, `-n 8` reported 88.32 % and `-p no:xdist` reported
-# 82.26 %, a six-point gap concentrated in the bootstrap/CLI modules. Whatever
-# the cause, a figure that depends on the worker count is not a property of the
-# code, so the reported one comes from the invocation that has no worker count.
+# Coverage is deliberately NOT here. Two reasons, and the FIRST ONE IS NOW
+# SPENT -- kept because knowing it is spent is what stops it being rediscovered.
 #
-# The side benefit is the one every partial run used to pay for: `pytest <file>`
-# no longer trips a whole-package coverage gate, so `--no-cov` is no longer
-# needed just to run part of the suite.
+# The original reason was that a parallel and a serial run did not measure the
+# same thing: on one tree with all 9724 tests passing, `-n 8` reported 88.32 %
+# and `-p no:xdist` reported 82.26 %, a six-point gap, and a figure that
+# depends on the worker count is not a property of the code. That comment ended
+# "Whatever the cause". The cause was found and fixed: two tests installed a
+# `sys.settrace` probe and handed back `None`, which uninstalls coverage's own
+# CTracer for the rest of the session, blacking out 1982 consecutive tests
+# serially while xdist lost only the one worker that drew them. See
+# `tests/test_coverage_instrument.py`, which now refuses that shape.
+#
+# Measured after the fix, same tree, both runners:
+#
+#     -p no:xdist   3271 and 3272 of 30350 missed on two runs
+#     -n 8           3272 of 30350 missed
+#
+# All three land on 89.22 %, against a 1825-statement spread before. Note where
+# the remaining wobble lives: the two SERIAL runs differ from each other by the
+# same one statement that separates serial from parallel, so it is run-to-run
+# noise and not a property of the worker count. The runners agree, and the
+# original reason to keep coverage out of `addopts` no longer applies.
+#
+# The second reason does, and stands on its own: `pytest <file>` does not trip
+# a whole-package coverage gate, so `--no-cov` is not needed to run part of the
+# suite. That is why this stays as it is rather than moving back.
 addopts = "-q"
 
 [tool.coverage.run]
 source = ["rheplicant", "_rheplicant_bootstrap"]
 
 [tool.coverage.report]
-# The floor the serial coverage job enforces. It lives here rather than in a
+# The floor the coverage job enforces. It lives here rather than in a
 # --cov-fail-under flag so that ONE number is read by the job, by coverage
 # itself, and by tests/test_readme_counts.py, which compares the README's
 # printed figure against it.
-fail_under = 82
+#
+# Raised 82 -> 89 when the settrace blackout above was fixed. 82 was chosen
+# against a real 82.26, i.e. a floor a fraction of a point below the
+# measurement; leaving it there against a real 89.22 would have left SEVEN
+# points of slack, and a gate seven points below reality is one that cannot
+# fail -- which is the shape this repo keeps finding. 89 restores the original
+# tightness rather than inventing a new policy, and was verified to PASS rather
+# than assumed: a full serial run under it reports "Required test coverage of
+# 89.0% reached. Total coverage: 89.22%". The 0.22 of headroom absorbs the
+# one-statement run-to-run wobble noted above with room to spare.
+fail_under = 89
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

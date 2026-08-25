@@ -18,14 +18,18 @@ Redirect to a file and read `$?`:
 ```
 
 **Partial runs no longer need `--no-cov`** — this reversed, and the old habit
-is widespread enough to be worth stating. `addopts` is now just `-q`.
-Coverage moved out of it into a serial CI job, because `-n 8` and
-`-p no:xdist` do not measure the same suite: 88.32 % against 82.26 % on one
-tree with every test passing, a six-point gap concentrated in the
-bootstrap/CLI modules. A figure that depends on the worker count is not a
-property of the code, so the reported one comes from the run that has no
-worker count. Measured on this tree: `pytest tests/test_docs_links.py` with
-no flags exits 0.
+is widespread enough to be worth stating. `addopts` is now just `-q`, so
+`pytest tests/test_docs_links.py` with no flags exits 0. Coverage is measured
+by its own job.
+
+It was moved there because `-n 8` and `-p no:xdist` disagreed by six points.
+**That cause is now fixed** — two tests uninstalled coverage's tracer with
+`sys.settrace(None)`, blacking out 1982 consecutive tests serially, and
+`tests/test_coverage_instrument.py` now refuses that shape. The two runners
+agree: 89.22 % either way, one statement apart, and the remaining wobble is
+run-to-run rather than runner-to-runner. Coverage stays out of `addopts` for
+the second reason only, that a partial run should not trip a whole-package
+gate. `pyproject.toml` carries the measurement.
 
 **The suite is two pytest sessions.** The evidence layer needs float64 while
 other tests assert refusals only float32 forces, and `jax_enable_x64` is
@@ -49,8 +53,9 @@ rather than reading it as green.
 
 The coverage figure in `README.md` is **truncated**, never rounded — the same
 guard treats it as a floor and compares it against `[tool.coverage.report]
-fail_under` in `pyproject.toml` (currently 82). That is the only place the
-floor lives; the `--cov-fail-under` flag it used to read is gone.
+fail_under` in `pyproject.toml` (currently **89**, raised from 82 with the
+fix above). That is the only place the floor lives; the `--cov-fail-under`
+flag it used to read is gone.
 
 ## The config layer's boundary is textual
 
