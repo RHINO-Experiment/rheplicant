@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,12 +46,28 @@ class PreparedExecution:
 
 
 def _capture_service(trace: AuditTrace) -> CaptureService:
+    """A capture service on a fresh temporary root.
+
+    The directory exists before the object that owns it does, so anything
+    raised in between leaks it: nothing else knows the path, and the process
+    that could have cleaned it up is the one unwinding. The window is small
+    -- one closure definition and one constructor -- and small is the reason
+    to close it here rather than to argue about how it could be entered.
+    """
     root = Path(tempfile.mkdtemp(prefix="rheplicant-capture-"))
+    try:
 
-    def on_verified(layer: LayerIdentity, row: CapturedInput) -> None:
-        trace.record_input(layer, captured_input_json(row))
+        def on_verified(layer: LayerIdentity, row: CapturedInput) -> None:
+            trace.record_input(layer, captured_input_json(row))
 
-    return CaptureService(root, on_verified=on_verified)
+        return CaptureService(root, on_verified=on_verified)
+    except BaseException:
+        # ignore_errors: this path is already failing, and a cleanup that
+        # raises here would replace the failure the caller needs to see --
+        # the same trade `prepare_execution_environment` makes explicitly
+        # below, where there is an exception object to hang a note on.
+        shutil.rmtree(root, ignore_errors=True)
+        raise
 
 
 def prepare_execution_environment(
@@ -101,6 +118,22 @@ def prepare_execution_environment(
             trace,
             warning_written,
         )
-    except BaseException:
-        capture.close()
+    except BaseException as error:
+        # `close()` removes every captured file and then rmtree's the root,
+        # and both can raise: `_remove` only forgives FileNotFoundError, and
+        # rmtree forgives nothing. Called bare in an except block, a failure
+        # there REPLACES the exception being handled, so a permissions
+        # problem during cleanup would be reported in place of the real
+        # failure -- the one the user has to act on.
+        #
+        # The note keeps both: the original propagates, and the cleanup
+        # failure travels with it instead of vanishing, which is the half a
+        # bare `suppress` would lose.
+        try:
+            capture.close()
+        except BaseException as cleanup:  # noqa: BLE001 - reported, not handled
+            error.add_note(
+                f"capture cleanup also failed and was not the original fault: "
+                f"{type(cleanup).__name__}: {cleanup}"
+            )
         raise

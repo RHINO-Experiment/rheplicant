@@ -150,6 +150,15 @@ RESOURCE_DIMENSIONS = (
         "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_iterations",
         "count",
     ),
+    (
+        # The alms route (A8.6). Its twin two entries up is general_pointing's;
+        # the destination path carries the engine, so a driftscan entry taking
+        # pre-computed alms needs its own selector or resolution refuses it as
+        # a destination nothing describes.
+        "rheplicant.config.kinds.projectors.build_projector.driftscan.beam_alms",
+        "dimensionless",
+    ),
+    ("rheplicant.config.kinds.projectors.build_projector.driftscan.nside", "count"),
     ("rheplicant.config.kinds.projectors.build_projector.driftscan.lmax", "count"),
     ("rheplicant.config.kinds.projectors.build_projector.driftscan.lat_deg", "deg"),
     ("rheplicant.config.kinds.projectors.build_projector.driftscan.az_deg", "deg"),

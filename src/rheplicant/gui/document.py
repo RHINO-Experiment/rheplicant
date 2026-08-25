@@ -38,6 +38,12 @@ from rheplicant.gui.node_forms import (
 )
 from rheplicant.gui.previews import PreviewProjection, project_previews
 from rheplicant.gui.validation import ValidationProjection, validate_document
+
+#: Re-exported under its historic private name: `outputs.py` and
+#: `document_edits.py` import `_same_value` from here, and the point of
+#: the move is one implementation, not one import path.
+from rheplicant.gui.yaml_values import plain as _plain
+from rheplicant.gui.yaml_values import same_value as _same_value
 from rheplicant.radio.graph import RADIO_GRAPH
 
 _COMPOSITION_KINDS = frozenset(("junction", "selector"))
@@ -200,14 +206,6 @@ def _model(document: Mapping[str, object]) -> Mapping[str, object]:
     return value
 
 
-def _plain(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
-    return value
-
-
 def _dump(document: Mapping[str, object]) -> str:
     return yaml.safe_dump(
         _plain(document),
@@ -215,35 +213,6 @@ def _dump(document: Mapping[str, object]) -> str:
         default_flow_style=False,
         sort_keys=False,
     )
-
-
-def _same_value(left: object, right: object) -> bool:
-    """Compare YAML values without collapsing bool/int/float distinctions."""
-    if isinstance(left, Mapping) and isinstance(right, Mapping):
-        if len(left) != len(right):
-            return False
-        for left_key, left_value in left.items():
-            matches = [
-                right_value
-                for right_key, right_value in right.items()
-                if _same_value(left_key, right_key)
-            ]
-            if len(matches) != 1 or not _same_value(left_value, matches[0]):
-                return False
-        return True
-    if (
-        not isinstance(left, str | bytes)
-        and not isinstance(right, str | bytes)
-        and isinstance(left, Sequence)
-        and isinstance(right, Sequence)
-    ):
-        return len(left) == len(right) and all(
-            _same_value(left_item, right_item)
-            for left_item, right_item in zip(left, right, strict=True)
-        )
-    if type(left) is not type(right):
-        return False
-    return left == right
 
 
 def _claims(model: Mapping[str, object], graph: SignalGraph) -> tuple[str, ...]:

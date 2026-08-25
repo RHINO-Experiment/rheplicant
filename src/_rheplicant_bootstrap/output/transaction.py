@@ -255,11 +255,26 @@ def _write_new_file(
 
 
 def _replace_file(parent_fd: int, name: str, payload: bytes) -> None:
+    """Rewrite one owned staged file in place, verifying identity FIRST.
+
+    The truncation used to ride along on the ``open`` -- ``_OPEN_WRITE |
+    O_TRUNC`` -- which put the destructive act before the check meant to
+    authorise it. Between the ``lstat`` above and that ``open`` the name can
+    be swapped; the identity check below would then refuse, correctly, but
+    only after the file it refused to touch had already been emptied. A
+    refusal that fires after the damage is a report, not a guard.
+
+    ``ftruncate`` after the check is the same two syscalls in the safe order:
+    open (no truncation), confirm this is the inode we stat'ed and that it is
+    a regular file, then empty it. On the refusal path the file is now left
+    exactly as found.
+    """
     before = os.lstat(name, dir_fd=parent_fd)
-    fd = os.open(name, _OPEN_WRITE | os.O_TRUNC, dir_fd=parent_fd)
+    fd = os.open(name, _OPEN_WRITE, dir_fd=parent_fd)
     try:
         if not _same_identity(before, os.fstat(fd)) or not stat.S_ISREG(before.st_mode):
             raise ConfigError(f"owned staged metadata {name!r} changed before rewrite.")
+        os.ftruncate(fd, 0)
         _write_all(fd, payload)
         _fchmod(fd, 0o600)
         _fsync_file(fd)

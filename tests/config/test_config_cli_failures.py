@@ -55,3 +55,49 @@ def test_validate_bad_existing_target_is_read_only_and_has_no_failure_bundle(
     assert main(["validate", str(config)]) == 2
     assert sentinel.read_bytes() == b"foreign"
     assert not tuple(tmp_path.glob("result.refused-*"))
+
+
+def test_a_usage_refusal_carries_the_usage_it_names():
+    """A7.8. ``_Parser.error`` raised ``f"usage: {message}"`` -- the word and
+    then nothing that is one, so ``usage: unrecognized arguments: --zzz`` told
+    a reader they had made a usage mistake and withheld the usage.
+
+    ``format_usage()`` is what argparse would have printed before exiting, so
+    including it makes the promise true. Its own first token is ``usage: ``,
+    which is why the prefix every other caller sees does not move.
+    """
+    import pytest
+
+    from _rheplicant_bootstrap.cli import _parser
+    from _rheplicant_bootstrap.errors import ConfigError
+
+    with pytest.raises(ConfigError) as caught:
+        _parser().parse_args(["validate", "x", "--zzz"])
+
+    message = str(caught.value)
+    assert message.startswith("usage: ")
+    # The part that used to be missing: the actual grammar, and the commands.
+    assert "rheplicant" in message
+    assert "{validate,run,script}" in message
+    # ... and the reason, still there.
+    assert "unrecognized arguments: --zzz" in message
+    # Two lines, not one: the usage block and then what went wrong.
+    assert message.count("\n") >= 1
+
+
+def test_help_still_exits_rather_than_refusing():
+    """The other half of A7.8's sentence, measured and left alone.
+
+    ``--help`` raising ``SystemExit(0)`` is what a CLI should do -- it has
+    printed what was asked for and there is nothing to report. The review
+    paired it with the error path, but only the error path was discarding
+    anything, and turning ``--help`` into a ``ConfigError`` would make
+    ``main(["--help"])`` return a failure code for a successful request.
+    """
+    import pytest
+
+    from _rheplicant_bootstrap.cli import _parser
+
+    with pytest.raises(SystemExit) as caught:
+        _parser().parse_args(["--help"])
+    assert caught.value.code == 0

@@ -122,12 +122,40 @@ targets the density divided by ``prod sigma(theta)``: the GLS-flavoured
 posterior again, not the full one. The contrast to hold in mind is
 :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`, whose
 observation site is a ``Normal`` whose ``log_prob`` carries ``-log scale``
-automatically -- so the ``nuts`` exit samples the full density while
-``plan.sample``'s gradient blocks sample the GLS-flavoured one, from the same
-declared model. The difference is ``O(f^2)`` with ``f = 1/sqrt(delta_nu tau)``
-and is small in most regimes, but it is the same distinction
+automatically -- so the ``nuts`` exit samples the full density while a
+gradient block samples the GLS-flavoured one, from the same declared model.
+It is the same distinction
 :class:`~rheplicant.inference.compressed.BayesMemory` refuses to mix under its
 ``estimator`` field, so it is written here rather than left to be discovered.
+
+**It is the BLOCK TYPE that decides, not the exit** -- worth stating plainly,
+because this paragraph and the migration spec both first described it as
+something ``plan.sample`` does. Measured across both packages on
+``mu = w x`` with ``sigma = 0.5 |mu|``, n=40, prior ``N(0, 100)``, where the
+two closed forms are **5.104641** (log-determinant kept, the unbiased one)
+and **6.258841** (dropped, GLS-flavoured):
+
+======================================  ==========  ===================
+exit                                    lands at    which side
+======================================  ==========  ===================
+``plan.estimate``, CONJUGATE block      5.104558    unbiased
+``plan.estimate``, GRADIENT block       6.248269    GLS-flavoured
+======================================  ==========  ===================
+
+So ``estimate`` shows it too, and a conjugate block does not: freezing sigma
+per inner solve puts its fixed point on the unbiased side, which is the same
+argument :func:`~rheplicant.inference.gls.iterative_gls` makes for itself.
+The ratio is ``1.2261`` against ``(1 + f^2) = 1.25`` at ``f = 0.5``, the gap
+being finite-sample scatter at n=40. The difference is ``O(f^2)`` with
+``f = 1/sqrt(delta_nu tau)`` and is small in most regimes -- but it is
+attached to which ENGINE ran, and reading it as a property of one exit is
+what left the estimate path unexamined.
+
+The numbers are bayesmith's cross-check
+(``tests/crosscheck/test_dispatch.py``, recorded in
+``docs/migration/plan.md``), where the port's own conjugate estimate agrees
+with the first row to **9e-12** and its nonlinear path declines to give a
+point estimate at all.
 """
 
 import dataclasses

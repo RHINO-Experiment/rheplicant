@@ -180,21 +180,24 @@ _B9_TAIL = (
     "(check B9)."
 )
 
-_B9_NO_REMEDY = (
-    "There is no edit that fixes this on engine: driftscan. beam_alms: is a "
-    "general_pointing key -- measured, a driftscan entry carrying it earns "
-    "'engine: driftscan does not take [beam_alms]' -- so the sharing route "
-    "this layer has is not open here, and this is a note about what the run "
-    "costs rather than something to act on. Two driftscan projectors over one "
-    "beam is a supported thing to want; examples/driftscan_mmode.py builds "
-    "exactly that pair on purpose."
+#: The remedy, which on driftscan carries one extra clause: alms have no
+#: pixel count, so the resolution the ``beam:`` route infers has to be
+#: written. Until A8.6 this constant was ``_B9_NO_REMEDY`` and said there was
+#: no edit at all -- true when written, and quotable for as long as nobody
+#: re-measured it.
+_B9_DRIFTSCAN_REMEDY = (
+    "Write beam_alms: {ref: resources.projectors.drift.beam_alms} on the "
+    "second entry: measured, that route analyses the beam once and hands both "
+    "projectors the same array. On engine: driftscan write nside: too -- alms "
+    "carry no pixel count, so the resolution the beam route infers from the "
+    "map length has to be declared on this one."
 )
 
 B9_DRIFTSCAN = (
     "resources.projectors.second and resources.projectors.drift both analyse "
     "resources.beams.horn at lmax=8 with beam_iterations=3, and this run's "
     "two beam_alms are not the same array -- so the identical spherical "
-    "harmonic transform ran 2 times. " + _B9_NO_REMEDY + _B9_TAIL
+    "harmonic transform ran 2 times. " + _B9_DRIFTSCAN_REMEDY + _B9_TAIL
 )
 
 B9_GENERAL_POINTING = (
@@ -671,22 +674,54 @@ class TestB9:
         assert one.beam_alms is two.beam_alms
         assert mine(document, base_dir=str(tmp_path)) == frozenset()
 
-    def test_the_driftscan_advice_is_that_there_ISNT_ONE_and_it_is_measured(
-            self, tmp_path):
-        """§0.3 E.6 ruling 2: B9's own advice is refused by the layer.
+    def test_the_driftscan_advice_now_names_a_remedy_that_works(self, tmp_path):
+        """This test used to assert the OPPOSITE, and the change is the point.
 
-        ``beam_alms:`` is a ``general_pointing`` key only, so on two driftscan
-        projectors the remedy earns a ``ConfigError`` two gates later -- a
-        live R4 advice loop.  The message therefore says plainly that no edit
-        exists there, and this is the measurement behind that sentence.
+        It was ``test_the_driftscan_advice_is_that_there_ISNT_ONE_and_it_is
+        _measured``, and it was right: ``beam_alms:`` was a general_pointing
+        key, so the remedy earned ``does not take ['beam_alms']`` two gates
+        later -- a live R4 advice loop, and the message said plainly that no
+        edit existed. A8.6 opened the route, and the sentence became the last
+        thing between a user and a remedy that now works.
+
+        A "measured" note is exactly what this failure mode preys on: the
+        measurement stays quotable long after the thing it measured has
+        changed, and it reads as more authoritative than prose while doing it.
+        What kept it honest was this test -- the measurement was executable,
+        so opening the route turned the note red instead of leaving it to be
+        found by a reader who trusted it.
+
+        So: apply the advice the message now gives, and assert it builds and
+        shares.
         """
-        with pytest.raises(ConfigError,
-                           match=r"does not take \['beam_alms'\]"):
+        document = two_projectors(tmp_path, second={
+            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+            "nside": 4,
+        })
+        run = built_run(document, base_dir=str(tmp_path))
+        first = run.resources.resources["resources.projectors.drift"]
+        second = run.resources.resources["resources.projectors.second"]
+
+        assert second.beam_alms is first.beam_alms
+        # ... and with one analysis shared, B9 has nothing left to report.
+        assert mine(document, base_dir=str(tmp_path)) == frozenset()
+
+    def test_the_driftscan_advice_says_what_the_alms_route_additionally_needs(
+            self, tmp_path):
+        """The one asymmetry that survives: alms carry no pixel count.
+
+        Applying the remedy WITHOUT ``nside:`` is refused, which is why the
+        driftscan advice carries a clause the general_pointing advice does
+        not. A message that named the remedy and omitted this would send a
+        reader into a second refusal -- the R4 loop, one step further along
+        than the one the old sentence avoided.
+        """
+        with pytest.raises(ConfigError, match="nside"):
             load_document(
                 two_projectors(tmp_path, second={
                     "beam_alms": {"ref": "resources.projectors.drift.beam_alms"}}),
                 base_dir=str(tmp_path))
-        assert _B9_NO_REMEDY in B9_DRIFTSCAN
+        assert "write nside: too" in B9_DRIFTSCAN
 
     def test_an_entry_supplying_its_OWN_beam_alms_analyses_nothing(self,
                                                                   tmp_path):
@@ -752,16 +787,18 @@ class TestB9:
                               np.asarray(two.beam_alms))
 
     def test_a_MIXED_engine_group_takes_the_driftscan_sentence(self, tmp_path):
-        """The branch ``_remedy`` reaches for every group that is not all
-        general_pointing, including the mixed one.
+        """A mixed group is advised on the member the warning attaches to.
 
         One driftscan and one general_pointing over the same beam at the same
         ``lmax``/``beam_iterations`` is a legal document and a real group: both
-        analyse, and the pair is not ``is``-identical.  It gets the driftscan
-        sentence, which understates the options (the general_pointing member
-        could in principle ref the driftscan's ``beam_alms``) and never
-        overstates them -- the direction ``optics.py::_remedy``'s docstring
-        argues for, and the reason there is no third branch.
+        analyse, and the pair is not ``is``-identical.
+
+        This used to take the driftscan branch and be told no edit existed --
+        conservative, and the docstring argued for it on the grounds that
+        overstating would be an R4 loop. With the route open on both engines
+        the honest answer is available: advise the entry the warning is on,
+        and add the ``nside:`` clause only when that entry is a driftscan.
+        Here it is the general_pointing one.
         """
         sections = projector_sections(tmp_path)
         sections["projectors"]["gp"] = dict(GENERAL_POINTING)
@@ -769,7 +806,12 @@ class TestB9:
         found = built_only(document, "B9", base_dir=str(tmp_path))
         assert found.severity == WARN
         assert found.where == "resources.projectors.gp"
-        assert _B9_NO_REMEDY in found.message
+        # The advice is keyed on the ADVISED entry, which here is the
+        # general_pointing one -- so it gets the plain remedy, with no
+        # `nside:` clause, because a general_pointing entry taking alms
+        # already declares its own nside.
+        assert "Write beam_alms:" in found.message
+        assert "write nside: too" not in found.message
 
     def test_the_beam_wins_against_B9(self, tmp_path):
         """§5's ANTI-PROPERTY, for B9 -- the row most likely to be believed to

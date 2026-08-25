@@ -2751,6 +2751,28 @@ _TASK3_SAFE_CORRECTIONS: dict[str, str] = {
 #: was right is kept character for character; "this run's grids say" becomes
 #: "this run's fit twin predicts".
 _CORRECTED_BY_PLAN: dict[str, str] = {
+    # A8.6 gave `engine: driftscan` a `beam_alms:` route, and `nside` reverses
+    # with it: the beam route infers it from the map length and refuses it as
+    # written, the alms route cannot infer it and requires it. The old
+    # sentence was true of the only route that existed and would have been
+    # actively wrong beside the new one, so it names the route it is talking
+    # about and points at the other. Both harvested forms are registered
+    # because the sweep collects the message with and without its leading
+    # interpolation.
+    _HOLE + ": nside is not written for engine: driftscan. from_beam_maps() "
+    "infers it from the map length -- nside is inferred, not declared -- and "
+    "passes it to the constructor itself, so a config that also passed it "
+    "raises 'got multiple values for keyword argument nside'. The beam's own "
+    "nside: is where the resolution is declared.":
+        "test_config_kind_projectors.py::"
+        "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
+    ": nside is not written for engine: driftscan. from_beam_maps() infers it "
+    "from the map length -- nside is inferred, not declared -- and passes it "
+    "to the constructor itself, so a config that also passed it raises 'got "
+    "multiple values for keyword argument nside'. The beam's own nside: is "
+    "where the resolution is declared.":
+        "test_config_kind_projectors.py::"
+        "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
     _HOLE + ": the file holds shape " + _HOLE + "; this run's grids say "
     + _HOLE
     + ". Exactly -- broadcast-compatible is the dangerous case (check C11).":

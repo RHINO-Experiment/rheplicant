@@ -113,24 +113,91 @@ class BuiltResources(NamedTuple):
     order: tuple[str, ...]
 
 
-def _referenced_names(node: Any) -> set[str]:
-    """Every ``resources.<kind>.<name>`` a spec mentions, at any depth."""
+def _expanded(value: str, declared: frozenset[str], owner: str | None) -> set[str]:
+    """One ``resources.`` string as the entry names it will actually read.
+
+    Three or more dotted parts name one entry, which is the ordinary case.
+    **Two parts are a KIND PREFIX**, and that is not a shorthand for nothing:
+    ``{from_switch_order: {resource: resources.s_params}}`` stacks every
+    entry of that kind the switch order names, so the spec depends on all of
+    them. Reading only the three-part form made every such dependency
+    invisible to the build graph.
+
+    What that cost, measured: a document with an ``arrays`` entry stacking
+    ``resources.arrays`` built when the stacking entry was declared LAST and
+    was refused when it was declared FIRST, with ``resources.arrays has no
+    entry for ['hot', 'cold']`` -- naming entries the document plainly
+    declares. `TestBuildOrder.test_order_in_the_document_does_not_matter`
+    states the invariant that broke: "a mapping has an order and a reader
+    should not have to know it."
+
+    The expansion is an OVER-approximation, deliberately: it claims every
+    declared entry of the kind, not the subset the switch order will name,
+    because the order is not known here and depending on too much only
+    constrains the build sequence further. It cannot invent a dependency on
+    something undeclared, since it draws only from ``declared`` -- so the
+    missing-reference check below still sees exactly the names it used to.
+
+    Trailing dots are stripped because ``from_switch_order`` strips them too
+    (``refs.py``'s ``rstrip('.')``), and without that the legal spelling
+    ``resources.s_params.`` produced the phantom name ``resources.s_params.``
+    -- three parts by ``split``, matching no entry, and refused by the
+    missing-reference check as a resource the document does not declare.
+
+    ``owner`` is dropped from an EXPANSION only, never from an explicit
+    reference, and the difference is a defect this package has already paid
+    for once. An entry that stacks its own kind appears in its own expansion,
+    and a self-edge there would be reported as "these entries reference each
+    other in a loop" -- true of the expansion, false of the document. But a
+    *written* ``{ref: resources.probe.a}`` inside ``resources.probe.a`` IS a
+    loop, and a blanket ``name != dotted`` filter used to hide it from the
+    graph entirely; ``TestTheDagWithAProbeKind::
+    test_a_direct_self_reference_is_refused_as_a_cycle`` exists because that
+    filter was removed, and it caught this function reintroducing it.
+    """
+    trimmed = value.rstrip(".")
+    parts = trimmed.split(".")
+    if len(parts) >= 3:
+        return {".".join(parts[:3])}
+    if len(parts) == 2:
+        prefix = trimmed + "."
+        return {
+            name
+            for name in declared
+            if name.startswith(prefix)
+            and "." not in name[len(prefix) :]
+            and name != owner
+        }
+    return set()
+
+
+def _referenced_names(
+    node: Any, declared: frozenset[str] = frozenset(), owner: str | None = None
+) -> set[str]:
+    """Every resource entry a spec will read, at any depth.
+
+    ``declared`` is every ``resources.<kind>.<name>`` the document declares,
+    and it is what lets a bare kind prefix be expanded -- see
+    :func:`_expanded`. It defaults to empty so the scan keeps working for a
+    caller that has no such set; with no set, a kind prefix contributes
+    nothing, which is the behaviour this function had before.
+
+    ``owner`` is the entry whose spec is being scanned, and it is excluded
+    from expansions only. See :func:`_expanded` for why the distinction is
+    not a nicety.
+    """
     found: set[str] = set()
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "ref" and isinstance(value, str) and value.startswith(_REF_PREFIX):
-                parts = value.split(".")
-                if len(parts) >= 3:
-                    found.add(".".join(parts[:3]))
+                found |= _expanded(value, declared, owner)
             else:
-                found |= _referenced_names(value)
+                found |= _referenced_names(value, declared, owner)
     elif isinstance(node, (list, tuple)):
         for item in node:
-            found |= _referenced_names(item)
+            found |= _referenced_names(item, declared, owner)
     elif isinstance(node, str) and node.startswith(_REF_PREFIX):
-        parts = node.split(".")
-        if len(parts) >= 3:
-            found.add(".".join(parts[:3]))
+        found |= _expanded(node, declared, owner)
     return found
 
 
@@ -339,7 +406,16 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     for dotted in list(specs):
         specs[dotted] = _resolved_spec(dotted, specs, kind_of, resolved, [])
 
-    dependencies = {dotted: set(_referenced_names(spec)) for dotted, spec in specs.items()}
+    # `declared` is what lets a bare `resources.<kind>` prefix expand to the
+    # entries it will actually read; see `_expanded`. `owner` is passed rather
+    # than subtracted afterwards: a blanket `- {dotted}` also hides a WRITTEN
+    # self-reference, which is a real loop and which this package already
+    # removed such a filter for once.
+    declared = frozenset(specs)
+    dependencies = {
+        dotted: _referenced_names(spec, declared, dotted)
+        for dotted, spec in specs.items()
+    }
     for dotted, needs in dependencies.items():
         missing = sorted(needs - set(specs))
         if missing:

@@ -9,7 +9,7 @@ resource, operator, state, or inference object.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,6 +22,11 @@ from _rheplicant_bootstrap.presets import read_installed_preset
 from _rheplicant_bootstrap.types import SourceInput
 from rheplicant.config.findings import Finding, Report
 from rheplicant.gui.forms import FormProjection, project_forms
+
+# The lax twin of this used to live here and answered differently on
+# numeric mapping keys; see yaml_values.py for the measurement.
+from rheplicant.gui.yaml_values import plain as _plain
+from rheplicant.gui.yaml_values import same_value as _same
 from rheplicant.radio.graph import RADIO_GRAPH
 
 _PROCESS_SECTIONS = frozenset(("defaults", "plugins", "outputs"))
@@ -74,32 +79,6 @@ class ValidationProjection:
     selected_presets: tuple[str, ...]
     preset_changes: tuple[PresetChange, ...]
     run_blocked: bool
-
-
-def _plain(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
-    return value
-
-
-def _same(left: object, right: object) -> bool:
-    if isinstance(left, Mapping) and isinstance(right, Mapping):
-        return (
-            len(left) == len(right)
-            and all(key in right and _same(value, right[key]) for key, value in left.items())
-        )
-    if (
-        not isinstance(left, str | bytes)
-        and not isinstance(right, str | bytes)
-        and isinstance(left, Sequence)
-        and isinstance(right, Sequence)
-    ):
-        return len(left) == len(right) and all(
-            _same(a, b) for a, b in zip(left, right, strict=True)
-        )
-    return type(left) is type(right) and left == right
 
 
 def _walk_diff(path: str, preset: object, document: object) -> tuple[PresetChange, ...]:

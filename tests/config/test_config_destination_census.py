@@ -106,6 +106,20 @@ EXPECTED_ROUTES = {
         None,
         None,
     ),
+    # A8.6: the driftscan engine gained the same route. It is a SECOND row
+    # rather than a second string in the row above, because each row is one
+    # call site and the two engines resolve their own -- which is itself what
+    # this census requires: `destination=<name>` resolves to the LAST
+    # descriptor assigned to that name, so one shared call site could only
+    # ever register one destination.
+    (
+        "kinds/projectors.py",
+        "build_projector",
+        "resolve_value",
+        "'rheplicant.config.kinds.projectors.build_projector.driftscan.beam_alms'",
+        None,
+        None,
+    ),
     (
         "kinds/s_params.py",
         "_dimensioned",
@@ -407,7 +421,7 @@ def test_every_production_value_resolution_names_its_destination():
             ):
                 missing.append(f"{path.relative_to(ROOT)}:{call.lineno}")
     assert missing == []
-    assert len(routes) == 49
+    assert len(routes) == 50  # 49 + driftscan's beam_alms (A8.6)
     assert len({path for path, _, _ in routes}) == 22
 
 

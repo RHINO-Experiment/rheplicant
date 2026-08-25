@@ -1100,10 +1100,14 @@ class TestUnderDeterminedBlocks:
     def test_the_condition_estimate_matches_a_dense_eigenvalue_computation(
         self, one_load_block
     ):
-        """The number the guard turns on, checked against LAPACK.
+        """The measured κ, checked against LAPACK.
 
-        Also the number a caller needs to pick a tolerance, which is why it is
-        public rather than buried in the guard.
+        NOT the number a caller picks a tolerance from -- that is
+        ``condition_bound``, which is what ``require_convergence`` reads. This
+        one is public because it can SEE a degeneracy the bound cannot, being
+        the only one of the two that measures ``λ_min`` instead of flooring
+        it. ``TestTheTwoConditionNumbersDivideTheLabour`` below pins that the
+        two docstrings keep saying so.
         """
         columns = [one_load_block.forward(jnp.zeros(3).at[i].set(1.0)) for i in range(3)]
         A = jnp.stack([jnp.ravel(c) for c in columns], axis=1)
@@ -1226,3 +1230,90 @@ assert 80.0 < scatter < 120.0, scatter
         done = subprocess.run([sys.executable, "-c", script], env=env,
                               capture_output=True, text=True)
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+class TestTheTwoConditionNumbersDivideTheLabour:
+    """``condition_bound`` bounds; ``condition_estimate`` measures. Both
+    behaviour and prose, because only one of the two rotted.
+
+    The behaviour never broke: ``test_the_bound_is_loose_by_five_decades_on_a
+    _healthy_block`` above has always pinned ``bound >> measured``, so an
+    implementation swap goes red there. What broke was the SENTENCE. The fix
+    that introduced ``condition_bound`` wrote its explanation --
+    "an upper bound", "the number to divide an accuracy target by", "now
+    ``λ_max · max(prior_variance)``" -- into ``condition_estimate``'s
+    docstring, and never took it off. So the two public docstrings ended up
+    contradicting each other about the same function: ``condition_bound``
+    said "``condition_estimate`` measures κ instead and is biased LOW; a
+    tolerance chosen from it is too loose by that bias", while
+    ``condition_estimate`` told the reader to divide their accuracy target by
+    it.
+
+    That is not a cosmetic defect. ``condition_estimate`` is what the config
+    layer's ``condition`` run kind hands back (``config/sections/conjugate.py``),
+    so the number a document author receives came with instructions to use it
+    in the one way its own implementation warns against -- and the bias runs
+    toward silence: measured 33.9x low at a true κ of 1e4 and ~700x at 1e7, so
+    a ``tol`` computed from it is too LOOSE by that factor and certifies an
+    answer it should have refused.
+
+    Prose has no test, which is why it could sit there. These are that test.
+    """
+
+    @staticmethod
+    def _doc(function) -> str:
+        assert function.__doc__, function.__name__
+        return " ".join(function.__doc__.split()).lower()
+
+    def test_only_the_bound_claims_to_be_the_number_to_divide_by(self):
+        """The exact claim that was on the wrong function."""
+        bound = self._doc(condition_bound)
+        estimate = self._doc(condition_estimate)
+
+        assert "number to divide an accuracy target by" in bound
+        assert "number to divide an accuracy target by" not in estimate
+        # ... and the estimate says so in as many words, rather than merely
+        # omitting it: silence would let the claim drift back in unnoticed.
+        assert "do not divide an accuracy target by this number" in estimate
+
+    def test_only_the_bound_claims_to_be_an_upper_bound(self):
+        assert "upper bound" in self._doc(condition_bound)
+        assert "upper bound" not in self._doc(condition_estimate)
+
+    def test_the_estimate_names_its_own_bias_and_its_direction(self):
+        """"Biased" alone is not actionable; a reader needs the SIGN.
+
+        Low means the tolerance it suggests is too loose, which is the
+        direction that certifies rather than refuses.
+        """
+        estimate = self._doc(condition_estimate)
+        assert "too small" in estimate or "too low" in estimate or "too large" in estimate
+        assert "too loose" in estimate
+
+    def test_each_docstring_points_at_the_other(self):
+        """Whichever one a reader lands on, the other is one hop away."""
+        assert "condition_estimate" in self._doc(condition_bound)
+        assert "condition_bound" in self._doc(condition_estimate)
+
+    def test_the_behaviour_the_prose_describes_is_the_behaviour_shipped(
+        self, twin, template_state
+    ):
+        """The anti-vacuity half: the sentences above are checked against the
+        numbers, so a docstring pair that agreed with each other while both
+        describing the wrong function would still fail here.
+
+        ``condition_bound`` floors ``λ_min`` at ``1/max(prior_variance)``
+        instead of measuring it, so on a block whose data constrains every
+        direction it must come back the LARGER of the two -- and by decades,
+        not by a tie-break.
+        """
+        n_time = template_state.coords.time.shape[0]
+        wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
+        block = linear_operator(
+            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
+                                  into=lambda p: p["gain"].gain, linear=True),
+            wide, template_state,
+        )
+        bound = float(condition_bound(block, noise_std=1.0, prior_std=5.0))
+        measured = float(condition_estimate(block, noise_std=1.0, prior_std=5.0))
+        assert bound > 1e4 * measured, (bound, measured)

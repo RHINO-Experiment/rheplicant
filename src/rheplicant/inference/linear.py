@@ -1480,30 +1480,35 @@ def condition_estimate(
     iterations: int = POWER_ITERATIONS,
     key: jax.Array | None = None,
 ) -> jax.Array:
-    """An upper bound on the conditioning of the system this block is solved with.
+    """The MEASURED conditioning of the system this block is solved with.
 
     ``κ(AᵀN⁻¹A + S⁻¹)`` is the number that says how much a solver's residual
     understates its error: for a solution ``x`` with relative residual ``r``,
 
         ‖x - x*‖ / ‖x*‖  ≤  κ · r
 
-    so a residual of 1e-6 against κ=1e7 certifies nothing at all. Use it to
-    pick ``tol`` for :func:`wiener_solve` and :func:`gcr_sample`: for a target
-    relative accuracy ``a``, ask for roughly ``tol = a / κ``.
+    so a residual of 1e-6 against κ=1e7 certifies nothing at all.
 
-    **A BOUND, and it has not always been one.** This returned ``λ_max`` over a
-    MEASURED ``λ_min`` until the measurement was shown to be biased high — see
-    :func:`_condition_estimate` for the numbers and where they came from. The
-    number here is now ``λ_max · max(prior_variance)``, which bounds κ from
-    above and is therefore safe to divide an accuracy target by; the old one
-    was too small by as much as a factor of 700, so the ``tol`` a reader
-    computed from it was too loose by the same. It is an over-estimate where
-    the data does constrain every direction, and that costs iterations rather
-    than correctness.
+    **Do not divide an accuracy target by this number.**
+    :func:`condition_bound` is the one to divide by, and it is what
+    ``require_convergence`` itself reads. This one measures ``λ_min`` by a
+    second power iteration, whose leading eigenvalues crowd against ``λ_max``
+    with vanishing gaps on a graded spectrum, so the ``λ_min`` it returns is
+    too LARGE and this κ too SMALL — measured on a 20-point geometric
+    spectrum at a true κ of 1e4, λ_min came back 33.9× high and κ 33.9× low;
+    at 1e7 over 50 points the factor was ~700 and 2000 iterations did not
+    close it. A ``tol`` computed from it is too LOOSE by that factor, which is
+    the direction that certifies an answer it should have refused. See
+    :func:`_condition_estimate` for where those numbers came from.
 
-    ``λ_max`` itself is approached from BELOW, geometrically, so the estimate
-    can only make the bound smaller — never larger than the truth by more than
-    that convergence leaves on the table.
+    **What it is good for is the thing a bound cannot do: it can SEE a
+    degeneracy.** A near-degenerate partition shows up entirely in ``λ_min``,
+    which the bound replaces with the prior's floor and therefore cannot
+    report. Measured in
+    ``tests/inference/test_linear_groups.py::TestGroupedVsAlternating``: the
+    joint operator's κ exceeds its members' by orders of magnitude here, and
+    by a factor of 1.7 under the bound. Read it as a diagnostic — "how badly
+    conditioned is this partition?" — and never as a certificate.
 
     Large κ is not a defect here, it is the design: for a block the data does
     not fully identify, ``λ_min`` is exactly ``1/prior_std²`` while ``λ_max``
@@ -1524,10 +1529,10 @@ def condition_estimate(
             is refused by name, and a 1-D sigma whose axis the prediction
             cannot settle is refused by
             :func:`~rheplicant.inference.noise.check_noise_std_axis`. They have
-            to, because this is the function a caller is told to consult in
-            order to choose ``tol`` for those solves — a κ computed under a
-            different reading of the same array answers a different question
-            than the solve it was computed for.
+            to, because a diagnostic is only about the system it describes: a κ
+            computed under a different reading of the same array answers a
+            different question than the solve it was computed for, and would
+            report the conditioning of an operator nobody builds.
         prior_std: as for :func:`wiener_solve` — it defaults to the latent's
             declared prior, so the κ reported here is the κ of the system those
             solves will build rather than of a system nobody solves.

@@ -16,13 +16,73 @@ unexplained after it was found and fixed.
 .venv/bin/python -m pytest -n 8
 ```
 
-**Judge by pytest's exit code, never a pipe's.** `pytest … | tail` reports the
-exit status of `tail`, so a collection error or a usage error reads as green.
-Redirect to a file and read `$?`:
+**Judge by pytest's exit code, never a pipe's** — and the exit code you were
+handed is often not pytest's. Capture it to its own file, and read *that*:
 
 ```bash
-.venv/bin/python -m pytest -n 8 > run.log 2>&1; echo "EXIT=$?"; tail -5 run.log
+.venv/bin/python -m pytest -n 8 > run.log 2>&1; echo "PYTEST_EXIT=$?" > run.exit
+cat run.exit; tail -5 run.log
 ```
+
+Writing `…; echo "EXIT=$?"; tail -5 run.log` on one line is not enough, and
+that was the old advice here. The compound command ends in `tail`, so its
+status is `tail`'s — and anything reporting on the command as a whole (a
+wrapper, a task notification, `&&`) says **0** however pytest ended.
+Measured: a run stopped with SIGTERM at 92 % printed `EXIT=143` while the
+harness announced `exited with code 0`. Zero failures so far and no
+completion looks exactly like a pass.
+
+**Non-zero is not one thing.** pytest returns **1** for tests failed, **2**
+interrupted, **3** internal error, **4** usage error (a mis-split `-k`
+expression does this), **5** nothing collected; a killed process gives
+**143**. Only **1** means a test failed.
+
+That distinction is load-bearing in **mutation testing**, where the rule is
+"mutate, expect red": scoring any non-zero as a kill turns a typo in the
+pytest invocation into a KILLED for every mutant, and the guard being
+checked is never exercised. Score `1`, and treat 2–5 as "the run did not
+happen".
+
+**And clear `__pycache__` between mutants.** Restoring a source file with
+`cp` inside the same second leaves bytecode whose timestamp is not older
+than the source, so Python reuses it and the mutant never runs — recorded
+as a **SURVIVED** that is just as false as the KILLs above, and pointing
+the other way. Three shapes, three directions, all of them a green-looking
+lie:
+
+| what you see | what happened |
+|---|---|
+| exit 4 read as "tests failed" | a mis-split `-k`; the run never started |
+| exit 143 reported as 0 | a killed run, 92 % done, zero failures so far |
+| SURVIVED | stale bytecode; the mutation was never executed |
+
+Suspect a recorded SURVIVED before you suspect the test.
+
+And when a mutant does go red, check that the red is **your** assertion: a
+guard you did not know existed can kill the mutation first, leaving the one
+you just wrote unevaluated. No exit code separates those two — only the
+failure's own test name does. Both halves of this were measured: a
+`sorted()` mutation here was killed by an origin-shape cross-check three
+functions away, and the same mistake in the sibling repository recorded
+four mutants as killed by tests that never ran.
+
+**Mutation testing also has one blind spot, and it is structural rather
+than a matter of care.** It asks whether an assertion is sensitive to its
+input. It cannot ask whether the input is the one you think it is — because
+**you can only mutate what you already know is a variable**. Measured: two
+cross-repository guards asserting upstream docstring text survived every
+mutation of that text and were nonetheless green only because the editable
+install happened to be checked out on an unmerged branch. The mutations
+proved the assertions read the text; nothing in reach proved *which ref*
+the text came from, since the ref was not in the variable set. Finding that
+took someone working in the other repository, for whom "which checkout is
+installed" was the first suspicious thing rather than a constant. When a
+guard's greenness depends on something you have never varied, no amount of
+mutating what you have will surface it.
+
+**Count tests from `--junit-xml`, not from the terminal.** Counting dots
+misread a run as `892 passed, 2 skipped` when it was `892 passed, 0
+skipped`; the summary line is prose and the XML is the record.
 
 **Partial runs no longer need `--no-cov`** — this reversed, and the old habit
 is widespread enough to be worth stating. `addopts` is now just `-q`, so
