@@ -1,5 +1,8 @@
 # Noise, linear blocks, and conditioning
 
+```{include} _migration-to-bayesmith.md
+```
+
 Giving the noise is giving the likelihood, and a block that is genuinely linear
 in its latents has a posterior in closed form. These belong on one page because
 they are one argument: the noise model decides what `S` and `N` are, the linear

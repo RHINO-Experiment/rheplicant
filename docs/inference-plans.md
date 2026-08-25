@@ -1,5 +1,8 @@
 # Plans and engines
 
+```{include} _migration-to-bayesmith.md
+```
+
 One space can be stepped by several engines at once. A `SamplingPlan` declares
 the partition and *derives* each block's engine from what the latents already
 say about themselves, rather than restating it.

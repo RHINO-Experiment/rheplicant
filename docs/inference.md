@@ -1,5 +1,8 @@
 # Inference
 
+```{include} _migration-to-bayesmith.md
+```
+
 A digital twin is only half a research tool. The other half is running it
 backwards: given data, what were the sky, the beam, the gain? RHEPLICANT does
 that through one object — a **parameter space** — that every inference engine

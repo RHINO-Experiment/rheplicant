@@ -1,5 +1,8 @@
 # Parameter spaces: what you infer, and how it enters
 
+```{include} _migration-to-bayesmith.md
+```
+
 Declaring an inference problem is two separate statements, and keeping them
 separate is what lets one latent drive several stages, or a leaf be a transform
 of several latents, without a new operator for each combination.

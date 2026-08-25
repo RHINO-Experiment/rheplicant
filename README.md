@@ -43,6 +43,17 @@ the core is domain-agnostic by construction.
 None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
 
+**2 and 4 are being separated into a package of their own**, `bayesmith`,
+which does inference over a graph with no radio astronomy in it. Nothing has
+moved: `rheplicant.inference` is still the implementation, code written
+against it keeps working, and `bayesmith` is not released, so there is nothing
+to install and nothing to migrate to. The separation is designed to keep the
+sentence above rather than spend it — `bayesmith` reads a whole `Pipeline` as
+a single deterministic node, so the twin you fit stays the twin you simulate
+with. The
+[inference pages](https://rheplicant.readthedocs.io/en/latest/inference.html)
+carry the detail and will say when the timing is settled.
+
 ## Two nouns
 
 **`State`** — the complete scientific context: data, coordinates, environment,
