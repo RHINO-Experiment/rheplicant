@@ -189,7 +189,16 @@ def publish_script(
         return absolute
     except ConfigError:
         raise
-    except OSError as error:
+    except (OSError, NotImplementedError) as error:
+        # `NotImplementedError` is not an `OSError` and is a real outcome of
+        # the `os.link(..., follow_symlinks=False)` above: CPython raises it
+        # where the platform cannot honour that keyword. Measured here
+        # (darwin): `os.link in os.supports_follow_symlinks` is True and the
+        # call succeeds, so this is a portability guard rather than a live
+        # path on this machine -- which is exactly why it needs writing down
+        # instead of testing. Without it the one platform that cannot do it
+        # gets a raw traceback out of a publish step, where every other
+        # failure here arrives as this package's own refusal.
         raise ConfigError(f"cannot publish generated script {absolute!r}: {error}.") from None
     finally:
         if temporary_created:

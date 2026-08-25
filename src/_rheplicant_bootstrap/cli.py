@@ -17,8 +17,29 @@ from _rheplicant_bootstrap.source import read_source
 
 
 class _Parser(argparse.ArgumentParser):
+    """An argparse parser that refuses through this package's error type.
+
+    The override exists so a usage mistake arrives as a ``ConfigError`` the
+    caller can catch, rather than as argparse's own ``SystemExit`` -- which
+    matters because ``main()`` is a library entry point with a documented
+    ``int`` return, and a process-exiting parser would make that signature a
+    fiction for every argument mistake.
+
+    It used to raise ``f"usage: {message}"``, which promised a usage line and
+    then did not print one: the reader got ``usage: unrecognized arguments:
+    --zzz`` and no indication of what the usage IS. ``format_usage()`` is
+    what argparse would have written before exiting, so including it makes
+    the word true. The message still begins ``usage: `` -- that is the first
+    token of ``format_usage()`` -- so nothing matching on the prefix moves.
+
+    ``--help`` is deliberately left alone. It still raises ``SystemExit(0)``
+    after printing, which is what a CLI should do and what ``main`` reports
+    as its own exit code; the review paired the two, but only the error path
+    was discarding anything.
+    """
+
     def error(self, message: str) -> None:
-        raise ConfigError(f"usage: {message}")
+        raise ConfigError(f"{self.format_usage().strip()}\n{message}")
 
 
 def _parser() -> _Parser:

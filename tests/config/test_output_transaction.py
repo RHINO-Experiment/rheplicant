@@ -504,3 +504,58 @@ def test_publication_revalidates_ancestry_immediately_before_rename(
         assert not (tmp_path / "held-private" / "result").exists()
     finally:
         close_output_lease(lease)
+
+
+class TestTheRewriteVerifiesBeforeItTruncates:
+    """A7.8. ``_replace_file`` opened with ``O_TRUNC`` and checked the inode
+    afterwards, so a name swapped between its ``lstat`` and its ``open`` was
+    emptied and *then* refused. The refusal was correct and arrived after the
+    damage, which makes it a report rather than a guard.
+
+    The order is now open, verify, ``ftruncate``.
+
+    The race lives INSIDE the function -- between two syscalls it makes
+    itself -- so it cannot be lost from outside: a swap arranged by a test is
+    simply what ``_replace_file`` stats. What can be tested is the property
+    the reordering buys, which is the one that matters: **on the refusal
+    path, the bytes are still there.** ``_same_identity`` is forced to
+    disagree, which is what a real swap would produce at exactly that point.
+    """
+
+    def test_a_refused_rewrite_leaves_the_file_untouched(self, tmp_path, monkeypatch):
+        import os
+
+        from _rheplicant_bootstrap.errors import ConfigError
+        from _rheplicant_bootstrap.output import transaction
+
+        original = b"the bytes that must survive a refusal"
+        target = tmp_path / "metadata.json"
+        target.write_bytes(original)
+
+        monkeypatch.setattr(transaction, "_same_identity", lambda left, right: False)
+
+        parent_fd = os.open(tmp_path, os.O_RDONLY)
+        try:
+            with pytest.raises(ConfigError, match="changed before rewrite"):
+                transaction._replace_file(parent_fd, "metadata.json", b"new payload")
+        finally:
+            os.close(parent_fd)
+
+        assert target.read_bytes() == original
+
+    def test_an_accepted_rewrite_still_replaces_the_whole_file(self, tmp_path):
+        """ANTI-VACUITY, and the half a reordering can break: ``ftruncate``
+        has to actually run on the accepted path, or a payload shorter than
+        what it replaces would leave the tail of the old file behind."""
+        import os
+
+        from _rheplicant_bootstrap.output.transaction import _replace_file
+
+        target = tmp_path / "metadata.json"
+        target.write_bytes(b"x" * 200)
+        parent_fd = os.open(tmp_path, os.O_RDONLY)
+        try:
+            _replace_file(parent_fd, "metadata.json", b"short")
+        finally:
+            os.close(parent_fd)
+        assert target.read_bytes() == b"short"

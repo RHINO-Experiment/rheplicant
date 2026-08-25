@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from io import StringIO
 from types import SimpleNamespace
@@ -224,3 +225,92 @@ def test_prepare_failure_closes_capture(tmp_path, monkeypatch):
         )
 
     assert capture.close_calls == 1
+
+
+class TestCleanupDoesNotReplaceTheFailure:
+    """A7.8. ``prepare_execution_environment``'s unwind called
+    ``capture.close()`` bare, and ``close()`` can raise: ``_remove`` forgives
+    only ``FileNotFoundError`` and the closing ``shutil.rmtree`` forgives
+    nothing. A failure there REPLACED the exception being handled, so a
+    permissions problem during cleanup would be reported in place of the
+    fault the user has to act on.
+
+    The original now propagates and the cleanup failure travels with it as a
+    note -- the half that a bare ``contextlib.suppress`` would have thrown
+    away.
+    """
+
+    def test_the_original_exception_survives_a_failing_close(self):
+        class Boom(RuntimeError):
+            """The real failure, the one that must reach the caller."""
+
+        class ExplodingCapture:
+            def close(self):
+                raise OSError("cleanup could not remove the capture root")
+
+        capture = ExplodingCapture()
+
+        # The shape of the code under test, isolated: an in-flight exception
+        # and a cleanup that fails during the unwind.
+        def unwind():
+            try:
+                raise Boom("the fault worth reporting")
+            except BaseException as error:
+                try:
+                    capture.close()
+                except BaseException as cleanup:  # noqa: BLE001
+                    error.add_note(
+                        f"capture cleanup also failed and was not the original "
+                        f"fault: {type(cleanup).__name__}: {cleanup}"
+                    )
+                raise
+
+        with pytest.raises(Boom) as caught:
+            unwind()
+
+        notes = getattr(caught.value, "__notes__", [])
+        assert any("cleanup also failed" in note for note in notes), notes
+        assert any("OSError" in note for note in notes), notes
+
+    def test_the_source_still_wraps_close_rather_than_calling_it_bare(self):
+        """The test above pins the SHAPE; this pins that the shape is the one
+        shipped. Reading the source is the only way to tell here -- the real
+        function needs a whole prepared config, a runtime session and a
+        plugin walk before it can reach its own unwind, and a fixture that
+        heavy would be testing the fixture."""
+        import inspect
+
+        source = inspect.getsource(environment.prepare_execution_environment)
+        assert "except BaseException as error:" in source
+        assert "add_note" in source
+        # The bare call is what this replaced; it must not come back.
+        assert "\n        capture.close()\n        raise" not in source
+
+    def test_a_capture_service_that_cannot_be_built_leaves_no_directory(
+        self, tmp_path, monkeypatch
+    ):
+        """The other half: ``mkdtemp`` runs before the object that owns the
+        directory exists, so anything raised in between leaks it -- nobody
+        else knows the path."""
+        import tempfile
+
+        made = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def recording_mkdtemp(*args, **kwargs):
+            path = real_mkdtemp(*args, **kwargs, dir=str(tmp_path))
+            made.append(path)
+            return path
+
+        monkeypatch.setattr(environment.tempfile, "mkdtemp", recording_mkdtemp)
+
+        def exploding_service(*args, **kwargs):
+            raise RuntimeError("the service could not be constructed")
+
+        monkeypatch.setattr(environment, "CaptureService", exploding_service)
+
+        with pytest.raises(RuntimeError, match="could not be constructed"):
+            environment._capture_service(trace=None)
+
+        assert made, "the probe must have seen a mkdtemp to be evidence"
+        assert not any(os.path.exists(path) for path in made), made
