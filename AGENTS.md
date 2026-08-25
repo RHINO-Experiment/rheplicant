@@ -66,6 +66,20 @@ failure's own test name does. Both halves of this were measured: a
 functions away, and the same mistake in the sibling repository recorded
 four mutants as killed by tests that never ran.
 
+**Mutation testing also has one blind spot, and it is structural rather
+than a matter of care.** It asks whether an assertion is sensitive to its
+input. It cannot ask whether the input is the one you think it is — because
+**you can only mutate what you already know is a variable**. Measured: two
+cross-repository guards asserting upstream docstring text survived every
+mutation of that text and were nonetheless green only because the editable
+install happened to be checked out on an unmerged branch. The mutations
+proved the assertions read the text; nothing in reach proved *which ref*
+the text came from, since the ref was not in the variable set. Finding that
+took someone working in the other repository, for whom "which checkout is
+installed" was the first suspicious thing rather than a constant. When a
+guard's greenness depends on something you have never varied, no amount of
+mutating what you have will surface it.
+
 **Count tests from `--junit-xml`, not from the terminal.** Counting dots
 misread a run as `892 passed, 2 skipped` when it was `892 passed, 0
 skipped`; the summary line is prose and the XML is the record.
