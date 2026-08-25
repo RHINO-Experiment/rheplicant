@@ -42,6 +42,7 @@ from rheplicant.gui.validation import ValidationProjection, validate_document
 #: Re-exported under its historic private name: `outputs.py` and
 #: `document_edits.py` import `_same_value` from here, and the point of
 #: the move is one implementation, not one import path.
+from rheplicant.gui.yaml_values import plain as _plain
 from rheplicant.gui.yaml_values import same_value as _same_value
 from rheplicant.radio.graph import RADIO_GRAPH
 
@@ -202,14 +203,6 @@ def _model(document: Mapping[str, object]) -> Mapping[str, object]:
                 raise ConfigError(f"model.{node_id}: every instance must be a mapping.")
         elif not isinstance(settings, Mapping):
             raise ConfigError(f"model.{node_id}: must be a mapping.")
-    return value
-
-
-def _plain(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
     return value
 
 

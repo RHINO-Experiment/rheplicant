@@ -79,4 +79,25 @@ def same_value(left: object, right: object) -> bool:
     return left == right
 
 
-__all__ = ["same_value"]
+def plain(value: object) -> object:
+    """Frozen or tuple-bearing YAML back as plain mutable ``dict``/``list``.
+
+    The bounded loader returns a FROZEN value, and every consumer that means
+    to edit, diff or render one needs it thawed first. This was written out
+    twice, byte for byte, in ``document.py`` and ``validation.py``; it is one
+    idea and now has one home, next to the comparison it is usually paired
+    with.
+
+    Sequences come back as ``list`` whatever they went in as, which is not a
+    loss: YAML has one sequence type and the tuple is Python's. That is the
+    same reading :func:`same_value` takes, so a value thawed here and compared
+    there cannot disagree with itself.
+    """
+    if isinstance(value, Mapping):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [plain(item) for item in value]
+    return value
+
+
+__all__ = ["plain", "same_value"]

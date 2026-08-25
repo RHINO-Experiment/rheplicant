@@ -25,6 +25,7 @@ from rheplicant.gui.forms import FormProjection, project_forms
 
 # The lax twin of this used to live here and answered differently on
 # numeric mapping keys; see yaml_values.py for the measurement.
+from rheplicant.gui.yaml_values import plain as _plain
 from rheplicant.gui.yaml_values import same_value as _same
 from rheplicant.radio.graph import RADIO_GRAPH
 
@@ -78,14 +79,6 @@ class ValidationProjection:
     selected_presets: tuple[str, ...]
     preset_changes: tuple[PresetChange, ...]
     run_blocked: bool
-
-
-def _plain(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
-    return value
 
 
 def _walk_diff(path: str, preset: object, document: object) -> tuple[PresetChange, ...]:
