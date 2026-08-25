@@ -3,6 +3,13 @@
 Repo-specific facts that are expensive to rediscover. Everything here was
 measured in this checkout, not assumed. Keep it short enough to be read.
 
+**This file exists twice.** `CLAUDE.md` and `AGENTS.md` are one document for two
+tools, and `tests/test_docs_claims.py` holds them byte-identical. Edit both, or
+that test goes red with the diff. They were allowed to drift once and each ended
+up stale exactly where the other was current — this page's config allowlist said
+five files against a real three, while `AGENTS.md` still called the coverage gap
+unexplained after it was found and fixed.
+
 ## Running the tests
 
 ```bash
@@ -17,19 +24,19 @@ Redirect to a file and read `$?`:
 .venv/bin/python -m pytest -n 8 > run.log 2>&1; echo "EXIT=$?"; tail -5 run.log
 ```
 
-**Partial runs no longer need `--no-cov`.** `addopts` used to carry
-`--cov=… --cov-fail-under=…`, so running one file exited non-zero on a
-whole-package gate even when every test in it passed. Coverage has moved to its
-own **serial** CI job and `addopts` is now just `-q`; `pytest <file>` is clean.
+**Partial runs no longer need `--no-cov`** — this reversed, and the old habit
+is widespread enough to be worth stating. `addopts` is now just `-q`, so
+`pytest tests/test_docs_links.py` with no flags exits 0. Coverage is measured
+by its own job.
 
-**Coverage is measured serially, and that is not fussiness.** On one tree with
-all 9724 tests passing, `-n 8` reported **88.32 %** and `-p no:xdist` reported
-**82.26 %** — six points, concentrated in the bootstrap/CLI modules
-(`plugins.py` alone is 417 statements of the gap). The cause is not established.
-What is established is that the parallel figure depends on how the work happened
-to be distributed, so the number anyone quotes comes from the invocation with no
-worker count in it. The floor lives once, in `[tool.coverage.report]
-fail_under`, read by the job, by coverage, and by `tests/test_readme_counts.py`.
+It was moved there because `-n 8` and `-p no:xdist` disagreed by six points.
+**That cause is now fixed** — two tests uninstalled coverage's tracer with
+`sys.settrace(None)`, blacking out 1982 consecutive tests serially, and
+`tests/test_coverage_instrument.py` now refuses that shape. The two runners
+agree: 89.22 % either way, one statement apart, and the remaining wobble is
+run-to-run rather than runner-to-runner. Coverage stays out of `addopts` for
+the second reason only, that a partial run should not trip a whole-package
+gate. `pyproject.toml` carries the measurement.
 
 **The suite is two pytest sessions.** The evidence layer needs float64 while
 other tests assert refusals only float32 forces, and `jax_enable_x64` is
@@ -52,7 +59,10 @@ behind those modules the whole time. If it skips, complete the environment
 rather than reading it as green.
 
 The coverage figure in `README.md` is **truncated**, never rounded — the same
-guard treats it as a floor and compares it against `--cov-fail-under`.
+guard treats it as a floor and compares it against `[tool.coverage.report]
+fail_under` in `pyproject.toml` (currently **89**, raised from 82 with the
+fix above). That is the only place the floor lives; the `--cov-fail-under`
+flag it used to read is gone.
 
 ## The config layer's boundary is textual
 
