@@ -16,6 +16,7 @@ from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.resources import (
     RESOURCE_KINDS,
+    _referenced_names,
     build_resources,
     check_unknown_keys,
     merge_extends,
@@ -3836,3 +3837,124 @@ class TestUnknownKeyHints:
             "resources.x.y", {"kind": "probe"}, frozenset({"kind"}),
             label="kind: probe", note="Always.", hints={"z0": "..."},
         )
+
+
+class TestAKindPrefixIsADependency:
+    """``from_switch_order: {resource: resources.<kind>}`` reads every entry of
+    that kind, and the build graph has to know it.
+
+    A8.5. ``_referenced_names`` recorded a dependency only for a three-part
+    ``resources.<kind>.<name>``; a two-part kind PREFIX contributed nothing,
+    so every entry the stack would read was invisible to the graph that
+    decides build order.
+
+    The consequence was not subtle and not benign. Measured before the fix,
+    on one document whose only variable was the order of a mapping's keys:
+
+        stacked declared LAST   -> BUILT
+        stacked declared FIRST  -> REFUSED, "resources.arrays has no entry
+                                   for ['hot', 'cold']"
+
+    naming two entries the document plainly declares.
+    ``TestBuildOrder.test_order_in_the_document_does_not_matter`` states the
+    invariant that broke -- "a mapping has an order and a reader should not
+    have to know it" -- and the refusal blamed the document for it.
+
+    **A trap for anyone re-measuring this.** Build each document with a FRESH
+    ``ResolutionContext``. The environment object is shared by every
+    dependency snapshot (see ``_build``), so two ``build_resources`` calls on
+    one context make the second complain that a resource "was bound more than
+    once" -- which is the probe re-binding, not the code under test. That
+    artefact cost a diagnosis here.
+    """
+
+    @staticmethod
+    def _context():
+        return ResolutionContext(
+            freq=jnp.linspace(60e6, 85e6, 4),
+            time=jnp.arange(8.0),
+            dtype="float32",
+            switch_order=("hot", "cold"),
+        )
+
+    ENTRIES = {"hot": {"list": [1.0, 2.0]}, "cold": {"list": [3.0, 4.0]}}
+    STACK = {"stacked": {"from_switch_order": {"resource": "resources.arrays"}}}
+
+    @pytest.mark.parametrize(
+        ("label", "section"),
+        [
+            ("stacked last", {"arrays": {**ENTRIES, **STACK}}),
+            ("stacked first", {"arrays": {**STACK, **ENTRIES}}),
+        ],
+    )
+    def test_the_document_builds_whichever_order_it_declares(self, label, section):
+        built = build_resources(section, self._context())
+        assert built.resources["resources.arrays.stacked"].shape == (2, 2), label
+        # The stack is built AFTER both entries it reads, in both documents.
+        order = list(built.order)
+        assert order[-1] == "resources.arrays.stacked", (label, order)
+        assert set(order[:-1]) == {"resources.arrays.hot", "resources.arrays.cold"}
+
+    def test_the_scan_expands_a_kind_prefix_to_that_kinds_entries(self):
+        declared = frozenset(
+            {
+                "resources.s_params.hot",
+                "resources.s_params.cold",
+                "resources.arrays.elsewhere",
+            }
+        )
+        node = {"from_switch_order": {"resource": "resources.s_params", "part": "re"}}
+        assert _referenced_names(node, declared) == {
+            "resources.s_params.hot",
+            "resources.s_params.cold",
+        }
+
+    def test_a_sub_value_of_an_entry_is_not_a_fourth_entry(self):
+        """``resources.s_params.hot.calibration`` is an attribute OF ``hot``,
+        not a sibling of it -- the same distinction ``from_switch_order``'s own
+        ``"." not in ...`` filter makes when it builds ``available``. An
+        expansion that took every ``startswith`` match would claim a
+        dependency on a name no entry answers to."""
+        declared = frozenset(
+            {"resources.s_params.hot", "resources.s_params.hot.calibration"}
+        )
+        node = {"ref": "resources.s_params"}
+        assert _referenced_names(node, declared) == {"resources.s_params.hot"}
+
+    def test_a_trailing_dot_does_not_manufacture_a_resource_name(self):
+        """``resources.s_params.`` is a spelling ``from_switch_order`` accepts
+        -- it calls ``rstrip('.')`` on it. Before the fix ``split('.')`` gave
+        three parts and the scan recorded the phantom ``resources.s_params.``,
+        which matches no entry and which the missing-reference check below
+        refuses as a resource the document does not declare. One layer
+        accepted a spelling the other rejected.
+        """
+        declared = frozenset({"resources.s_params.hot", "resources.s_params.cold"})
+        node = {"from_switch_order": {"resource": "resources.s_params."}}
+        found = _referenced_names(node, declared)
+        assert found == {"resources.s_params.hot", "resources.s_params.cold"}
+        assert not any(name.endswith(".") for name in found)
+
+    def test_without_a_declared_set_a_kind_prefix_still_contributes_nothing(self):
+        """ANTI-VACUITY, and a compatibility statement in one assertion.
+
+        ``declared`` defaults to empty, and with no set there is nothing to
+        expand to -- which is exactly the behaviour this function had before.
+        So the tests above are known to be exercising the NEW path rather than
+        passing on something that was always true, and a caller that does not
+        pass the set is not silently given a different answer.
+        """
+        node = {"from_switch_order": {"resource": "resources.s_params"}}
+        assert _referenced_names(node) == set()
+        assert _referenced_names(node, frozenset()) == set()
+
+    def test_an_entry_that_stacks_its_own_kind_does_not_report_a_loop(self):
+        """The expansion names the stacking entry itself, and a self-edge would
+        be reported as "these entries reference each other in a loop" -- true
+        of the expansion, false of the document. The entry cannot READ itself
+        either way: the stack sees only what is already built.
+        """
+        built = build_resources(
+            {"arrays": {**self.STACK, **self.ENTRIES}}, self._context()
+        )
+        assert "resources.arrays.stacked" in built.resources
