@@ -19,9 +19,11 @@ subprocess costs about three seconds.
 added to ``src/``, so an exact assertion would fail on unrelated work and be
 loosened until it meant nothing; and the run that would measure it costs twelve
 minutes, which is not a price to pay on every invocation of the suite. The
-README states it to one decimal and ``pyproject.toml``'s ``--cov-fail-under``
-is what actually holds the floor. What is pinned exactly is the count that a
-plain collection already knows.
+README states it to one decimal and ``pyproject.toml``'s
+``[tool.coverage.report] fail_under`` is what actually holds the floor -- the
+``--cov-fail-under`` flag it used to read is gone, and the code below has said
+so for longer than this sentence did. What is pinned exactly is the count that
+a plain collection already knows.
 
 **Its SHAPE is pinned, and that is new in Plan 3C.** Until now the count was
 pinned by equality while the percentage standing beside it was matched by
@@ -149,14 +151,23 @@ _LIVE_COVERAGE = re.compile(r"\(([\d,]+) tests, (\d+\.\d) % coverage")
 _ANY_COVERAGE = re.compile(r"(\d+(?:\.\d+)?) % coverage")
 
 
-def _cov_fail_under() -> int:
-    """The floor ``pyproject.toml`` makes the suite actually enforce."""
-    # Reads `[tool.coverage.report] fail_under`, not a --cov-fail-under flag.
-    # Coverage left the default addopts when it moved to its own serial job:
-    # a parallel and a serial run of this suite do not measure the same thing
-    # (88.32 % against 82.26 % on one tree, all tests passing), so the reported
-    # figure comes from the invocation with no worker count in it. The floor
-    # moved with it, and this is still the one place that holds it.
+def _coverage_floor() -> int:
+    """The floor ``pyproject.toml`` makes the suite actually enforce.
+
+    Named for what it reads -- ``[tool.coverage.report] fail_under`` -- and
+    not for the ``--cov-fail-under`` flag it used to read, which is gone.
+    """
+    # Coverage left the default addopts when it moved to its own serial job.
+    # The reason recorded here was that a parallel and a serial run did not
+    # measure the same thing (88.32 % against 82.26 % on one tree, all tests
+    # passing). **That cause is fixed**: two tests had uninstalled coverage's
+    # tracer with `sys.settrace(None)`, blacking out 1982 consecutive tests
+    # serially, and `tests/test_coverage_instrument.py` refuses that shape
+    # now. The two runners agree -- 89.22 % either way, one statement apart,
+    # and two SERIAL runs differ by that same statement, so the remainder is
+    # run-to-run noise rather than the worker count. Coverage stays out of
+    # `addopts` for the second reason only: a partial run should not trip a
+    # whole-package gate. This is still the one place the floor lives.
     found = re.search(r"^fail_under\s*=\s*(\d+)",
                       (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
     assert found, (
@@ -190,8 +201,8 @@ def test_the_readme_states_one_live_coverage_figure_beside_its_test_count():
        them apart. A second live claim, or the historical one reworded into
        the live shape, is caught here.
     4. **The live figure is not below the floor the suite enforces.** A README
-       claiming less coverage than ``--cov-fail-under`` states something every
-       passing run disproves.
+       claiming less coverage than ``[tool.coverage.report] fail_under``
+       states something every passing run disproves.
 
     **The one decimal is a TRUNCATION of the measured percentage, never a
     rounding, and that is a deliberate choice, not an oversight to "fix".**
@@ -243,11 +254,11 @@ def test_the_readme_states_one_live_coverage_figure_beside_its_test_count():
         "('rather than the 99.7 % it was before ...'); if a second live claim "
         "is really wanted, it needs its own guard, not a widening of this."
     )
-    floor = _cov_fail_under()
+    floor = _coverage_floor()
     assert float(figure) >= floor, (
         f"README says {figure} % coverage while pyproject.toml enforces a "
-        f"--cov-fail-under={floor} floor that every passing run clears. One "
-        "of the two is wrong, and it is not the run."
+        f"[tool.coverage.report] fail_under = {floor} floor that every "
+        "passing run clears. One of the two is wrong, and it is not the run."
     )
 
 
@@ -322,4 +333,52 @@ def test_every_test_count_in_the_readme_is_the_real_one():
             "collected, so this is real drift rather than a thin environment. "
             "Update README.md rather than loosening this assertion -- the count "
             "went stale by 759 once because nothing checked it."
+        )
+
+
+def test_the_coverage_floor_lives_in_exactly_one_place() -> None:
+    """``pyproject.toml``'s own comment claims ONE number. This reads it.
+
+    The claim is that the floor is stated once, in
+    ``[tool.coverage.report] fail_under``, and read from there by the coverage
+    job, by coverage itself and by :func:`_coverage_floor` above. A second
+    statement of it -- a ``--cov-fail-under`` back in ``addopts``, or in the
+    workflow's own command -- would not fail loudly. It would simply mean two
+    numbers, and the one that lost would go stale silently, which is exactly
+    how the prose in this file came to name a flag that had been gone for
+    weeks.
+
+    Derived rather than listed: both files are read at run time and the
+    pattern is the flag's own spelling, so this cannot fall behind a rename
+    it is meant to catch.
+
+    Deliberately checks the SHIPPING configuration and not prose. The three
+    remaining mentions of the flag in this repository all say it is gone, and
+    a guard that forbade the string outright would forbid saying so.
+    """
+    config = (ROOT / "pyproject.toml").read_text()
+    workflow = ROOT / ".github" / "workflows" / "test.yml"
+    assert workflow.exists(), (
+        "the coverage job's workflow is gone, so the claim that it reads the "
+        "floor from pyproject.toml has nothing to be true about."
+    )
+
+    floors = re.findall(r"^fail_under\s*=\s*(\d+)", config, re.MULTILINE)
+    assert floors == [str(_coverage_floor())], (
+        f"pyproject.toml states fail_under {len(floors)} times ({floors}); the "
+        "floor is supposed to be one number. Two of them is two chances to go "
+        "stale, and nothing announces which one the job actually used."
+    )
+
+    for name, text in (("pyproject.toml", config), ("test.yml", workflow.read_text())):
+        active = [
+            line.strip()
+            for line in text.splitlines()
+            if "--cov-fail-under" in line and not line.strip().startswith("#")
+        ]
+        assert active == [], (
+            f"{name} carries an active --cov-fail-under: {active}. That is a "
+            "SECOND floor beside [tool.coverage.report] fail_under, and "
+            "whichever one loses stops being read without saying so. Put the "
+            "number in [tool.coverage.report] and let the flag go."
         )
