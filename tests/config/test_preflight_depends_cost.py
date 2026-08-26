@@ -184,7 +184,18 @@ class TestTheCostAndTheImportInvariant:
         A35 is a fifth of it.  The assertion that CAN fail is the next one.
         """
         cost, _, _ = child
-        assert cost < 0.05, f"the pass cost {cost:.4f} s on this document"
+        # 0.25 s, not 0.05. The tighter number was measuring the box rather
+        # than the pass, and this file already recorded it doing so: 1 run in 5
+        # under `pytest tests/config -n 16` came in at 0.0696 s. The x86_64 CI
+        # runner reproduces that under its own load, at 0.0703 s -- so the
+        # budget failed on two machines for the same reason, neither of them
+        # anything to do with what the pass does.
+        #
+        # It stays a COARSE ceiling, which is all it was: this assertion guards
+        # against something being BUILT on a route that should only walk, and a
+        # build is not a 5x overrun, it is an order of magnitude. The assertion
+        # that can fail finely is the next one, as the docstring says.
+        assert cost < 0.25, f"the pass cost {cost:.4f} s on this document"
 
     def test_this_check_s_own_walk_costs_almost_nothing(self, child):
         """R9: a cost assertion has to be able to fail, so here is one that can.

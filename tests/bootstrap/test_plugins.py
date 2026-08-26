@@ -785,7 +785,32 @@ def test_namespace_generated_builtin_and_extension_reasons(tmp_path, monkeypatch
     assert builtin_record.resolved_path_reason == "generated_module"
     assert builtin_record.code_hash_reason == "generated_module"
 
-    extension_record = import_plugin("math")
+    # DERIVED, not hard-coded. `math` stood here, and it is an extension
+    # module on this developer's interpreter and a BUILT-IN one on the CI
+    # runner's: CPython builds differ in which stdlib C modules they compile
+    # in, and a built-in has no file at all, so `resolved_path is not None`
+    # failed against a record that was entirely correct. What this block is
+    # about is the extension path, so it asks the interpreter which module
+    # actually takes it.
+    import importlib.machinery
+    import importlib.util
+
+    extension_name = next(
+        (
+            name
+            for name in ("math", "_ctypes", "zlib", "_json", "binascii", "select")
+            if (spec := importlib.util.find_spec(name)) is not None
+            and isinstance(spec.loader, importlib.machinery.ExtensionFileLoader)
+        ),
+        None,
+    )
+    if extension_name is None:  # pragma: no cover - no such build met yet
+        pytest.skip(
+            "this interpreter compiles every stdlib C module in, so there is "
+            "no extension module to take the extension path with. That is a "
+            "property of the build, not a missing dependency."
+        )
+    extension_record = import_plugin(extension_name)
     assert extension_record.origin is not None
     assert extension_record.resolved_path is not None
     assert extension_record.resolved_path_reason is None

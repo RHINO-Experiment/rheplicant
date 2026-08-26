@@ -166,10 +166,23 @@ def test_a_reachable_target_does_not_trip_the_guard(block) -> None:
     """Otherwise the test above would pass on a guard that refuses everything.
 
     The counterweight still exists; what changed is what counts as reachable.
-    At ``REACHABLE`` the bound certifies the solve and the guard is silent; at
-    1e-3 it refuses, and on this fixture at float32 that refusal is CORRECT --
-    the draw's error bound really is 10.47 and no tolerance moves it. Both halves are
+    At ``REACHABLE`` the bound certifies the solve and the guard is silent, and
+    at a tolerance no arithmetic can reach it refuses. Both halves are
     asserted, so this cannot pass on a guard that has stopped firing either.
+
+    **The refusing half asks for 1e-30, not 1e-3, and the reason is measured.**
+    1e-3 refused because this fixture's error bound is 10.47 -- here. On the
+    x86_64 CI runner the bound is below 1e-3 and the guard stayed correctly
+    silent, so the assertion failed while the guard was doing its job. The
+    bound is ``kappa * residual`` on a float32 near-singular solve, and a
+    factor of ten thousand between two BLAS implementations is what that
+    quantity is worth; it is not a platform-stable number and was never
+    checked as one.
+
+    1e-30 is below ``kappa * epsilon`` on any machine, so it takes the
+    "cannot reach at this precision" route rather than depending on where the
+    bound lands. That is the property this half is for -- the guard still
+    fires -- established by construction instead of by conditioning.
     """
     cond, values = block
     got, _ = conjugate_draw(
@@ -183,7 +196,7 @@ def test_a_reachable_target_does_not_trip_the_guard(block) -> None:
     with pytest.raises(EquinoxRuntimeError):
         conjugate_draw(
             cond, ("gain",), values, key=jax.random.key(1), tol=1e-8,
-            maxiter=None, require_convergence=1e-3,
+            maxiter=None, require_convergence=1e-30,
         )
 
 

@@ -76,6 +76,15 @@ jobs:
         working-directory: tools/config_gui_spike/react
         run: npm ci
 
+      # `sh: 1: playwright: not found` was the first symptom and `npm ci`
+      # answers it; the browser is the second. Chromium only: the config's
+      # four projects differ by viewport and name no browserName, so they all
+      # run on the default. `--with-deps` because a bare runner has none of
+      # the shared libraries chromium links against.
+      - name: Install the browser Playwright drives
+        working-directory: tools/config_gui_spike/react
+        run: npx playwright install --with-deps chromium
+
       - name: Report environment completeness BEFORE judging any number
         # The difference between what this environment collects and what the
         # README claims IS the completeness report -- that is the design of
