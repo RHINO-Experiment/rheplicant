@@ -296,7 +296,7 @@ class TestBlocks:
                               "steps": 3}, {"names": ["a"]}]))
         assert [f.check for f in found] == ["A19"]
 
-    def test_an_unknown_engine_is_refused_here_and_names_the_two(self):
+    def test_an_unknown_engine_is_refused_here_and_names_them_all(self):
         # `_BLOCK_KEYS` (exits.py:165) accepts any string, so today
         # `engine: banana` reaches the user as a ParameterSpaceError from
         # `plan.py:353-359` -- measured.  Kills deleting the enum clause:
@@ -306,7 +306,7 @@ class TestBlocks:
                              {"names": ["w"]}]))
         assert [f.check for f in found] == [""]
         assert "'banana'" in found[0].message
-        assert "['conjugate', 'gradient']" in found[0].message
+        assert "['conjugate', 'gradient', 'log_conjugate']" in found[0].message
 
     def test_an_engine_that_is_not_even_a_string_is_refused_by_the_same_clause(
             self):
@@ -316,7 +316,8 @@ class TestBlocks:
         # reader is told their block "mixes declared-linear latents [...] with
         # non-linear ones []" -- an A18 refusal about a block that is not
         # mixed at all.  `Block._check` calls this one by name, measured:
-        # "asks for engine=5; the engines are ['conjugate', 'gradient']".
+        # "asks for engine=5; the engines are ['conjugate', 'log_conjugate',
+        # 'gradient']".
         found = _found(_doc([{"names": ["d", "a"], "engine": 5},
                              {"names": ["w"]}]))
         assert [f.check for f in found] == [""]
@@ -346,10 +347,17 @@ class TestBlocks:
         from rheplicant.config.preflight.fitting import (
             _T7_CONJUGATE,
             _T7_GRADIENT,
+            _T7_LOG_CONJUGATE,
         )
-        from rheplicant.inference.engines import CONJUGATE, ENGINES, GRADIENT
+        from rheplicant.inference.engines import (
+            CONJUGATE,
+            ENGINES,
+            GRADIENT,
+            LOG_CONJUGATE,
+        )
 
         assert _T7_CONJUGATE == CONJUGATE
+        assert _T7_LOG_CONJUGATE == LOG_CONJUGATE
         assert _T7_GRADIENT == GRADIENT
         assert _ENGINES == frozenset(ENGINES)
 
@@ -1274,7 +1282,8 @@ _VERBATIM = [
      _doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
      '', 'runs[0].blocks[0]',
      "runs['fit']: blocks[0] asks for engine: 'banana'; the engines are "
-     "['conjugate', 'gradient']. Leave engine: out and it is derived from "
+     "['conjugate', 'gradient', 'log_conjugate']. Leave engine: out and it is "
+     "derived from "
      "linear: true on each member, which is the normal case -- an "
      "explicit engine is an override."),
     ('a18-a-mixed-block',

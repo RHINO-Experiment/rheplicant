@@ -260,13 +260,24 @@ def _resolve_name(space: ParameterSpace, name: str | None) -> str:
     return name
 
 
-def _resolve_names(space: ParameterSpace, names: Sequence[str] | str) -> tuple[str, ...]:
+def _resolve_names(
+    space: ParameterSpace,
+    names: Sequence[str] | str,
+    *,
+    require_linear: bool = True,
+) -> tuple[str, ...]:
     """The latents to put in one block, in the caller's own order.
 
     A bare string is one name, the same "one or many" convention
     :class:`~rheplicant.inference.parameters.Bind` and
     :func:`~rheplicant.inference.identifiability.identifiability` use. Without
     it, ``names="gain"`` iterates into ``('g', 'a', 'i', 'n')``.
+
+    ``require_linear=False`` keeps every structural check — non-empty, declared,
+    no repeats — and drops only the ``linear=True`` requirement, for
+    :mod:`rheplicant.inference.loglinear`, whose blocks are precisely the ones
+    that must NOT carry that declaration. The checks are shared rather than
+    copied so that a change to what a block may be made of reaches both.
     """
     selected = (names,) if isinstance(names, str) else tuple(names)
     if not selected:
@@ -291,14 +302,15 @@ def _resolve_names(space: ParameterSpace, names: Sequence[str] | str) -> tuple[s
             "the {name: array} solution has one entry per name, so one copy's answer "
             "would silently overwrite the other's."
         )
-    not_linear = [name for name in selected if not space.latent(name).linear]
-    if not_linear:
-        raise ParameterSpaceError(
-            f"Latent(s) {not_linear} are not declared linear=True, so their linear "
-            "operator is not meaningful. Declare them, and the claim will be checked — "
-            "jointly, which is stricter than one at a time: a gain and an antenna "
-            "temperature are each affine given the other and bilinear together."
-        )
+    if require_linear:
+        not_linear = [name for name in selected if not space.latent(name).linear]
+        if not_linear:
+            raise ParameterSpaceError(
+                f"Latent(s) {not_linear} are not declared linear=True, so their linear "
+                "operator is not meaningful. Declare them, and the claim will be checked "
+                "— jointly, which is stricter than one at a time: a gain and an antenna "
+                "temperature are each affine given the other and bilinear together."
+            )
     return selected
 
 
@@ -397,6 +409,52 @@ def _magnitude(latent: Any) -> float:
     """
     magnitude = float(np.max(np.abs(latent.init)))
     return magnitude if magnitude != 0.0 else 1.0
+
+
+def _single_probe(
+    space: ParameterSpace, name: str, key: jax.Array
+) -> Callable[[int, float], jax.Array]:
+    """Probes for a one-latent block: ``magnitude * scale * N(0, 1)``.
+
+    Factored out because the log-space check
+    (:func:`~rheplicant.inference.loglinear.check_log_linearity`) asks the same
+    question of a different map and must ask it at the SAME points. A second
+    copy of the probe scheme would let the two drift into probing different
+    models while both reported on "linearity".
+    """
+    latent = space.latent(name)
+    magnitude = _magnitude(latent)
+
+    def probe_at(index: int, scale: float) -> jax.Array:
+        return magnitude * scale * jax.random.normal(
+            jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
+        )
+
+    return probe_at
+
+
+def _group_probe(
+    space: ParameterSpace, selected: Sequence[str], key: jax.Array
+) -> Callable[[int, float], dict[str, jax.Array]]:
+    """Probes for a grouped block, per latent, at each member's own scale.
+
+    Sub-keys are folded in by position in the SORTED names, so permuting the
+    caller's ``names`` probes the model at the same points.
+    """
+    ordered = sorted(selected)
+
+    def probe_at(index: int, scale: float) -> dict[str, jax.Array]:
+        root = jax.random.fold_in(key, index)
+        return {
+            member: _magnitude(space.latent(member)) * scale * jax.random.normal(
+                jax.random.fold_in(root, position),
+                space.latent(member).init.shape,
+                dtype=space.latent(member).init.dtype,
+            )
+            for position, member in enumerate(ordered)
+        }
+
+    return probe_at
 
 
 def _affinity_errors(
@@ -520,13 +578,7 @@ def check_linearity(
         name = _resolve_name(space, name)
         g, zero = _isolate(space, pipeline, state_template, name, at)
         _require_inexact(space, (name,))
-        latent = space.latent(name)
-        magnitude = _magnitude(latent)
-
-        def probe_at(index: int, scale: float) -> jax.Array:
-            return magnitude * scale * jax.random.normal(
-                jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
-            )
+        probe_at = _single_probe(space, name, key)
 
         subject = (
             f"Latent {name!r} is declared linear=True, but the prediction is not affine "
@@ -541,18 +593,7 @@ def check_linearity(
         selected = _resolve_names(space, names)
         g, zero = _isolate_group(space, pipeline, state_template, selected, at)
         _require_inexact(space, selected)
-        ordered = sorted(selected)
-
-        def probe_at(index: int, scale: float) -> dict[str, jax.Array]:
-            root = jax.random.fold_in(key, index)
-            return {
-                member: _magnitude(space.latent(member)) * scale * jax.random.normal(
-                    jax.random.fold_in(root, position),
-                    space.latent(member).init.shape,
-                    dtype=space.latent(member).init.dtype,
-                )
-                for position, member in enumerate(ordered)
-            }
+        probe_at = _group_probe(space, selected, key)
 
         subject = (
             f"Latents {list(selected)} are each declared linear=True, but the prediction "

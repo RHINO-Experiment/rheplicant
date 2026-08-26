@@ -89,6 +89,26 @@ class LinearityRefused(ParameterSpaceError):
         self.failed = tuple(float(scale) for scale in failed)
 
 
+class LogSpaceUnavailable(ParameterSpaceError):
+    """A quantity ``log`` cannot be taken of, where log space was being asked for.
+
+    A SUBCLASS for the same reason :class:`LinearityRefused` is one: every
+    ``except ParameterSpaceError`` already written keeps catching it and the
+    message is unchanged. What the subclass buys is a NARROW catch.
+
+    Discovering whether a latent has a log-linear block means asking
+    :func:`~rheplicant.inference.loglinear.check_log_linearity` and reading a
+    refusal as "no". Two refusals mean that — a departure from affinity
+    (:class:`LinearityRefused`) and a prediction that is negative, zero or not
+    finite (this one) — while the rest of ``ParameterSpaceError``'s family, a
+    latent of integer dtype or a name the space never declared, mean the
+    question was never asked. Catching the base class to classify would file
+    those as "not log-linear" and route a broken declaration to a gradient
+    block with nothing said, which is the shape of failure this package spends
+    its refusals avoiding.
+    """
+
+
 class DataIngestionError(DirtError, ValueError):
     """A data file could not be read, or its contents contradict what the
     caller declared about them.

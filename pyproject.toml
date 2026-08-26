@@ -44,6 +44,18 @@ dependencies = [
     # at a recorded 1.8.0 while running 1.10.0 source. A version check would have
     # refused a fully capable install; the symbol check cannot. The gates stay.
     "limTOD[jax]>=1.10",
+    # The auto-partition grouping rule and the log-space transform arithmetic
+    # live in bayesmith (dispatch.factor.first_fit, exact.loglinear) and are
+    # imported rather than re-spelled -- one statement of each, two paradigms
+    # reading it. The floor names the first release that carries them; 0.1.0
+    # on PyPI does not, so until 0.2.0 ships this resolves only against a
+    # local editable install:
+    #
+    #     uv pip install --python .venv/bin/python --no-deps -e ../bayesmith
+    #
+    # The same bet the limTOD floor above records: declare the true
+    # requirement rather than pretend the seam is optional.
+    "bayesmith>=0.2",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

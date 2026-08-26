@@ -49,6 +49,10 @@ OWNERS = {
     # layer they already import ``check_linearity`` from is the one that
     # should hand it to them.
     "LinearityRefused": "rheplicant.inference",
+    # And its sibling: the discovery in `partition.auto_blocks` catches this by
+    # name to classify a latent, so the layer that classifies is the layer that
+    # must hand out the class.
+    "LogSpaceUnavailable": "rheplicant.inference",
 }
 DEFAULT_OWNER = "rheplicant.core"
 

@@ -50,10 +50,11 @@ from rheplicant.config.sections.transforms import _whole
 
 __all__: list[str] = []
 
-#: ``engines.CONJUGATE`` and ``engines.GRADIENT`` (``engines.py:62``, ``:66``),
+#: ``engines.CONJUGATE``, ``engines.LOG_CONJUGATE`` and ``engines.GRADIENT``,
 #: written out because this module may not import that package -- see the
 #: module docstring for the guard that measures it.
 _T7_CONJUGATE: str = "conjugate"
+_T7_LOG_CONJUGATE: str = "log_conjugate"
 _T7_GRADIENT: str = "gradient"
 
 #: The engines a block may ask for, closed.  ``_BLOCK_KEYS``
@@ -61,14 +62,21 @@ _T7_GRADIENT: str = "gradient"
 #: ``engine: banana`` reaches the user as a ParameterSpaceError from
 #: ``Block._check`` (``plan.py:353-359``) -- measured.
 #:
-#: A copy of ``ENGINES`` (``engines.py:69``), which is the thing this plan
-#: warns against: a closed set written out stops being closed the day a third
-#: engine ships, and this pass would then refuse a block the package accepts.
-#: What stops that is not the import -- which the guard above forbids -- but
-#: ``test_the_engine_enum_is_the_packages_own``, which imports ``CONJUGATE``,
-#: ``GRADIENT`` and ``ENGINES`` in the TEST and asserts all three against
-#: these three names.  A third engine turns that test red.
-_ENGINES: frozenset[str] = frozenset({_T7_CONJUGATE, _T7_GRADIENT})
+#: A copy of ``ENGINES``, which is the thing this plan warns against: a closed
+#: set written out stops being closed the day a third engine ships, and this
+#: pass would then refuse a block the package accepts.  What stops that is not
+#: the import -- which the guard above forbids -- but
+#: ``test_the_engine_enum_is_the_packages_own``, which imports the engine names
+#: and ``ENGINES`` in the TEST and asserts each against these names.
+#:
+#: That is not a hypothetical any more: a third engine DID ship
+#: (``log_conjugate``, for a block that is conjugate once the data is taken to
+#: logs), the test went red on the copy, and the copy was extended here.  The
+#: guard is the reason that was a red test rather than a config layer quietly
+#: refusing a partition ``auto_blocks`` had just produced.
+_ENGINES: frozenset[str] = frozenset(
+    {_T7_CONJUGATE, _T7_LOG_CONJUGATE, _T7_GRADIENT}
+)
 
 #: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py:165``), copied
 #: for the same reason :data:`_ENGINES` is: reaching it means importing

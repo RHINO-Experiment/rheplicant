@@ -169,16 +169,20 @@ from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.engines import (
+    CLOSED_FORM,
     CONJUGATE,
     DEFAULT_GRADIENT_STEPS,
     ENGINES,
     GRADIENT,
+    LOG_CONJUGATE,
     Conditioning,
     conditional_potential,
     conjugate_draw,
     conjugate_estimate,
     gradient_draw,
     gradient_estimate,
+    log_conjugate_draw,
+    log_conjugate_estimate,
     require_priors,
 )
 from rheplicant.inference.identifiability import (
@@ -187,6 +191,7 @@ from rheplicant.inference.identifiability import (
 )
 from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.linear import check_linearity
+from rheplicant.inference.loglinear import check_log_linearity, to_log_space
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
 
@@ -418,12 +423,12 @@ class Block:
                     f"learning_rate must be > 0, got {self.learning_rate}. It is a "
                     "fraction of max|init|, not an absolute step."
                 )
-            if self.engine == "conjugate":
+            if self.engine in CLOSED_FORM:
                 raise ParameterSpaceError(
-                    "Block(..., engine='conjugate', learning_rate=...) is a "
-                    "contradiction: a conjugate block is solved in closed form and "
-                    "has no iterate for a step size to scale. Drop learning_rate, or "
-                    "drop engine='conjugate' if the block is meant to be gradient."
+                    f"Block(..., engine={self.engine!r}, learning_rate=...) is a "
+                    "contradiction: that block is solved in closed form and has no "
+                    "iterate for a step size to scale. Drop learning_rate, or drop "
+                    f"engine={self.engine!r} if the block is meant to be gradient."
                 )
 
     @property
@@ -579,6 +584,43 @@ class SamplingPlan:
         self._assign = self._partition()
         self.engines = {block.names: engine for block, engine in self._assign}
 
+    @classmethod
+    def automatic(
+        cls,
+        space: ParameterSpace,
+        pipeline: AbstractOperator,
+        state_template: State,
+        **options: Any,
+    ) -> "SamplingPlan":
+        """The same plan, over a partition derived from the model.
+
+        :func:`~rheplicant.inference.partition.auto_blocks` groups the
+        declared-linear latents into as many conjugate blocks as the model
+        needs — one per factor of a multilinear form, since latents that are
+        each affine alone need not be affine together — and puts everything
+        else in one gradient block. ``**options`` are that function's; it owns
+        the vocabulary, so ``steps=`` and the probe's tolerances are spelled
+        once rather than restated here.
+
+        This needs the pipeline, which ``__init__`` does not: which latents may
+        share a conjugate block is a property of the prediction, and no
+        declaration carries it.
+
+        Args:
+            space: the parameter declaration to partition.
+            pipeline, state_template: the model, probed to find the partition.
+            **options: forwarded to
+                :func:`~rheplicant.inference.partition.auto_blocks`.
+
+        Returns:
+            A plan whose blocks were derived. Nothing else differs — the
+            partition is checked, and each conjugate block's joint linearity
+            re-verified at the first sweep, exactly as for a declared one.
+        """
+        from rheplicant.inference.partition import auto_blocks
+
+        return cls(space, *auto_blocks(space, pipeline, state_template, **options))
+
     # ------------------------------------------------------------ declaring --
 
     def _partition(self) -> tuple[tuple[Block, str], ...]:
@@ -691,6 +733,25 @@ class SamplingPlan:
         linear = [name for name in block.names if self.space.latent(name).linear]
         other = [name for name in block.names if not self.space.latent(name).linear]
 
+        if block.engine == LOG_CONJUGATE:
+            if linear:
+                raise ParameterSpaceError(
+                    f"Block{block.names} asks for engine='log_conjugate', but {linear} "
+                    "are declared linear=True — the prediction is affine in them, and "
+                    "then log(prediction) is not. The two claims exclude each other, "
+                    "so one of them is wrong: drop linear=True if the latent really "
+                    "enters through an exponential, or drop engine='log_conjugate' and "
+                    "let the conjugate engine be derived."
+                )
+            if block.steps is not None:
+                raise ParameterSpaceError(
+                    f"Block{block.names} is solved in closed form in log space, which "
+                    f"has no inner steps, so steps={block.steps} would be silently "
+                    "ignored. Drop steps=, or say engine='gradient' if a gradient step "
+                    "was what you meant."
+                )
+            return LOG_CONJUGATE
+
         if block.engine is None:
             if other and linear:
                 raise ParameterSpaceError(
@@ -767,17 +828,28 @@ class SamplingPlan:
             observed,
             predictor="this plan's model",
         )
+        normalized = as_noise_model(noise)
+        log_observed, log_sigma = None, None
+        if any(engine == LOG_CONJUGATE for _, engine in self._assign):
+            log_observed, log_sigma = to_log_space(observed, normalized)
+
         cond = Conditioning(
             space=self.space,
             pipeline=pipeline,
             state_template=state_template,
             observed=observed,
-            noise=as_noise_model(noise),
+            noise=normalized,
             forward=forward,
+            log_observed=log_observed,
+            log_sigma=log_sigma,
         )
         for block, engine in self._assign:
             if engine == CONJUGATE:
                 check_linearity(
+                    self.space, pipeline, state_template, names=block.names, at=values0
+                )
+            elif engine == LOG_CONJUGATE:
+                check_log_linearity(
                     self.space, pipeline, state_template, names=block.names, at=values0
                 )
         return cond, values0
@@ -856,8 +928,12 @@ class SamplingPlan:
         """
         for index, (block, engine) in enumerate(self._assign):
             block_key = None if key is None else jax.random.fold_in(key, index)
-            if engine == CONJUGATE:
-                run = conjugate_draw if draw else conjugate_estimate
+            if engine in CLOSED_FORM:
+                log = engine == LOG_CONJUGATE
+                if draw:
+                    run = log_conjugate_draw if log else conjugate_draw
+                else:
+                    run = log_conjugate_estimate if log else conjugate_estimate
                 extra = {"key": block_key} if draw else {}
                 values, recorded = run(
                     cond, block.names, values,

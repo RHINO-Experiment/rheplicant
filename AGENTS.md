@@ -122,9 +122,16 @@ subprocess, which is why `tests/evidence` shows as skips in the main count.
 
 Several test modules stand down behind a module-level `pytest.importorskip`,
 so a thinner virtualenv silently collects fewer tests of the same suite.
-Complete means the dev group plus **`h5py`** and **`rhino-cal-jax`** (the
-latter is not on PyPI; install it editable from its own checkout, and install
-`editables` alongside it, which its editable hook needs).
+Complete means the dev group plus **`h5py`**, **`rhino-cal-jax`** (not on
+PyPI; install it editable from its own checkout, and install `editables`
+alongside it, which its editable hook needs) and **`bayesmith`** at the
+`>=0.2` surface (`first_fit`, `exact.loglinear`). **0.2.0 is on PyPI as of
+2026-08-26**, so `uv pip install 'bayesmith>=0.2'` resolves; this checkout
+nevertheless holds it **editable from `../bayesmith` with `--no-deps`**,
+because the two repositories are developed against each other and a released
+version would freeze the seam mid-programme. Its runtime deps (jax, equinox,
+numpy, numpyro) are already here. Without it `rheplicant.inference` does not import at all, so this one
+fails loudly rather than as silent skips.
 
 `tests/test_readme_counts.py` pins the README's test count by equality but
 **skips** where any module fails to collect, and its skip message says so

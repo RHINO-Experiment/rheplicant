@@ -9,8 +9,9 @@ three graph diagnostics. Those counterparts are **cross-checked against this
 module numerically** -- element-wise to roundoff, same refusals, same fixed
 points -- and the records live in that package's ``docs/migration/``.
 
-What they are NOT is drop-in. Measured 2026-08-26: of the 99 names this package
-publishes, bayesmith has a name for 24, and even those take different arguments
+What they are NOT is drop-in. Measured 2026-08-26: of the 106 names this package
+publishes, 24 exist anywhere in bayesmith and only 12 among the 42 it publishes
+at top level -- and even those take different arguments
 because the two are different paradigms -- this layer reads a ``Pipeline`` and a
 ``ParameterSpace``, bayesmith reads a ``Graph``. So "use bayesmith instead" is
 not a migration path for existing code, and nothing here is deprecated.
@@ -23,7 +24,11 @@ whose signatures do match would make the test that compares them compare an
 object with itself, and a guard that cannot fail is worse than no guard.
 """
 
-from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
+from rheplicant.core.errors import (
+    LinearityRefused,
+    LogSpaceUnavailable,
+    ParameterSpaceError,
+)
 from rheplicant.inference.archive import load_memory, save_memory
 from rheplicant.inference.calibrate import AdamCalibrator, GradientCalibrator
 from rheplicant.inference.chain import (
@@ -82,6 +87,13 @@ from rheplicant.inference.linear import (
     linear_operator,
     wiener_solve,
 )
+from rheplicant.inference.loglinear import (
+    FIRST_ORDER_MAX_FRACTIONAL,
+    LOG_DEFAULT_SCALES,
+    check_log_linearity,
+    log_linear_operator,
+    to_log_space,
+)
 from rheplicant.inference.memory import BayesMemory
 from rheplicant.inference.noise import (
     FlaggedNoise,
@@ -110,6 +122,7 @@ from rheplicant.inference.parameters import (
     ParameterSpace,
     refuse_stochastic_stages,
 )
+from rheplicant.inference.partition import auto_blocks
 from rheplicant.inference.plan import (
     MIN_DRAWS,
     Block,
@@ -152,10 +165,13 @@ __all__ = [
     "COEFFICIENTS",
     "CRITERION_SHIFT",
     "DEFAULT_RANK_RTOL",
+    "FIRST_ORDER_MAX_FRACTIONAL",
+    "LOG_DEFAULT_SCALES",
     "MIN_DRAWS",
     "DISTRIBUTE",
     "REQUIRED_TERM_MEMBERS",
     "LinearityRefused",
+    "LogSpaceUnavailable",
     "ParameterSpaceError",
     "AdamCalibrator",
     "AmbiguousFanWarning",
@@ -198,12 +214,14 @@ __all__ = [
     "SamplingPlan",
     "SqrtInfo",
     "as_noise_model",
+    "auto_blocks",
     "basis_fidelity",
     "build_forward_fn",
     "build_reduced_basis",
     "chain_log_likelihood",
     "chain_marginal",
     "check_linearity",
+    "check_log_linearity",
     "check_observed_shape",
     "coherent_mode",
     "compress",
@@ -220,6 +238,7 @@ __all__ = [
     "inverse_variance",
     "iterative_gls",
     "linear_operator",
+    "log_linear_operator",
     "load_memory",
     "marginalise",
     "marginalise_arrays",
@@ -244,6 +263,7 @@ __all__ = [
     "split_rhat",
     "systematic_floor",
     "push_forward",
+    "to_log_space",
     "to_numpyro_model",
     "train_posterior",
     "wiener_solve",

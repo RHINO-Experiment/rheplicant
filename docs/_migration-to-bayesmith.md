@@ -7,18 +7,26 @@ pages have a counterpart there: the linear-Gaussian exact solves, the iterative
 GLS, the Fisher matrix, the square-root information layer, and the graph
 diagnostics.
 
-**Nothing here is moving, and nothing here is deprecated.**
-`rheplicant.inference` is the implementation, it is fully supported, and it is
-what these pages describe. An earlier version of this note said the layer was
-being separated out and that the timing was unsettled. It is settled now, and
-the answer turned out to be *no*: the two packages stay separate and are held
-in agreement by a cross-check suite rather than by shared code — 123 comparisons
-that run on every change to bayesmith.
+**Nothing here is moving, and nothing here is deprecated — and since
+2026-08-26 the two packages are no longer fully disjoint.**
+`rheplicant.inference` is the implementation of everything on these pages, it
+is fully supported, and the historically shared capabilities stay separate,
+held in agreement by a cross-check suite rather than by shared code — 123
+comparisons that run on every change to bayesmith. The NEW capabilities are
+the exception, by the owner's decision: the auto-partition grouping rule and
+the log-space transform arithmetic were implemented in bayesmith
+(`dispatch.factor`, `exact.loglinear`) and `rheplicant.inference` imports
+them (`partition.py`, `loglinear.py`) rather than carrying a second copy —
+so bayesmith is now a runtime dependency, and for those two seams there is
+one statement of the algorithm with two paradigms' probes feeding it. The
+cross-check discipline stays for what was born twice; what was born once is
+simply shared.
 
 The reason is worth one sentence, because "keep both" can read as indecision.
 The two are different paradigms — this layer reads a `Pipeline` and a
-`ParameterSpace`, bayesmith reads a `Graph` — so of the 99 names published here
-only 24 exist there at all, and even those take different arguments. And the
+`ParameterSpace`, bayesmith reads a `Graph` — so of the 106 names published here
+only 24 exist anywhere in bayesmith, and only 12 in the 42 it publishes at top
+level, and even those take different arguments. And the
 three that do match exactly are the ones the cross-check compares; making one a
 re-export of the other would leave that test comparing an object with itself,
 unable to fail. The easier half of the merge was the half that would have cost

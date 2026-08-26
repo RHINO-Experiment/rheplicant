@@ -201,6 +201,13 @@ def test_the_cache_holds_one_program_per_branch(block) -> None:
     The key carries ``tol``, ``maxiter`` and ``require_convergence`` because all
     three are baked into the compiled graph -- the first two reach CG as static
     arguments and the third decides whether the guard is traced in at all.
+
+    It carries the ENGINE for a different reason: a ``log_conjugate`` block
+    solves the same names against ``log`` of the data, so serving it from a
+    ``conjugate`` block's slot would run one space's program on the other's
+    arrays -- a confident wrong answer with every guard still green. That the
+    two get separate slots is asserted in
+    ``tests/inference/test_loglinear.py``, where a log-linear fixture exists.
     """
     cond, values = block
     programs: dict = {}
@@ -215,8 +222,8 @@ def test_the_cache_holds_one_program_per_branch(block) -> None:
         )
     assert sorted(programs) == sorted(
         [
-            (("gain",), False, 1e-8, None, REACHABLE),
-            (("gain",), True, 1e-8, None, REACHABLE),
+            (("gain",), False, 1e-8, None, REACHABLE, "conjugate"),
+            (("gain",), True, 1e-8, None, REACHABLE, "conjugate"),
         ]
     ), (
         f"Expected one program for the mean and one for the draw, got "

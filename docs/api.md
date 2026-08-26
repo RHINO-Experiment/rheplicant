@@ -229,6 +229,9 @@ coefficients the noise-wave model consumes.
 .. automodule:: rheplicant.inference.linear
    :members:
 
+.. automodule:: rheplicant.inference.loglinear
+   :members:
+
 .. automodule:: rheplicant.inference.identifiability
    :members:
 ```
@@ -276,6 +279,9 @@ coefficients the noise-wave model consumes.
 .. automodule:: rheplicant.inference.plan
    :members:
    :show-inheritance:
+
+.. automodule:: rheplicant.inference.partition
+   :members:
 
 .. automodule:: rheplicant.inference.engines
    :members:

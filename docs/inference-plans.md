@@ -47,6 +47,16 @@ gain against a `(3, 4)` time × frequency coefficient basis, 54 data points and
 `Block` does not ask again. A block whose members are all declared linear is
 solved by the [conjugate routines](inference-linear.md#linear-blocks); anything
 else is stepped by gradient.
+
+There is a third engine, `log_conjugate`, and it is *not* derived — because
+there is no declaration to derive it from. A block is
+[conjugate in log space](inference-linear.md#the-same-model-in-log-space-where-sigma-is-constant)
+when the prediction is `exp` of an affine map, which no `Latent` field states;
+it is either asked for with `engine="log_conjugate"` or found by
+[`auto_blocks`](#the-partition-can-be-derived-too) probing for it. Asking for it
+on a latent declared `linear=True` is refused, because the two claims exclude
+each other: `exp` of an affine function is affine only where it is constant.
+
 The plan's `repr` reports what it derived:
 
 ```text
@@ -86,6 +96,115 @@ it to a block, or drop it from the space.
 A latent in *two* blocks is refused too: the second update each sweep would be
 solving a conditional the first had just invalidated, and every diagnostic would
 report the second's answer as if the first had never run.
+
+### The partition can be derived, too
+
+Declaring the blocks stays available and stays the honest default for a model
+you know. When you would rather not, `auto_blocks` reads the partition off the
+model, and `SamplingPlan.automatic` is the one-liner over it:
+
+```python
+plan = SamplingPlan.automatic(space, twin, state)
+
+# the same thing, with the blocks in reach to inspect or amend
+plan = SamplingPlan(space, *auto_blocks(space, twin, state, steps=20))
+```
+
+The rule is conjugate blocks for the latents declared `linear=True` and one
+gradient block for everything else — with two refinements, both of which the
+probe supplies and neither of which you declare.
+
+**One block per factor, not one per latent and not one for all.**
+`Latent(..., linear=True)` is a claim about **one** latent: the prediction is
+affine in it *with the others held fixed*. A conjugate block over several of
+them claims something strictly stronger, that the prediction is affine in them
+**jointly**, and on a multilinear model that is false while every member's own
+declaration is true. So sweeping every linear latent into one block is wrong,
+and one block per latent is needlessly worse — the correct partition is one
+block per *factor*, holding all of that factor's latents. On
+`gain × (B_ant @ t_ant + B_nw @ t_nw + tone)`:
+
+```text
+SamplingPlan(('t_ant', 't_nw'):conjugate, ('gain'):conjugate)
+```
+
+**And log-linearity is discovered, not declared.** A latent the prediction is
+`exp`-affine in — a gain bound as `Bind(..., fn=jnp.exp)` — has no `linear=True`
+to read, and there is deliberately no `log_linear=True` either: the same probe
+that finds the grouping asks
+[`check_log_linearity`](inference-linear.md#the-same-model-in-log-space-where-sigma-is-constant)
+and routes it to a `log_conjugate` block. On the same model with the gain in
+log space, nothing is declared about the gain at all and the partition still
+comes back closed-form throughout:
+
+```text
+SamplingPlan(('t_ant', 't_nw'):conjugate, ('log_gain'):log_conjugate)
+```
+
+The two probes take separate `scales`, and that is not tidiness: feeding the
+linear default's `1e3` entry to a log probe sends it through an exponential
+that overflows, the check refuses, and a genuinely log-linear latent is filed as
+gradient — a misclassification that costs a conjugate block and reports nothing.
+`log_scales=` is the argument, `LOG_DEFAULT_SCALES` the default.
+
+#### A worked example: all three engines from one model
+
+For `d = exp(Ax) · (By + exp(Cz)) · (1 + f w)` — a matrix-exponential gain over
+a summed sky under radiometer noise — declare `linear=True` on `y` alone (the
+one latent the prediction is affine in) and let the probes decide the rest:
+
+```text
+SamplingPlan(('y'):conjugate, ('x'):log_conjugate, ('z'):gradient)
+```
+
+`y` is conjugate in the original space, solved each sweep with sigma frozen at
+the current prediction — the GLS-flavoured choice this page documents above.
+`x` is discovered: nothing was declared for it, but `log(prediction) = Ax +
+log(By + exp(Cz))` is affine in it given the others, so the probe routes it to
+the log-space engine. `z` fails both probes and takes NUTS. Three engines, one
+sweep.
+
+Two things this example teaches beyond the partition:
+
+* **A correct partition is not a convergence proof.** This model is fully
+  identified (`identifiability` reports nullity 0) with
+  `weakest_identified = 5.4e-4` — one direction constrained thousands of times
+  more weakly than the rest, because `exp(Ax)`'s shape partly trades against
+  the sky's. Single-latent Gibbs alternation random-walks along that valley:
+  measured, two 400-sweep chains from different starts each reported tight
+  widths while sitting sixteen of those widths apart, and the joint
+  chi-squared `rhat` flagged nothing — chi-squared is FLAT along a valley by
+  construction, which is a blindness this page's own monitoring section
+  warns about in its other form. On such a model, put the strongly coupled
+  latents in ONE block by hand (`Block("y", "z", steps=...)`), and run a
+  second chain from a different start before believing any of them.
+* **Where this package's plans stop.** A `Latent`'s prior is a fixed
+  distribution; a prior *parameterised by another latent* — a field `w1`
+  whose statistics a hyperparameter sets — has no spelling in a
+  `ParameterSpace`, and a plan cannot sweep what it cannot declare. That
+  hierarchical variant of this same model is the second worked example in
+  bayesmith's documentation (`docs/factor-partition-examples.md` in that
+  repository), where the graph paradigm carries it natively and the
+  partition rule it showcases — a hyperparameter is ejected from every exact
+  block, because an exact block solving only against data would silently
+  drop the `p(w1 | y)` factor — has no counterpart here to drift from.
+
+**Pairs settle it.** For latents already known to be affine on their own, every
+diagonal block of the group's Hessian vanishes, so joint affinity is exactly the
+claim that the off-diagonal ones do too — a question about pairs. Probing the
+`C(n, 2)` pairs with `check_linearity` therefore decides a property of all
+`2ⁿ − n − 1` subsets, and the verdicts colour a graph whose groups are the
+blocks. The cost is that quadratic count of probes, each a linearization plus
+one forward per entry in `scales`; nothing here switches on a size, for the same
+reason `check_identifiability` does not.
+
+Deriving the partition changes nothing downstream. The blocks are checked
+exactly as declared ones are, each conjugate block's joint linearity re-verified
+at the first sweep, and — the part worth saying plainly — **a derived partition
+is not a reason to believe a model**. Two coupled conjugate blocks are precisely
+the configuration whose degenerate case converges quietly onto an arbitrary
+point with every per-block guard green; `identifiability` is what sees that, and
+both exits still run it by default.
 
 ### Two methods, not a mode flag
 

@@ -1,16 +1,24 @@
-"""The two engines a Gibbs block can be updated by, and the conditioning they share.
+"""The engines a Gibbs block can be updated by, and the conditioning they share.
 
 :mod:`rheplicant.inference.plan` decides *which* latents go in a block and
 *which* engine that block takes; this module is what an engine actually does to
 one block, given everything outside it held fixed.
 
-There are exactly two, and the split is not a taxonomy — it is the same split
-the rest of the package already makes. A block whose latents are all declared
+There are three, and the split is not a taxonomy — it is the same split the rest
+of the package already makes. A block whose latents are all declared
 ``linear=True`` is a linear-Gaussian conditional, so its point estimate is
 :func:`~rheplicant.inference.linear.wiener_solve` and its draw is
 :func:`~rheplicant.inference.linear.gcr_sample`, which is an **exact**
-conditional draw. Anything else has only a gradient, so its point estimate is a
-descent and its draw is NUTS.
+conditional draw. A block whose prediction is ``exp`` of an affine map is the
+same thing once the DATA is taken to logs, under the multiplicative noise the
+radiometer equation gives — :data:`LOG_CONJUGATE`, and
+:mod:`rheplicant.inference.loglinear` is where that transform and its
+first-order caveat live. Anything else has only a gradient, so its point
+estimate is a descent and its draw is NUTS.
+
+The first two share every line of their update but one, so they share a
+function: :func:`_conjugate_update` takes which transition to build, and the
+difference between them is exactly that a log block does not re-evaluate sigma.
 
 **Conditioning is one function, used by both.** :class:`Conditioning` closes
 over the model once and hands out three things: the joint prediction, the joint
@@ -61,12 +69,25 @@ from rheplicant.inference.parameters import ParameterSpace
 #: The engine for a block whose latents are ALL declared ``linear=True``.
 CONJUGATE: str = "conjugate"
 
+#: The engine for a block that is conjugate once the DATA is taken to logs —
+#: the prediction is ``exp(affine)``, so ``linear_operator`` refuses it while
+#: :func:`~rheplicant.inference.loglinear.log_linear_operator` does not. There
+#: is no ``Latent(log_linear=True)`` to derive this from, deliberately: it is
+#: discovered by probing (:func:`~rheplicant.inference.partition.auto_blocks`)
+#: or asked for explicitly, never inferred from a declaration that does not
+#: exist.
+LOG_CONJUGATE: str = "log_conjugate"
+
 #: The engine for anything else — and the legitimate downgrade for a block the
 #: caller wants stepped by gradient even though it could be solved.
 GRADIENT: str = "gradient"
 
-#: The two, in the order a message should list them.
-ENGINES: tuple[str, ...] = (CONJUGATE, GRADIENT)
+#: The three, in the order a message should list them.
+ENGINES: tuple[str, ...] = (CONJUGATE, LOG_CONJUGATE, GRADIENT)
+
+#: The engines that solve in closed form, and so have no inner step count and
+#: no step size. Named once because three places refuse those arguments.
+CLOSED_FORM: tuple[str, ...] = (CONJUGATE, LOG_CONJUGATE)
 
 #: Inner steps a gradient block takes when ``Block(..., steps=)`` says nothing.
 #: Small on purpose: within a Gibbs sweep the block is revisited every sweep, so
@@ -102,6 +123,17 @@ class Conditioning:
         observed: the data. Shaped like the prediction — checked at the exits.
         noise: the noise model, normalized (a bare sigma is already wrapped).
         forward: ``{name: value} -> prediction``.
+        log_observed, log_sigma: the data and sigma a
+            :data:`LOG_CONJUGATE` block solves against, from
+            :func:`~rheplicant.inference.loglinear.to_log_space`. ``None`` when
+            the partition has no such block.
+
+            Computed ONCE per run rather than per sweep, and that is not an
+            optimization — it is the log-space claim showing up in the code.
+            ``log_sigma`` does not depend on the prediction, so unlike
+            :meth:`sigma` there is nothing for a sweep to re-evaluate; and
+            ``to_log_space`` refuses a non-positive sample eagerly, which a
+            jitted transition could not do at all.
     """
 
     space: ParameterSpace
@@ -110,6 +142,8 @@ class Conditioning:
     observed: jax.Array
     noise: NoiseModel
     forward: Callable[[dict[str, jax.Array]], jax.Array]
+    log_observed: jax.Array | None = None
+    log_sigma: jax.Array | None = None
 
     def sigma(self, values: dict[str, jax.Array]) -> jax.Array:
         """Noise sigma at the current joint prediction, shaped like the data."""
@@ -312,6 +346,53 @@ def _conjugate_transition(
     return transition
 
 
+def _log_conjugate_transition(
+    cond: Conditioning,
+    names: tuple[str, ...],
+    *,
+    draw: bool,
+    tol: float,
+    maxiter: int | None,
+    require_convergence: float | None,
+) -> Callable[..., tuple[dict[str, jax.Array], jax.Array]]:
+    """The same update, against ``log`` of the data. Note what is NOT here.
+
+    :func:`_conjugate_transition` opens with ``sigma = cond.sigma(values)``,
+    because under a prediction-dependent noise model the covariance moves every
+    time the block's neighbours do. In log space it does not:
+    ``Var[log(1 + f w)]`` is a function of ``f`` alone, so ``cond.log_sigma`` is
+    computed once for the run and simply used. The reweighting fixed point
+    :func:`~rheplicant.inference.gls.iterative_gls` performs has nothing to
+    iterate on here, and the absence of that one line is what says so.
+
+    **What this costs, stated where it is incurred.** The log-space Gaussian is
+    the multiplicative model only to first order, so a plan mixing
+    :data:`LOG_CONJUGATE` and :data:`CONJUGATE` blocks draws its conditionals
+    from two likelihoods that agree to ``O(f^2)`` rather than exactly. That is
+    the same class of statement as
+    :func:`gradient_draw`'s Metropolis-within-Gibbs downgrade: still a usable
+    sampler, no longer the exact one a pure-conjugate plan is.
+    :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL` bounds
+    the discrepancy — at the ``f = 4.05e-3`` of a 61 kHz channel at 1 s the
+    variance the two disagree on is 4e-5 of itself.
+    """
+    from rheplicant.inference.loglinear import log_linear_operator
+
+    @eqx.filter_jit
+    def transition(values, key):
+        block = log_linear_operator(
+            cond.space, cond.pipeline, cond.state_template,
+            names=names, at=values, check=False,
+        )
+        extra = {"key": key} if draw else {}
+        return (gcr_sample if draw else wiener_solve)(
+            block, cond.log_observed, noise_std=cond.log_sigma, tol=tol,
+            maxiter=maxiter, require_convergence=require_convergence, **extra,
+        )
+
+    return transition
+
+
 def _conjugate_update(
     cond: Conditioning,
     names: tuple[str, ...],
@@ -322,6 +403,7 @@ def _conjugate_update(
     maxiter: int | None,
     require_convergence: float | None,
     programs: dict[Any, Any] | None = None,
+    engine: str = CONJUGATE,
 ) -> tuple[dict[str, jax.Array], jax.Array]:
     """One conjugate-Gaussian block update. ``key=None`` is the mean, ``k`` a draw.
 
@@ -342,10 +424,18 @@ def _conjugate_update(
     traced into the graph at all.
     """
     draw = key is not None
-    key_for = (names, draw, tol, maxiter, require_convergence)
+    # `engine` is IN the cache key: the two transitions differ in which space
+    # they solve, and serving one from the other's slot would draw a log block
+    # against linear-space data with every guard still green.
+    key_for = (names, draw, tol, maxiter, require_convergence, engine)
     transition = None if programs is None else programs.get(key_for)
     if transition is None:
-        transition = _conjugate_transition(
+        build = (
+            _log_conjugate_transition
+            if engine == LOG_CONJUGATE
+            else _conjugate_transition
+        )
+        transition = build(
             cond, names, draw=draw, tol=tol, maxiter=maxiter,
             require_convergence=require_convergence,
         )
@@ -358,6 +448,26 @@ def _conjugate_update(
 def conjugate_estimate(cond, names, values, **kwargs):
     """The block's conditional posterior MEAN, by :func:`wiener_solve`."""
     return _conjugate_update(cond, names, values, key=None, **kwargs)
+
+
+def log_conjugate_estimate(cond, names, values, **kwargs):
+    """The same mean, solved in log space. See :func:`_log_conjugate_transition`."""
+    return _conjugate_update(
+        cond, names, values, key=None, engine=LOG_CONJUGATE, **kwargs
+    )
+
+
+def log_conjugate_draw(cond, names, values, *, key, **kwargs):
+    """An exact draw from the LOG-SPACE conditional.
+
+    Exact for that conditional, which is the multiplicative model's own only to
+    first order in ``f`` — the one qualification a
+    :data:`CONJUGATE` block does not carry. See
+    :func:`_log_conjugate_transition` for the size of it.
+    """
+    return _conjugate_update(
+        cond, names, values, key=key, engine=LOG_CONJUGATE, **kwargs
+    )
 
 
 def conjugate_draw(cond, names, values, *, key, **kwargs):
@@ -542,15 +652,19 @@ def gradient_draw(
 
 
 __all__ = [
+    "CLOSED_FORM",
     "CONJUGATE",
     "DEFAULT_GRADIENT_STEPS",
     "DEFAULT_LEARNING_RATE",
     "ENGINES",
     "GRADIENT",
+    "LOG_CONJUGATE",
     "Conditioning",
     "conditional_potential",
     "conjugate_draw",
     "conjugate_estimate",
+    "log_conjugate_draw",
+    "log_conjugate_estimate",
     "gradient_draw",
     "gradient_estimate",
     "require_priors",

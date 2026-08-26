@@ -525,6 +525,78 @@ the right thing to condition a constrained realization on, because a GCR draw
 *is* a draw from a linear-Gaussian posterior at a given covariance. If you want
 the full likelihood's mode or posterior, that is a gradient sampler's job.
 
+### The same model in log space, where sigma is constant
+
+`RadiometerNoise` generates `d = μ (1 + f w)`. Take logs:
+
+```text
+log d = log μ + log(1 + f w)
+```
+
+and `log(1 + f w) → N(0, f²)` to first order. Two things follow.
+
+**A block whose `log μ` is affine becomes conjugate.** A gain bound as
+`Bind("log_gain", into=..., fn=jnp.exp)` makes the prediction `exp(log_gain)·S`,
+which is not affine in `log_gain` — `linear_operator` refuses it, and the only
+route left is a gradient block. `log_linear_operator` exports the same block
+from `log` of the prediction, and what comes back is an ordinary `LinearBlock`
+that `wiener_solve` and `gcr_sample` accept unchanged:
+
+```python
+block = log_linear_operator(space, twin, state, "log_gain", at=values)
+y, sigma = to_log_space(observed, noise)
+draw, _ = gcr_sample(block, y, noise_std=sigma, prior_std=PRIOR, key=key)
+```
+
+**And σ is constant there, so there is no fixed point to find.**
+`Var[log(1 + f w)]` is a function of `f` alone — measured at prediction
+magnitudes 1, 10³ and 10⁶ it moves only in the fifth significant figure, which
+is the Monte Carlo floor of the measurement. The reweighting that
+[`iterative_gls`](#when-the-covariance-is-not-given) exists to perform has
+nothing left to iterate on: one solve, not a loop. The GLS-versus-full-likelihood
+distinction on this page is a consequence of σ tracking the prediction, and in
+log space it does not.
+
+**A summed sky is no obstacle**, which is the fact that makes this useful for
+an instrument model. For `d = g (T_ant + T_nw + tone)`, `log` of the sum is not
+affine in the sky coefficients — but the *gain* block does not need it to be.
+Conditional on the sky, `log d = log g + log S` with `log S` a known constant,
+and a known constant added to the prediction is exactly what `LinearBlock.offset`
+holds. So the gain is log-linear whatever the sky is made of, and the sky block
+stays an ordinary linear block in the original space. Each block takes the space
+its own conditional is affine in.
+
+What does break it is an additive term *downstream* of the gain: `d = g S + C`
+is log-linear in neither, because `log` does not distribute over that sum.
+`check_log_linearity` refuses it, and a receiver offset is the realistic way to
+meet that refusal.
+
+**The approximation, and its size.** First order is not exact —
+`E[log(1 + f w)] = −f²/2`, and the variance exceeds `f²`. `to_log_space` adds
+the `f²/2` back (a constant, so it is exact arithmetic rather than an estimate),
+and `f` above `FIRST_ORDER_MAX_FRACTIONAL` is refused. Measured over 2×10⁷ draws:
+
+| `f` | `Var / f² − 1` | `mean / (−f²/2)` |
+|---|---|---|
+| 4.0e-3 | below the measurement floor | 1.00 |
+| 0.06 | 0.0088 | 1.006 |
+| 0.10 | 0.0258 | 1.016 |
+| 0.30 | 0.3983 | 1.185 |
+
+The operating range is the top of that table, not the bottom:
+`f = 1/√(Δν·τ)` is 4.05×10⁻³ for the 61 kHz × 1 s configuration this page uses,
+where the mean shift is 8×10⁻⁶. The refusal at 0.06 is therefore not a limit
+anyone meets by observing — it fires on a `channel_width` or `integration_time`
+that is not what was intended.
+
+:::{note}
+Both exits refuse a non-positive value by name rather than letting `log`
+produce a NaN, and the reason is not tidiness. NaN fails every comparison, so a
+NaN departure reads as *passing* `check_linearity`'s `departure > rtol` test and
+a NaN residual reads as a converged solve. Flagged samples are exempt: an
+unobserved sample may hold anything and is carried through at infinite σ.
+:::
+
 ### `noise=` or `noise_std=`: the keyword is the type
 
 Two spellings have now run past each other on this page — `iterative_gls(...,
