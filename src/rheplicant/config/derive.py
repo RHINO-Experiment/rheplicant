@@ -26,6 +26,7 @@ import contextlib
 from collections.abc import Callable
 
 import jax.numpy as jnp
+import numpy as np
 
 from rheplicant.config.context import ResolutionContext
 from rheplicant.config.delivery import record_resolved_delivery
@@ -120,14 +121,34 @@ def _median_gap(axis, *, name: str, axis_name: str):
             "required, so this is reachable only when a value node is resolved before "
             "the observation is."
         )
-    gaps = jnp.abs(jnp.diff(axis))
+    # float64, via numpy, and NOT jnp. `diff` of a float32 axis whose values
+    # are large and close cancels: measured on a 449-channel 50-200 MHz grid,
+    # the gaps span 16 Hz around a true spacing of 334821.429 Hz, and the
+    # median lands wherever that jitter puts it. That is how the same document
+    # reported a "336 Hz median channel spacing" on one machine and "328 Hz"
+    # on another -- a user-facing number moving 2.4 % with the CPU rather than
+    # with the data. In float64 the same gaps span 6e-08 Hz.
+    #
+    # jnp cannot do this: `jax_enable_x64` is off here (float32 is the
+    # package's production dtype) so a float64 request is silently truncated.
+    # numpy can, and may: every caller of this consumes a concrete scalar at
+    # config time -- `float(...)` in grids.py, a `ResolvedValue` in the two
+    # derivations -- so nothing here is ever traced.
+    gaps = np.abs(np.diff(np.asarray(axis, dtype=np.float64)))
     if gaps.size == 0:
         raise ConfigError(
             f"{name}: the {axis_name} axis has {axis.shape[0]} sample(s), so it has no "
             "spacing. A single-sample axis is legal elsewhere; it is not something to "
             "measure."
         )
-    return jnp.median(gaps)
+    # Back to a jax scalar, and that is not cosmetic: `config/delivery.py`
+    # refuses a value node for an `eqx.field(static=True)` float BY the value
+    # being an array, and returning a Python float here silently turned that
+    # refusal off -- caught by exactly one test in 6092, which is the kind of
+    # margin this conversion exists to keep. The accuracy is what changed, not
+    # the type: float32 holds this median to about seven digits, against the
+    # 16 Hz of jitter the float32 `diff` was introducing.
+    return jnp.asarray(np.median(gaps))
 
 
 @register_derivation("channel_spacing", frozenset({"times"}))
