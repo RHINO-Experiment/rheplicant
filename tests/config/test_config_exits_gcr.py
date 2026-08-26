@@ -317,13 +317,23 @@ class TestNoiseFromGls:
 
     def test_an_unconverged_covariance_must_be_acknowledged(self):
         # min_reweights == max_reweights == 2 stops the loop three steps short
-        # of the fixed point: measured iterations 2, delta 1.9868e-06,
-        # converged False.
+        # of the fixed point: measured iterations 2, delta 1.9868e-06 on arm64
+        # and 7.9e-08 on x86_64, converged False on both.
+        #
+        # `reweight_tol: 1e-12` is what makes that last clause true BY
+        # CONSTRUCTION rather than by trajectory. Without it the loop is judged
+        # against the package's default, max(8 * eps, tol), and whether the
+        # delta at two steps lands above it is a property of the platform's
+        # arithmetic: measured 2026-08-26, this refusal did not fire at all on
+        # the Linux runner because the run had converged there. Five orders of
+        # margin is the same choice, for the same reason, that
+        # test_config_exits_gls.py's SQUEEZED records.
         with pytest.raises(ConfigError,
                            match="acknowledge_unconverged_covariance") as got:
             gcr_product(
                 {"noise_from": "gls", "n_draws": 4, "min_reweights": 2,
-                 "max_reweights": 2}, noise=GCR_RADIOMETER)
+                 "max_reweights": 2, "reweight_tol": 1.0e-12},
+                noise=GCR_RADIOMETER)
         message = str(got.value)
         # The refusal QUOTES what the loop reached, so a reader can tell a cap
         # that was too low from a tolerance that was too tight.  Task 5's own
@@ -333,9 +343,12 @@ class TestNoiseFromGls:
         assert "1.987e-06" in message
 
     def test_acknowledging_it_draws_anyway_and_records_the_false(self):
+        # `reweight_tol` as above: unconverged by construction, not by which
+        # machine ran it.
         product = gcr_product(
             {"noise_from": "gls", "n_draws": 4, "min_reweights": 2,
-             "max_reweights": 2, "acknowledge_unconverged_covariance": True},
+             "max_reweights": 2, "reweight_tol": 1.0e-12,
+             "acknowledge_unconverged_covariance": True},
             noise=GCR_RADIOMETER)
         assert product["gls"]["converged"] is False
         assert product["gls"]["iterations"] == 2
@@ -362,17 +375,22 @@ class TestNoiseFromGls:
         # 3.179e-07 at the package's own reweight_tol (max(8 * eps, tol)), and
         # two steps to 1.987e-06 at 0.1.  BOTH fields move, and the control's
         # own 3 (against the shipped 5) is what says min_reweights travelled.
+        # Asserted as RELATIONS, because the step counts are trajectory and the
+        # trajectory is not portable: the control takes 3 steps on arm64 and 2
+        # on x86_64. What "the knob travelled" actually means survives both --
+        # the control stops before the shipped floor of 5, and loosening the
+        # tolerance stops it no later still and declares convergence.
+        SHIPPED_FLOOR = 5
         control = gcr_product(
             {"noise_from": "gls", "n_draws": 4, "min_reweights": 1},
             noise=GCR_RADIOMETER)
-        assert control["gls"]["iterations"] == 3
-        assert control["gls"]["delta"] == pytest.approx(3.179e-07, rel=1e-3)
+        assert control["gls"]["iterations"] < SHIPPED_FLOOR, control["gls"]
         loosened = gcr_product(
             {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
              "reweight_tol": 0.1}, noise=GCR_RADIOMETER)
         assert loosened["gls"]["converged"] is True
-        assert loosened["gls"]["iterations"] == 2
-        assert loosened["gls"]["delta"] == pytest.approx(1.9868e-06, rel=1e-3)
+        assert loosened["gls"]["iterations"] <= control["gls"]["iterations"]
+        assert float(loosened["gls"]["delta"]) > 0.0
 
     def test_the_gls_knobs_without_noise_from_gls_are_refused(self):
         # A declared key that reaches nothing is the defect this whole plan is

@@ -96,7 +96,12 @@ class TestTheProduct:
                                    "iterations", "delta", "converged")
         assert product.converged is True
         assert product.iterations == 5
-        assert product.delta == pytest.approx(3.9736e-07, rel=1e-3)
+        # `delta` is trajectory, and the trajectory is not portable: 3.9736e-07
+        # on arm64, 7.947e-08 on x86_64. `converged` is the property, and the
+        # package only sets it when delta fell below the tolerance, so the pair
+        # is asserted as that -- positive, finite, and small enough to be a
+        # fixed point rather than a step.
+        assert 0.0 < float(product.delta) < 1e-5, product.delta
         assert set(product.solution) == {"g"}
         assert float(product.solution["g"]) == pytest.approx(TRUTH_G,
                                                              abs=1e-4)
@@ -150,7 +155,12 @@ class TestTheProduct:
         # And `residual` is the package's own, carried through _replace
         # untouched: on the shipped document it is exactly 0.0, which a
         # hard-coded zero would also satisfy; here it is 1.725e-06.
-        assert float(moved.residual) == pytest.approx(1.725e-06, rel=1e-3)
+        # Not pinned to the digit: 1.725e-06 on arm64, 7.5e-08 on x86_64. The
+        # claim the comment above makes is that the residual is the package's
+        # OWN and was carried through untouched -- so what has to be true is
+        # that it is not the hard-coded zero, which is exactly what a
+        # fabricated field would be.
+        assert 0.0 < float(moved.residual) < 1e-4, moved.residual
 
 
 class TestTheConvergenceGate:
@@ -177,7 +187,16 @@ class TestTheConvergenceGate:
         # and the delta's four digits are what make _gls_result's {delta:.4g}
         # API -- the gcr module pins the same format on its own document.
         assert "stopped after 2 reweights" in message
-        assert "4.768e-07" in message
+        # The delta is DERIVED rather than pinned, and that is the stronger
+        # test as well as the portable one. What is under contract is that the
+        # refusal quotes what the loop REACHED, at `{delta:.4g}`; the value
+        # reached is the platform's arithmetic (4.768e-07 on arm64, 7.947e-08
+        # on x86_64), so pinning its digits tested the machine. This still
+        # fails if the number stops being quoted, if the format changes, or if
+        # the quoted number is not the one the run actually reached.
+        reached = gls_product({**SQUEEZED,
+                               "acknowledge_unconverged_covariance": True})
+        assert f"{float(reached.delta):.4g}" in message
         assert "acknowledge_unconverged_covariance: true" in message
 
     def test_the_acknowledgement_lets_that_covariance_through(self):
@@ -185,7 +204,11 @@ class TestTheConvergenceGate:
                                "acknowledge_unconverged_covariance": True})
         assert product.converged is False
         assert product.iterations == 2
-        assert product.delta == pytest.approx(4.7684e-07, rel=1e-3)
+        # Unconverged is the property; the delta is the trajectory. SQUEEZED's
+        # tolerance is five orders below anything the loop reaches on either
+        # platform, which is what makes `converged is False` true by
+        # construction rather than by which machine ran it.
+        assert float(product.delta) > SQUEEZED["reweight_tol"], product.delta
         # The covariance comes back too, and it is a real one -- but note what
         # this assertion does NOT do: two reweights already put it within 2e-6
         # (relatively) of the fixed point's 2.30699312e-04, so no tolerance
@@ -388,10 +411,13 @@ class TestWhatReachesTheLoop:
                                                               abs=1.0e-5)
         assert float(capped.solution["c"]) == pytest.approx(0.0184463,
                                                             rel=1e-3)
-        assert capped.iterations == 5
         assert float(uncapped.solution["dep"]) == pytest.approx(1.0, abs=1e-4)
         assert float(uncapped.solution["c"]) == pytest.approx(0.02, abs=1e-5)
-        assert uncapped.iterations == 9
+        # The reweight counts are NOT asserted absolutely. They are trajectory:
+        # the uncapped run takes 9 steps on arm64 and 5 on x86_64. The five
+        # orders `dep` moves between capped and uncapped is what this test is
+        # about, and it is asserted above; the count carried no part of it.
+        assert capped.iterations > 0 and uncapped.iterations > 0
         # And a declared cap that is generous means what no cap means, which
         # is what says the capped run above was capped BY THE DECLARATION
         # rather than by anything the pair does on its own.
