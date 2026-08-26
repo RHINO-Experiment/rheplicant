@@ -51,7 +51,18 @@ from tests.config.exit_helpers import (
 #: ``delta <= reweight_tol`` (boundary-validation.md), where a change of
 #: ``<=`` to ``<`` in the package flips the verdict.  Five orders of margin is
 #: what keeps this constant about the executor.
-SQUEEZED = {"min_reweights": 1, "max_reweights": 2, "reweight_tol": 1.0e-12}
+#: **``max_reweights: 1``, and that ONE is what makes this portable.** At two
+#: the loop takes a real step, and how big that step is turns out to be an
+#: architecture question: on x86_64 this reweighting reaches the fixed point
+#: EXACTLY and reports ``delta == 0.0``, so `converged` comes back True and no
+#: tolerance in the world -- 1e-12 included -- can call it unconverged. On
+#: arm64 it hovers at ~4.8e-07 instead, one ulp of float32 noise above zero.
+#:
+#: At one reweight there is no previous sigma to difference against, so the
+#: package reports ``delta = inf``. That is unconverged BY CONSTRUCTION rather
+#: than by where the arithmetic lands, which is the only version of this
+#: fixture that means the same thing on both machines.
+SQUEEZED = {"min_reweights": 1, "max_reweights": 1, "reweight_tol": 1.0e-12}
 
 #: The converged covariance's mean, measured: 2.30699312e-04.
 SIGMA_MEAN = 2.30699e-4
@@ -190,7 +201,7 @@ class TestTheConvergenceGate:
         # 100 lets the loop run to 100 against a tolerance it never meets),
         # and the delta's four digits are what make _gls_result's {delta:.4g}
         # API -- the gcr module pins the same format on its own document.
-        assert "stopped after 2 reweights" in message
+        assert "stopped after 1 reweights" in message
         # The delta is DERIVED rather than pinned, and that is the stronger
         # test as well as the portable one. What is under contract is that the
         # refusal quotes what the loop REACHED, at `{delta:.4g}`; the value
@@ -207,11 +218,15 @@ class TestTheConvergenceGate:
         product = gls_product({**SQUEEZED,
                                "acknowledge_unconverged_covariance": True})
         assert product.converged is False
-        assert product.iterations == 2
+        assert product.iterations == 1
         # Unconverged is the property; the delta is the trajectory. SQUEEZED's
         # tolerance is five orders below anything the loop reaches on either
         # platform, which is what makes `converged is False` true by
         # construction rather than by which machine ran it.
+        # `inf` at one reweight -- see SQUEEZED. Asserted as "above the
+        # tolerance" rather than as inf, because what the gate reads is the
+        # comparison and a future first-step delta that were finite but large
+        # would be just as unconverged.
         assert float(product.delta) > SQUEEZED["reweight_tol"], product.delta
         # The covariance comes back too, and it is a real one -- but note what
         # this assertion does NOT do: two reweights already put it within 2e-6
@@ -224,17 +239,43 @@ class TestTheConvergenceGate:
             SIGMA_MEAN, rel=1e-4)
 
     def test_reweight_tol_alone_decides_converged(self):
-        # Same block, same step count, the same delta of 4.768e-07: only the
-        # tolerance differs.  This kills an implementation that swept
-        # reweight_tol and dropped it -- the package's own default here is
-        # max(8 * eps, tol) = 1e-6, which calls BOTH of these converged, so a
-        # dropped key makes the pair agree.
-        tight = gls_product({**SQUEEZED,
+        """Same block, same step count: only the tolerance differs.
+
+        This kills an implementation that swept ``reweight_tol`` and dropped
+        it -- the package's own default here is ``max(8 * eps, tol)``, which
+        calls BOTH of these converged, so a dropped key makes the pair agree.
+
+        **The step it brackets is MEASURED, not pinned, and the search is the
+        portable part.** The pair needs a delta that is finite and above zero,
+        so that one tolerance can sit under it and one over. That is not a
+        given: on x86_64 this reweighting reaches the fixed point exactly and
+        reports ``delta == 0.0`` at two steps, where arm64 hovers at 4.8e-07.
+        A hard-coded step count and a hard-coded pair of tolerances therefore
+        made this test a statement about one machine's arithmetic. It now asks
+        the block where it is still moving, and brackets THAT.
+        """
+        moving = None
+        for steps in range(2, 7):
+            probe = gls_product({"min_reweights": 1, "max_reweights": steps,
+                                 "reweight_tol": 1.0})
+            delta = float(probe.delta)
+            if 0.0 < delta < float("inf"):
+                moving = (steps, delta)
+                break
+        assert moving is not None, (
+            "this block reaches its fixed point exactly at every step count "
+            "tried, so no tolerance can sit between converged and not, and "
+            "the claim has nothing to be exhibited on. That is a property of "
+            "the arithmetic, not of reweight_tol: pick a fixture whose "
+            "reweighting is still moving."
+        )
+        steps, delta = moving
+        settings = {"min_reweights": 1, "max_reweights": steps}
+        tight = gls_product({**settings, "reweight_tol": delta / 2.0,
                              "acknowledge_unconverged_covariance": True})
-        loose = gls_product({"min_reweights": 1, "max_reweights": 2,
-                             "reweight_tol": 1.0e-3})
-        assert tight.iterations == 2
-        assert loose.iterations == 2
+        loose = gls_product({**settings, "reweight_tol": delta * 2.0})
+        assert tight.iterations == steps
+        assert loose.iterations == steps
         assert tight.delta == pytest.approx(loose.delta, rel=1e-6)
         assert tight.converged is False
         assert loose.converged is True

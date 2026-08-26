@@ -202,8 +202,15 @@ def test_the_ratio_is_marginalised_and_a_raw_gradient_amplitude_names_the_wrong_
     )
     raw = dict(zip(FLAT, np.abs(gradients), strict=True))
 
-    assert raw["running"] / raw["t21_depth"] == pytest.approx(9.4, rel=0.3)
-    assert ratios["t21_depth"] / ratios["running"] == pytest.approx(4.0, rel=0.3)
+    # The REVERSAL is the claim, and the magnitudes are not. Measured: the raw
+    # ratio is 9.4 on arm64 and 22.4 on x86_64, which is the same statement
+    # about which direction the parameterisation flatters, made by arithmetic
+    # that lands differently. Both are asserted as orderings with a margin
+    # wide enough that neither could be noise -- a factor of three either way
+    # -- because a reversal that were marginal would be the interesting
+    # failure and this must not read it as a pass.
+    assert raw["running"] > 3.0 * raw["t21_depth"], raw
+    assert ratios["t21_depth"] > 3.0 * ratios["running"], ratios
 
 
 def test_audit_refuses_above_a_declared_ratio():

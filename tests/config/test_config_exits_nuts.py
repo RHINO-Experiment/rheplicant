@@ -254,9 +254,21 @@ class TestTheStartMoves:
             needle({"init": "declared"}).samples["c"].mean())
 
     def test_ref_starts_somewhere_else_and_the_chain_shows_it(self):
+        """The claim is that the START moved the CHAIN, so it is asserted as a
+        difference from the default start rather than as a side of a line.
+
+        `< 5.0e7` stood here and is where the arm64 chain happens to land; the
+        x86_64 one lands at 9.37e7. Both are a diverging chain wandering off
+        from a ref of 6e7, and neither number says anything the other does
+        not -- what says something is that neither is where the DECLARED start
+        leaves it. A threshold could only ever have been one machine's side of
+        one machine's wander.
+        """
         with pytest.warns(UserWarning, match="divergent"):
             drawn = needle({"init": "ref"})
-        assert float(drawn.samples["c"].mean()) < 5.0e7
+        settled = float(needle().samples["c"].mean())
+        moved = float(drawn.samples["c"].mean())
+        assert abs(moved - settled) > 0.1 * abs(settled), (moved, settled)
         assert drawn.divergences > 0
 
     def test_ref_puts_the_ref_on_the_kernel(self, monkeypatch):

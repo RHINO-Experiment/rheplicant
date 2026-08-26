@@ -336,27 +336,41 @@ class TestNoiseFromGls:
         with pytest.raises(ConfigError,
                            match="acknowledge_unconverged_covariance") as got:
             gcr_product(
-                {"noise_from": "gls", "n_draws": 4, "min_reweights": 2,
-                 "max_reweights": 2, "reweight_tol": 1.0e-12},
+                {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
+                 "max_reweights": 1, "reweight_tol": 1.0e-12},
                 noise=GCR_RADIOMETER)
         message = str(got.value)
         # The refusal QUOTES what the loop reached, so a reader can tell a cap
         # that was too low from a tolerance that was too tight.  Task 5's own
         # test pins the same two fields on its own document, so the :.4g is
         # load-bearing in both.
-        assert "stopped after 2 reweights" in message
-        assert "1.987e-06" in message
+        assert "stopped after 1 reweights" in message
+        # The delta is DERIVED, not pinned: what is under contract is that the
+        # refusal quotes what the loop reached at `{delta:.4g}`, and the value
+        # reached belongs to the platform -- 1.987e-06 on arm64, and on x86_64
+        # this loop reaches its fixed point exactly, so at two steps there was
+        # nothing to refuse at all. At ONE reweight there is no previous sigma
+        # to difference against and the package reports `inf`, which is
+        # unconverged by construction on either machine.
+        reached = gcr_product(
+            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
+             "max_reweights": 1, "reweight_tol": 1.0e-12,
+             "acknowledge_unconverged_covariance": True},
+            noise=GCR_RADIOMETER)
+        assert f"{float(reached['gls']['delta']):.4g}" in message
 
     def test_acknowledging_it_draws_anyway_and_records_the_false(self):
-        # `reweight_tol` as above: unconverged by construction, not by which
-        # machine ran it.
+        # One reweight: `delta` is `inf` because there is no previous sigma to
+        # difference against, so this is unconverged by construction rather
+        # than by where the arithmetic lands. At two steps x86_64 reaches the
+        # fixed point exactly and reports converged.
         product = gcr_product(
-            {"noise_from": "gls", "n_draws": 4, "min_reweights": 2,
-             "max_reweights": 2, "reweight_tol": 1.0e-12,
+            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
+             "max_reweights": 1, "reweight_tol": 1.0e-12,
              "acknowledge_unconverged_covariance": True},
             noise=GCR_RADIOMETER)
         assert product["gls"]["converged"] is False
-        assert product["gls"]["iterations"] == 2
+        assert product["gls"]["iterations"] == 1
 
     def test_the_acknowledgement_is_a_bool(self):
         with pytest.raises(ConfigError,
