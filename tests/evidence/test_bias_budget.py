@@ -148,10 +148,19 @@ def test_the_ratio_grows_as_sqrt_n_for_a_coherent_error():
     assert large / small == pytest.approx(4.0, rel=0.05), (
         f"{small} -> {large} over a 16x campaign; sqrt(N) predicts 4.0x."
     )
-    # And the absolute numbers, so a regression that keeps the ratio but moves
-    # the scale is visible. Measured at 1.571e-11 and 6.286e-11.
-    assert small == pytest.approx(1.571e-11, rel=0.25)
-    assert large == pytest.approx(6.286e-11, rel=0.25)
+    # And the absolute scale, so a regression that keeps the ratio but moves
+    # the scale is visible. As a BAND, not a pin: measured 1.571e-11 on arm64
+    # macOS and 1.639e-12 on x86_64 Linux, a factor of ten. These are
+    # bias-over-sigma at the 1e-11 level, which is to say a coherent error
+    # already indistinguishable from zero, so its absolute size is decided by
+    # where the arithmetic rounds and not by the campaign. The RATIO above is
+    # the section's claim and holds on both platforms to well inside 5 %.
+    #
+    # The band still does the job the pin was written for. What it is guarding
+    # against is a regression that moves the scale by orders of magnitude --
+    # a bias at 1e-6 would be a real one, and no platform spread reaches that.
+    assert 1e-13 < small < 1e-9, small
+    assert 1e-13 < large < 1e-9, large
 
 
 def test_a_bigger_incoherent_error_does_not_show_the_sqrt_n_law():
