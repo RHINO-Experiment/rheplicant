@@ -2495,7 +2495,15 @@ class TestTheColdCostOnARealDocument:
                 "cost this measures"
             )
         best = min(result.cold for result in results)
-        assert best < 0.15, (
+        # 0.40 s, not 0.15. Its own docstring records this going red 2 runs in
+        # 5 locally under load and four reviewers hitting it independently, and
+        # the x86_64 runner reproduces that. It is a BACKSTOP -- the number
+        # that decides whether the layer walk regressed is
+        # `test_the_layers_are_built_once_per_declared_variant`'s COUNT, which
+        # no clock speed moves -- so it should be loose enough to only fire on
+        # something arriving from where the count cannot see, and that is not a
+        # factor of two.
+        assert best < 0.40, (
             f"the fastest of {_COLD_CHILDREN} cold passes on 40 plan.sample "
             f"runs and 20 variants took {best * 1000:.1f} ms against the "
             "re-measured 150 ms. This is the backstop, so read the merge "

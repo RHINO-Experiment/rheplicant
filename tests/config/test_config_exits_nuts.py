@@ -710,8 +710,13 @@ class TestTheDiagnostics:
         #
         # `n_eff` is the one that does the work -- the two differ by 75 % --
         # so it stays.
-        assert drawn.diagnostics["d"]["n_eff"] == pytest.approx(
-            57.31, rel=5e-2)
+        # `n_eff` is what discriminates a swapped pairing -- the two latents'
+        # differ by 75 % -- but its VALUE is trajectory: 57.31 on arm64 and
+        # 42.27 on x86_64. So the discrimination is asserted as the SEPARATION
+        # it rests on rather than as one machine's number: d's row must be the
+        # smaller by a margin no swap could survive.
+        near, far = drawn.diagnostics["d"]["n_eff"], drawn.diagnostics["a"]["n_eff"]
+        assert near < 0.8 * far, (near, far)
 
     def test_the_divergence_count_is_real_and_not_always_zero(self):
         """A count that is 0 on every document a test ever shows it is a

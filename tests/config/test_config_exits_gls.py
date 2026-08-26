@@ -101,7 +101,11 @@ class TestTheProduct:
         # package only sets it when delta fell below the tolerance, so the pair
         # is asserted as that -- positive, finite, and small enough to be a
         # fixed point rather than a step.
-        assert 0.0 < float(product.delta) < 1e-5, product.delta
+        # `>= 0`, not `> 0`: on x86_64 this iteration reaches the fixed point
+        # EXACTLY and reports delta 0.0, while on arm64 it hovers at ~4e-07,
+        # one ulp of float32 noise apart. Zero is the ideal converged value,
+        # not a missing one.
+        assert 0.0 <= float(product.delta) < 1e-5, product.delta
         assert set(product.solution) == {"g"}
         assert float(product.solution["g"]) == pytest.approx(TRUTH_G,
                                                              abs=1e-4)

@@ -300,7 +300,12 @@ class TestNoiseFromGls:
         # GLSResult's `residual` under this name -- a plausible mix-up, since
         # both are small relative numbers off the same result -- lands three
         # orders away.
-        assert product["gls"]["delta"] == pytest.approx(7.947e-08, rel=1e-3)
+        # The type is this test's subject; the VALUE is the trajectory, and the
+        # trajectory is not portable -- 7.947e-08 on arm64, 2.384e-07 on x86_64,
+        # both of them a fifth reweight at the float32 noise floor. What a record
+        # reporting something else would fail is the band and the type.
+        assert isinstance(product["gls"]["delta"], float)
+        assert 0.0 <= product["gls"]["delta"] < 1e-5, product["gls"]["delta"]
         assert type(product["gls"]["iterations"]) is int
         assert type(product["gls"]["delta"]) is float
 
