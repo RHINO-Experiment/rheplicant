@@ -1,4 +1,27 @@
-"""Inference / calibration layer: treats a Pipeline as data, never lives inside it."""
+"""Inference / calibration layer: treats a Pipeline as data, never lives inside it.
+
+**There is a sibling package, and it is not a replacement for this one.**
+`bayesmith <https://pypi.org/project/bayesmith/>`_ does Bayesian inference over
+an explicit graph, with no radio astronomy in it, and several capabilities here
+have a counterpart there: the linear-Gaussian exact solves, ``iterative_gls``,
+the Fisher half of ``uncertainty``, the square-root information layer, and the
+three graph diagnostics. Those counterparts are **cross-checked against this
+module numerically** -- element-wise to roundoff, same refusals, same fixed
+points -- and the records live in that package's ``docs/migration/``.
+
+What they are NOT is drop-in. Measured 2026-08-26: of the 99 names this package
+publishes, bayesmith has a name for 24, and even those take different arguments
+because the two are different paradigms -- this layer reads a ``Pipeline`` and a
+``ParameterSpace``, bayesmith reads a ``Graph``. So "use bayesmith instead" is
+not a migration path for existing code, and nothing here is deprecated.
+
+Which to reach for: if you have a RHINO twin, you are in the right place. If you
+have a model that is not this instrument, bayesmith is the general one. The two
+agreeing is the point, and it is checked rather than asserted -- which is also
+why this module is not a shell around that one. Re-exporting the three names
+whose signatures do match would make the test that compares them compare an
+object with itself, and a guard that cannot fail is worse than no guard.
+"""
 
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.inference.archive import load_memory, save_memory
