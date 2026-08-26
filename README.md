@@ -43,16 +43,15 @@ the core is domain-agnostic by construction.
 None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
 
-**2 and 4 are being separated into a package of their own**, `bayesmith`,
-which does inference over a graph with no radio astronomy in it. Nothing has
-moved: `rheplicant.inference` is still the implementation, code written
-against it keeps working, and `bayesmith` is not released, so there is nothing
-to install and nothing to migrate to. The separation is designed to keep the
-sentence above rather than spend it — `bayesmith` reads a whole `Pipeline` as
-a single deterministic node, so the twin you fit stays the twin you simulate
-with. The
+**2 and 4 have a sibling, and it is a separate package rather than a
+successor.** `bayesmith <https://pypi.org/project/bayesmith/>`_ does inference
+over a graph with no radio astronomy in it, and the capabilities it shares with
+this package are held in agreement by a cross-check suite rather than by shared
+code. Nothing here is moving or deprecated: `rheplicant.inference` is the
+implementation. If you have a RHINO twin you are in the right place; if you
+have a model that is not this instrument, bayesmith is the general one. The
 [inference pages](https://rheplicant.readthedocs.io/en/latest/inference.html)
-carry the detail and will say when the timing is settled.
+carry the detail.
 
 ## Two nouns
 
