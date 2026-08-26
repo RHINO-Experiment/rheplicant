@@ -562,19 +562,38 @@ class TestTheOneOverSSquaredLawAtItsExtremes:
 
         Not through the report's own dispatch — this refits the conditional
         problem from scratch, priors on and priors off, and differences the two
-        modes. The disagreement is 2.8e-5 at the loose end and 9.2e-4 at the
-        tight one; both are pinned, because a fix that improved one at the cost
-        of the other would otherwise pass. That is not hypothetical: an anchor
-        at ``theta_hat`` rather than at ``theta_L`` holds the loose end to
-        3.1e-5 and takes the tight one to 5.2e-2.
+        modes. Both ends are checked, because a fix that improved one at the
+        cost of the other would otherwise pass. That is not hypothetical: an
+        anchor at ``theta_hat`` rather than at ``theta_L`` holds the loose end
+        to 3.1e-5 and takes the tight one to 5.2e-2.
+
+        **The discrimination lives at the TIGHT end, and only there.** Measured
+        2026-08-26: the loose end's disagreement is 2.83e-5 on arm64 macOS and
+        **5.81e-5** on x86_64 Linux -- a factor of 2.05 between two CORRECT
+        runs, while the distance from the correct value to the wrong anchor's
+        3.1e-5 is a factor of 1.1. A tolerance wide enough to admit the second
+        machine necessarily admits the defect, so the loose end cannot separate
+        them at any tolerance whatever. Pinning it to 5 % never made it
+        discriminating; it made it pass on one laptop. It is asserted here as
+        an order of magnitude, which is what it is worth.
+
+        The tight end keeps its 5 %, passes on both platforms, and is what
+        actually catches the anchor defect: 5.2e-2 against 9.25e-4 is a factor
+        of 56, far outside any platform spread.
         """
         sigma = float(conditional.for_latent("fg_beta")["sigma_post"])
         log_amp = jnp.asarray(report.mode_of("fg_log_amp"))
         refit = _conditional_refit(tour, log_amp, prior_std) / sigma
         closed = float(conditional.shift_at("fg_beta", prior_std))
-        assert abs(closed - refit) / abs(refit) == pytest.approx(
-            expected_disagreement, rel=0.05
-        )
+        disagreement = abs(closed - refit) / abs(refit)
+        if prior_std == 0.01:
+            assert disagreement == pytest.approx(expected_disagreement, rel=0.05)
+        else:
+            assert (
+                0.2 * expected_disagreement
+                < disagreement
+                < 5 * expected_disagreement
+            ), disagreement
         assert closed == pytest.approx(refit, rel=3e-3)
 
 

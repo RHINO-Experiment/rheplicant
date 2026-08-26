@@ -45,7 +45,7 @@ jobs:
         # docs/install.md say why `uv lock` cannot succeed here).
         run: |
           uv venv --python ${{ matrix.python }}
-          uv pip install -e ".[rhino,numpyro]" --group dev
+          uv pip install -e ".[rhino,numpyro,gui]" --group dev
 
       - name: Install the integrations that are not on an index
         # `editables` is not decoration: rhino-cal-jax's editable hook needs it.
@@ -59,6 +59,22 @@ jobs:
           uv pip install editables
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
           uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      # The two TypeScript typecheck guards shell out to `node_modules/.bin/tsc`
+      # and raised FileNotFoundError without it -- not a skip, a crash, which
+      # reads as a broken test rather than a missing toolchain. The frontend is
+      # part of this project (CLAUDE.md: the e2e suite serves the checked-in
+      # production bundle), so the toolchain belongs in CI rather than the
+      # guards being taught to stand down.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tools/config_gui_spike/react/package-lock.json
+
+      - name: Install the frontend toolchain
+        working-directory: tools/config_gui_spike/react
+        run: npm ci
 
       - name: Report environment completeness BEFORE judging any number
         # The difference between what this environment collects and what the
@@ -97,7 +113,7 @@ jobs:
       - name: Create the environment
         run: |
           uv venv --python 3.12
-          uv pip install -e ".[rhino,numpyro]" --group dev
+          uv pip install -e ".[rhino,numpyro,gui]" --group dev
 
       - name: Install the integrations that are not on an index
         continue-on-error: true

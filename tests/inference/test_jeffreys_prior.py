@@ -364,7 +364,15 @@ def test_slogdet_and_cholesky_both_return_plausible_numbers_on_the_singular_bloc
         "eigenvalue flipped on this platform. The claim under test is that "
         "slogdet does not RAISE on a singular matrix, which still holds."
     )
-    assert float(0.5 * logabsdet) == pytest.approx(6.420496, abs=5e-6)
+    # Centre = the arm64 measurement; the band admits a decade of roundoff
+    # in the null eigenvalue (log(10)/2 = 1.15). Measured 6.420496 on arm64
+    # macOS and 6.444212 on x86_64 Linux -- the null eigenvalue differing by
+    # about 5 %, which `logabsdet` carries as the LOG of, so a factor of two
+    # in it moves this by 0.35. The old `abs=5e-6` was five orders of
+    # magnitude tighter than the quantity is reproducible to, and passed only
+    # on the machine it was written on.
+    assert jnp.isfinite(logabsdet), "slogdet returned -inf on a singular matrix"
+    assert float(0.5 * logabsdet) == pytest.approx(6.43, abs=1.2)
 
     factor = jnp.linalg.cholesky(matrix)
     assert bool(jnp.all(jnp.isfinite(factor))), (
@@ -372,8 +380,16 @@ def test_slogdet_and_cholesky_both_return_plausible_numbers_on_the_singular_bloc
         "It still did not raise."
     )
     pivots = jnp.diag(factor)
-    assert float(jnp.min(pivots)) == pytest.approx(9.755e-05, rel=1e-3)
-    assert float(jnp.sum(jnp.log(pivots))) == pytest.approx(6.566517, abs=5e-6)
+    # The smallest pivot is the square root of that same roundoff, so it moves
+    # by half the relative swing. Positive and of this order is the property.
+    assert float(jnp.min(pivots)) > 0.0, "a non-positive pivot means cholesky failed"
+    assert float(jnp.min(pivots)) == pytest.approx(9.755e-05, rel=0.5)
+    # The SAME quantity as `0.5 * logabsdet` above, by log det = 2 sum log
+    # pivot, down a different route -- so the two need not agree to the digit
+    # and measurably do not: 6.420496 vs 6.566517 on arm64, while on x86_64
+    # both land on 6.444212. That the gap BETWEEN the routes is itself
+    # platform-dependent is the clearest statement that neither is a contract.
+    assert float(jnp.sum(jnp.log(pivots))) == pytest.approx(6.43, abs=1.2)
 
 
 def test_the_eigh_route_floors_the_singular_block_to_effectively_zero():
