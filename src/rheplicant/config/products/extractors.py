@@ -367,6 +367,27 @@ def _raw_array(name: str) -> Callable:
 
 
 def _prediction_bands(product: object, _configured: object, _options: Mapping[str, object]):
+    """Reduce a ``(n_draw, *grid)`` pushforward across the DRAW axis.
+
+    ``axis=0`` throughout, and that is the whole content of this function: the
+    predictions arrive already pushed through the model one draw at a time
+    (:func:`~rheplicant.inference.predict_from_samples` vmaps over the draw
+    axis), so every statistic here is a reduction OF pushforwards and never the
+    model evaluated once at a reduced parameter.  For a nonlinear model the two
+    orderings are different numbers, which is the reason
+    :func:`~rheplicant.inference.linear.check_linearity` exists at all.
+
+    ``median`` is named for its pair rather than for its quantile.  ``q025``
+    and ``q975`` are one thing — the edges of a 95% interval — and slipping a
+    ``q050`` between them would read as a third edge of that band.  What the
+    median actually pairs with is ``mean``: both are central tendencies, and a
+    reader choosing between them is choosing how much a heavy tail should
+    move the answer.
+
+    A ``predict`` run reusing a ``fisher`` product never reaches here — it has
+    no draw axis to reduce, and :mod:`~rheplicant.config.products.bundle`
+    answers it with ``std`` alone.
+    """
     array = _array(product, where="prediction")
     if array.ndim == 0:
         raise ConfigError("prediction bands need a prediction with a leading draw axis.")
@@ -374,6 +395,7 @@ def _prediction_bands(product: object, _configured: object, _options: Mapping[st
         "npz",
         {
             "mean": np.mean(array, axis=0),
+            "median": np.median(array, axis=0),
             "std": np.std(array, axis=0),
             "q025": np.quantile(array, 0.025, axis=0),
             "q975": np.quantile(array, 0.975, axis=0),

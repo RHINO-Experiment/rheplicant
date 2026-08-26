@@ -248,3 +248,32 @@ def test_condition_publishes_its_conditioning_number():
     )
     assert extracted.encoding == "json"
     assert extracted.value["kappa"] == pytest.approx(1234.5)
+
+
+def test_prediction_bands_reduce_across_the_DRAW_axis_and_carry_a_median():
+    """`predict`'s bands are a reduction OF pushforwards, and `median` is one.
+
+    The draw axis is leading, so every statistic is `axis=0`. Checked with a
+    stack whose mean and median DIFFER per pixel, because a symmetric fixture
+    would pass whichever axis the extractor happened to reduce over and
+    whichever central tendency it happened to compute.
+    """
+    # Three draws over a (2,) grid. Column 0: (1, 2, 9) -> mean 4, median 2.
+    # Column 1: (10, 30, 35) -> mean 25, median 30. Neither column's mean
+    # equals its median, and the two columns disagree about which is larger.
+    prediction = np.array([[1.0, 10.0], [2.0, 30.0], [9.0, 35.0]])
+    # The product IS the array: `predict`'s samples route returns
+    # `predict_from_samples`' stack verbatim, so there is no wrapper to unwrap.
+    bands = extract_run_payload("predict", "prediction_bands", prediction, configured())
+
+    assert bands.encoding == "npz"
+    assert set(bands.value) == {"mean", "median", "std", "q025", "q975"}
+    np.testing.assert_allclose(bands.value["mean"], np.array([4.0, 25.0]))
+    np.testing.assert_allclose(bands.value["median"], np.array([2.0, 30.0]))
+    # The grid shape survives and the draw axis is gone.
+    assert bands.value["median"].shape == (2,)
+
+
+def test_prediction_bands_refuse_a_prediction_with_no_draw_axis():
+    with pytest.raises(ConfigError, match="leading draw axis"):
+        extract_run_payload("predict", "prediction_bands", np.float64(1.0), configured())
