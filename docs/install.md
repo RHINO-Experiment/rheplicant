@@ -140,7 +140,11 @@ else and said nothing about it.
 
 ## Running the tests
 
-There is no CI; run the suite and the linter in the project venv before pushing.
+There **is** CI — `.github/workflows/test.yml` has run the suite on every push
+since `d65785b` (2026-08-24). Run the suite and the linter in the project venv
+anyway before pushing: the runner is Linux and this is often not, and the
+difference is not academic — several numeric assertions in this suite are
+currently red there and green here.
 The `dev` group carries what the tests need on top of the package — `numpyro`,
 because five modules import it unguarded, and `mdit-py-plugins`, because the
 docs-link guard computes anchors with myst's own slugifier. Both are runtime
