@@ -79,10 +79,16 @@ class TestTheChainComesBack:
         """
         drawn = product()
         assert isinstance(drawn, NutsProduct)
-        assert float(drawn.samples["g"].mean()) == pytest.approx(1.500021,
-                                                                 abs=1e-5)
-        assert float(drawn.samples["g"].std()) == pytest.approx(0.000429,
-                                                                abs=1e-5)
+        # Against the TRUTH, at a tolerance the posterior width justifies --
+        # not against this machine's chain. Measured 1.500021 here and
+        # 1.4999907 on the x86_64 runner: both recover 1.5 to 1e-5, and the
+        # `abs=1e-5` pin on the sampler's own mean failed on the second while
+        # the recovery it exists to check was fine. The std is ~4.3e-4, so
+        # five of those is the band a converged chain's mean lives in.
+        mean = float(drawn.samples["g"].mean())
+        std = float(drawn.samples["g"].std())
+        assert std == pytest.approx(0.000429, rel=0.25), std
+        assert abs(mean - 1.5) < 5 * std, (mean, std)
 
     def test_the_product_carries_the_space_and_NOT_the_prediction(self):
         """The memory trap, asserted as an ABSENCE.
@@ -122,10 +128,10 @@ class TestTheChainComesBack:
     def test_two_latents_come_back_under_their_own_names(self):
         drawn = product(inference=TWO_LATENTS)
         assert set(drawn.samples) == {"d", "a"}
-        assert float(drawn.samples["d"].mean()) == pytest.approx(1.19996,
-                                                                 abs=1e-4)
-        assert float(drawn.samples["a"].mean()) == pytest.approx(11.99974,
-                                                                 abs=1e-3)
+        # Against the truths, 1.2 and 12.0, for the reason the one-latent
+        # test above records. Measured d = 1.19996 here, 1.1995487 there.
+        assert float(drawn.samples["d"].mean()) == pytest.approx(1.2, abs=2e-3)
+        assert float(drawn.samples["a"].mean()) == pytest.approx(12.0, abs=2e-2)
 
 
 class TestTheNoiseModelGoesInWhole:
@@ -693,8 +699,17 @@ class TestTheDiagnostics:
             assert isinstance(row["n_eff"], float)
             assert 0.9 < row["r_hat"] < 1.1
             assert row["n_eff"] > 10
-        assert drawn.diagnostics["d"]["r_hat"] == pytest.approx(
-            0.99729, rel=1e-2)
+        # The `r_hat` pin that stood here is GONE, on the strength of this
+        # test's own argument: the two r_hats agree to 0.1 %, inside any
+        # tolerance that would admit them both, so it never discriminated a
+        # swapped pairing -- and it was platform-fragile as well, measured
+        # 0.99729 here against 1.0113 on the x86_64 runner. A pin that cannot
+        # discriminate reads exactly like one that can, which is the shape
+        # this class is written against; keeping it for another platform to
+        # break would have been keeping it for its appearance.
+        #
+        # `n_eff` is the one that does the work -- the two differ by 75 % --
+        # so it stays.
         assert drawn.diagnostics["d"]["n_eff"] == pytest.approx(
             57.31, rel=5e-2)
 
@@ -752,7 +767,12 @@ class TestTheDiagnostics:
         """
         with pytest.warns(UserWarning, match=r"out of 100\."):
             drawn = product({"thinning": 2, "target_accept_prob": 0.2})
-        assert drawn.divergences == 100
+        # `out of 100` above IS the claim -- the denominator is
+        # `diverging.size` and not `num_chains * num_samples`. How many of
+        # those 100 actually diverged is the sampler's business and moves with
+        # the platform: all 100 here, 78 on the x86_64 runner. What must hold
+        # is that some did, so the warning fired at all.
+        assert 0 < drawn.divergences <= 100, drawn.divergences
         assert drawn.n_draw == 100
 
 

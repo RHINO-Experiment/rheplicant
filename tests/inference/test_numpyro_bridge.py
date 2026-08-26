@@ -7,6 +7,7 @@ leaf that logarithm eventually lands in.
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 numpyro = pytest.importorskip("numpyro", reason="numpyro not installed")
@@ -134,7 +135,26 @@ class TestMCMCRecovery:
 
     def test_nuts_recovers_a_tied_reparameterization(self, template_state):
         """Two gain stages, ONE latent, sampled in log space — a model the
-        positional-prior scheme could not express at all."""
+        positional-prior scheme could not express at all.
+
+        **1000/1000 rather than 300/300, and the reason is measured.** At
+        300/300 this chain's ESS at ``key(0)`` is **28** — the worst of the
+        four seeds tried, which give 28, 97, 119 and 126. A chain that thin is
+        not sampling the posterior, it is wandering in it, and where it stops
+        is decided by the exact floating-point trajectory: the recovered gain
+        was within 0.0026 here and **0.72 out** on the x86_64 CI runner, which
+        is roughly 160 posterior standard deviations. The assertion below was
+        not measuring recovery, it was recording one machine's luck.
+
+        At 1000/1000 the same four seeds give ESS 287 to 450, r-hat at most
+        1.006, and a recovery error of at most 1e-4 — an order of magnitude
+        inside the tolerance, on every seed, rather than at the mercy of one.
+
+        ESS is asserted BEFORE recovery so that a chain which stops mixing
+        again fails as "did not converge" rather than as "wrong number". The
+        two have different causes and different fixes, and a bare recovery
+        assertion cannot tell them apart.
+        """
         def two_stage(gain):
             return Pipeline(
                 SkyOperator(amplitude=jnp.array(SKY)),
@@ -153,11 +173,18 @@ class TestMCMCRecovery:
         )
         model = to_numpyro_model(two_stage(1.0), template_state, space, noise_std=SIGMA)
         mcmc = numpyro.infer.MCMC(
-            numpyro.infer.NUTS(model), num_warmup=300, num_samples=300,
+            numpyro.infer.NUTS(model), num_warmup=1000, num_samples=1000,
             progress_bar=False,
         )
         mcmc.run(jax.random.key(0), observed=data)
-        recovered = float(jnp.exp(mcmc.get_samples()["log_gain"]).mean())
+        draws = mcmc.get_samples()["log_gain"]
+        ess = float(
+            numpyro.diagnostics.effective_sample_size(
+                np.asarray(draws).reshape(1, -1)
+            )
+        )
+        assert ess > 150, f"the chain barely mixed (ESS {ess:.0f}); see the docstring"
+        recovered = float(jnp.exp(draws).mean())
         assert abs(recovered - TRUE_GAIN) < 0.01
 
     def test_posterior_predictive(self, twin, space, template_state, observed):
