@@ -104,11 +104,13 @@ you know. When you would rather not, `auto_blocks` reads the partition off the
 model, and `SamplingPlan.automatic` is the one-liner over it:
 
 ```python
-plan = SamplingPlan.automatic(space, twin, state)
+plan = SamplingPlan.automatic(space, twin, state, noise=noise)
 
 # the same thing, with the blocks in reach to inspect or amend
-plan = SamplingPlan(space, *auto_blocks(space, twin, state, steps=20))
+plan = SamplingPlan(space, *auto_blocks(space, twin, state, noise=noise, steps=20))
 ```
+
+`noise=` is optional and only the log-space half needs it — see below.
 
 The rule is conjugate blocks for the latents declared `linear=True` and one
 gradient block for everything else — with two refinements, both of which the
@@ -133,9 +135,21 @@ SamplingPlan(('t_ant', 't_nw'):conjugate, ('gain'):conjugate)
 to read, and there is deliberately no `log_linear=True` either: the same probe
 that finds the grouping asks
 [`check_log_linearity`](inference-linear.md#the-same-model-in-log-space-where-sigma-is-constant)
-and routes it to a `log_conjugate` block. On the same model with the gain in
-log space, nothing is declared about the gain at all and the partition still
-comes back closed-form throughout:
+and routes it to a `log_conjugate` block.
+
+**Discovery needs the noise, and this is half the question rather than a
+detail.** A log-conjugate block is a claim about the *likelihood*: taking logs
+simplifies a multiplicative noise and merely restates an additive one as a
+different likelihood from the one declared, and the first-order equivalence
+holds only up to `FIRST_ORDER_MAX_FRACTIONAL`. So `auto_blocks` takes `noise=`
+and applies both refusals when it partitions. Without it, no `log_conjugate`
+block is claimed at all and an `UncheckedLogRouteWarning` names the latents
+that qualified on their prediction alone — conservative, because a gradient
+block is always a sound verdict, and loud, because the alternative is a
+partition promising a route `to_log_space` will refuse.
+
+On the same model with the gain in log space, nothing is declared about the
+gain at all and the partition comes back closed-form throughout:
 
 ```text
 SamplingPlan(('t_ant', 't_nw'):conjugate, ('log_gain'):log_conjugate)

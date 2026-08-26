@@ -22,6 +22,7 @@ refuses the model before any of this is reached, which would leave the
 end-to-end test measuring the identifiability guard instead of the partition.
 """
 
+import warnings
 from typing import ClassVar
 
 import jax
@@ -42,8 +43,35 @@ from rheplicant.inference import (
     auto_blocks,
 )
 from rheplicant.inference.engines import CONJUGATE, GRADIENT, LOG_CONJUGATE
-from rheplicant.inference.noise import HomoscedasticNoise
+from rheplicant.inference.loglinear import (
+    FIRST_ORDER_MAX_FRACTIONAL,
+    log_route_refusal,
+    to_log_space,
+)
+from rheplicant.inference.noise import HomoscedasticNoise, RadiometerNoise
+from rheplicant.inference.partition import UncheckedLogRouteWarning
 from rheplicant.radio import GainOperator
+
+
+class _Multiplicative:
+    """The smallest thing the log route reads as multiplicative noise.
+
+    Only ``fractional`` and ``std`` are consulted, so this is the honest
+    minimum rather than a stub pretending to be a RadiometerNoise. It exists
+    to drive ``f`` to a chosen value -- reaching the ceiling with a real
+    radiometer would need a channel width nobody observes with.
+    """
+
+    def __init__(self, fractional: float):
+        self.fractional = fractional
+
+    def std(self, prediction):
+        return self.fractional * jnp.abs(prediction)
+
+
+#: f = 4.05e-3 for a 61 kHz channel at 1 s -- two orders under the ceiling,
+#: which is where a real instrument sits.
+MULTIPLICATIVE = RadiometerNoise(channel_width=61e3, integration_time=1.0)
 
 N_TIME, N_FREQ = 6, 9
 TONE_CHANNEL = 2
@@ -386,7 +414,9 @@ class TestLogLinearIsDiscovered:
         which the probe finds. No gradient block is produced at all — every
         latent in this model is solved in closed form.
         """
-        plan = SamplingPlan.automatic(log_gain_space(), log_gain_model, state)
+        plan = SamplingPlan.automatic(
+            log_gain_space(), log_gain_model, state, noise=MULTIPLICATIVE
+        )
         assert plan.engines == {
             ("t_ant", "t_nw"): CONJUGATE,
             ("log_gain",): LOG_CONJUGATE,
@@ -415,14 +445,102 @@ class TestLogLinearIsDiscovered:
         reported nowhere. Pinned by driving it deliberately.
         """
         space = log_gain_space()
-        derived = auto_blocks(space, log_gain_model, state)
+        derived = auto_blocks(space, log_gain_model, state, noise=MULTIPLICATIVE)
         assert derived[-1].engine == LOG_CONJUGATE
 
         misprobed = auto_blocks(
-            space, log_gain_model, state, log_scales=(1e3,), steps=4
+            space, log_gain_model, state, noise=MULTIPLICATIVE,
+            log_scales=(1e3,), steps=4,
         )
         assert misprobed[-1].names == ("log_gain",)
         assert misprobed[-1].engine is None  # fell through to the gradient block
+
+
+class TestTheNoiseIsHalfTheLogQuestion:
+    """A log-conjugate block is a claim about the LIKELIHOOD, not the prediction.
+
+    Found by D17's dual-run protocol on 2026-08-27 and ruled by the owner the
+    same day: ``auto_blocks`` took no noise model, so it could hand out a
+    ``log_conjugate`` block that ``to_log_space`` then refused -- which this
+    module's own docstring names as the failure it exists to prevent. The two
+    refusals were already written, and on the same constant; they simply lived
+    at solve time. These pin them at partition time.
+    """
+
+    def test_an_additive_noise_model_means_no_log_block(self, log_gain_model, state):
+        """Taking logs of an already-additive noise does not simplify it -- it
+        states a different likelihood from the one declared."""
+        blocks = auto_blocks(
+            log_gain_space(),
+            log_gain_model,
+            state,
+            noise=HomoscedasticNoise(sigma=1.0),
+        )
+        assert blocks[-1].names == ("log_gain",)
+        assert blocks[-1].engine is None  # derived as gradient
+
+    def test_a_fractional_level_above_the_ceiling_means_no_log_block(
+        self, log_gain_model, state
+    ):
+        """The same ceiling the transform enforces, applied before the
+        partition rather than at the first sweep."""
+        blocks = auto_blocks(
+            log_gain_space(), log_gain_model, state, noise=_Multiplicative(0.3)
+        )
+        assert blocks[-1].names == ("log_gain",)
+        assert blocks[-1].engine is None
+
+    def test_omitting_the_noise_warns_rather_than_claiming_a_block(
+        self, log_gain_model, state
+    ):
+        """Conservative AND loud.
+
+        Gradient is always a sound verdict, so the omission cannot produce a
+        wrong answer -- but saying nothing would turn the defect this whole
+        change is about from wrong into silent, which is worse.
+        """
+        with pytest.warns(UncheckedLogRouteWarning, match="log_gain"):
+            blocks = auto_blocks(log_gain_space(), log_gain_model, state)
+        assert blocks[-1].names == ("log_gain",)
+        assert blocks[-1].engine is None
+
+    def test_a_model_with_no_log_candidate_does_not_warn(self, line, state):
+        """The warning names a real missed opportunity or it is noise."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UncheckedLogRouteWarning)
+            auto_blocks(line_space(), line, state)
+
+    @pytest.mark.parametrize(
+        "noise",
+        [
+            pytest.param(HomoscedasticNoise(sigma=1.0), id="additive"),
+            pytest.param(_Multiplicative(0.004), id="f-small"),
+            pytest.param(_Multiplicative(FIRST_ORDER_MAX_FRACTIONAL), id="f-at-ceiling"),
+            pytest.param(_Multiplicative(0.3), id="f-too-large"),
+            pytest.param(
+                RadiometerNoise(channel_width=61e3, integration_time=1.0),
+                id="radiometer",
+            ),
+        ],
+    )
+    def test_the_two_consumers_of_the_predicate_cannot_disagree(self, noise):
+        """The anti-drift guard, and the reason the predicate was extracted.
+
+        ``log_route_refusal`` is asked at PARTITION time; ``to_log_space``
+        raises at SOLVE time. If those two could ever answer differently, the
+        defect D17 found comes straight back in a new shape -- a partition
+        promising a route the transform refuses. So the equivalence is
+        asserted per noise model rather than assumed from them sharing a
+        function today.
+        """
+        data = jnp.abs(jnp.linspace(1.0, 3.0, N_FREQ)) + 1.0
+        refused_at_partition = log_route_refusal(noise) is not None
+        try:
+            to_log_space(data, noise)
+            refused_at_solve = False
+        except ParameterSpaceError:
+            refused_at_solve = True
+        assert refused_at_partition == refused_at_solve
 
 
 # ---------------------------------------------------- linear and non-linear --

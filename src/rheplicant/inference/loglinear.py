@@ -77,7 +77,6 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-
 from bayesmith.exact.loglinear import (
     FIRST_ORDER_MAX_FRACTIONAL,
     multiplicative_log_data,
@@ -122,19 +121,63 @@ from rheplicant.inference.parameters import ParameterSpace
 LOG_DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1e-2, 1e-1, 1.0)
 
 
+#: The named reasons a noise model has no log route.
+#:
+#: The vocabulary is deliberately the same two names bayesmith's
+#: ``NOT_LOG_LINEAR_REASONS`` uses for the same two verdicts, so a reader
+#: comparing the packages is comparing words as well as behaviour.
+LOG_ROUTE_REFUSALS: frozenset[str] = frozenset(
+    {"noise_additive", "fractional_too_large"}
+)
+
+
+def log_route_refusal(noise: Any) -> str | None:
+    """Which of :data:`LOG_ROUTE_REFUSALS` applies to ``noise``, or ``None``.
+
+    **The predicate, extracted so there is exactly one of it.** Whether a log
+    route exists is asked in two places — here, at PARTITION time by
+    :func:`~rheplicant.inference.partition.auto_blocks`, and at SOLVE time by
+    :func:`to_log_space`, which raises the full refusal — and the two must not
+    be able to disagree. Before this function they could: `auto_blocks` took no
+    noise model at all, so it could produce a ``log_conjugate`` block that
+    ``to_log_space`` then refused, which
+    :mod:`rheplicant.inference.partition`'s own docstring names as the failure
+    that module exists to prevent. Measured on 2026-08-27 by D17's dual-run
+    protocol, against bayesmith's graph-side probe, which reads the noise when
+    it partitions.
+
+    Returns a REASON rather than raising, because at partition time "no log
+    route here" is a blameless verdict that routes the latent to a gradient
+    block; the raise belongs where a caller asked for the transform by name.
+    """
+    if isinstance(noise, FlaggedNoise):
+        noise = noise.base
+    fractional = getattr(noise, "fractional", None)
+    if fractional is None:
+        return "noise_additive"
+    if float(fractional) > FIRST_ORDER_MAX_FRACTIONAL:
+        return "fractional_too_large"
+    return None
+
+
 def _fraction_and_flags(noise: Any) -> tuple[float, jax.Array | None]:
     """The multiplicative level ``f``, and the flags if the model carries any.
 
     Refuses anything whose noise is not multiplicative in the prediction, since
     for those the log transform is not a change of variables that buys
     anything — it is simply a different, wrong, likelihood.
+
+    The two refusals are decided by :func:`log_route_refusal` and only WORDED
+    here: one predicate, two consumers, so the partition-time verdict and this
+    one cannot drift apart.
     """
     flags = None
     if isinstance(noise, FlaggedNoise):
         flags, noise = noise.flags, noise.base
 
+    refusal = log_route_refusal(noise)
     fractional = getattr(noise, "fractional", None)
-    if fractional is None:
+    if refusal == "noise_additive":
         raise ParameterSpaceError(
             f"to_log_space() needs a multiplicative noise model — one generating "
             f"d = mu (1 + f w) — and {type(noise).__name__} is not one. The log "
@@ -146,7 +189,7 @@ def _fraction_and_flags(noise: Any) -> tuple[float, jax.Array | None]:
         )
 
     fractional = float(fractional)
-    if fractional > FIRST_ORDER_MAX_FRACTIONAL:
+    if refusal == "fractional_too_large":
         raise ParameterSpaceError(
             f"This noise model has f = {fractional:.4g}, above the "
             f"{FIRST_ORDER_MAX_FRACTIONAL} at which the first-order log-space "
@@ -584,8 +627,10 @@ def to_log_space(
 __all__ = [
     "FIRST_ORDER_MAX_FRACTIONAL",
     "LOG_DEFAULT_SCALES",
+    "LOG_ROUTE_REFUSALS",
     "check_log_linearity",
     "has_log_linear_block",
+    "log_route_refusal",
     "log_linear_operator",
     "to_log_space",
 ]

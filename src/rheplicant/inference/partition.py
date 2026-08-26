@@ -81,7 +81,9 @@ this module deliberately does not run it early — a partition is not a reason t
 believe a model.
 """
 
+import warnings
 from collections.abc import Sequence
+from typing import Any
 
 import jax
 from bayesmith.dispatch.factor import first_fit
@@ -96,12 +98,33 @@ from rheplicant.core.state import State
 from rheplicant.inference.engines import LOG_CONJUGATE
 from rheplicant.inference.linear import DEFAULT_SCALES, check_linearity
 from rheplicant.inference.loglinear import (
+    FIRST_ORDER_MAX_FRACTIONAL,
     LOG_DEFAULT_SCALES,
     check_log_linearity,
     has_log_linear_block,
+    log_route_refusal,
 )
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.plan import Block
+
+
+class UncheckedLogRouteWarning(UserWarning):
+    """A latent looked log-linear, and no noise model was there to confirm it.
+
+    Whether a log-conjugate block exists is half a question about the
+    prediction (is ``log(prediction)`` affine?) and half a question about the
+    likelihood (does taking logs SIMPLIFY this noise, and is its fractional
+    level inside the first-order ceiling?). :func:`auto_blocks` can answer the
+    first from the model alone; the second needs ``noise=``.
+
+    A warning rather than a refusal, because there is nothing wrong with the
+    model: the caller simply did not supply what the second half needs, and
+    the conservative verdict -- gradient -- is always sound. It is not silent
+    for the same reason the partition is conservative: this module's job is to
+    produce a partition its own solvers will accept, and before 2026-08-27 it
+    could hand out a ``log_conjugate`` block that ``to_log_space`` then
+    refused.
+    """
 
 
 def _may_share_a_block(
@@ -153,6 +176,7 @@ def auto_blocks(
     state_template: State,
     *,
     at: dict[str, jax.Array] | None = None,
+    noise: Any | None = None,
     steps: int | None = None,
     learning_rate: float | None = None,
     scales: Sequence[float] = DEFAULT_SCALES,
@@ -181,6 +205,18 @@ def auto_blocks(
             :func:`~rheplicant.inference.linear.check_linearity`. Defaults to
             the declared initial values, which is where the plan's own
             first-sweep check evaluates the same claim.
+        noise: the model's noise. **A log-conjugate block is a claim about the
+            LIKELIHOOD, not only about the prediction**, so whether one exists
+            cannot be settled without it: taking logs simplifies a
+            multiplicative noise and merely restates an additive one, and the
+            first-order equivalence holds only up to
+            :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL`.
+            Given one, those two refusals are applied HERE, and a latent they
+            reject is filed to the gradient block — the same verdict, the same
+            constant, simply reached before a partition is handed out rather
+            than at the first sweep. Omitted, no log-conjugate block is claimed
+            at all and :class:`UncheckedLogRouteWarning` names any latent that
+            would have qualified on its prediction alone.
         steps, learning_rate: passed to the gradient block. They have no
             meaning without one, so a space with no gradient latents refuses
             them rather than accepting a tuning that reaches nothing.
@@ -222,14 +258,40 @@ def auto_blocks(
             scales=scales, rtol=rtol,
         )
 
-    log_linear = tuple(
-        name
-        for name in candidates
-        if has_log_linear_block(
-            space, pipeline, state_template, names=(name,), at=at,
-            scales=log_scales, rtol=rtol,
+    # The noise settles the log question before any probe is worth running:
+    # an additive noise, or an f above the first-order ceiling, means there is
+    # no log route however affine `log(prediction)` turns out to be.
+    refusal = None if noise is None else log_route_refusal(noise)
+    log_candidates = (
+        ()
+        if refusal is not None
+        else tuple(
+            name
+            for name in candidates
+            if has_log_linear_block(
+                space, pipeline, state_template, names=(name,), at=at,
+                scales=log_scales, rtol=rtol,
+            )
         )
     )
+    if noise is None and log_candidates:
+        # Probed, qualified on the prediction, and NOT claimed -- because the
+        # half of the question that needs the noise was never asked. Filing
+        # them as log blocks anyway is what produced a partition `to_log_space`
+        # refuses; saying nothing would make that silent instead of wrong.
+        warnings.warn(
+            f"auto_blocks() found {list(log_candidates)} log-linear in the "
+            "PREDICTION, but was given no noise= model, so it cannot tell "
+            "whether a log route exists: log space simplifies a multiplicative "
+            "noise and merely restates an additive one, and the first-order "
+            "equivalence holds only up to "
+            f"f = {FIRST_ORDER_MAX_FRACTIONAL}. They are in the gradient block. "
+            "Pass noise= to have them checked and, if they qualify, solved in "
+            "closed form.",
+            UncheckedLogRouteWarning,
+            stacklevel=2,
+        )
+    log_linear = () if noise is None else log_candidates
     log_set = set(log_linear)
     other = tuple(name for name in candidates if name not in log_set)
 
@@ -269,4 +331,4 @@ def auto_blocks(
     return tuple(blocks)
 
 
-__all__ = ["auto_blocks"]
+__all__ = ["UncheckedLogRouteWarning", "auto_blocks"]
