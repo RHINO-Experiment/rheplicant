@@ -36,7 +36,11 @@ from rheplicant import Coordinates, State
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
+import numpyro.distributions as dist
+
 from rheplicant.inference import Bind, Latent, ParameterSpace
+from rheplicant.inference.graph_bridge import to_graph
+from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.identifiability import (
     DEFAULT_RANK_RTOL,
     _in_float64,
@@ -1155,3 +1159,170 @@ class TestTheSVDAsksForWhatItUses:
                 np.asarray(v_true[rank:], dtype=np.float64),
                 np.asarray(v_false[rank:], dtype=np.float64),
             )
+
+
+# ------------------------------------------------ what the delegation rests on --
+
+
+class TestTheExpansionPointIsTheDeclaredInit:
+    """D21: the verdict is taken where the SPACE says, not where the prior sits.
+
+    bayesmith defaults ``at=`` to the prior centres -- its own dispatch layer's
+    anchoring rule, and the right default there. This package's default is the
+    declared ``init``, and ``Latent`` carries ``init`` and ``prior`` as
+    INDEPENDENT fields: ``Latent("fwhm_deg", init=12.0, prior=Uniform(5, 30))``
+    is the shape the declaring module's own example takes.
+
+    Identifiability is a LOCAL property of a nonlinear model -- this module's
+    docstring says so -- so the two points are two different questions, not two
+    spellings of one. The migration contract said "the same point, one
+    spelling"; that line was wrong and is corrected.
+    """
+
+    @staticmethod
+    def _space(init_gain, prior_centre):
+        """``gain`` free-ish, with its prior centred AWAY from its init."""
+        return ParameterSpace(
+            latents=[
+                Latent(
+                    "gain",
+                    init=jnp.full(N_TIME, init_gain),
+                    prior=dist.Normal(jnp.full(N_TIME, prior_centre), 1.0),
+                ),
+                Latent("t_coeff", init=COEFF0),
+            ],
+            bindings=[
+                Bind("gain", into=lambda p: p["gain"].gain),
+                Bind(
+                    "t_coeff",
+                    into=lambda p: p["t_ant"].t_ant,
+                    fn=lambda c: TIME_BASIS @ c @ FREQ_BASIS.T,
+                ),
+            ],
+        )
+
+    def test_the_two_points_really_do_give_different_answers(self, state):
+        """The fixture has to be able to tell them apart, or the next test is empty.
+
+        A gain of exactly zero kills every derivative with respect to
+        ``t_coeff`` -- the prediction is ``gain * (T_ant + tone)`` -- so the
+        model is degenerate there and identified at a gain of one. If this
+        assertion ever stops holding, the test below is passing for no reason.
+        """
+        pipeline = make_pipeline(5000.0)
+        at_zero = identifiability(
+            self._space(0.0, 1.0), pipeline, state, at={"gain": jnp.zeros(N_TIME)}
+        )
+        at_one = identifiability(
+            self._space(1.0, 1.0), pipeline, state, at={"gain": jnp.ones(N_TIME)}
+        )
+        assert at_zero.nullity > at_one.nullity
+
+    def test_the_default_point_is_the_init_not_the_prior_centre(self, state):
+        """The claim itself: same prior, different init, and the init decides."""
+        pipeline = make_pipeline(5000.0)
+        # Prior centred at 1.0 in both. Only the init differs.
+        degenerate = identifiability(self._space(0.0, 1.0), pipeline, state)
+        healthy = identifiability(self._space(1.0, 1.0), pipeline, state)
+        assert degenerate.nullity > healthy.nullity, (
+            "the report followed the prior centre, not the declared init -- "
+            "which is bayesmith's default and this package's contract says init"
+        )
+
+
+class TestTheSynthesisedGraph:
+    """D22: a rank verdict reads none of the three things the graph demands.
+
+    ``identifiability`` takes no data, no noise model and no priors -- a rank
+    is a property of the forward model alone. ``to_graph`` requires all three,
+    because a graph node IS its distribution, so the facade synthesises them.
+
+    That is sound only if none of them can reach the answer. bayesmith's own
+    ``local_block`` says the prior fields are *deliberately empty* and
+    ``dense_operator`` differentiates the observed nodes' locs -- but a
+    docstring is not a measurement, and this is the assumption the whole
+    delegation rests on. So it is measured: build the graph three ways and
+    compare every number in the report.
+    """
+
+    @staticmethod
+    def _report(graph, at):
+        from bayesmith.diagnose.identifiability import identifiability as bayesmith_rank
+
+        return bayesmith_rank(graph, names=("gain", "t_coeff"), at=at)
+
+    @staticmethod
+    def _graph(state, observed, sigma, prior_width):
+        space = ParameterSpace(
+            latents=[
+                Latent(
+                    "gain",
+                    init=jnp.asarray(GAIN0, dtype=jnp.float64),
+                    prior=dist.Normal(jnp.asarray(GAIN0, dtype=jnp.float64), prior_width),
+                ),
+                Latent(
+                    "t_coeff",
+                    init=jnp.asarray(COEFF0, dtype=jnp.float64),
+                    prior=dist.Normal(
+                        jnp.asarray(COEFF0, dtype=jnp.float64), prior_width
+                    ),
+                ),
+            ],
+            bindings=[
+                Bind("gain", into=lambda p: p["gain"].gain),
+                Bind(
+                    "t_coeff",
+                    into=lambda p: p["t_ant"].t_ant,
+                    fn=lambda c: TIME_BASIS @ c @ FREQ_BASIS.T,
+                ),
+            ],
+        )
+        graph = to_graph(
+            space,
+            make_pipeline(5000.0),
+            state,
+            observed=observed,
+            noise=HomoscedasticNoise(sigma),
+            priors=None,
+        )
+        return graph, {
+            "gain": jnp.asarray(GAIN0, dtype=jnp.float64),
+            "t_coeff": jnp.asarray(COEFF0, dtype=jnp.float64),
+        }
+
+    def test_the_data_the_sigma_and_the_prior_do_not_reach_the_verdict(self, state):
+        """Three variations, one report. Every field, not just the nullity.
+
+        Comparing only ``nullity`` would pass for a model that is degenerate
+        whatever you do to it, which is most of the interesting ones.
+        """
+        with jax.enable_x64(True):
+            shape = (N_TIME, N_FREQ)
+            baseline = self._report(*self._graph(state, jnp.zeros(shape), 1.0, 1.0))
+            variants = [
+                self._graph(state, jnp.full(shape, 1e4), 1.0, 1.0),
+                self._graph(state, jnp.zeros(shape), 1e-3, 1.0),
+                self._graph(state, jnp.zeros(shape), 1.0, 1e6),
+            ]
+            for graph, at in variants:
+                other = self._report(graph, at)
+                assert other.nullity == baseline.nullity
+                assert other.rank == baseline.rank
+                assert other.n_data == baseline.n_data
+                np.testing.assert_array_equal(
+                    other.singular_values, baseline.singular_values
+                )
+                np.testing.assert_array_equal(other.jacobian, baseline.jacobian)
+                np.testing.assert_array_equal(other.column_norms, baseline.column_norms)
+
+    def test_the_baseline_is_not_a_degenerate_comparison(self, state):
+        """The sibling: the report has structure, so equality above says something.
+
+        Three identical all-zero reports would satisfy every assertion in the
+        test above.
+        """
+        with jax.enable_x64(True):
+            report = self._report(*self._graph(state, jnp.zeros((N_TIME, N_FREQ)), 1.0, 1.0))
+            assert report.n_par > 1
+            assert float(report.singular_values[0]) > 0.0
+            assert len(set(np.round(report.singular_values, 12))) > 1

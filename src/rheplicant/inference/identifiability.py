@@ -83,63 +83,33 @@ conditioning of one block without forming anything.
 import contextlib
 import dataclasses
 from collections.abc import Iterator, Sequence
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+import numpyro.distributions as dist
+from bayesmith.diagnose.identifiability import DEFAULT_RANK_RTOL as _bayesmith_rank_rtol
+from bayesmith.diagnose.identifiability import identifiability as _bayesmith_identifiability
+from bayesmith.distributions import ComplexNormal
+from bayesmith.errors import BayesmithError
+
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.graph_bridge import to_graph
+from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.parameters import ParameterSpace
 
-#: Singular values at or below ``rtol * s_max`` are called null.
-#:
-#: Justified against the measured float64 spectrum of the motivating model —
-#: the degenerate one, which is the hard case, since it is the only one with a
-#: number on both sides of the cut:
-#:
-#: * its null direction sits at **6.6e-17** of the largest singular value;
-#: * its weakest genuinely IDENTIFIED direction at **4.8e-5** (the (3,3)
-#:   polynomial basis is itself mildly ill-conditioned; give the same model a
-#:   calibration tone and the weakest identified direction rises to 6.8e-2);
-#: * the SVD's own noise floor is a few times ``n · eps`` ≈ **1e-14**, below
-#:   which no tolerance is measuring anything but roundoff.
-#:
-#: Every tolerance in (1e-13, 4.8e-5) therefore returns the same verdict — an
-#: 8.7-decade window whose geometric centre is 2e-9. 1e-8 sits within a decade
-#: of that centre: 3.7 decades of headroom before an identified direction gets
-#: called null, and 6 decades of floor before roundoff gets called a signal. It
-#: is also ``sqrt(eps)`` in float64, which is the scale at which a direction
-#: stops being constrained by the data and starts being constrained by the
-#: arithmetic.
-#:
-#: The upper end is model-dependent and the lower end is not: a genuinely
-#: weakly-constrained direction can sit at 1e-6, and then this default is only
-#: two decades away from mis-classifying it. Read
-#: :attr:`IdentifiabilityReport.weakest_identified` before trusting the verdict,
-#: and pass ``rtol=`` when it comes back close to the cut.
-#:
-#: **The test suite pins this value into 2.5 decades, not 8.7.** That is
-#: deliberate but not obvious, so know where a retune will fail before reaching
-#: for the assertions. Two counterfactuals elsewhere are stated against this
-#: default rather than against a literal, and each end of the window is a
-#: measured number that a real claim turns on:
-#:
-#: * **lower, 1.0e-10** — ``test_the_same_model_without_normalisation_would_be
-#:   _called_degenerate``. The mixed-scale fixture's RAW spectrum ratio is
-#:   1.0e-10, and that counterfactual only demonstrates anything while the ratio
-#:   sits *below* this default. Retune under 1e-10 and the right repair is to
-#:   widen the fixture's 1e10 scale gap, not to relax its assertion.
-#: * **upper, 3.1168e-8** — ``test_float32_would_have_got_the_verdict_wrong``.
-#:   The basis model's null direction surfaces there in single precision, so a
-#:   default *above* it would call that direction null, float32 would get the
-#:   verdict right, and the argument for the x64 machinery would be gone. The
-#:   margin here is 3.1x, not a decade.
-#:
-#: ``test_the_suite_pins_this_constant_more_tightly_than_the_physics`` states
-#: that window in one place; read it first if a retune starts failing tests.
-DEFAULT_RANK_RTOL: float = 1e-8
+#: Re-exported from bayesmith, which now owns both the number and the
+#: measurement behind it. **Not a second copy**: the whole argument for the
+#: value -- the 8.7-decade window, the null direction at 7.5e-17, the weakest
+#: identified at 4.8e-5, and (as of D9) the family sweep showing that no
+#: float32 counterpart exists to be written -- lives beside the arithmetic that
+#: uses it. A constant justified in one place and spelled in two is the defect
+#: this migration exists to remove; see `bayesmith.diagnose.identifiability`.
+DEFAULT_RANK_RTOL: float = _bayesmith_rank_rtol
 
 
 @contextlib.contextmanager
@@ -399,6 +369,14 @@ def _flat_view(
 ) -> tuple[jax.Array, tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
     """``(x0, shapes, spans)`` for the selected latents, in the GIVEN order.
 
+    **Kept for :mod:`rheplicant.inference.sensitivity`, which imports it, and
+    for nothing else.** This module stopped using it when its rank arithmetic
+    moved to bayesmith; iron law 1 says a private name is a preserved surface
+    until its LAST consumer switches, so it goes when ``sensitivity`` does --
+    later in this same wave. Deleting it now would be the migration breaking a
+    module it had not reached yet.
+
+
     Built by hand rather than with ``ravel_pytree``, which flattens a dict in
     SORTED key order. Sorting is fine as long as nothing else disagrees with
     it, and catastrophic as soon as something does: a report that flattened one
@@ -479,87 +457,180 @@ def identifiability(
     _check_differentiable(space, selected)
 
     with _in_float64():
-        forward, values0 = space.forward_fn(pipeline, state_template)
-        values0 = {**values0, **(at or {})}
-        x0, shapes, spans = _flat_view(values0, selected)
-
-        def f_flat(x: jax.Array) -> jax.Array:
-            block = {
-                name: jnp.reshape(x[start:stop], shape)
-                for name, shape, (start, stop) in zip(selected, shapes, spans, strict=True)
-            }
-            return jnp.ravel(forward({**values0, **block}))
-
-        jacobian = jax.jacfwd(f_flat)(x0)  # (n_data, n_par)
-        # This catches a model that pins its OUTPUT to single precision, which
-        # is the way it actually happens (one astype in one operator). It cannot
-        # catch a model that rounds an INTERMEDIATE to float32 and promotes back
-        # — the dtype is then honest and the digits are gone anyway. Nothing
-        # cheap distinguishes that from a genuinely float64 model, so the limit
-        # is stated rather than papered over: if a model does that, its
-        # `weakest_identified` will sit near 1e-7 and should not be believed.
-        if jacobian.dtype != jnp.float64:
-            raise StateValidationError(
-                f"This model computes its prediction in {jacobian.dtype} even with x64 "
-                "enabled, so its own roundoff (~1e-7 relative) is larger than the "
-                f"rank tolerance ({rtol:g}) and an exact degeneracy would be reported as "
-                "identified — the measured case surfaces at 3.1e-8 in single precision "
-                "against 6.6e-17 in double. Remove the float32 cast from the operator or "
-                "binding that pins it."
+        # The expansion point is the DECLARED INIT, passed explicitly (D21).
+        # bayesmith defaults `at=` to the prior centres, and `Latent` carries
+        # `init` and `prior` as independent fields -- this module's own example
+        # is `Latent("fwhm_deg", init=12.0, prior=Uniform(5, 30))`. The verdict
+        # is a LOCAL property, so the two points are two different questions:
+        # measured on `mu = a exp(b x)`, expanding at a = 0.0 gives nullity 1
+        # and at a = 1.0 gives nullity 0.
+        values0 = _widened({**space.initial_values(), **(at or {})})
+        graph = _graph_for_rank(space, pipeline, state_template, values0)
+        try:
+            found = _bayesmith_identifiability(
+                graph, names=selected, at=values0, rtol=rtol
             )
+        except BayesmithError as error:
+            _reraise(error, rtol)
 
-        norms = jnp.linalg.norm(jacobian, axis=0)
-        # A zero column is an exact null direction; dividing it by its own zero
-        # norm makes the whole spectrum NaN, and a NaN spectrum reports rank 0
-        # for every model. Leaving it at zero is both finite and correct.
-        safe_norms = jnp.where(norms > 0, norms, 1.0)
-        normalised = jacobian / safe_norms
+    return IdentifiabilityReport(
+        names=tuple(found.names),
+        shapes=tuple(found.shapes),
+        spans=tuple(found.spans),
+        n_par=found.n_par,
+        n_data=found.n_data,
+        rank=found.rank,
+        nullity=found.nullity,
+        singular_values=found.singular_values,
+        null_space=found.null_space,
+        jacobian=found.jacobian,
+        column_norms=found.column_norms,
+        rtol=found.rtol,
+        threshold=found.threshold,
+    )
 
-        n_par = int(x0.size)
-        n_data = int(jacobian.shape[0])
-        # The full_matrices flag is load-bearing in exactly ONE regime, and it is
-        # the headline case: the free-per-cell model has 64 data points against
-        # 72 parameters. Turned off there, `right` comes back (n_data, n_par)
-        # with no rows past index n_data, so `right[rank:]` below would be EMPTY
-        # while `nullity` still reported n_par - rank — a report whose two halves
-        # disagree, and whose direction() passes its bounds check and then
-        # indexes off the end. Pinned by
-        # test_the_null_space_is_whole_when_there_are_fewer_data_than_parameters.
-        #
-        # Everywhere else it is pure waste, and expensively so. `U` is discarded
-        # and `right` is read only as `right[rank:]`; for n_data >= n_par both
-        # spellings return the same (n_par,) spectrum and the same (n_par, n_par)
-        # `right`, bit for bit — TestTheSVDAsksForWhatItUses pins that on a
-        # matrix with a real null space, since an equality that only held at full
-        # rank would say nothing. What `full_matrices=True` adds there is an
-        # (n_data, n_data) left factor nothing reads: measured on (32768, n_par)
-        # in float64, `U` alone is 8.59 GB and the call runs 2.43 s against
-        # 0.002 s at n_par=8, and 20.27 s against 0.22 s at n_par=128. The memory
-        # is the real hazard — a realistic grid is far larger than the toy models
-        # in the test suite, all but one of which are over-determined.
-        _, spectrum, right = jnp.linalg.svd(normalised, full_matrices=n_data < n_par)
-        spectrum = np.asarray(spectrum, dtype=np.float64)
-        # The SVD returns min(n_data, n_par) values; the remaining directions of
-        # parameter space are exactly null, so pad rather than drop them. Then
-        # rank is simply "how many are above the cutoff", with no caveat.
-        spectrum = np.concatenate([spectrum, np.zeros(n_par - spectrum.size)])
-        threshold = float(rtol * spectrum[0])
-        rank = int(np.sum(spectrum > threshold))
-        return IdentifiabilityReport(
-            names=selected,
-            shapes=shapes,
-            spans=spans,
-            n_par=n_par,
-            n_data=n_data,
-            rank=rank,
-            nullity=n_par - rank,
-            singular_values=spectrum,
-            null_space=np.asarray(right[rank:], dtype=np.float64),
-            jacobian=np.asarray(normalised, dtype=np.float64),
-            column_norms=np.asarray(safe_norms, dtype=np.float64),
-            rtol=float(rtol),
-            threshold=threshold,
-        )
+
+def _widened(values: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    """The latent values at 64 bits, which is the other half of running in x64.
+
+    Opening the context is not enough on its own: a `Latent`'s ``init`` was
+    built when the space was declared, which is outside the block, so it is
+    float32 and the tangent JAX takes from it is float32 too. The old
+    implementation cast at exactly this point for exactly this reason; the
+    delegation kept the context manager and dropped the cast, and the whole
+    45-test file went red at once on bayesmith's "the joint Jacobian came back
+    float32" -- which is the refusal doing its job rather than a surprise.
+
+    Complex latents are widened to ``complex128`` rather than to a real type.
+    A selected complex latent is refused upstream by
+    :func:`_check_differentiable`; an UNSELECTED one is legal, is held fixed,
+    and must survive the trip without losing its imaginary part.
+    """
+    def widen(value: jax.Array) -> jax.Array:
+        array = jnp.asarray(value)
+        if jnp.issubdtype(array.dtype, jnp.complexfloating):
+            return array.astype(jnp.complex128)
+        if jnp.issubdtype(array.dtype, jnp.floating):
+            return array.astype(jnp.float64)
+        return array
+
+    return {name: widen(value) for name, value in values.items()}
+
+
+def _graph_for_rank(
+    space: ParameterSpace,
+    pipeline: AbstractOperator,
+    state_template: State,
+    values0: dict[str, jax.Array],
+) -> Any:
+    """The graph this rank test needs, with the three things it does not have.
+
+    A rank verdict is a property of the forward model alone. ``to_graph``
+    nevertheless requires data, a noise model and a prior per latent, because a
+    graph node IS its distribution -- so this synthesises all three.
+
+    **That is only sound because none of them can reach the answer, and that is
+    checked rather than asserted.** bayesmith takes the Jacobian from
+    ``local_block``, whose docstring says the prior fields are *deliberately
+    empty*, and ``dense_operator`` differentiates the observed nodes' locs --
+    the prediction. The data enters as ``block.data``, which the design matrix
+    does not read.
+    ``tests/inference/test_identifiability.py::TestTheSynthesisedGraph`` pins
+    the invariance directly: change the data, the sigma and the synthesised
+    prior widths, and every number in the report is unchanged.
+
+    Built INSIDE the caller's ``_in_float64`` block, which is not an
+    implementation detail: bayesmith refuses a graph whose own constants were
+    traced at float32, by name, so wrapping only the call would be caught
+    rather than silently answered at single precision.
+    """
+    forward, _ = space.forward_fn(pipeline, state_template)
+    prediction = forward(values0)
+    return to_graph(
+        _without_joint_prior(space),
+        pipeline,
+        state_template,
+        observed=jnp.zeros_like(prediction),
+        noise=HomoscedasticNoise(jnp.asarray(1.0, dtype=prediction.dtype)),
+        priors={
+            latent.name: _flat_prior(values0[latent.name])
+            for latent in space.latents
+            if latent.prior is None
+        },
+    )
+
+
+def _without_joint_prior(space: ParameterSpace) -> ParameterSpace:
+    """The same space with its block prior dropped, for the rank test only.
+
+    ``to_graph`` REFUSES a space that declares ``joint_prior``: a graph
+    declares one distribution per node, so building the graph without it would
+    drop the prior in silence and hand back a posterior that is only the
+    likelihood. That refusal is right for a solve and wrong here, and inheriting
+    it would have been the facade importing a constraint from a layer it does
+    not use -- measured: it broke eight of ``test_jeffreys_prior.py``'s cases,
+    which reach this function through ``JeffreysPrior.check_identified``.
+
+    Dropping it is sound for the same reason the synthesised priors are:
+    **a rank verdict reads no prior at all.** bayesmith takes the Jacobian from
+    ``local_block``, whose prior fields are deliberately empty. And the
+    circularity is worth naming -- ``JeffreysPrior`` is DEFINED from the
+    information matrix, so a rank test that consulted it would be asking the
+    model about a prior derived from the model.
+
+    Rebuilt rather than mutated: ``joint_prior`` is a static field, and a space
+    is an ``eqx.Module``.
+    """
+    if space.joint_prior is None:
+        return space
+    return ParameterSpace(
+        latents=space.latents,
+        bindings=space.bindings,
+        raw_bind=space.raw_bind,
+    )
+
+
+def _flat_prior(value: jax.Array) -> Any:
+    """A stand-in prior for a latent that declares none, centred where it sits.
+
+    ``ComplexNormal`` for a complex latent rather than ``Normal``: the adapter
+    refuses the substitution by name, and is right to -- ``ComplexNormal``'s
+    two parts are independent and each carries ``scale**2``, so reading a real
+    ``Normal``'s scale as one would silently double the declared variance. An
+    unselected complex latent is legal here (it is held fixed), so this path is
+    reached by an ordinary model rather than an exotic one; it was the last of
+    the 45 to go green.
+
+    The width is arbitrary and that is the point -- see
+    :func:`_graph_for_rank` for why no prior can reach the verdict, and the
+    invariance test that checks it rather than asserting it.
+    """
+    if jnp.issubdtype(jnp.asarray(value).dtype, jnp.complexfloating):
+        return ComplexNormal(jnp.asarray(value), 1.0)
+    return dist.Normal(jnp.asarray(value), 1.0)
+
+
+def _reraise(error: Exception, rtol: float) -> None:
+    """bayesmith's refusals in this package's classes, with its own wording.
+
+    Only the two refusals that can still reach here are translated, and they
+    are the precision pair: everything else is refused by ``_resolve_names`` /
+    ``_check_at`` / ``_check_differentiable`` BEFORE the graph is built, which
+    is where those messages have always been pinned. Naming the two rather
+    than catching broadly is the point -- a new bayesmith refusal arriving here
+    should be a loud unknown, not a sentence this function invented for it.
+    """
+    text = str(error)
+    if "came back float32" in text or "float32 as the ambient precision" in text:
+        raise StateValidationError(
+            f"This model computes its prediction in single precision even with x64 "
+            "enabled, so its own roundoff (~1e-7 relative) is larger than the "
+            f"rank tolerance ({rtol:g}) and an exact degeneracy would be reported as "
+            "identified -- the measured case surfaces at 3.1e-8 in single precision "
+            "against 6.6e-17 in double. Remove the float32 cast from the operator or "
+            "binding that pins it."
+        ) from error
+    raise
 
 
 __all__ = ["DEFAULT_RANK_RTOL", "IdentifiabilityReport", "identifiability"]
