@@ -44,18 +44,28 @@ dependencies = [
     # at a recorded 1.8.0 while running 1.10.0 source. A version check would have
     # refused a fully capable install; the symbol check cannot. The gates stay.
     "limTOD[jax]>=1.10",
-    # The auto-partition grouping rule and the log-space transform arithmetic
-    # live in bayesmith (dispatch.factor.first_fit, exact.loglinear) and are
-    # imported rather than re-spelled -- one statement of each, two paradigms
-    # reading it. The floor names the first release that carries them; 0.1.0
-    # on PyPI does not, so until 0.2.0 ships this resolves only against a
-    # local editable install:
+    # Three seams import from bayesmith rather than re-spell it -- one
+    # statement of each rule, two paradigms reading it. The auto-partition
+    # grouping rule and the log-space transform arithmetic
+    # (dispatch.factor.first_fit, exact.loglinear) came first, at 0.2. The
+    # adapter in inference/graph_bridge.py added the other two: it reads
+    # AffinityRefused's structured payload so a translated refusal carries the
+    # probe's NUMBERS rather than a sentence to parse, and it declares a
+    # complex latent with ComplexNormal, which exists because no numpyro
+    # distribution samples complex.
+    #
+    # The floor names the first release carrying that second pair -- 0.3.0.
+    # It is not decoration: a 0.2 install satisfies the import statements and
+    # then fails at the call, which is the shape a floor exists to turn into a
+    # resolution error. This checkout nevertheless holds bayesmith EDITABLE,
+    # because the two repositories are developed against each other and a
+    # released pin would freeze the seam mid-programme:
     #
     #     uv pip install --python .venv/bin/python --no-deps -e ../bayesmith
     #
     # The same bet the limTOD floor above records: declare the true
     # requirement rather than pretend the seam is optional.
-    "bayesmith>=0.2",
+    "bayesmith>=0.3",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

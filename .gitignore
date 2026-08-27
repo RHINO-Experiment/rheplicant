@@ -70,3 +70,14 @@ docs/_receiver-figure-data.npz
 
 # Visual brainstorming companion (local mockups)
 .superpowers/
+
+# The test-run artefacts this repo's own working notes tell you to create:
+# `pytest ... > run.log 2>&1; echo "PYTEST_EXIT=$?" > run.exit`. The exit code
+# has to be captured to its own file because a pipeline's status is the LAST
+# command's, so a `| tail` turns a usage error green -- which is why the recipe
+# exists and why its output is a normal part of working here rather than a
+# stray file. Two phases on a shared machine, hence the numbered second pair.
+run.log
+run.exit
+run2.log
+run2.exit

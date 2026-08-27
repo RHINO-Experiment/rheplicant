@@ -67,10 +67,22 @@ this file exists to close, so they are checked by name.
 not become anybody's problem.** The migration spec's §六 step 3 calls the merge
 of the two sessions "一个可能的红利", a possible dividend, and says to re-assess
 this module's reason to exist when it lands. Measured on 2026-08-25, ahead of
-that: ``tests/evidence/`` is the only directory in the suite carrying an x64
-collection gate, so once it leaves for bayesmith there is no x64 consumer left
-and the second session has nothing to run. The merge is therefore **"delete
-this file and that conftest"**, not "turn x64 on for the whole suite".
+that: ``tests/evidence/`` was then the only directory in the suite carrying an
+x64 collection gate, so once it leaves for bayesmith there is no x64 consumer
+left and the second session has nothing to run. The merge is therefore
+**"delete this file and that conftest"**, not "turn x64 on for the whole
+suite".
+
+**Corrected 2026-08-27: it is no longer the only one, and the conclusion above
+survives only for THIS file.** ``tests/seam/`` now carries the same gate, for
+the adapter's deterministic tier -- a machine-precision comparison against a
+dense reference, which float32 cannot state. Its driver is
+``tests/test_seam_session.py``. The difference that matters when the merge is
+assessed: the evidence layer's x64 need LEAVES with the layer, and the
+adapter's does not, because the adapter is what this package keeps rather than
+what it hands over. So "the two sessions merge" is now, at best, "one of the
+two goes"; a reader planning that step from the paragraph above alone would
+plan to delete a directory that has to stay.
 
 The distinction is the whole point of measuring early, because the phrase "the
 two sessions merge" reads equally well as the second thing, and the second
