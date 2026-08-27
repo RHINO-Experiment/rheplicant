@@ -443,7 +443,11 @@ class TestTheConditionCeiling:
         """
         forward, params = self._lopsided()
         fisher = fisher_information(forward, params, noise_std=1.0)
-        with pytest.raises(StateValidationError) as caught:
+        # `match=` even though the message is asserted below: a refusal pinned
+        # only by `assert x in message` is invisible to the refusal census, and
+        # so invisible to Appendix B -- which is what a wave reads to find out
+        # which sentences it has just become responsible for.
+        with pytest.raises(StateValidationError, match="condition number") as caught:
             parameter_covariance(fisher)
         assert caught.value.__cause__ is not None
         assert type(caught.value.__cause__) is ValueError
@@ -458,7 +462,7 @@ class TestTheConditionCeiling:
         """
         forward, params = self._lopsided()
         fisher = fisher_information(forward, params, noise_std=1.0)
-        with pytest.raises(StateValidationError) as caught:
+        with pytest.raises(StateValidationError, match="enable_x64") as caught:
             parameter_covariance(fisher)
         message = str(caught.value)
         assert "jax.enable_x64" in message

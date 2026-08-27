@@ -70,12 +70,13 @@ CENSUS: dict[str, int] = {
     "test_plan.py": 32,
     "test_prior_sensitivity.py": 9,
     "test_stochastic_twin.py": 4,
-    # 8 -> 12 on 2026-08-27: `uncertainty`'s second step. Three come with the
-    # far side's condition ceiling (D29) -- the refusal itself, the class it
-    # wears on this side, and the remedy it has to name -- and one with
-    # `propagate_covariance`'s new refusal of a PRECISION, which used to
-    # return an error bar wrong by the square of everything.
-    "test_uncertainty.py": 12,
+    # 8 -> 14 on 2026-08-27: `uncertainty`'s second step. Five come with the
+    # far side's condition ceiling (D29/D30) -- the refusal, the class it wears
+    # on this side, the remedy it has to name, and the two spellings of "this
+    # is already a covariance" -- and one with `propagate_covariance`'s new
+    # refusal of a PRECISION, which used to return an error bar wrong by the
+    # square of everything.
+    "test_uncertainty.py": 14,
 }
 
 #: Which exception classes those sites name, and how often. Carried because the
@@ -86,7 +87,7 @@ CENSUS: dict[str, int] = {
 #: refusals the adapter is responsible for.
 BY_CLASS: dict[str, int] = {
     "ParameterSpaceError": 178,
-    "StateValidationError": 62,
+    "StateValidationError": 64,
     "RuntimeError": 4,
     "Exception": 3,
     "TypeError": 1,
@@ -155,7 +156,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 248
+    assert sum(CENSUS.values()) == 250
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():
