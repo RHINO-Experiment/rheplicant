@@ -102,15 +102,20 @@ _INVERSE_KIND: dict[str, str] = {
 #: nothing sayable here is lost, and nothing the far side can do becomes
 #: reachable through it.
 #:
-#: ``"matrix"`` (hand-built, provenance unrecorded) crosses as a precision
-#: because that is what :func:`parameter_covariance` has always done with one:
-#: inverted it and called the result a covariance.
+#: Anything else -- ``"matrix"``, which is what :class:`FlatMatrix` calls a
+#: hand-built one, or a kind from a future version of this module -- crosses as
+#: a precision, through the lookup's default rather than through a row of its
+#: own. That is what :func:`parameter_covariance` has always done with such a
+#: matrix: inverted it and called the result a covariance. Every FlatMatrix
+#: this package builds declares ``kind="fisher"`` explicitly (measured:
+#: `memory.py`, `reduced_basis.py`, `fisher_information`), so a row for
+#: ``"matrix"`` would be a second spelling of the default with nothing able to
+#: reach it and nothing able to tell the two apart.
 _REMOTE_KIND: dict[str, str] = {
     "fisher": "fisher",
     "posterior_precision": "posterior_precision",
     "covariance": "covariance",
     "posterior_covariance": "covariance",
-    "matrix": "fisher",
 }
 
 
