@@ -1119,10 +1119,42 @@ class TestTheSynthesisedInformationGraph:
 
     def test_the_synthesised_data_cannot_reach_the_answer(self):
         """Zeros against 1e4 counts -- four decades, and the answer does not
-        move by a bit. A Fisher information carries no residual."""
+        move by a bit. A Fisher information carries no residual.
+
+        **A mutation of the adapter's chosen data therefore CANNOT be killed,
+        and that is the point rather than a gap.** Changing
+        ``graph_for_information``'s ``jnp.zeros`` to ``jnp.full(..., 1e4)``
+        leaves this whole suite green, which is what this test asserts is true.
+        A guard that went red there would be claiming something false about an
+        expected information.
+
+        What can still go wrong is the adapter building a DIFFERENT graph from
+        the one measured here, so the last assertion closes that loop: the
+        shipped helper's matrix is the baseline's.
+        """
         flat = dist.ImproperUniform(dist.constraints.real, (), ())
         other = self._matrix(self._graph(jnp.full((N_TIME, N_FREQ), 1e4), flat))
-        assert float(jnp.max(jnp.abs(other - self._baseline()))) == 0.0
+        baseline = self._baseline()
+        assert float(jnp.max(jnp.abs(other - baseline))) == 0.0
+
+        from rheplicant.inference.graph_bridge import graph_for_information
+
+        freq = jnp.linspace(60e6, 85e6, N_FREQ) / NU0
+
+        def forward(values):
+            row = (
+                jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"])
+                + values["t_floor"]
+            )
+            return jnp.broadcast_to(row, (N_TIME, N_FREQ))
+
+        shipped = self._matrix(
+            graph_for_information(forward, self.VALUES, RADIOMETER)
+        )
+        assert float(jnp.max(jnp.abs(shipped - baseline))) == 0.0, (
+            "the adapter builds a different graph from the one these "
+            "measurements were made on, so they say nothing about it"
+        )
 
     def test_the_synthesised_densities_cannot_reach_the_answer(self):
         """A proper Normal in place of the flat declaration, on the latent the
