@@ -350,6 +350,54 @@ class TestMCMCRecovery:
             predict_from_samples(twin, template_state, space, {"wrong": jnp.zeros(3)})
 
 
+class TestObservedNoneIsThePriorPredictive:
+    """The one thing the two packages spell in OPPOSITE directions.
+
+    Here ``model()`` with no argument has always meant the prior predictive --
+    draw the observation, do not condition on anything. On the graph side
+    ``model(None)`` means the opposite: use each node's own declared data. The
+    facade translates by passing ``{}``, and this class is why that translation
+    needs a guard of its own.
+
+    **The graph is built against a placeholder of zeros**, because ``to_graph``
+    needs data at build time and ``to_numpyro_model`` is not given any. So a
+    translation that passed ``None`` through would condition every
+    prior-predictive call on that placeholder and hand back an array of zeros
+    wearing the right shape and dtype. Measured: it survives every other test
+    in this file -- the shape assertions agree, the site is present, and
+    nothing else looks at it.
+    """
+
+    def test_no_argument_leaves_the_observation_unconditioned(
+        self, twin, space, template_state
+    ):
+        model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
+        tr = trace(seed(model, jax.random.key(0))).get_trace()
+        site = tr["obs"]
+        assert not site["is_observed"], (
+            "the prior-predictive call came back CONDITIONED, which means it was "
+            "conditioned on the adapter's placeholder"
+        )
+        # And the drawn value is a draw, not the placeholder wearing its shape.
+        assert float(jnp.max(jnp.abs(site["value"]))) > 0.0
+
+    def test_an_argument_conditions_on_it_and_not_on_the_placeholder(
+        self, twin, space, template_state, observed
+    ):
+        """The other direction, and it is what makes the first one meaningful.
+
+        A facade that ignored its argument and always ran unconditioned would
+        satisfy the test above.
+        """
+        model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
+        site = trace(seed(model, jax.random.key(0))).get_trace(observed)["obs"]
+        assert site["is_observed"]
+        assert jnp.allclose(site["value"], observed)
+        # Named separately: `observed` is not all-zero, so this rules out the
+        # placeholder specifically rather than by implication.
+        assert not jnp.allclose(site["value"], jnp.zeros_like(observed))
+
+
 class TestASampledSigmaCollidingWithALatent:
     """D27's measurement, turned into a refusal rather than left to NumPyro.
 
