@@ -42,10 +42,29 @@ import jax.numpy as jnp
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.graph_bridge import to_graph
 from rheplicant.inference.likelihood import check_observed_shape
-from rheplicant.inference.noise import HomoscedasticNoise
+from rheplicant.inference.noise import HomoscedasticNoise, check_noise_std_axis
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
+
+#: The deterministic site this package has always recorded the prediction at.
+#: Not the graph's internal ``__mu__``: a caller is invited to read
+#: ``mcmc.get_samples()["prediction"]`` by this module's own docstring and by
+#: ``examples/tutorial_nuts.py``, so it is a public name and kept (D26).
+PREDICTION_SITE: str = "prediction"
+
+
+def _bayesmith_to_numpyro():
+    """``bayesmith.to_numpyro``, imported at the call.
+
+    Same reason ``graph_bridge`` imports its own: importing this package must
+    not import bayesmith, and a missing one should fail at the call that needed
+    it rather than at the import of anything sitting beside it.
+    """
+    import bayesmith
+
+    return bayesmith.to_numpyro
 
 
 def _require_numpyro():
@@ -285,9 +304,18 @@ def to_numpyro_model(
         :class:`~rheplicant.inference.noise.FlaggedNoise` or ``flags`` — is
         masked out rather than given an infinite scale, which would send the
         whole potential to ``-inf``. Masking is the limit that exists.
+
+        **The model itself is bayesmith's.** This function declares the graph
+        through :func:`~rheplicant.inference.graph_bridge.to_graph` and hands
+        it to ``bayesmith.to_numpyro``; the sites, the mask and the joint-prior
+        factor are emitted there, from the declaration. What stays here is what
+        a graph cannot spell: the refusals above, the site NAMES (D26 — the
+        graph calls its own nodes ``__mu__`` and ``__data__``, and this package
+        has always called them ``"prediction"`` and ``obs_name``), and the
+        meaning of ``observed=None``, which is the prior predictive here and
+        "each node's declared data" there.
     """
     _require_numpyro()
-    import numpyro
     import numpyro.distributions as dist
 
     _require_priors(space)
@@ -308,65 +336,51 @@ def to_numpyro_model(
             space, pipeline, state_template, caller="to_numpyro_model"
         )
 
-    def _site(latent):
-        """The sample site for one latent — its own prior, or a flat one.
+    # The prediction's shape, asked of the declaration rather than of a traced
+    # array: `to_graph` needs data at BUILD time and this function is not given
+    # any -- the caller passes it when the model is run. So the graph is built
+    # against a placeholder of the right shape and every call conditions it
+    # explicitly, which is also what makes `observed=None` mean the prior
+    # predictive here rather than "use the declared data".
+    forward, values0 = space.forward_fn(pipeline, state_template)
+    prediction_shape = tuple(jax.eval_shape(forward, values0).shape)
 
-        A latent the joint prior covers still needs a site for NUTS to have a
-        coordinate; what it does not need is a density, because the whole
-        density over that block arrives once at the factor site below. An
-        improper flat site contributes exactly zero, so the block's log prior is
-        the joint prior and nothing else.
-        """
-        if latent.prior is not None:
-            return numpyro.sample(latent.name, latent.prior)
-        return numpyro.sample(
-            latent.name,
-            dist.ImproperUniform(
-                dist.constraints.real, (), event_shape=latent.init.shape
-            ),
-        )
+    sampled_scale = isinstance(noise_std, dist.Distribution)
+    noise = as_noise_model(
+        # A placeholder sigma, and only its FLAGS are read: the value comes from
+        # the declared scale latent instead. `to_graph` refuses this combination
+        # for anything but a homoscedastic model, which is what makes the
+        # placeholder unreachable rather than merely unread (D27).
+        HomoscedasticNoise(jnp.ones(())) if sampled_scale else noise_std,
+        flags,
+    )
+    # In front of the seam, with this function's name on it. `to_graph` runs the
+    # same check and would name itself, which is true and unhelpful to someone
+    # who called this. Measured 2026-08-27 (D28): this path used to ACCEPT an
+    # ambiguous 1-D sigma on a square grid and broadcast it along the last axis
+    # in silence, so the refusal is new here and is a fix, not a regression.
+    check_noise_std_axis(noise, prediction_shape, "to_numpyro_model")
+
+    graph = to_graph(
+        space, pipeline, state_template, jnp.zeros(prediction_shape), noise,
+        prediction_name=PREDICTION_SITE,
+        observation_name=obs_name,
+        scale_prior=("noise_std", noise_std) if sampled_scale else None,
+    )
+    declared = _bayesmith_to_numpyro()(graph)
 
     def model(observed: jax.Array | None = None):
-        values = {latent.name: _site(latent) for latent in space.latents}
-        prediction = space.bind(pipeline, values)(state_template).data
+        # `{}` and not `None`: the two packages spell the unconditioned model
+        # differently on purpose. There, `None` means "each node's own declared
+        # data"; here it has always meant the prior predictive, and that is a
+        # keeping surface -- `mcmc.run(key, observed=data)` is how every caller
+        # in this package conditions. The mapping is where the two meet.
+        if observed is None:
+            return declared({})
         # Trace time, not run time: both shapes are static, so this compiles
         # away entirely and NUTS refuses before it draws a single sample.
-        # `observed=None` is the prior-predictive call, not a mismatch.
-        if observed is not None:
-            check_observed_shape(
-                jnp.shape(prediction), observed, predictor="this model"
-            )
-        numpyro.deterministic("prediction", prediction)
-
-        noise = as_noise_model(
-            HomoscedasticNoise(numpyro.sample("noise_std", noise_std))
-            if isinstance(noise_std, dist.Distribution)
-            else noise_std,
-            flags,
-        )
-        if joint is not None:
-            # The SAME noise object the likelihood is about to use, which is why
-            # the prior carries none of its own: a likelihood/prior noise
-            # mismatch is not something this API can express.
-            numpyro.factor(
-                "joint_prior",
-                joint.log_density(
-                    lambda v: space.bind(pipeline, v)(state_template).data,
-                    values,
-                    noise,
-                ),
-            )
-
-        sigma = noise.std(prediction)
-
-        # A sample with infinite sigma was not observed. Handing that scale to
-        # Normal sends its log_prob -- and so the whole potential -- to -inf,
-        # because r^2/sigma^2 vanishes but log sigma does not. Masking is the
-        # limit that exists.
-        seen = jnp.isfinite(sigma)
-        site = dist.Normal(prediction, jnp.where(seen, sigma, 1.0))
-        with numpyro.handlers.mask(mask=seen):
-            numpyro.sample(obs_name, site, obs=observed)
+        check_observed_shape(prediction_shape, observed, predictor="this model")
+        return declared({obs_name: observed})
 
     return model
 

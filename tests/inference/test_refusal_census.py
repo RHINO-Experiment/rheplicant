@@ -46,7 +46,10 @@ CENSUS: dict[str, int] = {
     # 14 -> 13 on 2026-08-27: the refusal that pinned the masking GAP retired
     # when G1's wiring landed. What it protected is pinned positively by
     # TestFlaggedNoiseCrossesAsADeclaredMask.
-    "test_graph_bridge.py": 13,
+    # 13 -> 16 on 2026-08-27: D26/D27 gave the seam two node names and a
+    # declared scale latent, and each of the three reserved names is a
+    # collision the caller has to be told about.
+    "test_graph_bridge.py": 16,
     "test_identifiability.py": 13,
     "test_inference_construction_guards.py": 10,
     "test_inference_unpinned_refusals.py": 5,
@@ -77,7 +80,7 @@ CENSUS: dict[str, int] = {
 #: the seam at all. A drift between these two populations is a drift in which
 #: refusals the adapter is responsible for.
 BY_CLASS: dict[str, int] = {
-    "ParameterSpaceError": 175,
+    "ParameterSpaceError": 178,
     "StateValidationError": 58,
     "RuntimeError": 4,
     "Exception": 3,
@@ -147,7 +150,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 241
+    assert sum(CENSUS.values()) == 244
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():

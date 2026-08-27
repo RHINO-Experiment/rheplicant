@@ -48,6 +48,7 @@ from rheplicant.core.state import State
 from rheplicant.inference.likelihood import check_observed_shape
 from rheplicant.inference.noise import (
     FlaggedNoise,
+    HomoscedasticNoise,
     NoiseModel,
     check_noise_std_axis,
 )
@@ -379,12 +380,22 @@ def _refuse_a_noise_model_this_seam_cannot_read(noise: Any) -> None:
     )
 
 
-def _refuse_internal_names(latents: tuple[Latent, ...]) -> None:
+def _refuse_internal_names(latents: tuple[Latent, ...], reserved: frozenset[str]) -> None:
+    """No latent may take a name this call gives one of the graph's own nodes.
+
+    ``reserved`` rather than :data:`INTERNAL_NAMES`, because the two node names
+    are no longer fixed: ``to_numpyro_model`` names them ``"prediction"`` and
+    its ``obs_name`` so that the sites a caller reads out of ``get_samples()``
+    keep the names this package has always given them (D26). A refusal keyed to
+    the defaults would then guard the wrong two strings -- it would let a latent
+    called ``prediction`` through and refuse one called ``__mu__``, which is the
+    exact inverse of what that call needs.
+    """
     for latent in latents:
-        if latent.name in INTERNAL_NAMES:
+        if latent.name in reserved:
             _refuse(
                 f"Latent {latent.name!r} takes one of the adapter's internal node names "
-                f"{sorted(INTERNAL_NAMES)}. Those name the prediction and the observation "
+                f"{sorted(reserved)}. Those name the prediction and the observation "
                 "in the graph this builds, so the collision would be a duplicate node "
                 "name -- or worse, a latent whose posterior draws came back keyed to the "
                 "prediction. Rename the latent."
@@ -429,6 +440,42 @@ def _bayesmith_joint_prior(prior: Any) -> Any:
     return bayesmith.JeffreysPrior(over=prior.over, rank_rtol=prior.rank_rtol)
 
 
+def _refuse_a_scale_prior_the_seam_cannot_read(noise: Any, scale_prior: Any) -> None:
+    """A declared scale latent replaces the noise model's sigma, so the noise
+    model must have nothing else to say.
+
+    ``scale_prior`` exists for one caller: ``to_numpyro_model`` given a
+    distribution-valued ``noise_std``, which today becomes the sample site
+    ``"noise_std"`` and then a
+    :class:`~rheplicant.inference.noise.HomoscedasticNoise` around it. The
+    sigma that noise model carries is therefore a PLACEHOLDER -- the value
+    comes from the latent instead -- and the only thing read off it is its
+    flags.
+
+    So it has to be a homoscedastic model, optionally flagged, and nothing
+    else. A radiometer's sigma tracks the prediction; silently replacing that
+    with a constant latent would be a different model with the same shapes,
+    the same dtypes and a perfectly healthy chain. The placeholder's
+    unreachability is measured rather than asserted (see
+    ``TestASampledScaleCrossesAsALatent`` in ``tests/inference/
+    test_graph_bridge.py``), and this refusal is what keeps it measurable: it
+    is only unreachable because nothing else could have contributed.
+    """
+    if scale_prior is None:
+        return
+    base = noise.base if isinstance(noise, FlaggedNoise) else noise
+    if not isinstance(base, HomoscedasticNoise):
+        _refuse(
+            f"to_graph was given scale_prior={scale_prior[0]!r} together with "
+            f"{type(base).__name__} noise. A declared scale latent REPLACES the noise "
+            "model's sigma, so the only thing left to read off the noise model is its "
+            "flags -- and a sigma that tracks the prediction has more to say than that. "
+            "Replacing it with a constant latent would be a different model with the "
+            "same shapes and a healthy chain. Pass a HomoscedasticNoise (optionally "
+            "flagged), or drop scale_prior and let the noise model carry the sigma."
+        )
+
+
 def _prevalidate(
     space: ParameterSpace,
     pipeline: AbstractOperator,
@@ -436,6 +483,8 @@ def _prevalidate(
     observed: Any,
     noise: Any,
     priors: Mapping[str, Any] | None,
+    reserved: frozenset[str],
+    scale_prior: tuple[str, Any] | None,
 ) -> _Resolved:
     """Everything that must be refused while the evidence for it still exists.
 
@@ -447,10 +496,11 @@ def _prevalidate(
     supplied: Mapping[str, Any] = {} if priors is None else dict(priors)
     latents = tuple(space.latents)
 
-    _refuse_internal_names(latents)
+    _refuse_internal_names(latents, reserved)
     _refuse_scopes_without_a_graph_spelling(latents)
     _refuse_unusable_priors(latents, supplied)
     _refuse_a_noise_model_this_seam_cannot_read(noise)
+    _refuse_a_scale_prior_the_seam_cannot_read(noise, scale_prior)
 
     joint = space.joint_prior
     resolved_priors = {}
@@ -500,6 +550,9 @@ def to_graph(
     noise: Any,
     *,
     priors: Mapping[str, Any] | None = None,
+    prediction_name: str = PREDICTION,
+    observation_name: str = OBSERVATION,
+    scale_prior: tuple[str, Any] | None = None,
 ) -> Any:
     """Build the bayesmith ``Graph`` this space, pipeline and data describe.
 
@@ -539,7 +592,12 @@ def to_graph(
     """
     import bayesmith
 
-    resolved = _prevalidate(space, pipeline, state_template, observed, noise, priors)
+    reserved = frozenset({prediction_name, observation_name}) | (
+        frozenset() if scale_prior is None else frozenset({scale_prior[0]})
+    )
+    resolved = _prevalidate(
+        space, pipeline, state_template, observed, noise, priors, reserved, scale_prior
+    )
     forward = resolved.forward
     names = resolved.names
     priors_by_name = resolved.priors
@@ -549,15 +607,23 @@ def to_graph(
             bayesmith.sample(name, _prior_factory(priors_by_name[name])) for name in names
         ]
         prediction = bayesmith.det(
-            PREDICTION,
+            prediction_name,
             _prediction_fn(forward, names),
             *refs,
             linear_in=resolved.linear_names,
         )
+        parents = [prediction]
+        if scale_prior is not None:
+            # The scale is a node, not a number. `observe` takes several
+            # parents, so this needs nothing from the far side that 0.4.0 does
+            # not already have -- measured before it was written (D27).
+            parents.append(
+                bayesmith.sample(scale_prior[0], _prior_factory(scale_prior[1]))
+            )
         bayesmith.observe(
-            OBSERVATION,
-            _observation_fn(noise),
-            prediction,
+            observation_name,
+            _observation_fn(noise, declared_scale=scale_prior is not None),
+            *parents,
             obs=data,
             mask=_observed_mask(noise),
             depends_on_prediction=bool(noise.depends_on_prediction),
@@ -681,21 +747,33 @@ def _finite_sigma(noise: Any, prediction: jax.Array) -> jax.Array:
     return noise.std(prediction)
 
 
-def _observation_fn(noise: Any) -> Callable[[jax.Array], Any]:
-    """The observed node's ``dist_fn``: ``Normal(mu, noise.std(mu))``.
+def _observation_fn(noise: Any, *, declared_scale: bool = False) -> Callable[..., Any]:
+    """The observed node's ``dist_fn``: ``Normal(mu, sigma)``.
 
     The sigma is asked of the noise model rather than re-derived from its
     fields, which is what keeps the radiometer's floor, its absolute value and
     its fractional level in one place. A second spelling here would be the copy
     that goes stale, and it would go stale silently: both readings are finite
     and correctly shaped.
+
+    With ``declared_scale`` the sigma arrives as a second PARENT instead --
+    a latent the graph declares (D27). The noise model is then read only for
+    its flags, and ``_refuse_a_scale_prior_the_seam_cannot_read`` has already
+    established that it has nothing else to say. The scale is broadcast to the
+    prediction's shape rather than trusted to broadcast on its own: a scalar
+    would, and so would a vector of the wrong length against the wrong axis.
     """
     import numpyro.distributions as distributions
 
     def observation(prediction: jax.Array) -> Any:
         return distributions.Normal(prediction, _finite_sigma(noise, prediction))
 
-    return observation
+    def observation_with_scale(prediction: jax.Array, scale: jax.Array) -> Any:
+        return distributions.Normal(
+            prediction, jnp.broadcast_to(scale, jnp.shape(prediction))
+        )
+
+    return observation_with_scale if declared_scale else observation
 
 
 # ------------------------------------------------- the single prior entry --

@@ -829,3 +829,183 @@ class TestAJointPriorCrossesAsADeclaredFactor:
                 noise,
                 priors={"gains": dist.Normal(jnp.full((N_TIME,), GAIN), 5.0)},
             )
+
+
+class TestTheNodeNamesAreTheCallersToChoose:
+    """D26. The graph's two internal nodes are named by whoever builds it.
+
+    They were fixed at ``__mu__`` and ``__data__``, double-underscored so they
+    read as internal. ``to_numpyro_model`` needs them to be ``"prediction"``
+    and its ``obs_name`` instead, because those are the site names a caller is
+    invited to read out of ``mcmc.get_samples()`` -- by this package's own
+    docstring and by ``examples/tutorial_nuts.py`` -- and iron law 1 keeps
+    public names.
+
+    The refusal that stops a latent colliding with them therefore has to follow
+    the choice. Keyed to the defaults it would guard the wrong two strings: it
+    would let a latent called ``prediction`` through on the very call that
+    needs that name, and refuse one called ``__mu__`` on a call that does not.
+    """
+
+    def test_the_defaults_are_the_internal_names(
+        self, space, instrument, data, noise, template_state
+    ):
+        graph = to_graph(space, instrument, template_state, data, noise)
+        assert {node.name for node in graph.nodes} == {"gains", PREDICTION, OBSERVATION}
+
+    def test_the_chosen_names_are_what_the_graph_carries(
+        self, space, instrument, data, noise, template_state
+    ):
+        graph = to_graph(
+            space, instrument, template_state, data, noise,
+            prediction_name="prediction", observation_name="obs",
+        )
+        assert {node.name for node in graph.nodes} == {"gains", "prediction", "obs"}
+
+    def test_a_latent_colliding_with_a_CHOSEN_name_is_refused(
+        self, instrument, data, noise, template_state
+    ):
+        colliding = gain_space()
+        colliding = ParameterSpace(
+            latents=(
+                Latent(
+                    name="prediction",
+                    init=jnp.full((N_TIME,), GAIN),
+                    linear=True,
+                    prior=dist.Normal(jnp.full((N_TIME,), GAIN), 5.0),
+                ),
+            ),
+            bindings=(
+                type(colliding.bindings[0])(
+                    "prediction", into=lambda p: p["gain"].gain
+                ),
+            ),
+        )
+        with pytest.raises(ParameterSpaceError, match="internal node names"):
+            to_graph(
+                colliding, instrument, template_state, data, noise,
+                prediction_name="prediction", observation_name="obs",
+            )
+
+    def test_that_same_latent_is_fine_under_the_default_names(
+        self, instrument, data, noise, template_state
+    ):
+        """The other direction, and it is the half a fixed refusal gets wrong.
+
+        A latent called ``prediction`` collides with nothing when the nodes are
+        called ``__mu__`` and ``__data__``. A guard keyed to the defaults would
+        pass this and fail the test above; one keyed to the chosen names does
+        the opposite, which is what is wanted.
+        """
+        from rheplicant.inference import Bind
+
+        colliding = ParameterSpace(
+            latents=(
+                Latent(
+                    name="prediction",
+                    init=jnp.full((N_TIME,), GAIN),
+                    linear=True,
+                    prior=dist.Normal(jnp.full((N_TIME,), GAIN), 5.0),
+                ),
+            ),
+            bindings=(Bind("prediction", into=lambda p: p["gain"].gain),),
+        )
+        graph = to_graph(colliding, instrument, template_state, data, noise)
+        assert "prediction" in graph.latents
+
+
+class TestASampledScaleCrossesAsALatent:
+    """D27. ``noise_std`` as a numpyro distribution becomes a graph latent.
+
+    ``to_numpyro_model`` has always supported an INFERRED sigma: a
+    distribution-valued ``noise_std`` becomes the sample site ``"noise_std"``,
+    which belongs to no ``ParameterSpace``. Measured before this was built:
+    ``observe`` takes several parents, so the scale can be a node and nothing
+    on the far side had to change for it.
+
+    The noise model handed in alongside is then a **placeholder** -- only its
+    flags are read -- which is why the seam refuses the combination for
+    anything but a homoscedastic model. Without that refusal a radiometer's
+    prediction-tracking sigma would be silently replaced by a constant latent:
+    same shapes, same dtypes, a healthy chain, a different model.
+    """
+
+    @staticmethod
+    def _scaled(space, instrument, data, template_state, placeholder=1.0, flags=None):
+        noise = HomoscedasticNoise(sigma=jnp.asarray(placeholder))
+        if flags is not None:
+            noise = FlaggedNoise(base=noise, flags=flags)
+        return to_graph(
+            space, instrument, template_state, data, noise,
+            prediction_name="prediction", observation_name="obs",
+            scale_prior=("noise_std", dist.HalfNormal(1.0)),
+        )
+
+    def test_the_scale_is_a_latent_of_the_graph(
+        self, space, instrument, data, template_state
+    ):
+        graph = self._scaled(space, instrument, data, template_state)
+        assert list(graph.latents) == ["gains", "noise_std"]
+        assert graph.node("obs").parents == ("prediction", "noise_std")
+
+    def test_the_placeholder_sigma_cannot_reach_the_answer(
+        self, space, instrument, data, template_state
+    ):
+        """A billion-fold change in the value that was handed in, and nothing.
+
+        Not a courtesy check: the placeholder is the price of reusing a noise
+        model to carry flags, and the only thing that makes it legitimate is
+        that the answer cannot see it.
+        """
+        from bayesmith.graph.evaluate import log_joint
+
+        values = {"gains": jnp.full((N_TIME,), GAIN), "noise_std": jnp.array(0.5)}
+        one = self._scaled(space, instrument, data, template_state, placeholder=1.0)
+        huge = self._scaled(space, instrument, data, template_state, placeholder=1e9)
+        assert float(log_joint(one, values)) == float(log_joint(huge, values))
+
+    def test_the_flags_still_become_the_mask(
+        self, space, instrument, data, template_state
+    ):
+        """The one thing the placeholder noise model IS read for."""
+        flags = jnp.zeros(data.shape, dtype=bool).at[:, 2].set(True)
+        graph = self._scaled(space, instrument, data, template_state, flags=flags)
+        mask = np.asarray(graph.node("obs").observed_mask)
+        assert not mask[:, 2].any()
+        assert mask[:, 0].all() and mask[:, 1].all()
+
+    def test_a_prediction_tracking_sigma_is_refused_beside_a_declared_scale(
+        self, space, instrument, data, template_state
+    ):
+        from rheplicant.inference.noise import RadiometerNoise
+
+        with pytest.raises(ParameterSpaceError, match="scale_prior"):
+            to_graph(
+                space, instrument, template_state, data,
+                RadiometerNoise(channel_width=1e6, integration_time=1.0),
+                scale_prior=("noise_std", dist.HalfNormal(1.0)),
+            )
+
+    def test_the_scale_latent_name_is_reserved_too(
+        self, instrument, data, template_state
+    ):
+        """The declared scale takes a name, so a latent cannot also have it.
+
+        Same rule as the two node names, and it has to be the same rule: the
+        collision is a duplicate node, and the graph would be built from
+        whichever declaration ran last.
+        """
+        from rheplicant.inference import Bind
+
+        colliding = ParameterSpace(
+            latents=(
+                Latent(
+                    name="noise_std",
+                    init=jnp.full((N_TIME,), GAIN),
+                    prior=dist.Normal(jnp.full((N_TIME,), GAIN), 5.0),
+                ),
+            ),
+            bindings=(Bind("noise_std", into=lambda p: p["gain"].gain),),
+        )
+        with pytest.raises(ParameterSpaceError, match="internal node names"):
+            self._scaled(colliding, instrument, data, template_state)

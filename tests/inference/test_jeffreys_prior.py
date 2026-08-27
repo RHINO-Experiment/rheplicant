@@ -906,9 +906,10 @@ class TestASamplerActuallyCarriesTheFactor:
     Metropolis ratio. So two chains on one key, one carrying the factor and one
     not:
 
-    * under the radiometer declaration, where this prior is exactly flat, they
-      must agree **bitwise** -- measured, ``max|difference| = 0.0`` on both
-      latents over 300 draws;
+    * under the radiometer declaration, where this prior is flat, they must
+      agree to far below anything the posterior can resolve -- measured,
+      ``max|difference|`` of **1.9e-10** against a posterior sd of 1.3e-4, a
+      ratio of **1.4e-6**;
     * under a constant sigma, where it is not flat, they must diverge --
       measured, 4.0 and 5.1 posterior standard deviations.
 
@@ -916,7 +917,30 @@ class TestASamplerActuallyCarriesTheFactor:
     flat constant, without a tolerance anywhere.
     """
 
-    def test_a_flat_prior_leaves_the_trajectory_bitwise_unchanged(self):
+    def test_a_flat_prior_leaves_the_trajectory_where_it_was(self):
+        """**This assertion used to be ``== 0.0``, and the change is a real
+        measurement rather than a loosened tolerance.**
+
+        Before ``numpyro_bridge`` delegated, the factor was added by a
+        hand-written ``numpyro.factor`` whose information matrix was assembled
+        from a synthesised graph, and every ``mu`` cancelled BIT-exactly --
+        ``sigma = f|mu|`` against ``J = mu g`` divides a value by itself -- so
+        the factor was the same float at every point and the trajectories were
+        identical. The information now comes from the MODEL graph, assembled in
+        a different order, and the cancellation is exact only to roundoff.
+
+        Measured after the switch: the factor is still the flat constant to
+        **5.7e-9** across the grid (matching the printed 15.80169853 to eight
+        decimals, and inside the 1e-7 the sibling test above already pins), and
+        the trajectory divergence that leaks from it is 1.9e-10 against a
+        posterior sd of 1.3e-4.
+
+        So the bound is stated **relative to the posterior**, not as an absolute
+        epsilon: a factor that stopped being constant in any way a sampler could
+        care about would move the chain by a fraction of a sigma, and the
+        sibling test below shows what that looks like -- four to five sigma.
+        The headroom here is six orders of magnitude.
+        """
         data = observed_data()
         key = jax.random.key(20260827)
         prior = JeffreysPrior(over=("fg_log_amp", "fg_beta"))
@@ -934,11 +958,15 @@ class TestASamplerActuallyCarriesTheFactor:
             difference = float(
                 jnp.max(jnp.abs(with_prior[name] - without[name]))
             )
-            assert difference == 0.0, (
-                f"{name}: the chains differ by {difference:.3e} with a prior that "
-                f"is flat to {RADIOMETER_FLAT_HALF_LOGDET} at every point. Under "
-                "one key a constant in the potential changes no trajectory, so a "
-                "difference here is the factor not being constant."
+            spread = float(jnp.std(without[name]))
+            assert difference < 1e-5 * spread, (
+                f"{name}: the chains differ by {difference:.3e}, which is "
+                f"{difference / spread:.2e} of the posterior sd {spread:.3e}, with "
+                f"a prior flat to {RADIOMETER_FLAT_HALF_LOGDET} at every point. "
+                "Under one key a constant in the potential changes no trajectory, "
+                "so a difference at the posterior's own scale is the factor not "
+                "being constant. Measured ratios when this was written: 1.4e-6 "
+                "and 1.9e-7."
             )
 
     def test_a_prior_that_is_not_flat_moves_the_trajectory(self):
