@@ -41,6 +41,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from bayesmith.diagnose import sensitivity as bayesmith_sensitivity
+
 from rheplicant import Coordinates, Environment, State
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.inference import Bind, Latent, ParameterSpace, sensitivity
@@ -850,7 +852,11 @@ class TestWhenNewtonDoesNotGetThere:
     def test_a_mode_that_is_not_found_is_fatal_and_says_what_it_prevents(
         self, tour, monkeypatch
     ):
-        monkeypatch.setattr(sensitivity, "MAX_NEWTON_STEPS", 2)
+        # bayesmith's constant, not this package's: the Newton solve moved
+        # there when the module became a facade, and patching the
+        # re-exported name here would change nothing while reading as
+        # though it had -- a test that cannot fail.
+        monkeypatch.setattr(bayesmith_sensitivity, "MAX_NEWTON_STEPS", 2)
         with pytest.raises(StateValidationError) as excinfo:
             prior_sensitivity(
                 tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD
@@ -870,7 +876,11 @@ class TestWhenNewtonDoesNotGetThere:
         back is the closed form with ``verified`` false and the refit column
         NaN — never a NaN silently averaged into a verdict.
         """
-        monkeypatch.setattr(sensitivity, "MAX_NEWTON_STEPS", 2)
+        # bayesmith's constant, not this package's: the Newton solve moved
+        # there when the module became a facade, and patching the
+        # re-exported name here would change nothing while reading as
+        # though it had -- a test that cannot fail.
+        monkeypatch.setattr(bayesmith_sensitivity, "MAX_NEWTON_STEPS", 2)
         starved = prior_sensitivity(
             tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD,
             at={

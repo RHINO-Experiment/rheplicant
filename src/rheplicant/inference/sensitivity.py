@@ -107,13 +107,21 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from bayesmith.diagnose.sensitivity import (
+    prior_sensitivity as _bayesmith_prior_sensitivity,
+)
+from bayesmith.diagnose.sensitivity import (
+    MAX_NEWTON_STEPS as _bayesmith_max_newton_steps,
+)
+from bayesmith.errors import BayesmithError
+
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
+from rheplicant.inference.graph_bridge import to_graph
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference.identifiability import (
     _check_at,
     _check_differentiable,
-    _flat_view,
     _in_float64,
     _resolve_names,
     identifiability,
@@ -167,7 +175,10 @@ VERIFY_ATOL: float = 1e-6
 #: The tour's MAP takes **7** from the declared init and its likelihood-only
 #: refit **3** from the MAP, so this is 14x the measured need. It is a ceiling
 #: on a loop that either converges quadratically or is not going to.
-MAX_NEWTON_STEPS: int = 100
+#: Re-exported from bayesmith, which owns the Newton solve this bounds.
+#: Not a second copy: patching THIS name no longer changes anything, which
+#: is why the two tests that used to do so now patch bayesmith's.
+MAX_NEWTON_STEPS: int = _bayesmith_max_newton_steps
 
 #: Convergence test: ``max(|dx| / (1 + |x|)) < NEWTON_TOL``.
 #:
@@ -183,58 +194,24 @@ NEWTON_TOL: float = 1e-13
 MAX_BACKTRACKS: int = 40
 
 
-def _newton(
-    objective: Any, x0: jax.Array
-) -> tuple[jax.Array, int, bool]:
-    """Damped Newton on a scalar objective. Returns ``(x, steps, converged)``.
-
-    Damped rather than plain because the second solve here runs with the priors
-    REMOVED, which is exactly the configuration where a full Newton step can
-    leave the basin — the priors were the term keeping the Hessian comfortably
-    positive. The line search only ever shortens a step, never changes its
-    direction, so a converged result is a stationary point of ``objective`` and
-    not of some modified problem.
-
-    Never raises: a solve that fails comes back with ``converged=False`` and
-    the last iterate, because the caller has to decide whether a failed MAP
-    (fatal) or a failed verification refit (reportable) is the situation.
-    """
-    value_and_grad = jax.value_and_grad(objective)
-    hessian = jax.hessian(objective)
-    x = x0
-    for step in range(1, MAX_NEWTON_STEPS + 1):
-        value, gradient = value_and_grad(x)
-        direction = jnp.linalg.solve(hessian(x), gradient)
-        if not bool(jnp.all(jnp.isfinite(direction))) or not bool(jnp.isfinite(value)):
-            return x, step, False
-        # `+ eps * |value|` rather than a strict decrease: at the mode the two
-        # objective values differ only in their last bits, and a strict test
-        # would backtrack 40 times on a converged solve and report failure.
-        ceiling = float(value) + 1e-12 * abs(float(value))
-        length = 1.0
-        for _ in range(MAX_BACKTRACKS):
-            trial = x - length * direction
-            if float(objective(trial)) <= ceiling:
-                break
-            length *= 0.5
-        else:
-            return x, step, False
-        moved = float(jnp.max(jnp.abs(length * direction) / (1.0 + jnp.abs(trial))))
-        x = trial
-        if moved < NEWTON_TOL:
-            return x, step, True
-    return x, MAX_NEWTON_STEPS, False
-
-
-def _prior_moments(
+def _refuse_a_prior_this_cannot_read(
     space: ParameterSpace,
     names: Sequence[str],
-    shapes: Sequence[tuple[int, ...]],
-) -> tuple[jax.Array, jax.Array]:
-    """``(loc, scale)`` of every selected latent, flattened. Refuses, loudly.
+) -> None:
+    """Refuse a selected latent whose prior this diagnostic cannot read.
 
-    The two refusals here are the ones that keep this function from reporting a
-    Gaussian displacement for something that has none. Both name the latent.
+    **Refusal only.** It used to also assemble ``(loc, scale)``; that half is
+    bayesmith's now. What stays is the three refusals, and they stay HERE, in
+    front of ``to_graph``, for the reason P1 gives: a refusal the seam would
+    re-word belongs before the seam. Two of the three would otherwise never be
+    reached -- ``to_graph`` refuses a prior-free latent first, in its own words,
+    which name neither ``prior_std`` nor ``linear`` and so tell a caller
+    holding a ``wiener_solve``-style declaration nothing about what to do.
+
+    The third (a non-Gaussian prior) bayesmith also refuses, in wording this
+    package's port gave it. It is kept anyway rather than deferred: leaving one
+    of three to fire from the far side would make which message a caller sees
+    depend on declaration order.
     """
     # Function-local, the same way `uncertainty._prior_precision` imports it:
     # `linear` owns what "a Gaussian prior ON THE LATENT" means — it is the
@@ -242,9 +219,7 @@ def _prior_moments(
     # .base_dist while being Gaussian in log x, not in x.
     from rheplicant.inference.linear import _gaussian_parameters
 
-    locations: list[jax.Array] = []
-    scales: list[jax.Array] = []
-    for name, shape in zip(names, shapes, strict=True):
+    for name in names:
         latent = space.latent(name)
         prior = latent.prior
         if prior is None and latent.linear:
@@ -285,49 +260,6 @@ def _prior_moments(
                 "to_numpyro_model + NUTS, which honours the prior as written, or exclude "
                 f"{name!r} with names=."
             )
-        loc, scale = gaussian
-        locations.append(jnp.ravel(jnp.broadcast_to(jnp.asarray(loc, dtype=jnp.float64), shape)))
-        scales.append(jnp.ravel(jnp.broadcast_to(jnp.asarray(scale, dtype=jnp.float64), shape)))
-    return jnp.concatenate(locations), jnp.concatenate(scales)
-
-
-def _refuse_rank_deficient(
-    space: ParameterSpace,
-    pipeline: AbstractOperator,
-    state_template: State,
-    names: Sequence[str],
-    values: dict[str, jax.Array],
-) -> None:
-    """Refuse a selection whose Jacobian at the mode is rank-deficient.
-
-    The rank verdict, the null direction and the participation shares all come
-    from :func:`~rheplicant.inference.identifiability.identifiability`, which
-    is where that measurement lives; this only decides that a shift cannot be
-    reported without it.
-    """
-    report = identifiability(space, pipeline, state_template, names=names, at=values)
-    if not report.nullity:
-        return
-    participation = report.participation(0)
-    mixed = ", ".join(
-        f"{name} {share:.2f}" for name, share in sorted(
-            participation.items(), key=lambda item: -item[1]
-        )
-    )
-    raise ParameterSpaceError(
-        f"prior_sensitivity cannot report a prior shift for {list(names)}: at the mode, "
-        f"identifiability() reports rank {report.rank} of {report.n_par}, so "
-        f"{report.nullity} direction(s) of this selection are ones the data cannot see "
-        f"at all. The first of them mixes {mixed} (participation, in column-normalised "
-        "coordinates). The shift is defined as the displacement from the mode the "
-        "LIKELIHOOD alone would choose, and along a null direction there is no such "
-        "mode — it is a ray, and the distance from a ray is not a number. What would "
-        "come back is nevertheless finite, because the declared priors make the "
-        "posterior proper: it would be the prior reporting on itself, with a "
-        "well-formed sigma and a plausible magnitude. Call identifiability() for the "
-        "full direction, fix the parameterization, or restrict names= to a subset the "
-        "data determines."
-    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -646,107 +578,142 @@ def prior_sensitivity(
     _check_differentiable(space, selected)
 
     with _in_float64():
-        forward, values0 = space.forward_fn(pipeline, state_template)
-        values0 = {**values0, **(at or {})}
+        # The DECLARED INIT, passed explicitly -- D21. bayesmith defaults `at=`
+        # to the prior centres, and here the two are never the same question:
+        # this function's whole subject is the distance between the mode and
+        # the prior's own centre.
+        values0 = _widened({**space.initial_values(), **(at or {})})
+        forward, _ = space.forward_fn(pipeline, state_template)
         data = jnp.asarray(observed, dtype=jnp.float64)
+        # Before the graph, because this package's wording for it is pinned and
+        # `to_graph`'s is its own. Same principle as P1: a refusal the seam
+        # would re-word lives in front of the seam.
         check_observed_shape(
             jnp.shape(forward(values0)), data, predictor="this forward model"
         )
+        _refuse_a_prior_this_cannot_read(space, selected)
         noise = as_noise_model(
             noise_std,
             flags,
             prediction_shape=jnp.shape(data),
             caller="prior_sensitivity",
         )
-        log_likelihood = NoiseModelLikelihood(noise)
-
-        x0, shapes, spans = _flat_view(values0, selected)
-        loc, scale = _prior_moments(space, selected, shapes)
-
-        def unflatten(x: jax.Array) -> dict[str, jax.Array]:
-            return {
-                name: jnp.reshape(x[start:stop], shape)
-                for name, shape, (start, stop) in zip(selected, shapes, spans, strict=True)
-            }
-
-        def neg_log_likelihood(x: jax.Array) -> jax.Array:
-            return -log_likelihood(forward({**values0, **unflatten(x)}), data)
-
-        def neg_log_posterior(x: jax.Array) -> jax.Array:
-            return neg_log_likelihood(x) + 0.5 * jnp.sum(((x - loc) / scale) ** 2)
-
-        mode, newton_steps, converged = _newton(neg_log_posterior, x0)
-        if not converged:
-            raise StateValidationError(
-                f"prior_sensitivity could not find the mode: {newton_steps} damped "
-                "Newton steps on the exact log-posterior did not converge to "
-                f"max|dx|/(1+|x|) < {NEWTON_TOL:g}. Every number this reports is a "
-                "displacement FROM that mode, so there is nothing to report — the "
-                "closed form would expand about a point that is not stationary and "
-                "come back finite. Three things do this: a starting point in another "
-                "basin (pass at=), a model that computes its prediction in float32 "
-                "(the Hessian is then noise at the 1e-7 level — identifiability() "
-                "names that one), and a genuinely non-quadratic posterior, for which "
-                "to_numpyro_model + NUTS is the right tool and this one is not."
-            )
-
-        precision = jax.hessian(neg_log_posterior)(mode)
-        covariance = jnp.linalg.inv(precision)
-        sigma_post = jnp.sqrt(jnp.diag(covariance))
-
-        values_at_mode = {**values0, **unflatten(mode)}
-        _refuse_rank_deficient(space, pipeline, state_template, selected, values_at_mode)
-
-        offset = loc - mode
-        # theta_hat - theta_L = H^-1 P (m - theta_hat), with H the LIKELIHOOD
-        # curvature -- not the posterior's. Using (H + P)^-1 here is wrong by
-        # exactly diag((H + P)^-1 P), the prior's share of the posterior
-        # precision: 5.9e-2 at the tour's beta with s = 0.01, and it grows
-        # without bound as the prior tightens, which is the regime the report
-        # exists to describe.
-        likelihood_precision = jax.hessian(neg_log_likelihood)(mode)
-        shift_sigma = (
-            jnp.linalg.solve(likelihood_precision, offset / scale**2) / sigma_post
+        graph = _graph_for_sensitivity(
+            space, pipeline, state_template, data, noise
         )
+        try:
+            found = _bayesmith_prior_sensitivity(graph, names=selected, at=values0)
+        except BayesmithError as error:
+            _reraise(error)
 
-        likelihood_mode, refit_steps, refit_converged = _newton(neg_log_likelihood, mode)
-        if refit_converged:
-            shift_refit = (mode - likelihood_mode) / sigma_post
-            agreed = jnp.abs(shift_sigma - shift_refit) <= (
-                VERIFY_RTOL * jnp.abs(shift_refit) + VERIFY_ATOL
-            )
-        else:
-            shift_refit = jnp.full_like(shift_sigma, jnp.nan)
-            agreed = jnp.zeros_like(shift_sigma, dtype=bool)
+    return PriorSensitivityReport(
+        names=tuple(found.names),
+        shapes=tuple(found.shapes),
+        spans=tuple(found.spans),
+        n_par=found.n_par,
+        mode=found.mode,
+        prior_loc=found.prior_loc,
+        prior_std=found.prior_std,
+        mean_offset=found.mean_offset,
+        sigma_post=found.sigma_post,
+        shift_sigma=found.shift_sigma,
+        shift_sigma_refit=found.shift_sigma_refit,
+        verified=found.verified,
+        criterion_std=found.criterion_std,
+        precision=found.precision,
+        newton_steps=found.newton_steps,
+        refit_steps=found.refit_steps,
+        refit_converged=found.refit_converged,
+    )
 
-        mean_offset = jnp.abs(offset)
-        criterion = jnp.sqrt(sigma_post * mean_offset / CRITERION_SHIFT)
 
-        # float64 explicitly rather than by inheritance: these arrays leave the
-        # x64 context, and an array that arrived here as float32 would be a
-        # report whose digits stop before the effect it is measuring does.
-        def as_numpy(array: jax.Array) -> np.ndarray:
-            return np.asarray(array, dtype=np.float64)
+def _widened(values: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    """The latent values at 64 bits -- the other half of running in x64.
 
-        return PriorSensitivityReport(
-            names=selected,
-            shapes=shapes,
-            spans=spans,
-            n_par=int(x0.size),
-            mode=as_numpy(mode),
-            prior_loc=as_numpy(loc),
-            prior_std=as_numpy(scale),
-            mean_offset=as_numpy(mean_offset),
-            sigma_post=as_numpy(sigma_post),
-            shift_sigma=as_numpy(shift_sigma),
-            shift_sigma_refit=as_numpy(shift_refit),
-            verified=np.asarray(agreed, dtype=bool),
-            criterion_std=as_numpy(criterion),
-            precision=as_numpy(precision),
-            newton_steps=int(newton_steps),
-            refit_steps=int(refit_steps),
-            refit_converged=bool(refit_converged),
-        )
+    Opening the context is not enough: a ``Latent``'s ``init`` was built when
+    the space was declared, outside the block, so it is float32 and the tangent
+    taken from it is too. Identical to
+    :func:`~rheplicant.inference.identifiability._widened` and deliberately not
+    shared with it: that module is a preserved surface for exactly one
+    consumer, and importing a second private name across modules is how the
+    census in iron law 1 grows. Six lines, twice, beats a dependency that has
+    to be tracked.
+    """
+
+    def widen(value: jax.Array) -> jax.Array:
+        array = jnp.asarray(value)
+        if jnp.issubdtype(array.dtype, jnp.complexfloating):
+            return array.astype(jnp.complex128)
+        if jnp.issubdtype(array.dtype, jnp.floating):
+            return array.astype(jnp.float64)
+        return array
+
+    return {name: widen(value) for name, value in values.items()}
+
+
+def _graph_for_sensitivity(
+    space: ParameterSpace,
+    pipeline: AbstractOperator,
+    state_template: State,
+    data: jax.Array,
+    noise: Any,
+) -> Any:
+    """The graph, with the caller's OWN data and noise -- nothing synthesised.
+
+    The contrast with
+    :func:`~rheplicant.inference.identifiability._graph_for_rank` is the whole
+    of why this module is a different problem. A rank verdict reads no data, no
+    noise and no prior, so that one synthesises all three and pins the
+    invariance. This one reads all three -- the mode it finds is the posterior's
+    -- and it is HANDED all three, because they are arguments. There is nothing
+    to synthesise and nothing to prove invariant.
+
+    Only the block prior is dropped, and only because ``to_graph`` refuses one:
+    a graph declares one distribution per node. The selected latents' own
+    Gaussian priors are what this function is about and they come through
+    untouched.
+    """
+    if space.joint_prior is None:
+        return to_graph(space, pipeline, state_template, data, noise)
+    return to_graph(
+        ParameterSpace(
+            latents=space.latents,
+            bindings=space.bindings,
+            raw_bind=space.raw_bind,
+        ),
+        pipeline,
+        state_template,
+        data,
+        noise,
+    )
+
+
+def _reraise(error: Exception) -> None:
+    """bayesmith's refusals in this package's classes, wording preserved.
+
+    The messages are already this package's -- the port kept them, down to
+    "identifiability() reports rank N of M" -- so what changes is the CLASS.
+    ``GraphError`` and ``StructureError`` are bayesmith's taxonomy;
+    ``ParameterSpaceError`` and ``StateValidationError`` are the ones this
+    package's callers catch, and ``config/postflight/fitting.py`` catches
+    exactly those two by name.
+
+    ``ConvergenceError`` is bayesmith's own class for a Newton solve that did
+    not land, and it maps to ``StateValidationError`` because that is what this
+    package raised for it.
+    """
+    from bayesmith.errors import (
+        ConvergenceError,
+        GraphError,
+        NotGaussian,
+        StructureError,
+    )
+
+    if isinstance(error, (StructureError, ConvergenceError)):
+        raise StateValidationError(str(error)) from error
+    if isinstance(error, (GraphError, NotGaussian)):
+        raise ParameterSpaceError(str(error)) from error
+    raise
 
 
 __all__ = [

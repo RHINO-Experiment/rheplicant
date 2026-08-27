@@ -364,35 +364,6 @@ class IdentifiabilityReport:
         }
 
 
-def _flat_view(
-    values: dict[str, jax.Array], names: Sequence[str]
-) -> tuple[jax.Array, tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
-    """``(x0, shapes, spans)`` for the selected latents, in the GIVEN order.
-
-    **Kept for :mod:`rheplicant.inference.sensitivity`, which imports it, and
-    for nothing else.** This module stopped using it when its rank arithmetic
-    moved to bayesmith; iron law 1 says a private name is a preserved surface
-    until its LAST consumer switches, so it goes when ``sensitivity`` does --
-    later in this same wave. Deleting it now would be the migration breaking a
-    module it had not reached yet.
-
-
-    Built by hand rather than with ``ravel_pytree``, which flattens a dict in
-    SORTED key order. Sorting is fine as long as nothing else disagrees with
-    it, and catastrophic as soon as something does: a report that flattened one
-    way and named the other would attribute a degeneracy to the wrong latent
-    with every shape still checking out.
-    """
-    pieces = [jnp.ravel(jnp.asarray(values[name], dtype=jnp.float64)) for name in names]
-    shapes = tuple(jnp.shape(values[name]) for name in names)
-    spans: list[tuple[int, int]] = []
-    offset = 0
-    for piece in pieces:
-        spans.append((offset, offset + piece.size))
-        offset += piece.size
-    return jnp.concatenate(pieces), shapes, tuple(spans)
-
-
 def identifiability(
     space: ParameterSpace,
     pipeline: AbstractOperator,
