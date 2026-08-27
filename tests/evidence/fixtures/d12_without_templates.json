@@ -1,0 +1,51 @@
+{
+  "format_version": 3,
+  "jax_enable_x64": true,
+  "global_names": [
+    "depth",
+    "width"
+  ],
+  "global_shapes": [
+    [],
+    []
+  ],
+  "accumulated_rows": 2,
+  "terms": [
+    {
+      "epoch_id": "night-042",
+      "n_observed": 777,
+      "exact": false,
+      "support": {
+        "depth": [
+          -2.0,
+          2.0
+        ],
+        "width": [
+          -1.0,
+          3.0
+        ]
+      },
+      "include_logdet": false,
+      "noise_frozen_at": "gls",
+      "prior_share": [
+        0,
+        1
+      ],
+      "rows": 2,
+      "dtype": "float64",
+      "residual_dof": 13,
+      "template_names": [],
+      "n_template_projections": null,
+      "inputs": [
+        [
+          "beam_model",
+          "sha256:b3ee"
+        ],
+        [
+          "cal_solution",
+          "sha256:0f17"
+        ]
+      ]
+    }
+  ]
+}
