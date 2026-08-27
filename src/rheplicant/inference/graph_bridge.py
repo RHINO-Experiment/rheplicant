@@ -233,7 +233,9 @@ def _refuse(message: str) -> NoReturn:
     raise ParameterSpaceError(message)
 
 
-def _prior_of(latent: Latent, supplied: Mapping[str, Any]) -> Any:
+def _prior_of(
+    latent: Latent, supplied: Mapping[str, Any], covered_by: str | None = None
+) -> Any:
     """The one prior in force for ``latent`` -- declared or supplied, never both.
 
     ``priors=`` is the SINGLE entry for a prior that the declaration does not
@@ -245,6 +247,18 @@ def _prior_of(latent: Latent, supplied: Mapping[str, Any]) -> Any:
     the two readings drift.
     """
     name = latent.name
+    if covered_by is not None:
+        if name in supplied:
+            _refuse(
+                f"to_graph was given priors[{name!r}], and {name!r} is also covered by "
+                f"this space's joint_prior over {covered_by}. That is two priors on one "
+                "quantity: the posterior would be multiplied by both, which is a proper "
+                "density and a plausible chain and not the model either declaration "
+                "describes -- and no diagnostic reports a prior counted twice, because "
+                "each one on its own is correct. Drop the priors= entry, or take the "
+                "latent out of over=."
+            )
+        return _flat_prior_for(latent)
     if name in supplied:
         if latent.prior is not None:
             _refuse(
@@ -377,16 +391,42 @@ def _refuse_internal_names(latents: tuple[Latent, ...]) -> None:
             )
 
 
-def _refuse_a_joint_prior(space: ParameterSpace) -> None:
-    if space.joint_prior is None:
-        return
-    _refuse(
-        f"This space declares joint_prior={type(space.joint_prior).__name__}(...), a "
-        "prior over a BLOCK of latents. A graph declares one distribution per node, so a "
-        "joint prior needs a factor site of its own -- the G13 gap. Building the graph "
-        "without it would drop the prior in silence and return a posterior that is only "
-        "the likelihood."
+def _flat_prior_for(latent: Latent) -> Any:
+    """The improper density a joint-prior-covered latent declares on the graph.
+
+    A covered latent still needs a NODE -- a sampler needs the coordinate, and
+    a graph node IS its distribution -- but it must not carry a density, because
+    the whole density over that block arrives once at the factor site. An
+    improper flat site contributes exactly zero, so the block's log prior is
+    the joint prior and nothing else.
+
+    The spelling is the one the far side checks for **by type**: its
+    ``_check_against`` refuses a covered latent whose density is not an
+    ``ImproperUniform``, on the grounds that two priors on one quantity give a
+    proper density and a plausible chain and no diagnostic that reports it.
+    This is also the spelling ``to_numpyro_model`` has always used for the same
+    latents, so the graph and the hand-written bridge declare the same thing.
+    """
+    import numpyro.distributions as distributions
+
+    return distributions.ImproperUniform(
+        distributions.constraints.real, (), event_shape=jnp.shape(latent.init)
     )
+
+
+def _bayesmith_joint_prior(prior: Any) -> Any:
+    """This package's ``JeffreysPrior`` as the graph's.
+
+    Both are ``eqx.Module``s over the same two static fields, and the second is
+    carried rather than dropped: ``rank_rtol=None`` means "the default" on both
+    sides and the same default, but an EXPLICIT rank_rtol is a caller's
+    decision about where a null eigenvalue starts, and losing it here would
+    leave a rank verdict taken at a tolerance nobody asked for -- finite,
+    plausible, and a different prior.
+    """
+    import bayesmith
+
+    return bayesmith.JeffreysPrior(over=prior.over, rank_rtol=prior.rank_rtol)
 
 
 def _prevalidate(
@@ -408,15 +448,21 @@ def _prevalidate(
     latents = tuple(space.latents)
 
     _refuse_internal_names(latents)
-    _refuse_a_joint_prior(space)
     _refuse_scopes_without_a_graph_spelling(latents)
     _refuse_unusable_priors(latents, supplied)
     _refuse_a_noise_model_this_seam_cannot_read(noise)
 
+    joint = space.joint_prior
     resolved_priors = {}
     for latent in latents:
-        prior = _prior_of(latent, supplied)
-        _refuse_a_complex_latent_without_a_complex_prior(latent, prior)
+        covered = joint is not None and joint.covers(latent.name)
+        prior = _prior_of(latent, supplied, covered_by=joint.label if covered else None)
+        if not covered:
+            # A covered latent's flat site has no loc to read a dtype off, and
+            # a complex one is refused upstream by `check_identified` before a
+            # graph is built at all -- so this check would be asking the flat
+            # declaration a question it cannot answer.
+            _refuse_a_complex_latent_without_a_complex_prior(latent, prior)
         resolved_priors[latent.name] = prior
 
     # `forward_fn` validates the space against the pipeline (aliased targets,
@@ -516,6 +562,12 @@ def to_graph(
             mask=_observed_mask(noise),
             depends_on_prediction=bool(noise.depends_on_prediction),
         )
+        if space.joint_prior is not None:
+            # Declared, not added by a consumer afterwards. A graph missing this
+            # line builds, validates, samples and diagnoses cleanly, and is a
+            # likelihood-only posterior -- which is exactly what the refusal
+            # this replaced said it was preventing.
+            bayesmith.joint_prior(_bayesmith_joint_prior(space.joint_prior))
 
     with translate("to_graph"):
         return bayesmith.trace(model, observed)

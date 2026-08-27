@@ -385,19 +385,6 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
         with pytest.raises(ParameterSpaceError, match=scope):
             to_graph(scoped, instrument, template_state, data, noise)
 
-    def test_a_joint_prior_because_it_needs_a_factor_site(
-        self, instrument, data, noise, template_state
-    ):
-        from rheplicant.inference import JeffreysPrior
-
-        space = ParameterSpace(
-            latents=(Latent(name="gains", init=jnp.full((N_TIME,), GAIN)),),
-            bindings=gain_space().bindings,
-            joint_prior=JeffreysPrior(over=("gains",)),
-        )
-        with pytest.raises(ParameterSpaceError, match="joint_prior"):
-            to_graph(space, instrument, template_state, data, noise)
-
     @pytest.mark.parametrize("name", sorted(INTERNAL_NAMES))
     def test_a_latent_named_like_an_internal_node(
         self, instrument, data, noise, template_state, name
@@ -633,3 +620,132 @@ class TestFlaggedNoiseCrossesAsADeclaredMask:
             HomoscedasticNoise(sigma=jnp.array(0.5)),
         )
         assert graph.node("__data__").observed_mask is None
+
+
+class TestAJointPriorCrossesAsADeclaredFactor:
+    """G13 landed on the far side, so this seam declares instead of refusing.
+
+    The refusal it replaces — ``to_graph`` telling the caller that a joint
+    prior needs a factor site nobody had built yet — is RETIRED, the triage
+    table's third column, for the reason the masking one was: it pinned a GAP,
+    the gap is closed, and a test that pins an absence does not outlive its
+    subject. What it protected is pinned positively here.
+
+    **What makes this seam worth guarding is that dropping it is invisible.**
+    A graph built without the declaration has the right nodes, the right
+    shapes, the right dtypes; it validates, it samples, and every convergence
+    diagnostic is clean. It is simply a different posterior — the likelihood
+    alone — which is the sentence the retired refusal used to say out loud.
+    So the guard below is not "the field is set" but "the potential moved, by
+    this much".
+    """
+
+    @staticmethod
+    def _covered_space(**overrides):
+        """The gain space with its prior handed to a ``JeffreysPrior``.
+
+        A covered latent must NOT declare a ``Latent(prior=...)`` of its own —
+        ``ParameterSpace.__check_init__`` refuses that as two priors on one
+        quantity, and the far side refuses it a second time by type. So this
+        space drops the ``Normal`` the sibling fixtures carry.
+        """
+        from rheplicant.inference import JeffreysPrior
+
+        return ParameterSpace(
+            latents=(Latent(name="gains", init=jnp.full((N_TIME,), GAIN), linear=True),),
+            bindings=gain_space().bindings,
+            joint_prior=JeffreysPrior(over=("gains",), **overrides),
+        )
+
+    def test_the_graph_carries_the_declaration(
+        self, instrument, data, noise, template_state
+    ):
+        graph = to_graph(
+            self._covered_space(), instrument, template_state, data, noise
+        )
+        assert isinstance(graph.joint_prior, bayesmith.JeffreysPrior)
+        assert graph.joint_prior.over == ("gains",)
+
+    def test_an_explicit_rank_rtol_crosses_rather_than_defaulting(
+        self, instrument, data, noise, template_state
+    ):
+        """``None`` means the same default on both sides, which is why this
+        needs a NON-default value to say anything.
+
+        An explicit ``rank_rtol`` is a caller's decision about where a null
+        eigenvalue starts. Dropping it here would leave the rank verdict taken
+        at a tolerance nobody asked for — finite, plausible, a different prior,
+        and nothing in the graph's shape or dtype to say so.
+        """
+        graph = to_graph(
+            self._covered_space(rank_rtol=1e-5), instrument, template_state, data, noise
+        )
+        assert graph.joint_prior.rank_rtol == 1e-5
+
+    def test_the_covered_latent_is_declared_flat(
+        self, instrument, data, noise, template_state
+    ):
+        """Improper, and improper by the exact type the far side checks for.
+
+        A covered latent still needs a node — a sampler needs the coordinate —
+        but it must not carry a density, because the whole density over the
+        block arrives once at the factor. ``_check_against`` refuses anything
+        that is not an ``ImproperUniform`` here, so the spelling is part of the
+        contract and not a stylistic choice.
+        """
+        graph = to_graph(
+            self._covered_space(), instrument, template_state, data, noise
+        )
+        from bayesmith.graph.evaluate import apply_probabilistic, evaluate
+
+        values = dict(self._covered_space().initial_values())
+        distribution = apply_probabilistic(
+            graph, graph.node("gains"), evaluate(graph, values)
+        )
+        assert isinstance(distribution, dist.ImproperUniform)
+
+    def test_an_uncovered_latent_keeps_its_own_prior(
+        self, instrument, space, data, noise, template_state
+    ):
+        """The flat declaration is for the COVERED ones, and only those.
+
+        Without this, a wiring that declared every latent flat would pass every
+        test above and quietly delete the priors of the latents the block does
+        not name.
+        """
+        graph = to_graph(space, instrument, template_state, data, noise)
+        from bayesmith.graph.evaluate import apply_probabilistic, evaluate
+
+        values = dict(space.initial_values())
+        distribution = apply_probabilistic(
+            graph, graph.node("gains"), evaluate(graph, values)
+        )
+        assert isinstance(distribution, dist.Normal)
+        assert graph.joint_prior is None
+
+    # The guard a forgotten declaration would fail -- "the potential moved, and
+    # by this much" -- CANNOT live here. `JeffreysPrior.information` refuses
+    # ambient float32 by name (D9's third caller), and this file is float32 on
+    # purpose. It is in `tests/seam/test_g13_joint_prior.py`, x64-gated, which
+    # is where this file's own header says the adapter's numeric acceptance
+    # goes. The structural facts above are the half that can be stated here.
+
+    def test_a_supplied_prior_for_a_covered_latent_is_refused(
+        self, instrument, data, noise, template_state
+    ):
+        """``priors=`` and ``over=`` naming the same latent is the same defect
+        the declaration-time check refuses, arriving by the other door.
+
+        ``ParameterSpace.__check_init__`` catches ``Latent(prior=...)`` against
+        ``over=``; nothing caught a call-site ``priors=`` against it, because
+        that dictionary does not exist until ``to_graph`` is called.
+        """
+        with pytest.raises(ParameterSpaceError, match="two priors on one quantity"):
+            to_graph(
+                self._covered_space(),
+                instrument,
+                template_state,
+                data,
+                noise,
+                priors={"gains": dist.Normal(jnp.full((N_TIME,), GAIN), 5.0)},
+            )
