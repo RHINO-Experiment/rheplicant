@@ -81,6 +81,23 @@ failure's own test name does. Both halves of this were measured: a
 functions away, and the same mistake in the sibling repository recorded
 four mutants as killed by tests that never ran.
 
+**And commit the batch before you mutate it.** The protocol restores with
+`git checkout -- src/` rather than `cp`, which is right — `cp` is the stale-
+bytecode trap above. But `git checkout` restores to **HEAD**, so on a tree
+carrying uncommitted work it is a silent full revert of that work, not of the
+mutant. Measured in the sibling repository on 2026-08-27: a mutation run was
+killed on a timeout leaving a mutant in the tree, and the `git checkout --
+src/` that followed took the whole unfinished feature with it. Only `tests/`
+survived, because every mutation point happened to be under `src/`. `git
+checkout` is the better tool precisely because HEAD is the reference — which
+is also the requirement: HEAD has to already be the thing you want back.
+
+Two smaller ones from the same run. Flush the mutation log
+(`print(..., flush=True)`) or a killed run leaves a zero-byte file and no
+record of how far it got. And scope the `__pycache__` sweep to the package:
+`rglob("__pycache__")` from the repo root also walks `.venv`, which turns a
+15-second mutant into a two-minute one for no benefit.
+
 **Mutation testing also has one blind spot, and it is structural rather
 than a matter of care.** It asks whether an assertion is sensitive to its
 input. It cannot ask whether the input is the one you think it is — because
