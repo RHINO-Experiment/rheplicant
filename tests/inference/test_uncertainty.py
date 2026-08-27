@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from rheplicant.core.errors import StateValidationError
@@ -289,3 +290,56 @@ class TestNamedParameters:
 
         with pytest.raises(StateValidationError, match="Complex parameters"):
             fisher_information(forward, {"coeffs": jnp.ones(3) + 0j}, noise_std=1.0)
+
+
+class TestTheFlatLayoutIsSortedByName:
+    """The invariant the seam's block order rests on, and it is JAX's, not ours.
+
+    ``fisher_information`` asks the far side for the block in
+    ``sorted(names)`` order so that nothing needs permuting afterwards -- the
+    far side lays a block out in the order it is given, and this package's flat
+    layout has always been sorted-by-key because ``ravel_pytree`` orders a dict
+    that way.
+
+    **That ``sorted()`` is therefore a no-op today**, which a mutation set found
+    by removing it and killing nothing. It is kept because the two orders must
+    not be free to drift, and the drift would be silent: every number would be
+    right and every row would be in the wrong place. What was missing is an
+    assertion on the invariant itself, since it belongs to JAX's dict
+    flattening rather than to anything here.
+    """
+
+    def test_named_spans_orders_by_name_not_by_declaration(self):
+        from rheplicant.inference.uncertainty import _named_spans
+
+        names, spans, shapes = _named_spans(
+            {"zeta": jnp.zeros(3), "mu": jnp.array(1.0), "alpha": jnp.zeros(2)}
+        )
+        assert names == ("alpha", "mu", "zeta"), (
+            "the flat layout is no longer sorted by name, so fisher_information's "
+            "block order and its reported spans have come apart"
+        )
+        # The spans follow the same order and are contiguous from zero, which is
+        # the half that says they describe THIS ordering rather than some other.
+        assert spans == ((0, 2), (2, 3), (3, 6))
+        assert shapes == ((2,), (), (3,))
+
+    def test_the_matrix_rows_follow_that_order(self):
+        """End to end, on a model where the two orders visibly differ.
+
+        ``alpha`` is declared last and sorts first, and it is the only latent
+        the prediction is sensitive to at this point -- so row 0 carries the
+        information and row 1 is the one that is nearly empty. A block asked
+        for in declaration order would put them the other way round with every
+        value still correct.
+        """
+        def forward(p):
+            return jnp.stack([p["zulu"] * 0.0 + 1.0, p["alpha"] * 3.0])
+
+        matrix = fisher_information(
+            forward, {"zulu": jnp.array(1.0), "alpha": jnp.array(1.0)}, 1.0
+        )
+        assert matrix.names == ("alpha", "zulu")
+        values = np.asarray(matrix.matrix)
+        assert values[0, 0] == pytest.approx(9.0), "row 0 is not alpha's"
+        assert values[1, 1] == pytest.approx(0.0, abs=1e-12), "row 1 is not zulu's"
