@@ -8,6 +8,7 @@ import pytest
 from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.noise import HomoscedasticNoise, RadiometerNoise
 from rheplicant.inference.uncertainty import (
+    FlatMatrix,
     fisher_information,
     parameter_covariance,
     propagate_covariance,
@@ -166,6 +167,106 @@ class TestCovariancePropagation:
         with pytest.raises(StateValidationError, match="structure"):
             propagate_covariance(forward, theta0, cov_other)
 
+    def test_a_precision_is_refused_rather_than_propagated(self, linear_problem):
+        """A new refusal, and the same table :meth:`FlatMatrix.sigma` uses.
+
+        A Fisher matrix and a covariance are the same shape, so this used to
+        return a finite, correctly shaped error bar wrong by the square of
+        everything. Measured cost of the refusal: across ``tests/inference`` +
+        ``tests/config`` + the two x64 sessions, all 23 covariances that reach
+        this function are ``kind='covariance'``; none is a precision.
+        """
+        forward, theta0, _ = linear_problem
+        fisher = fisher_information(forward, theta0, noise_std=0.5)
+        with pytest.raises(StateValidationError, match="not a covariance"):
+            propagate_covariance(forward, theta0, fisher)
+
+    def test_a_posterior_covariance_still_propagates(self, linear_problem):
+        """The other side of that rule, because the far side does not have
+        this kind at all.
+
+        ``'posterior_covariance'`` IS a covariance; a translation table that
+        forgot it would send it across under a name the far side refuses, and
+        the config layer's ``predict`` route reads exactly this product from a
+        ``width: fisher`` run.
+        """
+        forward, theta0, _ = linear_problem
+        cov = parameter_covariance(
+            fisher_information(forward, theta0, noise_std=0.5)
+        )
+        posterior = FlatMatrix(
+            matrix=cov.matrix,
+            structure=cov.structure,
+            kind="posterior_covariance",
+            names=cov.names,
+            spans=cov.spans,
+            shapes=cov.shapes,
+        )
+        assert jnp.allclose(
+            propagate_covariance(forward, theta0, posterior),
+            propagate_covariance(forward, theta0, cov.matrix),
+            rtol=1e-6,
+        )
+
+
+class TestTheSynthesisedGraphCannotReachTheAnswer:
+    """``propagate_covariance`` gives the far side a graph, and a graph needs
+    a noise model and data that the delta method has no use for.
+
+    The legality of synthesising them is one sentence -- the delta method
+    reads the Jacobian of the prediction and the covariance, and neither the
+    residual nor the weighting appears in ``sqrt(diag(J Sigma J^T))``. But a
+    sentence is not a measurement, and this is the assumption the whole
+    delegation rests on, so it is built three ways and the reports are
+    compared bitwise. D22 made the same argument for the rank test and put the
+    same class beside it.
+    """
+
+    @staticmethod
+    def _report(sigma, data_scale, linear_problem):
+        """The delta-method report, with the synthesised pieces overridden."""
+        import rheplicant.inference.graph_bridge as bridge
+
+        forward, theta0, _ = linear_problem
+        cov = jnp.diag(jnp.array([0.04, 0.01, 0.09]))
+        real = bridge.graph_for_information
+
+        def spied(fn, values, noise, *, priors=None, caller="JeffreysPrior"):
+            # The two synthesised things, replaced. `graph_for_information`
+            # makes the data itself (zeros of the prediction's shape), so the
+            # data is moved by moving what the graph is built to observe --
+            # which is what a wrong synthetic residual would look like.
+            return real(
+                lambda v: fn(v) + data_scale,
+                values,
+                HomoscedasticNoise(jnp.asarray(sigma)),
+                priors=priors,
+                caller=caller,
+            )
+
+        bridge.graph_for_information = spied
+        try:
+            return propagate_covariance(forward, theta0, cov)
+        finally:
+            bridge.graph_for_information = real
+
+    def test_the_synthetic_sigma_and_data_do_not_move_the_report(
+        self, linear_problem
+    ):
+        base = self._report(1.0, 0.0, linear_problem)
+        wider = self._report(1e4, 0.0, linear_problem)
+        offset = self._report(1.0, 1e3, linear_problem)
+        assert jnp.array_equal(base, wider)
+        assert jnp.array_equal(base, offset)
+
+    def test_the_baseline_is_not_degenerate(self, linear_problem):
+        """The sibling of the test above, and it is what makes it mean
+        something: three identical reports would also be three zeros, or three
+        NaNs, and the comparison would pass on all of them."""
+        base = self._report(1.0, 0.0, linear_problem)
+        assert jnp.all(jnp.isfinite(base))
+        assert float(base.min()) > 0.0
+
 
 class TestPushForward:
     def test_matches_python_loop(self, linear_problem):
@@ -290,6 +391,155 @@ class TestNamedParameters:
 
         with pytest.raises(StateValidationError, match="Complex parameters"):
             fisher_information(forward, {"coeffs": jnp.ones(3) + 0j}, noise_std=1.0)
+
+
+class TestTheConditionCeiling:
+    """``parameter_covariance`` gates on conditioning, and the gate is the far
+    side's (D29).
+
+    ``F = J^T N^-1 J`` SQUARES the design's condition number, so an ordinary
+    model reaches the arithmetic's limit; the ceiling is ``1/sqrt(eps)`` read
+    from the values' own dtype -- float32 2.90e+03, float64 6.71e+07 -- which
+    is where inverting has spent half the digits available. This package used
+    to return the number anyway: measured at ``kappa(J) = 1e3``, the float32
+    covariance is 2.4 % wrong and the float64 one 1.08e-12 wrong, and neither
+    said which it was. A Cramer-Rao bound that is wrong without saying so is
+    worse than no bound, which is why this arrives as a correction rather than
+    as a regression.
+    """
+
+    @staticmethod
+    def _lopsided():
+        """A model whose two columns differ in scale by 1e3, and nothing else.
+
+        The Jacobian is ``diag(1, 1e-3)``, so ``F`` is ``diag(1, 1e-6)`` and
+        the inverse runs at ``kappa = 1e6`` -- outside float32's ceiling and
+        inside float64's, which is what lets ONE model show both sides of the
+        rule rather than two models showing one side each.
+        """
+
+        def forward(params):
+            return jnp.stack([params["a"], 1e-3 * params["b"]])
+
+        return forward, {"a": jnp.array(1.0), "b": jnp.array(1.0)}
+
+    def test_a_float32_inverse_past_the_ceiling_is_refused(self):
+        forward, params = self._lopsided()
+        fisher = fisher_information(forward, params, noise_std=1.0)
+        with pytest.raises(StateValidationError, match="condition number"):
+            parameter_covariance(fisher)
+
+    def test_the_refusal_wears_this_packages_class_and_keeps_the_original(self):
+        """Both halves, because either alone is satisfiable the wrong way.
+
+        The class is this package's promise -- every other refusal this module
+        raises is a ``StateValidationError``, and a bare ``ValueError`` in the
+        far side's vocabulary arriving at a rheplicant exit is the shape
+        ``numpyro_bridge`` already had to put a sentence in front of. The
+        ``__cause__`` is the other half: a facade that re-raised without
+        chaining would satisfy the class assertion while throwing away the
+        measurement, and the message it quotes is the one that names the
+        remedy.
+        """
+        forward, params = self._lopsided()
+        fisher = fisher_information(forward, params, noise_std=1.0)
+        with pytest.raises(StateValidationError) as caught:
+            parameter_covariance(fisher)
+        assert caught.value.__cause__ is not None
+        assert type(caught.value.__cause__) is ValueError
+        assert "parameter_covariance" in str(caught.value)
+
+    def test_the_refusal_names_the_remedy_and_says_where_it_does_not_work(self):
+        """The remedy has to be reachable, and the wrong one has to be named.
+
+        Widening only the inverse is the natural fix and it recovers nothing
+        -- the digits were spent forming ``F`` -- so a message that said only
+        "use float64" would send a reader to the one place it does not help.
+        """
+        forward, params = self._lopsided()
+        fisher = fisher_information(forward, params, noise_std=1.0)
+        with pytest.raises(StateValidationError) as caught:
+            parameter_covariance(fisher)
+        message = str(caught.value)
+        assert "jax.enable_x64" in message
+        assert "not around this call" in message
+
+    def test_the_same_model_in_double_is_allowed(self):
+        """Anti-vacuity: the rule is about the arithmetic, not about the model.
+
+        Without this the ceiling could be refusing every multi-scale model and
+        nothing here would notice.
+        """
+        with jax.enable_x64(True):
+            forward, params = self._lopsided()
+            params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
+            cov = parameter_covariance(
+                fisher_information(forward, params, noise_std=1.0)
+            )
+            assert cov.matrix.dtype == jnp.float64
+            # diag(1, 1e6): the honest inverse of diag(1, 1e-6).
+            assert float(cov.matrix[0, 0]) == pytest.approx(1.0, rel=1e-9)
+            assert float(cov.matrix[1, 1]) == pytest.approx(1e6, rel=1e-9)
+
+    def test_jitter_is_measured_after_it_is_applied(self):
+        """``jitter`` is the one remedy this call itself offers, so the
+        condition has to be read off the matrix it was added to.
+
+        Measuring first would refuse a caller who has already fixed the
+        problem, and the two orderings are indistinguishable on a
+        well-conditioned matrix -- which is every other test in this file.
+        """
+        forward, params = self._lopsided()
+        fisher = fisher_information(forward, params, noise_std=1.0)
+        cov = parameter_covariance(fisher, jitter=1e-3)
+        assert jnp.all(jnp.isfinite(cov.matrix))
+
+    def test_a_covariance_is_not_inverted_a_second_time(self):
+        """A new refusal, and its cost was measured at zero.
+
+        Inverting a covariance gives a precision back, which is a legitimate
+        operation and not what this function's name promises -- and the
+        result used to come back labelled ``kind='covariance'`` on a matrix
+        that was not one. Across ``tests/inference`` + ``tests/config`` the 65
+        calls to this function are 49 ``'fisher'`` and 16
+        ``'posterior_precision'``; not one hands it a covariance.
+        """
+        forward, params = self._lopsided()
+        with jax.enable_x64(True):
+            params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
+            cov = parameter_covariance(
+                fisher_information(forward, params, noise_std=1.0)
+            )
+            with pytest.raises(StateValidationError, match="covariance"):
+                parameter_covariance(cov)
+
+    def test_a_posterior_covariance_is_refused_by_the_same_rule(self):
+        """The second covariance spelling, which the far side does not have.
+
+        This package needs four kinds where the far side has three, so the
+        translation table is the only thing standing between
+        ``'posterior_covariance'`` and a silent second inversion. A table that
+        dropped it would send an unknown kind across as a precision and invert
+        a covariance without a word.
+        """
+        forward, params = self._lopsided()
+        with jax.enable_x64(True):
+            params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
+            cov = parameter_covariance(
+                fisher_information(forward, params, noise_std=1.0)
+            )
+            # Rebuilt rather than `tree_at`-ed: `kind` is a static field, so
+            # it is part of the treedef and not a leaf to swap.
+            posterior = FlatMatrix(
+                matrix=cov.matrix,
+                structure=cov.structure,
+                kind="posterior_covariance",
+                names=cov.names,
+                spans=cov.spans,
+                shapes=cov.shapes,
+            )
+            with pytest.raises(StateValidationError, match="covariance"):
+                parameter_covariance(posterior)
 
 
 class TestTheFlatLayoutIsSortedByName:

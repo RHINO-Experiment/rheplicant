@@ -133,23 +133,45 @@ class TestPriorEntersTheMatrix:
         assert jnp.allclose(jnp.diag(added)[start:stop], 1 / 2.0**2, rtol=1e-6)
 
     def test_tightening_the_prior_tightens_the_error_bar(self, design):
-        """The measurement from the defect report, as an assertion."""
-        forward = make_forward(design)
-        loose = parameter_covariance(
-            fisher_information(
-                forward, VALUES, noise_std=NOISE,
-                space=make_space(vec_scale=[5.0, 5.0], scalar_scale=5.0),
-            )
-        ).sigma("z_scalar")
-        tight = parameter_covariance(
-            fisher_information(
-                forward, VALUES, noise_std=NOISE,
-                space=make_space(vec_scale=[5.0, 5.0], scalar_scale=1e-4),
-            )
-        ).sigma("z_scalar")
+        """The measurement from the defect report, as an assertion.
+
+        **Float64, and the whole computation is inside the block.** The tight
+        arm declares a prior four orders narrower than the data supports,
+        which is the point being made -- and a posterior precision holding
+        both is conditioned at ``kappa = 3.2e6``, past the float32 ceiling of
+        2.90e+03 that ``parameter_covariance`` took from the far side (D29).
+        The conditioning is not incidental to this test; it is the four orders
+        the test is about, so widening the arithmetic is the honest fix rather
+        than a way around a guard.
+
+        The design is WIDENED rather than redrawn. It is data, and the
+        condition number is a property of the matrix, not of how its entries
+        were sampled -- so widening keeps one spelling of the fixture, where
+        redrawing in float64 would make a second model that no assertion here
+        compares against the first.
+        """
+        with jax.enable_x64(True):
+            wide = jnp.asarray(design, jnp.float64)
+            values = {k: jnp.asarray(v, jnp.float64) for k, v in VALUES.items()}
+            forward = make_forward(wide)
+            loose = parameter_covariance(
+                fisher_information(
+                    forward, values, noise_std=NOISE,
+                    space=make_space(vec_scale=[5.0, 5.0], scalar_scale=5.0),
+                )
+            ).sigma("z_scalar")
+            tight = parameter_covariance(
+                fisher_information(
+                    forward, values, noise_std=NOISE,
+                    space=make_space(vec_scale=[5.0, 5.0], scalar_scale=1e-4),
+                )
+            ).sigma("z_scalar")
         assert float(tight) < float(loose)
         # A prior 4 orders tighter than the data pins the parameter to itself.
         assert float(tight) == pytest.approx(1e-4, rel=1e-2)
+        # The block took: a float32 run of this reaches the SAME assertions by
+        # the route the ceiling exists to refuse, and nothing above would say.
+        assert tight.dtype == jnp.float64
 
     def test_a_prior_that_does_not_bind_barely_moves_anything(self, design):
         """The other direction: a wide prior must be nearly a no-op, or the

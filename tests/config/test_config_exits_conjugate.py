@@ -17,6 +17,8 @@ because one executor serves both: the registry, the parse, and the order
 """
 
 import equinox as eqx
+import jax
+import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
@@ -351,15 +353,47 @@ class TestWidth:
         # would notice.  Measured: sigma(dep) = 0.0115564 and
         # sigma(c) = 2.29834e-05, five orders apart, so a covariance filed
         # against the wrong member is visible rather than plausible.
-        product = run_product(two_latent_document(
-            {**WIENER, "width": "fisher", "names": ["dep", "c"],
-             "require_convergence": None}))
-        covariance = product["covariance"]
+        #
+        # Run in float64, and DECLARED so on the document.  Those five orders
+        # between the two sigmas are five orders of conditioning too: the
+        # posterior precision here inverts at kappa = 6.5e5, past the float32
+        # ceiling of 2.90e+03 that parameter_covariance took from the far side
+        # (D29).  The pair is the same pair the doc-string of
+        # two_latent_document calls "ill-conditioned enough that
+        # require_convergence FIRES on it", so this is that fact arriving at a
+        # second exit rather than a new one.
+        #
+        # The declaration is written HERE and not in the builder: a document's
+        # `runtime.jax_enable_x64` is VERIFIED against the process at build
+        # time, and the fixture census drives every `*_document` builder with
+        # no arguments in this suite's float32 session.  Same reason, and the
+        # same precedent, as `joint_results()` in test_config_exits_npe.py.
+        was = jax.config.read("jax_enable_x64")
+        jax.config.update("jax_enable_x64", True)
+        try:
+            document = two_latent_document(
+                {**WIENER, "width": "fisher", "names": ["dep", "c"],
+                 "require_convergence": None})
+            document["runtime"] = {**document["runtime"],
+                                   "jax_enable_x64": True}
+            product = run_product(document)
+            covariance = product["covariance"]
+            # Read INSIDE the block too.  `sigma()` is arithmetic on the
+            # matrix, and outside the context a float64 array meets float32
+            # operands -- measured, it raises `lax.mul requires arguments to
+            # have the same dtypes` rather than quietly narrowing.
+            sigma_dep = float(covariance.sigma("dep"))
+            sigma_c = float(covariance.sigma("c"))
+        finally:
+            jax.config.update("jax_enable_x64", was)
         assert covariance.kind == "posterior_covariance"
-        assert float(covariance.sigma("dep")) == pytest.approx(0.0115564,
-                                                               rel=1e-3)
-        assert float(covariance.sigma("c")) == pytest.approx(2.29834e-05,
-                                                             rel=1e-3)
+        assert sigma_dep == pytest.approx(0.0115564, rel=1e-3)
+        assert sigma_c == pytest.approx(2.29834e-05, rel=1e-3)
+        # The block took.  Without this the widening could quietly stop
+        # happening and the two sigmas above would come back from the float32
+        # inverse the ceiling exists to refuse -- rel=1e-3 is loose enough to
+        # hide that, which is exactly what makes it worth asserting.
+        assert covariance.matrix.dtype == jnp.float64
 
     def test_width_fisher_under_check_false_on_a_curved_latent(self):
         # The combination _gaussian_width's docstring argues about: check:

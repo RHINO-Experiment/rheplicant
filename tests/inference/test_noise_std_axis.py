@@ -61,6 +61,17 @@ SIGMA_VECTOR = jnp.linspace(0.01, 1.0, N)
 @pytest.fixture
 def square_state():
     """A deliberately SQUARE (n_time == n_freq) grid — where the bug lives."""
+    return _square_state()
+
+
+def _square_state():
+    """The fixture's body, callable directly.
+
+    One test has to build this INSIDE a ``jax.enable_x64`` block, and a
+    fixture is built before the test body runs. Two spellings of one grid is
+    the shape this codebase pays for most often, so the grid is written once
+    and the fixture is a caller like any other.
+    """
     return State(
         coords=Coordinates(
             time=jnp.linspace(0.0, 7.0, N),
@@ -89,6 +100,11 @@ def oblong_state():
 @pytest.fixture
 def gain_model():
     """``forward({'gt': (8,)}) -> (n_time, n_freq)`` — a per-TIME gain."""
+    return _gain_model()
+
+
+def _gain_model():
+    """The fixture's body, callable directly — see :func:`_square_state`."""
     twin = assemble(
         SkyOperator(amplitude=jnp.array(SKY)),
         GainOperator(gain=jnp.ones(N)),
@@ -211,34 +227,63 @@ class TestFisherInformation:
         with pytest.raises(StateValidationError, match="more than one"):
             fisher_information(forward, values0, noise_std=SIGMA_VECTOR)
 
-    def test_the_two_explicit_readings_give_visibly_different_answers(
-        self, square_state, gain_model
-    ):
+    def test_the_two_explicit_readings_give_visibly_different_answers(self):
         """This is what the refusal is protecting: the numbers really do differ.
 
         Per-time weighting tracks sigma across the latent (0.00004 .. 0.00354);
         per-frequency weighting averages it away into a flat 0.00010.
+
+        **Float64, and the model is built inside the block.** ``sigma`` spans
+        100x here on purpose, and ``F = J^T N^-1 J`` SQUARES that, so the
+        inverse runs at ``kappa = 1.0e4`` -- past what float32 carries
+        (2.90e+03), and refused since ``parameter_covariance`` took the far
+        side's ceiling (D29). That is not a nuisance about this test: the
+        conditioning and the subject are the SAME 100x spread, so a version of
+        this test that stayed in float32 would be asserting a closed form to
+        rtol 1e-4 against an inverse that had spent more than half its digits.
+
+        Inside the block and not merely around the call: ``jax.enable_x64`` is
+        a tracing-time global, so an array built outside stays float32 and
+        widening only the inverse recovers nothing -- measured on the far side
+        at 2.45e-02 relative error against 2.41e-02 for doing nothing.
         """
-        space, twin = gain_model
-        forward, values0 = space.forward_fn(twin, square_state)
+        with jax.enable_x64(True):
+            space, twin = _gain_model()
+            forward, values0 = space.forward_fn(twin, _square_state())
+            sigma = jnp.asarray(SIGMA_VECTOR, jnp.float64)
 
-        per_time = parameter_covariance(
-            fisher_information(forward, values0, noise_std=SIGMA_VECTOR[:, None])
-        ).sigma("gt")
-        per_freq = parameter_covariance(
-            fisher_information(forward, values0, noise_std=SIGMA_VECTOR[None, :])
-        ).sigma("gt")
+            per_time = parameter_covariance(
+                fisher_information(forward, values0, noise_std=sigma[:, None])
+            ).sigma("gt")
+            per_freq = parameter_covariance(
+                fisher_information(forward, values0, noise_std=sigma[None, :])
+            ).sigma("gt")
 
-        assert per_time.shape == per_freq.shape == (N,)
-        # Per-time: sigma_i = noise_i / (sqrt(n_freq) * SKY), a 100x spread.
-        assert jnp.allclose(
-            per_time, SIGMA_VECTOR / (jnp.sqrt(N) * SKY), rtol=1e-4
-        )
-        assert float(per_time.max() / per_time.min()) > 50.0
-        # Per-frequency: every time sample sees the same set of channels, so
-        # the error bar is flat.
-        assert jnp.allclose(per_freq, per_freq[0], rtol=1e-5)
-        assert not jnp.allclose(per_time, per_freq, rtol=0.1)
+            assert per_time.shape == per_freq.shape == (N,)
+            # Per-time: sigma_i = noise_i / (sqrt(n_freq) * SKY), a 100x spread.
+            assert jnp.allclose(per_time, sigma / (jnp.sqrt(N) * SKY), rtol=1e-4)
+            assert float(per_time.max() / per_time.min()) > 50.0
+            # Per-frequency: every time sample sees the same set of channels, so
+            # the error bar is flat.
+            assert jnp.allclose(per_freq, per_freq[0], rtol=1e-5)
+            assert not jnp.allclose(per_time, per_freq, rtol=0.1)
+
+    def test_the_widened_run_really_is_in_double(self):
+        """The sibling of the test above, and the reason it can fail.
+
+        A widened test whose arrays are still float32 passes for the wrong
+        reason: the ceiling it was moved to clear would be the float32 one
+        again, and nothing in the numbers would say so. This asserts the
+        arithmetic it runs in, so "the block did not take" is a separate red
+        from "the answer moved".
+        """
+        with jax.enable_x64(True):
+            space, twin = _gain_model()
+            forward, values0 = space.forward_fn(twin, _square_state())
+            sigma = jnp.asarray(SIGMA_VECTOR, jnp.float64)
+            fisher = fisher_information(forward, values0, noise_std=sigma[:, None])
+        assert fisher.matrix.dtype == jnp.float64
+        assert values0["gt"].dtype == jnp.float64
 
     def test_an_unambiguous_vector_still_works(self, oblong_state, gain_model):
         space, twin = gain_model

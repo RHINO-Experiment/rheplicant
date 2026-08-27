@@ -92,6 +92,27 @@ _INVERSE_KIND: dict[str, str] = {
     "posterior_precision": "posterior_covariance",
 }
 
+#: This package's ``kind`` spelled in the far side's vocabulary.
+#:
+#: The far side knows three kinds and this package needs four, because
+#: "posterior" is a fact about the matrix that :meth:`FlatMatrix.sigma` reports
+#: and the far side has no use for: the only distinction it branches on is
+#: whether the thing IS a covariance, and both of this package's covariance
+#: spellings are one. So this is a translation rather than a widening --
+#: nothing sayable here is lost, and nothing the far side can do becomes
+#: reachable through it.
+#:
+#: ``"matrix"`` (hand-built, provenance unrecorded) crosses as a precision
+#: because that is what :func:`parameter_covariance` has always done with one:
+#: inverted it and called the result a covariance.
+_REMOTE_KIND: dict[str, str] = {
+    "fisher": "fisher",
+    "posterior_precision": "posterior_precision",
+    "covariance": "covariance",
+    "posterior_covariance": "covariance",
+    "matrix": "fisher",
+}
+
 
 class FlatMatrix(eqx.Module):
     """A matrix over a FLATTENED parameter vector, carrying its provenance.
@@ -377,6 +398,33 @@ def _prior_precision(
 _FLAT_LATENT: str = "__flat__"
 
 
+def _remote_flat(matrix: FlatMatrix) -> Any:
+    """This package's :class:`FlatMatrix` as the far side's, over the same rows.
+
+    Three fields cross unchanged and two are translated. ``names`` and
+    ``spans`` are optional here and required there, because a matrix on this
+    side can have been built over a pytree with no names to give; such a matrix
+    crosses as the ONE latent :func:`fisher_information` gives it, over
+    ``ravel_pytree``'s own vector -- which is the layout :class:`FlatMatrix`
+    documents in either case, so the rows line up without a permutation.
+
+    ``kind`` is the other, through :data:`_REMOTE_KIND`.
+
+    ``shapes`` and ``structure`` do not cross at all: they are how THIS package
+    checks a matrix against a pytree, and the far side checks the same thing
+    against a graph's own declarations instead.
+    """
+    from bayesmith.exact.fisher import FlatMatrix as RemoteFlat
+
+    size = matrix.matrix.shape[0]
+    return RemoteFlat(
+        values=matrix.matrix,
+        names=matrix.names if matrix.names is not None else (_FLAT_LATENT,),
+        spans=matrix.spans if matrix.spans is not None else ((0, size),),
+        kind=_REMOTE_KIND.get(matrix.kind, "fisher"),
+    )
+
+
 def _bayesmith_fisher(graph, block_names, values, noise, *, include_prior):
     """The far side's Fisher over ``block_names``, read from the graph.
 
@@ -560,29 +608,53 @@ def parameter_covariance(fisher: FlatMatrix, jitter: float = 0.0) -> FlatMatrix:
             rather than declared. ``fisher_information(..., space=...)`` is the
             same regularization with the prior written down.
 
+    Raises:
+        StateValidationError: if the condition number exceeds what the values'
+            own dtype can carry, or if this is handed a covariance. Both
+            refusals are decided across the seam and re-raised here in this
+            package's class; see the notes below.
+
     Note:
-        **This function does not gate on conditioning, and in float32 that is
-        a real exposure.** ``F = J^T N^-1 J`` SQUARES the design's condition
-        number, so an ordinary model reaches the arithmetic's limit: measured
-        at ``kappa(J) = 1e3``, the float32 covariance is 2.4% wrong while the
-        float64 one is wrong by 1.08e-12, and neither says so.
+        **This inversion IS gated on conditioning, and the gate is the far
+        side's.** ``F = J^T N^-1 J`` SQUARES the design's condition number, so
+        an ordinary model reaches the arithmetic's limit: measured at
+        ``kappa(J) = 1e3``, the float32 covariance is 2.4% wrong while the
+        float64 one is wrong by 1.08e-12, and neither used to say so. The
+        ceiling is ``1/sqrt(eps)`` read from the values' own dtype (float32:
+        2.90e+03, float64: 6.71e+07) -- the point where inverting has spent
+        half the digits available -- and it arrives with this function's
+        delegation rather than being written a second time here (D29).
 
-        The gate lives in ``bayesmith.exact.fisher.parameter_covariance``
-        rather than here -- deliberately one implementation, not two -- as a
-        ceiling of ``1/sqrt(eps)`` read from the values' own dtype (float32:
-        2.90e+03, float64: 6.71e+07), which is the point where inverting has
-        spent half the digits available.
-
-        Note what the remedy is NOT: wrapping this ``inv`` in ``with
+        Note what the remedy is NOT: wrapping this call in ``with
         jax.enable_x64(True):`` recovers nothing. The context does not widen
         an array traced outside it, and even forcing the upcast leaves the
         error at 2.45e-02 against 2.41e-02 for doing nothing, because the
         digits were spent forming ``F``. The arithmetic has to be widened
-        around building the model.
+        around building the model, which is what the refusal's own message
+        says.
+
+    Note:
+        **Why the refusals are caught by class and not by ``translate``.**
+        This is the one delegation in the module that reaches no graph, so
+        none of the three families ``translate`` knows about can arise on this
+        path -- the far side's only refusals here are its own two plain
+        ``ValueError``s. Catching ``ValueError`` and re-raising is therefore
+        narrow rather than broad: it names the exit a caller actually called,
+        and it keeps the exception class this module promises, which is the
+        same reason ``numpyro_bridge`` refuses ahead of a bare
+        ``AssertionError`` from the far side.
     """
-    n = fisher.matrix.shape[0]
+    from bayesmith.exact.fisher import parameter_covariance as remote
+
+    try:
+        found = remote(_remote_flat(fisher), jitter)
+    except ValueError as refusal:
+        raise StateValidationError(
+            f"parameter_covariance() will not invert this {fisher.kind!r}: "
+            f"{refusal}"
+        ) from refusal
     return FlatMatrix(
-        matrix=jnp.linalg.inv(fisher.matrix + jitter * jnp.eye(n)),
+        matrix=found.values,
         structure=fisher.structure,
         kind=_INVERSE_KIND.get(fisher.kind, "covariance"),
         names=fisher.names,
@@ -610,9 +682,32 @@ def propagate_covariance(
 
     Returns:
         Per-sample prediction standard deviation, shaped like the prediction.
+
+    Raises:
+        StateValidationError: for a covariance whose provenance does not match
+            ``params`` (three checks, all of them ahead of the seam because the
+            graph would erase what they are about), or for a PRECISION -- the
+            same table :meth:`FlatMatrix.sigma` refuses on, and the same
+            remedy. A Fisher matrix and a covariance are the same shape, so
+            putting one where the other belongs returns an error bar wrong by
+            the square of everything and says nothing.
+
+    Note:
+        **The graph this builds synthesises a noise model and data, and
+        neither can reach the answer.** The delta method reads the Jacobian of
+        the prediction and the covariance it was handed; it does not read the
+        residual, and it does not weight anything. So a homoscedastic sigma of
+        1.0 and zeros of the prediction's shape are enough to give the far
+        side a graph to differentiate -- the same argument D22 makes for the
+        rank test, and, like that one, MEASURED rather than asserted:
+        ``TestTheSynthesisedGraphCannotReachTheAnswer`` builds it three times
+        over different synthetic sigmas and data and compares the reports
+        bitwise.
     """
+    from rheplicant.inference.graph_bridge import graph_for_information, translate
+
     f_flat, x0, prediction = _flat_forward(forward, params)
-    jacobian = jax.jacfwd(f_flat)(x0)
+    names, spans, shapes = _named_spans(params)
     if isinstance(param_cov, FlatMatrix):
         expected = jax.tree_util.tree_structure(params)
         if param_cov.structure != expected:
@@ -624,7 +719,6 @@ def propagate_covariance(
         # For a dict-based space the treedef encodes the KEY NAMES only, so two
         # spaces with the same latent names and different per-latent shapes pass
         # the structure check and produce finite, wrong error bars.
-        names, _, shapes = _named_spans(params)
         if param_cov.shapes is not None and shapes is not None:
             if param_cov.names != names or param_cov.shapes != shapes:
                 was = dict(zip(param_cov.names, param_cov.shapes, strict=True))
@@ -633,14 +727,52 @@ def propagate_covariance(
                     f"param_cov was computed for {was} but params is {now} — the "
                     "flattened orderings differ and the numbers would be wrong."
                 )
+        if param_cov.kind in _PRECISION_KINDS:
+            raise StateValidationError(
+                f"propagate_covariance was given {_PRECISION_KINDS[param_cov.kind]}, "
+                "not a covariance. The delta method wants Sigma, and a precision "
+                "is its INVERSE — the same shape, so the error bar comes back "
+                "finite and wrong by the square of everything. Invert it with "
+                "parameter_covariance() first."
+            )
         param_cov = param_cov.matrix
     if param_cov.shape != (x0.size, x0.size):
         raise StateValidationError(
             f"param_cov shape {param_cov.shape} does not match the flattened "
             f"parameter size {x0.size}."
         )
-    variance = jnp.einsum("ip,pq,iq->i", jacobian, param_cov, jacobian)
-    return jnp.sqrt(variance).reshape(prediction.shape)
+
+    # One node per named latent, or ONE node over `ravel_pytree`'s own vector
+    # when the pytree has no names to give -- the same two routes, and the same
+    # layout, as `fisher_information`. The matrix crosses with the layout the
+    # PARAMS decide, not the one it arrived carrying: the guards above have
+    # already refused any disagreement between them, and the graph is built
+    # from the params, so taking both from one place is what keeps the rows
+    # lined up with the columns.
+    if names is None:
+        values = {_FLAT_LATENT: x0}
+        graph_forward = lambda v: f_flat(v[_FLAT_LATENT])  # noqa: E731
+    else:
+        values = {name: jnp.asarray(params[name]) for name in names}
+        graph_forward = forward
+    crossing = FlatMatrix(
+        matrix=param_cov,
+        structure=jax.tree_util.tree_structure(params),
+        kind="covariance",
+        names=names,
+        spans=spans,
+        shapes=shapes,
+    )
+    graph = graph_for_information(
+        graph_forward,
+        values,
+        HomoscedasticNoise(jnp.ones((), jnp.result_type(float))),
+        caller="propagate_covariance",
+    )
+    from bayesmith.exact.fisher import propagate_covariance as remote
+
+    with translate("propagate_covariance"):
+        return remote(graph, _remote_flat(crossing), values)
 
 
 def push_forward(
