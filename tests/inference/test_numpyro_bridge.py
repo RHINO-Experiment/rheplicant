@@ -348,3 +348,60 @@ class TestMCMCRecovery:
     def test_predict_missing_site_rejected(self, twin, space, template_state):
         with pytest.raises(StateValidationError, match="missing site"):
             predict_from_samples(twin, template_state, space, {"wrong": jnp.zeros(3)})
+
+
+class TestASampledSigmaCollidingWithALatent:
+    """D27's measurement, turned into a refusal rather than left to NumPyro.
+
+    A sampled ``noise_std`` takes the site ``"noise_std"``, which belongs to no
+    ``ParameterSpace``. A space that declares a latent of that name collides
+    with it -- loudly, today: NumPyro asserts "all sites must have unique names
+    but got `noise_std` duplicated". Loud is not the same as useful. That
+    sentence names neither the argument that created the second site nor the
+    space that declared the first, and it is a bare ``AssertionError``, while
+    this package's exception classes are a keeping surface.
+    """
+
+    @staticmethod
+    def _colliding_space():
+        return ParameterSpace(
+            latents=(
+                Latent(
+                    name="noise_std", init=jnp.array(1.0), prior=dist.Normal(1.0, 0.3)
+                ),
+            ),
+            bindings=(Bind("noise_std", into=lambda p: p["gain"].gain),),
+        )
+
+    def test_the_collision_is_refused_by_name(self, twin, template_state):
+        # `match=` and not only the assertions below: the pinned-refusal census
+        # is derived from `raises(..., match=...)` sites, and Appendix B of the
+        # migration plan is what a wave reads to find out which sentences it has
+        # just become responsible for. A refusal pinned only by `in message`
+        # is invisible to both.
+        with pytest.raises(ParameterSpaceError, match="noise_std") as caught:
+            to_numpyro_model(
+                twin, template_state, self._colliding_space(),
+                noise_std=dist.HalfNormal(1.0),
+            )
+        message = str(caught.value)
+        assert "noise_std" in message
+        assert "HalfNormal" in message
+        # Both quantities named, and both ways out.
+        assert "rename the latent" in message
+        assert "fixed noise_std" in message
+
+    def test_a_fixed_sigma_beside_that_latent_is_left_alone(
+        self, twin, template_state, observed
+    ):
+        """The sibling: nothing collides when the sigma is not sampled.
+
+        Without it a refusal that fired on the NAME alone would satisfy the
+        test above and delete an ordinary, if unfortunately named, latent.
+        """
+        model = to_numpyro_model(
+            twin, template_state, self._colliding_space(), noise_std=SIGMA
+        )
+        tr = trace(seed(model, jax.random.key(0))).get_trace()
+        assert "noise_std" in tr
+        assert isinstance(tr["noise_std"]["fn"], dist.Normal)

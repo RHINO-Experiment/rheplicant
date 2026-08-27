@@ -79,6 +79,49 @@ def _require_priors(space: ParameterSpace) -> None:
         )
 
 
+def _refuse_a_latent_named_like_the_sampled_sigma(
+    space: ParameterSpace, noise_std: Any
+) -> None:
+    """A sampled sigma takes the site ``"noise_std"``; a latent cannot have it too.
+
+    The site below is named ``"noise_std"`` and belongs to no
+    :class:`~rheplicant.inference.parameters.ParameterSpace` -- which is the
+    whole subject of the refusal beneath this one. So a space that happens to
+    declare a latent of that name collides with it.
+
+    **It does not pass silently today**, and that is worth stating because the
+    remedy here is not a repair but a re-wording: NumPyro raises a bare
+    ``AssertionError`` reading "all sites must have unique names but got
+    `noise_std` duplicated" (measured). That is loud, and it names neither the
+    ``noise_std=`` argument that created the second site, nor the space that
+    declared the first, nor this package's exception class -- and exception
+    identity is a keeping surface. Same principle as the rest of this layer:
+    a refusal the layer below would word badly lives above it.
+
+    Only when the sigma is actually sampled. A latent named ``noise_std``
+    beside a fixed sigma is an ordinary latent with an unfortunate name, and
+    nothing collides.
+    """
+    import numpyro.distributions as distributions
+
+    if not isinstance(noise_std, distributions.Distribution):
+        return
+    if not any(latent.name == "noise_std" for latent in space.latents):
+        return
+    raise ParameterSpaceError(
+        "to_numpyro_model was given a "
+        f"{type(noise_std).__name__} noise_std -- which becomes the sample site "
+        "'noise_std' -- and this space also declares a latent called "
+        "'noise_std'. Two sample sites cannot share a name: NumPyro refuses the "
+        "model with a bare assertion naming neither the argument nor the space, "
+        "so it is refused here instead. The two are different quantities -- the "
+        "site is an inferred sigma that no ParameterSpace declares, and your "
+        "latent is bound into the model -- so rename the latent, or pass a fixed "
+        "noise_std (a scalar, an array, or a NoiseModel) and declare the sigma's "
+        "prior on the latent instead."
+    )
+
+
 def _refuse_sampled_noise_std_under_a_joint_prior(
     space: ParameterSpace, noise_std: Any, allowed: bool
 ) -> None:
@@ -249,6 +292,7 @@ def to_numpyro_model(
 
     _require_priors(space)
     _refuse_a_joint_prior_in_single_precision(space)
+    _refuse_a_latent_named_like_the_sampled_sigma(space, noise_std)
     _refuse_sampled_noise_std_under_a_joint_prior(
         space, noise_std, allow_sampled_noise_std
     )

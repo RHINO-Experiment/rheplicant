@@ -58,7 +58,11 @@ CENSUS: dict[str, int] = {
     "test_noise_model.py": 3,
     "test_noise_std_axis.py": 18,
     "test_npe.py": 4,
-    "test_numpyro_bridge.py": 5,
+    # 5 -> 6 on 2026-08-27: D27's collision refusal (a sampled noise_std
+    # against a latent of that name). NumPyro already refused it with a bare
+    # assertion naming neither side; this package now says it first, in its own
+    # exception class.
+    "test_numpyro_bridge.py": 6,
     "test_parameters.py": 29,
     "test_plan.py": 32,
     "test_prior_sensitivity.py": 9,
@@ -73,7 +77,7 @@ CENSUS: dict[str, int] = {
 #: the seam at all. A drift between these two populations is a drift in which
 #: refusals the adapter is responsible for.
 BY_CLASS: dict[str, int] = {
-    "ParameterSpaceError": 174,
+    "ParameterSpaceError": 175,
     "StateValidationError": 58,
     "RuntimeError": 4,
     "Exception": 3,
@@ -143,7 +147,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 240
+    assert sum(CENSUS.values()) == 241
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():
