@@ -12,7 +12,7 @@ import pytest
 
 numpyro = pytest.importorskip("numpyro", reason="numpyro not installed")
 import numpyro.distributions as dist  # noqa: E402
-from numpyro.handlers import seed, trace  # noqa: E402
+from numpyro.handlers import seed, substitute, trace  # noqa: E402
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError  # noqa: E402
 from rheplicant.core.pipeline import Pipeline  # noqa: E402
@@ -53,6 +53,93 @@ def observed(template_state):
     )(template_state).data
     noise = SIGMA * jax.random.normal(jax.random.key(99), truth.shape)
     return truth + noise
+
+
+class TestAJointPriorNeedsFloat64:
+    """D25: the refusal, and the sibling that proves it is about precision.
+
+    ``JeffreysPrior.log_density`` is evaluated inside the model body at every
+    leapfrog step, and its information matrix is refused at single precision --
+    measured on an exactly degenerate block, float32 gives -27.52 where the
+    block honestly gives -338.05, in a term the sampler exponentiates.
+
+    The refusal is raised HERE, at construction, rather than left to arrive
+    from across the seam. ``jax_enable_x64`` is a tracing-time global and
+    NumPyro traces ``model`` long after this function returns, so there is no
+    block to open around the arithmetic; what would arrive instead is a
+    translated refusal quoting "a Jeffreys information matrix", naming neither
+    the ``joint_prior`` nor the document that declared it.
+
+    This module is float32 (it has no x64 fixture), which is what makes the
+    condition free here and is why the test lives in this file rather than
+    beside the rest of the Jeffreys tests -- ``test_jeffreys_prior.py`` carries
+    a module-scope autouse x64 fixture and could not state this at all.
+    """
+
+    @staticmethod
+    def _covered_space():
+        from rheplicant.inference import JeffreysPrior
+
+        return ParameterSpace(
+            latents=(Latent(name="gain", init=jnp.array(1.0)),),
+            bindings=(Bind("gain", into=lambda p: p["gain"].gain),),
+            joint_prior=JeffreysPrior(over=("gain",)),
+        )
+
+    def test_the_ambient_precision_is_single_here(self):
+        """The condition, stated rather than assumed.
+
+        If this module ever acquires an x64 fixture, the refusal test below
+        stops being about anything and would pass by not running its branch.
+        """
+        assert jnp.result_type(float) == jnp.float32
+
+    def test_a_declared_joint_prior_is_refused_at_construction(
+        self, twin, observed, template_state
+    ):
+        with pytest.raises(StateValidationError) as caught:
+            to_numpyro_model(
+                twin, template_state, self._covered_space(), SIGMA
+            )
+        message = str(caught.value)
+        # What was declared, and where the number goes wrong -- a refusal that
+        # only says "float32" leaves the reader to guess whether it matters.
+        assert "JeffreysPrior" in message and "gain" in message
+        assert "float32" in message
+        assert "310" in message
+        # Both routes out, by name.
+        assert "jax_enable_x64" in message
+        assert "inference.joint_prior" in message
+
+    def test_the_same_space_is_accepted_in_a_float64_session(
+        self, twin, observed, template_state
+    ):
+        """The sibling: the refusal is about the precision, not the prior.
+
+        Without this, a guard that refused every declared ``joint_prior``
+        outright would satisfy the test above and delete a working feature.
+        The space is rebuilt INSIDE the block, because a space declared outside
+        it carries float32 constants in and is refused separately.
+        """
+        was = jax.config.read("jax_enable_x64")
+        jax.config.update("jax_enable_x64", True)
+        try:
+            model = to_numpyro_model(
+                twin, template_state, self._covered_space(), SIGMA
+            )
+            # `substitute`, not `seed` alone: the covered latent's site is an
+            # ImproperUniform and an improper density cannot be sampled from --
+            # which is the point of it, and is why a real run passes
+            # `init_to_declared`. The value is supplied here for the same
+            # reason.
+            conditioned = substitute(
+                seed(model, rng_seed=0), data={"gain": jnp.array(1.0)}
+            )
+            sites = trace(conditioned).get_trace(observed)
+        finally:
+            jax.config.update("jax_enable_x64", was)
+        assert "joint_prior" in sites, "the factor site is not in the trace"
+        assert np.isfinite(float(sites["joint_prior"]["fn"].log_factor))
 
 
 class TestModelConstruction:

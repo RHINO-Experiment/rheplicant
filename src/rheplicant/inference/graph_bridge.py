@@ -573,6 +573,64 @@ def to_graph(
         return bayesmith.trace(model, observed)
 
 
+def graph_for_information(
+    forward: Callable[[dict[str, jax.Array]], jax.Array],
+    values: Mapping[str, jax.Array],
+    noise: Any,
+) -> Any:
+    """A graph for a FISHER question, built from a bare forward callable.
+
+    :func:`to_graph` takes a ``ParameterSpace`` and a pipeline. A Fisher block
+    is asked of neither: ``JeffreysPrior.information`` is handed ``f(values) ->
+    prediction`` and a values dict, because that is the shape its callers have
+    -- a NumPyro model body holds a closure over the bound pipeline and nothing
+    it could hand back. So this is the same three-layer construction reached
+    from the other side, sharing this module's node functions so the
+    observation node has one spelling and not two.
+
+    **Two things are synthesised, and the legality of both is that the answer
+    cannot reach them** -- the same argument D22 makes for the rank test, and
+    like that one it is MEASURED rather than asserted (see
+    ``TestTheSynthesisedInformationGraph`` in
+    ``tests/inference/test_jeffreys_prior.py``):
+
+    * the **data**, as zeros of the prediction's shape. A Fisher information is
+      an EXPECTED information -- ``J^T N^-1 J`` plus the variance's own term --
+      and no residual appears in either. The far side reads the noise from the
+      graph at ``values`` and the design from the block; neither reads ``obs``.
+    * every latent's **density**, as an improper flat one. The block's prior
+      fields are deliberately empty on the far side, and the covered latents
+      must be flat anyway or ``_check_against`` refuses them as two priors on
+      one quantity. Declaring the uncovered ones flat as well keeps one rule
+      here rather than two, and they are held fixed at ``values`` regardless.
+
+    What is NOT synthesised is the noise: it is the caller's, because the whole
+    subject of this prior is that the noise model chooses its shape.
+    """
+    import bayesmith
+    import numpyro.distributions as distributions
+
+    names = tuple(values)
+    flat = distributions.ImproperUniform(distributions.constraints.real, (), ())
+    prediction_shape = tuple(jax.eval_shape(forward, dict(values)).shape)
+    check_noise_std_axis(noise, prediction_shape, "JeffreysPrior")
+
+    def model(data: Any) -> None:
+        refs = [bayesmith.sample(name, _prior_factory(flat)) for name in names]
+        prediction = bayesmith.det(PREDICTION, _prediction_fn(forward, names), *refs)
+        bayesmith.observe(
+            OBSERVATION,
+            _observation_fn(noise),
+            prediction,
+            obs=data,
+            mask=_observed_mask(noise),
+            depends_on_prediction=bool(noise.depends_on_prediction),
+        )
+
+    with translate("JeffreysPrior"):
+        return bayesmith.trace(model, jnp.zeros(prediction_shape))
+
+
 def _prior_factory(prior: Any) -> Callable[[], Any]:
     """``lambda: prior``, bound now.
 

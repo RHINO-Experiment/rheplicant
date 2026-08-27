@@ -853,3 +853,282 @@ def test_information_rows_are_in_sorted_order_not_declaration_order():
     assert float(declared.log_density(forward_a, values, RADIOMETER)) == pytest.approx(
         float(reversed_.log_density(forward_a, values, RADIOMETER)), rel=1e-15
     )
+
+
+# ----------------------------------------------------- and now an actual chain --
+
+
+def _chain(space, noise, key, data):
+    """One NUTS run, from the declared start, on the given key."""
+    from numpyro.infer import MCMC, NUTS
+
+    from rheplicant.inference.numpyro_bridge import init_to_declared
+
+    kernel = NUTS(
+        build_model(space, noise=noise), init_strategy=init_to_declared(space)
+    )
+    mcmc = MCMC(kernel, num_warmup=200, num_samples=300, progress_bar=False)
+    mcmc.run(key, observed=data)
+    return mcmc.get_samples()
+
+
+def _flat_priors():
+    return {
+        name: dist.ImproperUniform(dist.constraints.real, (), ())
+        for name in ("fg_log_amp", "fg_beta")
+    }
+
+
+class TestASamplerActuallyCarriesTheFactor:
+    """The acceptance every test above is silent about.
+
+    Everything before this evaluates the potential at points chosen by hand.
+    That is the right instrument for "is the factor the number it should be",
+    and it cannot say the two things only a run can: that NUTS differentiates
+    through the factor site at every leapfrog step, and that the site is in the
+    potential the sampler explores rather than merely in a ``log_density``
+    someone can call.
+
+    **What a chain cannot do here is measure the prior's displacement**, and
+    that is not a limitation of this file. ``prior_sensitivity``'s own module
+    docstring states the arithmetic: the Monte Carlo standard error of a
+    posterior mean from ``n_eff`` draws is ``1/sqrt(n_eff)`` sigma, and the two
+    chains' noise ADDS. Measured here, under a homoscedastic declaration where
+    this prior is ``p(log A) proportional to A^2``: the mean shift is +0.005
+    against a posterior sd of 0.055, and across three seeds the first-order
+    prediction ``Cov @ grad(log prior)`` was matched at ratios 0.55, 1.44 and
+    1.09 -- with the beta component changing SIGN. An assertion on that number
+    would be a coin flip wearing a tolerance.
+
+    **So the discriminator is common random numbers, and it has no noise in it
+    at all.** Adding a CONSTANT to a potential leaves a NUTS trajectory exactly
+    unchanged: the gradient is identical and the constant cancels out of every
+    Metropolis ratio. So two chains on one key, one carrying the factor and one
+    not:
+
+    * under the radiometer declaration, where this prior is exactly flat, they
+      must agree **bitwise** -- measured, ``max|difference| = 0.0`` on both
+      latents over 300 draws;
+    * under a constant sigma, where it is not flat, they must diverge --
+      measured, 4.0 and 5.1 posterior standard deviations.
+
+    One pair of runs states both that the factor is present and that it is the
+    flat constant, without a tolerance anywhere.
+    """
+
+    def test_a_flat_prior_leaves_the_trajectory_bitwise_unchanged(self):
+        data = observed_data()
+        key = jax.random.key(20260827)
+        prior = JeffreysPrior(over=("fg_log_amp", "fg_beta"))
+        with_prior = _chain(
+            power_law_space(joint_prior=prior), RADIOMETER, key, data
+        )
+        without = _chain(
+            power_law_space(priors=_flat_priors()), RADIOMETER, key, data
+        )
+        for name in ("fg_log_amp", "fg_beta"):
+            assert jnp.all(jnp.isfinite(with_prior[name]))
+            assert float(jnp.std(with_prior[name])) > 0.0, (
+                f"{name} never moved, so the two chains agree for the wrong reason"
+            )
+            difference = float(
+                jnp.max(jnp.abs(with_prior[name] - without[name]))
+            )
+            assert difference == 0.0, (
+                f"{name}: the chains differ by {difference:.3e} with a prior that "
+                f"is flat to {RADIOMETER_FLAT_HALF_LOGDET} at every point. Under "
+                "one key a constant in the potential changes no trajectory, so a "
+                "difference here is the factor not being constant."
+            )
+
+    def test_a_prior_that_is_not_flat_moves_the_trajectory(self):
+        """The sibling, and without it the test above passes when the factor
+        site was never emitted at all.
+
+        Two chains that both ignore the prior also agree bitwise.
+        """
+        data = observed_data()
+        key = jax.random.key(20260827)
+        noise = HomoscedasticNoise(sigma=jnp.array(1000.0))
+        prior = JeffreysPrior(over=("fg_log_amp", "fg_beta"))
+        with_prior = _chain(power_law_space(joint_prior=prior), noise, key, data)
+        without = _chain(power_law_space(priors=_flat_priors()), noise, key, data)
+        for name in ("fg_log_amp", "fg_beta"):
+            spread = float(jnp.std(without[name]))
+            difference = float(jnp.max(jnp.abs(with_prior[name] - without[name])))
+            assert difference > spread, (
+                f"{name}: the chains differ by {difference:.3e} against a "
+                f"posterior sd of {spread:.3e}. Under a constant sigma this "
+                "prior is p(log A) proportional to A^2 and is not constant, so "
+                "identical trajectories mean the factor never reached the "
+                "potential."
+            )
+
+
+def test_a_vector_latent_permutes_by_ITS_SPAN_and_not_as_one_row():
+    """D24's permutation is over spans, and a two-scalar block cannot say so.
+
+    The rows come back from the far side in ``over``'s order and this package
+    lays them out by sorted key, so the facade permutes. With every latent a
+    scalar that is a permutation of names; with a vector in the block it is a
+    permutation of SPANS, and a version that swapped names as single rows would
+    return a matrix of the right shape, symmetric, positive definite, and
+    scrambled.
+
+    The oracle is ``fisher_information`` -- this package's own assembly, which
+    flattens by sorted key and is what ``information`` called before it
+    delegated. It is a REGRESSION oracle rather than an independent one, and it
+    is available only until ``uncertainty`` is switched in its turn; when that
+    happens this comparison retires with it and the layout claim needs a home
+    that does not depend on the old spelling still being here.
+    """
+    from rheplicant.inference.uncertainty import fisher_information
+
+    freq = jnp.linspace(60e6, 85e6, N_FREQ) / NU0
+
+    def forward(values):
+        row = jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"])
+        return jnp.broadcast_to(row, (N_TIME, N_FREQ)) + values["offsets"][:, None]
+
+    values = {
+        "fg_log_amp": jnp.array(7.8),
+        "fg_beta": jnp.array(2.55),
+        "offsets": jnp.array([3.0, -1.0, 2.0, 0.5, -2.0, 1.0, 0.0, 4.0]),
+    }
+    over = ("offsets", "fg_log_amp", "fg_beta")
+    prior = JeffreysPrior(over=over)
+    mine = prior.information(forward, values, HOMOSCEDASTIC)
+
+    block = {name: values[name] for name in over}
+    held = {k: v for k, v in values.items() if k not in block}
+    expected = fisher_information(
+        lambda moving: forward({**held, **moving}),
+        block,
+        HOMOSCEDASTIC,
+        None,
+        space=None,
+    ).matrix
+    expected = 0.5 * (expected + expected.T)
+
+    assert mine.shape == (10, 10)
+    assert jnp.allclose(mine, expected, rtol=1e-10, atol=0.0), (
+        "the permuted block does not match this package's own sorted-key "
+        f"layout; worst entry differs by {float(jnp.max(jnp.abs(mine - expected))):.3e}"
+    )
+    # sorted(over) is ("fg_beta", "fg_log_amp", "offsets"): two scalars, then
+    # the eight-element span. A name-wise permutation would put `offsets` in a
+    # single row and the two scalars in eight.
+    assert float(mine[0, 0]) == pytest.approx(float(expected[0, 0]), rel=1e-10)
+    assert float(mine[2, 2]) == pytest.approx(float(expected[2, 2]), rel=1e-10)
+
+
+class TestTheSynthesisedInformationGraph:
+    """The facade invents two things, and their legality is that the answer
+    cannot reach them. That is a claim about the far side, so it is MEASURED.
+
+    ``JeffreysPrior.information`` is handed ``f(values) -> prediction`` and a
+    values dict. ``to_graph`` wants a space and a pipeline, so the adapter
+    builds the three-layer graph from the callable instead
+    (``graph_bridge.graph_for_information``) and has to supply what a graph
+    requires and a Fisher block does not: **data**, and a **density per
+    latent**. Both are chosen to be unreachable -- a Fisher information is an
+    EXPECTED information, so no residual appears in it, and the block's prior
+    fields are empty on the far side by that function's own docstring.
+
+    **A docstring is not a measurement**, and this is the assumption the whole
+    delegation rests on, so the graph is rebuilt with each synthesised thing
+    changed and the matrices are compared. Same shape as D22's
+    ``TestTheSynthesisedGraph`` for the rank test, and for the same reason.
+
+    Three latents, not two: the covered ones MUST stay improper -- the far side
+    refuses two priors on one quantity by type -- so varying a density needs a
+    latent the block does not name. ``t_floor`` is that latent, held fixed, and
+    it reaches the prediction so that its presence is not free.
+    """
+
+    OVER = ("fg_log_amp", "fg_beta")
+    VALUES = {
+        "fg_log_amp": jnp.array(7.8),
+        "fg_beta": jnp.array(2.55),
+        "t_floor": jnp.array(300.0),
+    }
+
+    @staticmethod
+    def _graph(data, held_density):
+        """The adapter's own construction, with the two knobs exposed."""
+        import bayesmith
+
+        from rheplicant.inference import graph_bridge as gb
+
+        names = ("fg_log_amp", "fg_beta", "t_floor")
+        freq = jnp.linspace(60e6, 85e6, N_FREQ) / NU0
+        flat = dist.ImproperUniform(dist.constraints.real, (), ())
+
+        def forward(values):
+            row = (
+                jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"])
+                + values["t_floor"]
+            )
+            return jnp.broadcast_to(row, (N_TIME, N_FREQ))
+
+        def model(observed):
+            refs = [
+                bayesmith.sample(
+                    name,
+                    gb._prior_factory(held_density if name == "t_floor" else flat),
+                )
+                for name in names
+            ]
+            prediction = bayesmith.det(
+                gb.PREDICTION, gb._prediction_fn(forward, names), *refs
+            )
+            bayesmith.observe(
+                gb.OBSERVATION,
+                gb._observation_fn(RADIOMETER),
+                prediction,
+                obs=observed,
+                mask=gb._observed_mask(RADIOMETER),
+                depends_on_prediction=bool(RADIOMETER.depends_on_prediction),
+            )
+
+        return bayesmith.trace(model, data)
+
+    @classmethod
+    def _matrix(cls, graph):
+        import bayesmith
+
+        return bayesmith.JeffreysPrior(over=cls.OVER).information(graph, cls.VALUES)
+
+    @classmethod
+    def _baseline(cls):
+        flat = dist.ImproperUniform(dist.constraints.real, (), ())
+        return cls._matrix(cls._graph(jnp.zeros((N_TIME, N_FREQ)), flat))
+
+    def test_the_baseline_is_not_degenerate(self):
+        """Without this every comparison below is satisfied by three copies of
+        the zero matrix, which would agree perfectly and mean nothing."""
+        baseline = self._baseline()
+        assert baseline.shape == (2, 2)
+        assert float(jnp.linalg.det(baseline)) > 0.0
+        eigenvalues = jnp.linalg.eigvalsh(baseline)
+        assert float(eigenvalues[0]) > 0.0
+        assert float(eigenvalues[-1] / eigenvalues[0]) > 10.0, (
+            "the two eigenvalues are within a decade of each other, so a matrix "
+            "that had lost its structure could still look like this one"
+        )
+
+    def test_the_synthesised_data_cannot_reach_the_answer(self):
+        """Zeros against 1e4 counts -- four decades, and the answer does not
+        move by a bit. A Fisher information carries no residual."""
+        flat = dist.ImproperUniform(dist.constraints.real, (), ())
+        other = self._matrix(self._graph(jnp.full((N_TIME, N_FREQ), 1e4), flat))
+        assert float(jnp.max(jnp.abs(other - self._baseline()))) == 0.0
+
+    def test_the_synthesised_densities_cannot_reach_the_answer(self):
+        """A proper Normal in place of the flat declaration, on the latent the
+        block does not name -- which is the one the adapter also declares flat
+        and could equally have declared otherwise."""
+        other = self._matrix(
+            self._graph(jnp.zeros((N_TIME, N_FREQ)), dist.Normal(0.0, 1e6))
+        )
+        assert float(jnp.max(jnp.abs(other - self._baseline()))) == 0.0

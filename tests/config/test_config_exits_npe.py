@@ -64,8 +64,39 @@ def trio_product():
 
 @cache
 def joint_results():
-    """The joint-prior document, executed ONCE -- it carries a nuts run."""
-    return run_document(joint_prior_document())
+    """The joint-prior document, executed ONCE -- it carries a nuts run.
+
+    **Run in float64, and the document is BUILT inside the block too.** A
+    declared ``joint_prior`` is ``sqrt(det I)`` evaluated at every leapfrog
+    step, and its half-log-determinant is refused at single precision (D25 in
+    the migration ledger): measured on an exactly degenerate block, float32
+    gives -27.52 where the block honestly gives -338.05, 310 nats, in a term
+    the sampler exponentiates and with a converged chain on the other side of
+    it. ``to_numpyro_model`` says so at construction time and names the route,
+    which is this one.
+
+    Inside the block and not merely around the run: ``jax_enable_x64`` is a
+    tracing-time global, so a space declared outside it carries float32
+    constants into a float64 session, and that is refused separately and by a
+    different sentence.
+    """
+    was = jax.config.read("jax_enable_x64")
+    jax.config.update("jax_enable_x64", True)
+    try:
+        document = joint_prior_document()
+        # Written HERE and not in the builder. `runtime.jax_enable_x64` is
+        # VERIFIED against the process at build time, so a builder that
+        # declared it would be unbuildable in this suite's float32 session --
+        # and the fixture census drives every `*_document` builder with no
+        # arguments, so it would take two unrelated census tests down with it.
+        # Measured, and it is the shape this file already lives with: the
+        # projector helper writes `acknowledge_float32_sky` for the same
+        # reason, that a document's declarations are constrained by who builds
+        # it and not only by what it means.
+        document["runtime"] = {**document["runtime"], "jax_enable_x64": True}
+        return run_document(document)
+    finally:
+        jax.config.update("jax_enable_x64", was)
 
 
 class TestTheBank:

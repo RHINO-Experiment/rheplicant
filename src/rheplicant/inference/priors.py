@@ -50,6 +50,46 @@ def _as_names(names: Any) -> tuple[str, ...]:
     )
 
 
+def _bayesmith_prior(prior: "JeffreysPrior") -> Any:
+    """This declaration as the far side's, carrying both static fields.
+
+    Built per call rather than cached on the module: an ``eqx.Module`` is
+    frozen, and a lazily attached attribute would be a second piece of state
+    with its own staleness question. The object is two static fields.
+    """
+    import bayesmith
+
+    return bayesmith.JeffreysPrior(over=prior.over, rank_rtol=prior.rank_rtol)
+
+
+def _rows_in_sorted_order(
+    matrix: jax.Array, over: tuple[str, ...], values: Any
+) -> jax.Array:
+    """Permute a block matrix from ``over``'s order into ``sorted(over)``'s.
+
+    D24's execution. The far side lays the block out in the order ``over``
+    names; this package has always laid it out by sorted key, because
+    :func:`~rheplicant.inference.uncertainty.fisher_information` flattens that
+    way. A symmetric permutation leaves the determinant alone -- so the prior
+    is the same prior either way -- and moves every row, so a caller reading
+    row 0 gets a different number. On the tour's own block those two readings
+    differ by 7.4e+1.
+
+    Each latent occupies a span the size of its own value, so the permutation
+    is over spans and not over names: a two-element latent and a scalar do not
+    swap as single rows.
+    """
+    sizes = {name: int(jnp.size(jnp.asarray(values[name]))) for name in over}
+    start, spans = 0, {}
+    for name in over:
+        spans[name] = (start, start + sizes[name])
+        start += sizes[name]
+    order = jnp.concatenate(
+        [jnp.arange(*spans[name]) for name in sorted(over)]
+    ) if over else jnp.arange(0)
+    return matrix[jnp.ix_(order, order)]
+
+
 class JeffreysPrior(eqx.Module):
     r"""``p(theta) = sqrt(det I(theta))`` over a named block, conditional on the rest.
 
@@ -369,7 +409,8 @@ class JeffreysPrior(eqx.Module):
                 carries none of its own.
             flags: optional boolean mask, as elsewhere.
         """
-        from rheplicant.inference.uncertainty import fisher_information
+        from rheplicant.inference.graph_bridge import graph_for_information, translate
+        from rheplicant.inference.uncertainty import as_noise_model
 
         missing = [name for name in self.over if name not in values]
         if missing:
@@ -379,23 +420,18 @@ class JeffreysPrior(eqx.Module):
                 "from the names that are present, which is a prior over a different "
                 "block."
             )
-        block = {name: values[name] for name in self.over}
-        held = {name: value for name, value in values.items() if name not in block}
-
-        def block_forward(moving: dict[str, jax.Array]) -> jax.Array:
-            return forward({**held, **moving})
-
-        # Rows come back in sorted(over) order, not over= order: uncertainty's
-        # _named_spans flattens by sorted key. Harmless for the determinant --
-        # a symmetric permutation leaves it alone -- and wrong for anyone
-        # reading a row, which is why Returns says so and a test pins it.
-        matrix = fisher_information(
-            block_forward, block, noise_std, flags, space=None
-        ).matrix
-        # Symmetric by construction and not quite symmetric in floating point;
-        # eigvalsh reads one triangle, so which one it reads would otherwise be
-        # a choice nobody made.
-        return 0.5 * (matrix + matrix.T)
+        graph = graph_for_information(
+            forward, values, as_noise_model(noise_std, flags)
+        )
+        with translate("JeffreysPrior.information"):
+            matrix = _bayesmith_prior(self).information(graph, values)
+        # Rows come back in sorted(over) order, not over= order -- D24. The far
+        # side returns them in over='s order and says in its own docstring that
+        # this package's sorted order is a wart that does not port. It is a
+        # wart; it is also observable and pinned, so the FACADE permutes and
+        # the difference is registered rather than taken silently. The
+        # determinant is invariant either way, so the prior is untouched.
+        return _rows_in_sorted_order(matrix, self.over, values)
 
     def log_density(
         self,
@@ -428,14 +464,7 @@ class JeffreysPrior(eqx.Module):
         ``cholesky`` on the same array — can reach the arithmetic without
         re-differentiating the model.
         """
-        eigenvalues = jnp.linalg.eigvalsh(matrix)  # ascending, real
-        floor = self.rank_tolerance * eigenvalues[-1]
-        # The smallest positive number the dtype holds, not zero: log(0) is
-        # -inf, and an infinite potential is a NaN gradient rather than a
-        # rejected proposal.
-        tiny = jnp.finfo(eigenvalues.dtype).tiny
-        kept = jnp.where(eigenvalues > floor, eigenvalues, tiny)
-        return 0.5 * jnp.sum(jnp.log(kept))
+        return _bayesmith_prior(self).half_log_determinant(matrix)
 
 
 __all__ = ["JeffreysPrior"]

@@ -129,6 +129,49 @@ def _refuse_sampled_noise_std_under_a_joint_prior(
     )
 
 
+def _refuse_a_joint_prior_in_single_precision(space: ParameterSpace) -> None:
+    """A Jeffreys prior needs float64, and this is where that can still be said.
+
+    ``JeffreysPrior.log_density`` is evaluated INSIDE the model body, at every
+    leapfrog step, and the block's information matrix is refused by name when
+    the ambient precision is single -- measured on an exactly degenerate block,
+    a half-log-determinant of **-27.52** where the same block honestly gives
+    **-338.05**, 310 nats, in a term NUTS exponentiates.
+
+    The refusal has to be HERE and not there. ``jax_enable_x64`` is a
+    tracing-time global and NumPyro traces ``model`` long after this function
+    has returned, so the trick :func:`~rheplicant.inference.identifiability.
+    identifiability` uses -- open x64 around its own arithmetic -- has nothing
+    to open it around: a float32-traced model cannot contain a float64 factor.
+    What arrives at trace time instead is a translated refusal quoting "a
+    Jeffreys information matrix", which is true and names neither the
+    ``joint_prior`` that caused it nor the model that declared it.
+
+    This is D25 in the migration ledger. The route out is a float64 session,
+    not a keyword: there is no reading of this prior at single precision that
+    is worth having.
+    """
+    if space.joint_prior is None or jnp.result_type(float) == jnp.float64:
+        return
+    raise StateValidationError(
+        f"to_numpyro_model was given a space declaring "
+        f"{type(space.joint_prior).__name__}(over="
+        f"{list(space.joint_prior.over)}), and the ambient precision is float32. "
+        "The joint prior is sqrt(det I) over that block, evaluated at every "
+        "leapfrog step, and its half-log-determinant is not supportable in "
+        "single precision: measured on an exactly degenerate block, float32 "
+        "gives -27.52 where the block honestly gives -338.05 -- a 310-nat error "
+        "in a term the sampler exponentiates, with a proper posterior, a "
+        "converged chain and clean diagnostics on the other side of it. "
+        "Nothing downstream reports a log-prior that is wrong by 310 nats. "
+        "Run this model in a float64 session (`jax.config.update("
+        "'jax_enable_x64', True)` before the space is declared, so the "
+        "model's own constants are built at the wider dtype), or drop "
+        "inference.joint_prior and declare the block's latents with "
+        "Latent(prior=...)."
+    )
+
+
 def to_numpyro_model(
     pipeline: AbstractOperator,
     state_template: State,
@@ -205,6 +248,7 @@ def to_numpyro_model(
     import numpyro.distributions as dist
 
     _require_priors(space)
+    _refuse_a_joint_prior_in_single_precision(space)
     _refuse_sampled_noise_std_under_a_joint_prior(
         space, noise_std, allow_sampled_noise_std
     )
