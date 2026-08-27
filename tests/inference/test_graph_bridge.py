@@ -657,6 +657,30 @@ class TestAJointPriorCrossesAsADeclaredFactor:
             joint_prior=JeffreysPrior(over=("gains",), **overrides),
         )
 
+    @staticmethod
+    def _two_latent_space(over):
+        """Gains plus one sky amplitude, so ``over`` has an ORDER to get wrong.
+
+        A one-element ``over`` is its own reverse, which is not a hypothetical
+        weakness: the first version of this class used the one-latent space
+        throughout and a mutation that crossed the block REVERSED survived the
+        whole set. The density does not change under a symmetric permutation,
+        so no potential test can see it; only the declaration itself can.
+        """
+        from rheplicant.inference import Bind, JeffreysPrior
+
+        return ParameterSpace(
+            latents=(
+                Latent(name="gains", init=jnp.full((N_TIME,), GAIN), linear=True),
+                Latent(name="sky_a", init=jnp.array(SKY_A), linear=True),
+            ),
+            bindings=(
+                Bind("gains", into=lambda p: p["gain"].gain),
+                Bind("sky_a", into=lambda p: p["sum"]["sky_a"].amplitude),
+            ),
+            joint_prior=JeffreysPrior(over=over),
+        )
+
     def test_the_graph_carries_the_declaration(
         self, instrument, data, noise, template_state
     ):
@@ -665,6 +689,24 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         )
         assert isinstance(graph.joint_prior, bayesmith.JeffreysPrior)
         assert graph.joint_prior.over == ("gains",)
+
+    @pytest.mark.parametrize("over", [("gains", "sky_a"), ("sky_a", "gains")])
+    def test_the_block_crosses_in_the_order_it_was_declared(
+        self, instrument, data, noise, template_state, over
+    ):
+        """Both orders, because one order alone cannot tell a reversal from a
+        coincidence.
+
+        The two declarations are the SAME prior -- ``det`` is invariant under a
+        symmetric permutation, and ``tests/seam/`` pins that the potential does
+        not move between them. What is not invariant is the block as declared,
+        and D24 is a registered difference about exactly this axis, so the seam
+        must not be quietly choosing an order of its own.
+        """
+        graph = to_graph(
+            self._two_latent_space(over), instrument, template_state, data, noise
+        )
+        assert graph.joint_prior.over == over
 
     def test_an_explicit_rank_rtol_crosses_rather_than_defaulting(
         self, instrument, data, noise, template_state
@@ -704,15 +746,10 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         )
         assert isinstance(distribution, dist.ImproperUniform)
 
-    def test_an_uncovered_latent_keeps_its_own_prior(
+    def test_a_space_with_no_joint_prior_declares_none(
         self, instrument, space, data, noise, template_state
     ):
-        """The flat declaration is for the COVERED ones, and only those.
-
-        Without this, a wiring that declared every latent flat would pass every
-        test above and quietly delete the priors of the latents the block does
-        not name.
-        """
+        """The control: nothing declared, nothing carried, priors untouched."""
         graph = to_graph(space, instrument, template_state, data, noise)
         from bayesmith.graph.evaluate import apply_probabilistic, evaluate
 
@@ -722,6 +759,49 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         )
         assert isinstance(distribution, dist.Normal)
         assert graph.joint_prior is None
+
+    def test_a_latent_the_block_does_not_name_keeps_its_own_prior(
+        self, instrument, data, noise, template_state
+    ):
+        """The flat declaration is for the COVERED ones, and ONLY those.
+
+        The condition has to be a space that declares a joint prior covering
+        SOME of its latents. The obvious version of this test -- a space with
+        no joint prior at all -- was written first and a mutation replacing
+        ``joint.covers(name)`` with ``joint is not None`` survived it: with no
+        joint prior, both readings say "not covered" and the test never reaches
+        the branch it is about. A guard in the right place asking at the wrong
+        time is this codebase's most familiar defect, and this is one.
+        """
+        from rheplicant.inference import Bind, JeffreysPrior
+
+        partial = ParameterSpace(
+            latents=(
+                Latent(name="gains", init=jnp.full((N_TIME,), GAIN), linear=True),
+                Latent(
+                    name="sky_a",
+                    init=jnp.array(SKY_A),
+                    linear=True,
+                    prior=dist.Normal(SKY_A, 10.0),
+                ),
+            ),
+            bindings=(
+                Bind("gains", into=lambda p: p["gain"].gain),
+                Bind("sky_a", into=lambda p: p["sum"]["sky_a"].amplitude),
+            ),
+            joint_prior=JeffreysPrior(over=("gains",)),
+        )
+        graph = to_graph(partial, instrument, template_state, data, noise)
+        from bayesmith.graph.evaluate import apply_probabilistic, evaluate
+
+        env = evaluate(graph, dict(partial.initial_values()))
+        covered = apply_probabilistic(graph, graph.node("gains"), env)
+        uncovered = apply_probabilistic(graph, graph.node("sky_a"), env)
+        assert isinstance(covered, dist.ImproperUniform)
+        assert isinstance(uncovered, dist.Normal), (
+            "the latent the block does not name lost its declared prior; the "
+            "graph is proper, samples fine, and is a different model"
+        )
 
     # The guard a forgotten declaration would fail -- "the potential moved, and
     # by this much" -- CANNOT live here. `JeffreysPrior.information` refuses
