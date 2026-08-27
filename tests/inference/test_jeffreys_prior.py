@@ -880,100 +880,71 @@ def _flat_priors():
 
 
 class TestASamplerActuallyCarriesTheFactor:
-    """The acceptance every test above is silent about.
+    """The acceptance the potential tests above are silent about.
 
     Everything before this evaluates the potential at points chosen by hand.
     That is the right instrument for "is the factor the number it should be",
     and it cannot say the two things only a run can: that NUTS differentiates
-    through the factor site at every leapfrog step, and that the site is in the
-    potential the sampler explores rather than merely in a ``log_density``
-    someone can call.
+    through the factor site at every leapfrog step without producing a NaN, and
+    that the site is in the potential the sampler explores rather than merely
+    in a ``log_density`` someone can call.
 
-    **What a chain cannot do here is measure the prior's displacement**, and
-    that is not a limitation of this file. ``prior_sensitivity``'s own module
-    docstring states the arithmetic: the Monte Carlo standard error of a
-    posterior mean from ``n_eff`` draws is ``1/sqrt(n_eff)`` sigma, and the two
-    chains' noise ADDS. Measured here, under a homoscedastic declaration where
-    this prior is ``p(log A) proportional to A^2``: the mean shift is +0.005
-    against a posterior sd of 0.055, and across three seeds the first-order
-    prediction ``Cov @ grad(log prior)`` was matched at ratios 0.55, 1.44 and
-    1.09 -- with the beta component changing SIGN. An assertion on that number
-    would be a coin flip wearing a tolerance.
+    **What a chain cannot do here is measure the prior's displacement.**
+    ``prior_sensitivity``'s own module docstring states the arithmetic: the
+    Monte Carlo standard error of a posterior mean from ``n_eff`` draws is
+    ``1/sqrt(n_eff)`` sigma, and two chains' noise ADDS. Measured under a
+    homoscedastic declaration where this prior is ``p(log A) ~ A^2``: the mean
+    shift is +0.005 against a posterior sd of 0.055, and across three seeds the
+    first-order prediction was matched at ratios 0.55, 1.44 and 1.09 -- with
+    the beta component changing SIGN.
 
-    **So the discriminator is common random numbers, and it has no noise in it
-    at all.** Adding a CONSTANT to a potential leaves a NUTS trajectory exactly
-    unchanged: the gradient is identical and the constant cancels out of every
-    Metropolis ratio. So two chains on one key, one carrying the factor and one
-    not:
+    **And a chain cannot compare TRAJECTORIES either, which cost this file two
+    wrong assertions and five red CI runs.** A constant added to a potential
+    leaves a NUTS trajectory unchanged in exact arithmetic, so the first
+    version asserted that two chains -- one carrying a flat Jeffreys factor,
+    one not -- agree bitwise under a common key. They did, on the machine it
+    was written on. They do not on another: the radiometer factor's every-``mu``
+    cancellation is exact only to roundoff, a leapfrog trajectory is chaotic, and
+    the last bits grow. Re-pinning it to "1e-5 of a posterior sd" was the same
+    mistake with a tolerance on it -- measured 1.4e-6 locally, **1.89e-2** on
+    the CI runner, four orders out.
 
-    * under the radiometer declaration, where this prior is flat, they must
-      agree to far below anything the posterior can resolve -- measured,
-      ``max|difference|`` of **1.9e-10** against a posterior sd of 1.3e-4, a
-      ratio of **1.4e-6**;
-    * under a constant sigma, where it is not flat, they must diverge --
-      measured, 4.0 and 5.1 posterior standard deviations.
-
-    One pair of runs states both that the factor is present and that it is the
-    flat constant, without a tolerance anywhere.
+    So the flat half is NOT tested here. It is tested where it is deterministic
+    --- ``test_under_radiometer_noise_switching_it_on_only_shifts_the_posterior``
+    differences the two potentials at three widely separated points and pins the
+    constant to 1e-7. What is left for a chain is what only a chain can say, and
+    both remaining assertions are about EFFECTS THAT ARE LARGE: a chain that
+    runs and moves, and a non-flat prior that visibly relocates it.
     """
 
-    def test_a_flat_prior_leaves_the_trajectory_where_it_was(self):
-        """**This assertion used to be ``== 0.0``, and the change is a real
-        measurement rather than a loosened tolerance.**
+    def test_a_flat_prior_still_gives_a_healthy_chain(self):
+        """NUTS differentiates through the factor at every step.
 
-        Before ``numpyro_bridge`` delegated, the factor was added by a
-        hand-written ``numpyro.factor`` whose information matrix was assembled
-        from a synthesised graph, and every ``mu`` cancelled BIT-exactly --
-        ``sigma = f|mu|`` against ``J = mu g`` divides a value by itself -- so
-        the factor was the same float at every point and the trajectories were
-        identical. The information now comes from the MODEL graph, assembled in
-        a different order, and the cancellation is exact only to roundoff.
-
-        Measured after the switch: the factor is still the flat constant to
-        **5.7e-9** across the grid (matching the printed 15.80169853 to eight
-        decimals, and inside the 1e-7 the sibling test above already pins), and
-        the trajectory divergence that leaks from it is 1.9e-10 against a
-        posterior sd of 1.3e-4.
-
-        So the bound is stated **relative to the posterior**, not as an absolute
-        epsilon: a factor that stopped being constant in any way a sampler could
-        care about would move the chain by a fraction of a sigma, and the
-        sibling test below shows what that looks like -- four to five sigma.
-        The headroom here is six orders of magnitude.
+        No cross-chain comparison: the claim is that the sampler can carry this
+        factor at all, which a NaN potential or a stuck chain would break and
+        which no machine's rounding can fake.
         """
         data = observed_data()
-        key = jax.random.key(20260827)
         prior = JeffreysPrior(over=("fg_log_amp", "fg_beta"))
-        with_prior = _chain(
-            power_law_space(joint_prior=prior), RADIOMETER, key, data
-        )
-        without = _chain(
-            power_law_space(priors=_flat_priors()), RADIOMETER, key, data
+        samples = _chain(
+            power_law_space(joint_prior=prior), RADIOMETER,
+            jax.random.key(20260827), data,
         )
         for name in ("fg_log_amp", "fg_beta"):
-            assert jnp.all(jnp.isfinite(with_prior[name]))
-            assert float(jnp.std(with_prior[name])) > 0.0, (
-                f"{name} never moved, so the two chains agree for the wrong reason"
-            )
-            difference = float(
-                jnp.max(jnp.abs(with_prior[name] - without[name]))
-            )
-            spread = float(jnp.std(without[name]))
-            assert difference < 1e-5 * spread, (
-                f"{name}: the chains differ by {difference:.3e}, which is "
-                f"{difference / spread:.2e} of the posterior sd {spread:.3e}, with "
-                f"a prior flat to {RADIOMETER_FLAT_HALF_LOGDET} at every point. "
-                "Under one key a constant in the potential changes no trajectory, "
-                "so a difference at the posterior's own scale is the factor not "
-                "being constant. Measured ratios when this was written: 1.4e-6 "
-                "and 1.9e-7."
+            assert jnp.all(jnp.isfinite(samples[name])), f"{name} went non-finite"
+            assert float(jnp.std(samples[name])) > 0.0, (
+                f"{name} never moved: the chain is stuck, which is what an "
+                "infinite or NaN factor looks like from here"
             )
 
     def test_a_prior_that_is_not_flat_moves_the_trajectory(self):
-        """The sibling, and without it the test above passes when the factor
-        site was never emitted at all.
+        """The half a chain CAN state, because the effect is large.
 
-        Two chains that both ignore the prior also agree bitwise.
+        Under a constant sigma this prior is ``p(log A) ~ A^2`` and is not
+        constant, so two chains on one key must separate. Measured at four to
+        five posterior standard deviations -- an effect no machine's rounding
+        reaches, which is the whole difference between this assertion and the
+        two that were removed.
         """
         data = observed_data()
         key = jax.random.key(20260827)
@@ -986,10 +957,8 @@ class TestASamplerActuallyCarriesTheFactor:
             difference = float(jnp.max(jnp.abs(with_prior[name] - without[name])))
             assert difference > spread, (
                 f"{name}: the chains differ by {difference:.3e} against a "
-                f"posterior sd of {spread:.3e}. Under a constant sigma this "
-                "prior is p(log A) proportional to A^2 and is not constant, so "
-                "identical trajectories mean the factor never reached the "
-                "potential."
+                f"posterior sd of {spread:.3e}. Identical trajectories mean the "
+                "factor never reached the potential the sampler explores."
             )
 
 
