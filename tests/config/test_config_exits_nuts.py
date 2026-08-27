@@ -97,6 +97,10 @@ class TestTheChainComesBack:
         measured at (200, 16, 8) against g's (200,).  Asserting that "g" is
         present passes just as well when the whole TOD is present too (2C
         shape 5), so this asserts the key SET and names the site.
+
+        The SET is the load-bearing half. Measured 2026-08-27 (D26): renaming
+        the deterministic site leaves the by-name line trivially true, and only
+        the set assertion still sees it.
         """
         drawn = product()
         assert "prediction" not in drawn.samples

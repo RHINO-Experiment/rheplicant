@@ -699,9 +699,12 @@ class TestThePriorGate:
         assert chain.error is None
         assert set(chain.product.samples) == {"d", "a"}
         # get_samples() also returns the deterministic "prediction" site,
-        # whose per-sample shape is the whole TOD.  Asserting its ABSENCE by
-        # name is the discriminating half: asserting that d and a are present
-        # passes just as well when the TOD is there too.
+        # whose per-sample shape is the whole TOD.  The SET assertion above is
+        # the discriminating half; this line is the weaker, redundant one.
+        # Measured 2026-08-27 (D26): renaming the site to `__mu__` leaves this
+        # line trivially true while the set assertion still fires, because it
+        # would see the new name. This comment used to claim the opposite and
+        # it sent a reader the wrong way once.
         assert "prediction" not in chain.product.samples
         assert chain.product.n_draw == 200
         assert float(jnp.mean(chain.product.samples["d"])) == pytest.approx(
