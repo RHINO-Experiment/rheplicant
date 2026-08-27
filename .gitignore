@@ -81,3 +81,21 @@ run.log
 run.exit
 run2.log
 run2.exit
+
+# The nine review and handover drafts in the root. The migration plan's
+# appendix C excludes them: their fate is decided separately and they do not
+# enter the repository as part of that programme. Listed here because relying
+# on them merely being untracked did not hold -- a `git add -A` swept them in
+# twice on 2026-08-27, and the second time only because the first was already
+# being cleaned up. Ignoring them makes the exclusion mechanical instead of a
+# thing someone has to remember; it does not decide their fate, and they stay
+# on disk exactly as appendix C describes.
+/CODE_REVIEW_REPORT.md
+/HANDOVER.md
+/NEXT_SESSION_PROMPT.md
+/PROPOSAL_BAYESMITH.md
+/PROPOSAL_MERGED.md
+/PROPOSAL_RHEPLICANT.md
+/PROPOSAL_bayesmith_bayesian.md
+/PROPOSAL_rheplicant_nonbayesian.md
+/REVIEW_REPORT.md

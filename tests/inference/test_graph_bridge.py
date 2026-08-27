@@ -26,6 +26,7 @@ import pickle
 import bayesmith
 import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from bayesmith.errors import AffinityRefused, GraphError, NotGaussian, NotLogLinear
@@ -348,16 +349,6 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
         with pytest.raises(StateValidationError, match="complex `observed`"):
             to_graph(space, instrument, template_state, data + 0j, noise)
 
-    def test_flagged_noise_because_masking_has_not_landed(
-        self, instrument, space, data, template_state
-    ):
-        flagged = FlaggedNoise(
-            base=HomoscedasticNoise(sigma=jnp.array(0.5)),
-            flags=jnp.zeros(data.shape, dtype=bool).at[0, 0].set(True),
-        )
-        with pytest.raises(ParameterSpaceError, match="sigma = inf"):
-            to_graph(space, instrument, template_state, data, flagged)
-
     def test_a_thing_that_is_not_a_noise_model(
         self, instrument, space, data, template_state
     ):
@@ -560,3 +551,85 @@ def test_importing_the_adapter_does_not_import_jax_eagerly():
     }
     assert not any(name.startswith("bayesmith") for name in named if name)
     assert not any(name.startswith("numpyro") for name in named if name)
+
+
+class TestFlaggedNoiseCrossesAsADeclaredMask:
+    """G1 landed on the far side, so this seam translates instead of refusing.
+
+    The refusal it replaces, which asserted that flagged noise could not cross
+    this seam, is RETIRED -- the triage table's third column, and it needs a
+    reason: it pinned a GAP, the gap is closed, and a test that pins an absence
+    outlives its subject. What it protected is pinned positively below.
+
+    THIS side spells an unobserved sample ``sigma = inf``. A graph node cannot:
+    ``Normal(mu, inf)`` has log-density ``-inf`` everywhere. So the flags cross
+    as the node's ``mask`` and the scale stays finite -- the far side's D20,
+    reached from the side that has to speak it.
+    """
+
+    @staticmethod
+    def _flagged(data, channel):
+        return FlaggedNoise(
+            base=HomoscedasticNoise(sigma=jnp.array(0.5)),
+            flags=jnp.zeros(data.shape, dtype=bool).at[:, channel].set(True),
+        )
+
+    def test_the_mask_is_the_negation_of_the_flags(
+        self, instrument, space, data, template_state
+    ):
+        """Polarity, against the flagged CHANNEL rather than against a count.
+
+        ``FlaggedNoise.flags`` is True where a sample was FLAGGED; the graph's
+        ``mask`` is True where a sample was TAKEN. They are negations, both
+        boolean and both the data's shape, so swapping them is invisible to
+        every shape and dtype check there is. A count would not catch it either
+        unless the flagged fraction happened not to be half.
+        """
+        graph = to_graph(
+            space, instrument, template_state, data, self._flagged(data, 2)
+        )
+        mask = np.asarray(graph.node("__data__").observed_mask)
+        assert mask.shape == tuple(data.shape)
+        assert not mask[:, 2].any(), "the flagged channel came through as TAKEN"
+        assert mask[:, 0].all() and mask[:, 1].all()
+
+    def test_the_declared_scale_is_finite_where_the_flags_are(
+        self, instrument, space, data, template_state
+    ):
+        """The far side refuses a non-finite scale, by name and on purpose.
+
+        "The sigma expression produced an infinity" and "this sample was
+        flagged" need different fixes; the second is now said by the mask, so
+        the scale says only the first. The value put there is the BASE model's
+        own sigma rather than a placeholder -- it cannot reach any answer, and
+        using the instrument's number means the graph reads as the model.
+        """
+        graph = to_graph(
+            space, instrument, template_state, data, self._flagged(data, 2)
+        )
+        node = graph.node("__data__")
+        env = {name: value for name, value in space.initial_values().items()}
+        from bayesmith.exact.gaussian import gaussian_parts
+        from bayesmith.graph.evaluate import evaluate
+
+        _, scale = gaussian_parts(graph, node, evaluate(graph, env))
+        scale = np.asarray(scale)
+        assert np.all(np.isfinite(scale)), "an inf reached the declared scale"
+        assert np.allclose(scale, 0.5)
+
+    def test_an_unflagged_noise_model_declares_no_mask_at_all(
+        self, instrument, space, data, template_state
+    ):
+        """``None``, not an all-True array: absence is cheaper and is the truth.
+
+        Without this, a translation that handed every graph a full mask would
+        pass every assertion above while making a mask the normal case.
+        """
+        graph = to_graph(
+            space,
+            instrument,
+            template_state,
+            data,
+            HomoscedasticNoise(sigma=jnp.array(0.5)),
+        )
+        assert graph.node("__data__").observed_mask is None

@@ -327,18 +327,29 @@ def _refuse_scopes_without_a_graph_spelling(latents: tuple[Latent, ...]) -> None
             )
 
 
-def _refuse_flagged_noise(noise: Any) -> None:
-    """Flags encode sigma = inf, and no graph node can carry that yet."""
+def _observed_mask(noise: Any) -> Any:
+    """``FlaggedNoise``'s flags as the graph's own declaration, or ``None``.
+
+    THIS side spells an unobserved sample ``sigma = inf`` and every consumer
+    here turns it into a clean zero weight. A graph node cannot do that,
+    because ``Normal(mu, inf)`` has log-density ``-inf`` everywhere and takes
+    the whole joint with it -- which is why this used to be a refusal naming
+    the G1 gap.
+
+    G1 landed (bayesmith 0.4.0) and the gap is closed the way the far side
+    chose: the mask is DECLARED on the node rather than encoded in the scale,
+    so ``log_joint``, ``to_numpyro`` and the exact solve all read one
+    statement. The translation is one line, and its direction is worth
+    stating: ``FlaggedNoise.flags`` is True where a sample was FLAGGED, while
+    the graph's ``mask`` is True where a sample was TAKEN. They are negations
+    of each other, and both are boolean arrays of the data's shape, so
+    swapping them costs nothing and is caught by nothing -- which is why
+    `tests/inference/test_graph_bridge.py` pins the polarity against the
+    flagged CHANNEL rather than against a count.
+    """
     if not isinstance(noise, FlaggedNoise):
-        return
-    _refuse(
-        "to_graph was given FlaggedNoise, which encodes an unobserved sample as "
-        "sigma = inf. Every consumer on THIS side turns that into a clean zero weight; a "
-        "graph node cannot, because Normal(mu, inf) has log-density -inf everywhere and "
-        "the whole joint goes with it. Masking is the G1 gap on the bayesmith side. "
-        "Until it lands, drop the flagged samples from `observed` and pass the base "
-        "noise model, which is the same likelihood written without the encoding."
-    )
+        return None
+    return jnp.logical_not(jnp.asarray(noise.flags))
 
 
 def _refuse_a_noise_model_this_seam_cannot_read(noise: Any) -> None:
@@ -400,7 +411,6 @@ def _prevalidate(
     _refuse_a_joint_prior(space)
     _refuse_scopes_without_a_graph_spelling(latents)
     _refuse_unusable_priors(latents, supplied)
-    _refuse_flagged_noise(noise)
     _refuse_a_noise_model_this_seam_cannot_read(noise)
 
     resolved_priors = {}
@@ -503,6 +513,7 @@ def to_graph(
             _observation_fn(noise),
             prediction,
             obs=data,
+            mask=_observed_mask(noise),
             depends_on_prediction=bool(noise.depends_on_prediction),
         )
 
@@ -538,6 +549,28 @@ def _prediction_fn(
     return prediction
 
 
+def _finite_sigma(noise: Any, prediction: jax.Array) -> jax.Array:
+    """``noise.std``, with a flagged sample's ``inf`` replaced by the base's own.
+
+    The scale a graph node declares has to be finite EVERYWHERE, and the far
+    side checks that by name: ``check_gaussian`` refuses a non-finite sigma
+    because "the sigma expression produced an infinity" and "this sample was
+    flagged" need different fixes. The second is now said by the node's
+    ``mask``, so the scale says only the first.
+
+    The value put at a flagged sample is the BASE model's sigma, not a
+    placeholder 1.0. It cannot reach any answer -- a masked sample contributes
+    nothing to the quadratic form, the normaliser, the information or a draw,
+    and the far side pins that a 1e9 change there moves nothing
+    (`bayesmith/tests/exact/test_masking.py` -- the project is named in the
+    path because it is not this repository's). Using the instrument's own number anyway means the
+    graph reads as the model rather than as the encoding.
+    """
+    if isinstance(noise, FlaggedNoise):
+        return noise.base.std(prediction)
+    return noise.std(prediction)
+
+
 def _observation_fn(noise: Any) -> Callable[[jax.Array], Any]:
     """The observed node's ``dist_fn``: ``Normal(mu, noise.std(mu))``.
 
@@ -550,7 +583,7 @@ def _observation_fn(noise: Any) -> Callable[[jax.Array], Any]:
     import numpyro.distributions as distributions
 
     def observation(prediction: jax.Array) -> Any:
-        return distributions.Normal(prediction, noise.std(prediction))
+        return distributions.Normal(prediction, _finite_sigma(noise, prediction))
 
     return observation
 

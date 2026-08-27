@@ -142,13 +142,15 @@ so a thinner virtualenv silently collects fewer tests of the same suite.
 Complete means the dev group plus **`h5py`**, **`rhino-cal-jax`** (not on
 PyPI; install it editable from its own checkout, and install `editables`
 alongside it, which its editable hook needs) and **`bayesmith`** at the
-`>=0.3` surface. The floor moved from 0.2 on 2026-08-27 and the two halves
+`>=0.4` surface. The floor moved from 0.2 on 2026-08-27 and the two halves
 are worth telling apart: 0.2 named `first_fit` and `exact.loglinear`, which
 `partition.py` and `loglinear.py` import; 0.3 names `AffinityRefused`'s
 structured payload and `ComplexNormal`, which `graph_bridge.py` needs. A 0.2
 install satisfies the import statements of the second pair and then fails at
-the call. **0.3.0 is on PyPI as of 2026-08-27**, so
-`uv pip install 'bayesmith>=0.3'` resolves; this checkout nevertheless holds
+the call. 0.3 named `AffinityRefused`'s payload and `ComplexNormal`; **0.4 names
+`observed_mask`**, which is how the adapter presents a `FlaggedNoise`.
+**0.4.0 is on PyPI as of 2026-08-27**, so
+`uv pip install 'bayesmith>=0.4'` resolves; this checkout nevertheless holds
 it **editable from `../bayesmith` with `--no-deps`**, because the two
 repositories are developed against each other and a released version would
 freeze the seam mid-programme. Its runtime deps (jax, equinox, numpy,

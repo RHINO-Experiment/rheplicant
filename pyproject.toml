@@ -54,7 +54,12 @@ dependencies = [
     # complex latent with ComplexNormal, which exists because no numpyro
     # distribution samples complex.
     #
-    # The floor names the first release carrying that second pair -- 0.3.0.
+    # 0.3.0 named that second pair. The floor is now 0.4, for a third: the
+    # adapter presents a `FlaggedNoise` as the graph node's declared
+    # `observed_mask`, which is bayesmith's G1 and exists from 0.4.0. Before
+    # it, an unobserved sample had no spelling a graph could carry.
+    #
+    # The floor names the first release carrying each pair.
     # It is not decoration: a 0.2 install satisfies the import statements and
     # then fails at the call, which is the shape a floor exists to turn into a
     # resolution error. This checkout nevertheless holds bayesmith EDITABLE,
@@ -65,7 +70,7 @@ dependencies = [
     #
     # The same bet the limTOD floor above records: declare the true
     # requirement rather than pretend the seam is optional.
-    "bayesmith>=0.3",
+    "bayesmith>=0.4",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
