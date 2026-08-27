@@ -632,12 +632,27 @@ def _widened(values: dict[str, jax.Array]) -> dict[str, jax.Array]:
 
     Opening the context is not enough: a ``Latent``'s ``init`` was built when
     the space was declared, outside the block, so it is float32 and the tangent
-    taken from it is too. Identical to
-    :func:`~rheplicant.inference.identifiability._widened` and deliberately not
-    shared with it: that module is a preserved surface for exactly one
-    consumer, and importing a second private name across modules is how the
-    census in iron law 1 grows. Six lines, twice, beats a dependency that has
-    to be tracked.
+    taken from it is too.
+
+    **The cast does two things and only one of them is a widening.** Measured
+    over ``{init, model consts} x {float32, float64}``: what makes this
+    function load-bearing is the MODEL's arrays being float32, and an init that
+    is already float64 does not rescue them, because ``jnp.array(1.0)`` is
+    *weakly* typed and a weak float64 adopts a strong float32's dtype rather
+    than promoting it. ``astype`` strips the weak type, and that is what lets
+    the init win the promotion so the prediction reaches bayesmith's
+    ``refuse_single_precision`` in double. A variant that cast only where the
+    dtype was float32 would be refused on a model declared under x64 -- pinned
+    by ``TestAModelDeclaredInSinglePrecision`` in
+    ``tests/inference/test_prior_sensitivity.py``, which exists because every
+    other fixture in that file is built under an x64 session and none of them
+    could tell this function from the identity.
+
+    Identical to :func:`~rheplicant.inference.identifiability._widened` and
+    deliberately not shared with it: that module is a preserved surface for
+    exactly one consumer, and importing a second private name across modules is
+    how the census in iron law 1 grows. Six lines, twice, beats a dependency
+    that has to be tracked.
     """
 
     def widen(value: jax.Array) -> jax.Array:

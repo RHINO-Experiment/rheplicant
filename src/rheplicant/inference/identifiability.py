@@ -472,6 +472,14 @@ def _widened(values: dict[str, jax.Array]) -> dict[str, jax.Array]:
     45-test file went red at once on bayesmith's "the joint Jacobian came back
     float32" -- which is the refusal doing its job rather than a surprise.
 
+    The ``astype`` also strips the WEAK type, and that half is not visible from
+    this module: ``jnp.array(1.0)`` under x64 is a weak float64, which adopts a
+    strong float32's dtype instead of promoting it, so an init that is already
+    float64 still fails to carry a float32 model. Every fixture here declares
+    in float32, so only the widening half is exercised; the weak-type half is
+    pinned in ``tests/inference/test_prior_sensitivity.py``, against the twin
+    of this function in ``sensitivity.py``.
+
     Complex latents are widened to ``complex128`` rather than to a real type.
     A selected complex latent is refused upstream by
     :func:`_check_differentiable`; an UNSELECTED one is legal, is held fixed,

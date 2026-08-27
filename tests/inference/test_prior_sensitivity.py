@@ -33,6 +33,7 @@ if the implementation drifted:
   move by 0.1 sigma. The declared 0.3 is 3.8x looser than that.
 """
 
+import contextlib
 import dataclasses
 
 import equinox as eqx
@@ -1178,3 +1179,160 @@ class TestTheCounterfactualIsAnchoredWhereItCanBe:
         assert float(report.shift_at("fg_beta", hypothetical)) == pytest.approx(
             truth, rel=tolerance
         )
+
+
+# ------------------------------------------ declared in single precision --
+
+
+@contextlib.contextmanager
+def _ambient_float32():
+    """Build things the way an ordinary rheplicant session builds them.
+
+    This module's autouse ``_float64`` fixture is right for the tour and wrong
+    for this question: it makes the twin, the state and the latents float64, so
+    nothing below the facade is ever asked to survive single precision.
+    """
+    was = jax.config.read("jax_enable_x64")
+    jax.config.update("jax_enable_x64", False)
+    try:
+        yield
+    finally:
+        jax.config.update("jax_enable_x64", was)
+
+
+class TestAModelDeclaredInSinglePrecision:
+    """The caller declares in float32; the verdict still comes back in double.
+
+    ``_widened`` was removed as an experiment while ``sensitivity`` was being
+    switched and all 64 tests in this file stayed green — recorded as the open
+    item S6 in ``2026-08-27-wave-A-sensitivity.md``, with two opposite
+    dispositions: dead code, or load-bearing with no fixture to exercise it.
+    Measured, it is the second, and this class is the missing fixture. Every
+    other fixture here is built under the module's ``_float64``, which is right
+    for the tour — its ADC counts are float64 counts — and which removes the
+    condition entirely.
+
+    **The condition is the MODEL's own arrays, not the init's dtype.** Four
+    cells of ``{init, model consts} x {float32, float64}``, ``_widened``
+    against ``_widened`` replaced by the identity:
+
+    ====================  ==================  ==============================
+    model consts          init                without ``_widened``
+    ====================  ==================  ==============================
+    float64               float64             passes
+    float64               float32             passes
+    float32               float64 (weak)      **refused**
+    float32               float32             **refused**
+    ====================  ==================  ==============================
+
+    The third row is the one that names the mechanism, and it is why the
+    docstring on ``_widened`` was rewritten in this batch: ``jnp.array(1.0)``
+    is **weakly** typed, and a weak float64 adopts a strong float32's dtype
+    instead of promoting it. ``astype(float64)`` therefore does two things and
+    only one of them is a widening — the other is stripping the weak type, so
+    that the init wins the promotion against the model's float32 constants and
+    the prediction reaches ``refuse_single_precision`` in double.
+    """
+
+    @pytest.fixture
+    def affine32(self):
+        """The affine fixture of :class:`TestTheClosedFormAgreesWithTheRefit`,
+        declared the way a config-driven run declares it.
+
+        Small and poor on purpose for the same reason it is there: eight
+        channels and unit noise, so the prior is visible against the
+        likelihood. Nothing here is float64.
+        """
+        from rheplicant.radio import ForegroundOperator, GainOperator, assemble
+
+        with _ambient_float32():
+            n = 8
+            freq = jnp.linspace(60e6, 85e6, n)
+            state = State(
+                coords=Coordinates(time=jnp.arange(float(n)), freq=freq),
+                key=jax.random.key(0),
+                meta={"telescope": "affine-single"},
+            )
+            twin = assemble(
+                ForegroundOperator(
+                    amplitude=jnp.array(1.0),
+                    spectral_index=jnp.array(2.5),
+                    ref_freq=70e6,
+                ),
+                GainOperator(gain=jnp.array(1.1)),
+            )
+            observed = twin(state).data
+            space = ParameterSpace(
+                latents=[
+                    Latent("gain", init=jnp.array(1.0), prior=dist.Normal(1.4, 0.2))
+                ],
+                bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
+            )
+        return {"space": space, "twin": twin, "state": state, "observed": observed}
+
+    def test_the_fixture_really_is_declared_in_single_precision(self, affine32):
+        """Without this the class below is a second copy of the affine test.
+
+        Everything the facade does not cast is checked: the init, the data, and
+        one of the model's own coordinate arrays. If a later edit gives this
+        fixture x64 — the way the rest of the module has it — this assertion is
+        what says so, rather than three tests quietly passing for free.
+        """
+        assert affine32["space"].initial_values()["gain"].dtype == jnp.float32
+        assert affine32["observed"].dtype == jnp.float32
+        assert affine32["state"].coords.freq.dtype == jnp.float32
+
+    def test_the_verdict_comes_back_in_double(self, affine32):
+        """The whole point of forcing x64: a float32 model, a float64 answer.
+
+        Without ``_widened`` this raises instead — bayesmith's
+        ``refuse_single_precision`` on the prediction, which is the refusal
+        doing its job and not a surprise. The report is checked for the
+        property that made the affine model worth using, not merely for a
+        dtype: on an exactly quadratic posterior the independent refit is
+        Newton-exact, so the closed form has nothing to hide behind.
+        """
+        with _ambient_float32():
+            report = prior_sensitivity(
+                affine32["space"], affine32["twin"], affine32["state"],
+                affine32["observed"], 1.0,
+            )
+        assert report.mode.dtype == jnp.float64
+        assert report.precision.dtype == jnp.float64
+        assert report.sigma_post.dtype == jnp.float64
+        row = report.for_latent("gain")
+        closed, refit = float(row["shift_sigma"]), float(row["shift_sigma_refit"])
+        assert closed == pytest.approx(refit, rel=VERIFY_RTOL, abs=VERIFY_ATOL), (
+            f"closed form {closed:+.9f} against an exact refit {refit:+.9f} on a "
+            "model declared in single precision. A float32 Hessian is noise at "
+            "the 1e-7 level, which is where these two would first disagree."
+        )
+        assert bool(np.all(report.verified))
+
+    def test_a_weak_float64_init_does_not_carry_a_float32_model(self, affine32):
+        """The half of ``_widened`` that is not a widening.
+
+        The init here is **already float64** — declared under x64, like every
+        other latent in this module — and the model around it is float32. A
+        ``_widened`` that only cast where the dtype was float32 would leave
+        this weakly typed, the weak float64 would adopt the model's float32,
+        and the prediction would arrive in single precision anyway. Measured:
+        ``forward`` returns float32 for the raw init and float64 for the
+        widened one, from the same values.
+        """
+        space = ParameterSpace(
+            latents=[Latent("gain", init=jnp.array(1.0), prior=dist.Normal(1.4, 0.2))],
+            bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
+        )
+        init = space.initial_values()["gain"]
+        assert init.dtype == jnp.float64 and init.weak_type, (
+            "this test is about a WEAKLY typed float64; if `initial_values` "
+            "starts returning a strong one, the condition is gone and so is "
+            "the test's subject."
+        )
+        with _ambient_float32():
+            report = prior_sensitivity(
+                space, affine32["twin"], affine32["state"], affine32["observed"], 1.0
+            )
+        assert report.mode.dtype == jnp.float64
+        assert bool(np.all(report.verified))
