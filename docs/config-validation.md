@@ -174,8 +174,11 @@ the most benign ADC this package can build (`model.adc: {scale: {value: 1.0,
 unit: adc_count/K}, n_bits:
 12}`, achieved peak `12.116166 adc_count` against a `2048 adc_count` clip
 limit — the real forward pass clips *nothing*): `linearity` still refuses,
-departure `5.32e+00` at the `1000x` probe against `rtol=1.19e-03`, with the
-`0.001x` and `1x` probes both exactly `0`. **This is correct, not a false
+departure `2.16e+00` at the `1000x` probe against `rtol=1.19e-03`, with the
+`0.001x` and `1x` probes both exactly `0`. (That departure was `5.32e+00`
+until 2026-08-27, when probe magnitudes moved from `max|init|` to the
+latent's declared prior width — the clip is reached either way, at a
+different distance.) **This is correct, not a false
 positive** — a converter is a deliberate non-linearity, and the claim really
 is false at the probe's outer scale even when it is true at the run's own
 operating point. The escape is `linearity`'s own `mode:` — decline the claim

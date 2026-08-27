@@ -362,6 +362,32 @@ TIGHT_GAIN = {"init": 1.0, "linear": True, "into": "gain.gain",
 CENTRE_LATENT = {"init": 75.0, "linear": True, "into": "global_signal.centre",
                  "prior": {"normal": {"loc": 75.0, "scale": 10.0}}}
 
+#: The same latent with an uncertainty wide enough for the probe to REACH its
+#: curvature -- the fixture for "check: refuses a latent that is not linear".
+#:
+#: Two latents rather than a wider ``scale`` on one, because
+#: :data:`CENTRE_LATENT`'s 10.0 is load-bearing elsewhere:
+#: ``test_width_fisher_falls_back_to_the_prior_where_the_likelihood_is_flat``
+#: asserts the reported sigma IS that 10.0.
+#:
+#: Why a second one became necessary (D16 axis 1, ruled 2026-08-27): probe
+#: magnitudes used to be multiples of ``max|init|`` and are now multiples of
+#: the DECLARED prior width, because the prior is where the sampler goes and
+#: an all-zero init made the probes absolute. Measured on this model: at the
+#: old anchor the 1000x probe departed by 1.473e-01 against an rtol of
+#: 1.192e-03 and refused; at the new one it reaches 7.5x less far, the
+#: departure falls under the tolerance, and the check accepts. So a fixture
+#: that exists to BE refused now has to declare an uncertainty that reaches
+#: the non-linearity -- at scale 50.0 the departure is 9.674e-02, at 100.0 it
+#: is 1.994e-01.
+#:
+#: This is the probe answering a different question, not a weaker one: over
+#: +-10 the prediction really is affine to better than the tolerance, and it
+#: is +-100 where it stops being.
+CURVED_CENTRE_LATENT = {"init": 75.0, "linear": True,
+                        "into": "global_signal.centre",
+                        "prior": {"normal": {"loc": 75.0, "scale": 100.0}}}
+
 
 def run_product(document, name="conjugate.wiener"):
     """The named run of ``document``, executed, and its product.

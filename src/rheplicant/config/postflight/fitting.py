@@ -241,9 +241,23 @@ def _departure(measured: Mapping[str, Mapping[float, float]],
     table that appears to have probed fewer scales than it did, so whatever
     encodes this downstream needs an answer for a non-finite float, and that
     answer is not zero.
+
+    **The error is NOT coerced with ``float()``, and that is load-bearing.**
+    Since D16 axis 5 a departure may arrive as an ``Unresolved`` -- a float
+    subclass meaning "the roundoff floor declined to judge this", whose string
+    says so.  ``float()`` keeps the value and destroys the marker, so the
+    attribute would report a bare number while the message beside it rendered
+    ``unresolved:``, and the two would describe the same run differently.
+    ``test_C12_carries_its_numbers_on_the_PASSING_branch`` compares them and
+    caught exactly that.  The coercion was there for hashability, which a
+    float subclass already has, so it was never buying anything.
+
+    This module does not import the inference package (the layer boundary),
+    and does not need to: the value passes through, and nothing here asks what
+    type it is.
     """
     table = tuple(
-        (name, tuple((float(scale), float(error))
+        (name, tuple((float(scale), error)
                      for scale, error in sorted(measured[name].items())))
         for name in names if name in measured
     )

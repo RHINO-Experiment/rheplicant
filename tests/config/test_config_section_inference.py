@@ -535,11 +535,18 @@ class TestValidateRunsAtLoad:
         to drift.
 
         ``check_linearity`` runs ``_isolate`` before ``_require_inexact``
-        (``linear.py:517`` then ``:518``) and ``_isolate`` validates the space
-        against the pipeline -- so C12, which calls it once per latent
-        declared ``linear: true``, costs one extra validate each. Measured on
-        ``conjugate_document()`` (one linear latent): **2**; on the two-latent
-        document: **3**.
+        and ``_isolate`` validates the space against the pipeline -- so C12,
+        which calls it once per latent declared ``linear: true``, costs one
+        extra validate each.
+
+        **Times the number of at-points, since D16 axis 2 (2026-08-27).** The
+        check now asks "affine given the outside latents" at
+        ``DEFAULT_AT_POINTS`` of their values rather than at the one they were
+        declared at, and rebuilds the isolated map at each. Measured on
+        ``conjugate_document()`` (one linear latent): **4**, and on the
+        two-latent document: **7**; it was 2 and 3 when a check meant one
+        point. The count is DERIVED from the constant below rather than
+        written out again, so moving the constant moves this test with it.
 
         **The surviving invariant is "validate is called, and every call is on
         the FIT twin"**, and that second half is the one the 3B defect was
@@ -554,9 +561,11 @@ class TestValidateRunsAtLoad:
         from rheplicant.inference import ParameterSpace
         from tests.config.exit_helpers import TWO_LATENTS, conjugate_document
 
-        for label, inference, expected in (
-            ("one linear latent", None, 2),
-            ("two linear latents", dict(TWO_LATENTS), 3),
+        from rheplicant.inference.linear import DEFAULT_AT_POINTS
+
+        for label, inference in (
+            ("one linear latent", None),
+            ("two linear latents", dict(TWO_LATENTS)),
         ):
             seen = []
             document = (conjugate_document() if inference is None
@@ -567,7 +576,8 @@ class TestValidateRunsAtLoad:
             run = load_document(document)
             linear = [name for name in run.inference.space.names
                       if run.inference.space.latent(name).linear]
-            assert len(seen) == expected == 1 + len(linear), label
+            expected = 1 + DEFAULT_AT_POINTS * len(linear)
+            assert len(seen) == expected, label
             assert all(space is run.inference.space for space, _ in seen), label
             assert all(pipeline is run.inference.fit_twin
                        for _, pipeline in seen), label

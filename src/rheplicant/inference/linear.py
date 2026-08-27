@@ -85,6 +85,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.exact.linearity import DEFAULT_AT_POINTS as _DEFAULT_AT_POINTS
+from bayesmith.exact.linearity import RELATIVE_FLOOR_FACTOR, Unresolved
 
 from rheplicant.core.conditioning import (
     POWER_ITERATIONS,
@@ -411,6 +413,110 @@ def _magnitude(latent: Any) -> float:
     return magnitude if magnitude != 0.0 else 1.0
 
 
+#: How many values of the OUTSIDE latents a check looks at (D16 axis 2, ruled
+#: 2026-08-27). Imported from the sibling package rather than spelled again:
+#: one statement of the number, both sides reading it.
+DEFAULT_AT_POINTS: int = _DEFAULT_AT_POINTS
+
+
+def _prior_at_points(
+    space: ParameterSpace,
+    selected: Sequence[str],
+    at: dict[str, jax.Array],
+    count: int,
+    key: jax.Array,
+) -> list[dict[str, jax.Array]]:
+    """``at``, plus ``count - 1`` draws from the OUTSIDE latents' own priors.
+
+    D16 axis 2. Checking at one point is how a check becomes a
+    moderate-parameter probe -- the failure mode ``boundary-validation.md``
+    exists to prevent -- and "affine GIVEN the outside latents" is a claim
+    about the values they will actually take, not about the one they were
+    declared at. Measured before the change: a model affine in ``u`` exactly
+    when ``w`` sits at its declared init reported **0.0 at every scale** and
+    was accepted; one step away it refuses.
+
+    A latent with no prior to draw from keeps its ``at`` value in every point,
+    and says nothing: a free parameter has no distribution to sample, and
+    inventing a spread for it would probe somewhere the declaration never
+    claimed anything about.
+    """
+    chosen = set(selected)
+    drawable = [
+        (n, _gaussian_parameters(space.latent(n).prior))
+        for n in space.names
+        # An INTEGER latent is not drawable either, and the check for it is
+        # separate from "has no prior" on purpose: `_require_inexact` refuses
+        # an integer dtype among the SELECTED latents, but an outside one is
+        # perfectly legal (a channel count, a mode index) and simply has no
+        # Gaussian draw. Measured: `jax.random.normal` refuses an int32 dtype
+        # outright, so without this an entirely valid document dies here with
+        # a message about dtypes rather than a verdict about linearity.
+        if n not in chosen
+        and jnp.issubdtype(jnp.asarray(space.latent(n).init).dtype, jnp.inexact)
+    ]
+    points = [dict(at)]
+    for index in range(1, max(count, 1)):
+        point = dict(at)
+        for position, (member, parameters) in enumerate(drawable):
+            if parameters is None:
+                continue
+            template = jnp.asarray(space.latent(member).init)
+            sub_key = jax.random.fold_in(jax.random.fold_in(key, index), position)
+            loc, scale = parameters
+            point[member] = jnp.asarray(loc, dtype=template.dtype) + jnp.asarray(
+                scale, dtype=template.dtype
+            ) * jax.random.normal(sub_key, template.shape, dtype=template.dtype)
+        points.append(point)
+    return points
+
+
+def _worse(current: float, value: float) -> float:
+    """``max`` that PROPAGATES NaN, and keeps an ``Unresolved`` that wins.
+
+    ``max`` alone drops NaN silently on one argument order and returns it on
+    the other, and a NaN here means "this probe was unusable", which must
+    survive a merge across at-points rather than depend on iteration order.
+    """
+    if np.isnan(current) or np.isnan(value):
+        return float("nan")
+    return current if current >= value else value
+
+
+def _probe_anchor(latent: Any) -> float:
+    """The magnitude one probe is measured in: the latent's PRIOR width.
+
+    D16 axis 1, ruled 2026-08-27. This used to be ``max|init|``
+    (:func:`_magnitude`), and the reason it moved is written into that
+    function's own neighbourhood: an all-zero ``init`` has no scale to take,
+    falls back to 1.0, and the probes become absolute -- so a sky declared at
+    zero, which is the ordinary declaration, was probed at magnitudes that
+    have nothing to do with where the sampler will go. The PRIOR is where it
+    will go, so that is what a probe is measured in.
+
+    Measured before the change: on ``signal + 1e-7 signal**2`` with
+    ``max|init| = 1`` and a prior width of 100, the old anchor reached 1e3 and
+    accepted (worst 8.24e-05 against rtol 1.19e-03) while the new one reaches
+    1e5 and refuses. Same criteria, different reach.
+
+    Falls back to ``max|init|`` when there is no Gaussian prior to read -- a
+    prior-free latent, or one whose prior is not Gaussian in the latent
+    itself. :func:`_gaussian_parameters` identifies that by TYPE and not by
+    attribute, which matters here for the same reason it matters there:
+    ``LogNormal`` carries a ``.scale`` that is a width in ``log x``.
+
+    ``_magnitude`` itself is untouched: ``engines.py`` reads it to turn a
+    gradient block's ``learning_rate`` into an absolute step, and that is a
+    different question with a different right answer.
+    """
+    parameters = _gaussian_parameters(latent.prior)
+    if parameters is not None and not _holds_a_tracer(parameters[1]):
+        width = float(np.max(np.abs(np.asarray(parameters[1]))))
+        if np.isfinite(width) and width > 0.0:
+            return width
+    return _magnitude(latent)
+
+
 def _single_probe(
     space: ParameterSpace, name: str, key: jax.Array
 ) -> Callable[[int, float], jax.Array]:
@@ -423,7 +529,7 @@ def _single_probe(
     models while both reported on "linearity".
     """
     latent = space.latent(name)
-    magnitude = _magnitude(latent)
+    magnitude = _probe_anchor(latent)
 
     def probe_at(index: int, scale: float) -> jax.Array:
         return magnitude * scale * jax.random.normal(
@@ -446,7 +552,7 @@ def _group_probe(
     def probe_at(index: int, scale: float) -> dict[str, jax.Array]:
         root = jax.random.fold_in(key, index)
         return {
-            member: _magnitude(space.latent(member)) * scale * jax.random.normal(
+            member: _probe_anchor(space.latent(member)) * scale * jax.random.normal(
                 jax.random.fold_in(root, position),
                 space.latent(member).init.shape,
                 dtype=space.latent(member).init.dtype,
@@ -455,6 +561,36 @@ def _group_probe(
         }
 
     return probe_at
+
+
+def _reported(
+    values: jax.Array, kept: jax.Array, departure: jax.Array, threshold: float
+) -> float:
+    """The worst of ``values`` among the elements the roundoff floor kept.
+
+    That is the number the criterion actually JUDGED, so it is the number a
+    refusal quotes: reporting the raw maximum instead would print values above
+    the threshold beside a verdict of "pass" and read as a broken guard.
+
+    **A masked element with a real departure is reported, not zeroed.** The
+    mask holds two very different populations. An element whose departure is
+    exactly 0.0 is bitwise-affine, and a reported 0.0 says so truthfully. An
+    element whose departure is non-zero, sits under the floor, and WOULD have
+    breached ``threshold`` had it been judged is a question the arithmetic
+    could not answer -- reporting 0.0 there states the model was measured and
+    found exactly affine, which is the opposite of what happened. Those come
+    back as :class:`~bayesmith.exact.linearity.Unresolved`, a float whose
+    string says it was not judged.
+
+    Adopted with D16 axis 5 rather than invented here, and the type is
+    IMPORTED rather than redefined so that ``isinstance`` means the same thing
+    on both sides of the seam.
+    """
+    judged = float(jnp.max(jnp.where(kept, values, 0.0)))
+    declined = (departure > 0) & ~kept & (values > threshold)
+    if not bool(jnp.any(declined)):
+        return judged
+    return Unresolved(max(judged, float(jnp.max(jnp.where(declined, values, 0.0)))))
 
 
 def _affinity_errors(
@@ -476,33 +612,47 @@ def _affinity_errors(
         rtol = 1e4 * float(jnp.finfo(baseline.dtype).eps)
 
     epsilon = float(jnp.finfo(baseline.dtype).eps)
+    # NOT the 1e-300 literal this used to carry. Measured on the other side of
+    # the seam: 1e-300 underflows to 0.0 in float32, so an element the block
+    # cannot move at all gives 0/0 = NaN and the finiteness branch reads that
+    # as a refusal -- condemning an entirely honest model.
+    tiny = float(jnp.finfo(baseline.dtype).tiny)
     errors: dict[float, float] = {}
     verdicts: dict[float, bool] = {}
     for index, scale in enumerate(scales):
         probe = probe_at(index, scale)
         actual = g(probe)
         predicted = baseline + tangent(probe)
-        # Measure against the VARIATION, not the total: a large constant offset
-        # would otherwise hide a completely nonlinear response.
-        variation = float(jnp.max(jnp.abs(actual - baseline)))
-        departure = float(jnp.max(jnp.abs(actual - predicted)))
-        errors[scale] = departure / max(variation, 1e-300)
-
+        # PER ELEMENT, since D16 axis 5 (owner ruled 2026-08-27). A maximum
+        # over the whole output lets a bright entry supply both the yardstick
+        # and the roundoff floor for a faint one: measured, six channels at
+        # 1e8 beside six carrying a 1e-2 quadratic reported 2.81e-14 -- a
+        # false "perfectly affine" -- and the same curvature alone refuses.
+        #
+        # Measure against the VARIATION, not the total: a large constant
+        # offset would otherwise hide a completely nonlinear response.
+        variation = jnp.abs(actual - baseline)
+        departure = jnp.abs(actual - predicted)
+        magnitude = jnp.maximum(jnp.abs(actual), jnp.abs(baseline))
+        relative = departure / jnp.maximum(variation, tiny)
         # A departure smaller than the arithmetic's OWN noise floor is not
         # evidence of curvature; without this the relative measure explodes at
         # small probes, where the variation is vanishing but roundoff is not,
-        # and rejects perfectly linear blocks. The floor is set by the magnitudes
-        # actually being differenced AT THIS PROBE — not by a constant, and not
-        # by the baseline alone. A constant floor would silently exempt every
-        # model whose prediction is small in its own units, and a baseline-only
-        # floor would let an unrelated bright component disable the check.
-        floor = 1e4 * epsilon * max(
-            float(jnp.max(jnp.abs(actual))), float(jnp.max(jnp.abs(baseline)))
+        # and rejects perfectly linear blocks. The floor is per element and set
+        # by the magnitudes actually being differenced AT THIS ELEMENT -- not
+        # by a constant, which would exempt every model whose prediction is
+        # small in its own units, and not by the output's maximum, which is
+        # the dilution above.
+        judged = departure > RELATIVE_FLOOR_FACTOR * epsilon * magnitude
+        finite = bool(jnp.all(jnp.isfinite(relative)))
+        errors[scale] = _reported(relative, judged, departure, rtol) if finite else (
+            float("nan")
         )
         # NaN must count as a FAILURE, not a pass: `nan > rtol` is False, so a
         # naive comparison treats an unusable probe as evidence of linearity.
-        finite = np.isfinite(errors[scale]) and np.isfinite(departure)
-        verdicts[scale] = (not finite) or (errors[scale] > rtol and departure > floor)
+        verdicts[scale] = (not finite) or bool(
+            jnp.any(judged & (relative > rtol))
+        )
 
     failed = sorted(scale for scale, bad in verdicts.items() if bad)
     return errors, failed, rtol
@@ -518,6 +668,7 @@ def check_linearity(
     at: dict[str, jax.Array] | None = None,
     scales: Sequence[float] = DEFAULT_SCALES,
     rtol: float | None = None,
+    at_points: Sequence[dict[str, jax.Array]] | None = None,
     key: jax.Array | None = None,
 ) -> dict[float, float]:
     """Verify that the prediction really is affine in one latent — or in a group.
@@ -540,15 +691,26 @@ def check_linearity(
         at: values for the latents OUTSIDE the block. Linearity is a claim
             *given* them, so check it where the sampler will actually be.
             Defaults to the declared initial values.
+        at_points: the outside values to check at, in full. Defaults to ``at``
+            plus ``DEFAULT_AT_POINTS - 1`` draws from those latents' own
+            priors (D16 axis 2, ruled 2026-08-27). **Passing a single point is
+            how a check becomes a moderate-parameter probe**, which is the
+            failure mode ``boundary-validation.md`` exists to prevent; do it
+            only when the model is used at exactly one outside value. Measured
+            before the default moved: a model affine in ``u`` exactly when the
+            outside latent sits at its declared init reported 0.0 at every
+            scale and was accepted. A latent with no Gaussian prior keeps its
+            ``at`` value at every point -- a free parameter has no
+            distribution to draw from.
         scales: probe magnitudes, as multiples of the latent's own scale,
-            taken from ``max|init|`` — per latent, for a group, since two
+            taken from its **prior width** — per latent, for a group, since two
             latents in one block are routinely in different units. The default
             spans six orders of magnitude on purpose — see the module
-            docstring. NOTE: an all-zero ``init`` has no scale to take, so it
-            falls back to 1.0 and the probes become absolute. If your latent
-            lives at 1e6 (sky alms in kelvin, say), give a representative
-            ``init`` or pass ``scales`` explicitly — otherwise the sweep never
-            reaches the regime the sampler will actually explore.
+            docstring. The prior is where the sampler will actually go, which
+            is why it and not ``init`` sets the magnitude: an all-zero ``init``
+            is the ordinary declaration for a sky, and anchoring on it made the
+            probes absolute. A latent with no Gaussian prior to read falls back
+            to ``max|init|``, and to 1.0 if that is zero too.
         rtol: tolerance on the relative departure from affinity. Default:
             ``1e4 * eps`` of the prediction dtype, which leaves room for
             accumulated roundoff in a long reduction without admitting real
@@ -576,9 +738,12 @@ def check_linearity(
 
     if names is None:
         name = _resolve_name(space, name)
-        g, zero = _isolate(space, pipeline, state_template, name, at)
-        _require_inexact(space, (name,))
+        selected = (name,)
+        _require_inexact(space, selected)
         probe_at = _single_probe(space, name, key)
+
+        def isolate_at(point, _n=name):
+            return _isolate(space, pipeline, state_template, _n, point)
 
         subject = (
             f"Latent {name!r} is declared linear=True, but the prediction is not affine "
@@ -591,9 +756,11 @@ def check_linearity(
         )
     else:
         selected = _resolve_names(space, names)
-        g, zero = _isolate_group(space, pipeline, state_template, selected, at)
         _require_inexact(space, selected)
         probe_at = _group_probe(space, selected, key)
+
+        def isolate_at(point, _s=selected):
+            return _isolate_group(space, pipeline, state_template, _s, point)
 
         subject = (
             f"Latents {list(selected)} are each declared linear=True, but the prediction "
@@ -609,7 +776,28 @@ def check_linearity(
             "costs before you choose it."
         )
 
-    errors, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol)
+    # D16 axis 2: the claim is "affine GIVEN the outside latents", so it is
+    # checked at more than the one value they were declared at. The verdicts
+    # are merged per scale by the WORSE of them -- the axis-4 ruling, which
+    # keeps this function's published return shape one level deep.
+    points = (
+        list(at_points)
+        if at_points is not None
+        else _prior_at_points(
+            space, selected, _values_at(space, {}, at), DEFAULT_AT_POINTS, key
+        )
+    )
+    merged: dict[float, float] = {}
+    failed_scales: list[float] = []
+    for point in points:
+        g, zero = isolate_at(point)
+        errors, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol)
+        for scale, value in errors.items():
+            merged[scale] = value if scale not in merged else _worse(
+                merged[scale], value
+            )
+        failed_scales.extend(f for f in failed if f not in failed_scales)
+    errors, failed = merged, sorted(failed_scales)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         # The subclass, and the SAME sentence: `detail` renders the numbers for

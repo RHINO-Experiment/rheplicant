@@ -2089,7 +2089,7 @@ class TestPlan3CsSurfaceAndItsPage:
             f"{self.PAGE} no longer names linearity's own escape beside the "
             "shipped-interaction paragraph."
         )
-        assert "5.32e+00" in body and "12.116166" in body, (
+        assert "2.16e+00" in body and "12.116166" in body, (
             f"{self.PAGE}'s shipped-interaction paragraph no longer carries "
             "the measured departure/peak it claims."
         )
@@ -2117,7 +2117,7 @@ class TestPlan3CsSurfaceAndItsPage:
             "page's central claim ('refused... whether or not it "
             "saturates') is stale."
         )
-        assert "5.32e+00" in checks["C12"].message, (
+        assert "2.16e+00" in checks["C12"].message, (
             "C12's own message no longer carries the departure the page "
             "quotes."
         )

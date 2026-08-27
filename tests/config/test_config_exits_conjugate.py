@@ -25,6 +25,7 @@ from rheplicant.config.sections.runs import parse_runs, run_document
 from rheplicant.core.errors import ParameterSpaceError
 from tests.config.exit_helpers import (
     CENTRE_LATENT,
+    CURVED_CENTRE_LATENT,
     FROZEN,
     PRIOR_FREE,
     RADIOMETER,
@@ -475,10 +476,14 @@ class TestCheckReachesLinearOperator:
         # does not touch (this fixture declines it via _declined()) -- but
         # the document is no longer "at defaults" in the sense a reader took
         # from the old name, now that C12 is refuse-by-default too.
+        # CURVED_CENTRE_LATENT, not CENTRE_LATENT: since D16 axis 1 the probe
+        # magnitudes follow the DECLARED prior width, and this fixture has to
+        # declare an uncertainty that reaches the curvature it exists to
+        # exhibit. That helper's comment carries the measurement.
         with pytest.raises(ParameterSpaceError, match="JOINTLY"):
             run_document(_declined(wiener_document(
                 {**WIENER, "names": ["c"]},
-                parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
+                parameters={"c": CURVED_CENTRE_LATENT}, at={"c": 76.0})))
 
     def test_check_false_reaches_linear_operator(self):
         # Measured: the same document with check: false solves and lands at
