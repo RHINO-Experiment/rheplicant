@@ -86,7 +86,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from bayesmith.exact.linearity import DEFAULT_AT_POINTS as _DEFAULT_AT_POINTS
-from bayesmith.exact.linearity import RELATIVE_FLOOR_FACTOR, Unresolved
+from bayesmith.exact.linearity import (
+    RELATIVE_FLOOR_FACTOR,
+    WEIGHTED_FLOOR_FACTOR,
+    WEIGHTED_RTOL,
+    Unresolved,
+)
 
 from rheplicant.core.conditioning import (
     POWER_ITERATIONS,
@@ -599,7 +604,8 @@ def _affinity_errors(
     probe_at: Callable[[int, float], Any],
     scales: Sequence[float],
     rtol: float | None,
-) -> tuple[dict[float, float], list[float], float]:
+    noise: Any | None = None,
+) -> tuple[dict[float, float], dict[float, float] | None, list[float], float]:
     """Compare a map against its own linearization at zero, probe by probe.
 
     Shared verbatim by the single-latent and the grouped check, which differ
@@ -617,7 +623,24 @@ def _affinity_errors(
     # cannot move at all gives 0/0 = NaN and the finiteness branch reads that
     # as a refusal -- condemning an entirely honest model.
     tiny = float(jnp.finfo(baseline.dtype).tiny)
+    # D16 axis 3 (owner ruled 2026-08-27). "Small" has to be small compared to
+    # SOMETHING, and a departure can be far under the relative tolerance while
+    # being many noise widths wide -- which is the regime a conjugate solve
+    # gets wrong. Measured: on `signal + 1e-7 signal**2` the relative column
+    # reads 0.000e+00 at every probe while the sigma-weighted one reads
+    # 6.262e-02 against a threshold of 1e-3.
+    #
+    # `None` when the caller passed no noise, and then this criterion simply
+    # does not apply. That is NOT the shape D17's log gate took, and the
+    # difference is worth stating: there, a missing noise model made a
+    # POSITIVE claim unsafe (a log block that would be refused downstream), so
+    # the verdict went conservative. Here it only makes the check weaker, and
+    # the fallback verdict is the one this function gave before the axis
+    # moved -- so silence is the honest default rather than a refusal nobody
+    # could act on.
+    sigma = None if noise is None else jnp.abs(jnp.asarray(noise.std(baseline)))
     errors: dict[float, float] = {}
+    weighted_errors: dict[float, float] | None = None if sigma is None else {}
     verdicts: dict[float, bool] = {}
     for index, scale in enumerate(scales):
         probe = probe_at(index, scale)
@@ -650,12 +673,29 @@ def _affinity_errors(
         )
         # NaN must count as a FAILURE, not a pass: `nan > rtol` is False, so a
         # naive comparison treats an unusable probe as evidence of linearity.
-        verdicts[scale] = (not finite) or bool(
-            jnp.any(judged & (relative > rtol))
-        )
+        refused = (not finite) or bool(jnp.any(judged & (relative > rtol)))
+
+        if sigma is not None:
+            # In the units the likelihood divides by, and gated by a floor of
+            # its OWN -- four decades below the relative column's. Ungated it
+            # measures DYNAMIC RANGE rather than curvature; gated at the
+            # relative column's factor it could not fire on any model with
+            # more signal than noise.
+            in_sigma = departure / jnp.maximum(sigma, tiny)
+            above = departure > WEIGHTED_FLOOR_FACTOR * epsilon * magnitude
+            weighted_finite = bool(jnp.all(jnp.isfinite(in_sigma)))
+            weighted_errors[scale] = (
+                _reported(in_sigma, above, departure, WEIGHTED_RTOL)
+                if weighted_finite
+                else float("nan")
+            )
+            refused = refused or (not weighted_finite) or bool(
+                jnp.any(above & (in_sigma > WEIGHTED_RTOL))
+            )
+        verdicts[scale] = refused
 
     failed = sorted(scale for scale, bad in verdicts.items() if bad)
-    return errors, failed, rtol
+    return errors, weighted_errors, failed, rtol
 
 
 def check_linearity(
@@ -669,6 +709,7 @@ def check_linearity(
     scales: Sequence[float] = DEFAULT_SCALES,
     rtol: float | None = None,
     at_points: Sequence[dict[str, jax.Array]] | None = None,
+    noise: Any | None = None,
     key: jax.Array | None = None,
 ) -> dict[float, float]:
     """Verify that the prediction really is affine in one latent — or in a group.
@@ -715,6 +756,19 @@ def check_linearity(
             ``1e4 * eps`` of the prediction dtype, which leaves room for
             accumulated roundoff in a long reduction without admitting real
             curvature.
+        noise: the model's noise, enabling a SECOND criterion — the departure
+            in units of sigma, against
+            :data:`~bayesmith.exact.linearity.WEIGHTED_RTOL` (D16 axis 3,
+            ruled 2026-08-27). "Small" has to be small compared to something,
+            and a departure far under ``rtol`` can still be many noise widths
+            wide, which is the regime a conjugate solve gets wrong. Measured
+            on one such model, the relative column reads ``0.000e+00`` at
+            every probe while the weighted one reads ``6.262e-02``. Omitted,
+            only the relative criterion applies and the verdict is the one
+            this function gave before the axis moved — a weaker check, not a
+            different one, so no warning: unlike the log route, nothing here
+            makes a positive claim that a missing noise model would render
+            unsafe.
         key: PRNG key for the probes. Fixed by default, so the check is
             reproducible. For a group the per-latent sub-keys are folded in by
             position in the SORTED names, so permuting ``names`` probes the
@@ -788,18 +842,37 @@ def check_linearity(
         )
     )
     merged: dict[float, float] = {}
+    merged_weighted: dict[float, float] | None = None
     failed_scales: list[float] = []
     for point in points:
         g, zero = isolate_at(point)
-        errors, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol)
+        errors, weighted, failed, rtol = _affinity_errors(
+            g, zero, probe_at, scales, rtol, noise
+        )
         for scale, value in errors.items():
             merged[scale] = value if scale not in merged else _worse(
                 merged[scale], value
             )
+        if weighted is not None:
+            merged_weighted = merged_weighted or {}
+            for scale, value in weighted.items():
+                merged_weighted[scale] = value if scale not in merged_weighted else (
+                    _worse(merged_weighted[scale], value)
+                )
         failed_scales.extend(f for f in failed if f not in failed_scales)
-    errors, failed = merged, sorted(failed_scales)
+    errors, weighted, failed = merged, merged_weighted, sorted(failed_scales)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
+        # The second criterion's own column, and only when it was asked. Both
+        # are reported because the guard is a DISJUNCTION: one number against
+        # one threshold is unreadable half the time, since a reader sees a
+        # value under the tolerance printed beside a refusal and concludes the
+        # guard is broken.
+        weighted_detail = "" if weighted is None else (
+            "; in units of sigma against weighted_rtol="
+            f"{WEIGHTED_RTOL:.2e}: "
+            + ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in weighted.items())
+        )
         # The subclass, and the SAME sentence: `detail` renders the numbers for
         # a reader, and `errors=` hands the same numbers to a caller that has
         # to do something with them. Rendering them only would leave parsing
@@ -807,10 +880,12 @@ def check_linearity(
         raise LinearityRefused(
             f"{subject}: departure from its own linearization exceeds rtol={rtol:.2e} "
             f"(above the per-probe roundoff floor) at {failed} times {scale_of} "
-            f"({detail}). {remedy}",
+            f"({detail}){weighted_detail}. {remedy}",
             errors=errors,
             rtol=rtol,
             failed=failed,
+            weighted=weighted,
+            weighted_rtol=None if weighted is None else WEIGHTED_RTOL,
         )
     return errors
 

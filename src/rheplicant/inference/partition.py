@@ -138,6 +138,7 @@ def _may_share_a_block(
     scales: Sequence[float],
     rtol: float | None,
     log: bool,
+    noise: Any | None = None,
 ) -> bool:
     """Whether the prediction — or ``log`` of it — is affine in this PAIR, jointly.
 
@@ -152,6 +153,10 @@ def _may_share_a_block(
         (LinearityRefused, LogSpaceUnavailable) if log else (LinearityRefused,)
     )
     check = check_log_linearity if log else check_linearity
+    # `noise=` only for the linear check: `check_log_linearity` asks about
+    # `log(prediction)`, whose noise the transform is what REMOVES, so there is
+    # no sigma column for it to be judged in.
+    extra = {} if log else {"noise": noise}
     try:
         check(
             space,
@@ -161,6 +166,7 @@ def _may_share_a_block(
             at=at,
             scales=scales,
             rtol=rtol,
+            **extra,
         )
     except refusals:
         return False
@@ -205,7 +211,12 @@ def auto_blocks(
             :func:`~rheplicant.inference.linear.check_linearity`. Defaults to
             the declared initial values, which is where the plan's own
             first-sweep check evaluates the same claim.
-        noise: the model's noise. **A log-conjugate block is a claim about the
+        noise: the model's noise. Read twice, for two different questions.
+            **For the affinity check** it enables the second criterion — the
+            departure in units of sigma (D16 axis 3) — which is what tells a
+            curvature that is small against the signal from one that is small
+            against the noise. Omitted, only the relative criterion applies.
+            **A log-conjugate block is a claim about the
             LIKELIHOOD, not only about the prediction**, so whether one exists
             cannot be settled without it: taking logs simplifies a
             multiplicative noise and merely restates an additive one, and the
@@ -255,7 +266,7 @@ def auto_blocks(
         # one probed at the same points the re-check will use.
         check_linearity(
             space, pipeline, state_template, names=(name,), at=at,
-            scales=scales, rtol=rtol,
+            scales=scales, rtol=rtol, noise=noise,
         )
 
     # The noise settles the log question before any probe is worth running:
@@ -313,7 +324,7 @@ def auto_blocks(
     def linear_pair(first: str, second: str) -> bool:
         return _may_share_a_block(
             space, pipeline, state_template, first, second,
-            at=at, scales=scales, rtol=rtol, log=False,
+            at=at, scales=scales, rtol=rtol, log=False, noise=noise,
         )
 
     def log_pair(first: str, second: str) -> bool:

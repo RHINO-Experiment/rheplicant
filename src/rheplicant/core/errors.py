@@ -69,7 +69,17 @@ class LinearityRefused(ParameterSpaceError):
         rtol: the tolerance the comparison actually used, which is derived
             from the prediction's dtype when the caller passes none.
         failed: the scales that exceeded it, ascending -- a subset of
-            ``errors``' keys, and the same tuple the message names.
+            ``errors``' keys, and the same tuple the message names. A scale
+            can be in here because of EITHER criterion, which is why both
+            columns are carried rather than one.
+        weighted: ``{scale: departure in units of sigma}``, or ``None`` when
+            the check was run without a noise model and the second criterion
+            therefore did not apply. ``None`` rather than an empty mapping:
+            "not measured" and "measured as nothing" are different answers,
+            and this class exists because the second one used to be reported
+            for both.
+        weighted_rtol: the threshold that column was judged against, or
+            ``None`` for the same reason.
     """
 
     def __init__(
@@ -78,6 +88,8 @@ class LinearityRefused(ParameterSpaceError):
         errors: Mapping[float, float],
         rtol: float,
         failed: Sequence[float],
+        weighted: Mapping[float, float] | None = None,
+        weighted_rtol: float | None = None,
     ) -> None:
         super().__init__(*args)
         # Copied rather than aliased: the caller's ``errors`` is the same dict
@@ -87,6 +99,12 @@ class LinearityRefused(ParameterSpaceError):
         self.errors = dict(errors)
         self.rtol = float(rtol)
         self.failed = tuple(float(scale) for scale in failed)
+        # The SECOND criterion's column, and ``None`` when the caller gave no
+        # noise model for it to be measured against -- which is a different
+        # thing from "measured and found zero", so it is not defaulted to an
+        # empty mapping.
+        self.weighted = None if weighted is None else dict(weighted)
+        self.weighted_rtol = None if weighted_rtol is None else float(weighted_rtol)
 
 
 class LogSpaceUnavailable(ParameterSpaceError):

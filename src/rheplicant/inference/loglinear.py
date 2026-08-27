@@ -413,7 +413,13 @@ def check_log_linearity(
     def g_log(x: Any) -> jax.Array:
         return jnp.log(g(x))
 
-    errors, failed, rtol = _affinity_errors(g_log, zero, probe_at, scales, rtol)
+    # No noise column here, and that is the point of log space rather than an
+    # omission: the transform's whole purpose is to leave a noise that no
+    # longer depends on the prediction, so 'the departure in units of sigma'
+    # is a question about the ORIGINAL likelihood, not this one.
+    errors, _weighted, failed, rtol = _affinity_errors(
+        g_log, zero, probe_at, scales, rtol
+    )
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise LinearityRefused(

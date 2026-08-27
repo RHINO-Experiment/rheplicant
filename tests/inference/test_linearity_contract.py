@@ -1,8 +1,9 @@
 """What ``check_linearity`` decides, pinned per axis (D16, ruled 2026-08-27).
 
-Three of D16's five axes moved on that date, and each moved a verdict rather
-than a number: the probe anchor, the number of outside values checked at, and
-whether the departure is aggregated over the whole output or per element. The
+Four of D16's five axes moved on that date, and each moved a verdict rather
+than a number: the probe anchor, the number of outside values checked at, whether a second
+criterion in units of the noise applies, and whether the departure is
+aggregated over the whole output or per element. The
 fixtures here are the ones the adjudication probe measured with
 (``bayesmith/docs/probes/probe_12_d16_five_axes.py``), promoted to the suite
 because a probe that lives only beside a decision decays as soon as the
@@ -34,6 +35,7 @@ from rheplicant.inference.linear import (
     _probe_anchor,
     check_linearity,
 )
+from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 
 N_TIME, N_FREQ = 4, 12
@@ -276,3 +278,80 @@ class TestTheDepartureIsAggregatedPerElement:
         verdict, errors = _probe(honest, dict(self.SPEC), names=("u",))
         assert verdict == "accepted"
         assert set(errors) == set(DEFAULT_SCALES)
+
+
+class TestSmallComparedToWhat:
+    """Axis 3. A departure under the relative tolerance can still be many
+    noise widths wide, and that is the regime a conjugate solve gets wrong."""
+
+    @staticmethod
+    def _model(p):
+        signal = B1 @ p["u"]
+        return signal + 1e-7 * signal**2
+
+    SPEC: ClassVar[dict] = {"u": (jnp.array([1.0, 0.3]), jnp.zeros(2), 1.0, True)}
+
+    def test_without_a_noise_model_the_verdict_cannot_move_with_the_noise(self):
+        """The old contract, kept as the fallback and pinned as such.
+
+        Not a bug and not a warning: with no noise passed there is no second
+        criterion, and the answer is the one this check always gave. What
+        would be wrong is for it to LOOK like it had considered the noise.
+        """
+        verdicts = {
+            sigma: _probe(self._model, dict(self.SPEC), names=("u",))[0]
+            for sigma in (1e2, 1.0, 1e-2, 1e-4)
+        }
+        assert set(verdicts.values()) == {"accepted"}
+
+    @pytest.mark.parametrize(
+        ("sigma", "expected"),
+        [(1e2, "accepted"), (1.0, "refused"), (1e-2, "refused"), (1e-4, "refused")],
+    )
+    def test_with_one_the_verdict_moves_with_the_noise_alone(self, sigma, expected):
+        """The model, the probes and the departure never move; sigma does.
+
+        Measured at sigma=1: the relative column reads 0.000e+00 at every
+        probe -- under its own roundoff floor -- while the sigma-weighted one
+        reads 6.262e-02 against a threshold of 1e-3. So the refusal is the
+        second criterion's alone, which is what makes this axis a separate
+        question rather than a tighter tolerance on the first.
+        """
+        verdict, _ = _probe(
+            self._model,
+            dict(self.SPEC),
+            names=("u",),
+            noise=HomoscedasticNoise(sigma=sigma),
+        )
+        assert verdict == expected
+
+    def test_the_refusal_carries_both_columns_and_says_which_threshold(self):
+        """One number against one threshold is unreadable half the time.
+
+        The guard is a DISJUNCTION, so a reader shown only the relative column
+        would see a value under its tolerance printed beside a refusal and
+        conclude the guard is broken.
+        """
+        _, refused = _probe(
+            self._model,
+            dict(self.SPEC),
+            names=("u",),
+            noise=HomoscedasticNoise(sigma=1.0),
+        )
+        assert refused.weighted is not None
+        assert refused.weighted_rtol == pytest.approx(1e-3)
+        assert set(refused.weighted) == set(refused.errors)
+        assert max(float(v) for v in refused.weighted.values()) > refused.weighted_rtol
+        assert "weighted_rtol" in str(refused)
+
+    def test_no_noise_means_the_second_column_is_absent_not_empty(self):
+        """"Not measured" and "measured as nothing" are different answers.
+
+        The whole reason this payload exists is that the second was once
+        reported for both.
+        """
+        curved = lambda p: (B1 @ p["u"]) + 0.5 * (B1 @ p["u"]) ** 2  # noqa: E731
+        _, refused = _probe(curved, dict(self.SPEC), names=("u",))
+        assert refused.weighted is None
+        assert refused.weighted_rtol is None
+        assert "weighted_rtol" not in str(refused)
