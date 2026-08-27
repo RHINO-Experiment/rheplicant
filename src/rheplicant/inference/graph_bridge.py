@@ -367,6 +367,29 @@ def _observed_mask(noise: Any) -> Any:
     return jnp.logical_not(jnp.asarray(noise.flags))
 
 
+def _refuse_flags_that_do_not_match(noise: Any, prediction_shape: tuple[int, ...]) -> None:
+    """Ask the noise model for its sigma abstractly, so IT says what is wrong.
+
+    ``FlaggedNoise.std`` refuses a flags array that is not the prediction's
+    shape, in this package's words and with this package's exception class.
+    Every non-graph exit reaches that sentence by calling ``std``; a graph exit
+    does not -- it reads ``noise.flags`` for the node's ``mask`` and lets the
+    far side compare shapes, which refuses correctly and says
+    ``observed_mask``, a word the caller never used, wearing
+    ``ParameterSpaceError`` where this package promises
+    ``StateValidationError``.
+
+    So the check is brought back in front of the seam, and brought back by
+    CALLING the one that exists rather than by restating it. ``eval_shape``
+    runs the function abstractly: the shape comparison is an ordinary Python
+    ``if`` and fires, while nothing is computed. One sentence, one class, one
+    place it is written.
+    """
+    if not isinstance(noise, FlaggedNoise):
+        return
+    jax.eval_shape(noise.std, jax.ShapeDtypeStruct(prediction_shape, jnp.float32))
+
+
 def _refuse_a_noise_model_this_seam_cannot_read(noise: Any) -> None:
     """Say what a noise argument has to be, rather than failing where it is used."""
     if isinstance(noise, NoiseModel) and hasattr(noise, "depends_on_prediction"):
@@ -524,6 +547,7 @@ def _prevalidate(
     # The founding pre-validation: past this point sigma has been broadcast
     # into a distribution and the ambiguity is settled, wrongly and silently.
     check_noise_std_axis(noise, prediction_shape, "to_graph")
+    _refuse_flags_that_do_not_match(noise, prediction_shape)
     check_observed_shape(prediction_shape, observed, predictor="this forward model")
     if jnp.iscomplexobj(observed):
         raise StateValidationError(
@@ -643,6 +667,9 @@ def graph_for_information(
     forward: Callable[[dict[str, jax.Array]], jax.Array],
     values: Mapping[str, jax.Array],
     noise: Any,
+    *,
+    priors: Mapping[str, Any] | None = None,
+    caller: str = "JeffreysPrior",
 ) -> Any:
     """A graph for a FISHER question, built from a bare forward callable.
 
@@ -672,17 +699,29 @@ def graph_for_information(
 
     What is NOT synthesised is the noise: it is the caller's, because the whole
     subject of this prior is that the noise model chooses its shape.
+
+    ``priors`` overrides the flat declaration per latent, and it is what makes
+    this graph usable for a POSTERIOR precision as well as a likelihood one:
+    ``fisher_information(space=...)`` asks for the declared priors' curvature,
+    and the far side reads that off the graph's own nodes rather than from a
+    second argument. Absent (the default), every latent is flat and the answer
+    is the likelihood information alone.
     """
     import bayesmith
     import numpyro.distributions as distributions
 
     names = tuple(values)
     flat = distributions.ImproperUniform(distributions.constraints.real, (), ())
+    declared = {} if priors is None else dict(priors)
     prediction_shape = tuple(jax.eval_shape(forward, dict(values)).shape)
-    check_noise_std_axis(noise, prediction_shape, "JeffreysPrior")
+    check_noise_std_axis(noise, prediction_shape, caller)
+    _refuse_flags_that_do_not_match(noise, prediction_shape)
 
     def model(data: Any) -> None:
-        refs = [bayesmith.sample(name, _prior_factory(flat)) for name in names]
+        refs = [
+            bayesmith.sample(name, _prior_factory(declared.get(name, flat)))
+            for name in names
+        ]
         prediction = bayesmith.det(PREDICTION, _prediction_fn(forward, names), *refs)
         bayesmith.observe(
             OBSERVATION,
@@ -693,7 +732,7 @@ def graph_for_information(
             depends_on_prediction=bool(noise.depends_on_prediction),
         )
 
-    with translate("JeffreysPrior"):
+    with translate(caller):
         return bayesmith.trace(model, jnp.zeros(prediction_shape))
 
 

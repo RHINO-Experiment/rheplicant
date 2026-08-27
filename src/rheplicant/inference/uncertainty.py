@@ -47,7 +47,6 @@ from rheplicant.inference.noise import (
     HomoscedasticNoise,
     NoiseModel,
     check_noise_std_axis,
-    inverse_variance,
 )
 from rheplicant.inference.parameters import ParameterSpace
 
@@ -256,30 +255,6 @@ def as_noise_model(
     return noise if flags is None else FlaggedNoise(noise, flags)
 
 
-def _log_sigma_curvature(
-    noise: NoiseModel,
-    f_flat: Callable[[jax.Array], jax.Array],
-    x0: jax.Array,
-    prediction: jax.Array,
-) -> jax.Array:
-    """``(d log sigma/d theta)^T (d log sigma/d theta)`` over observed samples.
-
-    The Gaussian information carried by the *variance* rather than the mean.
-    Unobserved samples (infinite sigma) contribute a flat zero, which also
-    keeps their derivative from being a NaN.
-    """
-    shape = jnp.shape(prediction)
-
-    def log_sigma(x: jax.Array) -> jax.Array:
-        sigma = noise.std(jnp.reshape(f_flat(x), shape))
-        seen = jnp.isfinite(sigma)
-        safe = jnp.where(seen, sigma, 1.0)
-        return jnp.ravel(jnp.where(seen, jnp.log(safe), 0.0))
-
-    jac = jax.jacfwd(log_sigma)(x0)  # (n_data, n_params)
-    return jac.T @ jac
-
-
 def _prior_precision(
     space: ParameterSpace,
     names: tuple[str, ...] | None,
@@ -288,6 +263,27 @@ def _prior_precision(
     size: int,
 ) -> jax.Array:
     """``-d2 log p(theta)/dtheta2`` of the declared priors, over the flat vector.
+
+    **This is a registered DEFERRAL, not a decision to keep two spellings**
+    (G15 in ``2026-08-26-one-implementation.md`` §四). The likelihood half of
+    this module's Fisher is delegated; this diagonal is not, because the far
+    side cannot yet supply it for a NONLINEAR block and iron law 5 forbids
+    depending on a surface that is not released:
+
+    * ``local_block`` gives the right Jacobian for a nonlinear model and
+      carries **no prior at all** -- deliberately, and its own module docstring
+      says passing it to ``fisher_information(include_prior=True)`` must fail
+      loudly on the empty dict rather than fold in a curvature nobody declared;
+    * ``unchecked_operator`` carries the prior and takes its tangent at the
+      domain's ZERO, because an affine map has one tangent everywhere. For a
+      power law that is the wrong Jacobian.
+
+    Neither is wrong; there is simply no third one yet. **Discharge condition,
+    so this cannot quietly become permanent**: when bayesmith publishes a local
+    block that carries the declared prior (G15), this function is deleted and
+    ``fisher_information`` passes ``include_prior=space is not None``. The
+    delegation is already written that way -- the call below is the only line
+    that changes.
 
     For a Gaussian ``N(m, s)`` the log-density's curvature is ``1/s^2``,
     independent of where it is evaluated — the one prior family whose
@@ -375,6 +371,42 @@ def _prior_precision(
     return jnp.diag(precision)
 
 
+#: The name the flat pytree path gives its single latent. Double-underscored
+#: for the reason `graph_bridge`'s own node names are: it is not something a
+#: caller declared, and it must not collide with one that was.
+_FLAT_LATENT: str = "__flat__"
+
+
+def _bayesmith_fisher(graph, block_names, values, noise, *, include_prior):
+    """The far side's Fisher over ``block_names``, read from the graph.
+
+    The noise reaches it TWICE and the two are not the same argument -- that
+    function says so itself. ``precision`` is the decided operator that weights
+    the design; ``precision_of`` is the RULE, whose derivative is the variance's
+    own information. An operator has no derivative, so a caller holding only
+    the first cannot supply the second, and one holding only the second has not
+    decided anything yet.
+
+    Both are read from this graph at these values, so ``centre`` is the same
+    point by construction -- and it is passed anyway, because the far side
+    cross-checks the two rather than trusting them, on the grounds that an
+    unchecked redundancy is how a covariance ends up weighted at one point and
+    curved at another.
+    """
+    from bayesmith.diagnose.local import local_block
+    from bayesmith.exact.fisher import fisher_information as remote_fisher
+    from bayesmith.exact.gaussian import precision_at
+
+    return remote_fisher(
+        local_block(graph, block_names, values),
+        precision=precision_at(graph, values),
+        include_prior=include_prior,
+        depends_on_prediction=bool(noise.depends_on_prediction),
+        precision_of=lambda moving: precision_at(graph, {**values, **moving}),
+        centre={name: values[name] for name in block_names},
+    )
+
+
 def fisher_information(
     forward: Callable[[Any], jax.Array],
     params: Any,
@@ -448,21 +480,54 @@ def fisher_information(
         that are too wide by ``sqrt(1 + 2 f^2)`` — a plausible number, and the
         wrong one.
     """
+    from rheplicant.inference.graph_bridge import graph_for_information, translate
+
     f_flat, x0, prediction = _flat_forward(forward, params)
-    jacobian = jax.jacfwd(f_flat)(x0)  # (n_data, n_params)
     noise = as_noise_model(
         noise_std,
         flags,
         prediction_shape=jnp.shape(prediction),
         caller="fisher_information",
     )
-    weights = jnp.ravel(inverse_variance(noise, prediction))
-    matrix = jacobian.T @ (weights[:, None] * jacobian)
-    if noise.depends_on_prediction:
-        matrix = matrix + 2.0 * _log_sigma_curvature(noise, f_flat, x0, prediction)
     names, spans, shapes = _named_spans(params)
+
+    # A flat `{name: array}` dict becomes one node per latent, which is what
+    # lets the declared priors reach the far side as declarations. Anything
+    # else -- a bare array, a pipeline pytree -- has no names to give
+    # (`_named_spans` says so), so it crosses as ONE latent over
+    # `ravel_pytree`'s own vector. That is exactly the ordering `FlatMatrix`
+    # documents, so the layout is the same either way; and `space=` cannot
+    # reach it, because `_check_space_against` has already refused an unnamed
+    # params by name.
+    if names is None:
+        block_names = (_FLAT_LATENT,)
+        values = {_FLAT_LATENT: x0}
+        graph_forward = lambda v: f_flat(v[_FLAT_LATENT])  # noqa: E731
+        declared = None
+    else:
+        # SORTED, because that is this package's flat layout -- `_named_spans`
+        # derives it from `ravel_pytree`, which orders a dict by sorted key.
+        # Handing the far side the same order means no permutation afterwards:
+        # it lays the block out in the order it is given (D24 is the same fact
+        # seen from the one call site that cannot choose).
+        block_names = tuple(sorted(names))
+        values = {name: jnp.asarray(params[name]) for name in block_names}
+        graph_forward = forward
+        declared = None
+
+    graph = graph_for_information(
+        graph_forward, values, noise, priors=declared, caller="fisher_information"
+    )
+    with translate("fisher_information"):
+        found = _bayesmith_fisher(
+            graph, block_names, values, noise, include_prior=False
+        )
+    matrix = found.values
     kind = "fisher"
     if space is not None:
+        # G15's deferral, and the ONE line that changes when it is discharged:
+        # `include_prior=space is not None` above, this block deleted. See
+        # `_prior_precision` for why the far side cannot supply it yet.
         matrix = matrix + _prior_precision(space, names, spans, shapes, x0.size)
         kind = "posterior_precision"
     return FlatMatrix(
