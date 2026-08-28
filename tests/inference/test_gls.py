@@ -36,6 +36,7 @@ from rheplicant.inference import (
     linear_operator,
     wiener_solve,
 )
+from rheplicant.inference import gls as gls_module
 
 N_DATA, N_PAR = 64, 4
 OFFSET = 300.0  # "mu" in hydra-tod's d = (U p + mu)(1 + n)
@@ -472,3 +473,87 @@ class TestABareSigmaIsRefusedByName:
             block, observed, noise=HomoscedasticNoise(jnp.asarray(0.5)), prior_std=1.0
         )
         assert result.converged
+
+
+class TestTheKnobsReachTheFarSideExactlyAsWritten:
+    """Added 2026-08-28 by the Wave B gls mutation set, which found the gap.
+
+    D50 pinned ``reweight_tol`` one hop UP -- the config layer forwarding it
+    into ``inference.iterative_gls`` -- and did so by watching the seam rather
+    than a numerical consequence, because no fixture in that family can
+    bracket the reweighting's own step. The Wave B switch then created a
+    SECOND hop, this module forwarding into ``bayesmith.exact.gls``, and
+    nothing watched it: deleting ``reweight_tol=reweight_tol`` from the
+    delegation left every one of the eleven files that touch
+    ``iterative_gls`` green.
+
+    It survives for a reason worth stating, because it is not "no test
+    exercises this". The far side computes its default from **the same
+    formula** this module used to -- ``max(REWEIGHT_TOL_EPS * eps, tol)`` --
+    so dropping the forward is exactly equivalent whenever the caller passes
+    ``None``, and every fixture in this family does. The gap only opens for an
+    EXPLICIT tolerance, and the numerical consequence of that is what D50
+    already established cannot be bracketed here.
+
+    So the seam is watched directly, the same remedy at the same shape of
+    problem, one layer down.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch):
+        seen: dict = {}
+        real = gls_module._far_iterative_gls
+
+        def spy(*args, **kwargs):
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(gls_module, "_far_iterative_gls", spy)
+        return seen
+
+    def test_an_explicit_reweight_tol_arrives_unchanged(
+        self, monkeypatch, block, observed, noise
+    ):
+        seen = self._spy(monkeypatch)
+        iterative_gls(
+            block, observed, noise=noise, prior_std=PRIOR, reweight_tol=3.7e-09
+        )
+        assert seen["reweight_tol"] == 3.7e-09
+
+    def test_no_declared_tolerance_forwards_none_rather_than_a_local_default(
+        self, monkeypatch, block, observed, noise
+    ):
+        """The two sides derive the same default from the same formula, so the
+        facade must hand the far side ``None`` and let it derive -- computing
+        it here as well would be the second spelling that goes stale."""
+        seen = self._spy(monkeypatch)
+        iterative_gls(block, observed, noise=noise, prior_std=PRIOR)
+        assert seen["reweight_tol"] is None
+
+    @pytest.mark.parametrize(
+        "knob,value",
+        [("min_reweights", 3), ("max_reweights", 7), ("tol", 1e-5),
+         ("maxiter", 11), ("require_convergence", 1e-1)],
+    )
+    def test_every_other_knob_arrives_unchanged(
+        self, monkeypatch, block, observed, noise, knob, value
+    ):
+        """The mutation set killed each of these through a numerical
+        consequence, so they are not unguarded -- but they are guarded
+        INDIRECTLY, and a knob that stops being forwarded should say so here
+        rather than through whichever fixture happens to notice."""
+        seen = self._spy(monkeypatch)
+        try:
+            iterative_gls(
+                block, observed, noise=noise, prior_std=PRIOR, **{knob: value}
+            )
+        except Exception:  # noqa: BLE001 -- see below
+            # Deliberately tolerated. The spy records the keywords BEFORE the
+            # far side runs, so a value the far side then refuses -- which
+            # `require_convergence=1e-1` is on this block -- has still proved
+            # it arrived, and arguably proved it harder: the far side acted on
+            # it. Asserting a clean return here would mean choosing values
+            # that change nothing, which is the opposite of what a forwarding
+            # test wants.
+            pass
+        assert seen[knob] == value
