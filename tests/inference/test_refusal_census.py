@@ -66,7 +66,13 @@ CENSUS: dict[str, int] = {
     "test_inference_unpinned_refusals.py": 5,
     "test_jeffreys_prior.py": 13,
     "test_linear_block_as_dict.py": 2,
-    "test_linear_blocks.py": 19,
+    # 19 -> 18 on 2026-08-28: Wave B's `linear` switch. The float32-floor
+    # test stopped pinning ONE key's refusal with `pytest.raises` and now
+    # sweeps twenty, because the refusal was key-dependent all along --
+    # 15 of 20 before the switch, 12 after. It still asserts a refusal,
+    # and a stronger one (the floor, plus the KIND of every refusal); it
+    # is the `pytest.raises` site the census counts that is gone.
+    "test_linear_blocks.py": 18,
     "test_linear_groups.py": 21,
     "test_loss_sense.py": 5,
     "test_noise_model.py": 3,
@@ -102,7 +108,10 @@ BY_CLASS: dict[str, int] = {
     # side; that is the whole content of D48.
     "ParameterSpaceError": 180,
     "StateValidationError": 64,
-    "RuntimeError": 4,
+    # 4 -> 3 on 2026-08-28: the same single site, see CENSUS above. The
+    # class is NOT lost -- three other files still pin it -- so the seam
+    # still has a rule for it.
+    "RuntimeError": 3,
     "Exception": 3,
     # 1 -> 2 on 2026-08-28: D23's fixture pins that numpyro accepts a Latent as
     # a distribution parameter and jax does not, which is a TypeError from the
@@ -174,7 +183,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 253
+    assert sum(CENSUS.values()) == 252
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():

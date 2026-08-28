@@ -91,7 +91,7 @@ def block():
 #: be certified here at float32.
 #:
 #: It used to be 1e-3 throughout this file, back when kappa was a measurement
-#: biased low; since ``_condition_number`` became a rigorous upper bound, 1e-3
+#: biased low; since ``condition_bound`` became a rigorous upper bound, 1e-3
 #: is unreachable on this block rather than merely demanding. See that
 #: function's docstring for why the measurement had to go.
 REACHABLE = 20.0
@@ -149,16 +149,40 @@ def test_the_conjugate_convergence_guard_still_raises_equinox(block) -> None:
     from equinox import EquinoxRuntimeError
 
     cond, values = block
-    with pytest.raises(EquinoxRuntimeError) as caught:
-        conjugate_draw(
-            cond, ("gain",), values, key=jax.random.key(1), tol=1e-14, maxiter=1,
-            require_convergence=1e-8,
-        )
-    assert "did not converge" in str(caught.value) or "cannot reach" in str(
-        caught.value
-    ), (
+    # Swept rather than pinned to one key, and that is a correction. This used
+    # to pass `key(1)` and read as deterministic; it never was. Whether the
+    # guard fires depends on the fluctuation drawn -- measured across 20 keys,
+    # 14 refused and 6 did not, and the Wave B switch moved the split to 10/10
+    # by changing how the draw's whitening is spelled, without touching what
+    # this test is about. A one-key pin on a key-dependent outcome is a guard
+    # that can stop being able to fail without anything saying so.
+    caught = None
+    for seed in range(20):
+        try:
+            conjugate_draw(
+                cond, ("gain",), values, key=jax.random.key(seed), tol=1e-14,
+                maxiter=1, require_convergence=1e-8,
+            )
+        except EquinoxRuntimeError as refused:
+            caught = refused
+            break
+        except Exception as wrong_type:  # noqa: BLE001 -- the TYPE is the claim
+            raise AssertionError(
+                "the guard refused, but as "
+                f"{type(wrong_type).__name__} rather than EquinoxRuntimeError: "
+                "under `jax.jit` the diagnosis is buried in a callback "
+                "traceback, which is why the transition is built with "
+                "`eqx.filter_jit`"
+            ) from wrong_type
+
+    assert caught is not None, (
+        "no key in 20 was refused, so this test can no longer fail for the "
+        "reason it exists -- `maxiter=1` no longer produces an unconverged "
+        "solve on this block"
+    )
+    assert "did not converge" in str(caught) or "cannot reach" in str(caught), (
         "The guard fired but said something unrecognised; the message is the "
-        f"half of it that tells the caller what to do. Got: {caught.value}"
+        f"half of it that tells the caller what to do. Got: {caught}"
     )
 
 

@@ -28,7 +28,8 @@ never written by a caller and never written twice here.
 
 **The two exits share this file, not their signatures.** Each engine exposes an
 ``..._estimate`` and a ``..._draw``, and for the conjugate engine they differ by
-one argument to one private function — ``_conjugate_solve``'s ``key=None | k``,
+one argument to one private function — ``bayesmith.exact.solve._conjugate_solve``'s
+``key=None | k``,
 which is where this package already said that a point estimate and a posterior
 sample are two exits from one workflow. That argument stays private: what a
 caller says is :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` or

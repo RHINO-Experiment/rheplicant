@@ -170,7 +170,7 @@ class TestGcrDraws:
         # called.  It says tol arrived; the second half says
         # require_convergence: null did too, and pins what the draw becomes.
         # Both halves DECLARE the key now: the shipped default became null
-        # when kappa became a bound (inference/linear.py::_condition_bound).
+        # when kappa became a bound (inference/linear.py::condition_bound).
         with pytest.raises(eqx.EquinoxRuntimeError,
                            match="wiener_solve/gcr_sample"):
             gcr_product({"n_draws": 4, "tol": 2.0,
@@ -187,14 +187,26 @@ class TestGcrDraws:
         # declares its prior on the LATENT, where _prior_kwargs returns {} and
         # dropping the keywords from the call changes nothing at all; on a
         # PRIOR_FREE document the package refuses the bare draw outright
-        # (_require_prior_std, linear.py:1009), so this is the one test that
-        # can watch the compiled mapping travel.
+        # (`linear._require_prior_std` -- named, not line-cited; the citation
+        # here read linear.py:1009 and the function had moved), so this is the
+        # one test that can watch the compiled mapping travel.
         #
-        # prior_std: 0.01 / prior_mean: 1.0 is TIGHT written as run keys, and
-        # measured it reproduces the declared-prior route to every digit:
-        # mean 1.141650, sd 0.0086774.  Taken the other way round -- 1.0 wide
-        # centred on 0.01 -- the same document scores 1.498 +- 0.0162, so a
-        # swap between the two keywords is visible rather than plausible.
+        # prior_std: 0.01 / prior_mean: 1.0 is TIGHT written as run keys.  What
+        # this test discriminates is a SWAP of the two keywords: taken the
+        # other way round -- 1.0 wide centred on 0.01 -- the same document
+        # scores 1.4989 against this route's 1.1419, a gap of 0.357.
+        #
+        # The mean used to be pinned at `abs=1.0e-4`, which is 0.23 of this
+        # estimator's OWN standard error (sd 0.00876 over 400 draws => sem
+        # 4.4e-4).  A pin tighter than the noise it measures is not a tolerance,
+        # it is a hostage to the key stream -- and Wave B's `linear` switch
+        # moved that stream (D53: the far side whitens with `omega / sigma`,
+        # the near side with `sqrt(weight) * omega`, so the same key draws a
+        # different, equally valid sample).  Pinned at 5 sigma of the mean
+        # instead, and the swap it exists to catch is asserted OUTRIGHT rather
+        # than left implicit in a tight number: 0.357 is 815 standard errors,
+        # so no tolerance in between decides anything the explicit check does
+        # not decide better.
         with pytest.raises(ParameterSpaceError,
                            match="gcr_sample needs a prior_std"):
             gcr_product({"n_draws": 4}, parameters=PRIOR_FREE, prior=None)
@@ -202,9 +214,18 @@ class TestGcrDraws:
             {"n_draws": 400, "prior_std": PRIOR_SIGMA, "prior_mean": 1.0},
             parameters=PRIOR_FREE, prior=None)
         draws = product["draws"]["g"]
-        assert float(jnp.mean(draws)) == pytest.approx(1.14165, abs=1.0e-4)
+        mean = float(jnp.mean(draws))
+        assert mean == pytest.approx(1.1419, abs=2.2e-3)  # 5 * sem
         assert float(jnp.std(draws)) == pytest.approx(POSTERIOR_SIGMA,
                                                       rel=0.05)
+        # The swap, stated rather than implied.
+        swapped = gcr_product(
+            {"n_draws": 400, "prior_std": 1.0, "prior_mean": PRIOR_SIGMA},
+            parameters=PRIOR_FREE, prior=None)
+        assert abs(float(jnp.mean(swapped["draws"]["g"])) - mean) > 0.3, (
+            "a swap of prior_std and prior_mean would be invisible here, which "
+            "is the one thing this test exists to see"
+        )
 
 
 class TestGcrGrammar:

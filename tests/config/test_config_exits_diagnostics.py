@@ -174,7 +174,8 @@ class TestTheNumberItReports:
     def test_names_decides_which_block_is_conditioned(self):
         """The JOINT number is the one a per-block guard cannot produce.
 
-        ``_condition_number``'s own docstring (linear.py:1322-1324): "two
+        ``bayesmith.exact.solve._condition_bound``'s own docstring -- cited by
+        function rather than by line, because the line moved once already: "two
         latents the data barely distinguishes give a well-conditioned operator
         each and a badly conditioned one together".  Measured on the
         degenerate document: ``a`` alone is 1.000000e+00 and so is ``b``,

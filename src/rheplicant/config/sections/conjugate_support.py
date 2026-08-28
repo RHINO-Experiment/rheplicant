@@ -21,13 +21,18 @@ Two rules this half exists to keep:
 * **The block is always the GROUPED spelling.**  ``linear_operator`` takes
   ``name=`` OR ``names=`` and they are not interchangeable: the first returns
   a bare array, the second ``{latent: array}``, and six downstream consumers
-  raise on the bare form (``linear.py:184-215``).  The config layer compiles
+  raise on the bare form (``LinearBlock.as_dict``).  The config layer compiles
   to ``names=`` even for a block of one.
 * **A grouped block's prior is per member.**  ``S`` is block-diagonal, not a
-  multiple of the identity, so ``_per_member`` (``linear.py:963-973``) refuses
+  multiple of the identity, so ``linear._per_member`` refuses
   a scalar outright rather than broadcasting it.  A scalar in a document is
   therefore broadcast HERE, and only when the block names exactly one latent
   -- check A51.
+
+  Both of the references above name a FUNCTION rather than a line range. The
+  second used to read ``linear.py:963-973`` and the function was at 1321,
+  having moved twice since; a line number is a second copy of a fact with
+  nothing rendering it beside the first, so it goes stale unread.
 
 ``check:`` belongs to ``linear_operator`` alone; none of the four solves takes
 it.  It is passed only when the document declares it, so the package's own

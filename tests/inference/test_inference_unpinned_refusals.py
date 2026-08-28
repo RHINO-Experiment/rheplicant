@@ -118,7 +118,8 @@ class TestALatentMustDeclareItselfLinear:
 class TestAComplexPredictionIsRefusedAtTheConjugateSeam:
     """The conjugate solves are real-valued; a complex offset is refused early.
 
-    ``_conjugate_solve`` splits a latent into real degrees of freedom and takes
+    ``bayesmith.exact.solve._conjugate_solve`` splits a latent into real degrees
+    of freedom and takes
     ``jax.grad`` of a real pairing. A complex *prediction* has no such pairing,
     so without this guard the failure surfaces much later as a dtype error
     inside CG, naming a helper rather than the argument.

@@ -1013,9 +1013,13 @@ class TestUnderDeterminedBlocks:
         residual that small means nothing when κ is this large.
 
         ``require_convergence`` is passed rather than defaulted: it stopped
-        being on by default when κ became a bound. See
-        ``inference/linear.py::_condition_number``."""
-        with pytest.raises(RuntimeError, match="condition number"):
+        being on by default when κ became a bound. The message says "condition
+        bound" rather than "condition number" because that is what the guard
+        reads -- :func:`condition_bound`, not :func:`condition_estimate` -- and
+        since the switch the wording comes from
+        ``bayesmith.exact.solve._conjugate_solve``, which spells the
+        distinction the near side only documented."""
+        with pytest.raises(RuntimeError, match="condition bound"):
             gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
                        prior_std=LOAD_PRIOR, key=jax.random.key(0),
                        require_convergence=1e-3)
@@ -1033,7 +1037,7 @@ class TestUnderDeterminedBlocks:
         for — and the blind directions must come back at 250; the unguarded
         solve returns ~1e-5 instead.
         """
-        with pytest.raises(RuntimeError, match="condition number"):
+        with pytest.raises(RuntimeError, match="condition bound"):
             wiener_solve(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
                          prior_std=LOAD_PRIOR, prior_mean=250.0,
                          require_convergence=1e-3)
@@ -1057,13 +1061,51 @@ class TestUnderDeterminedBlocks:
     ):
         """κ·eps ≈ 4 at single precision, so NO tolerance can make this solve
         accurate. Saying so is the point: the honest answer is a refusal, not
-        four thousand iterations that end up equally wrong."""
+        four thousand iterations that end up equally wrong.
+
+        **Asserted over a spread of keys, not one, and that is a correction.**
+        This used to pin ``key(0)`` and read as deterministic. It never was:
+        measured across 20 keys, the draw is refused for 15 of them and
+        accepted for 5 — because whether ``residual × κ`` clears the target
+        depends on the fluctuation drawn, and a draw that lands accurately
+        SHOULD be accepted (``test_the_zero_centred_mean_is_not_refused`` is
+        that counterweight). Pinning one key made a key-dependent outcome look
+        like a property, and the Wave B switch moved which keys fall where
+        (12 of 20 after) without changing anything this test is about.
+
+        What is key-independent is the floor itself and the KIND of refusal:
+        every refusal here names the precision, never "did not converge",
+        because tightening ``tol`` is the wrong advice when the arithmetic
+        cannot represent the answer. Both halves hold on either side of the
+        seam.
+        """
         if jax.config.read("jax_enable_x64"):
             pytest.skip("this is the single-precision floor")
-        with pytest.raises(RuntimeError, match="precision|condition number"):
-            gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
-                       prior_std=LOAD_PRIOR, key=jax.random.key(0),
-                       tol=1e-12, maxiter=5000, require_convergence=1e-3)
+
+        bound = float(condition_bound(one_load_block, noise_std=LOAD_NOISE,
+                                      prior_std=LOAD_PRIOR))
+        epsilon = float(jnp.finfo(jnp.float32).eps)
+        assert bound * epsilon > 1e-3, (bound, epsilon)
+
+        refusals = []
+        for seed in range(20):
+            try:
+                gcr_sample(one_load_block, one_load_observed,
+                           noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR,
+                           key=jax.random.key(seed), tol=1e-12, maxiter=5000,
+                           require_convergence=1e-3)
+            except RuntimeError as refused:
+                refusals.append(str(refused))
+
+        assert refusals, (
+            "no key was refused at all, so this test can no longer fail for "
+            "the reason it exists; κ·eps is "
+            f"{bound * epsilon:.2f} against a target of 1e-3"
+        )
+        assert all("at this precision" in text for text in refusals), (
+            "a refusal here advised tightening tol, which cannot help below "
+            "the precision floor"
+        )
 
     def test_a_well_conditioned_block_is_not_refused(self, twin, template_state):
         """The default must not fire on healthy solves, and it does not.

@@ -244,7 +244,7 @@ class TestSkySpaceConvergenceGuard:
 
         kappa is ``lam_max / min(lam)``, a rigorous upper bound. It read
         3.0e+04 here while the guard measured lam_min instead, which is the
-        correction ``inference/linear.py::_condition_number`` records.
+        correction ``inference/linear.py::condition_bound`` records.
         """
         base = jax.random.normal(jax.random.key(3), (24, self.N_PIX))
         return MatrixProjector(matrix=base.at[:, -1].multiply(1e-4))

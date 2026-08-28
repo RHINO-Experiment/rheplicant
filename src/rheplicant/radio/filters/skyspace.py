@@ -144,7 +144,7 @@ class SkySpaceFilter(AbstractLinearFilter):
         5e+09 and twelve iterations reported 3.0e+04. That case was refused
         anyway, so nothing here was observably wrong -- but a guard whose
         number leans toward silence is one defect away from being useless, and
-        ``inference/linear.py::_condition_number`` carries the same correction
+        ``inference/linear.py::condition_bound`` carries the same correction
         and the measurements that forced it.
         """
         misfit = normal_op(sky_hat) - rhs

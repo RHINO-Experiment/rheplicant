@@ -81,7 +81,6 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -92,13 +91,12 @@ from bayesmith.exact.linearity import (
     WEIGHTED_RTOL,
     Unresolved,
 )
+from bayesmith.exact.solve import condition_bound as _far_condition_bound
+from bayesmith.exact.solve import condition_estimate as _far_condition_estimate
+from bayesmith.exact.solve import gcr_sample as _far_gcr_sample
+from bayesmith.exact.solve import wiener_solve as _far_wiener_solve
 
-from rheplicant.core.conditioning import (
-    POWER_ITERATIONS,
-    extreme_eigenvalues,
-    largest_eigenvalue,
-    tree_norm,
-)
+from rheplicant.core.conditioning import POWER_ITERATIONS
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -985,62 +983,6 @@ def linear_operator(
     )
 
 
-def _real_parts(block: LinearBlock) -> tuple[Callable, Callable]:
-    """Convert between a latent and its real degrees of freedom.
-
-    A complex latent is carried as ``(real, imag)``. This is not bookkeeping
-    pedantry: ``prediction`` is real, so the map from complex coefficients to
-    data is **ℝ-linear but not ℂ-linear**, and a Krylov method run over ℂ
-    would be solving a different problem. Splitting makes the vector space the
-    one the objective actually lives on.
-
-    For a group the split is per member, so a block mixing a real latent with a
-    complex one carries ``{"real_one": array, "complex_one": (re, im)}`` — the
-    real one is NOT wrapped in a one-element tuple, because there is nothing to
-    unwrap it back from and a uniform wrapper would only move the asymmetry
-    somewhere less visible. The treedef is what every ``jax.tree.map`` in this
-    module aligns against, so it is the one thing that must be exactly
-    invertible; ``join(split(x)) == x`` is what makes it so.
-    """
-    if not block.grouped:
-        if _is_complex(block.dtype):
-            return (
-                lambda x: (jnp.real(x), jnp.imag(x)),
-                lambda parts: parts[0] + 1j * parts[1],
-            )
-        return (lambda x: x, lambda parts: parts)
-
-    complexity = {member: _is_complex(block.dtype[member]) for member in block.names}
-
-    def split(x):
-        return {
-            member: (jnp.real(x[member]), jnp.imag(x[member]))
-            if complexity[member]
-            else x[member]
-            for member in block.names
-        }
-
-    def join(parts):
-        return {
-            member: (parts[member][0] + 1j * parts[member][1])
-            if complexity[member]
-            else parts[member]
-            for member in block.names
-        }
-
-    return split, join
-
-
-def _domain_zero(block: LinearBlock) -> Any:
-    """A zero of the latent domain — an array, or ``{name: array}`` for a group."""
-    if not block.grouped:
-        return jnp.zeros(block.shape, dtype=block.dtype)
-    return {
-        member: jnp.zeros(block.shape[member], dtype=block.dtype[member])
-        for member in block.names
-    }
-
-
 def _domain_centre(block: LinearBlock, prior_mean: Any) -> Any:
     """``prior_mean`` laid out over the latent domain, zero where it is ``None``."""
 
@@ -1057,42 +999,148 @@ def _domain_centre(block: LinearBlock, prior_mean: Any) -> Any:
     }
 
 
-def _variance_parts(block: LinearBlock, prior_std: Any) -> Any:
-    """``S⁻¹``'s diagonal, shaped like :func:`_real_parts`' output.
+#: The observed node this adapter presents to bayesmith. Upstream a
+#: :class:`LinearBlock` predicts ONE array and the data arrives as an argument
+#: to the solve; downstream a block is keyed by observed-node name, because
+#: there a block is cut out of a graph that may carry several. One name is
+#: therefore enough, and it never reaches a caller: every public exit in this
+#: module takes and returns the upstream spelling.
+_OBSERVED = "observed"
 
-    This is the block-diagonal assembly, and it is assembly by *placement*
-    rather than by concatenation: each latent's variance lands on the leaf its
-    own parameters live on, so ``x / variance`` in a ``jax.tree.map`` IS
-    ``S⁻¹x`` with no indices to get wrong. A complex latent's variance is
-    duplicated across its real and imaginary parts, which is what
-    :func:`gcr_sample` documents ``prior_std`` to mean for one.
+
+def _as_far_block(
+    block: LinearBlock,
+    *,
+    observed: jax.Array | None,
+    prior_mean: Any,
+    prior_std: Any,
+) -> Any:
+    """This block, plus the solve's own arguments, as bayesmith's ``LinearBlock``.
+
+    The two dataclasses hold the same linear algebra in different shapes, and
+    every difference is about WHERE something lives rather than what it is:
+
+    ==================  ===========================  =========================
+    ..                  here                         there
+    ==================  ===========================  =========================
+    the latents         ``name: str | tuple``        ``names: tuple``
+    the domain          ``shape``/``dtype``, or dict ``{name: ...}`` always
+    the prediction      ``offset: Array``            ``offset: {node: Array}``
+    the data            an ARGUMENT to the solve     ``data`` on the block
+    the prior           ``prior``, plus keywords     ``prior_mean``/``prior_std``
+    ==================  ===========================  =========================
+
+    So a group converts by relabelling and a single-latent block converts by
+    wrapping. **No number changes**: ``probe_17_linear_solve_seam.py`` §0 pins
+    the posterior mean bit-identical across this conversion, which is the
+    precondition that makes the refusal comparisons in the rest of that probe
+    mean anything -- without it they would be comparing two different models.
+
+    That the data and the prior are ARGUMENTS here and FIELDS there is also
+    the whole reason this module keeps its refusals rather than delegating
+    them. A refusal that reads ``noise_std`` has nothing to read once the
+    sigma has become a :class:`~bayesmith.exact.precision.Precision`, so it
+    has to fire before the conversion or not at all -- D48's rule, and
+    ``check_noise_std_axis`` is the case where not-at-all costs an answer
+    rather than a message: measured, the far side accepts an ambiguous
+    ``(n,)`` sigma against an ``(n, n)`` prediction and returns a finite,
+    correctly shaped array that differs from the intended reading by 2.5e-03.
+
+    Args:
+        block: the upstream block.
+        observed: the data. ``None`` for :func:`condition_bound` and
+            :func:`condition_estimate`, which have none to pass --
+            conditioning is a property of ``AᵀN⁻¹A + S⁻¹`` alone. They get a
+            zero of the prediction's shape, which the far side never reads.
+        prior_mean: already resolved against the declaration; ``None``, or
+            ``None`` per member, means a zero-centred prior.
+        prior_std: already resolved, and already checked non-``None`` by
+            :func:`_require_prior_std`.
+
+    Returns:
+        A :class:`bayesmith.exact.block.LinearBlock` over the same domain.
     """
+    from bayesmith.exact.block import LinearBlock as _FarBlock
 
-    def one(std, is_complex):
-        variance = jnp.asarray(std) ** 2
-        return (variance, variance) if is_complex else variance
+    # `_domain_centre` takes a group's centre per member, and its only previous
+    # caller was `_conjugate_solve`, which always received `prior_mean` already
+    # normalized by `_resolve_prior`. `condition_bound` and `condition_estimate`
+    # have no prior mean to resolve -- conditioning does not depend on one --
+    # so the bare `None` is spread over the members here rather than being
+    # allowed to reach a subscript.
+    if prior_mean is None and block.grouped:
+        prior_mean = dict.fromkeys(block.names)
+    centre = _domain_centre(block, prior_mean)
+    data = jnp.zeros_like(block.offset) if observed is None else observed
 
-    if not block.grouped:
-        return one(prior_std, _is_complex(block.dtype))
-    return {
-        member: one(prior_std[member], _is_complex(block.dtype[member]))
-        for member in block.names
-    }
+    if block.grouped:
+        names = block.names
+        shape = {member: block.shape[member] for member in names}
+        dtype = {member: block.dtype[member] for member in names}
+        std = {member: prior_std[member] for member in names}
+        mean = {member: centre[member] for member in names}
+
+        def forward(domain: dict[str, Any]) -> dict[str, jax.Array]:
+            return {_OBSERVED: block.forward(domain)}
+
+        def adjoint(codomain: dict[str, jax.Array]) -> dict[str, Any]:
+            return dict(block.adjoint(codomain[_OBSERVED]))
+
+    else:
+        name = block.name
+        names = (name,)
+        shape = {name: block.shape}
+        dtype = {name: block.dtype}
+        std = {name: prior_std}
+        mean = {name: centre}
+
+        def forward(domain: dict[str, Any]) -> dict[str, jax.Array]:
+            return {_OBSERVED: block.forward(domain[name])}
+
+        def adjoint(codomain: dict[str, jax.Array]) -> dict[str, Any]:
+            return {name: block.adjoint(codomain[_OBSERVED])}
+
+    return _FarBlock(
+        names=names,
+        shape=shape,
+        dtype=dtype,
+        offset={_OBSERVED: block.offset},
+        forward=forward,
+        adjoint=adjoint,
+        data={_OBSERVED: data},
+        prior_mean=mean,
+        prior_std=std,
+    )
 
 
-def _largest_variance(prior_variance: Any) -> jax.Array:
-    """The biggest prior variance anywhere in the block.
+def _from_far_domain(block: LinearBlock, solution: dict[str, Any]) -> Any:
+    """The far side's ``{name: array}`` back in this block's own spelling.
 
-    ``1/λ`` of it floors ``λ_min`` of the normal operator: ``AᵀN⁻¹A`` is
-    positive semi-definite, so the LOOSEST prior in the block is what bounds
-    the operator from below. Taking the tightest instead would floor the
-    estimate above the true ``λ_min`` and report a condition number smaller
-    than the real one — an over-confident guard, which is the direction that
-    costs something.
+    A ``name=`` block's answer is a bare array and a ``names=`` group's is a
+    dict, and the two are not interchangeable -- :meth:`LinearBlock.as_dict`
+    exists because six downstream consumers index by latent name and all six
+    raise on the bare form. The far side only has the dict, so this is where
+    the distinction is restored.
     """
-    leaves = jax.tree.leaves(prior_variance)
-    return jnp.max(jnp.stack([jnp.max(jnp.asarray(leaf)) for leaf in leaves]))
+    if block.grouped:
+        return {member: solution[member] for member in block.names}
+    return solution[block.name]
 
+
+def _far_precision(noise_std: Any) -> Any:
+    """``sigma`` as the far side's ``{node: Precision}``.
+
+    ``diagonal_from`` is bayesmith's own bridge from a decided sigma, so the
+    weight this produces is ``1 / sigma**2`` computed by the same code the
+    correlated path uses. It is NOT
+    :func:`~rheplicant.inference.noise.inverse_variance`, and the difference
+    is the one :func:`_check_solve_arguments` documents at length: on a NaN
+    sigma this propagates, where ``inverse_variance`` would map it to weight
+    zero and silently drop the sample.
+    """
+    from bayesmith.exact.precision import diagonal_from
+
+    return diagonal_from({_OBSERVED: jnp.asarray(noise_std)})
 
 def _numpyro_distributions() -> Any:
     """numpyro's distribution module, or ``None`` when it is not installed.
@@ -1608,11 +1656,16 @@ def wiener_solve(
     prior_mean, prior_std = _check_solve_arguments(
         block, observed, prior_mean, prior_std, "wiener_solve", noise_std=noise_std
     )
-    return _conjugate_solve(
-        block, observed, noise_std=noise_std, prior_std=prior_std,
-        prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=None,
+    solution, residual = _far_wiener_solve(
+        _as_far_block(
+            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
+        ),
+        precision=_far_precision(noise_std),
+        tol=tol,
+        maxiter=maxiter,
         require_convergence=require_convergence,
     )
+    return _from_far_domain(block, solution), residual
 
 
 def condition_bound(
@@ -1663,117 +1716,13 @@ def condition_bound(
     _refuse_a_noise_model_at_the_conjugate_seam(noise_std, "condition_bound")
     _, prior_std = _resolve_prior(block, None, prior_std, "condition_bound")
     _require_prior_std(block, prior_std, "condition_bound")
-    return _condition_bound(
-        block,
-        1.0 / jnp.asarray(noise_std) ** 2,
-        _variance_parts(block, prior_std),
-        jax.random.key(0) if key is None else key,
-        iterations,
+    return _far_condition_bound(
+        _as_far_block(block, observed=None, prior_mean=None, prior_std=prior_std),
+        precision=_far_precision(noise_std),
+        iterations=iterations,
+        key=key,
     )
 
-
-def _normal_operator(block: LinearBlock, weight, prior_variance) -> Callable:
-    """``x -> (AᵀN⁻¹A + S⁻¹) x`` over the block's real degrees of freedom.
-
-    The curvature half is taken as a gradient rather than assembled from
-    ``A`` and ``Aᵀ``, which makes it symmetric positive definite by
-    construction with no adjoint convention left to get wrong — and, for a
-    group, no cross-block bookkeeping either: ``jax.grad`` of the group's own
-    ``χ²`` produces the full operator, off-diagonal blocks included, which is
-    exactly the coupling an alternating solve throws away.
-
-    ``prior_variance`` is a pytree of the same shape as ``parts``, so ``S⁻¹``
-    enters leaf by leaf. See :func:`_variance_parts`.
-    """
-    split, join = _real_parts(block)
-
-    def half_chi2(parts):
-        return 0.5 * jnp.sum(weight * block.forward(join(parts)) ** 2)
-
-    def normal(parts):
-        curvature = jax.grad(half_chi2)(parts)
-        return jax.tree.map(
-            lambda c, p, v: c + p / v, curvature, parts, prior_variance
-        )
-
-    return normal
-
-
-def _condition_estimate(
-    block: LinearBlock, weight, prior_variance, key, iterations: int
-) -> jax.Array:
-    """MEASURED ``κ`` of ``AᵀN⁻¹A + S⁻¹``. A diagnostic, and not a bound.
-
-    ``λ_max`` over a measured ``λ_min``, floored by the prior's own curvature.
-
-    **Biased low, and therefore unsafe to guard on.** ``extreme_eigenvalues``
-    finds ``λ_min`` by a second power iteration on ``λ_max·I − M``, whose
-    leading eigenvalues crowd against ``λ_max`` with vanishing gaps on a graded
-    spectrum — so the ``λ_min`` it returns is too LARGE and this κ too SMALL.
-    Measured on a 20-point geometric spectrum at a true κ of 1e4: λ_min 33.9×
-    high, κ 33.9× low; at 1e7 over 50 points the factor was ~700 and 2000
-    iterations did not close it. Guarding on this number is guarding on
-    something that leans toward silence, which is why
-    :func:`_condition_bound` exists and is what the guard reads.
-
-    What it is good for is the thing a bound cannot do: it can SEE a
-    degeneracy. A near-degenerate partition shows up entirely in ``λ_min``, so
-    the joint operator's κ exceeds its members' by orders of magnitude here and
-    by a factor of 1.7 under the bound — see
-    ``tests/inference/test_linear_groups.py::TestGroupedVsAlternating``.
-
-    For a group this is the JOINT condition number, and it is the number a
-    per-block guard cannot produce: two latents the data barely distinguishes
-    give a well-conditioned operator each and a badly conditioned one together.
-    """
-    split, _ = _real_parts(block)
-    template = split(_domain_zero(block))
-    largest, smallest = extreme_eigenvalues(
-        _normal_operator(block, weight, prior_variance), template, key, iterations
-    )
-    # AᵀN⁻¹A is positive semi-definite, so λ_min can never fall below the
-    # prior's own curvature however rank-deficient the data is.
-    floor = 1.0 / _largest_variance(prior_variance)
-    return largest / jnp.maximum(smallest, floor)
-
-
-def _condition_bound(
-    block: LinearBlock, weight, prior_variance, key, iterations: int
-) -> jax.Array:
-    """An UPPER BOUND on ``κ`` of ``AᵀN⁻¹A + S⁻¹``, not an estimate of it.
-
-    ``λ_max · max(prior_variance)``. ``AᵀN⁻¹A`` is positive semi-definite, so
-    ``λ_min ≥ λ_min(S⁻¹) = 1/max(prior_variance)`` exactly, and dividing
-    ``λ_max`` by that rigorous floor bounds the ratio from above.
-    :func:`_largest_variance` explains why the LOOSEST prior is the one that
-    bounds it.
-
-    **This is what the guard reads, and it did not always be.** The guard used
-    :func:`_condition_estimate` until bayesmith's port of this module measured
-    that number to be biased low — see that function for the factors. A guard
-    needs the error bounded from ABOVE or it certifies nothing, so it reads
-    this one, and :func:`condition_estimate`'s old advice to pick ``tol ≈ a/κ``
-    is safe only against this one too.
-
-    Found by ``bayesmith.exact.solve.condition_bound``, which is the same
-    formula; the cross-check harness in that repository keeps the two
-    comparable.
-
-    Half the cost of the estimate: ``iterations`` operator applications rather
-    than ``2 · iterations``, since only the top of the spectrum is measured.
-
-    **What it cannot do is see a degeneracy**, and that is why the estimate
-    survives beside it. λ_min is where a near-degenerate partition lives, and
-    this replaces λ_min with a prior floor that a group and its members share —
-    so the joint-versus-member comparison that the estimate resolves by a
-    factor of 30 collapses to 1.7 here.
-    """
-    split, _ = _real_parts(block)
-    template = split(_domain_zero(block))
-    largest = largest_eigenvalue(
-        _normal_operator(block, weight, prior_variance), template, key, iterations
-    )
-    return largest * _largest_variance(prior_variance)
 
 
 def condition_estimate(
@@ -1853,147 +1802,14 @@ def condition_estimate(
     _refuse_a_noise_model_at_the_conjugate_seam(noise_std, "condition_estimate")
     _, prior_std = _resolve_prior(block, None, prior_std, "condition_estimate")
     _require_prior_std(block, prior_std, "condition_estimate")
-    return _condition_estimate(
-        block,
-        1.0 / jnp.asarray(noise_std) ** 2,
-        _variance_parts(block, prior_std),
-        jax.random.key(0) if key is None else key,
-        iterations,
+    return _far_condition_estimate(
+        _as_far_block(block, observed=None, prior_mean=None, prior_std=prior_std),
+        precision=_far_precision(noise_std),
+        iterations=iterations,
+        key=key,
     )
 
 
-def _conjugate_solve(
-    block: LinearBlock,
-    observed: jax.Array,
-    *,
-    noise_std: Any,
-    prior_std: Any,
-    prior_mean: Any,
-    tol: float,
-    maxiter: int | None,
-    key: jax.Array | None,
-    require_convergence: float | None,
-) -> tuple[Any, jax.Array]:
-    """Shared machinery for the posterior mean and for a posterior draw.
-
-    Both solve ``(AᵀN⁻¹A + S⁻¹) x = b`` by CG over the latent's real degrees of
-    freedom. They differ only in ``b``: the mean uses ``AᵀN⁻¹(d - offset)``,
-    a draw adds the two fluctuation terms. ``key=None`` selects the mean.
-    """
-    split, join = _real_parts(block)
-    weight = 1.0 / jnp.asarray(noise_std) ** 2
-    prior_variance = _variance_parts(block, prior_std)
-    residual_data = observed - block.offset
-    zero = split(_domain_zero(block))
-    centre = split(_domain_centre(block, prior_mean))
-
-    def pair_with(vector):
-        """``Aᵀ vector`` in real coordinates, as the gradient of a real pairing.
-
-        Taking it as a gradient rather than calling ``block.adjoint`` is what
-        keeps the real/complex conventions from ever entering: ``jax.grad`` of a
-        real scalar is by construction the adjoint of the real inner product,
-        which is the pairing every term here lives in.
-        """
-        return jax.grad(lambda parts: jnp.sum(block.forward(join(parts)) * vector))(zero)
-
-    normal = _normal_operator(block, weight, prior_variance)
-
-    # S^-1 m: a zero-mean prior is wrong for most physical quantities (a
-    # noise-wave temperature sits near 250 K, not near zero), and shifting the
-    # prior is not the same act as shifting the model even though the two give
-    # the same Gaussian.
-    rhs = jax.tree.map(
-        lambda base, m, v: base + m / v,
-        pair_with(weight * residual_data),
-        centre,
-        prior_variance,
-    )
-
-    if key is not None:
-        # Constrained realization: the two fluctuation terms whose covariances
-        # sum to the normal operator itself, which is exactly why the solve
-        # comes out distributed as the posterior rather than merely centred on
-        # its mean.  b = AᵀN⁻¹(d-offset) + AᵀN⁻¹ᐟ²ω₁ + S⁻¹ᐟ²ω₂
-        data_key, prior_key = jax.random.split(key)
-        omega_data = jax.random.normal(
-            data_key, jnp.shape(residual_data), dtype=jnp.result_type(residual_data)
-        )
-        omega_prior = jax.tree.map(
-            lambda leaf, k: jax.random.normal(k, leaf.shape, dtype=leaf.dtype),
-            zero,
-            _split_like(prior_key, zero),
-        )
-        rhs = jax.tree.map(
-            lambda base, from_data, from_prior, v: (
-                base + from_data + from_prior / jnp.sqrt(v)
-            ),
-            rhs,
-            pair_with(jnp.sqrt(weight) * omega_data),
-            omega_prior,
-            prior_variance,
-        )
-
-    solution, _ = jax.scipy.sparse.linalg.cg(normal, rhs, tol=tol, maxiter=maxiter)
-    misfit = jax.tree.map(lambda a, b: a - b, normal(solution), rhs)
-    residual = tree_norm(misfit) / jnp.maximum(tree_norm(rhs), 1e-30)
-    if require_convergence is not None:
-        # jax's cg reports no convergence status of its own, so an unconverged
-        # solve otherwise comes back looking like any other answer. eqx.error_if
-        # fires under jit, where a Python `if` on a traced value cannot.
-        #
-        # The residual ALONE cannot decide this. Error and residual differ by
-        # the condition number, and for a block the data does not fully
-        # identify κ is enormous by construction — λ_min is exactly the prior's
-        # 1/prior_std² — so CG stops on a tiny residual with the prior-dominated
-        # directions still at their starting value, and hands back a draw whose
-        # posterior scatter there is orders of magnitude too small. Guarding on
-        # the residual certifies precisely nothing in the one regime these
-        # solvers exist to serve.
-        kappa = _condition_bound(
-            block, weight, prior_variance, jax.random.key(0), POWER_ITERATIONS
-        )
-        error_bound = residual * kappa
-        bad = jnp.logical_or(~jnp.isfinite(residual), error_bound > require_convergence)
-
-        # Below κ·eps no tolerance can help: the arithmetic itself cannot
-        # represent the answer that accurately. Worth its own message, because
-        # the remedy is precision, and the natural response to the other
-        # message — tighten tol, raise maxiter — burns a great many iterations
-        # here to arrive at an equally wrong answer.
-        epsilon = float(jnp.finfo(jnp.asarray(block.offset).dtype).eps)
-        unreachable = kappa * epsilon > require_convergence
-
-        solution = eqx.error_if(
-            solution,
-            jnp.logical_and(bad, unreachable),
-            "wiener_solve/gcr_sample cannot reach require_convergence at this "
-            "precision: the normal operator's condition number times the machine "
-            "epsilon already exceeds it, so no tol or maxiter will help. This is "
-            "the usual signature of a block the data does not identify. Enable "
-            "jax_enable_x64, or strengthen the prior (prior_std bounds the "
-            "conditioning: κ ≈ ‖AᵀN⁻¹A‖·prior_std²). condition_bound() reports "
-            "the number this guard read.",
-        )
-        solution = eqx.error_if(
-            solution,
-            jnp.logical_and(bad, ~unreachable),
-            "wiener_solve/gcr_sample did not converge: the relative residual times "
-            "the normal operator's condition number — the bound on the RELATIVE "
-            "ERROR, which is what require_convergence limits — exceeds it. The "
-            "residual alone looks converged; it is not, along the directions the "
-            "prior dominates. Pass tol ≈ require_convergence/κ with a maxiter to "
-            "match, or strengthen the prior. condition_bound() reports the κ "
-            "this guard read; condition_estimate() measures a smaller one and "
-            "is not what to divide a target by.",
-        )
-    return join(solution), residual
-
-
-def _split_like(key: jax.Array, template) -> Any:
-    """One independent key per leaf of ``template``, same structure."""
-    leaves, treedef = jax.tree.flatten(template)
-    return jax.tree.unflatten(treedef, list(jax.random.split(key, len(leaves))))
 
 
 def gcr_sample(
@@ -2090,8 +1906,14 @@ def gcr_sample(
     prior_mean, prior_std = _check_solve_arguments(
         block, observed, prior_mean, prior_std, "gcr_sample", noise_std=noise_std
     )
-    return _conjugate_solve(
-        block, observed, noise_std=noise_std, prior_std=prior_std,
-        prior_mean=prior_mean, tol=tol, maxiter=maxiter, key=key,
+    solution, residual = _far_gcr_sample(
+        _as_far_block(
+            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
+        ),
+        precision=_far_precision(noise_std),
+        key=key,
+        tol=tol,
+        maxiter=maxiter,
         require_convergence=require_convergence,
     )
+    return _from_far_domain(block, solution), residual

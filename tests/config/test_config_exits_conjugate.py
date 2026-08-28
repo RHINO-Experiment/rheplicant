@@ -166,7 +166,7 @@ class TestTheSolve:
         # hard-coded null never raises on the first.
         #
         # 1e-3 is DECLARED rather than defaulted: the shipped default became
-        # null when kappa became a bound (inference/linear.py::_condition_bound),
+        # null when kappa became a bound (inference/linear.py::condition_bound),
         # so leaving it out would make both halves of this pair the same call.
         with pytest.raises(eqx.EquinoxRuntimeError,
                            match="wiener_solve/gcr_sample"):
