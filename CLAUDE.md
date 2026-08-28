@@ -200,8 +200,11 @@ Several test modules stand down behind a module-level `pytest.importorskip`,
 so a thinner virtualenv silently collects fewer tests of the same suite.
 Complete means the dev group plus **`h5py`**, **`rhino-cal-jax`** (not on
 PyPI; install it editable from its own checkout, and install `editables`
-alongside it, which its editable hook needs) and **`bayesmith`** at the
-`>=0.5` surface. The floor moved from 0.2 on 2026-08-27 and the halves are
+alongside it, which its editable hook needs), **`bayesmith`** at the
+`>=0.5` surface, and the **`gui-react`** extra — which is in this list because
+CI did not have it and nothing said so: its `httpx2` is what
+`tests/gui/test_session_api.py` skips on, and its absence cost 118 statements
+of GUI coverage without a single test failing. The floor moved from 0.2 on 2026-08-27 and the halves are
 worth telling apart: 0.2 named `first_fit` and `exact.loglinear`, which
 `partition.py` and `loglinear.py` import; 0.3 names `AffinityRefused`'s
 structured payload and `ComplexNormal`, which `graph_bridge.py` needs. A 0.2
@@ -260,13 +263,29 @@ that log will conclude the gate is broken; it is doing exactly what it was
 configured to do, and what is wrong is that two different numbers are
 displayed by two different components.
 
-Note also that **CI's coverage is legitimately lower than a local run's**
-(88.96 % against 89.39 %) because CI skips more: `MomentRFI` cannot install
-there — `momentrfi` depends on `momentemu`, which is on no registry the runner
-reaches — so that step fails under `continue-on-error` and CI collects 628
-skips against 566 here. The README figure is the LOCAL measurement, so it is
-true where it was taken and unreachable on CI. Do not reconcile the two by
-editing the README; they are measurements of different environments.
+Note also that **CI's coverage was lower than a local run's** (88.96 % against
+89.39 %), and the reason first written here — that `MomentRFI` cannot install
+on the runner — was **wrong**. `MomentRFI` is absent in BOTH environments, so
+it explains no difference at all; that sentence was copied from the handover
+rather than measured, which is exactly the tax this file keeps recording.
+
+**Measured 2026-08-28, per file.** The whole gap is 132 statements and it has
+two parts. `platform_darwin.py` (67) and `platform_linux.py` (57) are the
+irreducible half — no single machine covers both, netting 10 against CI. The
+other 118 are the GUI modules, `gui/api.py` alone falling from **95.02 % to
+64 %**, and they trace to one missing package: `tests/gui/test_session_api.py`
+opens with `pytest.importorskip("httpx2")`, and **`httpx2` lives in the
+`gui-react` extra while CI installed `gui`**. `gui` deliberately excludes it —
+its own comment says `httpx2` is "solely for Starlette's test client" and must
+not become a runtime requirement — so the fix is for CI to install the test
+dependency, not to move it into the shipped extra. Both CI jobs now install
+`gui-react` alongside, and `httpx2` is named in the complete-environment list
+above.
+
+The README figure is the LOCAL measurement. Do not reconcile the two by
+editing the README; check first whether they are measuring the same
+environment, because the last time they diverged the cause was an install
+line and not the code.
 
 ## The config layer's boundary is textual
 

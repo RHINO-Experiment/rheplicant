@@ -45,7 +45,15 @@ jobs:
         # docs/install.md say why `uv lock` cannot succeed here).
         run: |
           uv venv --python ${{ matrix.python }}
-          uv pip install -e ".[rhino,numpyro,gui]" --group dev
+          # `gui-react` alongside `gui` for its `httpx2`, which is what
+          # `tests/gui/test_session_api.py` importorskips on. Without it that
+          # file and its siblings skipped here and nowhere else, costing 118
+          # statements of GUI coverage -- `gui/api.py` at 64 % against 95 %
+          # locally -- with no test failing to say so. `gui` deliberately
+          # excludes `httpx2` because the shipped server does not need it;
+          # this installs the TEST dependency rather than moving it into the
+          # runtime extra.
+          uv pip install -e ".[rhino,numpyro,gui,gui-react]" --group dev
 
       - name: Install the integrations that are not on an index
         # `editables` is not decoration: rhino-cal-jax's editable hook needs it.
@@ -122,7 +130,15 @@ jobs:
       - name: Create the environment
         run: |
           uv venv --python 3.12
-          uv pip install -e ".[rhino,numpyro,gui]" --group dev
+          # `gui-react` alongside `gui` for its `httpx2`, which is what
+          # `tests/gui/test_session_api.py` importorskips on. Without it that
+          # file and its siblings skipped here and nowhere else, costing 118
+          # statements of GUI coverage -- `gui/api.py` at 64 % against 95 %
+          # locally -- with no test failing to say so. `gui` deliberately
+          # excludes `httpx2` because the shipped server does not need it;
+          # this installs the TEST dependency rather than moving it into the
+          # runtime extra.
+          uv pip install -e ".[rhino,numpyro,gui,gui-react]" --group dev
 
       - name: Install the integrations that are not on an index
         continue-on-error: true

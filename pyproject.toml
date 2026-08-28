@@ -266,6 +266,13 @@ source = ["rheplicant", "_rheplicant_bootstrap"]
 # than assumed: a full serial run under it reports "Required test coverage of
 # 89.0% reached. Total coverage: 89.22%". The 0.22 of headroom absorbs the
 # one-statement run-to-run wobble noted above with room to spare.
+# `precision` governs BOTH the reported digits and the COMPARISON: coverage
+# checks `round(total, precision)` against `fail_under`. Left unset it
+# defaults to 0, which made an 89 floor gate at 88.5 -- and pytest-cov
+# prints its own FAIL line from the UNROUNDED total, so CI logged
+# "FAIL ... 88.96%" on every run and exited 0. Set to 2 so the number
+# that prints and the number that decides are the same one.
+precision = 2
 fail_under = 89
 exclude_lines = [
     "pragma: no cover",
