@@ -17,11 +17,40 @@ because the two are different paradigms -- this layer reads a ``Pipeline`` and a
 not a migration path for existing code, and nothing here is deprecated.
 
 Which to reach for: if you have a RHINO twin, you are in the right place. If you
-have a model that is not this instrument, bayesmith is the general one. The two
-agreeing is the point, and it is checked rather than asserted -- which is also
-why this module is not a shell around that one. Re-exporting the three names
-whose signatures do match would make the test that compares them compare an
-object with itself, and a guard that cannot fail is worse than no guard.
+have a model that is not this instrument, bayesmith is the general one.
+
+**Two paragraphs above are dated, and one of them has been overtaken. Read this
+before relying on either.** (2026-08-28.)
+
+The counts were measured 2026-08-26, against a bayesmith whose surface has
+grown by four releases since. They have moved, and this note deliberately does
+not replace them: reproducing the method that produced them is what a
+replacement needs, and a differently-derived number would only look like the
+same one. ``len(__all__)`` here is still exactly 106, which is the one of the
+four that can be checked in a line.
+
+The overtaken sentence is the one that used to end this docstring: that this
+module is "not a shell around that one", because re-exporting the matching
+names "would make the test that compares them compare an object with itself,
+and a guard that cannot fail is worse than no guard". **The premise stands and
+the conclusion has reversed.** Several modules here now delegate their
+numerics to bayesmith deliberately -- Wave A's five, ``linear``'s solve
+surface, ``gls`` -- so for those the two packages genuinely do compare an
+object with itself, and that is not an accident to avoid but the intended end
+state, reached one module at a time.
+
+What changed is that the guard which cannot fail is now DETECTED rather than
+prevented. Each cross-check carries its own anti-vacuity assertion, and when a
+module switches it is that assertion which goes red -- ``gls``'s draws coming
+back bitwise identical is what announced its own switch -- at which point the
+comparison retires and its independent oracles are identified in bayesmith's
+own suite. So the sentence was right about the hazard and wrong about the
+remedy: the remedy is not refusing to delegate, it is making sure the
+comparison says so when delegation makes it vacuous.
+
+The migration and its records live in bayesmith's ``docs/superpowers/specs/``;
+``docs/migration/`` there carries the per-module contracts, each now marked with
+what has switched.
 """
 
 from rheplicant.core.errors import (
