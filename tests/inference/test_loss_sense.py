@@ -200,6 +200,19 @@ class TestTheGuardCostsNothingAtRunTime:
         calibrator had been asked to run. Three calls: one from the guard's
         own probe at the start, one for the perfect prediction, and one from
         the first traced step of the loop.
+
+        **The learning rate is spelled out, and that is not decoration.** This
+        case used the calibrator's DEFAULT ``1e-2``, at which this fixture
+        diverges: measured, ``losses[-1]`` is ``nan`` and the fitted ``g`` is
+        not finite. The count assertion could not see it -- it counts
+        ``loss_fn`` calls and never looks at the fit -- so the tracing claim
+        was being measured on a run that produced NaN. ``1e-4`` is what the
+        converging cases at the top of this file use, and the count is
+        unchanged by the switch, which is the point: the claim was always
+        about tracing, and it should be made on a fit that works.
+
+        Found while probing D33 (a diverged fit refused rather than returned):
+        with that refusal applied, this case raised instead of counting.
         """
         calls = []
 
@@ -207,8 +220,12 @@ class TestTheGuardCostsNothingAtRunTime:
             calls.append(1)
             return jnp.mean((prediction - observed) ** 2)
 
-        GradientCalibrator(n_steps=50).fit(
+        fit, losses = GradientCalibrator(learning_rate=1e-4, n_steps=50).fit(
             forward, PARAMS0, OBSERVED, loss_fn=counting_loss
+        )
+        assert jnp.isfinite(fit["g"]), (
+            "the fixture diverged again -- the count below would still pass, "
+            "which is how this went unnoticed at the default learning rate"
         )
         assert len(calls) < 10, (
             f"loss_fn was called {len(calls)} times for a 50-step fit; the guard "
