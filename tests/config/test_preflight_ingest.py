@@ -1758,7 +1758,7 @@ class TestTheCost:
         check's own per-layer READ alone -- the ``dataclasses.replace`` /
         prefix / set-membership path inside ``_task3_over_layers`` that a
         document WITH findings exercises is never timed here at all."""
-        from tests.config.inflight_helpers import best_ms
+        from tests.config.inflight_helpers import best_ms, machine_factor
 
         document = ingested_document()
         document["variants"] = {
@@ -1770,4 +1770,4 @@ class TestTheCost:
         def run_them():
             return [list(check(document)) for check in mine]
 
-        assert best_ms(run_them, repeats=100) < 1.2
+        assert best_ms(run_them, repeats=100) < 1.2 * machine_factor()

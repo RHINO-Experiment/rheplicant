@@ -35,6 +35,7 @@ from tests.config.inflight_helpers import (
     axis_findings,
     axis_only,
     best_ms,
+    machine_factor,
 )
 from tests.config.message_binding import assert_bound_once, modules_carrying
 from tests.config.preflight_helpers import UNREADABLE_BEAM, preflight_document
@@ -526,7 +527,7 @@ class TestTheCost:
                                          "num": num}, "unit": "s"}}})
         facts = axis_facts(document)
         axes(facts)  # warm
-        assert best_ms(lambda: axes(facts), repeats=30) < bound
+        assert best_ms(lambda: axes(facts), repeats=30) < bound * machine_factor()
 
     def test_the_plans_own_hundredth_of_a_second_box(self):
         """§0.1's contract for this slot, kept verbatim and kept KNOWING it is
@@ -569,4 +570,4 @@ class TestTheCost:
             "the timed call must be the REFUSING one, or this measures the "
             "clean path the test above already covers"
         )
-        assert best_ms(lambda: axes(facts), repeats=30) < 1.6
+        assert best_ms(lambda: axes(facts), repeats=30) < 1.6 * machine_factor()

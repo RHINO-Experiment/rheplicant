@@ -47,6 +47,7 @@ from tests.config.inflight_helpers import (
     axis_findings,
     axis_only,
     best_ms,
+    machine_factor,
     projector_sections,
 )
 from tests.config.message_binding import assert_bound_once
@@ -1091,7 +1092,7 @@ class TestTheCost:
         # speed is a benchmark of the machine. Still coarse enough to catch
         # what it is for: a check that started BUILDING something here would
         # not cost 1.6x, it would cost an order of magnitude.
-        assert best_ms(lambda: axes(facts), repeats=30) < 2.5
+        assert best_ms(lambda: axes(facts), repeats=30) < 2.5 * machine_factor()
 
     def test_the_plans_own_hundredth_of_a_second_box(self):
         """§0.1's contract, on the document that lights every check here."""
@@ -1113,4 +1114,4 @@ class TestTheCost:
         document in the repository, and that is what this bound is for."""
         facts = axis_facts(preflight_document())
         axes(facts)  # warm
-        assert best_ms(lambda: axes(facts)) < 0.09
+        assert best_ms(lambda: axes(facts)) < 0.09 * machine_factor()

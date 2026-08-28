@@ -1799,7 +1799,7 @@ class TestTheCostOfTheTwoSlots:
         """
         run = built_run(preflight_document())
         built(run)                                     # warm
-        assert best_ms(lambda: built(run)) < 0.02
+        assert best_ms(lambda: built(run)) < 0.02 * machine_factor()
 
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
         """The plan's own §0.1 bound for this slot, on the worked document,
@@ -1840,6 +1840,12 @@ class TestTheCostOfTheTwoSlots:
         """
         facts = axis_facts(preflight_document())
         axes(facts)                                    # warm
+        # NOT multiplied by `machine_factor()`, and alone in this directory
+        # in that. Every other absolute bound here is calibrated and scales;
+        # this one is deliberately loose -- the docstring above says it is
+        # implied by the 0.09 assertion and exists to carry §0.1's contract
+        # number, not to add sensitivity. Scaling a bound that cannot fail
+        # would only make it look like a measurement.
         assert best_ms(lambda: axes(facts)) < 10.0     # §0.1's 0.01 s, in ms
 
     def test_building_the_axes_payload_does_not_pay_for_the_beam(self):

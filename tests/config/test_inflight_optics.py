@@ -37,6 +37,7 @@ from tests.config.inflight_helpers import (
     built_findings,
     built_only,
     built_run,
+    machine_factor,
     projector_sections,
 )
 from tests.config.preflight_helpers import (
@@ -1006,4 +1007,4 @@ class TestTheCostOfTheseTwoRows:
         """
         run = built_run(tone_and_flagger(threshold=1000.0))
         built(run)                                        # warm
-        assert best_ms(lambda: built(run), repeats=30) < 0.7
+        assert best_ms(lambda: built(run), repeats=30) < 0.7 * machine_factor()

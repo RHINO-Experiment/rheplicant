@@ -86,14 +86,30 @@ def _reference_workload() -> int:
 def machine_factor() -> float:
     """How much slower this machine is than the one the bounds were taken on.
 
-    **Every absolute cost bound in this directory is multiplied by this**, and
-    the reason is a CI failure rather than a preference. Three of them went red
-    on GitHub's linux/x86-64 runner while green here, at 0.106 ms against 0.09,
-    2.74 ms against 2.00, and 0.0512 s against 0.05 -- ratios of 1.18, 1.37 and
-    1.02 against margins the docstrings deliberately set at x6, x2.6 and
-    "headroom". Nothing had regressed. The runner is about four times slower
-    per operation than the machine the numbers were taken on, and a bound
-    calibrated in milliseconds is a statement about hardware.
+    **Every calibrated cost bound in this directory is multiplied by this**,
+    and the reason is a CI failure rather than a preference. Three of them went
+    red on GitHub's linux/x86-64 runner while green here, at 0.106 ms against
+    0.09, 2.74 ms against 2.00, and 0.0512 s against 0.05 -- ratios of 1.18,
+    1.37 and 1.02 against margins the docstrings deliberately set at x6, x2.6
+    and "headroom". Nothing had regressed. The runner is about four times
+    slower per operation than the machine the numbers were taken on, and a
+    bound calibrated in milliseconds is a statement about hardware.
+
+    **The sentence above was FALSE when it was first written, and CI found the
+    gap one push later.** The original pass scaled the three bounds that had
+    already gone red and left five others -- including
+    ``test_inflight_axes.py``'s ``axes(facts) < 0.09``, which is the SAME
+    assertion on the SAME call as the one it did fix in
+    ``test_config_inflight.py``, one of the two copies corrected and the other
+    not. That copy went red on the next run at 0.0961 against 0.09, a miss of
+    6.8 % and, again, nothing regressed. All eight now scale; the sweep was
+    ``grep`` for ``best_ms(`` with a comparison, classified one at a time.
+
+    **One bound is deliberately exempt** and says so where it lives:
+    ``test_config_inflight.py``'s ``< 10.0``, which its own docstring calls
+    implied by the ``0.09`` assertion and present to carry a contract number
+    rather than to add sensitivity. Scaling a bound that cannot fail would
+    only make it look like a measurement.
 
     The alternative was to loosen the three numbers, and that is what they were
     written to resist: each one is calibrated against a mutation table, and
