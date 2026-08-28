@@ -699,21 +699,44 @@ def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
 def _quadratic_form(
     factor: Any, target: Any, offset: Any, columns: Sequence[int] | None = None
 ) -> tuple[np.ndarray, np.ndarray, float]:
-    """``(A, b, c)`` such that the term is ``x^T A x - 2 b^T x + c``.
+    """The three coefficients of ``offset - ||R x - z||^2 / 2`` as a form in x.
 
-    The three coefficients are what a stored block and the epoch it came from
-    have in common, and all that they have in common. ``combine(null, info)``
-    re-triangularises, so the stored factor is **not** the epoch's factor even
-    up to roundoff -- it has a different number of rows and a different sign
-    convention -- while the form it stands for is preserved exactly. Comparing
-    coefficients is therefore the check; comparing arrays would refuse every
-    block the accumulator actually builds.
+    Namely the Gram ``R^T R``, the cross term ``R^T z``, and the log-density's
+    own CONSTANT ``offset - z.z/2``. They are what a stored block and the epoch
+    it came from have in common, and all that they have in common.
+    ``combine(null, info)`` re-triangularises, so the stored factor is **not**
+    the epoch's factor even up to roundoff -- it has a different number of rows
+    and a different sign convention -- while the form it stands for is preserved
+    exactly. Comparing coefficients is therefore the check; comparing arrays
+    would refuse every block the accumulator actually builds.
+
+    **The third one was ``z.z + offset`` until 2026-08-28, and that is not a
+    coefficient of anything.** ``combine`` moves the part of the residual no
+    quadratic form in ``x`` can express into the corner ``rho``: ``z.z`` falls
+    by ``rho^2`` and ``offset`` is paid ``-rho^2/2``, so their SUM falls by
+    ``1.5 * rho^2`` while the density is unchanged. The old spelling was
+    therefore preserved only when ``rho`` was empty -- which it is for every
+    full-rank epoch, and was for every fixture that reached this code path.
+
+    It surfaced as a platform difference, which is worth recording because the
+    guard's own message denies it. An exactly collinear night's QR has a zero
+    pivot, and *where LAPACK puts it* differs: on darwin/arm64 column 1 reduces
+    to 1.36e-16, the null direction stays inside the kept block and ``rho`` is
+    empty; on linux/x86-64 it reduces to exactly 0, the mass moves to the
+    corner, and ``rho^2 = 14.62``. The stored block was right on both. The
+    guard refused it on one, with a ``StateValidationError`` reporting a
+    shuffled campaign -- a data-integrity accusation, raised on correct data,
+    reproducible only on the machine nobody develops on.
     """
     factor = np.asarray(factor, dtype=float)
     if columns is not None:
         factor = factor[:, list(columns)]
     target = np.asarray(target, dtype=float)
-    return factor.T @ factor, factor.T @ target, float(target @ target + float(offset))
+    return (
+        factor.T @ factor,
+        factor.T @ target,
+        float(offset) - 0.5 * float(target @ target),
+    )
 
 
 def _reject_a_foreign_stack(

@@ -63,6 +63,7 @@ from tests.config.preflight_helpers import (
     preflight_document,
     refusals,
 )
+from tests.config.inflight_helpers import machine_factor
 
 #: ``tests/config/``.
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -1684,7 +1685,12 @@ class TestTheCostAndTheBoundary:
         preflight(doc)                       # warm the import graph
         start = time.perf_counter()
         preflight(doc)
-        assert time.perf_counter() - start < 0.05
+        elapsed = time.perf_counter() - start
+        factor = machine_factor()
+        assert elapsed < 0.05 * factor, (
+            f"the pass cost {elapsed:.4f} s against a bound of "
+            f"{0.05 * factor:.4f} s (machine factor {factor:.2f})"
+        )
 
     @pytest.mark.parametrize("patch", _BRANCH_PATCHES, ids=_BRANCH_IDS)
     def test_the_pass_touches_no_file(self, monkeypatch, patch):

@@ -193,9 +193,9 @@ def _assert_equals(message: str, expected: str) -> None:
     assert message == expected
 
 
-def a13_narrow_message(spacing: float) -> str:
+def a13_narrow_message(spacing: float, width: str = "300") -> str:
     return (
-        f"model.cw_tone.line_width: 300 Hz is narrower than the channel response "
+        f"model.cw_tone.line_width: {width} Hz is narrower than the channel response "
         f"this 'sinc2' grid can carry (1 x the {spacing:.6g} Hz median channel "
         f"spacing = {spacing:.6g} "
         "Hz). The sampled channels land on the lineshape's own nulls, or overflow "
@@ -204,11 +204,30 @@ def a13_narrow_message(spacing: float) -> str:
     )
 
 
-def assert_a13_narrow(message: str) -> None:
-    """Every character except the spacing, and the spacing's own arithmetic."""
+def _quoted_spacing(message: str) -> float:
     found = re.search(r"1 x the ([\d.e+]+) Hz median channel spacing", message)
     assert found, f"the narrow message no longer quotes a spacing: {message}"
-    assert message == a13_narrow_message(float(found.group(1)))
+    return float(found.group(1))
+
+
+def assert_a13_narrow(message: str) -> None:
+    """Every character except the spacing, and the spacing's own arithmetic."""
+    assert message == a13_narrow_message(_quoted_spacing(message))
+
+
+def assert_a13_just_under_the_floor(message: str) -> None:
+    """The same message for a width one tolerance BELOW the floor.
+
+    Two platform-dependent numbers here rather than one: the spacing, and the
+    width, which is ``floor * (1 - 2 * WIDTH_FLOOR_RTOL)`` of it and so carries
+    the spacing's digits into a second slot. It was pinned as a literal
+    ``A13_JUST_UNDER_THE_FLOOR_MESSAGE`` until 2026-08-28 -- the one assertion
+    in this module that the spacing-derivation above was not applied to, which
+    is why it was the one that went red on CI while its siblings passed.
+    """
+    spacing = _quoted_spacing(message)
+    width = f"{spacing * (1.0 - 2.0 * WIDTH_FLOOR_RTOL):.6g}"
+    assert message == a13_narrow_message(spacing, width)
 
 def a13_wide_message(spacing: float) -> str:
     return (
@@ -268,16 +287,6 @@ A13_DESCENDING_TIME_MESSAGE = (
     "spread over channels the tone is nowhere near." + _A13_TAIL
 )
 
-#: A width just BELOW ``floor * (1 - WIDTH_FLOOR_RTOL)`` on the narrow band:
-#: 336 Hz floor, so 335.99328 Hz.  The cell one tolerance up from it is
-#: accepted, which is what says the tolerance is read.
-A13_JUST_UNDER_THE_FLOOR_MESSAGE = (
-    "model.cw_tone.line_width: 335.993 Hz is narrower than the channel "
-    "response this 'sinc2' grid can carry (1 x the 336 Hz median channel "
-    "spacing = 336 Hz). The sampled channels land on the lineshape's own "
-    "nulls, or overflow its exponent, and the normalisation then divides by "
-    "float noise." + _A13_TAIL
-)
 
 #: A centre 0.1 MHz BELOW the band's first channel.  Its companion -- a centre
 #: exactly ON that channel -- is silent, because the comparison is ``<=``.
@@ -605,8 +614,58 @@ class TestA13sWidthLegs:
         assert WIDTH_FLOOR_RTOL > 0.0, "nothing to discriminate if it is zero"
         assert silent_here(narrow(floor * (1.0 - 0.5 * WIDTH_FLOOR_RTOL)))
         assert silent_here(narrow(floor)), "and a width AT the floor, likewise"
-        assert axis_only(narrow(floor * (1.0 - 2.0 * WIDTH_FLOOR_RTOL)),
-                         "A13").message == A13_JUST_UNDER_THE_FLOOR_MESSAGE
+        assert_a13_just_under_the_floor(
+            axis_only(narrow(floor * (1.0 - 2.0 * WIDTH_FLOOR_RTOL)), "A13").message
+        )
+
+    def test_no_pinned_message_in_this_module_spells_the_spacing_as_a_literal(
+        self,
+    ):
+        """The guard for the class of defect, not the instance.
+
+        The spacing is the platform's -- the comment above ``_assert_equals``
+        says so and the derivations exist for it -- but that policy was applied
+        assertion by assertion, and
+        ``test_the_floors_relative_tolerance_is_read_and_not_dropped`` was
+        missed. It then went red on CI while every sibling passed, which reads
+        as a fault in the check rather than in the fixture and cost a
+        transatlantic round trip to diagnose.
+
+        A constant is allowed to quote any number it likes; what it may not do
+        is quote the CHANNEL SPACING, because that is the one number this band
+        cannot express. Scanned from the module's own namespace so a new
+        constant is covered without being added anywhere.
+        """
+        import re as _re
+        import sys
+
+        module = sys.modules[type(self).__module__]
+        offenders = {
+            name: value
+            for name, value in vars(module).items()
+            if name.isupper()
+            and isinstance(value, str)
+            and _re.search(r"[\d.]+ Hz (?:median )?channel spacing", value)
+        }
+        assert not offenders, (
+            "these pinned messages spell the channel spacing as a literal, and "
+            "this band's spacing is 333.33 Hz against a float32 ulp of 8 Hz, so "
+            "the digit is decided by where linspace rounds: "
+            f"{sorted(offenders)}. Build them with a13_narrow_message/"
+            "a13_wide_message and assert through the matching assert_* helper."
+        )
+
+    def test_that_guard_can_still_see_an_offender(self):
+        """Its sibling. The scan reads a namespace, so a regex that stopped
+        matching would report a clean module rather than failing."""
+        import re as _re
+
+        planted = (
+            "model.cw_tone.line_width: 335.993 Hz is narrower than the channel "
+            "response this 'sinc2' grid can carry (1 x the 336 Hz median "
+            "channel spacing = 336 Hz)."
+        )
+        assert _re.search(r"[\d.]+ Hz (?:median )?channel spacing", planted)
 
     def test_a_descending_grid_is_not_waved_through(self):
         """``_median_gap`` takes ``abs`` BEFORE the median.  Unsigned, a

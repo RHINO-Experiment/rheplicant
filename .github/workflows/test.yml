@@ -131,6 +131,28 @@ jobs:
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
           uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 
+      # The SAME three steps the Suite job above runs, and they are here
+      # because they were not. `8ed385f` added them to Suite alone -- the
+      # commit is titled "the toolchain CI never installed" -- and this job
+      # runs the same suite, so it went on raising
+      # `FileNotFoundError: node_modules/.bin/tsc` from the two typecheck
+      # guards and `playwright: not found` from the e2e ones. A job that runs
+      # every test needs every test's environment; splitting the two and
+      # equipping one of them is how a red job stops meaning anything.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tools/config_gui_spike/react/package-lock.json
+
+      - name: Install the frontend toolchain
+        working-directory: tools/config_gui_spike/react
+        run: npm ci
+
+      - name: Install the browser Playwright drives
+        working-directory: tools/config_gui_spike/react
+        run: npx playwright install --with-deps chromium
+
       - name: Measure coverage serially
         # SERIAL on purpose, and this job exists for that one word.
         #

@@ -183,34 +183,137 @@ def test_a_bigger_incoherent_error_does_not_show_the_sqrt_n_law():
     assert not (ratios[0] < ratios[1] < ratios[2]), ratios
 
 
-def test_the_ratio_is_marginalised_and_a_raw_gradient_amplitude_names_the_wrong_culprit():
-    """Why the report is `|F^-1 grad| / sigma_N` and not `|grad|`.
+def test_the_reported_ratio_is_the_marginalised_one_and_not_the_raw_gradient():
+    """Why the report is ``|F^-1 grad| / sigma_N`` and not ``|grad|``.
 
-    The raw gradient is a derivative of nats with respect to whatever units the
-    latent happens to carry, so it ranks directions by their parameterisation.
-    Measured over eight epochs on this fixture it says `running` is 9.4x more
-    compromised than `t21_depth`; the marginalised ratio -- the shift of the
-    estimate in units of the error bar the campaign actually reports, after the
-    foreground latents are integrated out -- says `t21_depth` is 4.0x worse
-    than `running`. The two orderings are reversed, and only the second one is
-    a scientific error.
+    Against the formula written out by hand, on a fixture whose bias is a real
+    bias: an unseeded ``n_basis=4`` basis, whose smallest reported ratio is
+    ~4e-5 rather than the ~5e-12 a seeded basis gives.
     """
-    memory = _campaign(_basis(), 8)
-    ratios = memory.audit()["bias_over_sigma"]
-    gradients = np.sum(
+    memory = _campaign(_basis(n_basis=4, seed_scores=False), 8)
+    reported = memory.audit()["bias_over_sigma"]
+
+    _, names, spans, _, _ = memory._flatten_layout()
+    # `at=` is the storage origin, which is what `audit()` defaults to and
+    # what `_theta_fisher` refuses to guess: the gradients were taken there, so
+    # a Fisher taken anywhere else makes the ratio a quotient of two different
+    # linearisations.
+    at = dict(memory.basis.reference_values)
+    covariance = np.asarray(
+        jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at)))
+    )
+    gradient = np.sum(
         np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0
     )
-    raw = dict(zip(FLAT, np.abs(gradients), strict=True))
+    bias = covariance @ gradient
+    width = np.sqrt(np.diag(covariance))
 
-    # The REVERSAL is the claim, and the magnitudes are not. Measured: the raw
-    # ratio is 9.4 on arm64 and 22.4 on x86_64, which is the same statement
-    # about which direction the parameterisation flatters, made by arithmetic
-    # that lands differently. Both are asserted as orderings with a margin
-    # wide enough that neither could be noise -- a factor of three either way
-    # -- because a reversal that were marginal would be the interesting
-    # failure and this must not read it as a pass.
-    assert raw["running"] > 3.0 * raw["t21_depth"], raw
-    assert ratios["t21_depth"] > 3.0 * ratios["running"], ratios
+    assert min(reported.values()) > 1e-6, reported
+    for name, (start, stop) in zip(names, spans, strict=True):
+        by_hand = float(np.max(np.abs(bias[start:stop]) / width[start:stop]))
+        assert reported[name] == pytest.approx(by_hand, rel=1e-9), name
+
+
+def test_the_marginalised_ratio_is_invariant_to_units_and_the_raw_gradient_is_not():
+    """The property that makes one of them a scientific quantity.
+
+    Rescale latent *i* by ``c`` -- the same model, different units. The stored
+    gradient scales as ``c`` (it is a derivative with respect to whatever the
+    latent carries), so ``|grad|`` reorders and can be made to name any
+    direction as the worst by choosing units. The reported ratio does not move
+    at all: the bias picks up ``c`` from ``F^-1`` and ``sigma_N`` picks up the
+    same ``c`` from ``sqrt(diag(F^-1))``, and they cancel.
+
+    Done on the campaign's own numbers rather than by rebuilding it in new
+    units, so the arithmetic is the thing under test and not the fixture.
+
+    **This replaced an assertion that a particular ORDERING was reversed
+    (2026-08-28, D49), and the reason is worth keeping.** That test read
+    ``raw["running"] > 3 * raw["t21_depth"]`` and
+    ``ratios["t21_depth"] > 3 * ratios["running"]`` on a SEEDED basis, where
+    both reported ratios are ~5e-12 -- the regime the sibling test above
+    already calls "a coherent error already indistinguishable from zero, so its
+    absolute size is decided by where the arithmetic rounds". A ratio between
+    two such numbers is not a measurement, and CI (linux/x86-64) read 0.70
+    where this machine reads 3.97.
+
+    Swept over the fixtures where the bias IS real, the reversal turns out not
+    to be a property of the method at all -- it follows the random key::
+
+        n_basis  key   raw r/t   mrg t/r   min |mrg|
+              5   50      3.09      2.68   3.468e-06   <- reversed
+              5    7      7.33      0.81   7.183e-07   <- both name running
+              5  123      0.56      9.47   2.694e-06   <- both name t21_depth
+              6    7     57.76      0.59   1.025e-08   <- both name running
+
+    So the old assertion was true of one draw in the roundoff regime, and the
+    thing it was reaching for -- that the two rank directions differently, and
+    only one of the two rankings means anything -- is the invariance below.
+    """
+    memory = _campaign(_basis(n_basis=4, seed_scores=False), 8)
+    _, names, spans, _, _ = memory._flatten_layout()
+    # `at=` is the storage origin, which is what `audit()` defaults to and
+    # what `_theta_fisher` refuses to guess: the gradients were taken there, so
+    # a Fisher taken anywhere else makes the ratio a quotient of two different
+    # linearisations.
+    at = dict(memory.basis.reference_values)
+    covariance = np.asarray(
+        jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at)))
+    )
+    gradient = np.sum(
+        np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0
+    )
+
+    def report(cov, grad):
+        bias, width = cov @ grad, np.sqrt(np.diag(cov))
+        return {
+            name: float(np.max(np.abs(bias[a:b]) / width[a:b]))
+            for name, (a, b) in zip(names, spans, strict=True)
+        }
+
+    def raw(grad):
+        return {
+            name: float(np.max(np.abs(grad[a:b])))
+            for name, (a, b) in zip(names, spans, strict=True)
+        }
+
+    raw_before, before = raw(gradient), report(covariance, gradient)
+
+    # Rescale a direction the raw gradient does NOT currently name as worst,
+    # by enough that it must. Chosen from the measurement rather than written
+    # in: pinning "t21_depth" here would make the test's meaning depend on the
+    # fixture's argmax, which is the kind of accident this test replaced.
+    worst = max(raw_before, key=raw_before.__getitem__)
+    promoted = min(raw_before, key=raw_before.__getitem__)
+    assert promoted != worst, raw_before
+
+    # theta_i -> theta_i / c_i: the same model in different units. The Fisher
+    # transforms as D F D and the gradient as D g, with D = diag(c).
+    scales = np.ones(covariance.shape[0])
+    start, stop = dict(zip(names, spans, strict=True))[promoted]
+    scales[start:stop] = 1e6
+    diagonal = np.diag(scales)
+    rescaled_cov = np.linalg.pinv(diagonal @ np.linalg.pinv(covariance) @ diagonal)
+    rescaled_grad = diagonal @ gradient
+
+    after = report(rescaled_cov, rescaled_grad)
+    for name in names:
+        assert after[name] == pytest.approx(before[name], rel=1e-6), (
+            f"{name} moved under a pure change of units: {before} -> {after}"
+        )
+    assert max(after, key=after.__getitem__) == max(before, key=before.__getitem__)
+
+    # And the raw gradient's answer changes completely: the direction it named
+    # as least compromised is now the one it names as worst. A factor of 1e6,
+    # asserted as an argmax flip rather than as a margin -- a large effect, not
+    # a small difference, which is the failure mode this file has been bitten
+    # by twice.
+    raw_after = raw(rescaled_grad)
+    assert max(raw_after, key=raw_after.__getitem__) == promoted, (
+        f"the rescaling did not change the raw gradient's answer: "
+        f"{raw_before} -> {raw_after}"
+    )
+    assert raw_after[worst] == pytest.approx(raw_before[worst], rel=1e-9)
 
 
 def test_audit_refuses_above_a_declared_ratio():

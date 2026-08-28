@@ -27,6 +27,7 @@ import sys
 import textwrap
 
 import pytest
+from tests.config.inflight_helpers import machine_factor
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -265,7 +266,11 @@ class TestTheCostAndTheImportInvariant:
         it.  Make this check faster and re-calibrate.
         """
         _, _, own = child
-        assert own < 0.002, f"A35's own per-layer walk cost {own * 1000:.2f} ms"
+        factor = machine_factor()
+        assert own < 0.002 * factor, (
+            f"A35's own per-layer walk cost {own * 1000:.2f} ms against a bound "
+            f"of {2.0 * factor:.2f} ms (machine factor {factor:.2f})"
+        )
 
     def test_the_pass_itself_drags_in_no_optional_module(self, child):
         """The half no static import ban can be.  ``find_spec`` on a top-level

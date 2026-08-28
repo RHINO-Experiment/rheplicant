@@ -238,47 +238,72 @@ class TestTheConvergenceGate:
         assert float(jnp.mean(product.noise_std)) == pytest.approx(
             SIGMA_MEAN, rel=1e-4)
 
-    def test_reweight_tol_alone_decides_converged(self):
-        """Same block, same step count: only the tolerance differs.
+    def test_reweight_tol_reaches_the_solver_exactly_as_written(self, monkeypatch):
+        """This kills an implementation that swept ``reweight_tol`` and dropped it.
 
-        This kills an implementation that swept ``reweight_tol`` and dropped
-        it -- the package's own default here is ``max(8 * eps, tol)``, which
-        calls BOTH of these converged, so a dropped key makes the pair agree.
+        Observed at the seam rather than through its numerical consequence, and
+        that is a correction (2026-08-28, D50). The previous version bracketed
+        the reweighting's own step -- one tolerance under it, one over -- and
+        asserted the two verdicts differed. **No fixture in this family can
+        support that bracket**, which took a red CI run and a sweep to
+        establish rather than being obvious:
 
-        **The step it brackets is MEASURED, not pinned, and the search is the
-        portable part.** The pair needs a delta that is finite and above zero,
-        so that one tolerance can sit under it and one over. That is not a
-        given: on x86_64 this reweighting reaches the fixed point exactly and
-        reports ``delta == 0.0`` at two steps, where arm64 hovers at 4.8e-07.
-        A hard-coded step count and a hard-coded pair of tolerances therefore
-        made this test a statement about one machine's arithmetic. It now asks
-        the block where it is still moving, and brackets THAT.
+        * the block is one latent and exactly affine in it, and the data is a
+          deterministic forward through the fit twin, so the GLS solution
+          reproduces the data and RADIOMETER's prediction-proportional sigma
+          stops changing after ONE reweight;
+        * measured, every fixture in this file converges in **2 iterations**
+          with ``delta`` at float32 roundoff: ``gls_product`` 4.7684e-07,
+          ``gls_pair_product`` 8.9391e-07, ``at={"g": 0.5}`` exactly ``0.0``.
+          Adding scatter with ``realise:`` does not help -- 1.4304e-06 at seed
+          7, still two iterations;
+        * so ``delta`` is ``inf`` at one reweight and roundoff at two or more,
+          with nothing stable in between. A tolerance BELOW delta has to be
+          below zero on the machines where the fixed point is reached exactly,
+          and there is no such number.
+
+        That is the same fact :data:`SQUEEZED`'s comment records from the other
+        side, and the fixture-hunt the old assertion's failure message advised
+        ("pick a fixture whose reweighting is still moving") has no answer here.
+
+        The forwarding is the claim anyway -- the docstring said so -- and a
+        spy states it without an instrument in between. It is also the stronger
+        test: a numerical bracket passes whenever the default happens to agree
+        with the declared value, and this does not.
         """
-        moving = None
-        for steps in range(2, 7):
-            probe = gls_product({"min_reweights": 1, "max_reweights": steps,
-                                 "reweight_tol": 1.0})
-            delta = float(probe.delta)
-            if 0.0 < delta < float("inf"):
-                moving = (steps, delta)
-                break
-        assert moving is not None, (
-            "this block reaches its fixed point exactly at every step count "
-            "tried, so no tolerance can sit between converged and not, and "
-            "the claim has nothing to be exhibited on. That is a property of "
-            "the arithmetic, not of reweight_tol: pick a fixture whose "
-            "reweighting is still moving."
-        )
-        steps, delta = moving
-        settings = {"min_reweights": 1, "max_reweights": steps}
-        tight = gls_product({**settings, "reweight_tol": delta / 2.0,
-                             "acknowledge_unconverged_covariance": True})
-        loose = gls_product({**settings, "reweight_tol": delta * 2.0})
-        assert tight.iterations == steps
-        assert loose.iterations == steps
-        assert tight.delta == pytest.approx(loose.delta, rel=1e-6)
-        assert tight.converged is False
-        assert loose.converged is True
+        from rheplicant import inference
+
+        real = inference.iterative_gls
+        seen: list[dict] = []
+
+        def spy(*args, **kwargs):
+            seen.append(dict(kwargs))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(inference, "iterative_gls", spy)
+        gls_product({"min_reweights": 1, "max_reweights": 2,
+                     "reweight_tol": 3.7e-09,
+                     "acknowledge_unconverged_covariance": True})
+        assert len(seen) == 1, seen
+        assert seen[0]["reweight_tol"] == pytest.approx(3.7e-09)
+
+    def test_a_run_that_declares_no_tolerance_forwards_none(self, monkeypatch):
+        """The sibling. Without it the spy above passes for an implementation
+        that hard-codes 3.7e-09, or one that forwards a default under that name
+        whatever the run says."""
+        from rheplicant import inference
+
+        real = inference.iterative_gls
+        seen: list[dict] = []
+
+        def spy(*args, **kwargs):
+            seen.append(dict(kwargs))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(inference, "iterative_gls", spy)
+        gls_product({"min_reweights": 1, "max_reweights": 2})
+        assert len(seen) == 1, seen
+        assert "reweight_tol" not in seen[0], seen[0]
 
     def test_min_reweights_is_a_floor_the_package_honours(self):
         # The fixed point is reached in 5 steps, so a floor of 8 is visible

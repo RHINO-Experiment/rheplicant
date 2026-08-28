@@ -59,6 +59,7 @@ from tests.config.inflight_helpers import (
     axis_findings,
     axis_only,
     best_ms,
+    machine_factor,
     built_findings,
     built_only,
     built_run,
@@ -1776,7 +1777,7 @@ class TestTheCostOfTheTwoSlots:
         replaced it did."""
         facts = axis_facts(preflight_document())
         axes(facts)                                    # warm
-        assert best_ms(lambda: axes(facts)) < 0.09
+        assert best_ms(lambda: axes(facts)) < 0.09 * machine_factor()
 
     def test_the_built_pass_costs_a_small_fraction_of_a_millisecond(self):
         """**0.02 ms against a measured 0.0032 ms best case** -- about x6.

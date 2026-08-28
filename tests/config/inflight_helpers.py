@@ -27,6 +27,7 @@ refusal really does stop the load -- calls ``load_document`` under
 ``pytest.raises`` instead, and ``test_config_inflight.py`` ships that pair.
 """
 
+import functools
 import time
 
 import numpy as np
@@ -38,6 +39,79 @@ from rheplicant.config.inflight import Axes, Built, axes, built
 from rheplicant.config.postflight import Priced, priced
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
+
+
+#: What :func:`_reference_workload` costs on the machine every ABSOLUTE cost
+#: bound under ``tests/config/`` was calibrated on -- darwin/arm64, Apple
+#: silicon, 2026-08-28. Measured as the median of twelve independent
+#: best-of-thirty runs: 0.084-0.092 ms, a spread of 8.9 %.
+CALIBRATION_MS = 0.090
+
+
+class _ReferenceNode:
+    """A small object with the shape the passes actually walk."""
+
+    __slots__ = ("name", "kind", "children")
+
+    def __init__(self, name: str, kind: str) -> None:
+        self.name, self.kind, self.children = name, kind, ()
+
+
+def _reference_workload() -> int:
+    """Pure-CPU work of the same KIND the passes do, and nothing else.
+
+    Dict construction and iteration, attribute access through ``__slots__``,
+    a branch, ``len`` and small f-string formatting -- the interpreter work a
+    config pass is made of. No IO, no imports, no allocation of anything large,
+    so what it measures is how fast this machine runs Python and not how fast
+    its disk is or how warm its caches are.
+    """
+    table = {
+        f"key{index}": _ReferenceNode(
+            f"key{index}", "leaf" if index % 3 else "branch"
+        )
+        for index in range(64)
+    }
+    total = 0
+    for _ in range(24):
+        for name, node in table.items():
+            if node.kind == "leaf":
+                total += len(name) + len(node.children)
+            else:
+                total += len(f"{node.name}:{node.kind}")
+    return total
+
+
+@functools.lru_cache(maxsize=1)
+def machine_factor() -> float:
+    """How much slower this machine is than the one the bounds were taken on.
+
+    **Every absolute cost bound in this directory is multiplied by this**, and
+    the reason is a CI failure rather than a preference. Three of them went red
+    on GitHub's linux/x86-64 runner while green here, at 0.106 ms against 0.09,
+    2.74 ms against 2.00, and 0.0512 s against 0.05 -- ratios of 1.18, 1.37 and
+    1.02 against margins the docstrings deliberately set at x6, x2.6 and
+    "headroom". Nothing had regressed. The runner is about four times slower
+    per operation than the machine the numbers were taken on, and a bound
+    calibrated in milliseconds is a statement about hardware.
+
+    The alternative was to loosen the three numbers, and that is what they were
+    written to resist: each one is calibrated against a mutation table, and
+    every table row scales with the machine exactly as the clean number does.
+    Dividing by a reference keeps all of them -- a x10 regression of the code
+    under test still lands x10 above its bound, because the reference does not
+    move with it.
+
+    Cached, so the three tests that read it agree within a session and the
+    ~3 ms it costs is paid once.
+
+    Returns:
+        ``1.0`` on the calibration machine; larger on a slower one. Not
+        clamped: a factor of 20 would mean the bounds have stopped
+        discriminating, and the right response to that is a red test whose
+        message says so, not a silent floor.
+    """
+    return best_ms(_reference_workload, repeats=30) / CALIBRATION_MS
 
 
 def best_ms(call, repeats: int = 100) -> float:
