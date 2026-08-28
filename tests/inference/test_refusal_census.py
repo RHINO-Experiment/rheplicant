@@ -66,13 +66,18 @@ CENSUS: dict[str, int] = {
     "test_inference_unpinned_refusals.py": 5,
     "test_jeffreys_prior.py": 13,
     "test_linear_block_as_dict.py": 2,
-    # 19 -> 18 on 2026-08-28: Wave B's `linear` switch. The float32-floor
-    # test stopped pinning ONE key's refusal with `pytest.raises` and now
-    # sweeps twenty, because the refusal was key-dependent all along --
-    # 15 of 20 before the switch, 12 after. It still asserts a refusal,
-    # and a stronger one (the floor, plus the KIND of every refusal); it
-    # is the `pytest.raises` site the census counts that is gone.
-    "test_linear_blocks.py": 18,
+    # 19 -> 18 -> 20 on 2026-08-28, both moves in Wave B's `linear` batch.
+    # DOWN one: the float32-floor test stopped pinning ONE key's refusal with
+    # `pytest.raises` and now sweeps twenty, because the refusal was
+    # key-dependent all along -- 15 of 20 before the switch, 12 after. It
+    # still asserts a refusal, and a stronger one (the floor, plus the KIND
+    # of every refusal); it is the `pytest.raises` site that is gone.
+    # UP two: the batch's mutation set found that NOTHING asserted
+    # `_require_prior_std` on either conditioning exit, so
+    # `TestBothConditioningExitsRunTheSamePreconditions` adds one per exit --
+    # each also pinning that the message names its OWN caller, since three
+    # exits share the sentence.
+    "test_linear_blocks.py": 20,
     "test_linear_groups.py": 21,
     "test_loss_sense.py": 5,
     "test_noise_model.py": 3,
@@ -106,11 +111,13 @@ BY_CLASS: dict[str, int] = {
     # 179 -> 180 on 2026-08-28: G15's discharge added the order guard described
     # in CENSUS above. The class is unchanged BECAUSE the check stayed on this
     # side; that is the whole content of D48.
-    "ParameterSpaceError": 180,
+    # 180 -> 182 on 2026-08-28: the two conditioning-exit refusals the
+    # Wave B mutation set found unguarded. Same class, same seam rule.
+    "ParameterSpaceError": 182,
     "StateValidationError": 64,
-    # 4 -> 3 on 2026-08-28: the same single site, see CENSUS above. The
-    # class is NOT lost -- three other files still pin it -- so the seam
-    # still has a rule for it.
+    # 4 -> 3 on 2026-08-28: one `pytest.raises(RuntimeError)` site became a
+    # twenty-key sweep, see CENSUS above. The class is NOT lost -- three
+    # other files still pin it -- so the seam still has a rule for it.
     "RuntimeError": 3,
     "Exception": 3,
     # 1 -> 2 on 2026-08-28: D23's fixture pins that numpyro accepts a Latent as
@@ -183,7 +190,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 252
+    assert sum(CENSUS.values()) == 254
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():
