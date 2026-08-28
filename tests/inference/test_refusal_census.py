@@ -46,6 +46,12 @@ CENSUS: dict[str, int] = {
     "test_d23_refusal_criterion.py": 2,
     "test_declared_prior.py": 14,
     "test_fisher_prior.py": 7,
+    # G15's discharge, added 2026-08-28. ONE site: the Uniform prior refused
+    # while `graph_for_information` is monkeypatched to raise on contact, which
+    # pins that the admission runs BEFORE the graph exists. Left to the far
+    # side this refusal does not change class -- it does not arrive at all,
+    # because `translate` files `NotGaussian` as a blameless verdict (D48).
+    "test_g15_prior_delegation.py": 1,
     "test_forward.py": 1,
     "test_gls.py": 3,
     # 14 -> 13 on 2026-08-27: the refusal that pinned the masking GAP retired
@@ -91,7 +97,10 @@ CENSUS: dict[str, int] = {
 #: the seam at all. A drift between these two populations is a drift in which
 #: refusals the adapter is responsible for.
 BY_CLASS: dict[str, int] = {
-    "ParameterSpaceError": 179,
+    # 179 -> 180 on 2026-08-28: G15's discharge added the order guard described
+    # in CENSUS above. The class is unchanged BECAUSE the check stayed on this
+    # side; that is the whole content of D48.
+    "ParameterSpaceError": 180,
     "StateValidationError": 64,
     "RuntimeError": 4,
     "Exception": 3,
@@ -165,7 +174,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 252
+    assert sum(CENSUS.values()) == 253
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():

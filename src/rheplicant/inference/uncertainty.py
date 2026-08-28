@@ -281,35 +281,47 @@ def as_noise_model(
     return noise if flags is None else FlaggedNoise(noise, flags)
 
 
-def _prior_precision(
+def _declared_gaussian_priors(
     space: ParameterSpace,
     names: tuple[str, ...] | None,
     spans: tuple[tuple[int, int], ...] | None,
     shapes: tuple[tuple, ...] | None,
-    size: int,
-) -> jax.Array:
-    """``-d2 log p(theta)/dtheta2`` of the declared priors, over the flat vector.
+) -> dict[str, Any]:
+    """The declared prior per latent, once every admission check has passed.
 
-    **This is a registered DEFERRAL, not a decision to keep two spellings**
-    (G15 in ``2026-08-26-one-implementation.md`` §四). The likelihood half of
-    this module's Fisher is delegated; this diagonal is not, because the far
-    side cannot yet supply it for a NONLINEAR block and iron law 5 forbids
-    depending on a surface that is not released:
+    **G15's deferral is discharged, and this is what is left of it.** The
+    arithmetic — ``diag(1/sigma^2)`` laid out over the flat vector — is gone.
+    The far side computes it from the graph's own nodes, and the two agreed to
+    ``0.0e+00``, not merely to a tolerance, on the fixture in
+    ``docs/probes/probe_16_g15_discharge.py`` before the old spelling was
+    deleted.
 
-    * ``local_block`` gives the right Jacobian for a nonlinear model and
-      carries **no prior at all** -- deliberately, and its own module docstring
-      says passing it to ``fisher_information(include_prior=True)`` must fail
-      loudly on the empty dict rather than fold in a curvature nobody declared;
-    * ``unchecked_operator`` carries the prior and takes its tangent at the
-      domain's ZERO, because an affine map has one tangent everywhere. For a
-      power law that is the wrong Jacobian.
+    What stays is the ADMISSION, and it stays under a rule the plan states
+    generally rather than as an exception carved for this function: **any
+    refusal whose evidence the graph seam would erase lives in a
+    pre-validation, before the graph is built**
+    (``2026-08-26-one-implementation.md`` §三; its first named instance is
+    :func:`~rheplicant.inference.noise.check_noise_std_axis`).
 
-    Neither is wrong; there is simply no third one yet. **Discharge condition,
-    so this cannot quietly become permanent**: when bayesmith publishes a local
-    block that carries the declared prior (G15), this function is deleted and
-    ``fisher_information`` passes ``include_prior=space is not None``. The
-    delegation is already written that way -- the call below is the only line
-    that changes.
+    The seam erases exactly this one. :func:`~rheplicant.inference.graph_bridge
+    .translate` sorts bayesmith's refusals into three families, and
+    ``NotGaussian`` is the blameless third: *caught and not re-raised*, left on
+    the yielded ``Seam``, because a caller asking "is there an exact route
+    here?" in order to branch should not have to write ``except`` around a
+    question. ``fisher_information(space=...)`` is not that caller — for it a
+    Uniform prior is an error, and three tests pin it as one, by name.
+    **Measured**: with the prior moved onto the graph and the check left to the
+    far side, a ``Uniform`` ends the ``with`` block early, and the next line
+    reads ``.values`` off a name that was never assigned. The caller is
+    promised a ``ParameterSpaceError`` naming the latent and gets an
+    ``UnboundLocalError`` naming nothing.
+
+    Two of the five checks below have no counterpart on the far side at all:
+    a ``joint_prior`` (bayesmith has never heard of
+    :class:`~rheplicant.inference.priors.JeffreysPrior`), and an unnamed params
+    pytree (the far side's block always has names). The other three would
+    arrive as bayesmith's wording about "the exact linear-Gaussian path" —
+    a true sentence, about a different question.
 
     For a Gaussian ``N(m, s)`` the log-density's curvature is ``1/s^2``,
     independent of where it is evaluated — the one prior family whose
@@ -324,13 +336,41 @@ def _prior_precision(
     no curvature at all, narrower than the truth wherever the declared prior is
     bounded — the identical failure the conjugate exits already refuse, in the
     identical words.
+
+    **The two sides' Gaussian rules differ on exactly one spelling**, and the
+    returned mapping is canonical rather than verbatim because of it. Measured:
+    bayesmith's ``check_gaussian`` accepts a ``Normal`` and an ``Independent``
+    (``.to_event(1)``) and refuses an ``ExpandedDistribution`` (``.expand([2])``);
+    :func:`~rheplicant.inference.linear._gaussian_parameters` unwraps all three,
+    because both wrappers only re-shape a base distribution. Handing the graph
+    the declaration as written would therefore admit ``.expand([2])`` here and
+    have it refused — invisibly, per the paragraph above — one call later. So
+    what crosses is ``Normal(loc, scale)`` broadcast to the latent's own shape:
+    one form, agreed by both sides, for every spelling that gets this far. The
+    ``Latent`` keeps what the user wrote; this is the ``priors=`` entry point
+    synthesising a ``Normal``, which is the mechanism the plan's construction
+    table already names for a prior that has no graph-side spelling.
+
+    The broadcast is not decoration either. A ``Normal(0.0, 0.5)`` declared for
+    a ``(2,)`` latent would reach the far side with batch shape ``()``, and
+    ``Latent.__check_init__`` refuses that shape mismatch at construction — so
+    it cannot arrive from a ``ParameterSpace``. ``.expand([2])`` is the same
+    prior with the shape supplied, and it can.
+
+    Returns:
+        ``{name: Normal}``, ready for
+        :func:`~rheplicant.inference.graph_bridge.graph_for_information`'s
+        ``priors=`` — that function's single entry point for a declared prior.
     """
     # Imported where it is used rather than at module scope: `linear` is the
     # module that owns what "a Gaussian prior ON THE LATENT" means (it refuses
     # LogNormal, which carries .loc/.scale and a Normal .base_dist while being
     # Gaussian in log x), and a function-local import keeps the two modules
     # free to depend on each other in the other direction later.
-    from rheplicant.inference.linear import _gaussian_parameters
+    from rheplicant.inference.linear import (
+        _gaussian_parameters,
+        _numpyro_distributions,
+    )
 
     if space.joint_prior is not None:
         raise ParameterSpaceError(
@@ -363,8 +403,9 @@ def _prior_precision(
             "Pass the params that ParameterSpace.forward_fn returned for this space."
         )
 
-    precision = jnp.zeros(size)
-    for name, (start, stop), shape in zip(names, spans, shapes, strict=True):
+    distributions = _numpyro_distributions()
+    declared: dict[str, Any] = {}
+    for name, shape in zip(names, shapes, strict=True):
         prior = space.latent(name).prior
         if prior is None:
             raise ParameterSpaceError(
@@ -391,10 +432,12 @@ def _prior_precision(
                 "instead, which honours the prior as written, or drop `space=` and read "
                 "the result as the likelihood Fisher it then is."
             )
-        _, scale = gaussian
-        variance = jnp.ravel(jnp.broadcast_to(jnp.asarray(scale), shape)) ** 2
-        precision = precision.at[start:stop].set(1.0 / variance)
-    return jnp.diag(precision)
+        loc, scale = gaussian
+        declared[name] = distributions.Normal(
+            jnp.broadcast_to(jnp.asarray(loc), shape),
+            jnp.broadcast_to(jnp.asarray(scale), shape),
+        )
+    return declared
 
 
 #: The name the flat pytree path gives its single latent. Double-underscored
@@ -451,7 +494,12 @@ def _bayesmith_fisher(graph, block_names, values, noise, *, include_prior):
     from bayesmith.exact.gaussian import precision_at
 
     return remote_fisher(
-        local_block(graph, block_names, values),
+        # `priors=` is G15's third constructor, and it is a keyword rather
+        # than a second function because the default is unchanged. It must
+        # track `include_prior`: the prior curvature is read off the BLOCK's
+        # `prior_std`, so asking for it with a prior-free block raises
+        # `KeyError` on the first member -- measured, not inferred.
+        local_block(graph, block_names, values, priors=include_prior),
         precision=precision_at(graph, values),
         include_prior=include_prior,
         depends_on_prediction=bool(noise.depends_on_prediction),
@@ -544,19 +592,30 @@ def fisher_information(
     )
     names, spans, shapes = _named_spans(params)
 
+    # BEFORE the graph, not after: `translate` files bayesmith's `NotGaussian`
+    # as a blameless verdict and does NOT re-raise it, so a prior checked on
+    # the far side would end the `with` block early instead of refusing. This
+    # is P1's general rule -- a refusal whose evidence the seam would erase
+    # lives in a pre-validation -- and `_declared_gaussian_priors` is where it
+    # lives for this exit.
+    declared = (
+        None
+        if space is None
+        else _declared_gaussian_priors(space, names, spans, shapes)
+    )
+
     # A flat `{name: array}` dict becomes one node per latent, which is what
     # lets the declared priors reach the far side as declarations. Anything
     # else -- a bare array, a pipeline pytree -- has no names to give
     # (`_named_spans` says so), so it crosses as ONE latent over
     # `ravel_pytree`'s own vector. That is exactly the ordering `FlatMatrix`
     # documents, so the layout is the same either way; and `space=` cannot
-    # reach it, because `_check_space_against` has already refused an unnamed
-    # params by name.
+    # reach it, because `_declared_gaussian_priors` just above has already
+    # refused an unnamed params by name.
     if names is None:
         block_names = (_FLAT_LATENT,)
         values = {_FLAT_LATENT: x0}
         graph_forward = lambda v: f_flat(v[_FLAT_LATENT])  # noqa: E731
-        declared = None
     else:
         # SORTED, because that is this package's flat layout -- `_named_spans`
         # derives it from `ravel_pytree`, which orders a dict by sorted key.
@@ -566,27 +625,22 @@ def fisher_information(
         block_names = tuple(sorted(names))
         values = {name: jnp.asarray(params[name]) for name in block_names}
         graph_forward = forward
-        declared = None
 
     graph = graph_for_information(
         graph_forward, values, noise, priors=declared, caller="fisher_information"
     )
     with translate("fisher_information"):
         found = _bayesmith_fisher(
-            graph, block_names, values, noise, include_prior=False
+            graph, block_names, values, noise, include_prior=space is not None
         )
-    matrix = found.values
-    kind = "fisher"
-    if space is not None:
-        # G15's deferral, and the ONE line that changes when it is discharged:
-        # `include_prior=space is not None` above, this block deleted. See
-        # `_prior_precision` for why the far side cannot supply it yet.
-        matrix = matrix + _prior_precision(space, names, spans, shapes, x0.size)
-        kind = "posterior_precision"
     return FlatMatrix(
-        matrix=matrix,
+        matrix=found.values,
         structure=jax.tree_util.tree_structure(params),
-        kind=kind,
+        # Derived rather than re-spelled. The far side already tags which
+        # quantity it returned, and it tags it from the same flag that decided
+        # it; an `if space is not None` here would be a second copy of that
+        # rule, and the one that goes stale.
+        kind=found.kind,
         names=names,
         spans=spans,
         shapes=shapes,

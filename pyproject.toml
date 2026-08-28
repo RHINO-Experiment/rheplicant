@@ -54,10 +54,19 @@ dependencies = [
     # complex latent with ComplexNormal, which exists because no numpyro
     # distribution samples complex.
     #
-    # 0.3.0 named that second pair. The floor is now 0.4, for a third: the
-    # adapter presents a `FlaggedNoise` as the graph node's declared
-    # `observed_mask`, which is bayesmith's G1 and exists from 0.4.0. Before
-    # it, an unobserved sample had no spelling a graph could carry.
+    # 0.3.0 named that second pair. 0.4 was the third: the adapter presents a
+    # `FlaggedNoise` as the graph node's declared `observed_mask`, which is
+    # bayesmith's G1. Before it, an unobserved sample had no spelling a graph
+    # could carry.
+    #
+    # The floor is now 0.5, for a fourth: `diagnose.local.local_block` takes
+    # `priors=`, which is G15's third block constructor -- the one that takes
+    # the tangent at the CALLER's point (right for a nonlinear model) AND
+    # carries the declared Gaussian prior. `fisher_information(space=...)`
+    # spelled that curvature itself until this floor moved; the two agreed to
+    # 0.0e+00 on `docs/probes/probe_16_g15_discharge.py` and the local
+    # spelling was then deleted. A 0.4 install satisfies the import and
+    # raises `TypeError: unexpected keyword argument 'priors'` at the call.
     #
     # The floor names the first release carrying each pair.
     # It is not decoration: a 0.2 install satisfies the import statements and
@@ -70,7 +79,7 @@ dependencies = [
     #
     # The same bet the limTOD floor above records: declare the true
     # requirement rather than pretend the seam is optional.
-    "bayesmith>=0.4",
+    "bayesmith>=0.5",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
