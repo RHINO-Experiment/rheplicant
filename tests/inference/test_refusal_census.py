@@ -39,6 +39,11 @@ _DIRECTORY = Path(__file__).resolve().parent
 #: in the same commit -- the two are one measurement.
 CENSUS: dict[str, int] = {
     "test_block_learning_rate.py": 2,
+    # D23's discriminating fixture, added 2026-08-28. Two sites: the curvature
+    # refusal that a Jacobian-rank criterion would NOT have made, and the
+    # TypeError that says a prior parameterised by another Latent is not a
+    # declaration this package can state.
+    "test_d23_refusal_criterion.py": 2,
     "test_declared_prior.py": 14,
     "test_fisher_prior.py": 7,
     "test_forward.py": 1,
@@ -86,11 +91,15 @@ CENSUS: dict[str, int] = {
 #: the seam at all. A drift between these two populations is a drift in which
 #: refusals the adapter is responsible for.
 BY_CLASS: dict[str, int] = {
-    "ParameterSpaceError": 178,
+    "ParameterSpaceError": 179,
     "StateValidationError": 64,
     "RuntimeError": 4,
     "Exception": 3,
-    "TypeError": 1,
+    # 1 -> 2 on 2026-08-28: D23's fixture pins that numpyro accepts a Latent as
+    # a distribution parameter and jax does not, which is a TypeError from the
+    # library rather than a refusal this package makes. It is censused because
+    # the census counts pinned refusals, not authored ones.
+    "TypeError": 2,
 }
 
 
@@ -156,7 +165,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 250
+    assert sum(CENSUS.values()) == 252
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():

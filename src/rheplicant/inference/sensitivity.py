@@ -94,9 +94,30 @@ keyword is refused by name rather than reported as prior-free — see
 
 It needs the **likelihood's** mode to exist. Along a direction the data cannot
 see there is no such mode, only a ray, and the displacement from a ray is not a
-number — so a rank-deficient selection is refused, and the rank comes from
-:func:`~rheplicant.inference.identifiability.identifiability`, which already
-knows how to say which latents the degeneracy mixes.
+number — so a selection whose likelihood-only mode is not there is refused.
+
+**The verdict is taken on the REST TERM's own curvature, not on the observed
+Jacobian's rank** (ledger D23), and this paragraph said otherwise until
+2026-08-28. The rank test was this module's own, before the arithmetic moved
+to ``bayesmith.diagnose.sensitivity``; the criterion that has actually been
+running since is the curvature's, with a condition-number ceiling of
+``1/sqrt(eps)`` read from the dtype. The two disagree in both directions:
+
+* the curvature accepts a selection held only by a DOWNSTREAM density
+  (``child ~ Normal(parent, s)``), which a rank test refuses — a legitimate
+  question. That shape is not declarable here, because a ``Latent``'s prior is
+  built at declaration time out of concrete arrays;
+* the curvature REFUSES a near-collinear design whose observed Jacobian is
+  full rank, which a rank test accepts. Measured on a two-parameter model in
+  float64: at a column separation of 1e-3 the rank is 2 of 2 and the shift is
+  refused. That direction is reachable by anyone, and
+  ``tests/inference/test_d23_refusal_criterion.py`` is what pins it.
+
+When the refusal fires, the NAMING is still delegated to
+:func:`~rheplicant.inference.identifiability.identifiability` wherever its
+verdict agrees — it is the tool that knows how to say which latents a
+degeneracy mixes. Where the two disagree, the message reports the curvature's
+measured spectrum instead of borrowing a rank verdict that does not hold.
 """
 
 import dataclasses
