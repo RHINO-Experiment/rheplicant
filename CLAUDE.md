@@ -127,6 +127,19 @@ installed" was the first suspicious thing rather than a constant. When a
 guard's greenness depends on something you have never varied, no amount of
 mutating what you have will surface it.
 
+**That instance closed on 2026-08-28 and the lesson did not.** The branch
+was merged; measured against the **remote** rather than a local ref
+(`git ls-remote` for the tip, then `git show origin/main:<path>`), both
+docstrings are on `origin/main` and `track-a-tail` no longer exists, so the
+two guards now read the same text any checkout of `main` carries. The
+records that named the dependency — `docs/migration/{plan,linear}.md` and
+the two guards' own docstrings — were corrected in the same batch, because
+a closed hazard described as open costs the next reader exactly what an
+open one described as closed does. What stays true is the shape: **ask what
+a green guard depends on that you have never varied**, and prefer to answer
+it by measuring the remote, since a local `origin/main` is a file that was
+right when it was last fetched.
+
 **Count tests from `--junit-xml`, not from the terminal.** Counting dots
 misread a run as `892 passed, 2 skipped` when it was `892 passed, 0
 skipped`; the summary line is prose and the XML is the record.
