@@ -460,6 +460,44 @@ def _parse_plan(options, context):
     return parsed_options(execution, resolved=resolved)
 
 
+def _a49_is_not_honourable_by_a_plan(where: str, built: Any) -> None:
+    """A plan cannot run ``inference.noise.include_logdet: false``, so it says so.
+
+    A49 makes ``include_logdet`` a required declaration under a
+    prediction-dependent sigma because it selects an ESTIMATOR: ``false`` is
+    generalized least squares, biased high by ``(1 + f^2)``. Until B1 was
+    closed, ``plan.estimate`` and ``plan.sample`` silently ran the ``false``
+    variant whatever the document said -- so a ``true`` declaration was already
+    being contradicted, and nobody was told. The potential now carries its
+    log-determinant
+    (``inference/engines.py::Conditioning.neg_log_likelihood``), which makes
+    ``true`` honest and leaves exactly one cell that a plan cannot express.
+
+    It is refused rather than half-honoured. Threading the flag down would
+    make it mean two different things at the two exits -- GLS is a legitimate
+    point estimator and is not a posterior, so ``plan.sample`` has nothing
+    coherent to do with ``false`` -- and "the same word means different things
+    at the two exits" is the defect B1 IS.
+
+    The diagnostics ``chi2`` route still honours ``false``; that is the
+    estimator's own objective, evaluated, not sampled.
+
+    Self-adjudicated during Wave B under the standing delegation, and
+    registered in the migration ledger as D55.
+    """
+    if built.inference.noise.include_logdet is False:
+        raise ConfigError(
+            f"{where}: inference.noise.include_logdet: false is not available "
+            "to a plan exit. It selects generalized least squares -- a "
+            "different estimator, biased high by (1 + f^2) (check A49) -- and "
+            "a plan's gradient block descends the full log-density, whose "
+            "log-determinant a draw cannot drop and still be a posterior. "
+            "Either declare include_logdet: true and run the plan, or keep "
+            "false and ask for the GLS objective through a kind: gradient run "
+            "with objective: chi2, which evaluates it rather than sampling it."
+        )
+
+
 @register("plan.estimate", parse=_parse_plan)
 @register("plan.sample", parse=_parse_plan)
 def _run_plan(run: ParsedRun, built: Any, previous: Any = None) -> Any:
@@ -474,6 +512,7 @@ def _run_plan(run: ParsedRun, built: Any, previous: Any = None) -> Any:
         _a29_estimate_takes_no_seed(where, run.options)
     _sweep(run, _ESTIMATE_KEYS if estimate else _SAMPLE_KEYS)
     inference = built.inference
+    _a49_is_not_honourable_by_a_plan(where, built)
     space = _space(run, built)
     noise = _noise(run, built)
     observed = _observed(run, built)

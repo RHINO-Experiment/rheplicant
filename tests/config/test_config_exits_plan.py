@@ -229,3 +229,52 @@ class TestTheWarmStartEstimateStaysInExecute:
         product = handler_for("plan.sample").execute(parsed, built, {})
         assert calls == [0]  # exactly the warm start's own estimate
         assert float(product.mean["g"]) == pytest.approx(1.5, abs=0.2)
+
+
+# --------------------------------------------------------------------------
+# B1: a plan cannot express include_logdet: false, and says so rather than
+# overriding it.  See sections/exits.py::_a49_is_not_honourable_by_a_plan.
+# --------------------------------------------------------------------------
+
+#: 3.5714286 MHz / 2 s are the synthetic document's own grid spacing and sample
+#: step, spelled out because ``{from: observation}`` reads
+#: ``observation.time.channel_width``, which this document does not declare --
+#: the same reason ``exit_helpers.GCR_RADIOMETER`` spells them.
+def _radiometer(include_logdet):
+    return {"kind": "radiometer",
+            "channel_width": {"value": 3.5714286, "unit": "MHz"},
+            "integration_time": {"value": 2.0, "unit": "s"},
+            "include_logdet": include_logdet}
+
+
+class TestAPlanRefusesTheGLSDeclaration:
+    """``include_logdet: false`` selects an estimator a plan has no exit for.
+
+    Before B1 the plan ran that estimator unconditionally, so a ``true``
+    declaration was contradicted in silence.  Closing B1 makes ``true``
+    honest; this refusal is what keeps ``false`` from becoming the newly
+    silent cell.  Both directions are asserted, because a refusal that fires
+    on every radiometer would close the whole kind rather than one cell.
+    """
+
+    @pytest.mark.parametrize("run", [ESTIMATE, SAMPLE], ids=["estimate", "sample"])
+    def test_false_is_refused_at_both_exits(self, run):
+        doc = document(run)
+        doc["inference"]["noise"] = _radiometer(False)
+        with pytest.raises(ConfigError, match="include_logdet: false is not available"):
+            run_document(doc)
+
+    @pytest.mark.parametrize("run", [ESTIMATE, SAMPLE], ids=["estimate", "sample"])
+    def test_true_is_not(self, run):
+        """The anti-vacuity twin: the same document with ``true`` must run."""
+        doc = document(run)
+        doc["inference"]["noise"] = _radiometer(True)
+        run_document(doc)
+
+    def test_the_refusal_names_the_route_that_still_honours_false(self):
+        """A refusal that does not say what to do instead is half a refusal."""
+        doc = document(ESTIMATE)
+        doc["inference"]["noise"] = _radiometer(False)
+        with pytest.raises(ConfigError) as caught:
+            run_document(doc)
+        assert "objective: chi2" in str(caught.value)

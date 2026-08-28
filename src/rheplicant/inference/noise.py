@@ -349,6 +349,40 @@ def inverse_variance(noise: NoiseModel, prediction: jax.Array) -> jax.Array:
     return jnp.where(observed, 1.0 / safe**2, 0.0)
 
 
+def log_determinant(noise: NoiseModel, prediction: jax.Array) -> jax.Array:
+    """``sum log sigma`` over the OBSERVED samples -- half a log-determinant.
+
+    The term that separates a Gaussian log-density from a chi-squared. It is a
+    constant, and so invisible to any estimator, exactly when
+    ``noise.depends_on_prediction`` is ``False``; when it is ``True`` this is
+    the difference between the full likelihood and generalized least squares,
+    and the two are *different estimators* -- see this module's docstring for
+    the closed forms and which way the bias runs.
+
+    Named ``log_determinant`` for ``0.5 log|C|`` with ``C`` diagonal, which is
+    what it is; the factor of two lives in the caller's ``0.5 * chi2`` beside
+    it.
+
+    An unobserved sample (infinite sigma, see :class:`FlaggedNoise`)
+    contributes exactly zero. Taking the limit would not work -- ``log sigma ->
+    inf`` -- so one flagged channel would otherwise send every log-density and
+    every potential built on it to infinity. Same rule, and the same reason, as
+    :func:`inverse_variance`'s clean zero.
+
+    Deliberately WITHOUT the ``0.5 n log 2 pi`` that
+    :class:`NoiseModelLikelihood` carries. That is a constant in the sample
+    count, so it changes no answer, and it is not free: added to a gradient
+    block's potential it tripled the magnitude NUTS takes differences of, and
+    at float32 the scanned transition's agreement with ``MCMC.run`` degraded
+    from 3.0e-06 to 3.9e-04. ``tests/inference/test_noise_log_determinant.py``
+    pins this against :class:`NoiseModelLikelihood` so the two cannot drift.
+    """
+    sigma = noise.std(prediction)
+    seen = jnp.isfinite(sigma)
+    safe = jnp.where(seen, sigma, 1.0)
+    return jnp.sum(jnp.where(seen, jnp.log(safe), 0.0))
+
+
 class NoiseModelLikelihood(eqx.Module):
     """Gaussian log-density under a :class:`NoiseModel`.
 

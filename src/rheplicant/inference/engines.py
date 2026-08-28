@@ -64,7 +64,7 @@ from rheplicant.inference.linear import (
     linear_operator,
     wiener_solve,
 )
-from rheplicant.inference.noise import NoiseModel
+from rheplicant.inference.noise import NoiseModel, log_determinant
 from rheplicant.inference.parameters import ParameterSpace
 
 #: The engine for a block whose latents are ALL declared ``linear=True``.
@@ -173,6 +173,40 @@ class Conditioning:
         residual = jnp.where(seen, (self.observed - prediction) / safe, 0.0)
         return jnp.sum(residual**2)
 
+    def neg_log_likelihood(self, values: dict[str, jax.Array]) -> jax.Array:
+        """``-log p(data | values)``, log-determinant included.
+
+        The difference from ``0.5 * chi2`` is ``sum log sigma`` (plus a
+        constant), which is zero-slope only when sigma does not depend on the
+        prediction. That term is the whole of migration ledger **B1**: while
+        the potentials below were built from :meth:`chi2` alone, a gradient
+        block descended the GLS-flavoured target while
+        :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`'s
+        ``dist.Normal(prediction, sigma)`` sampled the full one, from the same
+        declared model. Measured on ``mu = exp(w) x`` with ``sigma = 0.5|mu|``,
+        the two optima are 21% apart
+        (``tests/inference/test_potential_carries_the_logdet.py``).
+
+        Both halves are asked of code that already owns them --
+        :meth:`chi2` and
+        :func:`~rheplicant.inference.noise.log_determinant` -- so the rule an
+        unobserved sample needs (``log sigma`` at an infinite sigma is ``inf``,
+        and one flagged channel would otherwise take the whole potential with
+        it) is not written a second time here.
+
+        The ``0.5 n log 2 pi`` that
+        :class:`~rheplicant.inference.noise.NoiseModelLikelihood` also carries
+        is absent, deliberately and at measured cost -- see that function.
+
+        :meth:`chi2` is deliberately NOT extended to include this. It is the
+        convergence monitor, and a monitor that silently changed units the
+        moment a noise model started reading its argument would be worse than
+        the omission this replaces.
+        """
+        return 0.5 * self.chi2(values) + log_determinant(
+            self.noise, self.forward(values)
+        )
+
 
 def _log_prior(space: ParameterSpace, names: Sequence[str], x: dict[str, jax.Array]):
     """Total log prior density of the block's latents, zero where undeclared.
@@ -201,15 +235,22 @@ def conditional_potential(
 ) -> Callable[[dict[str, jax.Array]], jax.Array]:
     """``x -> -log p(x | everything else)``, up to a constant.
 
-    ``0.5 chi2 - log prior``, with ``x`` a ``{name: array}`` dict over the
-    block's members and every other latent frozen at ``values``. This is the
-    objective the gradient engine descends and the potential NUTS samples, so
-    the two exits of that engine cannot target different distributions.
+    :meth:`Conditioning.neg_log_likelihood` minus the block's log prior, with
+    ``x`` a ``{name: array}`` dict over the block's members and every other
+    latent frozen at ``values``. This is the objective the gradient engine
+    descends and the potential NUTS samples, so the two exits of that engine
+    cannot target different distributions.
+
+    It read ``0.5 chi2 - log prior`` until B1 was closed, which made that
+    sentence true of the two exits and false against every OTHER route to the
+    same model -- see :meth:`Conditioning.neg_log_likelihood`.
     """
     others = {key: value for key, value in values.items() if key not in names}
 
     def potential(x: dict[str, jax.Array]) -> jax.Array:
-        return 0.5 * cond.chi2({**others, **x}) - _log_prior(cond.space, names, x)
+        return cond.neg_log_likelihood({**others, **x}) - _log_prior(
+            cond.space, names, x
+        )
 
     return potential
 
@@ -233,7 +274,9 @@ def _potential_of(
     def potential(
         others: dict[str, jax.Array], x: dict[str, jax.Array]
     ) -> jax.Array:
-        return 0.5 * cond.chi2({**others, **x}) - _log_prior(cond.space, names, x)
+        return cond.neg_log_likelihood({**others, **x}) - _log_prior(
+            cond.space, names, x
+        )
 
     return potential
 

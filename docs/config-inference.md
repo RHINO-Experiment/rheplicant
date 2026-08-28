@@ -101,7 +101,11 @@ Two different things in this package are called "noise model";
   on the prediction and refused otherwise — for a constant sigma it changes
   nothing (check A49). `false` is the documented GLS variant, a *different*
   estimator biased high by `(1 + f^2)`, and a lost declaration would come
-  back `true` with no error.
+  back `true` with no error. **`false` is refused by `kind: plan.estimate`
+  and `kind: plan.sample`**: GLS is a point estimator and is not a posterior,
+  so a plan has no exit that can express it. Ask for that objective through a
+  `kind: gradient` run with `objective: chi2`, which evaluates it rather than
+  sampling it.
 - `kind: radiometer_frozen` — this layer's construct; it exists nowhere in
   `src/` on purpose. The sigma is DECIDED into an array — the one form the
   conjugate seam accepts — from `|observed|` (`source: observed`) or one
@@ -301,7 +305,8 @@ rather than failing.
 - `gradient` — one differentiation, no optimiser: `objective:` is `chi2`,
   `sum_squares`, `mean`, `mse` or `{python: ...}`, `of:` names what to
   differentiate with respect to, and `at:` says where. `chi2` is the first
-  consumer of `inference.noise.include_logdet:`.
+  consumer of `inference.noise.include_logdet:`, and the only one that honours
+  `false` — the plan exits refuse it (see `kind: radiometer` above).
 - `mmodes` — what a drift scan actually sees: a complex `(n_freq, lmax + 1)`
   array, from `projector: {ref: ...}` and `sky: {ref: ...}` — **those two
   keys and nothing else**. There is no `beam:` (the beam is the projector's

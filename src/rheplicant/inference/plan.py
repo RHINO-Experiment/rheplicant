@@ -111,22 +111,49 @@ prediction — the same GLS-versus-full-likelihood difference
 :attr:`PlanDiagnostics.noise_depends_on_prediction` records whether that
 applied.
 
-**The gradient blocks omit the same term, by a different route, and this is
-the half that used to go unsaid.** A conjugate block freezes sigma to keep its
-step linear; a gradient block does not freeze it -- sigma is re-evaluated at
-the current prediction inside
+**The gradient blocks used to omit the same term, by a different route, and
+that half went unsaid for longer.** A conjugate block freezes sigma to keep
+its step linear; a gradient block does not freeze it -- sigma is re-evaluated
+at the current prediction inside
 :func:`~rheplicant.inference.engines.conditional_potential` -- but that
-potential is ``0.5 * chi2 - log_prior`` and ``chi2`` carries no
-``sum log sigma``. So when sigma depends on the prediction, a gradient block
-targets the density divided by ``prod sigma(theta)``: the GLS-flavoured
-posterior again, not the full one. The contrast to hold in mind is
+potential was ``0.5 * chi2 - log_prior``, and ``chi2`` carries no
+``sum log sigma``. So when sigma depended on the prediction, a gradient block
+targeted the density divided by ``prod sigma(theta)``: the GLS-flavoured
+posterior again, not the full one. The contrast that made it visible is
 :func:`~rheplicant.inference.numpyro_bridge.to_numpyro_model`, whose
 observation site is a ``Normal`` whose ``log_prob`` carries ``-log scale``
-automatically -- so the ``nuts`` exit samples the full density while a
-gradient block samples the GLS-flavoured one, from the same declared model.
+automatically -- so the ``nuts`` exit sampled the full density while a
+gradient block sampled the GLS-flavoured one, from the same declared model.
 It is the same distinction
 :class:`~rheplicant.inference.compressed.BayesMemory` refuses to mix under its
-``estimator`` field, so it is written here rather than left to be discovered.
+``estimator`` field, which is why it was written down here rather than left to
+be discovered.
+
+**Closed 2026-08-28** (migration ledger B1).
+:meth:`~rheplicant.inference.engines.Conditioning.neg_log_likelihood` is now
+``0.5 * chi2 + log_determinant``, and both potential builders take it -- the
+single-argument one the optimiser gets and the lifted one NUTS gets, since
+fixing one alone would have rebuilt the same two-targets defect a layer down.
+``chi2`` itself is deliberately unchanged: it is the convergence monitor, and
+a monitor that changed units the moment a noise model started reading its
+argument would be worse than the omission it replaced.
+
+The gradient block moved from **6.248269** to **5.004059** on the fixture
+below, against an unbiased closed form of 5.104641 -- so onto the unbiased
+side, 2.0% from the closed form where it had been 22% away. That remaining
+2.0% is the prior and not a residue of B1: the fixture declares ``w`` with
+``mu = exp(w) x``, so a ``Normal`` prior on ``w`` is a ``1/scale`` prior on
+the recovered scale. ``tests/inference/test_potential_carries_the_logdet.py``
+asserts the identity rather than the landing place for exactly that reason,
+and compares the two routes across the seam named above.
+
+One declaration cannot be honoured by a plan and is refused instead of
+overridden: ``inference.noise.include_logdet: false`` selects generalized
+least squares, which is a point estimator and is not a posterior, so
+``plan.estimate`` and ``plan.sample`` decline it by name
+(``config/sections/exits.py::_a49_is_not_honourable_by_a_plan``). Threading it
+down would have made one word mean two things at the two exits, which is the
+defect B1 IS.
 
 **It is the BLOCK TYPE that decides, not the exit** -- worth stating plainly,
 because this paragraph and the migration spec both first described it as
@@ -140,16 +167,21 @@ exit                                    lands at    which side
 ======================================  ==========  ===================
 ``plan.estimate``, CONJUGATE block      5.104558    unbiased
 ``plan.estimate``, GRADIENT block       6.248269    GLS-flavoured
+  *the same, after B1 closed*           5.004059    unbiased
 ======================================  ==========  ===================
 
-So ``estimate`` shows it too, and a conjugate block does not: freezing sigma
+So ``estimate`` showed it too, and a conjugate block never did: freezing sigma
 per inner solve puts its fixed point on the unbiased side, which is the same
 argument :func:`~rheplicant.inference.gls.iterative_gls` makes for itself.
-The ratio is ``1.2261`` against ``(1 + f^2) = 1.25`` at ``f = 0.5``, the gap
+The ratio was ``1.2261`` against ``(1 + f^2) = 1.25`` at ``f = 0.5``, the gap
 being finite-sample scatter at n=40. The difference is ``O(f^2)`` with
-``f = 1/sqrt(delta_nu tau)`` and is small in most regimes -- but it is
+``f = 1/sqrt(delta_nu tau)`` and was small in most regimes -- but it was
 attached to which ENGINE ran, and reading it as a property of one exit is
-what left the estimate path unexamined.
+what left the estimate path unexamined for as long as it was.
+
+The first two rows are kept at their measured values rather than dropped. The
+conjugate row still holds; the gradient row is what the defect looked like,
+and a fix whose record does not say what it changed cannot be checked.
 
 The numbers are bayesmith's cross-check
 (``tests/crosscheck/test_dispatch.py``, recorded in
