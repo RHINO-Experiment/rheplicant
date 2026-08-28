@@ -57,8 +57,22 @@ from rheplicant.inference.noise import NoiseModel
 from rheplicant.inference.parameters import ParameterSpace
 
 #: Floor on a mixture component's scale, as a fraction of the standardized
-#: latent's unit width. Without it a component can collapse onto a single
-#: training point and take the log-density to infinity.
+#: latent's unit width. A collapsed component -- one sitting on a single
+#: training point -- would take the log-density to infinity, and this keeps a
+#: component's width away from that.
+#:
+#: **Measured 2026-08-29: the floor guards a LIMIT, not a reachable value.**
+#: The scale is ``softplus(raw) + min_scale`` (``NeuralPosterior._mixture``,
+#: below), and ``softplus`` is strictly positive -- over ``raw`` in
+#: ``[-80, 80]`` its minimum is ``1.8e-35``, never zero. So ``min_scale = 0``
+#: does not give a zero scale: a deliberately collapsible bank (eight distinct
+#: thetas, eight components) returns a finite ``log_prob`` at ``0.0``
+#: (-3.6740) as at the default (-3.6689). This comment previously said the
+#: collapse happens "without it", which is not what the arithmetic does, and
+#: the config layer's refusal of ``min_scale: 0`` cites this line for that
+#: claim -- see ``config/sections/npe.py::_positive``. bayesmith's
+#: ``amortize.MIN_SCALE`` records the same measurement independently and
+#: refuses only a NEGATIVE floor.
 MIN_SCALE: float = 1e-3
 
 

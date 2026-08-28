@@ -244,11 +244,27 @@ def _real(where: str, value: Any) -> float:
 def _positive(where: str, value: Any) -> float:
     """``min_scale``, ``learning_rate``, ``eps`` -- strictly above zero.
 
-    ``min_scale: 0`` is the collapse ``MIN_SCALE`` exists to prevent (a
-    mixture component on one training point takes the log-density to
-    infinity, ``npe.py:59-61``); ``learning_rate: 0`` is a training run that
-    returns the untrained estimator; ``eps: 0`` divides by the square root of
-    a zero second moment.
+    ``learning_rate: 0`` is a training run that returns the untrained
+    estimator; ``eps: 0`` divides by the square root of a zero second moment.
+    Both are failures, and both are why this checker is strict.
+
+    ``min_scale: 0`` is NOT, and this docstring used to say it was. It read
+    "the collapse ``MIN_SCALE`` exists to prevent (a mixture component on one
+    training point takes the log-density to infinity)". **Measured
+    2026-08-29 on the package itself: the scale is ``softplus(raw) +
+    min_scale`` and ``softplus`` is strictly positive, so a zero floor is not
+    a zero scale.** ``NeuralPosterior.create(..., min_scale=0.0)`` builds and
+    returns a finite ``log_prob`` (-3.6740, against -3.6689 at the default) on
+    a deliberately collapsible bank. bayesmith's ``amortize.MIN_SCALE``
+    records the same and refuses only a negative floor.
+
+    The refusal is kept, on the narrower ground that a floor of zero is not a
+    floor and is more likely a mistake than an intent -- **not** on the ground
+    that it breaks anything, because it does not. Whether this layer should
+    instead follow bayesmith and admit ``0`` is registered for the owner
+    (migration ledger, Wave C ``min_scale`` item): relaxing it would let
+    documents load that are refused today, which is a config-surface change
+    and not this checker's to make.
     """
     number = _real(where, value)
     if not number > 0.0:
