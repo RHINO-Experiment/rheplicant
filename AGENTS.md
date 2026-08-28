@@ -241,6 +241,33 @@ fail_under` in `pyproject.toml` (currently **89**, raised from 82 with the
 fix above). That is the only place the floor lives; the `--cov-fail-under`
 flag it used to read is gone.
 
+**The floor is 89 and it gates at 88.5, and CI prints `FAIL` on every run
+while passing.** Both halves measured 2026-08-28. `coverage` compares the
+total **rounded to `[tool.coverage.report] precision`** digits, and `precision`
+is not set here, so it defaults to **0**: `should_fail_under(88.96, 89, 0)` is
+`False` because `round(88.96) == 89`. At `precision = 2` the same call is
+`True`. So the effective floor is half a point below the declared one.
+
+The confusing part is that **pytest-cov prints its own line from the
+UNROUNDED number**, so every Coverage job on CI ends with
+
+    FAIL Required test coverage of 89.0% not reached. Total coverage: 88.96%
+
+and then exits **0** and is marked green — measured on three consecutive runs
+at 88.99 %, 88.97 % and 88.96 %, all `success`, going back before this
+programme. The line that prints is not the line that decides. Anyone reading
+that log will conclude the gate is broken; it is doing exactly what it was
+configured to do, and what is wrong is that two different numbers are
+displayed by two different components.
+
+Note also that **CI's coverage is legitimately lower than a local run's**
+(88.96 % against 89.39 %) because CI skips more: `MomentRFI` cannot install
+there — `momentrfi` depends on `momentemu`, which is on no registry the runner
+reaches — so that step fails under `continue-on-error` and CI collects 628
+skips against 566 here. The README figure is the LOCAL measurement, so it is
+true where it was taken and unreachable on CI. Do not reconcile the two by
+editing the README; they are measurements of different environments.
+
 ## The config layer's boundary is textual
 
 `tests/config/test_config_surface.py::TestTheLayerBoundaryIsMechanical` scans
