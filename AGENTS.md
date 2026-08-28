@@ -169,6 +169,17 @@ is widespread enough to be worth stating. `addopts` is now just `-q`, so
 `pytest tests/test_docs_links.py` with no flags exits 0. Coverage is measured
 by its own job.
 
+**And because `addopts` is already `-q`, do not pass another one.** A second
+`-q` makes it `-qq` and **the summary line disappears entirely** — the run
+still prints its dots and still exits correctly, so a passing run looks
+normal and a count you wanted is simply absent. Measured here 2026-08-28:
+`pytest tests/inference/test_gls.py -n 2` printed `20 passed in 14.64s`, and
+the same command with `-q` printed only the progress line. This trap was on
+record for the sibling repository and **not** for this one, although
+`pyproject.toml` here carries the identical `addopts = "-q"`; it is written
+down now because the absent line reads as "no summary was produced" rather
+than as "you suppressed it".
+
 It was moved there because `-n 8` and `-p no:xdist` disagreed by six points.
 **That cause is now fixed** — two tests uninstalled coverage's tracer with
 `sys.settrace(None)`, blacking out 1982 consecutive tests serially, and
