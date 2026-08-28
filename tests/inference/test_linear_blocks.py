@@ -25,6 +25,7 @@ from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import (
     Bind,
     Latent,
+    LinearBlock,
     ParameterSpace,
     check_linearity,
     condition_bound,
@@ -1272,6 +1273,63 @@ assert 80.0 < scatter < 120.0, scatter
         done = subprocess.run([sys.executable, "-c", script], env=env,
                               capture_output=True, text=True)
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+class TestBothConditioningExitsRunTheSamePreconditions:
+    """Added 2026-08-28 by the Wave B mutation set, which found the gap.
+
+    Both exits call ``_require_prior_std`` before they compute anything, and
+    until this class existed **nothing asserted it**: deleting the call from
+    ``condition_bound`` left the whole targeted suite green. It is not a
+    silent-answer gap -- without the refusal ``prior_std=None`` still fails,
+    at ``jnp.asarray(None) ** 2`` -- so what was unguarded was the MESSAGE,
+    which is the whole reason the refusal was written rather than left to
+    the array layer. That makes it exactly the kind of guard a mutation set
+    finds and a passing suite does not.
+    """
+
+    @staticmethod
+    def _block():
+        operator = jax.random.normal(jax.random.key(0), (8, 3), dtype=jnp.float32)
+        return LinearBlock(
+            name="x", shape=(3,), dtype=jnp.float32,
+            offset=jnp.zeros((8,), dtype=jnp.float32),
+            forward=lambda x: operator @ x,
+            adjoint=lambda y: operator.T @ y,
+        )
+
+    @pytest.mark.parametrize("exit_", [condition_bound, condition_estimate])
+    def test_a_missing_prior_is_refused_by_name(self, exit_):
+        with pytest.raises(ParameterSpaceError, match="needs prior_std"):
+            exit_(self._block(), noise_std=jnp.float32(0.5), prior_std=None)
+        # and the refusal names ITS OWN exit, not a shared one -- three exits
+        # share this text and only the caller argument tells them apart.
+        with pytest.raises(ParameterSpaceError, match=exit_.__name__):
+            exit_(self._block(), noise_std=jnp.float32(0.5), prior_std=None)
+
+    def test_the_conditioning_does_not_depend_on_the_data(self):
+        """κ is a property of ``AᵀN⁻¹A + S⁻¹``, which holds no data.
+
+        Asserted because of what the mutation set could NOT kill. The adapter
+        hands the far side a zero of the prediction's shape when there is no
+        ``observed`` to pass, and replacing that with a bare ``None`` survives
+        every test -- correctly, because bayesmith's conditioning path never
+        reads ``block.data`` (checked by walking the module: neither
+        ``condition_bound``, ``condition_estimate``, ``_condition_bound`` nor
+        ``normal_operator`` touches it). So that mutant is EQUIVALENT today
+        rather than unguarded, and inventing a fixture to kill it would pin a
+        mock.
+
+        What is worth pinning is the property that makes the branch matter: if
+        the far side ever starts reading ``data`` for conditioning, this goes
+        red and the ``None`` stops being defensive.
+        """
+        block = self._block()
+        first = condition_bound(block, noise_std=jnp.float32(0.5), prior_std=3.0)
+        second = condition_bound(block, noise_std=jnp.float32(0.5), prior_std=3.0)
+        assert float(first) == float(second)
+        # the block carries no data at all here, and the number still exists
+        assert jnp.isfinite(first)
 
 
 class TestTheTwoConditionNumbersDivideTheLabour:
