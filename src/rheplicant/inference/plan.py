@@ -222,8 +222,13 @@ DEFAULT_CHI2_TOL: float = 1e-8
 #: Sweeps taken before the convergence test is consulted at all. The first
 #: steps of a coordinate descent can be nearly stationary without being near the
 #: minimum — the same reason
-#: :data:`~rheplicant.inference.gls.MIN_REWEIGHTS` exists, at a third the count
+#: :data:`~rheplicant.inference.gls.MIN_REWEIGHTS` exists, at a LOWER count
 #: because a sweep here is several block solves rather than one.
+#:
+#: This read "at a third the count" until 2026-08-28, and the two constants are
+#: 3 against 5. Corrected to the relation that holds rather than to a ratio,
+#: because the ratio is not the design — what is, is that a sweep costs more
+#: than a reweight and so fewer of them are spent before asking.
 MIN_SWEEPS: int = 3
 
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather

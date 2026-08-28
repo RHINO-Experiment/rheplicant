@@ -1298,3 +1298,53 @@ class TestGradientEngine:
         moved_little = abs(float(stingy.values["centre"]) - start)
         moved_far = abs(float(generous.values["centre"]) - start)
         assert moved_far > 20.0 * moved_little, (moved_little, moved_far)
+
+
+class TestTheDefaultsTheConfigLayerQUOTES:
+    """The values, pinned where the constants live.
+
+    ``tests/config/test_preflight_fitting.py`` builds A25's message out of
+    these rather than writing ``3`` and ``100`` into it, and asserts the
+    message quotes them -- which kills a restated default, and is what that
+    test is for. What it cannot do is notice the CONSTANT changing: a derived
+    message follows the new value and every assertion there still passes.
+
+    That gap was covered by an ``assert (MIN_SWEEPS, DEFAULT_MAX_ITER) ==
+    (3, 100)`` line in the config test -- **the only pin these two values
+    had**, and it sat in the layer that consumes them rather than the one that
+    declares them. Wave B moves ``plan`` behind the adapter, so a pin reaching
+    across that seam is one the migration has to renegotiate; a pin here is
+    one it does not (**D51**).
+    """
+
+    def test_the_sweep_defaults_are_the_numbers_the_message_quotes(self):
+        from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
+
+        assert (MIN_SWEEPS, DEFAULT_MAX_ITER) == (3, 100)
+
+    def test_min_sweeps_is_below_the_cap_it_is_compared_against(self):
+        """The relation the guard reads, not just the two numbers.
+
+        ``plan`` refuses ``min_sweeps > max_iter``, so a default pair that
+        violated its own guard would refuse every document that wrote neither
+        key -- which no fixture exercises, because they all write at least
+        one.
+        """
+        from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
+
+        assert MIN_SWEEPS <= DEFAULT_MAX_ITER
+
+    def test_min_draws_is_the_smallest_a_split_rhat_is_defined_on(self):
+        """``MIN_DRAWS`` is derived rather than chosen, so it is pinned that
+        way: two halves of two is the smallest split a variance exists on.
+
+        Asserted through the package's own splitter rather than as the literal
+        4, so a change to how the halves are taken moves this with it.
+        """
+        import numpy as np
+
+        from rheplicant.inference.plan import MIN_DRAWS, _halves
+
+        halves = _halves(np.arange(float(MIN_DRAWS)))
+        assert halves.shape == (2, 2)
+        assert _halves(np.arange(float(MIN_DRAWS - 1))).shape[1] < 2

@@ -3010,9 +3010,17 @@ class TestCounts:
         # package's constants, and this is what says so.  Kills writing 3 and
         # 100 out -- a restated default drifts silently, and both are
         # importable by the same deferred import the MIN_DRAWS precedent uses.
+        # The VALUES are pinned where they are declared, not here:
+        # `tests/inference/test_plan.py::TestTheDefaultsTheConfigLayerQUOTES`.
+        # This test's subject is the derivation -- that the message quotes the
+        # package's constants rather than restating them -- and it was also
+        # carrying `assert (MIN_SWEEPS, DEFAULT_MAX_ITER) == (3, 100)`, which
+        # was the ONLY pin those two values had anywhere. A config-layer test
+        # reaching across the inference seam for a value is exactly what
+        # Wave B has to renegotiate (D51); a pin beside the declaration is
+        # what it does not.
         from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
 
-        assert (MIN_SWEEPS, DEFAULT_MAX_ITER) == (3, 100)
         assert f"defaults to {MIN_SWEEPS}" in _counted(
             _estimate(max_iter=1))[0].message
         assert f"defaults to {DEFAULT_MAX_ITER}" in _counted(
