@@ -47,6 +47,16 @@ Measured: a run stopped with SIGTERM at 92 % printed `EXIT=143` while the
 harness announced `exited with code 0`. Zero failures so far and no
 completion looks exactly like a pass.
 
+**And the exit file itself can be a leftover.** Waiting on `[ -f run.exit ]`
+is only a test of the *name*, and a `run.exit` in `/tmp` outlives the session
+that wrote it. Measured 2026-08-28: `until [ -f /tmp/full2.exit ]` returned
+immediately against a file two days old, so a run still at 23 % was read as
+finished with `PYTEST_EXIT=1`, and the number was real — from a different
+run. Write the exit file into this session's own scratchpad, or `rm -f` it
+before starting; and wait on the **summary line in the log**, never on a
+file existing. Same family as the two above: something that says "X" when
+the truthful answer is "this query never happened".
+
 **Non-zero is not one thing.** pytest returns **1** for tests failed, **2**
 interrupted, **3** internal error, **4** usage error (a mis-split `-k`
 expression does this), **5** nothing collected; a killed process gives
@@ -80,6 +90,16 @@ failure's own test name does. Both halves of this were measured: a
 `sorted()` mutation here was killed by an origin-shape cross-check three
 functions away, and the same mistake in the sibling repository recorded
 four mutants as killed by tests that never ran.
+
+**That trap has a mirror, and it reads as SURVIVED rather than KILLED.** The
+paragraph above is "the red is not yours"; this one is "the test exists, you
+just did not run it". Measured 2026-08-28: a mutation deleting a refusal was
+recorded SURVIVED, and the test that kills it had been in the suite the whole
+time — it simply lived in a file outside the nine the mutation script named.
+Both mistakes print exactly one line and neither line says which it is. So
+before running a set, answer **who tests this code** by `grep -rl` or by the
+refusal census, not from memory; and treat a SURVIVED whose subject is an
+obvious refusal as a target-set bug until you have shown otherwise.
 
 **And commit the batch before you mutate it.** The protocol restores with
 `git checkout -- src/` rather than `cp`, which is right — `cp` is the stale-
