@@ -70,66 +70,53 @@ def space_with(vec_prior, scalar_prior=None):
     )
 
 
-class TestTheAdmissionRunsBeforeTheGraph:
+def test_a_refused_prior_never_reaches_graph_construction(design, monkeypatch):
     """P1's general rule, at the one exit that needed it.
 
     "Any refusal whose evidence the graph seam would erase lives in a
     pre-validation, before the graph is built."
+
+    Moving this check to the far side would leave every assertion in
+    ``test_fisher_prior.py`` red -- but red with ``UnboundLocalError``, which
+    names neither the latent nor the prior. This says the check runs while
+    there is still nothing to erase it.
+
+    **Both halves are in one test on purpose.** Written as two, deleting the
+    ``monkeypatch`` line left a green suite and a guard that had quietly become
+    a duplicate of ``test_a_prior_with_no_quadratic_form_is_refused_by_name``
+    -- measured, as a surviving mutant. Asserting first that an ADMITTED prior
+    DOES reach the patched builder makes the patch load-bearing for the pass,
+    so it cannot be removed silently.
     """
+    from rheplicant.inference import graph_bridge
 
-    def test_a_refused_prior_never_reaches_graph_construction(
-        self, design, monkeypatch
-    ):
-        """The ORDER, which no number can pin.
+    class GraphWasBuilt(AssertionError):
+        pass
 
-        Moving this check to the far side would leave every assertion in
-        ``test_fisher_prior.py`` red -- but red with ``UnboundLocalError``,
-        which names neither the latent nor the prior. This says the check runs
-        while there is still nothing to erase it.
-        """
-        from rheplicant.inference import graph_bridge
+    def refuse(*args, **kwargs):
+        raise GraphWasBuilt("graph construction was reached")
 
-        class GraphWasBuilt(AssertionError):
-            pass
+    monkeypatch.setattr(graph_bridge, "graph_for_information", refuse)
+    forward = make_forward(design)
+    good = dist.Normal(jnp.zeros(2), jnp.full(2, 0.5))
 
-        def refuse(*args, **kwargs):
-            raise GraphWasBuilt("the admission let a Uniform reach the graph")
-
-        monkeypatch.setattr(graph_bridge, "graph_for_information", refuse)
-
-        space = space_with(
-            dist.Normal(jnp.zeros(2), jnp.full(2, 0.5)),
-            scalar_prior=dist.Uniform(0.0, 3.0),
+    # The patch is live, and an admitted prior really does get past the
+    # admission to the graph. Without this the assertion below would pass for
+    # a `fisher_information` that refused everything, or one this patch never
+    # reached at all.
+    with pytest.raises(GraphWasBuilt):
+        fisher_information(
+            forward, VALUES, noise_std=NOISE, space=space_with(good)
         )
-        with pytest.raises(ParameterSpaceError, match="z_scalar"):
-            fisher_information(
-                make_forward(design), VALUES, noise_std=NOISE, space=space
-            )
 
-    def test_the_monkeypatch_would_have_fired_on_an_admitted_prior(
-        self, design, monkeypatch
-    ):
-        """The sibling that makes the test above mean something.
-
-        Without this, a ``fisher_information`` that refused everything before
-        touching the graph -- or one whose import the patch never reached --
-        would pass the test above for the wrong reason.
-        """
-        from rheplicant.inference import graph_bridge
-
-        class GraphWasBuilt(AssertionError):
-            pass
-
-        def refuse(*args, **kwargs):
-            raise GraphWasBuilt("reached")
-
-        monkeypatch.setattr(graph_bridge, "graph_for_information", refuse)
-
-        space = space_with(dist.Normal(jnp.zeros(2), jnp.full(2, 0.5)))
-        with pytest.raises(GraphWasBuilt):
-            fisher_information(
-                make_forward(design), VALUES, noise_std=NOISE, space=space
-            )
+    # And a refused one stops before it.
+    with pytest.raises(ParameterSpaceError, match="z_scalar"):
+        fisher_information(
+            forward,
+            VALUES,
+            noise_std=NOISE,
+            space=space_with(good, scalar_prior=dist.Uniform(0.0, 3.0)),
+        )
 
 
 def test_the_seam_still_files_not_gaussian_as_a_blameless_verdict():
