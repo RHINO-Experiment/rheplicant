@@ -44,15 +44,15 @@ likelihood's mode or posterior, that is a job for a gradient sampler
 from typing import Any, NamedTuple
 
 import jax
-import jax.numpy as jnp
-from jax import lax
+from bayesmith.exact.gls import iterative_gls as _far_iterative_gls
 
-from rheplicant.core.conditioning import tree_norm
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.inference.linear import (
+    _OBSERVED,
     LinearBlock,
+    _as_far_block,
     _check_solve_arguments,
-    wiener_solve,
+    _from_far_domain,
 )
 from rheplicant.inference.noise import NoiseModel
 
@@ -184,6 +184,14 @@ def iterative_gls(
         # in the package that requires a model rather than accepting one: its
         # whole subject is the fixed point a prediction-dependent sigma
         # implies, and a constant sigma has no fixed point to find.
+        #
+        # It stays HERE rather than delegating, and for the same reason its
+        # mirror in `linear` does: bayesmith takes a `sigma_of` CALLABLE and
+        # has never heard of `NoiseModel`, so past the seam there is nothing
+        # left to recognise. `linear` refuses a model where a decided sigma
+        # belongs; this exit requires one where a rule belongs. Two opposite
+        # refusals, one reason -- the evidence for both is erased by the same
+        # conversion.
         raise ParameterSpaceError(
             f"iterative_gls needs a NoiseModel, not a bare sigma; got "
             f"{type(noise).__name__}. It solves for the covariance a "
@@ -196,73 +204,52 @@ def iterative_gls(
         block, observed, prior_mean, prior_std, "iterative_gls"
     )
     if not 1 <= min_reweights <= max_reweights:
+        # Kept here although the far side carries this check WORD FOR WORD,
+        # because it does not carry the CLASS: it raises `GraphError`, and its
+        # own comment calls that a misfit for what is a bad keyword argument.
+        # Iron law 1 keeps exception identity, and pre-positioning is cheaper
+        # than translating one class at one site.
         raise ParameterSpaceError(
             f"iterative_gls needs 1 <= min_reweights <= max_reweights, got "
             f"{min_reweights} and {max_reweights}. The loop caps at "
             "max_reweights either way, so this configuration would silently "
             "get fewer steps than it asked for."
         )
-    if reweight_tol is None:
-        epsilon = float(jnp.finfo(jnp.asarray(block.offset).dtype).eps)
-        reweight_tol = max(REWEIGHT_TOL_EPS * epsilon, tol)
 
-    def solve_at(sigma, guard):
-        return wiener_solve(
-            block, observed, noise_std=sigma, prior_std=prior_std,
-            prior_mean=prior_mean, tol=tol, maxiter=maxiter,
-            require_convergence=guard,
-        )
+    def sigma_of(domain: Any) -> dict[str, Any]:
+        """``{observed: sigma}`` at the prediction this latent implies.
 
-    def sigma_at(latent):
-        return noise.std(block.forward(latent) + block.offset)
+        The far side's reweighting rule. It receives the block's DOMAIN in
+        bayesmith's dict spelling, so it is unwrapped back to this package's
+        before `noise.std` sees it -- `noise` is rheplicant's own object and
+        speaks arrays.
+        """
+        latent = _from_far_domain(block, domain)
+        return {_OBSERVED: noise.std(block.forward(latent) + block.offset)}
 
-    if not noise.depends_on_prediction:
-        sigma = noise.std(block.offset)
-        solution, residual = solve_at(sigma, require_convergence)
-        return GLSResult(
-            noise_std=sigma,
-            solution=solution,
-            residual=residual,
-            iterations=jnp.asarray(1),
-            delta=jnp.asarray(0.0),
-            converged=jnp.asarray(True),
-        )
-
-    def step(carry):
-        count, latent, _ = carry
-        updated, _ = solve_at(sigma_at(latent), None)
-        change = jax.tree.map(lambda a, b: a - b, updated, latent)
-        # Relative to the NEW iterate: relative to the old one, a step that
-        # starts near zero reports a huge change forever.
-        delta = tree_norm(change) / jnp.maximum(tree_norm(updated), 1e-30)
-        return count + 1, updated, delta
-
-    def unfinished(carry):
-        count, _, delta = carry
-        # max_reweights is the OUTER conjunct, so it caps the loop whatever
-        # min_reweights says. Written the other way round -- keep going while
-        # below the minimum OR not yet converged -- a min above the max never
-        # terminates, and an infinite lax.while_loop under jit cannot be
-        # interrupted.
-        return jnp.logical_and(
-            count < max_reweights,
-            jnp.logical_or(count < min_reweights, delta > reweight_tol),
-        )
-
-    first, _ = solve_at(noise.std(observed), None)
-    count, latent, delta = lax.while_loop(
-        unfinished, step, (jnp.asarray(1), first, jnp.asarray(jnp.inf))
+    far = _far_iterative_gls(
+        _as_far_block(
+            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
+        ),
+        sigma_of,
+        depends_on_prediction=noise.depends_on_prediction,
+        tol=tol,
+        maxiter=maxiter,
+        reweight_tol=reweight_tol,
+        min_reweights=min_reweights,
+        max_reweights=max_reweights,
+        require_convergence=require_convergence,
     )
-
-    # One final solve at the converged covariance, and the only place the
-    # conditioning guard runs -- so what it certifies is what is returned.
-    sigma = sigma_at(latent)
-    solution, residual = solve_at(sigma, require_convergence)
+    # Back to this package's container. The two GLSResults hold ONE covariance
+    # each and spell it differently: the far side stores `precision` and
+    # derives `noise_std`, this one stores the sigma. Iron law 1 keeps this
+    # layout, so the derivation runs here -- and for a diagonal precision it
+    # returns the very array `sigma_of` produced, bitwise.
     return GLSResult(
-        noise_std=sigma,
-        solution=solution,
-        residual=residual,
-        iterations=count,
-        delta=delta,
-        converged=delta <= reweight_tol,
+        noise_std=far.noise_std[_OBSERVED],
+        solution=_from_far_domain(block, far.solution),
+        residual=far.residual,
+        iterations=far.iterations,
+        delta=far.delta,
+        converged=far.converged,
     )
