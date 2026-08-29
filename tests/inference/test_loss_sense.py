@@ -210,6 +210,52 @@ class TestRefusedByMeasurement:
             )
 
 
+class TestTheWrapperSaysThisPackagesRoutes:
+    """D11 migrated the detection; the remedy sentence could not go with it.
+
+    ``bayesmith.optimize.check_loss_sense`` ends its declared-sense refusal
+    with *"use a density-aware route (`fit`, `nuts`)"*. Neither name exists in
+    rheplicant, so pointing a user there is worse than saying nothing, and the
+    wrapper swaps that sentence for this package's own.
+
+    **The swap is keyed on the far side's exact wording, which is exactly why
+    it needs a test.** If upstream rewords that sentence the substitution stops
+    matching, and it stops matching SILENTLY -- the refusal would simply go
+    back to naming `fit` and `nuts`, still raising, still the right class,
+    still passing every other case in this file.
+    """
+
+    def _refusal(self):
+        likelihood = GaussianLikelihood(jnp.array(1.0))
+        with pytest.raises(ParameterSpaceError) as caught:
+            GradientCalibrator(n_steps=5).fit(
+                forward, PARAMS0, OBSERVED, loss_fn=likelihood
+            )
+        return str(caught.value)
+
+    def test_it_names_this_packages_routes(self):
+        message = self._refusal()
+        assert "numpyro_bridge" in message and "SamplingPlan" in message, message
+
+    def test_and_not_the_far_sides(self):
+        """The half with teeth: absence, which the case above cannot see."""
+        message = self._refusal()
+        assert "`fit`, `nuts`" not in message, (
+            "the far side's remedy survived into this package's message -- the "
+            "substitution in calibrate.py is keyed on upstream wording that "
+            "has changed, and it failed silently"
+        )
+
+    def test_the_detection_itself_is_still_the_far_sides(self):
+        """Anti-vacuity: the wrapper must not have quietly become a re-write.
+
+        If the substitution were done by re-implementing the message here, both
+        cases above would pass while nothing delegated at all. The far side's
+        own opening clause is what proves the text came from over there.
+        """
+        assert "declares sense='maximize'" in self._refusal()
+
+
 class TestTheGuardCostsNothingAtRunTime:
     def test_it_runs_once_at_entry_and_not_inside_the_scan(self):
         """Counted, because "outside the loop" is the claim the docstring makes.

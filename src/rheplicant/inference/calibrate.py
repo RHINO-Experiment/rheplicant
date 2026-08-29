@@ -13,14 +13,14 @@ from typing import Any
 
 import equinox as eqx
 import jax
+from bayesmith.errors import StructureError as _FarStructureError
+from bayesmith.optimize import check_loss_sense as _far_check_loss_sense
 from bayesmith.optimize import minimize as _far_minimize
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.inference.likelihood import (
-    MAXIMIZE,
     check_observed_shape,
     mean_squared_error,
-    sense_of,
 )
 
 
@@ -43,6 +43,20 @@ def _refuse_mis_shaped_observed(
     )
 
 
+#: The far side's remedy names its OWN routes, which do not exist here. The
+#: wrapper below swaps this sentence for the near-side one; see
+#: :func:`_refuse_a_score_the_optimizer_would_walk_away_from` for why the
+#: substitution is asserted rather than trusted.
+_FAR_REMEDY = (
+    "Pass `lambda p, o: -score(p, o)`, or use a density-aware route "
+    "(`fit`, `nuts`)."
+)
+_NEAR_REMEDY = (
+    "Pass `lambda p, o: -likelihood(p, o)`, or use a likelihood-aware route "
+    "(numpyro_bridge, SamplingPlan)."
+)
+
+
 def _refuse_a_score_the_optimizer_would_walk_away_from(
     loss_fn: Callable[[jax.Array, jax.Array], jax.Array],
     forward: Callable[[Any], jax.Array],
@@ -60,24 +74,34 @@ def _refuse_a_score_the_optimizer_would_walk_away_from(
         mean_squared_error       ->  g = +0.9999    loss  2499  ->  0.002617
         GaussianLikelihood(0.05) ->  g = -30.7349   loss -3.2e7 -> -1.3e11
 
-    The check is in two parts, and the second is the one that matters.
+    The detection is
+    :func:`bayesmith.optimize.check_loss_sense`'s as of the Wave C
+    ``calibrate`` switch — migration ledger **D11**, whose wording is "loss
+    方向守卫随迁, ``test_loss_sense`` 经包装重放". This function is that
+    wrapper. It is two tests over there, and both are worth naming because the
+    second is the one that matters: a **declared** ``sense`` attribute, which
+    is exact but only sees objects that carry one and so is a whitelist; and a
+    **measured** comparison at the perfect prediction, ``loss_fn(observed,
+    observed)``, which an error minimises and a log-density maximises. The
+    second holds for any callable, declaration or not.
 
-    **Declared.** :func:`~rheplicant.inference.likelihood.sense_of` reads a
-    ``sense`` attribute. Cheap, exact, and gives the best message — but it
-    only sees objects that declare it, so on its own it is a whitelist, and a
-    whitelist is wrong about precisely the code it has not met.
+    **What the wrapper is for.** Two things do not survive the seam.
 
-    **Measured.** A scoring function is evaluated where it is unambiguous: at
-    the *perfect* prediction, ``loss_fn(observed, observed)``. An error attains
-    its minimum there; a log-density attains its maximum. So if scoring the
-    perfect prediction returns a value ABOVE the score at the starting
-    parameters, the function increases toward the truth and a minimizer will
-    run away from it. That holds for any callable, including a user's own
-    likelihood class and a bare lambda, with no declaration at all.
+    The exception CLASS: the far side raises ``StructureError`` and this
+    package's callers are pinned on ``ParameterSpaceError``. Iron law 1 keeps
+    the class, so it is translated here.
 
-    Costs one extra evaluation of ``forward`` and two of ``loss_fn`` on
-    concrete arrays, once, at entry — negligible against a fit, and outside
-    the ``lax.scan`` the optimizers run.
+    The REMEDY sentence: the far side ends with *"use a density-aware route
+    (`fit`, `nuts`)"*, and neither name exists in rheplicant. Advice that
+    points a user at a function their package does not have is worse than no
+    advice, so :data:`_FAR_REMEDY` is swapped for :data:`_NEAR_REMEDY`.
+
+    **The swap is asserted, not trusted.** A substitution keyed on the far
+    side's exact wording stops applying the moment that wording changes, and
+    it stops applying *silently* — the message would simply go back to naming
+    `fit` and `nuts`. ``test_loss_sense.py`` asserts the near-side remedy is
+    present, so a reworded upstream goes red here rather than shipping wrong
+    advice.
 
     Raises:
         ParameterSpaceError: if the sense is wrong by either test, or if the
@@ -87,33 +111,10 @@ def _refuse_a_score_the_optimizer_would_walk_away_from(
             as "cannot tell, proceed" would let the case this guard exists for
             through whenever it arrives with a NaN attached.
     """
-    if sense_of(loss_fn) == MAXIMIZE:
-        raise ParameterSpaceError(
-            f"{type(loss_fn).__name__} declares sense={MAXIMIZE!r}: it is a "
-            "log-density, and this calibrator minimizes. Minimizing a log-density "
-            "walks away from the truth while reporting an improving loss. Pass "
-            "`lambda p, o: -likelihood(p, o)`, or use a likelihood-aware route "
-            "(numpyro_bridge, SamplingPlan)."
-        )
-
-    at_start = jax.numpy.asarray(loss_fn(forward(params0), observed))
-    at_truth = jax.numpy.asarray(loss_fn(observed, observed))
-    if not jax.numpy.isfinite(at_start) or not jax.numpy.isfinite(at_truth):
-        raise ParameterSpaceError(
-            f"the loss is not finite at entry (start={at_start}, perfect-fit="
-            f"{at_truth}). A fit cannot begin from here, and the sense of the "
-            "scoring function cannot be established either — a non-finite score "
-            "compares False against everything."
-        )
-    if at_truth > at_start:
-        raise ParameterSpaceError(
-            f"{getattr(loss_fn, '__name__', type(loss_fn).__name__)} scores a "
-            f"PERFECT prediction ({at_truth}) higher than the starting one "
-            f"({at_start}), so it increases toward the truth and must be "
-            "maximized — but this calibrator minimizes, and will walk away from "
-            "the answer while the loss history improves. Negate it: "
-            "`lambda p, o: -score(p, o)`."
-        )
+    try:
+        _far_check_loss_sense(loss_fn, forward(params0), observed)
+    except _FarStructureError as exc:
+        raise ParameterSpaceError(str(exc).replace(_FAR_REMEDY, _NEAR_REMEDY)) from None
 
 
 class GradientCalibrator(eqx.Module):
