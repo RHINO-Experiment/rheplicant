@@ -257,6 +257,29 @@ class NeuralPosterior(_FarNeuralPosterior):
         except _FarStructureError as exc:
             raise StateValidationError(str(exc)) from None
 
+    def sample(self, datum: jax.Array, key: jax.Array, n_samples: int) -> jax.Array:
+        """``n_samples`` draws from ``q(theta | datum)``, flat and standardized back.
+
+        **Declared rather than inherited, for the same reason :meth:`create`
+        restates its signature.** Several guards read this package's public
+        surface out of ``src/`` by walking the AST, and an inherited member is
+        invisible to them: they resolve base classes *within* this package, and
+        this class's base is bayesmith's. Measured -- inheriting it silently
+        took ``tests/test_docs_claims.py`` down twice over, once for
+        ``NeuralPosterior.sample`` naming a member the walk could not find, and
+        once for ``n_samples=`` naming a keyword no parameter in ``src/``
+        accepted any more. Both sentences were still true for a caller; they
+        had merely stopped being checkable.
+
+        ``docs/config-inference.md`` maps the document's ``n_draws:`` onto this
+        ``n_samples``, and ``config/sections/npe.py`` states that this method
+        takes it positionally -- so the name and the position are both contract
+        here, not only over there.
+
+        The body is the far side's, unchanged.
+        """
+        return super().sample(datum, key, n_samples)
+
 
 #: Re-exported rather than wrapped: it carries no refusals to translate, its
 #: three fields (`train`, `validation`, `best_step`) match the far side's by
