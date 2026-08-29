@@ -32,8 +32,12 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.marginal.compress import ResidualSummary as _FarResidualSummary
+from bayesmith.marginal.diagnostics import held_out_z as _far_held_out_z
 from bayesmith.marginal.diagnostics import shrinkage_power as _far_shrinkage_power
 from bayesmith.marginal.diagnostics import shrinkage_report as _far_shrinkage_report
+from bayesmith.marginal.diagnostics import template_modes as _far_template_modes
+from bayesmith.marginal.diagnostics import tightest_direction as _far_tightest_direction
 
 from rheplicant.core.errors import StateValidationError
 
@@ -68,6 +72,37 @@ class EpochResidual:
     dof: int
     reduced_chi2: float
     templates: dict[str, float]
+
+
+def _summaries(terms: Sequence[Any]) -> tuple[Any, ...]:
+    """This package's stored terms as the far side's ``ResidualSummary`` tuples.
+
+    Built transiently, never stored. ``ResidualSummary`` is deliberately **not**
+    adopted as a field of :class:`~rheplicant.inference.compressed.QuadraticLikelihood`:
+    it would nest five leaves inside the container, move ``residual_dof`` and
+    ``template_names`` out of the manifest and into the binary, and add a
+    ``reduced_chi2`` this package does not store -- a ``_FORMAT_VERSION`` bump,
+    recorded as **D66**. Constructing one for the duration of a call costs
+    nothing and changes no archive.
+
+    ``epoch_id`` has no slot on the far side and is zipped back by the callers,
+    which is also why their refusal messages still name epochs rather than
+    positions.
+    """
+    built = []
+    for term in terms:
+        dof = int(term.residual_dof)
+        chi2 = float(np.asarray(term.residual_chi2))
+        built.append(
+            _FarResidualSummary(
+                chi2=chi2,
+                dof=dof,
+                reduced_chi2=chi2 / dof if dof > 0 else float("nan"),
+                template_names=tuple(term.template_names or ()),
+                projections=term.template_projections,
+            )
+        )
+    return tuple(built)
 
 
 def epoch_residuals(terms: Sequence[Any]) -> tuple[EpochResidual, ...]:
@@ -176,44 +211,8 @@ def coherent_mode(terms: Sequence[Any]) -> dict[str, Any]:
             "coherent_mode needs at least one epoch. An empty campaign has no "
             "mean to resolve, and returning zeros would read as a clean result."
         )
-    names = _refuse_mixed_templates(terms)
-    rows = epoch_residuals(terms)
-    n = len(rows)
-
-    chi2 = np.array([row.chi2 for row in rows])
-    dofs = {row.dof for row in rows}
-    # Every epoch's DOF, not the first one's: a campaign whose nights differ in
-    # flagging has a different null per night, and the sum is what is chi-square
-    # distributed. Var(sum of chi2_k) = 2 sum(k), so the z below is exact for a
-    # ragged campaign and reduces to the textbook form for a uniform one.
-    total_dof = sum(row.dof for row in rows)
-    spread = np.sqrt(2.0 * total_dof) if total_dof > 0 else np.nan
-    report: dict[str, Any] = {
-        "n_epochs": n,
-        "chi2_mean": float(chi2.mean()),
-        "chi2_dof": sorted(dofs)[0] if len(dofs) == 1 else None,
-        "chi2_z": float((chi2.sum() - total_dof) / spread),
-        "templates": {},
-    }
-    for index, name in enumerate(names):
-        values = np.array([row.templates[name] for row in rows])
-        report["templates"][name] = {
-            "mean": float(values.mean()),
-            # Population spread, not the sample one: under the null each
-            # projection is a standard normal in its own right, so the quantity
-            # being checked against 1.0 is the second moment about the *known*
-            # null mean of zero -- but the mean is reported separately and a
-            # shifted-mean fault must not inflate this. `ddof=0` about the
-            # sample mean is the compromise, and it is the same 1.0020 on
-            # the clean campaign and on the biased one -- which is the
-            # statement that the fault is a shift and not extra noise.
-            "scatter": float(values.std()),
-            # sqrt(N), which is the whole point: the mean does not shrink with
-            # N and its uncertainty does.
-            "z": float(values.mean() * np.sqrt(n)),
-        }
-        del index
-    return report
+    _refuse_mixed_templates(terms)
+    return _far_template_modes(_summaries(terms))
 
 
 @dataclass(frozen=True)
@@ -349,65 +348,30 @@ def held_out_z(
             if any score comes out non-finite.
     """
     terms = tuple(terms)
-    factors, targets, width = _campaign_arrays(terms)
-
-    fisher = np.asarray(prior_fisher, dtype=float)
-    if fisher.shape != (width, width):
-        raise ValueError(
-            f"prior_fisher has shape {fisher.shape}, but this campaign's epochs "
-            f"are over {width} raveled values ({list(terms[0].info.names)}). The "
-            "prior is added column for column, so a prior over a different "
-            "parameter set is not a prior over these."
-        )
-    mean = np.zeros(width) if prior_mean is None else np.asarray(prior_mean, dtype=float)
-    if mean.shape != (width,):
-        raise ValueError(
-            f"prior_mean has shape {mean.shape}, but this campaign's epochs are "
-            f"over {width} raveled values ({list(terms[0].info.names)})."
-        )
-
-    total_fisher = fisher + sum(row.T @ row for row in factors)
-    total_b = fisher @ mean + sum(
-        row.T @ target for row, target in zip(factors, targets, strict=True)
+    # This package's own three refusals run FIRST and are not delegated. The
+    # far side has no counterpart to the zero-row one, and what it does instead
+    # is the failure this function exists to prevent: a fully flagged epoch
+    # comes back `{'chi2': 0.0, 'dof': 0, 'z': nan}`, and far's own NaN guard
+    # cannot catch it because that guard tests `chi2`, which is 0.0 -- finite
+    # and non-negative, so it passes. A NaN z loses every `z > threshold` an
+    # audit could write and reads as the quietest night of the run. Recorded as
+    # D70; the arrays are discarded because only the checks are wanted here.
+    _campaign_arrays(terms)
+    scored = _far_held_out_z(
+        [term.info for term in terms], prior_fisher, prior_mean
     )
-
-    rows: list[HeldOut] = []
-    for term, row, target in zip(terms, factors, targets, strict=True):
-        left_fisher = total_fisher - row.T @ row
-        left_b = total_b - row.T @ target
-        try:
-            covariance = np.linalg.inv(np.linalg.cholesky(left_fisher)).T
-        except np.linalg.LinAlgError as error:
-            raise ValueError(
-                f"The campaign with epoch {term.epoch_id!r} left out carries "
-                "singular information, so there is no leave-one-out posterior to "
-                f"score that epoch against. Remedy: {_PRIOR_REMEDY}"
-            ) from error
-        covariance = covariance @ covariance.T
-        residual = row @ (covariance @ left_b) - target
-        spread = np.eye(row.shape[0]) + row @ covariance @ row.T
-        chi2 = float(residual @ np.linalg.solve(spread, residual))
-        dof = int(row.shape[0])
-        # `not (x >= 0.0)` rather than `x < 0.0`: NaN is False for both, and it
-        # is NaN that has to be caught here. A NaN z sails through every
-        # `z > threshold` an audit could write and reads as the quietest night.
-        if not (chi2 >= 0.0) or not np.isfinite(chi2):
-            raise ValueError(
-                f"Epoch {term.epoch_id!r} scored {chi2}, which is not finite and "
-                "non-negative. A stored factor or target carries NaN or inf, and "
-                "NaN loses every comparison a campaign audit could make about it "
-                "-- `z > threshold` is False for NaN, so the epoch would read as "
-                "the quietest night of the run. Recompress that epoch."
-            )
-        rows.append(
-            HeldOut(
-                epoch_id=term.epoch_id,
-                chi2=chi2,
-                dof=dof,
-                z=(chi2 - dof) / float(np.sqrt(2.0 * dof)),
-            )
+    # `epoch_id` has no slot on the far side, so it is zipped back rather than
+    # returned: far identifies epochs positionally and this package identifies
+    # them by name, which is what its refusal messages and its reports both do.
+    return tuple(
+        HeldOut(
+            epoch_id=term.epoch_id,
+            chi2=float(row["chi2"]),
+            dof=int(row["dof"]),
+            z=float(row["z"]),
         )
-    return tuple(rows)
+        for term, row in zip(terms, scored, strict=True)
+    )
 
 
 def _shrinkage_table(sigmas: Mapping[int, Any]) -> tuple[np.ndarray, np.ndarray]:
@@ -746,19 +710,7 @@ def _tightest_direction(block: np.ndarray) -> tuple[float, np.ndarray | None]:
     campaign must report ``nan`` and be refused by the NaN-safe comparison in
     :func:`systematic_floor`, not raise a linear-algebra error here.
     """
-    if not np.all(np.isfinite(block)):
-        return float("nan"), None
-    values, vectors = np.linalg.eigh(block)
-    smallest = float(values[0])
-    direction = np.asarray(vectors[:, 0], dtype=float)
-    direction = direction * np.sign(direction[int(np.argmax(np.abs(direction)))])
-    # A covariance is positive definite by construction here -- it is the
-    # inverse of a Cholesky factor times its transpose -- so a non-positive
-    # eigenvalue is roundoff on a block that constrains that direction not at
-    # all. Zero is the honest width for it and it is below every legal floor,
-    # which is the safe direction. `nan` is handled above, never here, because
-    # `smallest > 0.0` is False for NaN and would silently become zero.
-    return (math.sqrt(smallest) if smallest > 0.0 else 0.0), direction
+    return _far_tightest_direction(block)
 
 
 def systematic_floor(
