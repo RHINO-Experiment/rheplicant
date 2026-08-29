@@ -54,6 +54,34 @@ class SqrtInfo(eqx.Module):
     shapes: tuple[tuple[int, ...], ...] = eqx.field(static=True)
 
     def __check_init__(self):
+        complex_parts = [
+            name
+            for name, array in (
+                ("factor", self.factor),
+                ("target", self.target),
+                ("offset", self.offset),
+            )
+            if jnp.iscomplexobj(array)
+        ]
+        if complex_parts:
+            raise StateValidationError(
+                f"SqrtInfo was given a complex {' and '.join(complex_parts)}, and "
+                "this form is real by construction. Every quantity here is a "
+                "BILINEAR form -- `log_prob` takes `sum(residual**2)`, which is "
+                "`r^T r`, and `fisher()` takes `factor.T @ factor` with no "
+                "conjugate -- while a complex QR's Q is UNITARY and preserves "
+                "`r^H r` instead. The two disagree, and they disagree SILENTLY: "
+                "measured here on one shared complex scalar with R_1 = [[1j]] "
+                "and R_2 = [[1]], the summed information is exactly 0 by hand "
+                "and `combine(...).fisher()` returned 2.0 -- an absolute error "
+                "equal to the whole of the true value, with nothing raised. "
+                "Carry the latent as its REAL degrees of freedom instead, which "
+                "is what this package already does everywhere else a complex "
+                "quantity meets real data: see "
+                "`rheplicant.inference.linear`'s treatment of complex "
+                "coefficients, whose reason is that the map from them to the "
+                "data is R-linear and not C-linear."
+            )
         if self.factor.ndim != 2:
             raise StateValidationError(
                 f"SqrtInfo.factor must be 2-D (r, n); got shape {self.factor.shape}."
