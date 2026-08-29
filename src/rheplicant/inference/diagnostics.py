@@ -32,6 +32,8 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.marginal.diagnostics import shrinkage_power as _far_shrinkage_power
+from bayesmith.marginal.diagnostics import shrinkage_report as _far_shrinkage_report
 
 from rheplicant.core.errors import StateValidationError
 
@@ -504,10 +506,19 @@ def shrinkage_power(sigmas: Mapping[int, Any]) -> float:
     Raises:
         ValueError: for fewer than two campaign sizes, a non-positive size, a
             ragged table, or a sigma that is not finite and strictly positive.
+
+    **Delegates to :func:`bayesmith.marginal.diagnostics.shrinkage_power`** as of
+    the Wave D step-one batch (D61's ordering). Measured bitwise across the
+    seam BEFORE the near-side body was removed -- ``|delta| = 0.0`` on an
+    exact ``n**-0.5`` bank, an exact ``n**-1.0`` bank and a noisy one -- and
+    that comparison cannot be re-taken now that this calls that.
+
+    All four refusals live in the far side's ``_shrinkage_table`` with the
+    same sentences, and its ``StructureError`` **is a** ``ValueError``
+    (``ValueError`` is in its MRO), so this module's
+    ``pytest.raises(ValueError, ...)`` pins hold through the seam unchanged.
     """
-    log_size, log_sigma = _shrinkage_table(sigmas)
-    centred = log_size - log_size.mean()
-    return float(centred @ (log_sigma - log_sigma.mean()) / (centred @ centred))
+    return _far_shrinkage_power(sigmas)
 
 
 def shrinkage_report(sigmas: Mapping[int, Any]) -> dict[str, Any]:
@@ -528,12 +539,30 @@ def shrinkage_report(sigmas: Mapping[int, Any]) -> dict[str, Any]:
     the fixture -- without any new randomness being injected. What keeps its
     scatter exactly is the named template projection, 1.00200 clean and 1.00200
     biased, because there the fault is a pure additive shift.
+
+    **Delegates to :func:`bayesmith.marginal.diagnostics.shrinkage_report`** as of
+    the Wave D step-one batch (D61's ordering). Measured bitwise across the
+    seam BEFORE the near-side body was removed -- ``|delta| = 0.0`` on an
+    exact ``n**-0.5`` bank, an exact ``n**-1.0`` bank and a noisy one -- and
+    that comparison cannot be re-taken now that this calls that.
+
+    All four refusals live in the far side's ``_shrinkage_table`` with the
+    same sentences, and its ``StructureError`` **is a** ``ValueError``
+    (``ValueError`` is in its MRO), so this module's
+    ``pytest.raises(ValueError, ...)`` pins hold through the seam unchanged.
+
+    **The caveat is this package's own and is NOT taken from over there.**
+    The far side's ends *"Use template_modes(), coherent_mode() and the
+    systematic floor"*, and ``template_modes`` does not exist here -- advice
+    naming a function the reader's package lacks is worse than none. This
+    one also carries rheplicant's own measurement, the twelve digits on a
+    campaign biased by 52.6 sigma, which is evidence rather than phrasing.
     """
-    power = shrinkage_power(sigmas)
+    far = _far_shrinkage_report(sigmas)
     return {
-        "power": power,
-        "n_values": tuple(sorted(sigmas)),
-        "detects_coherent_bias": False,
+        "power": far["power"],
+        "n_values": far["n_values"],
+        "detects_coherent_bias": far["detects_coherent_bias"],
         "caveat": (
             "sigma_N is data-independent for a Gaussian model, so this power is "
             "-0.5 by construction. A deterministic error shared across epochs "

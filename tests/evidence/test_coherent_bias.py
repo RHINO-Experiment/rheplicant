@@ -233,3 +233,64 @@ def test_a_ragged_set_of_campaign_sizes_is_refused():
     ragged[160] = np.append(ragged[160], 0.01)
     with pytest.raises(ValueError, match="same latents"):
         shrinkage_power(ragged)
+
+
+class TestTheCaveatIsThisPackagesOwn:
+    """`shrinkage_report` delegates its numbers and keeps its own caveat.
+
+    The far side's ends *"Use template_modes(), coherent_mode() and the
+    systematic floor"*. ``template_modes`` does not exist in rheplicant, so
+    forwarding that text would hand a reader a function their package does not
+    have -- the same trap the `calibrate` switch hit with a remedy sentence,
+    recorded there.
+
+    This caveat also carries a measurement the far side's does not: the twelve
+    digits on a campaign biased by 52.6 sigma, which `test_provenance.py`
+    computes independently. That is evidence, not phrasing, and it would be
+    lost by forwarding.
+
+    Both directions are asserted, because the substitution is a decision that
+    can silently stop being made -- somebody delegating one more field, or
+    upstream rewording, and the caveat quietly becomes the far side's again
+    while every numeric assertion in this file stays green.
+    """
+
+    def _report(self):
+        base = _sigmas(biased=False)
+        return shrinkage_report(base)
+
+    def test_it_names_a_route_this_package_has(self):
+        caveat = self._report()["caveat"]
+        assert "coherent_mode()" in caveat, caveat
+
+    def test_it_does_not_name_one_this_package_lacks(self):
+        """The half with teeth. `template_modes` is bayesmith's."""
+        import rheplicant.inference as inference
+
+        caveat = self._report()["caveat"]
+        assert not hasattr(inference, "template_modes"), (
+            "rheplicant now HAS template_modes, so this test is stale -- the "
+            "caveat may name it and the substitution may no longer be needed"
+        )
+        assert "template_modes" not in caveat, (
+            "the far side's caveat reached this package's output; the "
+            "substitution in shrinkage_report stopped being applied"
+        )
+
+    def test_it_keeps_the_measurement_the_far_side_drops(self):
+        assert "52.6 sigma" in self._report()["caveat"]
+
+    def test_the_numbers_are_still_the_far_sides(self):
+        """ANTI-VACUITY: prove the delegation is real, not a local rewrite.
+
+        If `shrinkage_report` had quietly gone back to computing everything
+        here, all three cases above would still pass.
+        """
+        from bayesmith.marginal.diagnostics import shrinkage_report as far
+
+        base = _sigmas(biased=False)
+        ours, theirs = shrinkage_report(base), far(base)
+        assert ours["power"] == theirs["power"]
+        assert ours["n_values"] == theirs["n_values"]
+        assert ours["detects_coherent_bias"] == theirs["detects_coherent_bias"]
+        assert ours["caveat"] != theirs["caveat"], "the caveat must NOT match"
