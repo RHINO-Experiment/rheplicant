@@ -228,6 +228,21 @@ def save_memory(memory, path: str | Path) -> None:
     diagnosable -- the manifest is missing, which ``load_memory`` names -- where
     the reverse window was not.
 
+    **That argument holds only when the destination was previously EMPTY, and
+    re-archiving to a stable path is the ordinary case.** Measured 2026-08-29
+    (adversarial review of D39): save a campaign, recalibrate, and re-archive
+    to the same path with the process dying between these two writes, and the
+    NEW binary is left beside the OLD manifest. When only static fields changed
+    -- a corrected ``n_observed``, a new ``inputs`` digest -- the two files are
+    the same length, so :func:`load_memory`'s byte check cannot see it and the
+    load succeeds: arrays from the new run, every static field from the old.
+    Worse than a wrong field, the stale ``inputs`` then lets
+    ``_reject_shared_inputs`` ADMIT an epoch it exists to refuse.
+
+    So the window is diagnosable only on a first write. Closing it needs a
+    digest of the binary in the manifest, which is a ``_FORMAT_VERSION`` bump
+    -- see ledger D39 step 3 and the ordering it must follow.
+
     **The memory is checked before its terms are.** A foreign *term* has been
     refused by name since this module existed; a foreign *memory* was refused by
     ``AttributeError: 'ChainMemory' object has no attribute 'accumulated'``,

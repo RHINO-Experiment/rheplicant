@@ -180,17 +180,43 @@ class TestTheManifestIsNotBOUNDToItsBinary:
     manifest that stops early is caught by the bytes it never accounted for
     (measured on these fixtures: 144 of 1976).
 
-    **Deliberately NOT done: a digest.** The obvious fix -- put a hash of the
-    binary in the manifest -- requires a ``_FORMAT_VERSION`` bump, and this
-    reader refuses any version that is not exactly its own (``!=``, not
-    ``<``). This layer's whole premise is that *the raw data is gone*, so a
-    bump with no backward-compatible read makes every existing archive
-    permanently unreadable with nothing to re-archive from. The order that is
-    safe is: close the silent half (done), make the reader version-tolerant,
-    and only then bind. What a digest would still add over the byte check is
-    the case the byte check cannot see -- two archives of the SAME SHAPE, where
-    the counts match and the contents do not, which is also the likeliest real
-    mispairing (two nights of one campaign). That remains open.
+    **Deliberately NOT done: a digest.** Putting a hash of the binary in the
+    manifest requires a ``_FORMAT_VERSION`` bump, and this reader refuses any
+    version that is not exactly its own (``!=``, not ``<``). This layer's whole
+    premise is that *the raw data is gone*, so a bump with no
+    backward-compatible read makes every existing archive permanently
+    unreadable with nothing to re-archive from.
+
+    **What remains open is LARGER than this docstring first said, and the
+    correction matters because the first version pointed the next reader at
+    the wrong fix.** It read: the byte check misses "two archives of the SAME
+    SHAPE", and a digest would cover it. Both halves are wrong, found by
+    adversarially reviewing the change on 2026-08-29 and reproduced here.
+
+    **(a) It does not take two archives.** Reversing the ``terms`` list in an
+    archive's OWN manifest, binary untouched, loads without error and
+    cross-attaches every static field to the wrong epoch's arrays --
+    ``save_memory`` serialises in archive order, ``load_memory`` builds its
+    template in MANIFEST order, and equinox fills leaves positionally. Measured
+    on a two-term archive: the reduced chi-squareds swap, so the badly-fitting
+    night reports 0.076 and the well-fitting one 577, each under the other's
+    label. The byte check cannot see it -- same file, same size.
+
+    **(b) A digest of the binary would NOT close that.** The binary is
+    byte-identical; it is the manifest that moved. Nothing in the v3 binary
+    carries per-term identity, so no in-format check can detect it. Closing it
+    needs the epoch identity written into the BINARY, not a hash of it.
+
+    So step three is two things, not one: a digest (which closes the
+    same-shape mispairing *and* ``save_memory``'s re-archive crash window) and
+    per-term identity in the binary (which closes the permutation). The safe
+    order is unchanged: byte check, then converter, then both.
+
+    Reachability is this module's own standard, not a tampering argument --
+    ``_reject_bad_archive`` already records that a manifest is an editable text
+    file and that "concatenating two runs' manifests reaches that state with no
+    editing at all". Any tool that sorts terms by ``epoch_id`` for display and
+    writes the list back produces exactly this.
     """
 
     @staticmethod
@@ -227,6 +253,121 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         with pytest.raises(StateValidationError) as caught:
             load_memory(path, factorization())
         assert "144 bytes" in str(caught.value), str(caught.value)
+
+    def test_permuting_the_manifests_own_terms_cross_attaches_the_halves(self, tmp_path):
+        """PINNED, not fixed — no in-format check can see it (see the class docstring).
+
+        One archive. Reverse ``manifest["terms"]`` and touch nothing else. The
+        static half of each term comes from the manifest and the dynamic half
+        from the binary, so reversing one and not the other swaps them past
+        each other. This is the sharper half of what D39 leaves open, and the
+        digest that was proposed for it would not help: the binary is
+        byte-identical.
+
+        Asserted as a MEASUREMENT of current behaviour, exactly as D39's
+        original pin was, so the Wave D switch cannot change it in silence.
+        """
+        import json
+
+        from rheplicant.inference.archive import save_memory
+        from rheplicant.inference.compressed import QuadraticLikelihood
+        from rheplicant.inference.memory import BayesMemory
+        from rheplicant.inference.sqrtinfo import SqrtInfo
+
+        def term(epoch_id, scale, n_observed, dof):
+            return QuadraticLikelihood(
+                info=SqrtInfo(
+                    factor=jnp.array([[1.5, 0.25], [0.0, 0.75]]) * scale,
+                    target=jnp.array([0.5, -0.25]) * scale,
+                    offset=jnp.array(-3.25) * scale,
+                    names=("depth", "width"),
+                    shapes=((), ()),
+                ),
+                epoch_id=epoch_id,
+                n_observed=n_observed,
+                exact=False,
+                support={"depth": (-2.0, 2.0), "width": (-1.0, 3.0)},
+                include_logdet=False,
+                noise_frozen_at="gls",
+                residual_chi2=jnp.array(7.5) * scale,
+                template_projections=jnp.array([1.25, -0.5]) * scale,
+                residual_dof=dof,
+                template_names=("gain_ripple", "ground_pickup"),
+                inputs=(("beam_model", f"sha256:{epoch_id}"),),
+            )
+
+        memory = BayesMemory(factorization())
+        memory = memory.remember(term("night-1", 1.0, 777, 13))
+        memory = memory.remember(term("night-2", 1000.0, 111, 99))
+        path = tmp_path / "x.rhep"
+        save_memory(memory, path)
+
+        manifest = tmp_path / "x.json"
+        spec = json.loads(manifest.read_text())
+        before = path.stat().st_size
+        spec["terms"] = list(reversed(spec["terms"]))
+        manifest.write_text(json.dumps(spec))
+        assert path.stat().st_size == before, "the binary must be untouched"
+
+        # It loads. That is the finding.
+        terms = load_memory(path, factorization()).archive
+
+        # The static half followed the manifest; the dynamic half followed the
+        # binary; so each term now wears the other's identity.
+        assert terms[0].epoch_id == "night-2" and terms[0].n_observed == 111
+        assert float(terms[0].residual_chi2) == pytest.approx(7.5)
+        assert terms[0].residual_dof == 99
+
+        # The consequence a reader would actually meet: reduced chi-squared is
+        # a binary numerator over a manifest denominator.
+        assert float(terms[0].residual_chi2) / terms[0].residual_dof == pytest.approx(
+            0.0757, abs=1e-3
+        ), "the badly-fitting night now reads as the clean one"
+
+    def test_the_unpermuted_archive_pairs_them_correctly(self, tmp_path):
+        """ANTI-VACUITY for the case above: prove the halves DO line up normally,
+        or the assertions there describe nothing."""
+        import json
+
+        from rheplicant.inference.archive import save_memory
+        from rheplicant.inference.compressed import QuadraticLikelihood
+        from rheplicant.inference.memory import BayesMemory
+        from rheplicant.inference.sqrtinfo import SqrtInfo
+
+        memory = BayesMemory(factorization())
+        for epoch_id, scale, n_observed, dof in (
+            ("night-1", 1.0, 777, 13),
+            ("night-2", 1000.0, 111, 99),
+        ):
+            memory = memory.remember(
+                QuadraticLikelihood(
+                    info=SqrtInfo(
+                        factor=jnp.array([[1.5, 0.25], [0.0, 0.75]]) * scale,
+                        target=jnp.array([0.5, -0.25]) * scale,
+                        offset=jnp.array(-3.25) * scale,
+                        names=("depth", "width"),
+                        shapes=((), ()),
+                    ),
+                    epoch_id=epoch_id,
+                    n_observed=n_observed,
+                    exact=False,
+                    support={"depth": (-2.0, 2.0), "width": (-1.0, 3.0)},
+                    include_logdet=False,
+                    noise_frozen_at="gls",
+                    residual_chi2=jnp.array(7.5) * scale,
+                    template_projections=jnp.array([1.25, -0.5]) * scale,
+                    residual_dof=dof,
+                    template_names=("gain_ripple", "ground_pickup"),
+                    inputs=(("beam_model", f"sha256:{epoch_id}"),),
+                )
+            )
+        path = tmp_path / "x.rhep"
+        save_memory(memory, path)
+        terms = load_memory(path, factorization()).archive
+        assert terms[0].epoch_id == "night-1" and terms[0].residual_dof == 13
+        assert float(terms[0].residual_chi2) / terms[0].residual_dof == pytest.approx(
+            0.577, abs=1e-3
+        )
 
     def test_an_older_version_is_refused_with_what_to_do_about_it(self, tmp_path):
         """The refusal a version bump would hand every existing archive.
