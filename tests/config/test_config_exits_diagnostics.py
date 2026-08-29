@@ -697,7 +697,7 @@ class TestIdentifiability:
 class TestScoreDirections:
     def test_the_rows_come_back_in_the_callers_order(self):
         """score_directions returns in the CALLER's order deliberately
-        (reduced_basis.py:171-180): jax rebuilds the jacobian dict from its
+        (reduced_basis.py:159-168): jax rebuilds the jacobian dict from its
         flattened, SORTED form, so re-keying the result hands back
         alphabetical names.  Sorted here is ``['d', 'g']``, so asking for
         ``['g', 'd']`` and getting ``['g', 'd']`` is the whole assertion --

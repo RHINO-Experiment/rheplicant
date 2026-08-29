@@ -55,7 +55,7 @@ class TestTheNamesGuardStandsForBothKinds:
         returns ONE key for the two-name ask, silently, so the measured
         product for ``[g, d, g]`` has two keys for a three-name list.  A
         caller zipping that against their own list is off by one -- the
-        permutation bug ``reduced_basis.py:171-180`` is named after, reached
+        permutation bug ``reduced_basis.py:159-168`` is named after, reached
         from the far side.  Only this layer can refuse it for both kinds.
         """
         with pytest.raises(ConfigError,

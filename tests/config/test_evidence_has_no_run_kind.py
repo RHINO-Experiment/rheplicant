@@ -36,7 +36,7 @@ def _imported_inference_modules(path: pathlib.Path) -> set[str]:
     """Every ``rheplicant.inference.<name>`` this file imports, by AST.
 
     By AST and not by text, deliberately. ``config/sections/diagnostics.py``
-    cites ``reduced_basis.py:171-180`` five times in prose -- naming the bug
+    cites ``reduced_basis.py:159-168`` five times in prose -- naming the bug
     a comparison order reintroduces -- and a ``grep`` for the module name
     reports those as imports. The parse also sees imports deferred inside
     function bodies, which this layer uses throughout to keep jax off the

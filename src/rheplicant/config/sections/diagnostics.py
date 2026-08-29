@@ -8,7 +8,7 @@ sweep so few keys.
 The two package entry points have OPPOSITE calling conventions and the
 difference is not cosmetic: ``identifiability`` puts ``names``/``at``/``rtol``
 behind a bare ``*`` (identifiability.py:418-426), while ``score_directions``
-takes ``names`` and ``at`` positional-or-keyword (reduced_basis.py:114-120).
+takes ``names`` and ``at`` positional-or-keyword (reduced_basis.py:102-108).
 Both are called by keyword here so that neither call shape can be copied onto
 the other.
 
@@ -151,7 +151,7 @@ def _run_score_directions(run: ParsedRun, built: Any, previous: Any = None) -> A
     Returned exactly as the package built it.  The order is the caller's,
     deliberately: jax rebuilds a dict from its flattened, sorted form, so
     re-keying or re-sorting this product hands back alphabetical names and
-    reintroduces the bug reduced_basis.py:171-180 is named after.
+    reintroduces the bug reduced_basis.py:159-168 is named after.
     """
     from rheplicant.inference import score_directions
 
@@ -177,7 +177,7 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
       explicit ``isinstance(names, str)`` (``identifiability.py:180``, in
       prose at ``:174-176``), so ``names: gd`` asks for one latent called
       ``gd``; ``score_directions`` does a plain ``tuple(names)``
-      (``reduced_basis.py:164``) and reads the same document as ``g`` and
+      (``reduced_basis.py:152``) and reads the same document as ``g`` and
       ``d``, two rows.  In YAML a bare ``names: g`` is far more often a typo
       than an intention, and ``[g]`` says one thing to both.
     * an empty list -- ``identifiability`` refuses it by name;
@@ -191,7 +191,7 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
       ``score_directions`` silently returns ONE key for the two-name ask, so
       ``names: [g, d, g]`` hands back a 2-key product for a 3-name list and
       a caller zipping the two is off by one.  That is the permutation bug
-      ``reduced_basis.py:171-180`` is named after, reached from the far side.
+      ``reduced_basis.py:159-168`` is named after, reached from the far side.
 
     Which latents the space actually declares is NOT checked here: that
     refusal is the package's own on both kinds, and it names the declared
@@ -486,7 +486,7 @@ def _of_paths(run: RunSpec) -> tuple[str, ...]:
 
     The order is the caller's and is kept, for the reason
     :func:`_run_score_directions` gives: a product re-keyed into JAX's sorted
-    order is the bug ``reduced_basis.py:171-180`` is named after.
+    order is the bug ``reduced_basis.py:159-168`` is named after.
 
     A repeat is refused, for the reason :func:`_names` gives about
     ``names:``.  Measured before this guard: ``of: [gain.gain, gain.gain]``

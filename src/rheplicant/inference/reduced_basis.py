@@ -48,6 +48,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.exact.reduced_basis import numerical_rank as _far_numerical_rank
+from bayesmith.exact.reduced_basis import orthonormal_transform as _far_orthonormal_transform
+from bayesmith.exact.reduced_basis import orthonormalise as _far_orthonormalise
+from bayesmith.exact.reduced_basis import select_greedy as _far_select_greedy
+from bayesmith.exact.reduced_basis import select_svd as _far_select_svd
 from jax.scipy.linalg import solve_triangular
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
@@ -59,56 +64,39 @@ def orthonormal_transform(
 ) -> tuple[jax.Array, tuple[int, ...]]:
     """``(M, kept)`` with ``M @ candidates`` orthonormal, in candidates' own metric.
 
-    Modified Gram-Schmidt with one reorthogonalisation pass, in numpy, because
-    the *transform* is what the caller needs and a QR only hands back the
-    result. ``M`` is what lets the same combination be applied to the **raw**
-    rows: a basis has to be usable by an epoch whose flag pattern differs from
-    the reference's, and ``whitened / weight`` is infinite at exactly the
-    samples the reference could not see.
+    Delegates to :func:`bayesmith.exact.reduced_basis.orthonormal_transform` as of the
+    Wave C `reduced_basis` half-switch (migration ledger **D60**). Measured
+    bitwise across the seam under x64 before the near-side body was removed:
+    ``max|delta| = 0.0``. That comparison cannot be re-taken now.
 
-    Order is preserved -- ``span(row_1..row_j)`` is nested -- which is the
-    property seeding depends on: a score direction placed first survives
-    whatever the later candidates do.
-
-    Args:
-        candidates: ``(k, n_data)`` rows, already whitened.
-        rtol: drop a direction whose residual norm falls below
-            ``rtol * max_row_norm``. Defaults to ``sqrt(eps)``.
-
-    Returns:
-        ``(M, kept)``: ``M`` is ``(r, k)`` with ``r <= k``, and ``kept`` names
-        which candidate indices survived. ``r < k`` means the candidate set was
-        rank-deficient -- a fact about the model, which the caller decides about.
+    Two refusals arrive with the delegation and are declared in D60 under
+    iron law 3: the far side refuses ambient float32 at every entry (**D41**
+    -- the Gram matrix squares the condition number, so the retention cut is
+    3.4e-04 at float32 against 1.5e-08 at float64, and a foreground-dominated
+    bank silently loses the directions this basis exists to keep), and it
+    refuses a non-2-D candidate array. This module's own callers all live in
+    the x64 session, so the first never fires for them.
     """
-    whitened = np.asarray(candidates, dtype=np.float64)
-    count = whitened.shape[0]
-    if rtol is None:
-        rtol = float(np.sqrt(np.finfo(np.float64).eps))
-    scale = float(np.max(np.linalg.norm(whitened, axis=1))) if count else 0.0
-    cut = rtol * scale
-    vectors = np.zeros((0, whitened.shape[1]))
-    transform = np.zeros((0, count))
-    kept: list[int] = []
-    for index in range(count):
-        vector, row = whitened[index].copy(), np.eye(count)[index].copy()
-        for _ in range(2):  # twice is enough: MGS alone loses orthogonality here
-            for position in range(len(kept)):
-                overlap = float(vectors[position] @ vector)
-                vector = vector - overlap * vectors[position]
-                row = row - overlap * transform[position]
-        norm = float(np.linalg.norm(vector))
-        if norm <= cut:
-            continue
-        vectors = np.vstack([vectors, vector / norm])
-        transform = np.vstack([transform, row / norm])
-        kept.append(index)
-    return jnp.asarray(transform), tuple(kept)
+    return _far_orthonormal_transform(candidates, rtol)
 
 
 def orthonormalise(candidates: jax.Array, rtol: float | None = None) -> jax.Array:
-    """The orthonormal rows themselves, when the transform is not needed."""
-    transform, _ = orthonormal_transform(candidates, rtol)
-    return transform @ candidates
+    """The orthonormal rows themselves, when the transform is not needed.
+
+    Delegates to :func:`bayesmith.exact.reduced_basis.orthonormalise` as of the
+    Wave C `reduced_basis` half-switch (migration ledger **D60**). Measured
+    bitwise across the seam under x64 before the near-side body was removed:
+    ``max|delta| = 0.0``. That comparison cannot be re-taken now.
+
+    Two refusals arrive with the delegation and are declared in D60 under
+    iron law 3: the far side refuses ambient float32 at every entry (**D41**
+    -- the Gram matrix squares the condition number, so the retention cut is
+    3.4e-04 at float32 against 1.5e-08 at float64, and a foreground-dominated
+    bank silently loses the directions this basis exists to keep), and it
+    refuses a non-2-D candidate array. This module's own callers all live in
+    the x64 session, so the first never fires for them.
+    """
+    return _far_orthonormalise(candidates, rtol)
 
 
 def score_directions(
@@ -371,55 +359,58 @@ class ReducedBasis(eqx.Module):
 def numerical_rank(whitened_bank: jax.Array) -> int:
     """Largest ``k`` with ``s_k / s_0 > sqrt(eps)`` -- section 5 requirement 5.
 
-    Not a tuning knob. Beyond this cut the Gram matrix of the retained set is
-    numerically singular in float64, and ``c^T G c`` returns a finite,
-    occasionally negative number rather than raising: the spec records measured
-    ``kappa(G) = 1.4e8`` at ``n_S = 4`` and ``2e16`` at ``n_S = 16`` for raw
-    snapshots. ``sqrt(eps)`` rather than ``eps`` because the quadratic form
-    squares the conditioning -- that is the same reason section 3 stores ``R``
-    instead of ``F``.
+    Delegates to :func:`bayesmith.exact.reduced_basis.numerical_rank` as of the
+    Wave C `reduced_basis` half-switch (migration ledger **D60**). Measured
+    bitwise across the seam under x64 before the near-side body was removed:
+    ``max|delta| = 0.0``. That comparison cannot be re-taken now.
+
+    Two refusals arrive with the delegation and are declared in D60 under
+    iron law 3: the far side refuses ambient float32 at every entry (**D41**
+    -- the Gram matrix squares the condition number, so the retention cut is
+    3.4e-04 at float32 against 1.5e-08 at float64, and a foreground-dominated
+    bank silently loses the directions this basis exists to keep), and it
+    refuses a non-2-D candidate array. This module's own callers all live in
+    the x64 session, so the first never fires for them.
     """
-    singular = np.asarray(jnp.linalg.svd(whitened_bank, compute_uv=False))
-    if singular.size == 0 or singular[0] == 0.0:
-        return 0
-    cut = float(np.sqrt(np.finfo(singular.dtype).eps))
-    return int(np.sum(singular / singular[0] > cut))
+    return _far_numerical_rank(whitened_bank)
 
 
 def select_svd(whitened_bank: jax.Array, count: int) -> jax.Array:
     """The ``count`` leading right singular directions of the bank.
 
-    **Candidates, not a basis.** They happen to be orthonormal here, which is a
-    property of the SVD rather than of the pipeline; :func:`orthonormalise` is
-    still what makes that a claim the code depends on.
+    Delegates to :func:`bayesmith.exact.reduced_basis.select_svd` as of the
+    Wave C `reduced_basis` half-switch (migration ledger **D60**). Measured
+    bitwise across the seam under x64 before the near-side body was removed:
+    ``max|delta| = 0.0``. That comparison cannot be re-taken now.
+
+    Two refusals arrive with the delegation and are declared in D60 under
+    iron law 3: the far side refuses ambient float32 at every entry (**D41**
+    -- the Gram matrix squares the condition number, so the retention cut is
+    3.4e-04 at float32 against 1.5e-08 at float64, and a foreground-dominated
+    bank silently loses the directions this basis exists to keep), and it
+    refuses a non-2-D candidate array. This module's own callers all live in
+    the x64 session, so the first never fires for them.
     """
-    if count <= 0:
-        return jnp.zeros((0, whitened_bank.shape[1]))
-    return jnp.linalg.svd(whitened_bank, full_matrices=False)[2][:count]
+    return _far_select_svd(whitened_bank, count)
 
 
 def select_greedy(whitened_bank: jax.Array, count: int) -> jax.Array:
     """Greedy EIM-style selection: the worst-represented draw, repeatedly.
 
-    Returns rows *of the bank*, in the order chosen -- the selection step of
-    Field/Galley/Puerrer, and nothing more. Orthonormalising them is a separate
-    call because storing the raw picks is what makes ``G`` unusable.
+    Delegates to :func:`bayesmith.exact.reduced_basis.select_greedy` as of the
+    Wave C `reduced_basis` half-switch (migration ledger **D60**). Measured
+    bitwise across the seam under x64 before the near-side body was removed:
+    ``max|delta| = 0.0``. That comparison cannot be re-taken now.
+
+    Two refusals arrive with the delegation and are declared in D60 under
+    iron law 3: the far side refuses ambient float32 at every entry (**D41**
+    -- the Gram matrix squares the condition number, so the retention cut is
+    3.4e-04 at float32 against 1.5e-08 at float64, and a foreground-dominated
+    bank silently loses the directions this basis exists to keep), and it
+    refuses a non-2-D candidate array. This module's own callers all live in
+    the x64 session, so the first never fires for them.
     """
-    bank = np.asarray(whitened_bank)
-    if count <= 0:
-        return jnp.zeros((0, bank.shape[1]))
-    chosen: list[int] = []
-    residual = bank.copy()
-    for _ in range(min(count, bank.shape[0])):
-        index = int(np.argmax(np.linalg.norm(residual, axis=1)))
-        chosen.append(index)
-        direction = residual[index]
-        norm = float(np.linalg.norm(direction))
-        if norm == 0.0:
-            break
-        direction = direction / norm
-        residual = residual - np.outer(residual @ direction, direction)
-    return jnp.asarray(bank[chosen])
+    return _far_select_greedy(whitened_bank, count)
 
 
 def build_reduced_basis(
