@@ -28,11 +28,17 @@ same dof, so the two spellings could not be told apart.
 import numpy as np
 import pytest
 
+import jax.numpy as jnp
+
+from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.inference.diagnostics import (
     EpochResidual,
     coherent_mode,
     epoch_residuals,
+    systematic_floor,
 )
+from rheplicant.inference.factorize import Factorization
+from rheplicant.inference.memory import BayesMemory
 from tests.evidence import campaign_bank as camp
 
 
@@ -150,4 +156,59 @@ def test_a_zero_dof_epoch_reports_nan_rather_than_a_perfect_fit():
     assert np.isnan(produced.reduced_chi2), (
         f"a zero-dof epoch reported reduced_chi2 = {produced.reduced_chi2!r}. "
         f"Zero is what a perfect fit looks like."
+    )
+
+
+class _Quartic:
+    """A prior whose curvature depends on where you evaluate it.
+
+    ``log pi = -x^4 / 4``, so ``-d^2/dx^2 log pi = 3 x^2``. Every prior in this
+    directory's fixtures is Gaussian, and a Gaussian's curvature is
+    ``1 / scale^2`` **wherever you stand** -- which is exactly why nothing could
+    test the ``at=`` argument: on those fixtures ignoring it is an equivalent
+    mutation, not a defect.
+
+    Only ``log_prob`` is read downstream, so three lines is the whole prior.
+    """
+
+    def log_prob(self, x):
+        return -0.25 * jnp.sum(x**4)
+
+
+def _quartic_memory(n_epochs=4, init=1.0):
+    latent = Latent(
+        "x", init=jnp.full((camp.N_THETA,), init), prior=_Quartic()
+    )
+    space = ParameterSpace(
+        latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),)
+    )
+    memory = BayesMemory(Factorization(space))
+    for term in camp.terms(n_epochs, biased=False):
+        memory = memory.remember(term)
+    return memory
+
+
+def test_the_evaluation_point_reaches_the_reported_width():
+    """``systematic_floor(..., at=)`` -- no caller in the repository passes it.
+
+    The curvature here is ``3 x^2``, so standing at ``x = 3`` gives nine times
+    the prior information of standing at ``x = 1``, a tighter posterior and a
+    smaller reported sigma. An implementation that ignored ``at=`` would report
+    the ``init`` answer twice.
+    """
+    memory = _quartic_memory(init=1.0)
+    floors = {"x": 0.05}
+
+    at_init = systematic_floor(memory, floors)
+    at_three = systematic_floor(memory, floors, at={"x": jnp.full((camp.N_THETA,), 3.0)})
+
+    sigma_init = at_init["x"]["sigma"]
+    sigma_three = at_three["x"]["sigma"]
+    assert sigma_three != pytest.approx(sigma_init, rel=1e-9), (
+        f"systematic_floor reported sigma {sigma_three!r} at x=3 and "
+        f"{sigma_init!r} at the latent's init. The prior's curvature here is "
+        f"3 x^2, so the two cannot be the same number unless `at=` was ignored."
+    )
+    assert sigma_three < sigma_init, (
+        "more prior curvature must give a tighter posterior, not a looser one"
     )
