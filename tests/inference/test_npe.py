@@ -34,6 +34,7 @@ is why the default returns the best validation step rather than the last.
 
 import jax
 import jax.numpy as jnp
+import rheplicant.inference.npe as rheplicant_npe
 import pytest
 
 numpyro = pytest.importorskip("numpyro", reason="numpyro not installed")
@@ -334,3 +335,72 @@ class TestAgainstTheExactPosterior:
         assert float(draws.mean()) == pytest.approx(
             float(reference), abs=0.35 * PRIOR_STD
         )
+
+
+class TestTheRestatedSignaturesStillMatchTheFarSide:
+    """`create` and `train_posterior` restate a parameter list they delegate.
+
+    **They have to.** The config layer derives its ``npe:`` grammar from these
+    signatures — which keys exist, which are optional, what each defaults to,
+    and that ``embed`` belongs to ``create`` and not to ``train``. A forwarding
+    ``*args, **kwargs`` is a grammar of nothing: measured, it took seven tests
+    in ``tests/config/test_config_section_npe.py::
+    TestTheGrammarMatchesTheSignatures`` down at once.
+
+    Restating re-creates the drift that forwarding avoided, so it is guarded
+    here rather than hoped for. The far side is free to add a parameter, and
+    nothing else in either suite would notice: the config grammar is checked
+    against THIS signature, so a near side that fell behind would stay
+    self-consistent and silently stop offering the new knob.
+    """
+
+    @pytest.mark.parametrize(
+        "near, far, skip",
+        [
+            (
+                rheplicant_npe.NeuralPosterior.create,
+                "bayesmith.amortize:NeuralPosterior.create",
+                (),
+            ),
+            (
+                rheplicant_npe.train_posterior,
+                "bayesmith.amortize:train_posterior",
+                (),
+            ),
+        ],
+        ids=["create", "train_posterior"],
+    )
+    def test_parameter_for_parameter_and_default_for_default(self, near, far, skip):
+        import importlib
+        import inspect
+
+        module_name, _, attr = far.partition(":")
+        target = importlib.import_module(module_name)
+        for part in attr.split("."):
+            target = getattr(target, part)
+
+        ours = inspect.signature(near).parameters
+        theirs = inspect.signature(target).parameters
+        assert list(ours) == list(theirs), (
+            "parameter names or order drifted from the far side; the config "
+            "grammar is derived from ours, so it would silently stop matching"
+        )
+        for name in ours:
+            if name in skip:
+                continue
+            assert ours[name].default == theirs[name].default, (name, ours[name].default, theirs[name].default)
+            assert ours[name].kind == theirs[name].kind, (name, ours[name].kind, theirs[name].kind)
+
+    def test_the_comparison_would_notice_an_added_parameter(self):
+        """Anti-vacuity: the case above is an equality, so prove it can fail.
+
+        A signature comparison that accidentally compared something with
+        itself — the far side's against the far side's — would pass for ever.
+        """
+        import inspect
+
+        ours = list(inspect.signature(rheplicant_npe.NeuralPosterior.create).parameters)
+        assert "min_scale" in ours and "width" in ours, ours
+        assert ours != list(
+            inspect.signature(rheplicant_npe.train_posterior).parameters
+        ), "the two signatures are indistinguishable, so the check above proves little"
