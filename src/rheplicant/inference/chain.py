@@ -67,6 +67,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.errors import StructureError as _FarStructureError
+from bayesmith.marginal.chain import chain_marginal as _far_chain_marginal
 
 from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise_arrays
@@ -392,76 +394,30 @@ def chain_marginal(
     ``test_the_marginalisation_constant_is_carried`` notice and the exactness
     tests cannot.
     """
-    factors, targets, offsets = blocks
-    resolved = transition.at(values)
-    n_zeta = resolved.width
-    n_theta = sum(int(jnp.zeros(shape).size) for shape in shapes)
-    width = _check_block_width(factors, names, n_theta, n_zeta)
-
-    inverse_process = 1.0 / resolved.process_std
-    inverse_initial = 1.0 / resolved.initial_std
-
-    # zeta_1's prior, and nothing else: theta's prior lives on the
-    # Factorization, and a stored factor is prior-free in theta by construction.
-    carry_factor = (
-        jnp.zeros((width, width)).at[n_theta:, n_theta:].set(jnp.diag(inverse_initial))
-    )
-    carry_target = (
-        jnp.zeros(width).at[n_theta:].set(inverse_initial * resolved.initial_mean)
-    )
-    carry_offset = _initial_log_norm(resolved)
-
-    # `[zeta_e | theta | zeta_{e+1}]`: marginalise_arrays takes the block first.
-    augment_order = jnp.asarray(
-        list(range(n_theta, width))
-        + list(range(n_theta))
-        + list(range(width, width + n_zeta)),
-        dtype=int,
-    )
-    final_order = jnp.asarray(
-        list(range(n_theta, width)) + list(range(n_theta)), dtype=int
-    )
-    # `Q^-1/2 (zeta_{e+1} - phi zeta_e)`, with zero response to theta: condition
-    # C1b's locality, written into the rows rather than assumed. The scaling is
-    # `diag(1/q) @ phi`, not `phi @ diag(1/q)`; the two coincide for a scalar
-    # chain, which is why a wide chain is what tests the ordering.
-    transition_rows = jnp.concatenate(
-        [
-            jnp.zeros((n_zeta, n_theta)),
-            -inverse_process[:, None] * resolved.phi,
-            jnp.diag(inverse_process),
-        ],
-        axis=1,
-    )
-    transition_constant = _transition_log_norm(resolved)
-
-    def step(carry, block):
-        factor, target, offset = _fold(*carry, block, width)
-        widened = jnp.concatenate(
-            [factor, jnp.zeros((factor.shape[0], n_zeta))], axis=1
-        )
-        joint = jnp.concatenate([widened, transition_rows], axis=0)[:, augment_order]
-        joint_target = jnp.concatenate([target, jnp.zeros(n_zeta)])
-        factor, target, offset, _ = marginalise_arrays(
-            joint, joint_target, offset + transition_constant, n_zeta
-        )
-        return (factor, target, offset), None
-
-    # Every epoch but the last is folded and then advanced; the last is folded
-    # and then integrated out, because it has no successor to hand the chain to.
-    (factor, target, offset), _ = jax.lax.scan(
-        step,
-        (carry_factor, carry_target, carry_offset),
-        (factors[:-1], targets[:-1], offsets[:-1]),
-    )
-    factor, target, offset = _fold(
-        factor, target, offset, (factors[-1], targets[-1], offsets[-1]), width
-    )
-    factor, target, offset, _ = marginalise_arrays(
-        factor[:, final_order], target, offset, n_zeta
-    )
+    try:
+        far = _far_chain_marginal(blocks, transition, values, names, shapes)
+    except _FarStructureError as exc:
+        # `_check_block_width` is the only refusal on this path, and the two
+        # sides' messages are byte-identical (231 characters, measured), so
+        # preserving `str(exc)` reproduces this package's text exactly. Only
+        # the class is translated: `StructureError` and `StateValidationError`
+        # share nothing below `ValueError`, and this module's callers pin
+        # `StateValidationError` by name in twenty places.
+        raise StateValidationError(str(exc)) from None
+    # Re-wrapped rather than returned: the far container is a different class
+    # with the same five fields, and it spells the curvature `information()`
+    # where this package spells it `fisher()` -- `ChainMemory.fisher()` would
+    # break on the far object. The five fields transfer bitwise (measured 0.0
+    # on factor, target and offset at all four `chain_bank.PROBES`, on the
+    # scalar bank and on wide chains of width 2 and 3), and near's
+    # `__check_init__` re-runs on the way in, which is where this package's
+    # own refusals -- the complex-value one among them -- get their say.
     return SqrtInfo(
-        factor=factor, target=target, offset=offset, names=names, shapes=shapes
+        factor=far.factor,
+        target=far.target,
+        offset=far.offset,
+        names=far.names,
+        shapes=far.shapes,
     )
 
 

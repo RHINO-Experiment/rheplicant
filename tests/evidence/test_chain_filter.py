@@ -22,6 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from bayesmith.marginal import chain as arithmetic
 from rheplicant.inference import chain
 from rheplicant.inference.chain import (
     LinearGaussianTransition,
@@ -32,6 +33,18 @@ from rheplicant.inference.chain import (
 from rheplicant.inference.compress import compress_linear
 from rheplicant.inference.sqrtinfo import SqrtInfo
 from tests.evidence import chain_bank as bank
+
+#: `chain_marginal` delegates its recursion to `bayesmith.marginal.chain`, so a
+#: constant deleted from `rheplicant.inference.chain` is deleted from a module
+#: the answer no longer passes through. Every gap then reads exactly 0.0 -- and
+#: 0.0 is also what "this constant does not matter" looks like. These tests
+#: cannot tell the two apart from the number alone, so they say so out loud.
+_INERT = (
+    "the monkeypatch did not take: the gap is exactly 0.0, which is what an "
+    "inert patch and a constant that genuinely does not reach the answer both "
+    "produce. Check that the patched name is the one chain_marginal calls -- "
+    "the arithmetic is bayesmith.marginal.chain's, not this package's."
+)
 
 
 def _transition():
@@ -125,6 +138,40 @@ def test_an_inferred_correlation_time_is_exact_at_several_values():
         process_var = float(transition.process_std[0]) ** 2
         expected = bank.oracle(probe, phi=phi, process_var=process_var, initial_var=1.0)
         assert _filtered(probe, blocks, transition) == pytest.approx(expected, abs=1e-8)
+
+
+def test_the_log_likelihood_is_exactly_its_marginals_log_prob():
+    """`chain_log_likelihood` is a wrapper, and this is the only test that says so.
+
+    Both names go through the same delegated recursion, so every oracle
+    comparison in this file reddens for the two of them together and by the same
+    amount: a mutation adding one nat to `chain_log_likelihood` reddens 22 tests,
+    and one adding a nat to `chain_marginal.offset` reddens the same 22, file for
+    file. Nothing separated a defect in the wrapper from a defect in the
+    arithmetic it wraps.
+
+    Pinned as an identity rather than against a number, because the number is
+    what the oracle tests already check.
+    """
+    transition = LinearGaussianTransition(
+        phi=jnp.array([[bank.PHI]]),
+        process_std=jnp.array([bank.PROCESS_STD]),
+        initial_std=jnp.array([bank.INITIAL_STD]),
+    )
+    for probe in bank.PROBES:
+        values = _values(probe)
+        wrapped = chain_log_likelihood(
+            bank.stacked(), transition, values, bank.THETA_NAMES, ((), ())
+        )
+        marginal = chain_marginal(
+            bank.stacked(), transition, values, bank.THETA_NAMES, ((), ())
+        )
+        assert float(wrapped) == float(marginal.log_prob(values)), (
+            f"at theta={probe}, chain_log_likelihood returned {float(wrapped)!r} "
+            f"but its own marginal's log_prob is "
+            f"{float(marginal.log_prob(values))!r}. The wrapper is one line on "
+            f"both sides of the seam; if these differ, the line is wrong."
+        )
 
 
 def test_the_marginal_is_a_sqrtinfo_over_the_global_latents_only():
@@ -329,8 +376,10 @@ def test_the_initial_zeta_prior_normalisation_is_carried(monkeypatch):
     two halves further.
     """
     base = _filtered(bank.PROBES[1])
-    monkeypatch.setattr(chain, "_initial_log_norm", lambda transition: 0.0)
-    assert _filtered(bank.PROBES[1]) - base == pytest.approx(0.9189, abs=0.02)
+    monkeypatch.setattr(arithmetic, "_initial_log_norm", lambda transition: 0.0)
+    moved = _filtered(bank.PROBES[1]) - base
+    assert moved != 0.0, _INERT
+    assert moved == pytest.approx(0.9189, abs=0.02)
 
 
 def test_the_transition_normalisation_is_the_whole_density_not_half_of_it(
@@ -346,13 +395,14 @@ def test_the_transition_normalisation_is_the_whole_density_not_half_of_it(
     keeping only the spec's half costs +4.5947, which is 0.9189 x 5 exactly.
     """
     base = _filtered(bank.PROBES[1])
-    monkeypatch.setattr(chain, "_transition_log_norm", lambda transition: 0.0)
+    monkeypatch.setattr(arithmetic, "_transition_log_norm", lambda transition: 0.0)
     whole = _filtered(bank.PROBES[1]) - base
+    assert whole != 0.0, _INERT
     assert whole == pytest.approx(2.8618, abs=0.05)
 
     # ...and the spec's shorthand, which keeps only `0.5 logdet Q^-1`:
     monkeypatch.setattr(
-        chain,
+        arithmetic,
         "_transition_log_norm",
         lambda transition: -jnp.sum(jnp.log(transition.process_std)),
     )
@@ -391,7 +441,7 @@ def test_the_marginalisation_constant_is_carried(monkeypatch):
             jnp.abs(jnp.diag(upper)),
         )
 
-    monkeypatch.setattr(chain, "marginalise_arrays", without_the_constant)
+    monkeypatch.setattr(arithmetic, "marginalise_arrays", without_the_constant)
     gap = _filtered(bank.PROBES[1]) - base
     assert gap == pytest.approx(7.2619, abs=0.2)  # 6.2764 in-chain + 0.9855 final
     assert gap != pytest.approx(0.0, abs=1e-6), (
@@ -430,8 +480,10 @@ def test_the_fold_corner_is_carried(monkeypatch):
             new_offset + 0.5 * jnp.sum(upper[keep:, width] ** 2),
         )
 
-    monkeypatch.setattr(chain, "_fold", without_corner)
-    assert _filtered(bank.PROBES[1]) - base == pytest.approx(45.9502, rel=0.05)
+    monkeypatch.setattr(arithmetic, "_fold", without_corner)
+    moved = _filtered(bank.PROBES[1]) - base
+    assert moved != 0.0, _INERT
+    assert moved == pytest.approx(45.9502, rel=0.05)
 
 
 def test_the_marginalisation_corner_is_structurally_empty():
@@ -460,9 +512,11 @@ def test_deleting_the_marginalisation_corner_changes_nothing(monkeypatch):
     is not one of the six and why the fold's is.
     """
     base = _filtered(bank.PROBES[1])
-    real = chain.marginalise_arrays
+    real = arithmetic.marginalise_arrays
+    calls: list[int] = []
 
     def without_the_corner(factor, target, offset, n_block):
+        calls.append(1)
         width = factor.shape[1]
         upper = jnp.linalg.qr(
             jnp.concatenate([factor, target[:, None]], axis=1), mode="r"
@@ -478,7 +532,7 @@ def test_deleting_the_marginalisation_corner_changes_nothing(monkeypatch):
             pivots,
         )
 
-    monkeypatch.setattr(chain, "marginalise_arrays", without_the_corner)
+    monkeypatch.setattr(arithmetic, "marginalise_arrays", without_the_corner)
     assert _filtered(bank.PROBES[1]) - base == 0.0
 
 
