@@ -248,3 +248,69 @@ def test_the_mixed_template_refusal_is_this_packages_own_wording():
         f"bayesmith's copy fired instead of this package's -- the two differ by "
         f"that character and by nothing else."
     )
+
+
+class _SingularAtZero:
+    """``log pi = sum(log x)``: curvature ``1 / x^2``, non-finite at the origin.
+
+    A latent's declared ``init`` is the point ``systematic_floor`` differentiates
+    at unless ``at=`` names another, and ``init`` for this fixture is zeros --
+    which is outside this prior's support. That is the situation the refusal
+    exists for, and no fixture in this directory could reach it, because every
+    prior here is Gaussian and a Gaussian has finite curvature everywhere.
+    """
+
+    def log_prob(self, x):
+        return jnp.sum(jnp.log(x))
+
+
+class _Inverted:
+    """``log pi = +K/2 sum(x^2)``: curvature ``-K``, which is not a prior at all.
+
+    A duck-typed prior is whatever carries ``log_prob``, so nothing stops a
+    caller declaring one that removes information instead of adding it. With
+    ``K`` past the campaign's own curvature the sum stops being positive
+    definite and there is no posterior width to compare against a floor.
+    """
+
+    def __init__(self, strength):
+        self.strength = strength
+
+    def log_prob(self, x):
+        return 0.5 * self.strength * jnp.sum(x**2)
+
+
+def _memory_with(prior, n_epochs=4, init=0.0):
+    latent = Latent("x", init=jnp.full((camp.N_THETA,), init), prior=prior)
+    space = ParameterSpace(
+        latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),)
+    )
+    memory = BayesMemory(Factorization(space))
+    for term in camp.terms(n_epochs, biased=False):
+        memory = memory.remember(term)
+    return memory
+
+
+def test_a_prior_with_non_finite_curvature_is_refused_by_name():
+    """Rather than propagating a nan into the reported sigma.
+
+    A nan sigma compares False against every floor a caller could write, so the
+    campaign would read as comfortably above its systematic floor precisely
+    when the number backing that claim does not exist.
+    """
+    memory = _memory_with(_SingularAtZero(), init=0.0)
+    with pytest.raises(StateValidationError, match="non-finite curvature"):
+        systematic_floor(memory, {"x": 0.05})
+
+
+def test_an_information_sum_that_is_not_positive_definite_is_refused_by_name():
+    """Rather than by a bare LinAlgError out of numpy.
+
+    The message names the cause -- a global latent without a proper prior --
+    because that is the only way the sum fails to be invertible at any N, and
+    a raw "Matrix is not positive definite" names neither the latent nor the
+    remedy.
+    """
+    memory = _memory_with(_Inverted(strength=1e6), init=1.0)
+    with pytest.raises(StateValidationError, match="not positive definite"):
+        systematic_floor(memory, {"x": 0.05})
