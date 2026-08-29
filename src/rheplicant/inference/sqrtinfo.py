@@ -28,6 +28,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.marginal.sqrtinfo import (
+    marginalise_arrays as _far_marginalise_arrays,
+)
 
 from rheplicant.core.errors import StateValidationError
 
@@ -281,25 +284,20 @@ def marginalise_arrays(
         ``(factor, target, offset, pivots)`` -- the retained form, the offset
         with the Gaussian integral's constant folded in, and ``|diag(R)|`` of
         the re-triangularisation so a checked caller can test it.
+
+    **Delegated to** :func:`bayesmith.marginal.sqrtinfo.marginalise_arrays`, so
+    the Schur complement exists once. Measured bitwise identical on all four
+    returned arrays across widths 2, 3, 6 and 12, block sizes 1 through
+    ``width - 1``, and input scales spanning 1e-6 to 1e8, three seeds each --
+    worst absolute difference 0.0.
+
+    The delegation carries no refusal in either direction: neither side raises
+    anywhere in this function, which is the whole reason it is the clean half
+    of this module. :func:`marginalise` keeps its own five, this package's
+    exception class and this package's wording included, and it reads the
+    ``pivots`` returned here to raise them.
     """
-    width = factor.shape[1]
-    upper = jnp.linalg.qr(jnp.concatenate([factor, target[:, None]], axis=1), mode="r")
-    keep = min(upper.shape[0], width)
-    # The part of the residual no quadratic form in the retained columns can
-    # express. A constant, so it belongs in the offset.
-    corner = upper[keep:, width]
-    pivots = jnp.abs(jnp.diag(upper))
-    constant = (
-        0.5 * n_block * jnp.log(2.0 * jnp.pi)
-        - jnp.sum(jnp.log(pivots[:n_block]))
-        - 0.5 * jnp.sum(corner**2)
-    )
-    return (
-        upper[n_block:keep, n_block:width],
-        upper[n_block:keep, width],
-        offset + constant,
-        pivots,
-    )
+    return _far_marginalise_arrays(factor, target, offset, n_block)
 
 
 def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:

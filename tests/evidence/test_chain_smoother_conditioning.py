@@ -56,7 +56,7 @@ from tests.evidence import chain_bank as bank
 
 _NAMES = bank.THETA_NAMES
 _SHAPES = ((), ())
-_THETA = {name: jnp.array(v) for name, v in zip(_NAMES, [0.4, -1.1])}
+_THETA = {name: jnp.array(v) for name, v in zip(_NAMES, [0.4, -1.1], strict=True)}
 
 #: Down to the value this package's own docstring recommends for a frozen chain.
 _PROCESS_STD = (1e-1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-7, 1e-8, 1e-9)

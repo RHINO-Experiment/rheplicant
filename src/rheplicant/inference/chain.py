@@ -71,7 +71,7 @@ from bayesmith.errors import StructureError as _FarStructureError
 from bayesmith.marginal.chain import chain_marginal as _far_chain_marginal
 
 from rheplicant.core.errors import StateValidationError
-from rheplicant.inference.sqrtinfo import SqrtInfo, marginalise_arrays
+from rheplicant.inference.sqrtinfo import SqrtInfo
 
 
 class LinearGaussianTransition(eqx.Module):

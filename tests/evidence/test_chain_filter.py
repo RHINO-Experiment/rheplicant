@@ -21,8 +21,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from bayesmith.marginal import chain as arithmetic
+
 from rheplicant.inference import chain
 from rheplicant.inference.chain import (
     LinearGaussianTransition,
