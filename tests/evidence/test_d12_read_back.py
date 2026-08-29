@@ -148,41 +148,49 @@ class TestTheStaticFieldsComeBackFromTheManifest:
 
 
 class TestTheManifestIsNotBOUNDToItsBinary:
-    """A weakness found while writing this fixture, MEASURED and pinned rather
-    than fixed here (ledger D39).
+    """The manifest still is not BOUND to its binary — but the silent half is
+    closed (ledger D39, step 1 of the discharge).
 
     This format's first sentence is "write a memory to disk so that reading it
     back cannot lie about it", and the manifest is its reconstruction spec.
-    But nothing ties a manifest to the binary it was written for: pair
-    ``x.rhep`` with a different archive's ``x.json`` and the two directions
-    behave differently, and only one of them complains.
-
-    Measured on the two committed fixtures:
+    Nothing ties a manifest to the binary it was written for, and until
+    2026-08-29 the two mispairings behaved differently with only one of them
+    complaining:
 
     ==============================  ==========================================
-    pairing                         result
+    pairing                         result, as measured 2026-08-27
     ==============================  ==========================================
-    templated binary, plain spec    **loads**, and ``template_projections``
-                                    comes back ``None`` -- the two values in
-                                    the file are silently discarded. Every
-                                    other field is correct.
+    templated binary, plain spec    **loaded**, and ``template_projections``
+                                    came back ``None`` -- the two values in
+                                    the file silently discarded, every other
+                                    field correct.
     plain binary, templated spec    ``TreePathError`` at
                                     ``template_projections``
     ==============================  ==========================================
 
-    The asymmetry has a cause: ``template_projections`` is the LAST dynamic
-    leaf, so a spec that expects one fewer leaf simply stops early, while one
-    that expects one more runs off the end. The docstring's warning about
+    The asymmetry had a cause: ``template_projections`` is the LAST dynamic
+    leaf, so a spec expecting one fewer leaf simply stopped early, while one
+    expecting one more ran off the end. The module docstring's warning about
     "every later leaf read from the wrong offset" is about a field with
-    something after it; here there is nothing after it, so the consequence is
+    something after it; here there was nothing after it, so the consequence was
     a quiet loss instead of a loud corruption.
 
-    **Not fixed here**, and the reason is scope rather than difficulty:
-    binding the pair (a digest of the binary in the manifest, or a length) is
-    a change to the on-disk FORMAT, and the evidence layer is Wave D's. Doing
-    it under a precondition's name would be switching the thing the
-    precondition exists to protect. Pinned instead, in both directions, so the
-    switch cannot change it without saying so.
+    **The quiet half is now refused**: ``load_memory`` deserialises from an
+    open handle and compares the bytes consumed against the file's size, so a
+    manifest that stops early is caught by the bytes it never accounted for
+    (measured on these fixtures: 144 of 1976).
+
+    **Deliberately NOT done: a digest.** The obvious fix -- put a hash of the
+    binary in the manifest -- requires a ``_FORMAT_VERSION`` bump, and this
+    reader refuses any version that is not exactly its own (``!=``, not
+    ``<``). This layer's whole premise is that *the raw data is gone*, so a
+    bump with no backward-compatible read makes every existing archive
+    permanently unreadable with nothing to re-archive from. The order that is
+    safe is: close the silent half (done), make the reader version-tolerant,
+    and only then bind. What a digest would still add over the byte check is
+    the case the byte check cannot see -- two archives of the SAME SHAPE, where
+    the counts match and the contents do not, which is also the likeliest real
+    mispairing (two nights of one campaign). That remains open.
     """
 
     @staticmethod
@@ -194,15 +202,95 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         shutil.copy(FIXTURES / manifest, into / "x.json")
         return into / "x.rhep"
 
-    def test_a_plain_spec_silently_DROPS_the_projections(self, tmp_path):
+    def test_a_plain_spec_is_refused_by_the_bytes_it_never_read(self, tmp_path):
+        """The half that used to be silent. Refused by arithmetic, not by luck.
+
+        The check is bytes-consumed against file-size, so it does not depend on
+        ``template_projections`` being the last leaf -- any manifest that
+        under-describes its binary is caught, wherever the shortfall is.
+        """
         path = self._paired(
             "d12_with_templates.rhep", "d12_without_templates.json", tmp_path
         )
+        with pytest.raises(StateValidationError, match="were never read"):
+            load_memory(path, factorization())
+
+    def test_the_refusal_names_the_shortfall(self, tmp_path):
+        """A byte count is the one thing that tells a reader WHICH pair is wrong.
+
+        Without it the message is "these do not match", which is true of every
+        mispairing and actionable for none.
+        """
+        path = self._paired(
+            "d12_with_templates.rhep", "d12_without_templates.json", tmp_path
+        )
+        with pytest.raises(StateValidationError) as caught:
+            load_memory(path, factorization())
+        assert "144 bytes" in str(caught.value), str(caught.value)
+
+    def test_an_older_version_is_refused_with_what_to_do_about_it(self, tmp_path):
+        """The refusal a version bump would hand every existing archive.
+
+        This reader accepts exactly its own version (``!=``, not ``<=``), and
+        that cannot be relaxed: the versions differ in BYTE LAYOUT, so an older
+        binary read through this template runs off the end or reads leaves at
+        the wrong offset. The module docstring records that for version 1 by
+        measurement.
+
+        So the message is the only mitigation available, and it has to carry
+        the one instruction that works -- go back to the writer and re-archive
+        -- plus the constraint that makes this matter at all: this layer's
+        premise is that the raw data is gone, so a version it cannot read is
+        work nobody can recover. That is why the policy in the message is "a
+        bump ships with a converter, or it does not ship".
+        """
+        import json
+
+        path = self._paired(
+            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
+        )
+        manifest = tmp_path / "x.json"
+        spec = json.loads(manifest.read_text())
+        spec["format_version"] = spec["format_version"] - 1
+        manifest.write_text(json.dumps(spec))
+
+        with pytest.raises(StateValidationError) as caught:
+            load_memory(path, factorization())
+        message = str(caught.value)
+        assert "re-archive" in message, message
+        assert "converter" in message, message
+        assert "BYTE LAYOUT" in message, message
+
+    def test_a_newer_version_is_refused_differently(self, tmp_path):
+        """The two directions need different advice, so they must not share a
+        sentence: an older archive is converted forward, a newer one is met by
+        upgrading. Telling a user to re-archive something their reader is too
+        old to open would send them in a circle."""
+        import json
+
+        path = self._paired(
+            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
+        )
+        manifest = tmp_path / "x.json"
+        spec = json.loads(manifest.read_text())
+        spec["format_version"] = spec["format_version"] + 1
+        manifest.write_text(json.dumps(spec))
+
+        with pytest.raises(StateValidationError) as caught:
+            load_memory(path, factorization())
+        message = str(caught.value)
+        assert "Upgrade" in message, message
+        assert "re-archive" not in message.split("Upgrade")[1], message
+
+    def test_the_matched_pair_still_loads(self, tmp_path):
+        """ANTI-VACUITY. A check that refused every archive would pass the two
+        cases above and destroy the format."""
+        path = self._paired(
+            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
+        )
         term = load_memory(path, factorization()).archive[0]
-        # The finding. Not an assertion that this is right -- an assertion that
-        # this is what happens, so D39 can be discharged deliberately.
-        assert term.template_projections is None
-        assert term.template_names == ()
+        assert term.template_projections is not None
+        assert term.template_names != ()
         # ... while everything else came back correctly, which is what makes it
         # quiet rather than obviously broken.
         assert float(term.info.offset) == pytest.approx(-3.25)

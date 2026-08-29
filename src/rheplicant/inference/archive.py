@@ -304,9 +304,27 @@ def load_memory(path: str | Path, factorization: Factorization):
     manifest = json.loads(manifest_path.read_text())
 
     if manifest["format_version"] != _FORMAT_VERSION:
+        older = manifest["format_version"] < _FORMAT_VERSION
         raise StateValidationError(
             f"Archive format version {manifest['format_version']}, this rheplicant "
-            f"writes {_FORMAT_VERSION}."
+            f"writes {_FORMAT_VERSION}. "
+            + (
+                "This reader cannot be made tolerant of it: the versions differ "
+                "in BYTE LAYOUT, not only in manifest fields, so reading an "
+                "older binary through this template does not give a smaller "
+                "answer -- it runs off the end or reads leaves at the wrong "
+                "offset. Check out the rheplicant that wrote it, load the "
+                "archive there, and re-archive under this version. "
+                if older
+                else "This archive was written by a NEWER rheplicant than the "
+                "one reading it. Upgrade rather than converting: an older "
+                "reader cannot know what the newer format added. "
+            )
+            + "There is no in-place conversion, and that is the constraint any "
+            "future bump has to plan around -- this layer's premise is that "
+            "the raw data is gone, so a version it cannot read is work it "
+            "cannot recover. A bump therefore ships with a converter, or it "
+            "does not ship."
         )
     if not bool(jax.config.jax_enable_x64):
         raise StateValidationError(
@@ -379,9 +397,25 @@ def load_memory(path: str | Path, factorization: Factorization):
             for entry in manifest["terms"]
         ),
     )
-    restored, terms = eqx.tree_deserialise_leaves(
-        path, (template, tuple(template.archive))
-    )
+    with path.open("rb") as handle:
+        restored, terms = eqx.tree_deserialise_leaves(
+            handle, (template, tuple(template.archive))
+        )
+        consumed = handle.tell()
+    remaining = path.stat().st_size - consumed
+    if remaining:
+        raise StateValidationError(
+            f"This manifest describes {consumed} bytes and the binary holds "
+            f"{consumed + remaining}: {remaining} bytes were never read. The "
+            "manifest is this format's reconstruction spec, so a manifest that "
+            "stops early is not a smaller answer -- it is a different archive's "
+            "spec, and equinox has just handed back a memory missing whatever "
+            "those bytes held. Measured on this repo (ledger D39): pairing a "
+            "with-templates binary against a without-templates manifest "
+            "returned `template_projections=None` for every term, with every "
+            "other field correct and no error. Pair each binary with the "
+            "manifest written beside it."
+        )
     # `restored` carries the template's own terms -- its archive is the leaf
     # equinox stepped over -- so the deserialised ones are put back by hand.
     # Rebuilding through the constructor rather than eqx.tree_at because the
