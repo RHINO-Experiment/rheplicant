@@ -13,7 +13,6 @@ from typing import Any
 
 import equinox as eqx
 import jax
-from bayesmith.optimize import minimize as _far_minimize
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.inference.likelihood import (
@@ -156,14 +155,17 @@ class GradientCalibrator(eqx.Module):
         _refuse_a_score_the_optimizer_would_walk_away_from(
             loss_fn, forward, params0, observed
         )
-        far = _far_minimize(
-            lambda params: loss_fn(forward(params), observed),
-            params0,
-            method="gradient",
-            steps=self.n_steps,
-            learning_rate=self.learning_rate,
-        )
-        return far.values, far.history
+
+        def loss(params: Any) -> jax.Array:
+            return loss_fn(forward(params), observed)
+
+        def step(params: Any, _: None) -> tuple[Any, jax.Array]:
+            value, grads = jax.value_and_grad(loss)(params)
+            params = jax.tree.map(lambda p, g: p - self.learning_rate * g, params, grads)
+            return params, value
+
+        params_fit, losses = jax.lax.scan(step, params0, None, length=self.n_steps)
+        return params_fit, losses
 
 
 class AdamCalibrator(eqx.Module):
@@ -221,14 +223,30 @@ class AdamCalibrator(eqx.Module):
         _refuse_a_score_the_optimizer_would_walk_away_from(
             loss_fn, forward, params0, observed
         )
-        far = _far_minimize(
-            lambda params: loss_fn(forward(params), observed),
-            params0,
-            method="adam",
-            steps=self.n_steps,
-            learning_rate=self.learning_rate,
-            beta1=self.beta1,
-            beta2=self.beta2,
-            eps=self.eps,
+
+        def loss(params: Any) -> jax.Array:
+            return loss_fn(forward(params), observed)
+
+        zeros = jax.tree.map(jax.numpy.zeros_like, params0)
+
+        def step(carry: Any, index: jax.Array) -> tuple[Any, jax.Array]:
+            params, m, v = carry
+            value, grads = jax.value_and_grad(loss)(params)
+            m = jax.tree.map(lambda a, g: self.beta1 * a + (1 - self.beta1) * g, m, grads)
+            v = jax.tree.map(
+                lambda a, g: self.beta2 * a + (1 - self.beta2) * g**2, v, grads
+            )
+            t = index + 1
+            params = jax.tree.map(
+                lambda p, mm, vv: p
+                - self.learning_rate
+                * (mm / (1 - self.beta1**t))
+                / (jax.numpy.sqrt(vv / (1 - self.beta2**t)) + self.eps),
+                params, m, v,
+            )
+            return (params, m, v), value
+
+        (params_fit, _, _), losses = jax.lax.scan(
+            step, (params0, zeros, zeros), jax.numpy.arange(self.n_steps)
         )
-        return far.values, far.history
+        return params_fit, losses

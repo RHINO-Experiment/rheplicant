@@ -100,31 +100,12 @@ class TestTheControlStillWorks:
         assert float(fit["g"]) == pytest.approx(TRUTH, rel=1e-3)
 
     def test_the_fixed_step_descent_really_does_diverge_on_the_unscaled_negation(self):
-        """Pinned so the note above is a measurement and not a memory.
-
-        **The observation channel changed when `calibrate` switched, and the
-        claim did not** (migration ledger D33, whose triage named this as the
-        one test depending on a diverged fit being RETURNED). It used to read
-        ``assert not jnp.isfinite(fit["g"])``: the calibrator handed back a
-        NaN and this test caught it there. The fit now runs through
-        ``bayesmith.optimize.minimize``, which refuses a point whose objective
-        is not finite rather than returning it, so the divergence arrives as a
-        raise.
-
-        What is asserted is still exactly what the note above needs: that a
-        fixed-step descent, at this rate, does not survive the unscaled
-        negation. A NaN returned and a refusal raised are the same measurement
-        of the same fact.
-        """
+        """Pinned so the note above is a measurement and not a memory."""
         likelihood = GaussianLikelihood(jnp.array(1.0))
-        with pytest.raises(Exception) as caught:
-            GradientCalibrator(learning_rate=1e-4, n_steps=300).fit(
-                forward, PARAMS0, OBSERVED, loss_fn=lambda p, o: -likelihood(p, o)
-            )
-        assert "not finite at the point this fit reached" in str(caught.value), (
-            "the fit no longer diverges here, or it diverges into some other "
-            "refusal -- either way the note above needs re-measuring"
+        fit, _ = GradientCalibrator(learning_rate=1e-4, n_steps=300).fit(
+            forward, PARAMS0, OBSERVED, loss_fn=lambda p, o: -likelihood(p, o)
         )
+        assert not jnp.isfinite(fit["g"]), float(fit["g"])
 
 
 class TestRefusedByDeclaration:
