@@ -31,6 +31,7 @@ import pytest
 import jax.numpy as jnp
 
 from rheplicant.inference import Bind, Latent, ParameterSpace
+from rheplicant.core.errors import StateValidationError  # noqa: F401
 from rheplicant.inference.diagnostics import (
     EpochResidual,
     coherent_mode,
@@ -211,4 +212,39 @@ def test_the_evaluation_point_reaches_the_reported_width():
     )
     assert sigma_three < sigma_init, (
         "more prior curvature must give a tighter posterior, not a looser one"
+    )
+
+
+def test_the_mixed_template_refusal_is_this_packages_own_wording():
+    """``coherent_mode`` keeps its guard ahead of a delegated call, and this says so.
+
+    ``bayesmith``'s ``template_modes`` refuses the same condition with a message
+    that is identical **except for its opening capital** -- "These epochs name
+    different systematic templates" against "these epochs...". So removing this
+    package's guard and letting the far one fire changes almost nothing, which
+    is exactly the problem: measured, that mutation reddened **nothing** across
+    six diagnostics test files, because every existing pin matches on a later
+    substring and ``StructureError`` is a ``ValueError``.
+
+    A guard that cannot be observed is not a guard. This pins the one character
+    that distinguishes them, so the near-side refusal has to keep firing first.
+    """
+    import dataclasses  # noqa: PLC0415
+
+    terms = list(camp.terms(2, biased=False))
+    other = terms[1]
+    renamed = type(other)(
+        **{
+            **{f.name: getattr(other, f.name) for f in dataclasses.fields(other)},
+            "template_names": ("other_thing",),
+        }
+    )
+
+    with pytest.raises(ValueError) as caught:
+        coherent_mode((terms[0], renamed))
+    message = str(caught.value)
+    assert message.startswith("These epochs name different systematic templates"), (
+        f"the refusal opened with {message[:60]!r}. A lowercase opening means "
+        f"bayesmith's copy fired instead of this package's -- the two differ by "
+        f"that character and by nothing else."
     )
