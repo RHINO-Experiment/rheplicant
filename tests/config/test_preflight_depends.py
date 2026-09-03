@@ -18,7 +18,7 @@ is CPython's own way of making an import fail, and which
 declaring MomentRFI "the one distribution no test environment has" and leaving
 two tests to read the real environment for it.  **That premise was false when
 it was written**: the repository's own primary venv
-(``/Users/zzhang/projects/e-RHINO/.venv``) has MomentRFI installed as an
+(``/Users/zzhang/projects/rheplicant/.venv``) has MomentRFI installed as an
 editable, so both tests failed there with *"A35 produced 0 findings"* while
 passing in every worktree -- a suite that was a report about which checkout it
 ran in.  Measured, then fixed: presence is simulated in BOTH directions here,
