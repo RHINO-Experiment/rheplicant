@@ -178,7 +178,9 @@ def _time_axis(facts: Axes) -> Iterable[Finding]:
     One function, two ids, because one call decides both:
     ``_refuse_a_time_axis_the_stored_dtype_cannot_carry`` names non-finite
     values first (that is C2) and then compares the representable spacing at
-    the axis's peak against its smallest distinct gap (that is C1).
+    the axis's peak against its smallest distinct gap (that is C1). An axis of
+    ``n > 1`` identical values has no distinct gap and is refused where that
+    spacing exceeds ``FINEST_CADENCE_S`` (1e-3 s); that is C1 as well.
     ``Finding.check`` carries the BARE id either way -- ``"C1"`` or ``"C2"`` --
     and ``"C2.time"`` is a registry slot, so that ``_pointing_finite`` below
     can claim ``"C2.pointing"`` without either function silently displacing the
