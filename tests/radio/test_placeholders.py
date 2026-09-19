@@ -124,9 +124,14 @@ class TestNoiseOperator:
             jax.random.key_data(out.key), jax.random.key_data(data_state.key)
         )
 
-    def test_seed_reproducible(self, data_state):
+    def test_the_key_decides_the_draw(self, data_state):
+        """The same key draws the same realisation and a different key a
+        different one. The first half alone passes an operator that ignores
+        the state's key and draws from a fixed one."""
         op = NoiseOperator(sigma=jnp.array(0.1))
         assert jnp.array_equal(op(data_state).data, op(data_state).data)
+        rekeyed = data_state.replace(key=jax.random.key(1))
+        assert not jnp.array_equal(op(data_state).data, op(rekeyed).data)
 
     def test_successive_draws_differ(self, data_state):
         op = NoiseOperator(sigma=jnp.array(0.1))

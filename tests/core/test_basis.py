@@ -363,7 +363,10 @@ class TestTheBindPattern:
         twin = SeparableBasis(time=basis.time, freq=basis.freq)
         assert (basis == twin) is False
         assert (basis == basis) is True
-        assert hash(basis) == hash(basis)
+        # Identity hashing: eq=True on a frozen dataclass would hash the design
+        # matrices and raise, and a field-derived hash would not be object's.
+        assert hash(basis) == object.__hash__(basis)
+        assert len({basis, twin}) == 2
 
     def test_the_expansion_is_affine_so_the_conjugate_exits_accept_it(self, basis):
         """``linear=True`` is a claim, and this is the claim being checked

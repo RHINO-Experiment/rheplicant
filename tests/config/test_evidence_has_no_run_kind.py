@@ -160,6 +160,11 @@ class TestB12sPremiseIsFalse:
     installed there with ``--no-deps`` and ``rheplicant.config`` needs yaml;
     measured, ``ModuleNotFoundError: No module named 'yaml'``. Each half runs
     where it is real rather than skipping where it is not.
+
+    That the gate reaches the package function is asserted in
+    ``tests/config/test_postflight_fitting.py::TestC19``, which runs
+    ``prior_sensitivity`` through the registered C19 check. Unregistering C19,
+    or returning before the package call, fails seven of its cases.
     """
 
     def test_the_check_is_declared_with_a_default_and_a_finding_id(self):
@@ -204,14 +209,6 @@ class TestB12sPremiseIsFalse:
         assert findings[0].severity == "refuse"
         assert findings[0].where == "inference.checks.prior_sensitivity"
         assert "is one of" in findings[0].message
-
-    def test_the_gate_is_wired_to_the_package_function(self):
-        """A gate with nothing behind it would make B12's claim true after all."""
-        from rheplicant.config.postflight import fitting
-        from rheplicant.inference.sensitivity import prior_sensitivity
-
-        assert callable(prior_sensitivity)
-        assert callable(fitting._prior_sensitivity)
 
     def test_the_config_path_is_reachable_from_the_gui_catalog(self):
         """The face is published, not merely parsed.

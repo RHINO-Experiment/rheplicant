@@ -419,10 +419,16 @@ class TestFanOut:
         because `ParameterSpace.bindings` is itself static, which makes that aux
         data part of a jit cache key and therefore required to stay hashable.
         """
-        bind = Bind("v", into=lambda p: p["gain"].gain, fan="broadcast")
+        into = lambda p: p["gain"].gain  # noqa: E731 - one function object, shared
+        bind = Bind("v", into=into, fan="broadcast")
         leaves, treedef = jax.tree_util.tree_flatten(bind)
         assert leaves == []
-        assert hash(treedef) == hash(treedef)
+        # A jit cache key needs two equal Binds to give equal, equally hashed
+        # treedefs, and `fan` to be part of what they compare.
+        again = jax.tree_util.tree_structure(Bind("v", into=into, fan="broadcast"))
+        assert again == treedef
+        assert hash(again) == hash(treedef)
+        assert jax.tree_util.tree_structure(Bind("v", into=into)) != treedef
         assert list(Bind.__dataclass_fields__) == ["latents", "into", "fn", "fan"]
 
     def test_direct_threads_the_fan_through(self, fan_twin, fan_state):

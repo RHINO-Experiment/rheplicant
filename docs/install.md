@@ -42,7 +42,9 @@ and you install it yourself.
 * - `rfi`
   - `MomentRFIFlaggingOperator`, the real flagger. The threshold-based
     `FlaggingOperator` needs none of it
-  - `pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`
+  - `pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`
+    — both in one command: MomentRFI declares MomentEmu, neither is on PyPI,
+    and MomentRFI named alone does not resolve
 * - `rhino`
   - `read_rhino_observation()` — the RHINO HDF5 reader (h5py). The Touchstone
     reader needs none of it, being numpy only
