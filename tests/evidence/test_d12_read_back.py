@@ -327,7 +327,6 @@ class TestTheManifestIsNotBOUNDToItsBinary:
     def test_the_unpermuted_archive_pairs_them_correctly(self, tmp_path):
         """ANTI-VACUITY for the case above: prove the halves DO line up normally,
         or the assertions there describe nothing."""
-        import json
 
         from rheplicant.inference.archive import save_memory
         from rheplicant.inference.compressed import QuadraticLikelihood

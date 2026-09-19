@@ -88,7 +88,6 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 import numpyro.distributions as dist
 from bayesmith.diagnose.identifiability import DEFAULT_RANK_RTOL as _bayesmith_rank_rtol
 from bayesmith.diagnose.identifiability import identifiability as _bayesmith_identifiability

@@ -30,22 +30,21 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 
 from rheplicant import Coordinates, State
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
-import numpyro.distributions as dist
-
 from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.inference.graph_bridge import to_graph
-from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.inference.identifiability import (
     DEFAULT_RANK_RTOL,
     _in_float64,
     identifiability,
 )
+from rheplicant.inference.noise import HomoscedasticNoise
 from rheplicant.radio import GainOperator
 
 N_TIME, N_FREQ = 8, 8

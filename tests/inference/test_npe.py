@@ -34,8 +34,9 @@ is why the default returns the best validation step rather than the last.
 
 import jax
 import jax.numpy as jnp
-import rheplicant.inference.npe as rheplicant_npe
 import pytest
+
+import rheplicant.inference.npe as rheplicant_npe
 
 numpyro = pytest.importorskip("numpyro", reason="numpyro not installed")
 import numpyro.distributions as dist  # noqa: E402
@@ -388,7 +389,9 @@ class TestTheRestatedSignaturesStillMatchTheFarSide:
         for name in ours:
             if name in skip:
                 continue
-            assert ours[name].default == theirs[name].default, (name, ours[name].default, theirs[name].default)
+            assert ours[name].default == theirs[name].default, (
+                name, ours[name].default, theirs[name].default
+            )
             assert ours[name].kind == theirs[name].kind, (name, ours[name].kind, theirs[name].kind)
 
     def test_the_comparison_would_notice_an_added_parameter(self):

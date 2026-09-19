@@ -10,22 +10,22 @@ from pathlib import Path
 import pytest
 
 import _rheplicant_bootstrap.audit.bundle as audit_bundle
-from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME
 import _rheplicant_bootstrap.audit.software as audit_software
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
     candidate_serialization_snapshot,
     merge_bundle_files,
     serialize_bundle,
-    with_integrity,
     terminal_reserialization_snapshot,
     validate_serialized_bundle,
+    with_integrity,
 )
 from _rheplicant_bootstrap.audit.diagnostics import (
     CAPTURE_SCOPES,
     DIAGNOSTICS_KEYS,
     RUN_STATUSES,
 )
+from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME
 from _rheplicant_bootstrap.audit.json import canonical_json_bytes
 from _rheplicant_bootstrap.audit.provenance import (
     ARTEFACT_REASONS,

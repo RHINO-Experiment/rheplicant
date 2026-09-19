@@ -41,12 +41,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from bayesmith.diagnose import sensitivity as bayesmith_sensitivity
 
 from rheplicant import Coordinates, Environment, State
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
-from rheplicant.inference import Bind, Latent, ParameterSpace, sensitivity
+from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.inference.noise import NoiseModelLikelihood
 from rheplicant.inference.sensitivity import (
     CRITERION_SHIFT,

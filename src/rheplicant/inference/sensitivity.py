@@ -127,28 +127,25 @@ from typing import Any, ClassVar
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from bayesmith.diagnose.sensitivity import (
-    prior_sensitivity as _bayesmith_prior_sensitivity,
-)
 from bayesmith.diagnose.sensitivity import (
     MAX_NEWTON_STEPS as _bayesmith_max_newton_steps,
+)
+from bayesmith.diagnose.sensitivity import (
+    prior_sensitivity as _bayesmith_prior_sensitivity,
 )
 from bayesmith.errors import BayesmithError
 
 from rheplicant.core.errors import ParameterSpaceError, StateValidationError
-from rheplicant.inference.graph_bridge import to_graph
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference.graph_bridge import to_graph
 from rheplicant.inference.identifiability import (
     _check_at,
     _check_differentiable,
     _in_float64,
     _resolve_names,
-    identifiability,
 )
 from rheplicant.inference.likelihood import check_observed_shape
-from rheplicant.inference.noise import NoiseModelLikelihood
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
 

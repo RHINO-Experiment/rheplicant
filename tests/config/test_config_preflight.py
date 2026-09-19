@@ -54,6 +54,7 @@ from rheplicant.config.preflight import (
 from rheplicant.config.sections.runs import run_document
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.radio import NoiseOperator
+from tests.config.inflight_helpers import machine_factor
 from tests.config.preflight_helpers import (
     BASE_MODEL,
     UNREADABLE_BEAM,
@@ -63,7 +64,6 @@ from tests.config.preflight_helpers import (
     preflight_document,
     refusals,
 )
-from tests.config.inflight_helpers import machine_factor
 
 #: ``tests/config/``.
 _HERE = pathlib.Path(__file__).resolve().parent

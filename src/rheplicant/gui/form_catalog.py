@@ -30,7 +30,7 @@ from rheplicant.config.kinds.s_params import (
 )
 from rheplicant.config.kinds.sky_models import _ALLOWED_KEYS, SKY_KINDS
 from rheplicant.config.resources import RESOURCE_KINDS
-from rheplicant.config.sections.benchmark import _BENCHMARK_KEYS
+from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS, _BENCHMARK_KEYS
 from rheplicant.config.sections.benchmark import _METRICS as BENCHMARK_METRICS
 from rheplicant.config.sections.comparison import _COMPARE_KEYS
 from rheplicant.config.sections.comparison import _METRICS as COMPARE_METRICS
@@ -41,6 +41,7 @@ from rheplicant.config.sections.conjugate import (
     _GLS_KEYS,
     _WIENER_KEYS,
 )
+from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
 from rheplicant.config.sections.diagnostics import (
     _GRADIENT_KEYS,
     _IDENTIFIABILITY_KEYS,
@@ -81,8 +82,6 @@ from rheplicant.config.sections.npe import (
 from rheplicant.config.sections.npe import (
     _SAMPLE_KEYS as NPE_SAMPLE_KEYS,
 )
-from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS
-from rheplicant.config.sections.conjugate_support import _KNOB_DEFAULTS
 from rheplicant.config.sections.nuts import _INITS, _NUTS_DEFAULTS, _NUTS_KEYS
 from rheplicant.config.sections.observation import (
     _AUX_KEYS,
@@ -877,7 +876,9 @@ def _run_widgets(builder: _Builder) -> None:
             required_when=(
                 None if not demanded_by else _rule("runs[].kind", "in", demanded_by)
             ),
-            default=_NO_DEFAULT if _contested(key, default_owners) else defaults.get(key, _NO_DEFAULT),
+            default=(
+                _NO_DEFAULT if _contested(key, default_owners) else defaults.get(key, _NO_DEFAULT)
+            ),
             visible_when=visibility,
         )
 

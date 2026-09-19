@@ -59,10 +59,10 @@ from tests.config.inflight_helpers import (
     axis_findings,
     axis_only,
     best_ms,
-    machine_factor,
     built_findings,
     built_only,
     built_run,
+    machine_factor,
 )
 from tests.config.message_binding import (
     assert_bound_once,

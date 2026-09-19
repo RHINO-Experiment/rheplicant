@@ -559,9 +559,8 @@ class TestValidateRunsAtLoad:
         """
         from rheplicant.config.document import load_document
         from rheplicant.inference import ParameterSpace
-        from tests.config.exit_helpers import TWO_LATENTS, conjugate_document
-
         from rheplicant.inference.linear import DEFAULT_AT_POINTS
+        from tests.config.exit_helpers import TWO_LATENTS, conjugate_document
 
         for label, inference in (
             ("one linear latent", None),

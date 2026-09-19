@@ -40,7 +40,6 @@ from rheplicant.config.postflight import Priced, priced
 from rheplicant.config.sections.observation import build_observation
 from rheplicant.config.sections.runtime import build_runtime
 
-
 #: What :func:`_reference_workload` costs on the machine every ABSOLUTE cost
 #: bound under ``tests/config/`` was calibrated on -- darwin/arm64, Apple
 #: silicon, 2026-08-28. Measured as the median of twelve independent

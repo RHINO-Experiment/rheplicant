@@ -27,6 +27,7 @@ import sys
 import textwrap
 
 import pytest
+
 from tests.config.inflight_helpers import machine_factor
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]

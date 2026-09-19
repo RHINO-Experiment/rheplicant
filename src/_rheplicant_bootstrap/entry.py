@@ -11,12 +11,12 @@ from typing import Literal, TextIO, cast
 
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
-    candidate_serialization_snapshot,
     RESERVED_BUNDLE_PATHS,
+    candidate_serialization_snapshot,
     merge_bundle_files,
-    with_integrity,
     serialize_bundle,
     terminal_reserialization_snapshot,
+    with_integrity,
 )
 from _rheplicant_bootstrap.audit.resolved import (
     ResolvedArtefact,

@@ -9,8 +9,8 @@ from collections.abc import Callable
 
 import equinox as eqx
 import jax
-import numpy
 import jax.numpy as jnp
+import numpy
 import pytest
 
 from _rheplicant_bootstrap.layering import initial_merge, merge_with_origins
@@ -31,8 +31,8 @@ from rheplicant.core.operator import SnapshotOperator
 from rheplicant.radio.backend.flagging import MomentRFIFlaggingOperator
 from rheplicant.radio.instrument.adc import ADCOperator
 from rheplicant.radio.instrument.antenna_loss import AntennaLossOperator
-from rheplicant.radio.sky.foregrounds import ForegroundOperator
 from rheplicant.radio.sky.driftscan import DriftScanProjector
+from rheplicant.radio.sky.foregrounds import ForegroundOperator
 from rheplicant.radio.sky.global_signal import GlobalSignalOperator
 
 

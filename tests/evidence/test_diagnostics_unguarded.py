@@ -25,13 +25,12 @@ per-epoch sum -- while every campaign fixture in the suite gave every epoch the
 same dof, so the two spellings could not be told apart.
 """
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import jax.numpy as jnp
-
-from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.core.errors import StateValidationError  # noqa: F401
+from rheplicant.inference import Bind, Latent, ParameterSpace
 from rheplicant.inference.diagnostics import (
     EpochResidual,
     coherent_mode,
