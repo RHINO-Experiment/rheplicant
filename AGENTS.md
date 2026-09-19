@@ -213,8 +213,12 @@ which the seven GUI spike tests in `tests/gui/test_panel_spike.py` and
 spike when it is removed as scheduled; **`MomentRFI`** with **`MomentEmu`**,
 below; **`matplotlib`**, which rhino-cal's `gcr.data_processing` imports; and
 the **Node toolchain**, `npm` on `PATH` and `npm ci` run in
-`tools/config_gui_spike/react`, without which
-`tests/gui/test_typescript_gates.py` skips. Two sets of tests are opt-in by
+`tools/config_gui_spike/react`. Without `node_modules`,
+`tests/gui/test_typescript_gates.py` skips its three gates, and the closure
+case in each of `tests/gui/test_e2e_typecheck.py` and
+`tests/gui/test_react_test_typecheck.py` fails with `FileNotFoundError:
+'node_modules/.bin/tsc'` (measured 2026-09-19), so a missing toolchain shows
+as two red tests rather than as skips. Two sets of tests are opt-in by
 environment variable because their data is not redistributable:
 `RHEPLICANT_RHINO_BEAMS` names a directory of RHINO CST beam exports
 (`tests/radio/test_beams.py`), and `RHEPLICANT_RHINO_CAL` names a rhino-cal
@@ -229,8 +233,16 @@ uv pip install --python .venv/bin/python "MomentEmu @ git+https://github.com/zzh
 ```
 
 With both installed, `tests/radio/test_flagging_momentrfi.py` runs all 13 of
-its tests; without MomentRFI ten of them skip. CI requires MomentRFI like the
-other packages above. The three `DataHandler` comparisons in
+its tests; without MomentRFI ten of them skip.
+
+**What CI requires.** The Suite and Coverage jobs fail when any of seven
+import names is absent: `h5py`, `rhino_cal_jax`, `limtod_jax`,
+`numpyro`, `pyuvdata`, `pygdsm` and `MomentRFI`. They also install the
+`gui-react` extra and the Node toolchain without checking either by name.
+They install neither `panel` nor `matplotlib`, so on CI the seven spike tests
+skip, and neither opt-in variable is set.
+
+The three `DataHandler` comparisons in
 `tests/radio/test_ingestion_vs_reference.py` need both MomentRFI and
 matplotlib, because rhino-cal's `gcr` imports each, as well as
 `RHEPLICANT_RHINO_CAL`. Measured 2026-09-19 in a scratch venv holding all
