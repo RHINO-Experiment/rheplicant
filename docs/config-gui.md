@@ -194,17 +194,32 @@ is marked stale after a relevant edit.
 ## Security and trust boundaries
 
 `rheplicant-gui` binds to `127.0.0.1` by default. It has **no authentication,
-authorization, TLS termination, CSRF boundary or multi-user isolation**. A
-non-loopback host is refused unless `--allow-remote` is supplied:
+authorization, TLS termination, CSRF token or multi-user isolation**. A
+non-loopback host is refused unless `--allow-remote` is supplied together with
+at least one `--allowed-host`:
 
 ```bash
-rheplicant-gui --host 0.0.0.0 --allow-remote
+rheplicant-gui --host 0.0.0.0 --allow-remote --allowed-host gui.example.org
 ```
 
-That flag is an acknowledgement, not a security feature. Put an authenticating
-reverse proxy and process/filesystem isolation in front of the application if
-remote access is genuinely required. Do not expose it directly to an untrusted
-network.
+A loopback bind alone does not keep a web page out. A page on a domain its
+author controls can re-point that domain at `127.0.0.1` (DNS rebinding) and
+then call the editor as if it were the editor's own page, under the page's
+host name. The launcher therefore answers only to the host names `127.0.0.1`,
+`localhost` and `[::1]` (with any port), to a loopback bind address given with
+`--host`, and to each name given with `--allowed-host NAME`. A request naming
+any other host is refused with 400. A request that can change state (any
+method except GET, HEAD and OPTIONS) whose `Origin` header names a host outside
+that list is refused with 403; a request without an `Origin`, such as one from
+`curl` or a script, is accepted. `--allowed-host` is repeatable, takes a name
+or IP address without a scheme or port, and is also how a reverse proxy on the
+same machine that forwards its own host name is admitted.
+
+`--allow-remote` is an acknowledgement, not a security feature, and
+`--allowed-host` limits which names reach the editor, not who does. Put an
+authenticating reverse proxy and process/filesystem isolation in front of the
+application if remote access is required. Do not expose it directly to an
+untrusted network.
 
 The bounded loader rejects duplicate keys, unsafe YAML tags and non-mapping
 documents. React renders ordinary YAML-derived values as text. The one raw-HTML

@@ -64,7 +64,9 @@ def test_bundled_app_serves_the_editor_and_api_from_one_origin() -> None:
     pytest.importorskip("httpx2")
     from fastapi.testclient import TestClient
 
-    client = TestClient(launcher.create_editor_app())
+    # The launcher's app answers only to loopback host names, so the client
+    # addresses it the way a browser on this machine would.
+    client = TestClient(launcher.create_editor_app(), base_url="http://127.0.0.1:8000")
     index = client.get("/")
     assert index.status_code == 200
     assert "Rheplicant YAML config editor" in index.text
@@ -77,7 +79,14 @@ def test_bundled_app_serves_the_editor_and_api_from_one_origin() -> None:
 def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatch) -> None:
     calls: list[tuple[str, int, str]] = []
 
-    def fake_serve(*, host: str, port: int, log_level: str, allow_remote: bool = False) -> None:
+    def fake_serve(
+        *,
+        host: str,
+        port: int,
+        log_level: str,
+        allow_remote: bool = False,
+        allowed_hosts: tuple[str, ...] = (),
+    ) -> None:
         calls.append((host, port, log_level))
 
     monkeypatch.setattr(launcher, "serve", fake_serve)
@@ -89,9 +98,21 @@ def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatc
     assert len(calls) == 1
 
     assert launcher.main(["--host", "::1", "--port", "9124"]) == 0
+    with pytest.raises(SystemExit, match="--allowed-host"):
+        launcher.main(["--host", "0.0.0.0", "--allow-remote", "--port", "9125"])
+    assert len(calls) == 2
     assert launcher.main(
-        ["--host", "0.0.0.0", "--allow-remote", "--port", "9125"]
+        [
+            "--host",
+            "0.0.0.0",
+            "--allow-remote",
+            "--allowed-host",
+            "gui.example.org",
+            "--port",
+            "9125",
+        ]
     ) == 0
+    assert calls[-1] == ("0.0.0.0", 9125, "info")
 
 
 def test_serve_refuses_a_non_loopback_bind_without_acknowledgement(monkeypatch) -> None:
@@ -131,7 +152,13 @@ def test_serve_allows_a_non_loopback_bind_when_remote_is_acknowledged(monkeypatc
     calls: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    launcher.serve(host="0.0.0.0", port=8000, log_level="info", allow_remote=True)
+    launcher.serve(
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        allow_remote=True,
+        allowed_hosts=("gui.example.org",),
+    )
     assert len(calls) == 1
     _, kwargs = calls[0]
     assert kwargs["host"] == "0.0.0.0"
