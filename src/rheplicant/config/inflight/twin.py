@@ -270,9 +270,8 @@ def _switch_positions(run: Built) -> Iterable[Finding]:
             "Dropping the cycle instead -- observation.switching: {mode: "
             "none}, and model.cal_loads with it -- silences this too, but on "
             "a model whose only sources ARE the loads it leaves a pure "
-            "transform chain with nothing to transform, and the next "
-            "simulation fails with 'This assembly is a pure transform chain'; "
-            "it is a fix only for a run that has a source elsewhere. "
+            "transform chain with nothing to transform, which check A31 "
+            "refuses; it is a fix only for a run that has a source elsewhere. "
             "This check runs after build_resources, so it saves no beam: what "
             "it buys is the refusal instead of a plausible answer (check B5).")
         # ONE finding, not two. The fit twin inherits the raw twin's dark
