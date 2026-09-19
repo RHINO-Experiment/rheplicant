@@ -220,7 +220,11 @@ is accepted.
 `--allowed-host` is repeatable and takes a name or IP address without a scheme
 or port. It is also accepted without `--allow-remote` on a loopback bind, which
 is how a reverse proxy on the same machine that forwards its own host name is
-admitted. Every listed name is trusted the way loopback is: a page served from
+admitted. A proxy that terminates TLS must also forward
+`X-Forwarded-Proto: https`, which uvicorn trusts from `127.0.0.1` by default,
+or send the port in `Host`; otherwise every write is refused with 403, because
+an `https://` `Origin` counts as port 443 against a portless `Host` read as
+port 80. Every listed name is trusted the way loopback is: a page served from
 that name, with or without `--allow-remote`, can reach the editor through DNS
 rebinding by whoever controls that name's DNS records. List only names whose
 DNS you control.
