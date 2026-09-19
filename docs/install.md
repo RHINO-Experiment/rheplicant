@@ -69,10 +69,14 @@ rheplicant-gui                    # http://127.0.0.1:8000/
 ```
 
 The launcher binds to loopback by default. A non-loopback bind is refused
-unless `--allow-remote` is explicit, and that flag is only acknowledgement:
-the application has no authentication, tenant isolation or sandbox. YAML may
-load plugins and `python:` targets; resource/output fields are server paths;
-jobs use the server account's files and compute. Read the complete
+unless `--allow-remote` is given together with at least one
+`--allowed-host NAME`, and those flags are only acknowledgement: the
+application has no authentication, tenant isolation or sandbox. The server
+answers only to loopback host names and the listed names, and refuses a
+state-changing request whose `Origin` is not its own, which keeps out a
+DNS-rebinding page under any other name. YAML may load plugins and `python:`
+targets; resource/output fields are server paths; jobs use the server
+account's files and compute. Read the complete
 [workbench workflow and trust boundary](config-gui.md) before using remote
 access or running a document from another person.
 

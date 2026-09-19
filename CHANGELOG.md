@@ -45,11 +45,15 @@ remain editable; job results are bound to the submitted YAML digest; refreshing
 a job cannot replace an in-progress draft.
 
 The launcher binds to loopback by default. It refuses a remote bind without
-`--allow-remote` because the application has no authentication, TLS or
-multi-user isolation. This is deliberately documented as an acknowledgement,
-not a sandbox: safe YAML loading rejects tags and duplicate keys, while named
-plugins, `python:` targets, resource/output paths and execution jobs remain
-trusted capabilities of the server account.
+`--allow-remote` and at least one `--allowed-host NAME`, because the
+application has no authentication, TLS or multi-user isolation. The served app
+answers only to loopback host names and the listed names (400 otherwise) and
+refuses a state-changing request or websocket handshake whose `Origin` is not
+the request's own host and port (403), so a DNS-rebinding page under any
+other name cannot reach it. This is deliberately documented as an
+acknowledgement, not a sandbox: safe YAML loading rejects tags and duplicate
+keys, while named plugins, `python:` targets, resource/output paths and
+execution jobs remain trusted capabilities of the server account.
 
 ### A configuration run is now a scientific publication
 
