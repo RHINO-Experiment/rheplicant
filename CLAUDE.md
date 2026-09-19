@@ -209,10 +209,13 @@ of GUI coverage without a single test failing.
 **bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
 capability floor is 0.6, the highest release whose surface this package uses:
 0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
-payload and `ComplexNormal`; 0.4 `observed_mask`; 0.5
-`local_block(..., priors=True)`; 0.6 `marginal.chain.smooth` assembled as a
-square root, whose 0.5 spelling returns `nan` on a stiff chain. An install
-below a level satisfies the import statements and fails at the call, so
+payload and `ComplexNormal`; 0.4 `observe(..., mask=)` and the node field
+`Probabilistic.observed_mask`; 0.5 `local_block(..., priors=True)`; 0.6
+`marginal.chain.smooth` assembled as a square root, whose 0.5 spelling returns
+`nan` on a stiff chain. Below 0.5, `rheplicant.inference` fails at import,
+because `bayesmith.marginal` first ships in 0.5. A 0.5 install imports and
+fails only in behaviour, and the 0.4 and 0.5 keyword arguments are each a
+`TypeError` at the call on the release below.
 `tests/test_bayesmith_floor.py` asserts each level by capability, not by
 version. The range starts at 0.9 because the stable baseline relies on
 bayesmith 0.9's stability contract and is tested only against it, and it is
