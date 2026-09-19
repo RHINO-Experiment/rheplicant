@@ -289,6 +289,9 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
             f"{type(horizon).__name__} ({horizon!r})."
         )
     check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}), label="horizon:")
+    problem = _projector_mask_angles(name, horizon)
+    if problem is not None:
+        raise ConfigError(problem)
     mode = (
         horizon["mode"]
         if "mode" in horizon
@@ -700,6 +703,37 @@ def _horizon_angle(
     return value
 
 
+def _projector_mask_angles(name: str, horizon: Mapping[str, Any]) -> str | None:
+    """``horizon.el_deg``/``apod_deg`` under ``projector_mask``: read by nothing.
+
+    :func:`_truncate` is the only reader of either angle.  Under
+    ``projector_mask`` the cut belongs to the projector, whose own ``el_deg``
+    (its pointing) and ``apod_deg`` decide it, so an angle written here would
+    be dropped without a word.  Refused rather than ignored, as
+    ``check_unknown_keys`` refuses a key this layer would not read.
+
+    Extracted so ``preflight/document.py``'s A1.horizon asks the same
+    question of the text before the beam is read; the sentence lives here.
+
+    Returns:
+        The refusal, or ``None`` when the entry is fine.
+    """
+    if horizon.get("mode") != "projector_mask":
+        return None
+    written = [key for key in ("el_deg", "apod_deg") if key in horizon]
+    if not written:
+        return None
+    keys = " and ".join(f"horizon.{key}" for key in written)
+    verb, pronoun = ("is", "it") if len(written) == 1 else ("are", "them")
+    return (
+        f"{name}: {keys} {verb} read only by horizon.mode: truncate_map, which "
+        "cuts the beam map itself. Under projector_mask the cut is the "
+        "projector's: its horizon_mask: true applies it at the projector's own "
+        "el_deg and apodises it by the projector's own apod_deg. Delete "
+        f"{pronoun} here, and set apod_deg on the projector for a taper."
+    )
+
+
 def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):
     from rheplicant.radio import horizon_truncated_beam
 
@@ -708,8 +742,11 @@ def _truncate(name: str, maps, horizon: dict, context: ResolutionContext):
         raise ConfigError(
             f"{name}: horizon.el_deg={el_deg}. truncate_map accepts only 90 -- limTOD's "
             "horizon partition is defined at the horizon and nowhere else. For a "
-            "different cut, mask in the projector instead (horizon.mode: "
-            "projector_mask), which applies it in the horizontal frame."
+            "different cut, mask in the projector instead: set horizon.mode: "
+            "projector_mask here and horizon_mask: true on every driftscan "
+            "projector that reads this beam, which applies the cut in the "
+            "horizontal frame at that projector's own el_deg. The mode alone "
+            "masks nothing."
         )
     truncated, fraction = horizon_truncated_beam(
         np.asarray(maps),

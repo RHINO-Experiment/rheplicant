@@ -2893,6 +2893,23 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
         "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
     ": is not read by this layer yet -- it arrives with":
         "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+    # T-002 U7 (the horizon ruling): the truncate_map el_deg refusal sent the
+    # reader to `horizon.mode: projector_mask` alone, and that mode masks
+    # nothing unless the projector reading the beam also sets
+    # `horizon_mask: true`. The replacement names both settings. Both
+    # harvested forms, for the reason given above.
+    _HOLE + ": horizon.el_deg=" + _HOLE + ". truncate_map accepts only 90 -- "
+    "limTOD's horizon partition is defined at the horizon and nowhere else. "
+    "For a different cut, mask in the projector instead (horizon.mode: "
+    "projector_mask), which applies it in the horizontal frame.":
+        "test_config_kind_beams.py::"
+        "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
+    ". truncate_map accepts only 90 -- limTOD's horizon partition is defined "
+    "at the horizon and nowhere else. For a different cut, mask in the "
+    "projector instead (horizon.mode: projector_mask), which applies it in "
+    "the horizontal frame.":
+        "test_config_kind_beams.py::"
+        "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
 }
 
 

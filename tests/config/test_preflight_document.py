@@ -496,6 +496,37 @@ class TestHorizonNumbers:
             resources=_a_beam(apod_deg=True)), "A1")) == 1
 
 
+class TestProjectorMaskAngles:
+    """``horizon.el_deg``/``apod_deg`` under ``projector_mask``: read by
+    nothing, so refused in the text pass with ``build_beam``'s own sentence."""
+
+    @staticmethod
+    def _masked(**angles):
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = {"mode": "projector_mask",
+                                               **angles}
+        return preflight_document(resources=section)
+
+    def test_it_is_the_builders_sentence_one_phase_early(self):
+        from rheplicant.config.kinds.beams import _projector_mask_angles
+
+        found = _findings(self._masked(apod_deg=5.0), "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+        assert found[0].message == _projector_mask_angles(
+            "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0})
+        assert "is read only by horizon.mode: truncate_map" in found[0].message
+
+    def test_it_pre_empts_the_number_check_on_the_same_key(self):
+        """A value-node angle under projector_mask is one fault, not two: the
+        key should not be there at all, whatever its shape."""
+        found = _findings(self._masked(el_deg={"value": 90.0, "unit": "deg"}),
+                          "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+
+    def test_projector_mask_without_the_angles_is_silent(self):
+        assert _findings(self._masked(), "A1") == []
+
+
 class TestFanPresence:
     def test_two_targets_with_no_fan_are_refused_in_the_sugar_spelling(self):
         """Measured: this builds today with `Bind.fan = None`.  Kills the

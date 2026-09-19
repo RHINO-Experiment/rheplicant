@@ -266,6 +266,54 @@ class TestHorizonTruncation:
         assert "80" in message
         assert "90" in message
 
+    def test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs(
+            self, context):
+        """The remedy used to name ``horizon.mode: projector_mask`` alone,
+        which masks nothing: the cut happens only on a driftscan projector
+        that also sets ``horizon_mask: true``."""
+        with pytest.raises(ConfigError) as excinfo:
+            build_resources(_beam(horizon={"mode": "truncate_map", "el_deg": 80.0}), context)
+        assert str(excinfo.value) == (
+            "resources.beams.horn: horizon.el_deg=80.0. truncate_map accepts "
+            "only 90 -- limTOD's horizon partition is defined at the horizon "
+            "and nowhere else. For a different cut, mask in the projector "
+            "instead: set horizon.mode: projector_mask here and horizon_mask: "
+            "true on every driftscan projector that reads this beam, which "
+            "applies the cut in the horizontal frame at that projector's own "
+            "el_deg. The mode alone masks nothing."
+        )
+
+    @pytest.mark.parametrize(("written", "expected"), [
+        ({"el_deg": 90.0},
+         "resources.beams.horn: horizon.el_deg is read only by horizon.mode: "
+         "truncate_map, which cuts the beam map itself. Under projector_mask "
+         "the cut is the projector's: its horizon_mask: true applies it at the "
+         "projector's own el_deg and apodises it by the projector's own "
+         "apod_deg. Delete it here, and set apod_deg on the projector for a "
+         "taper."),
+        ({"el_deg": 90.0, "apod_deg": 5.0},
+         "resources.beams.horn: horizon.el_deg and horizon.apod_deg are read "
+         "only by horizon.mode: truncate_map, which cuts the beam map itself. "
+         "Under projector_mask the cut is the projector's: its horizon_mask: "
+         "true applies it at the projector's own el_deg and apodises it by "
+         "the projector's own apod_deg. Delete them here, and set apod_deg on "
+         "the projector for a taper."),
+    ], ids=["el_deg", "both"])
+    def test_projector_mask_refuses_the_two_angles_it_never_reads(
+            self, context, written, expected):
+        """Refused rather than dropped: ``_truncate`` is the only reader of
+        either angle, and a taper written here under ``projector_mask`` would
+        vanish without a word."""
+        with pytest.raises(ConfigError) as excinfo:
+            build_resources(_beam(horizon={"mode": "projector_mask", **written}),
+                            context)
+        assert str(excinfo.value) == expected
+
+    def test_projector_mask_without_the_angles_builds(self, context):
+        built = build_resources(_beam(horizon={"mode": "projector_mask"}), context)
+        fraction = built.resources["resources.beams.horn"].sky_fraction
+        assert [float(v) for v in fraction] == pytest.approx([1.0] * 4)
+
 
 class TestTheSubValues:
     def test_maps_and_sky_fraction_are_both_referenceable(self, context):

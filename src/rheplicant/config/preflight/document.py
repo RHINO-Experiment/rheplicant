@@ -58,6 +58,7 @@ from typing import Any
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
+from rheplicant.config.kinds.beams import _projector_mask_angles
 from rheplicant.config.preflight import register
 
 #: The eight keys schema §8 reserves at capability 3 or 4 -> (capability,
@@ -227,7 +228,12 @@ def _run_option_keys(document) -> Iterable[Finding]:
 
 
 def _task3_horizon_in(layer) -> Iterable[Finding]:
-    """A1: a horizon angle that is not a plain number, on one layer."""
+    """A1: a horizon angle that is not a plain number, on one layer.
+
+    Under ``horizon.mode: projector_mask`` either angle is refused outright,
+    in ``kinds/beams.py::_projector_mask_angles``' words: nothing reads it,
+    so its shape is not the fault and the number check stands down.
+    """
     resources = layer.get("resources")
     beams = resources.get("beams") if isinstance(resources, Mapping) else None
     if not isinstance(beams, Mapping):
@@ -237,6 +243,11 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
             continue
         horizon = spec.get("horizon")
         if not isinstance(horizon, Mapping):
+            continue
+        problem = _projector_mask_angles(f"resources.beams.{name}", horizon)
+        if problem is not None:
+            yield refuse("A1", longest_legal_prefix(
+                f"resources.beams.{name}.horizon"), problem)
             continue
         for key in ("el_deg", "apod_deg"):
             if key not in horizon:
