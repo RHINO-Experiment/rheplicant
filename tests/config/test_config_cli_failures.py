@@ -262,3 +262,37 @@ def test_an_assembly_refused_while_running_is_a_refusal(tmp_path, capsys):
     assert f"refused audit: {sibling}\n" in err
     diagnostics = json.loads((sibling / "diagnostics.json").read_bytes())
     assert diagnostics["status"] == "refused"
+
+
+def _plan_blocks(blocks):
+    """The fitting tests' own ``plan.estimate`` document with ``blocks``."""
+    from tests.config.test_preflight_fitting import _doc
+
+    value = _doc(blocks)
+    value.pop("variants", None)
+    return value
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    (_plan_blocks([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
+     "asks for engine: 'banana'; the engines are"),
+    (_plan_blocks([{"names": ["d", "a"], "engine": 5}, {"names": ["w"]}]),
+     "asks for engine: 5; the engines are"),
+    (_plan_blocks([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]),
+     "which inference.parameters does not declare"),
+], ids=["engine-banana", "engine-not-a-string", "a16-undeclared-name"])
+def test_a_preflight_refusal_reaches_validate_in_its_own_words(
+        tmp_path, capsys, value, expected):
+    """N-4: the audit trace validates every finding's ``check`` as a
+    non-empty string, so an id-less finding reached ``validate`` as
+    "finding.check must be a non-empty string." and the user's sentence was
+    lost.  Driven through the command line, where the trace is live."""
+    from _rheplicant_bootstrap.cli import main
+
+    config = tmp_path / "config.yaml"
+    write_document(config, value)
+    assert main(["validate", str(config)]) == 2
+    err = capsys.readouterr().err
+    assert expected in err
+    assert "must be a non-empty string" not in err
+    assert "(check A" in err
