@@ -11,9 +11,10 @@ is [the document's anatomy](config-anatomy.md).
 
 ## A document that simulates
 
-Four sections are required — `runtime`, `observation`, `model`, `runs` — and
-four sections is a runnable document. `schema_version` is optional but worth
-writing.
+A document requires `schema_version` and four sections: `runtime`,
+`observation`, `model` and `runs`. Those five keys make a runnable document.
+`schema_version` is the integer `1`; `load_document` and the command line
+both refuse a document that omits it or writes `1.0`.
 
 ```yaml
 schema_version: 1
