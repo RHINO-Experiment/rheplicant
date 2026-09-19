@@ -53,6 +53,7 @@ value check on the path bayesmith traces is caught here, and one in an
 operator that path never reaches is not.
 """
 
+import importlib
 import inspect
 
 import equinox as eqx
@@ -159,22 +160,68 @@ def _published_exceptions() -> dict[str, type]:
     }
 
 
-#: Each published exception's builtin base, read from its MRO on 2026-09-19.
-#: The sweep above still finds the classes; this table records which builtin
-#: ``except`` clause each one answers to, which a consumer may already have
-#: written. A class the sweep finds and this table lacks fails below, so a new
-#: exception states its builtin base when it is added.
+#: Where an outside consumer imports this package's exception classes from,
+#: plus the bootstrap module several of them are defined in.
+ERROR_NAMESPACES = (
+    "rheplicant.core.errors",
+    "rheplicant.config",
+    "rheplicant.config.errors",
+    "_rheplicant_bootstrap.errors",
+)
+_OWN_PACKAGES = ("rheplicant", "_rheplicant_bootstrap")
+
+
+def _public_name(klass: type) -> str:
+    """``module.qualname`` as the class reports it.
+
+    A class defined in ``_rheplicant_bootstrap.errors`` sets ``__module__`` to
+    the public module that re-exports it (``DirtError`` reports
+    ``rheplicant.core.errors``), so this is the name a consumer imports it
+    under, and it does not change when a class moves between the two modules
+    with its ``__module__`` kept.
+    """
+    return f"{klass.__module__}.{klass.__qualname__}"
+
+
+def _swept_exceptions() -> dict[str, type]:
+    """Every exception class of this package bound in :data:`ERROR_NAMESPACES`.
+
+    Keyed by :func:`_public_name`, so a class bound in several namespaces
+    (``ConfigError`` is in three) is one entry. Read off the modules, like
+    :func:`_published_exceptions`.
+    """
+    found = {}
+    for namespace in ERROR_NAMESPACES:
+        for name, obj in vars(importlib.import_module(namespace)).items():
+            if (
+                not name.startswith("_")
+                and inspect.isclass(obj)
+                and issubclass(obj, BaseException)
+                and obj.__module__.split(".")[0] in _OWN_PACKAGES
+            ):
+                found[_public_name(obj)] = obj
+    return found
+
+
+#: Each swept class's builtin base, read from its MRO on 2026-09-19 and keyed
+#: by public name. The sweep finds the classes; this table records which
+#: builtin ``except`` clause (or warnings filter category) each one answers
+#: to, which a consumer may already have written. A class the sweep finds and
+#: this table lacks fails below, so a new exception states its builtin base
+#: when it is added.
 BUILTIN_BASE = {
-    "AmbiguousNodeError": ValueError,
-    "AssemblyError": ValueError,
-    "DataIngestionError": ValueError,
-    "DirtError": Exception,
-    "LinearityRefused": ValueError,
-    "LogSpaceUnavailable": ValueError,
-    "MissingKeyError": RuntimeError,
-    "ParameterSpaceError": ValueError,
-    "PipelineError": ValueError,
-    "StateValidationError": ValueError,
+    "rheplicant.config.errors.ConfigError": ValueError,
+    "rheplicant.config.findings.ConfigWarning": UserWarning,
+    "rheplicant.core.errors.AmbiguousNodeError": ValueError,
+    "rheplicant.core.errors.AssemblyError": ValueError,
+    "rheplicant.core.errors.DataIngestionError": ValueError,
+    "rheplicant.core.errors.DirtError": Exception,
+    "rheplicant.core.errors.LinearityRefused": ValueError,
+    "rheplicant.core.errors.LogSpaceUnavailable": ValueError,
+    "rheplicant.core.errors.MissingKeyError": RuntimeError,
+    "rheplicant.core.errors.ParameterSpaceError": ValueError,
+    "rheplicant.core.errors.PipelineError": ValueError,
+    "rheplicant.core.errors.StateValidationError": ValueError,
 }
 
 
@@ -190,34 +237,65 @@ class TestTheExceptionClassesKeepTheirIdentity:
         assert len(found) >= 8, sorted(found)
         assert {"ParameterSpaceError", "StateValidationError", "DirtError"} <= set(found)
 
-    @pytest.mark.parametrize("name", sorted(_published_exceptions()))
-    def test_each_stays_catchable_as_the_family_and_as_its_builtin(self, name):
+    def test_the_wider_sweep_sees_every_namespace(self):
+        """Each namespace contributes a class, and the config family is in."""
+        for namespace in ERROR_NAMESPACES:
+            module = importlib.import_module(namespace)
+            assert any(
+                inspect.isclass(obj) and issubclass(obj, BaseException)
+                for obj in vars(module).values()
+            ), f"the sweep found no exception class in {namespace}"
+        found = _swept_exceptions()
+        assert "rheplicant.config.errors.ConfigError" in found
+        assert {f"rheplicant.core.errors.{name}" for name in _published_exceptions()} <= set(found)
+
+    @pytest.mark.parametrize("public_name", sorted(_swept_exceptions()))
+    def test_each_stays_catchable_as_the_family_and_as_its_builtin(self, public_name):
         """Two ``except`` clauses an outside consumer is entitled to write.
 
-        ``DirtError`` is the family catch the class docstring promises. The
-        builtin base is the other half: a generic ``except ValueError`` in
-        consumer code keeps working only while the class keeps deriving from
-        ``ValueError``. The builtin classes in the MRO are compared as a set
-        against the pinned base's own MRO, so a class that moves from
-        ``ValueError`` to ``RuntimeError``, or gains the other as a second
-        base, fails; asking only for one of the two, as this case used to,
-        passed both.
+        ``DirtError`` is the family catch the class docstring promises; a
+        warning category is outside the family and is asked only for its
+        builtin base. The builtin base is the other half: a generic ``except
+        ValueError`` in consumer code keeps working only while the class keeps
+        deriving from ``ValueError``. The builtin classes in the MRO are
+        compared as a set against the pinned base's own MRO, so a class that
+        moves from ``ValueError`` to ``RuntimeError``, or gains the other as a
+        second base, fails; asking only for one of the two, as this case used
+        to, passed both.
         """
-        klass = _published_exceptions()[name]
-        assert issubclass(klass, core_errors.DirtError)
-        assert name in BUILTIN_BASE, (
-            f"{name} is a new published exception; add its builtin base to "
-            "BUILTIN_BASE in this file"
+        klass = _swept_exceptions()[public_name]
+        if not issubclass(klass, Warning):
+            assert issubclass(klass, core_errors.DirtError)
+        assert public_name in BUILTIN_BASE, (
+            f"{public_name} is a new published exception; add its builtin base "
+            "to BUILTIN_BASE in this file"
         )
         builtins_in_mro = {base for base in klass.__mro__ if base.__module__ == "builtins"}
-        assert builtins_in_mro == set(BUILTIN_BASE[name].__mro__), (
-            f"{name} derives from {sorted(b.__name__ for b in builtins_in_mro)}, "
-            f"but its published builtin base is {BUILTIN_BASE[name].__name__}"
+        assert builtins_in_mro == set(BUILTIN_BASE[public_name].__mro__), (
+            f"{public_name} derives from {sorted(b.__name__ for b in builtins_in_mro)}, "
+            f"but its published builtin base is {BUILTIN_BASE[public_name].__name__}"
         )
 
+    @pytest.mark.parametrize("public_name", sorted(_swept_exceptions()))
+    def test_each_public_name_is_public_and_resolves_to_the_class(self, public_name):
+        """The key the table uses is an import a consumer can write.
+
+        A class defined in ``_rheplicant_bootstrap`` without a public
+        ``__module__`` would be keyed, and reported in tracebacks, under a
+        private module; one whose public module does not bind it would name
+        an import that fails or finds a different class.
+        """
+        klass = _swept_exceptions()[public_name]
+        assert not klass.__module__.startswith("_"), (
+            f"{public_name} reports a private module; set its __module__ to the "
+            "public module that re-exports it"
+        )
+        module = importlib.import_module(klass.__module__)
+        assert getattr(module, klass.__qualname__, None) is klass
+
     def test_the_builtin_base_table_names_only_published_classes(self):
-        stale = set(BUILTIN_BASE) - set(_published_exceptions())
-        assert not stale, f"BUILTIN_BASE names classes core.errors no longer defines: {stale}"
+        stale = set(BUILTIN_BASE) - set(_swept_exceptions())
+        assert not stale, f"BUILTIN_BASE names classes no namespace binds any more: {stale}"
 
     @pytest.mark.parametrize("name", sorted(_published_exceptions()))
     def test_a_root_re_export_is_the_same_object_and_not_a_copy(self, name):
