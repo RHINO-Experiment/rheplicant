@@ -235,6 +235,34 @@ class TestTheNoiseTransform:
             to_log_space(observed, HomoscedasticNoise(sigma=1.0))
         assert "multiplicative" in str(caught.value)
 
+    @pytest.mark.parametrize("floor", [1e-30, 1.0, 1e6])
+    def test_a_declared_floor_is_refused(self, observed, floor):
+        """A5-3: ``sigma = f max(|mu|, floor)`` is not ``f |mu|``.
+
+        The log-space sigma is ``f`` on every sample, which is the declared
+        likelihood only where the floor never binds. Before this refusal the
+        estimate was bit-identical for every floor. The float64 comparison
+        against the declared likelihood is
+        ``tests/evidence/test_log_route_floor.py``.
+        """
+        noise = RadiometerNoise(
+            channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME,
+            floor=floor,
+        )
+        with pytest.raises(ParameterSpaceError) as caught:
+            to_log_space(observed, noise)
+        assert "floor" in str(caught.value)
+
+    def test_a_zero_floor_is_accepted(self, observed):
+        """The negative control: ``floor=0.0`` is the default and the exact
+        multiplicative model, so the refusal above must not reach it."""
+        noise = RadiometerNoise(
+            channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME,
+            floor=0.0,
+        )
+        _, sigma = to_log_space(observed, noise)
+        assert jnp.all(sigma == noise.fractional)
+
 
 class TestTheFirstOrderBoundary:
     """Both sides of FIRST_ORDER_MAX_FRACTIONAL, and an extreme beyond it."""
