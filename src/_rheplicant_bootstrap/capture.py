@@ -17,6 +17,10 @@ from .types import DestinationDescriptor, LayerIdentity
 
 T = TypeVar("T")
 TREE_MAGIC = b"rheplicant-captured-tree-v1\x00"
+#: The longest source suffix a file slot keeps, in bytes. ``capture-NNNNNNNN``
+#: is 16 bytes and a file name may be 255, so an unbounded suffix could make
+#: the slot name itself unwritable; no reader here sniffs one this long.
+_SLOT_SUFFIX_BYTES = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,12 +162,24 @@ class CaptureService:
     def __exit__(self, *_args: object) -> None:
         self.close()
 
-    def _slot(self, *, directory: bool) -> Path:
+    def _slot(self, *, directory: bool, suffix: str = "") -> Path:
+        """A fresh slot under the root, named by a counter.
+
+        A FILE slot keeps its source's last suffix (``capture-00000001.fits``)
+        because readers choose a parser by it: ``pyuvdata.UVBeam.from_file``
+        refuses a name it cannot classify, ``radio/touchstone.py`` checks
+        ``.s1p``/``.s2p`` against the port count, and ``np.loadtxt``
+        decompresses ``.gz``. The name is still the service's own, so the run
+        reads the bytes that were hashed; the audit record names the source,
+        never the slot. A suffix over :data:`_SLOT_SUFFIX_BYTES` is dropped.
+        """
+        if directory or len(os.fsencode(suffix)) > _SLOT_SUFFIX_BYTES:
+            suffix = ""
         with self._lock:
             if self._closed:
                 raise ConfigError("capture service is closed")
             self._counter += 1
-            path = self._root / f"capture-{self._counter:08d}"
+            path = self._root / f"capture-{self._counter:08d}{suffix}"
             if directory:
                 path.mkdir(mode=0o700)
                 os.chmod(path, 0o700)
@@ -221,7 +237,7 @@ class CaptureService:
             raise ConfigError(f"cannot inspect declarative input {source}: {exc}") from exc
         if not stat.S_ISREG(before_target.mode):
             raise ConfigError(f"declarative input is not a regular file: {source}")
-        snapshot = self._slot(directory=False)
+        snapshot = self._slot(directory=False, suffix=source.suffix)
         try:
             digest = self._stream(source, snapshot, before_target)
             if (
