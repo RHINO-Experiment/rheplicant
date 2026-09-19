@@ -26,14 +26,34 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# bayesmith 0.9.0 is a local release and not on PyPI (see CLAUDE.md's
+# complete-environment section), so until it is published the environment
+# steps below cannot resolve `bayesmith>=0.9,<0.10` and the suite jobs fail at
+# install. The lint job does not depend on it.
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Ruff
+        # Pinned to the version the tree was last verified clean with, so a
+        # new ruff release cannot turn this job red without a change here.
+        run: uvx ruff@0.16.3 check src tests
+
   suite:
     name: Suite (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.12"]
+        # 3.11 is the floor `requires-python` declares; 3.12 is what the
+        # coverage job and the local checkout run.
+        python: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
