@@ -497,8 +497,9 @@ class TestHorizonNumbers:
 
 
 class TestProjectorMaskAngles:
-    """``horizon.el_deg``/``apod_deg`` under ``projector_mask``: read by
-    nothing, so refused in the text pass with ``build_beam``'s own sentence."""
+    """``horizon.el_deg``/``apod_deg`` under ``projector_mask`` or ``none``:
+    read by nothing, so refused in the text pass with ``build_beam``'s own
+    sentence."""
 
     @staticmethod
     def _masked(**angles):
@@ -508,12 +509,13 @@ class TestProjectorMaskAngles:
         return preflight_document(resources=section)
 
     def test_it_is_the_builders_sentence_one_phase_early(self):
-        from rheplicant.config.kinds.beams import _projector_mask_angles
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
 
         found = _findings(self._masked(apod_deg=5.0), "A1")
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
-        assert found[0].message == _projector_mask_angles(
-            "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0})
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0},
+            "projector_mask")
         assert "is read only by horizon.mode: truncate_map" in found[0].message
 
     def test_it_pre_empts_the_number_check_on_the_same_key(self):
@@ -525,6 +527,28 @@ class TestProjectorMaskAngles:
 
     def test_projector_mask_without_the_angles_is_silent(self):
         assert _findings(self._masked(), "A1") == []
+
+    @pytest.mark.parametrize("horizon", [
+        {"mode": "none", "el_deg": 90.0},
+        {"el_deg": 90.0},
+    ], ids=["mode-none", "mode-defaulted"])
+    def test_mode_none_refuses_them_too(self, horizon):
+        """``none`` reads neither angle either, and it is the default."""
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
+
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = dict(horizon)
+        found = _findings(preflight_document(resources=section), "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.horn", horizon, "none")
+        assert "Under horizon.mode: none" in found[0].message
+
+    def test_an_unknown_mode_is_left_to_the_builders_mode_refusal(self):
+        """The fault there is the mode, and the builder names the three."""
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = {"mode": "bogus", "el_deg": 90.0}
+        assert _findings(preflight_document(resources=section), "A1") == []
 
 
 class TestFanPresence:

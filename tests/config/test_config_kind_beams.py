@@ -309,6 +309,24 @@ class TestHorizonTruncation:
                             context)
         assert str(excinfo.value) == expected
 
+    @pytest.mark.parametrize("horizon", [
+        {"mode": "none", "apod_deg": 5.0},
+        {"apod_deg": 5.0},
+    ], ids=["mode-none", "mode-defaulted"])
+    def test_mode_none_refuses_the_two_angles_it_never_reads(
+            self, context, horizon):
+        """``none`` is also the default, so an angle written with no mode at
+        all is the same unread key."""
+        with pytest.raises(ConfigError) as excinfo:
+            build_resources(_beam(horizon=horizon), context)
+        assert str(excinfo.value) == (
+            "resources.beams.horn: horizon.apod_deg is read only by "
+            "horizon.mode: truncate_map, which cuts the beam map itself. "
+            "Under horizon.mode: none, which is also the default, nothing "
+            "cuts this beam. Delete it, or set horizon.mode: truncate_map to "
+            "cut the beam map at the horizon."
+        )
+
     def test_projector_mask_without_the_angles_builds(self, context):
         built = build_resources(_beam(horizon={"mode": "projector_mask"}), context)
         fraction = built.resources["resources.beams.horn"].sky_fraction

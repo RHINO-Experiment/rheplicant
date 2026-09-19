@@ -27,8 +27,11 @@ Three holes in A1's sweep, measured rather than inferred:
   ``:491`` are ``float(horizon.get("el_deg", 90.0))`` and
   ``float(horizon.get("apod_deg", 0.0))``: the keys are swept (``:204``) and
   the VALUES bypass the value grammar.  Measured, ``{value: 0.1, unit: rad}``
-  arrives as a bare ``TypeError`` from inside the build, and under
-  ``horizon.mode`` other than ``truncate_map`` it is never read at all.
+  arrives as a bare ``TypeError`` from inside the build.  Under
+  ``horizon.mode`` ``none`` or ``projector_mask`` neither angle is read at
+  all, and there the key itself is refused
+  (``kinds/beams.py::_unread_horizon_angles``) before its value is asked
+  about.
 
 **Every check here runs on the base document AND on each declared variant
 merged over it.**  That is the 2C shape-4 lesson: a capability key, a run
@@ -58,7 +61,7 @@ from typing import Any
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
-from rheplicant.config.kinds.beams import _projector_mask_angles
+from rheplicant.config.kinds.beams import _unread_horizon_angles
 from rheplicant.config.preflight import register
 
 #: The eight keys schema §8 reserves at capability 3 or 4 -> (capability,
@@ -230,9 +233,10 @@ def _run_option_keys(document) -> Iterable[Finding]:
 def _task3_horizon_in(layer) -> Iterable[Finding]:
     """A1: a horizon angle that is not a plain number, on one layer.
 
-    Under ``horizon.mode: projector_mask`` either angle is refused outright,
-    in ``kinds/beams.py::_projector_mask_angles``' words: nothing reads it,
-    so its shape is not the fault and the number check stands down.
+    Under ``horizon.mode: projector_mask`` or ``none`` (also the default)
+    either angle is refused outright, in
+    ``kinds/beams.py::_unread_horizon_angles``' words: nothing reads it, so
+    its shape is not the fault and the number check stands down.
     """
     resources = layer.get("resources")
     beams = resources.get("beams") if isinstance(resources, Mapping) else None
@@ -244,7 +248,8 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
         horizon = spec.get("horizon")
         if not isinstance(horizon, Mapping):
             continue
-        problem = _projector_mask_angles(f"resources.beams.{name}", horizon)
+        problem = _unread_horizon_angles(
+            f"resources.beams.{name}", horizon, horizon.get("mode", "none"))
         if problem is not None:
             yield refuse("A1", longest_legal_prefix(
                 f"resources.beams.{name}.horizon"), problem)
@@ -261,8 +266,7 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
                     "kinds/beams.py hands both horizon angles straight to "
                     "float(), so the value grammar never reaches here and a "
                     "value node arrives as a bare TypeError from inside the "
-                    "build -- or, under horizon.mode other than truncate_map, "
-                    "is never read at all (check A1).")
+                    "build (check A1).")
 
 
 @register("A1.horizon")

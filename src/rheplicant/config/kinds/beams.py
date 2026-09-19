@@ -289,14 +289,14 @@ def build_beam(name: str, spec: dict, context: ResolutionContext) -> Beam:
             f"{type(horizon).__name__} ({horizon!r})."
         )
     check_unknown_keys(name, horizon, frozenset({"mode", "el_deg", "apod_deg"}), label="horizon:")
-    problem = _projector_mask_angles(name, horizon)
-    if problem is not None:
-        raise ConfigError(problem)
     mode = (
         horizon["mode"]
         if "mode" in horizon
         else context.use_default("resources.beams[].horizon.mode", "none")
     )
+    problem = _unread_horizon_angles(name, horizon, mode)
+    if problem is not None:
+        raise ConfigError(problem)
     if mode == "truncate_map":
         maps, fraction = _truncate(name, maps, horizon, context)
     elif mode not in ("none", "projector_mask"):
@@ -703,34 +703,53 @@ def _horizon_angle(
     return value
 
 
-def _projector_mask_angles(name: str, horizon: Mapping[str, Any]) -> str | None:
-    """``horizon.el_deg``/``apod_deg`` under ``projector_mask``: read by nothing.
+def _unread_horizon_angles(
+    name: str, horizon: Mapping[str, Any], mode: Any
+) -> str | None:
+    """``horizon.el_deg``/``apod_deg`` under a mode that never reads them.
 
     :func:`_truncate` is the only reader of either angle.  Under
     ``projector_mask`` the cut belongs to the projector, whose own ``el_deg``
-    (its pointing) and ``apod_deg`` decide it, so an angle written here would
-    be dropped without a word.  Refused rather than ignored, as
-    ``check_unknown_keys`` refuses a key this layer would not read.
+    (its pointing) and ``apod_deg`` decide it; under ``none``, which is also
+    the default, nothing cuts the beam.  Either way an angle written here
+    would be dropped without a word, so it is refused rather than ignored,
+    as ``check_unknown_keys`` refuses a key this layer would not read.  Any
+    other ``mode`` answers ``None``: ``truncate_map`` reads both, and an
+    unknown mode is ``build_beam``'s own refusal, which names the three.
 
     Extracted so ``preflight/document.py``'s A1.horizon asks the same
     question of the text before the beam is read; the sentence lives here.
 
+    Args:
+        mode: the effective mode -- the written one, or ``"none"`` when the
+            key is absent.
+
     Returns:
         The refusal, or ``None`` when the entry is fine.
     """
-    if horizon.get("mode") != "projector_mask":
+    if mode not in ("none", "projector_mask"):
         return None
     written = [key for key in ("el_deg", "apod_deg") if key in horizon]
     if not written:
         return None
     keys = " and ".join(f"horizon.{key}" for key in written)
     verb, pronoun = ("is", "it") if len(written) == 1 else ("are", "them")
+    if mode == "projector_mask":
+        remedy = (
+            "Under projector_mask the cut is the projector's: its "
+            "horizon_mask: true applies it at the projector's own el_deg and "
+            "apodises it by the projector's own apod_deg. Delete "
+            f"{pronoun} here, and set apod_deg on the projector for a taper."
+        )
+    else:
+        remedy = (
+            "Under horizon.mode: none, which is also the default, nothing "
+            f"cuts this beam. Delete {pronoun}, or set horizon.mode: "
+            "truncate_map to cut the beam map at the horizon."
+        )
     return (
         f"{name}: {keys} {verb} read only by horizon.mode: truncate_map, which "
-        "cuts the beam map itself. Under projector_mask the cut is the "
-        "projector's: its horizon_mask: true applies it at the projector's own "
-        "el_deg and apodises it by the projector's own apod_deg. Delete "
-        f"{pronoun} here, and set apod_deg on the projector for a taper."
+        f"cuts the beam map itself. {remedy}"
     )
 
 
