@@ -419,3 +419,27 @@ def test_a_websocket_handshake_from_its_own_or_no_origin_passes(origin) -> None:
     sent, reached = _drive_guard(_raw_scope("websocket", headers))
     assert sent == []
     assert len(reached) == 1
+
+
+@pytest.mark.parametrize(
+    "hosts",
+    [
+        ["attacker.example:8000", "127.0.0.1:8000"],
+        ["127.0.0.1:8000", "attacker.example:8000"],
+        ["127.0.0.1:8000", "127.0.0.1:8000"],
+    ],
+)
+@pytest.mark.parametrize("kind", ["http", "websocket"])
+def test_more_than_one_host_header_is_refused(kind, hosts) -> None:
+    """Which copy a server or proxy reads is not fixed, so two Host headers
+    are refused even when both are allowed."""
+    extra = {"method": "GET"} if kind == "http" else {}
+    sent, reached = _drive_guard(
+        _raw_scope(kind, [("host", host) for host in hosts], **extra)
+    )
+    assert reached == []
+    if kind == "http":
+        assert sent[0]["status"] == 400
+        assert sent[1]["body"] == b"Invalid Host header."
+    else:
+        assert sent == [{"type": "websocket.close", "code": 1008}]
