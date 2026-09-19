@@ -877,12 +877,14 @@ class PlanDiagnostics:
             ``None`` when it had none. ``None`` for a draw.
         distance_bound: the last Newton decrement's upper bound, in posterior
             sigma: ``sqrt(g^T H^-1 g)`` at the returned point plus the error
-            its conjugate gradients may have left (see :func:`_certify`), so
+            its solve may have left (see :func:`_certify`), so
             at most ``sqrt(2 gap_tol)`` when :attr:`converged` is ``True``.
             ``inf`` when the residual could not bound it; ``None`` when no
             decrement was computed, and for a draw.
-        certificate_iterations: the conjugate-gradient iterations the last
-            decrement took. ``None`` as for :attr:`distance_bound`.
+        certificate_iterations: the Hessian-vector products the last decrement
+            took: its conjugate-gradient iterations, or one per latent where
+            it formed the Hessian instead. ``None`` as for
+            :attr:`distance_bound`.
         certificate_attempts: how many decrements the run computed (0 when no
             sweep was a candidate). ``None`` for a draw.
         solve_tol: the closed-form blocks' CG tolerance at the end of the run,
