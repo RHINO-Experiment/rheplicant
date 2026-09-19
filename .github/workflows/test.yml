@@ -88,14 +88,16 @@ jobs:
           uv pip install editables
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
 
-      - name: Try to install MomentRFI (Experimental)
-        # MomentRFI declares MomentEmu, which is not on PyPI, and this line does
-        # not install MomentEmu, so it does not resolve. MomentRFI is
-        # Experimental and nothing requires it. This is the only step allowed
-        # to fail; the completeness report below prints whether MomentRFI
-        # arrived without failing on it.
-        continue-on-error: true
-        run: uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+      - name: Install MomentRFI and MomentEmu
+        # Required. Neither is on PyPI, and MomentRFI declares MomentEmu, so
+        # the two are installed from git in one command: MomentRFI named alone
+        # does not resolve. With both present tests/radio/test_flagging_momentrfi.py
+        # runs all 13 of its tests; without MomentRFI ten of them skip
+        # (measured 2026-09-19).
+        run: >-
+          uv pip install
+          "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
+          "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 
       # The two TypeScript typecheck guards shell out to `node_modules/.bin/tsc`
       # and raised FileNotFoundError without it -- not a skip, a crash, which
@@ -132,26 +134,23 @@ jobs:
         # README.
         #
         # The package check does fail the step, after the count is printed,
-        # when a REQUIRED package is absent: each of these is installable on
+        # when a required package is absent: each of these is installable on
         # this runner, and without one the suite skips modules and still
-        # passes. MomentRFI is reported and never required (see the step that
-        # tries to install it).
+        # passes.
         run: |
           status=0
           .venv/bin/python -c "
           import importlib, sys
-          required = ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm')
-          experimental = ('MomentRFI',)
+          required = ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm',
+                      'MomentRFI')
           missing = []
-          for name in required + experimental:
+          for name in required:
               try:
                   importlib.import_module(name)
                   print(f'{name:16s} present')
               except Exception as error:
-                  label = 'ABSENT, experimental' if name in experimental else 'ABSENT'
-                  print(f'{name:16s} {label}  ({type(error).__name__})')
-                  if name in required:
-                      missing.append(name)
+                  print(f'{name:16s} ABSENT  ({type(error).__name__})')
+                  missing.append(name)
           if missing:
               print('required packages absent: ' + ', '.join(missing))
               sys.exit(1)
@@ -195,21 +194,24 @@ jobs:
           uv pip install editables
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
 
-      - name: Try to install MomentRFI (Experimental)
-        # MomentRFI declares MomentEmu, which is not on PyPI; see the Suite
-        # job's step of the same name.
-        continue-on-error: true
-        run: uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+      - name: Install MomentRFI and MomentEmu
+        # Required; see the Suite job's step of the same name.
+        run: >-
+          uv pip install
+          "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
+          "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 
       - name: Require the complete environment
-        # The Suite job's completeness report fails on the same six names. This
-        # job measures the coverage figure, and a required package that did not
-        # arrive would lower it through skips rather than through failures.
+        # The Suite job's completeness report fails on the same seven names.
+        # This job measures the coverage figure, and a required package that
+        # did not arrive would lower it through skips rather than through
+        # failures.
         run: |
           .venv/bin/python -c "
           import importlib, sys
           missing = []
-          for name in ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm'):
+          for name in ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm',
+                       'MomentRFI'):
               try:
                   importlib.import_module(name)
               except Exception as error:

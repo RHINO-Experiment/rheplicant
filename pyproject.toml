@@ -114,10 +114,13 @@ numpyro = ["numpyro>=0.21,<0.22"]
 # nothing and fails at the build backend.
 cal = ["rhino-cal-jax"]
 # MomentRFIFlaggingOperator bridges to the numpy MomentRFI package through
-# jax.pure_callback. MomentRFI is not on PyPI, so this extra names the
-# requirement rather than resolving it:
-#   uv pip install -e <path-to-MomentRFI>
-#   uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+# jax.pure_callback. Neither MomentRFI nor MomentEmu, which MomentRFI
+# declares, is on PyPI, so this extra names the requirement rather than
+# resolving it. Install the two together; MomentRFI named alone does not
+# resolve:
+#   uv pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" \
+#                  "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+# or install each editable from its own checkout, MomentEmu first.
 # The threshold-based FlaggingOperator needs none of it.
 rfi = ["MomentRFI", "MomentEmu"]
 # read_rhino_observation() reads the RHINO observation HDF5 through h5py. Unlike

@@ -210,10 +210,9 @@ It also means **`pyuvdata`** (the `uvbeam` extra) and **`pygdsm`**, both on
 PyPI, which `tests/config` importorskips; **`panel`** (the `gui-panel` extra),
 which the seven GUI spike tests in `tests/gui/test_panel_spike.py` and
 `tests/gui/test_candidate_parity.py` importorskip, and which leaves with the
-spike when it is removed as scheduled; **`matplotlib`**, which rhino-cal's
-`gcr.data_processing` imports, so the three `DataHandler` comparisons in
-`tests/radio/test_ingestion_vs_reference.py` need it; and the **Node
-toolchain**, `npm` on `PATH` and `npm ci` run in
+spike when it is removed as scheduled; **`MomentRFI`** with **`MomentEmu`**,
+below; **`matplotlib`**, which rhino-cal's `gcr.data_processing` imports; and
+the **Node toolchain**, `npm` on `PATH` and `npm ci` run in
 `tools/config_gui_spike/react`, without which
 `tests/gui/test_typescript_gates.py` skips. Two sets of tests are opt-in by
 environment variable because their data is not redistributable:
@@ -221,12 +220,22 @@ environment variable because their data is not redistributable:
 (`tests/radio/test_beams.py`), and `RHEPLICANT_RHINO_CAL` names a rhino-cal
 checkout (`tests/radio/test_ingestion_vs_reference.py`).
 
-**MomentRFI stays absent and is Experimental.** It declares MomentEmu, which is
-not on PyPI, so it does not install from an index; CI tries it and never
-requires it. The three `DataHandler` comparisons also reach MomentRFI through
-rhino-cal's `gcr` imports, so they skip without it even where matplotlib and
-`RHEPLICANT_RHINO_CAL` are both present (measured 2026-09-19: `No module
-named 'MomentRFI'`).
+**MomentRFI and MomentEmu install from git, together.** Neither is on PyPI,
+and MomentRFI declares MomentEmu, so naming MomentRFI alone does not resolve;
+one command with both does:
+
+```bash
+uv pip install --python .venv/bin/python "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+```
+
+With both installed, `tests/radio/test_flagging_momentrfi.py` runs all 13 of
+its tests; without MomentRFI ten of them skip. CI requires MomentRFI like the
+other packages above. The three `DataHandler` comparisons in
+`tests/radio/test_ingestion_vs_reference.py` need both MomentRFI and
+matplotlib, because rhino-cal's `gcr` imports each, as well as
+`RHEPLICANT_RHINO_CAL`. Measured 2026-09-19 in a scratch venv holding all
+three: the file's five tests pass; with MomentRFI absent the three skip on
+`No module named 'MomentRFI'`.
 
 **bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
 capability floor is 0.6, the highest release whose surface this package uses:
@@ -305,8 +314,8 @@ displayed by two different components.
 
 Note also that **CI's coverage was lower than a local run's** (88.96 % against
 89.39 %), and the reason first written here — that `MomentRFI` cannot install
-on the runner — was **wrong**. `MomentRFI` is absent in BOTH environments, so
-it explains no difference at all; that sentence was copied from the handover
+on the runner — was **wrong**. `MomentRFI` was absent in BOTH environments
+then, so it explained no difference at all; that sentence was copied from the handover
 rather than measured, which is exactly the tax this file keeps recording.
 
 **Measured 2026-08-28, per file.** The whole gap is 132 statements and it has
