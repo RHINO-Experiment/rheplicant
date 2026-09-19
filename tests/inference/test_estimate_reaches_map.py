@@ -682,6 +682,46 @@ class TestTheNewtonDecrement:
         attempt = _certify({}, cond, values, 0.005, 1)
         assert attempt.estimate < 0.1 and not attempt.certified
 
+    def test_a_complex_latent_enters_as_its_real_and_imaginary_parts(self):
+        """``f = Re(d^H H d) / 2`` for Hermitian ``H = A + iB`` is the real
+        quadratic form of ``[[A, -B], [B, A]]`` in ``(Re, Im)``, and that is
+        the Hessian the decrement must measure: 2n real latents, not n.
+
+        ``SamplingPlan.estimate`` cannot carry a complex latent today —
+        ``float(chi2)`` raises on the complex chi-squared
+        ``Conditioning.chi2`` returns, at this commit and at T-002's baseline
+        alike — so this asks the decrement's program directly.
+        """
+        from rheplicant.inference import engines
+        from rheplicant.inference.engines import _decrement_program
+
+        n, rng = 5, np.random.default_rng(4)
+        symmetric = rng.standard_normal((n, n))
+        symmetric = symmetric @ symmetric.T + n * np.eye(n)
+        skew = rng.standard_normal((n, n))
+        skew = skew - skew.T
+        hermitian = symmetric + 1j * skew
+        real_form = np.block([[symmetric, -skew], [skew, symmetric]])
+        assert np.all(np.linalg.eigvalsh(real_form) > 0), "the fixture must be convex"
+        minimum = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+        offset = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+
+        class Complex:
+            def neg_log_posterior(self, values):
+                gap = values["z"] - jnp.asarray(minimum)
+                return 0.5 * jnp.real(jnp.conj(gap) @ (jnp.asarray(hermitian) @ gap))
+
+        point = minimum + 0.01 * offset
+        values = {"z": jnp.asarray(point)}
+        lambda2, rho, products, status, _ = _decrement_program(Complex(), values)(values)
+        parts = np.concatenate([(point - minimum).real, (point - minimum).imag])
+        slope = real_form @ parts
+        exact = slope @ np.linalg.solve(real_form, slope)
+        assert int(status) == engines.DECREMENT_CONVERGED
+        assert int(products) == 2 * n + 1, "one product per REAL degree of freedom"
+        assert float(lambda2) == pytest.approx(exact, rel=1e-10)
+        assert float(rho) < 1e-10
+
     def test_an_early_stop_cannot_turn_a_refusal_into_a_certificate(self, monkeypatch):
         """The guarantee, made visible by stopping the solve early.
 
