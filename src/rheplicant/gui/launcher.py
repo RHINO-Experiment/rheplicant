@@ -334,7 +334,10 @@ def _parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help=(
             "a host name the editor answers to besides loopback; repeatable, "
-            "and required with --allow-remote"
+            "and required with --allow-remote. Also accepted without "
+            "--allow-remote on a loopback bind, for a reverse proxy on this "
+            "machine. A page served from a listed name can reach the editor "
+            "through DNS rebinding, so list only names whose DNS you control"
         ),
     )
     return parser

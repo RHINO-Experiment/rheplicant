@@ -443,3 +443,13 @@ def test_more_than_one_host_header_is_refused(kind, hosts) -> None:
         assert sent[1]["body"] == b"Invalid Host header."
     else:
         assert sent == [{"type": "websocket.close", "code": 1008}]
+
+
+def test_the_allowed_host_help_warns_that_a_listed_name_can_be_rebound(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        launcher.main(["--help"])
+    assert excinfo.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())
+    entry = text.rsplit("--allowed-host NAME", 1)[1]
+    assert "without --allow-remote" in entry
+    assert "DNS rebinding" in entry

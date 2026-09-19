@@ -217,9 +217,13 @@ for https. A page served from another port on the same machine is therefore
 refused. A request without an `Origin`, such as one from `curl` or a script,
 is accepted.
 
-`--allowed-host` is repeatable, takes a name or IP address without a scheme or
-port, and is also how a reverse proxy on the same machine that forwards its own
-host name is admitted.
+`--allowed-host` is repeatable and takes a name or IP address without a scheme
+or port. It is also accepted without `--allow-remote` on a loopback bind, which
+is how a reverse proxy on the same machine that forwards its own host name is
+admitted. Every listed name is trusted the way loopback is: a page served from
+that name, with or without `--allow-remote`, can reach the editor through DNS
+rebinding by whoever controls that name's DNS records. List only names whose
+DNS you control.
 
 `--allow-remote` is an acknowledgement, not a security feature, and
 `--allowed-host` limits which names reach the editor, not who does. Put an
