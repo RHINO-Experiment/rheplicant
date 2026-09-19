@@ -159,13 +159,23 @@ class _HostGuard:
         host, port = target
         if port is None:
             port = _DEFAULT_PORTS.get(scope.get("scheme", "http"))
-        if scope.get("method", "GET") not in _SAFE_METHODS and any(
+        if _may_change_state(scope) and any(
             _origin(origin) != (host, port)
             for origin in _header_values(scope, b"origin")
         ):
             await _refuse(scope, send, 403, "Cross-origin request refused.")
             return
         await self.app(scope, receive, send)
+
+
+def _may_change_state(scope) -> bool:
+    """Whether the Origin rule applies to this scope.
+
+    A websocket scope has no method, and browsers open cross-origin
+    websockets without asking the server first, so a handshake is treated
+    like a write rather than like a GET.
+    """
+    return scope["type"] == "websocket" or scope["method"] not in _SAFE_METHODS
 
 
 def _header_values(scope, name: bytes) -> list[str]:

@@ -15,6 +15,8 @@ it would have served.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from rheplicant.gui import launcher
@@ -352,3 +354,68 @@ def test_an_allowed_host_is_accepted_beside_loopback_and_nothing_else(
 def test_a_single_string_is_not_taken_for_a_list_of_host_names() -> None:
     with pytest.raises(TypeError, match="not one string"):
         launcher.create_editor_app(allowed_hosts="gui.example.org")
+
+
+def _raw_scope(kind: str, headers: list[tuple[str, str]], **extra) -> dict:
+    scope = {
+        "type": kind,
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "scheme": "ws" if kind == "websocket" else "http",
+        "path": "/ws",
+        "raw_path": b"/ws",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(name.encode("latin-1"), value.encode("latin-1")) for name, value in headers],
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    return {**scope, **extra}
+
+
+def _drive_guard(scope: dict) -> tuple[list[dict], list[dict]]:
+    """Run the launcher's guard on one raw ASGI scope.
+
+    Returns what the guard sent and the scopes that reached the app behind
+    it. The guard is driven directly because a websocket that passes it
+    would reach the bundled static files, which serve HTTP only.
+    """
+    reached: list[dict] = []
+    sent: list[dict] = []
+
+    async def app(inner_scope, receive, send) -> None:
+        reached.append(inner_scope)
+
+    async def receive() -> dict:
+        return {"type": "websocket.connect"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    guard = launcher._HostGuard(app, allowed=launcher._allowed_host_names(()))
+    asyncio.run(guard(scope, receive, send))
+    return sent, reached
+
+
+@pytest.mark.parametrize(
+    "origin", [FOREIGN_ORIGIN, "http://127.0.0.1:9999", "http://localhost:8000", "null"]
+)
+def test_a_websocket_handshake_from_another_origin_is_closed(origin) -> None:
+    """A websocket scope carries no method, and browsers do not apply the
+    same-origin policy to websockets, so the handshake is held to the
+    Origin rule of a write."""
+    sent, reached = _drive_guard(
+        _raw_scope("websocket", [("host", "127.0.0.1:8000"), ("origin", origin)])
+    )
+    assert sent == [{"type": "websocket.close", "code": 1008}]
+    assert reached == []
+
+
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:8000", None])
+def test_a_websocket_handshake_from_its_own_or_no_origin_passes(origin) -> None:
+    headers = [("host", "127.0.0.1:8000")]
+    if origin is not None:
+        headers.append(("origin", origin))
+    sent, reached = _drive_guard(_raw_scope("websocket", headers))
+    assert sent == []
+    assert len(reached) == 1
