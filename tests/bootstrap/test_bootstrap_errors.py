@@ -135,3 +135,19 @@ def test_destination_child_and_nested_preserve_the_parent_contract():
         DestinationDescriptor("", "model_field", "noise")
     with pytest.raises(ValueError):
         DestinationDescriptor("model", "model_field", "")
+
+
+def test_the_assembly_refusal_is_a_neutral_class_too():
+    """The command line classifies ``AssemblyError`` as a refusal, and the
+    bootstrap may not import ``rheplicant`` to name it; so the class lives
+    beside ``ConfigError`` and ``rheplicant.core.errors`` re-exports it."""
+    from _rheplicant_bootstrap.errors import REFUSALS
+    from _rheplicant_bootstrap.errors import AssemblyError as NeutralAssemblyError
+    from rheplicant.core.errors import AmbiguousNodeError, AssemblyError
+
+    assert AssemblyError is NeutralAssemblyError
+    assert AssemblyError.__module__ == "rheplicant.core.errors"
+    assert issubclass(AssemblyError, DirtError)
+    assert issubclass(AssemblyError, ValueError)
+    assert issubclass(AmbiguousNodeError, AssemblyError)
+    assert REFUSALS == (ConfigError, AssemblyError)

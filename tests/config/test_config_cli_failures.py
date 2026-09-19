@@ -169,3 +169,96 @@ def test_a_malformed_base_on_run_publishes_a_refused_audit(tmp_path, capsys):
     assert "selecting this variant" not in err
     assert "A1.variants" not in err
     assert len(tuple(tmp_path.glob("result.refused-*"))) == 1
+
+
+def _model(value, model):
+    value["model"] = model
+    return value
+
+
+#: Two sources and a transform feeding one junction: ``beam_spill`` reaches
+#: ``t_ant_sum`` with no source upstream, which the fold refuses.
+_UNSOURCED_BRANCH = {
+    "atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}},
+    "beam_spill": {"sky_fraction": {"value": 0.95, "unit": "dimensionless"},
+                   "t_ground": {"value": 290.0, "unit": "K"}},
+}
+_UNSOURCED_MESSAGE = (
+    "Transform 'beam_spill' feeds junction 't_ant_sum' with no live source "
+    "upstream"
+)
+
+
+def test_an_assembly_refused_while_building_is_a_refusal_on_validate(
+        tmp_path, capsys):
+    """N-1(b): exit 2 and the assembly's own sentence, never exit 1 with a
+    traceback.  ``AssemblyError`` is how the fold refuses an operator set,
+    and on this route every operator set is a user's document."""
+    from _rheplicant_bootstrap.cli import main
+
+    config = tmp_path / "config.yaml"
+    write_document(config, _model(document(), dict(_UNSOURCED_BRANCH)))
+    assert main(["validate", str(config)]) == 2
+    err = capsys.readouterr().err
+    assert _UNSOURCED_MESSAGE in err
+    assert "Traceback" not in err
+
+
+def test_an_assembly_refused_while_building_publishes_a_refused_audit(
+        tmp_path, capsys):
+    import json
+
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, _model(document(output=target),
+                                  dict(_UNSOURCED_BRANCH)))
+    assert main(["run", str(config)]) == 2
+    err = capsys.readouterr().err
+    assert _UNSOURCED_MESSAGE in err
+    assert "Traceback" not in err
+    (sibling,) = tuple(tmp_path.glob("result.refused-*"))
+    assert f"refused audit: {sibling}\n" in err
+    provenance = json.loads((sibling / "provenance.json").read_bytes())
+    assert provenance["status"] == "refused"
+
+
+def test_an_assembly_refused_while_running_is_a_refusal(tmp_path, capsys):
+    """The call-time guard: the twin assembles, and ``Assembly.__call__``
+    refuses the state it is handed.  Here a source model meets a recording,
+    which ``test_config_document.py`` pins as the assembly's refusal on the
+    Python route; on the command line the run's own row is now "refused", so
+    the published sibling is a refused audit and the exit is 2."""
+    import json
+
+    pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
+    from _rheplicant_bootstrap.cli import main
+    from tests.config.test_config_section_ingest import make_file
+
+    make_file(tmp_path / "obs.hd5f")
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, {
+        "schema_version": 1,
+        "runtime": {"seed": 1},
+        "observation": {
+            "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
+                          "freq_unit": "MHz", "settle_seconds": 0.0},
+            "switching": {"order": ["antenna", "internal_load",
+                                    "heated_load"]},
+        },
+        "model": {"global_signal": {"depth": {"value": 0.5, "unit": "K"},
+                                    "centre": {"value": 75.0, "unit": "MHz"},
+                                    "width": {"value": 5.0, "unit": "MHz"}}},
+        "outputs": {"dir": str(target)},
+        "runs": [{"kind": "forward"}],
+    })
+    assert main(["run", str(config)]) == 2
+    err = capsys.readouterr().err
+    assert "generates its own data" in err
+    assert "Traceback" not in err
+    (sibling,) = tuple(tmp_path.glob("result.refused-*"))
+    assert f"refused audit: {sibling}\n" in err
+    diagnostics = json.loads((sibling / "diagnostics.json").read_bytes())
+    assert diagnostics["status"] == "refused"

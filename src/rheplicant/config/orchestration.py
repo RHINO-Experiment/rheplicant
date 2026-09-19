@@ -52,7 +52,7 @@ from _rheplicant_bootstrap.capture import (
     CaptureService,
     captured_input_json,
 )
-from _rheplicant_bootstrap.errors import DirtError
+from _rheplicant_bootstrap.errors import REFUSALS, DirtError
 from _rheplicant_bootstrap.layering import (
     DeletionRecord,
     OriginNode,
@@ -975,9 +975,12 @@ def execute_one_parsed(
     The configured build is the ONE prepared layer whose identity is
     ``parsed.layer.identity`` -- an absent, duplicated or inconsistent target
     is a wiring error, and a variant-targeted run is never defaulted back to
-    the base build.  The classification is the legacy one: a captured
-    ``expect: refuse`` is a successful row with the error on the result; an
-    uncaptured ``ConfigError`` refuses; any other ``Exception`` is an error.
+    the base build.  The classification: a captured ``expect: refuse`` is a
+    successful row with the error on the result; an uncaptured
+    ``ConfigError`` or ``AssemblyError`` refuses (the bootstrap's
+    ``REFUSALS``: the assembly refusing the operator set this document
+    declared, as when a twin with sources is handed a recording); any other
+    ``Exception`` is an error.
     """
     label = parsed.layer.prefix or "base"
     matches = [layer for layer in prepared.layers if layer.layer.identity == parsed.layer.identity]
@@ -1047,7 +1050,7 @@ def execute_one_parsed(
         try:
             handler.pre_execute(parsed, handler_context, prior)
             product = handler.execute(parsed, handler_context, prior)
-        except ConfigError as caught:
+        except REFUSALS as caught:
             error = caught
             status = "refused"
         except Exception as caught:
