@@ -839,8 +839,11 @@ def _reject_a_foreign_block(
     # Measured in tests/evidence/test_chain_foreign_block_band.py.
     gram = float(np.max(np.abs(expected[0])))
     shared = max(gram, float(np.max(np.abs(expected[1]))), abs(expected[2]))
+    # `hypot.reduce`, not `sqrt(z @ z)`: the square underflows to 0 below
+    # |z| ~ 1e-154 in float64, which set this band to 0 and refused an honest
+    # block on its roundoff.
     target = np.asarray(term.info.target, dtype=float)
-    cross = min(shared, float(np.sqrt(gram * float(target @ target))))
+    cross = min(shared, float(np.sqrt(gram)) * float(np.hypot.reduce(target)))
     # `not (difference <= tolerance)`, and `isfinite(tolerance)` beside it: NaN
     # loses both comparisons, so the plain `>` form would wave a poisoned block
     # through, and an epoch whose own coefficients are inf makes the tolerance

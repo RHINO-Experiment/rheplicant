@@ -115,6 +115,23 @@ def _one_block_memory(block_term, epoch_term):
     return ChainMemory(stored.factorization, stored.stacked, _memory().remember(epoch_term)._epochs)
 
 
+@pytest.mark.parametrize("target_scale", [1e-100, 1e-160, 1e-200, 1e-300])
+def test_an_honest_block_with_a_tiny_target_is_accepted(target_scale):
+    """``z.z`` underflows to 0 below ``|z|`` of about 1e-154, which made the
+    cross term's band 0 and refused an honest block on its roundoff. The
+    norm is taken without squaring."""
+    epoch = _term(R0, Z0 * target_scale, 0.0)
+    assert tuple(_one_block_memory(epoch, epoch).epoch_ids) == ("e",)
+
+
+def test_a_foreign_block_with_a_tiny_target_is_still_refused():
+    """The negative control: the cross term 10 % off at the same scale."""
+    target = Z0 * 1e-200
+    moved = target + 0.1 * np.linalg.norm(Z0) * 1e-200 * np.array([1.0, 0.0, 0.0])
+    with pytest.raises(StateValidationError, match="quadratic forms differ"):
+        _one_block_memory(_term(R0, moved, 0.0), _term(R0, target, 0.0))
+
+
 @pytest.mark.parametrize("gram", GRAM_SCALES)
 @pytest.mark.parametrize("constant", CONSTANTS)
 class TestEveryScaleRatio:
