@@ -813,8 +813,8 @@ class TestConvergence:
         assert est.diagnostics.sweeps == 2
         assert est.diagnostics.chi2.shape == (3,)
 
-    def test_an_increase_beyond_the_floor_is_never_convergence(self, state):
-        """A chi-squared rise is not a stop, and in float32 this run cannot stop.
+    def test_an_increase_of_chi_squared_is_not_a_stop(self, state):
+        """A chi-squared rise is not convergence, and the run goes on past it.
 
         Until T-002 the rule was a DECREASE of the joint chi-squared, so any
         sweep on which chi-squared rose counted as converged. Here a tight
@@ -822,13 +822,13 @@ class TestConvergence:
         half its value at sweep 58 while the objective is still falling: the
         old rule stopped there, 3.6 posterior sigma from the MAP (measured).
 
-        The relative change test then stopped at sweep 73, 0.74 sigma from
-        the MAP in this module's float32. The gap certificate refuses
-        instead: the prior terms are ~1e4 nats, so a decrease is resolved
-        only to ~0.04 nats, above what 0.1 sigma needs at this contraction.
-        In float64 the same plan converges at sweep 106, 0.04 sigma off.
+        The relative change test then stopped at sweep 73, 0.74 sigma off in
+        this module's float32. The Newton decrement refuses that point and
+        the run continues: measured, it stops at sweep 95, 0.069 sigma from
+        the MAP, having tightened the conjugate solves twice along the way.
         """
-        space = basis_space(gain_prior=dist.Normal(jnp.ones(N_TIME), 0.01))
+        gain_prior = dist.Normal(jnp.ones(N_TIME), 0.01)
+        space = basis_space(gain_prior=gain_prior)
         pipeline = make_pipeline()
         observed = observed_of(space, pipeline, TRUTH)
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
@@ -842,13 +842,37 @@ class TestConvergence:
         # the objective was still falling where chi-squared first rose
         assert objective[rose[0] - 1] - objective[rose[0]] > 1.0, objective[rose[0]]
 
-        # The refusal sentence is the one test_the_JOINT_chi2_sees_... pins,
-        # asserted the same way, so the refusal census is unchanged.
-        with pytest.raises(ParameterSpaceError) as refused:
-            plan.estimate(pipeline, state, observed, **common)
-        message = str(refused.value)
-        assert "did not converge" in message
-        assert "resolved only to" in message and "JAX_ENABLE_X64=1" in message
+        estimate = plan.estimate(pipeline, state, observed, **common)
+        diagnostics = estimate.diagnostics
+        assert diagnostics.converged is True
+        assert diagnostics.sweeps > rose[0], (diagnostics.sweeps, rose[0])
+        exact, precision = _basis_map(observed, sigma=NOISE, gain_prior=gain_prior)
+        distance = _posterior_sigmas_from(estimate, exact, precision)
+        assert distance < 0.1, (distance, diagnostics.sweeps)
+
+    def test_an_inexact_inner_solve_is_tightened_until_it_certifies(
+        self, basis_setup, state
+    ):
+        """The second review's MEDIUM, in float32. At noise 0.30 the sweep's
+        fixed point at the default ``solve_tol = 1e-6`` is 0.113 posterior
+        sigma from the MAP (the reviewer's float64 measurement), so a stop
+        there cannot be certified. The run tightens the closed-form blocks'
+        CG when the objective rises beyond its resolution or the decrement
+        refuses a candidate, down to the float32 floor of two machine
+        epsilons; measured, it converges at sweep 111, 0.072 sigma off.
+        Without the tightening it exhausts 3000 sweeps and refuses.
+        """
+        space, pipeline, _ = basis_setup
+        observed = observed_of(space, pipeline, TRUTH)
+        estimate = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+            pipeline, state, observed, noise=0.30, max_iter=3000, solve_guard=None
+        )
+        diagnostics = estimate.diagnostics
+        assert diagnostics.converged is True
+        assert diagnostics.solve_tol < 1e-6
+        exact, precision = _basis_map(observed, sigma=0.30)
+        distance = _posterior_sigmas_from(estimate, exact, precision)
+        assert distance < 0.1, (distance, diagnostics.sweeps)
 
     def test_the_stop_rule_counts_changes_in_both_directions(self):
         """``_settled`` on hand-made traces: a rise beyond the tolerance is not

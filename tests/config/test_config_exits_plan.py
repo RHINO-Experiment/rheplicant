@@ -271,10 +271,12 @@ class TestAPlanRefusesTheGLSDeclaration:
 
         ``tol: null`` on the estimate, because its subject is the declaration
         and not convergence: the data are drawn at 0.05 K and the likelihood
-        says ``f |mu|`` with ``f = 3.7e-4``, so chi2 is ~4e9 and no float32 run
-        can certify 0.1 posterior sigma of that (T-002's gap certificate
-        refuses it by name). With no convergence test the exit runs its sweeps
-        and returns, which is what "must run" asks.
+        says ``f |mu|`` with ``f = 3.7e-4``, a sigma that depends on the
+        prediction. The conjugate block freezes it, so the sweep's fixed point
+        is not the joint MAP, and T-002's Newton-decrement certificate refuses
+        it by name (measured: 3.7e4 posterior sigma from the objective's
+        minimum). With no convergence test the exit runs its sweeps and
+        returns, which is what "must run" asks.
         """
         doc = document(run)
         doc["inference"]["noise"] = _radiometer(True)

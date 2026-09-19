@@ -305,6 +305,194 @@ def _objective_terms(
     return jnp.sum(residual**2), terms, scales
 
 
+#: Relative residual at which the Newton decrement's conjugate gradients stop,
+#: by working precision (bytes). The attainable level is about ``eps *
+#: kappa``, so float32 asks for less. What the stop costs the decrement is
+#: bounded afterwards from the TRUE residual (see :func:`_decrement_program`),
+#: not assumed from this number.
+_DECREMENT_RTOL: dict[int, float] = {4: 1e-4, 8: 1e-8}
+
+#: Conjugate-gradient iterations the decrement may take: ``4 n + 20`` for
+#: ``n`` flattened latents (exact arithmetic needs ``n``; the rest absorbs
+#: lost orthogonality), capped here. A decrement that has not reached its
+#: residual at the cap certifies nothing.
+_DECREMENT_MAXITER: int = 1000
+
+#: Latents up to which the decrement forms the Hessian from ``n``
+#: Hessian-vector products, :data:`_DECREMENT_BATCH` at a time so memory
+#: stays a few forward passes, and solves it densely. Up to here that costs
+#: no more products than conjugate gradients need on a correlated model, and
+#: it gives the exact condition number the decrement's error bound needs;
+#: above it the solve is conjugate gradients and the condition number an
+#: estimate (see :func:`_decrement_program`).
+_DECREMENT_DENSE_MAX: int = 256
+_DECREMENT_BATCH: int = 16
+
+#: The status of a decrement. ``UNREACHED``: the conjugate gradients did not
+#: reach their residual within the cap. ``NONCONVEX``: a direction of
+#: non-positive curvature, so the point is not near a minimum.
+DECREMENT_CONVERGED, DECREMENT_UNREACHED, DECREMENT_NONCONVEX, DECREMENT_NONFINITE = range(4)
+
+
+def _decrement_program(cond: Conditioning, template: dict[str, jax.Array]) -> Callable:
+    """The Newton decrement of the JOINT objective, jitted once per run.
+
+    Returns ``decrement(values) -> (lambda2, rho, products, status, kappa)``.
+    ``lambda2`` is ``g^T x`` for ``x`` the computed solution of ``H x = g``,
+    ``g`` and ``H`` the gradient and Hessian of
+    :meth:`Conditioning.neg_log_posterior` over every latent, flattened (a
+    complex latent as its real and imaginary parts). For a locally quadratic
+    objective ``sqrt(g^T H^-1 g)`` is the Mahalanobis distance to its minimum
+    in posterior sigma, whatever the number of data and however the sweep's
+    modes mix, which is what a point estimate's certificate needs and what a
+    change of the objective between sweeps cannot give (T-002 second review:
+    a slow mode hidden under a fast one certified 0.5 to 1.0 sigma off).
+
+    Every Hessian product is exact, ``jax.jvp`` of ``jax.grad``. With ``n``
+    latents, up to :data:`_DECREMENT_DENSE_MAX` the Hessian is formed from
+    ``n`` products and solved by an eigendecomposition after scaling by its
+    diagonal ``M``; above it, ``H x = g`` is conjugate gradients from zero,
+    unpreconditioned (``M = I``), stopped at a relative residual of
+    :data:`_DECREMENT_RTOL` or at :data:`_DECREMENT_MAXITER` iterations.
+    ``products`` counts the Hessian-vector products either way.
+
+    **Why an inexact solve cannot flip the verdict.** Let ``r = g - H x`` be
+    the TRUE residual, recomputed with one more product (a recursive residual
+    drifts from it in finite precision), ``rho`` its size relative to ``g``
+    in the ``M^-1`` norm, and ``kappa`` the condition number of ``M^-1/2 H
+    M^-1/2``. Then ``g^T H^-1 g - lambda2 = g^T H^-1 r`` exactly, which by
+    Cauchy-Schwarz in the ``H^-1`` inner product is at most ``rho sqrt(kappa)
+    g^T H^-1 g`` in size. So ``g^T H^-1 g <= lambda2 / (1 - rho sqrt(kappa))``
+    and the caller certifies on that upper bound, never on ``lambda2``;
+    nothing here assumes the solve was exact. The bound is for ``g`` and
+    ``H`` as the working precision computes them; their own rounding is a
+    separate ``eps kappa``, which the caller adds (see
+    :func:`~rheplicant.inference.plan._certify`).
+
+    ``kappa`` is exact (to rounding) on the dense path: the ratio of the
+    scaled Hessian's extreme eigenvalues. On the conjugate-gradient path it
+    is the ratio of the extreme eigenvalues of the iteration's Lanczos matrix,
+    which lie inside the spectrum, so it can only be low; the bound is then
+    as good as that estimate. At float64's ``rtol = 1e-8`` an estimate low by
+    a factor ``F`` hides at most ``1e-8 sqrt(F kappa)`` of the decrement,
+    which stays below 1e-3 of it for ``F kappa <= 1e10``.
+
+    ``status`` is :data:`DECREMENT_CONVERGED` (the dense solve, or conjugate
+    gradients at their residual), :data:`DECREMENT_UNREACHED`,
+    :data:`DECREMENT_NONCONVEX` (``lambda2`` then means nothing) or
+    :data:`DECREMENT_NONFINITE`. Only the first can certify.
+    """
+    flat0, unravel = ravel_pytree(template)
+    complex_ = jnp.iscomplexobj(flat0)
+    size = int(flat0.size)
+
+    def to_real(flat):
+        return jnp.concatenate([flat.real, flat.imag]) if complex_ else flat
+
+    def from_real(vector):
+        if complex_:
+            return unravel(vector[:size] + 1j * vector[size:])
+        return unravel(vector)
+
+    def objective(vector):
+        return cond.neg_log_posterior(from_real(vector))
+
+    slope_of = jax.grad(objective)
+    n = 2 * size if complex_ else size
+    rtol = _DECREMENT_RTOL.get(jnp.dtype(flat0.real.dtype).itemsize, 1e-8)
+    solve = _dense_decrement if n <= _DECREMENT_DENSE_MAX else _iterative_decrement
+
+    @eqx.filter_jit
+    def decrement(values):
+        vector = to_real(ravel_pytree(values)[0])
+        slope = slope_of(vector)
+
+        def curvature(direction):
+            return jax.jvp(slope_of, (vector,), (direction,))[1]
+
+        x, scale, products, status, kappa = solve(curvature, slope, n, rtol)
+        remainder = slope - curvature(x)
+        target = jnp.sum(slope * slope / scale)
+        rho = jnp.sqrt(jnp.sum(remainder * remainder / scale)
+                       / jnp.where(target > 0.0, target, 1.0))
+        lambda2 = jnp.sum(slope * x)
+        status = jnp.where(
+            jnp.all(jnp.isfinite(slope)) & jnp.isfinite(rho) & jnp.isfinite(lambda2),
+            status, DECREMENT_NONFINITE,
+        )
+        return lambda2, rho, products + 1, status, kappa
+
+    return decrement
+
+
+def _dense_decrement(curvature: Callable, slope: jax.Array, n: int, rtol: float):
+    """``H x = g`` from ``n`` Hessian columns, scaled by the diagonal."""
+    del rtol  # the solve is direct; its residual is measured, not targeted
+    unit = jnp.eye(n, dtype=slope.dtype)
+    columns = lax.map(curvature, unit, batch_size=min(n, _DECREMENT_BATCH))
+    hessian = 0.5 * (columns + columns.T)
+    diagonal = jnp.diagonal(hessian)
+    scale = jnp.where(diagonal > 0.0, diagonal, 1.0)
+    root = jnp.sqrt(scale)
+    eigenvalues, vectors = jnp.linalg.eigh(hessian / jnp.outer(root, root))
+    lowest = eigenvalues[0]
+    convex = (lowest > 0.0) & jnp.all(diagonal > 0.0)
+    inverse = jnp.where(eigenvalues > 0.0, 1.0 / eigenvalues, 0.0)
+    x = (vectors @ (inverse * (vectors.T @ (slope / root)))) / root
+    kappa = eigenvalues[-1] / jnp.where(lowest > 0.0, lowest, jnp.nan)
+    status = jnp.where(convex, DECREMENT_CONVERGED, DECREMENT_NONCONVEX)
+    return x, scale, n, status, kappa
+
+
+def _iterative_decrement(curvature: Callable, slope: jax.Array, n: int, rtol: float):
+    """``H x = g`` by conjugate gradients from zero, with its Lanczos ``kappa``."""
+    maxiter = min(4 * n + 20, _DECREMENT_MAXITER)
+    target = jnp.sum(slope * slope)
+    zeros = jnp.zeros(maxiter, slope.dtype)
+
+    def going(carry):
+        return carry[0] < 0
+
+    def step(carry):
+        status, k, x, r, p, rr, alphas, betas = carry
+        product = curvature(p)
+        bend = jnp.sum(p * product)
+        alpha = rr / jnp.where(bend > 0.0, bend, 1.0)
+        x = x + alpha * p
+        r = r - alpha * product
+        following = jnp.sum(r * r)
+        beta = following / jnp.where(rr > 0.0, rr, 1.0)
+        status = jnp.where(
+            ~(bend > 0.0), DECREMENT_NONCONVEX,
+            jnp.where(following <= rtol**2 * target, DECREMENT_CONVERGED,
+                      jnp.where(k + 1 >= maxiter, DECREMENT_UNREACHED, -1)))
+        return (status, k + 1, x, r, r + beta * p, following,
+                alphas.at[k].set(alpha), betas.at[k].set(beta))
+
+    start = (jnp.where(target > 0.0, -1, DECREMENT_CONVERGED), jnp.asarray(0),
+             jnp.zeros_like(slope), slope, slope, target, zeros, zeros)
+    status, k, x, _, _, _, alphas, betas = lax.while_loop(going, step, start)
+    return x, jnp.ones_like(slope), k, status, _lanczos_condition(alphas, betas, k)
+
+
+def _lanczos_condition(alphas: jax.Array, betas: jax.Array, k: jax.Array) -> jax.Array:
+    """The condition number of the Lanczos matrix of ``k`` CG steps.
+
+    The tridiagonal matrix has diagonal ``1/a[j] + b[j-1]/a[j-1]`` and
+    off-diagonal ``sqrt(b[j])/a[j]`` for the steps' ``alpha`` and ``beta``;
+    its eigenvalues (Ritz values) lie inside the operator's spectrum. The
+    unused tail is padded with ``1/a[0]``, a Rayleigh quotient, so it moves
+    neither extreme.
+    """
+    live = jnp.arange(alphas.shape[0]) < k
+    safe = jnp.where(alphas != 0.0, alphas, 1.0)
+    shifted = jnp.concatenate([jnp.zeros(1, alphas.dtype), betas[:-1] / safe[:-1]])
+    diagonal = jnp.where(live, 1.0 / safe + shifted, 1.0 / safe[0])
+    off = jnp.where(live[1:] & live[:-1], jnp.sqrt(jnp.abs(betas[:-1])) / safe[:-1], 0.0)
+    ritz = jax.scipy.linalg.eigh_tridiagonal(diagonal, off, eigvals_only=True)
+    return jnp.max(ritz) / jnp.where(jnp.min(ritz) > 0.0, jnp.min(ritz), jnp.nan)
+
+
 def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callable, Callable]:
     """``(measure, change)``, jitted once per run for a point estimate's monitor.
 

@@ -46,7 +46,11 @@ from rheplicant.inference import (
     ParameterSpace,
     SamplingPlan,
 )
-from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP, MIN_SWEEPS
+from rheplicant.inference.plan import (
+    DEFAULT_CHI2_TOL,
+    EARLIEST_CONVERGED_SWEEP,
+    MIN_SWEEPS,
+)
 from rheplicant.radio import ForegroundOperator, SkyOperator
 
 dist = pytest.importorskip("numpyro.distributions", reason="numpyro not installed")
@@ -290,14 +294,15 @@ def _template_plan(eps, tau, init, dtype=None):
 def test_the_earliest_stop_is_sweep_three_whatever_min_sweeps_says():
     """Started AT the MAP, no sweep moves the objective beyond its resolution.
 
-    Both certificates hold from sweep 2 on (a run that never moved uses a
-    contraction of 0), and the first certifiable decrease is sweep 2 against
-    sweep 1, so the earliest stop is sweep 3 for ``min_sweeps`` of 1, 2 and 3;
-    ``min_sweeps`` above that is the floor; and a cap of two sweeps can
-    never converge. Moved here from ``test_plan.py``'s float32 basis model,
-    whose start at the answer is not a fixed point in float32: its conjugate
-    solves move the objective by up to 2.3e-3 nats a sweep there, which the
-    gap certificate reads as the rises they are.
+    The pre-screen passes from sweep 2 on (a run that never moved uses a
+    contraction of 0) and the decrement there is zero, but the change test's
+    first change is sweep 2 against sweep 1, so the earliest stop is sweep 3
+    for ``min_sweeps`` of 1, 2 and 3; ``min_sweeps`` above that is the floor;
+    and a cap of two sweeps can never converge. Moved here from
+    ``test_plan.py``'s float32 basis model, whose start at the answer is not
+    a fixed point in float32: its conjugate solves move the objective by up
+    to 2.3e-3 nats a sweep there, which the pre-screen reads as the rises
+    they are.
     """
     observed, _, exact, _ = _template_case(0.2, 3.0, 11)
     plan, pipeline = _template_plan(0.2, 3.0, exact)
@@ -329,11 +334,14 @@ def test_a_large_n_collinear_pair_is_certified_within_a_tenth_of_a_sigma(shape, 
     """The T-002 review's HIGH: the relative change test certified a distance
     that grows as ``sqrt(N)``. Measured by the reviewer on this model, float64,
     ``converged=True`` at 0.059 sigma (``N = 1e4``, r = 0.993) and 0.60 sigma
-    (``N = 1e6``, r = 0.993); at ``N = 1e5`` it would be ~0.2. The gap
-    certificate is in nats, so the same 0.1 sigma holds at every ``N``.
+    (``N = 1e6``, r = 0.993); at ``N = 1e5`` it would be ~0.2. The Newton
+    decrement is a Mahalanobis distance, so the same 0.1 sigma holds at every
+    ``N``.
 
     Started 20 posterior sigma off along both axes. Every cell must converge
-    in float64, within 0.1 sigma, and report a distance bound that covers it.
+    in float64, within 0.1 sigma, and report a distance bound that covers it:
+    the model is linear, so the objective is exactly quadratic and the
+    decrement IS the distance to the MAP.
     """
     observed, _, exact, precision = _template_case(eps, 3.0, 21, shape=shape)
     sd = np.sqrt(np.diag(np.linalg.inv(precision)))
@@ -347,7 +355,7 @@ def test_a_large_n_collinear_pair_is_certified_within_a_tenth_of_a_sigma(shape, 
     diagnostics = estimate.diagnostics
     assert diagnostics.converged is True
     assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
-    assert diagnostics.distance_bound <= MAHALANOBIS_MAX
+    assert distance * (1.0 - 1e-6) <= diagnostics.distance_bound <= MAHALANOBIS_MAX
     assert 0.0 <= diagnostics.contraction < 1.0
 
 
@@ -376,8 +384,12 @@ def test_the_monitor_terms_sum_to_the_objective():
         assert float(chi2) == pytest.approx(float(cond.chi2(values)), rel=1e-12)
 
 
-class TestTheGapCertificate:
-    """``plan._gap_step`` on hand-made decreases, in nats, tol = 0.005."""
+class TestTheGapPreScreen:
+    """``plan._gap_step`` on hand-made decreases, in nats, tol = 0.005.
+
+    The pre-screen picks the sweeps at which the Newton decrement is computed;
+    it certifies nothing, and a sweep it passes is only a candidate.
+    """
 
     @staticmethod
     def _run(decreases, resolution=1e-9, tol=0.005):
@@ -385,43 +397,42 @@ class TestTheGapCertificate:
 
         state, out = _GapState(), []
         for decrease in decreases:
-            state, certified, gap, rho = _gap_step(state, decrease, resolution, tol)
-            out.append((certified, gap, rho))
+            state, passed, gap, rho = _gap_step(state, decrease, resolution, tol)
+            out.append((passed, gap, rho))
         return out
 
-    def test_a_geometric_run_certifies_once_its_tail_is_inside_tol(self):
+    def test_a_geometric_run_passes_once_its_tail_is_inside_tol(self):
         # D[k] = 0.5**k: the gap after D is (D + resolution) / (1 - 0.5).
         out = self._run([0.5**k for k in range(1, 12)])
-        for (certified, gap, rho), k in zip(out[1:], range(2, 12), strict=True):
+        for (passed, gap, rho), k in zip(out[1:], range(2, 12), strict=True):
             assert rho == pytest.approx(0.5)
             assert gap == pytest.approx(2 * (0.5**k + 1e-9), rel=1e-12)
-            assert certified is (gap <= 0.005)
-        assert [certified for certified, _, _ in out].index(True) == 8  # 2**-9
+            assert passed is (gap <= 0.005)
+        assert [passed for passed, _, _ in out].index(True) == 8  # 2**-9
 
-    def test_a_slow_contraction_is_not_certified_by_a_small_step(self):
+    def test_a_slow_contraction_is_not_passed_by_a_small_step(self):
         # D = 1e-4 per sweep at rho = 0.999: the tail is 0.1 nats, 20x tol.
         out = self._run([1e-4 * 0.999**k for k in range(10)])
-        assert not any(certified for certified, _, _ in out)
+        assert not any(passed for passed, _, _ in out)
 
-    def test_a_rise_certifies_nothing_and_forgets_the_contraction(self):
+    def test_a_rise_passes_nothing_and_forgets_the_contraction(self):
         out = self._run([1e-3, 5e-4, -1e-3, 1e-6])
         assert out[2] == (False, None, None)
         assert out[3][0] is False and out[3][2] is None
 
-    def test_a_stall_below_the_resolution_keeps_the_last_contraction(self):
-        # A long valley stalled on rounding: resolvable decreases contracting
-        # at 0.9999, then nothing the arithmetic can see.
+    def test_a_stall_below_the_resolution_is_passed_to_the_decrement(self):
+        """A long valley stalled on rounding: resolvable decreases contracting
+        at 0.9999, then nothing the arithmetic can see. The screen cannot tell
+        that from a converged run, so it passes it, and the decrement decides
+        (the model-level cases below measure it refusing such stalls)."""
         out = self._run([1e-3 * 0.9999**k for k in range(5)] + [0.0] * 5,
                         resolution=1e-8)
-        assert not any(certified for certified, _, _ in out)
-        assert out[-1][2] == pytest.approx(0.9999, rel=1e-6)
-        # ... and reads the vanished decrease at the size that contraction
-        # predicts: the tail is still ~10 nats, not the resolution.
-        assert out[-1][1] > 1.0
+        assert not any(passed for passed, _, _ in out[:5])
+        assert all(passed for passed, _, _ in out[5:])
 
     def test_a_run_that_never_moved_uses_a_contraction_of_zero(self):
         out = self._run([0.0, 0.0, 0.0], resolution=1e-9)
-        assert [certified for certified, _, _ in out] == [True, True, True]
+        assert [passed for passed, _, _ in out] == [True, True, True]
         assert out[-1][2] == 0.0
 
 
@@ -569,3 +580,338 @@ class TestTheNewtonPolish:
             return jnp.where(y > 0.25, y**2, -jnp.inf)
 
         assert self._polish(potential, 1.0, iterations=1) == 0.5
+
+
+# -------------------------------------------------- (v) the Newton decrement --
+
+
+class _Quadratic:
+    """A stand-in for ``Conditioning``: ``f(x) = (x - m)^T H (x - m) / 2``.
+
+    ``_decrement_program`` reads nothing but ``neg_log_posterior``, so the
+    decrement can be checked against dense algebra with no model in the way.
+    """
+
+    def __init__(self, hessian, minimum):
+        self.hessian, self.minimum = jnp.asarray(hessian), jnp.asarray(minimum)
+
+    def neg_log_posterior(self, values):
+        offset = values["x"] - self.minimum
+        return 0.5 * offset @ self.hessian @ offset
+
+
+def _quadratic(seed, n=30, condition=1e6, distance=0.105, spectrum=None):
+    """A rotated SPD Hessian, each latent rescaled by up to e^3, and a point
+    ``distance`` posterior sigma from its minimum (just outside 0.1)."""
+    rng = np.random.default_rng(seed)
+    rotation, _ = np.linalg.qr(rng.standard_normal((n, n)))
+    eigenvalues = np.logspace(0.0, np.log10(condition), n) if spectrum is None else spectrum
+    scale = np.exp(rng.uniform(-3.0, 3.0, n))
+    hessian = (rotation * eigenvalues) @ rotation.T * np.outer(scale, scale)
+    minimum, direction = rng.standard_normal(n), rng.standard_normal(n)
+    reach = np.sqrt(abs(direction @ hessian @ direction))
+    return hessian, minimum, minimum + distance * direction / reach
+
+
+def _decrement(hessian, minimum, point):
+    from rheplicant.inference.engines import _decrement_program
+
+    cond, values = _Quadratic(hessian, minimum), {"x": jnp.asarray(point)}
+    lambda2, rho, products, status, kappa = _decrement_program(cond, values)(values)
+    return float(lambda2), float(rho), int(products), int(status), float(kappa)
+
+
+class TestTheNewtonDecrement:
+    """``engines._decrement_program`` and ``plan._certify`` against dense algebra."""
+
+    @pytest.mark.parametrize("path", ["dense", "conjugate_gradients"])
+    @pytest.mark.parametrize("seed", range(4))
+    def test_it_is_g_h_inverse_g_within_the_bound_it_reports(self, monkeypatch, path, seed):
+        """30 latents at condition number 1e6 before a scaling of up to e^3
+        per latent, so the scaling the dense path undoes is real. The
+        decrement's error must lie inside ``rho sqrt(kappa) + eps kappa`` of
+        it, the spread :func:`plan._certify` certifies on; the dense path's
+        ``kappa`` is the scaled Hessian's own, the iterative one's a Lanczos
+        estimate that can only be low."""
+        from rheplicant.inference import engines
+
+        if path == "conjugate_gradients":
+            monkeypatch.setattr(engines, "_DECREMENT_DENSE_MAX", 0)
+        hessian, minimum, point = _quadratic(seed)
+        lambda2, rho, products, status, kappa = _decrement(hessian, minimum, point)
+        slope = hessian @ (point - minimum)
+        exact = slope @ np.linalg.solve(hessian, slope)
+        assert exact == pytest.approx(0.105**2, rel=1e-6)
+        assert status == engines.DECREMENT_CONVERGED
+        spread = rho * np.sqrt(kappa) + np.finfo(np.float64).eps * kappa
+        assert abs(lambda2 - exact) <= spread * exact
+        root = np.sqrt(np.diag(hessian))
+        scaled = np.linalg.eigvalsh(hessian / np.outer(root, root))
+        if path == "dense":
+            assert kappa == pytest.approx(scaled[-1] / scaled[0], rel=1e-6)
+            assert products == 31 and abs(lambda2 - exact) <= 1e-10 * exact
+        else:
+            plain = np.linalg.eigvalsh(hessian)
+            assert kappa <= plain[-1] / plain[0] * (1 + 1e-6)
+            assert products <= 4 * 30 + 20 + 1
+
+    @pytest.mark.parametrize("path", ["dense", "conjugate_gradients"])
+    def test_negative_curvature_is_not_a_minimum(self, monkeypatch, path):
+        from rheplicant.inference import engines
+        from rheplicant.inference.plan import _certify
+
+        if path == "conjugate_gradients":
+            monkeypatch.setattr(engines, "_DECREMENT_DENSE_MAX", 0)
+        spectrum = np.concatenate([[-1.0], np.logspace(0.0, 2.0, 7)])
+        hessian, minimum, point = _quadratic(3, n=8, spectrum=spectrum, distance=1e-3)
+        assert _decrement(hessian, minimum, point)[3] == engines.DECREMENT_NONCONVEX
+        cond, values = _Quadratic(hessian, minimum), {"x": jnp.asarray(point)}
+        assert not _certify({}, cond, values, 0.005, 1).certified
+
+    def test_an_iteration_that_does_not_reach_its_residual_certifies_nothing(
+        self, monkeypatch
+    ):
+        from rheplicant.inference import engines
+        from rheplicant.inference.plan import _certify
+
+        monkeypatch.setattr(engines, "_DECREMENT_DENSE_MAX", 0)
+        monkeypatch.setattr(engines, "_DECREMENT_MAXITER", 3)
+        hessian, minimum, point = _quadratic(0, distance=1e-3)
+        assert _decrement(hessian, minimum, point)[3] == engines.DECREMENT_UNREACHED
+        cond, values = _Quadratic(hessian, minimum), {"x": jnp.asarray(point)}
+        attempt = _certify({}, cond, values, 0.005, 1)
+        assert attempt.estimate < 0.1 and not attempt.certified
+
+    @pytest.mark.parametrize(
+        "lambda2, rho, kappa, dtype, status, certified",
+        [
+            # spread 1e-5 * 100 = 1e-3: 0.0099 / 0.999 is inside 0.01
+            (0.0099, 1e-5, 1e4, jnp.float64, 0, True),
+            # spread 0.1: the same estimate could be 0.011, outside
+            (0.0099, 1e-3, 1e4, jnp.float64, 0, False),
+            # spread >= 1: no upper bound at all
+            (1e-6, 2e-2, 1e4, jnp.float64, 0, False),
+            # float32 at kappa 1e7: eps * kappa = 1.19, the digits are rounding
+            (1e-6, 0.0, 1e7, jnp.float32, 0, False),
+            # a solve that did not reach its residual, or met non-positive
+            # curvature, certifies nothing however small its estimate
+            (1e-6, 0.0, 1.0, jnp.float64, 1, False),
+            (1e-6, 0.0, 1.0, jnp.float64, 2, False),
+            (float("nan"), 0.0, 1.0, jnp.float64, 0, False),
+        ],
+    )
+    def test_certify_passes_only_on_the_upper_bound(
+        self, lambda2, rho, kappa, dtype, status, certified
+    ):
+        """The rule on hand-made decrements, gap_tol 0.005 (``2 gap_tol =
+        0.01``): an estimate inside the threshold with an error bound that
+        reaches outside it is refused."""
+        from rheplicant.inference.plan import _DECREMENT_TAG, _certify
+
+        def program(values):
+            return (jnp.asarray(lambda2, dtype), jnp.asarray(rho, dtype), 5, status,
+                    jnp.asarray(kappa, dtype))
+
+        attempt = _certify({_DECREMENT_TAG: program}, None, {}, 0.005, 7)
+        assert attempt.certified is certified
+        assert attempt.sweep == 7 and attempt.iterations == 5
+
+
+# ------------------- (vi) the second review's cases, as real plans in float64 --
+
+#: The latents a :class:`_Dense` model can carry.
+DENSE_LATENTS = ("x0", "x1", "x2", "x3", "x4")
+DENSE_SHAPE = (100, 100)
+DENSE_TAU = 1e3
+
+
+class _Dense(AbstractOperator):
+    """``data = design @ (x0, ..., x4)[:k]`` on the grid: a linear model of up
+    to five scalar latents with any posterior precision."""
+
+    requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+    design: jax.Array
+    x0: jax.Array
+    x1: jax.Array
+    x2: jax.Array
+    x3: jax.Array
+    x4: jax.Array
+
+    def __call__(self, state: State) -> State:
+        n_time, n_freq = state.coords.time.shape[0], state.coords.freq.shape[0]
+        theta = jnp.stack([self.x0, self.x1, self.x2, self.x3, self.x4])
+        signal = self.design @ theta[: self.design.shape[1]]
+        return state.with_data(signal.reshape(n_time, n_freq))
+
+
+def _dense_case(data_precision, seed):
+    """A design whose data give ``data_precision`` (sigma 1), with data drawn
+    from it; the posterior precision adds the ``N(0, DENSE_TAU)`` priors.
+    Returns ``(design, observed, map, precision)``."""
+    n, size = len(data_precision), int(np.prod(DENSE_SHAPE))
+    rng = np.random.default_rng(seed)
+    basis, _ = np.linalg.qr(rng.standard_normal((size, n)))
+    design = basis @ np.linalg.cholesky(data_precision).T
+    observed = design @ (3.0 * rng.standard_normal(n)) + rng.standard_normal(size)
+    precision = data_precision + np.eye(n) / DENSE_TAU**2
+    return design, observed, np.linalg.solve(precision, design.T @ observed), precision
+
+
+def _dense_run(design, observed, init, **options):
+    names = DENSE_LATENTS[: design.shape[1]]
+    space = ParameterSpace(
+        latents=[
+            Latent(name, init=jnp.array(value), prior=dist.Normal(0.0, DENSE_TAU),
+                   linear=True)
+            for name, value in zip(names, init, strict=True)
+        ],
+        bindings=[Bind(name, into=lambda p, name=name: getattr(p["dense"], name))
+                  for name in names],
+    )
+    pipeline = Pipeline(
+        _Dense(design=jnp.asarray(design),
+               **{name: jnp.array(0.0) for name in DENSE_LATENTS}),
+        names=("dense",),
+    )
+    plan = SamplingPlan(space, *(Block(name) for name in names))
+    estimate = plan.estimate(
+        pipeline, _grid_state(*DENSE_SHAPE), jnp.asarray(observed.reshape(DENSE_SHAPE)),
+        noise=HomoscedasticNoise(sigma=jnp.array(1.0)), **options,
+    )
+    return estimate, [float(estimate.values[name]) for name in names]
+
+
+def _pairs(fast: float, slow: float) -> np.ndarray:
+    """Two independent pairs of unit-variance latents, correlated ``fast`` and
+    ``slow`` within each: the data precision is the correlation's inverse."""
+    correlation = np.zeros((4, 4))
+    correlation[:2, :2] = [[1.0, fast], [fast, 1.0]]
+    correlation[2:, 2:] = [[1.0, slow], [slow, 1.0]]
+    return np.linalg.inv(correlation)
+
+
+@pytest.mark.parametrize(
+    "slow, tol",
+    [(0.9975, 1e-3), (0.9975, DEFAULT_CHI2_TOL), (0.99975, 1e-3)],
+    ids=["r=0.9975-tol=1e-3", "r=0.9975-default-tol", "r=0.99975-tol=1e-3"],
+)
+def test_a_slow_pair_under_a_fast_one_is_certified_by_the_decrement(slow, tol):
+    """The second review's HIGH. Four one-latent conjugate blocks, a fast pair
+    (r = 0.6687) started 30 sigma off and a slow pair started 1 sigma off.
+    The fast pair's decreases dominate every sweep, so a contraction read
+    from them is the fast one, and the gap test passed with the slow pair
+    0.5 to 1.0 sigma from the MAP (reviewer's measurements at 3a73590). The
+    decrement sees the slow mode: every cell must converge, within 0.1 sigma,
+    with a bound that covers the distance.
+
+    It is also what keeps the decrement rare. At r = 0.99975 the run takes
+    about 4600 sweeps and three decrements (measured); with the pre-screen
+    removed it computed 14 and ran 8210 sweeps, because every refusal
+    doubles the wait before the next candidate.
+    """
+    precision = _pairs(0.6687, slow)
+    design, observed, exact, precision = _dense_case(precision, 0)
+    init = exact + np.array([0.0, 30.0, 0.0, 1.0])
+    estimate, got = _dense_run(design, observed, init, tol=tol, max_iter=20000)
+    distance = _mahalanobis(got, exact, precision)
+    diagnostics = estimate.diagnostics
+    assert diagnostics.converged is True
+    assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
+    assert distance * (1.0 - 1e-6) <= diagnostics.distance_bound <= MAHALANOBIS_MAX
+    if slow == 0.99975:
+        assert diagnostics.certificate_attempts <= 4, diagnostics.certificate_attempts
+
+
+#: The contraction of the Gauss-Seidel sweep a random precision must have, by
+#: the kind of its leading eigenvalue. Real ones at 0.99 and above are the
+#: slow runs the review's false certificates came from (the cap of 0.999
+#: keeps a run to a few hundred sweeps); complex ones oscillate, and one in
+#: several hundred reaches 0.9.
+GAUSS_SEIDEL_CONTRACTION = {"real": (0.99, 0.999), "complex": (0.9, 0.999)}
+
+
+def _gauss_seidel_precision(seed: int, kind: str) -> np.ndarray:
+    """The first of the review's random dense precisions, 3 to 5 blocks with
+    unit diagonal, whose sweep's leading eigenvalue is of ``kind`` and inside
+    :data:`GAUSS_SEIDEL_CONTRACTION`."""
+    rng = np.random.default_rng(seed)
+    low, high = GAUSS_SEIDEL_CONTRACTION[kind]
+    while True:
+        n = int(rng.integers(3, 6))
+        factor = rng.standard_normal((n, n + int(rng.integers(0, 3))))
+        precision = factor @ factor.T + 1e-3 * np.eye(n)
+        root = np.sqrt(np.diag(precision))
+        precision = precision / np.outer(root, root)
+        spectrum = np.linalg.eigvals(
+            -np.linalg.solve(np.tril(precision), np.triu(precision, 1))
+        )
+        lead = spectrum[np.argmax(np.abs(spectrum))]
+        found = "complex" if abs(lead.imag) > 1e-9 else "real"
+        if found == kind and low <= abs(lead) <= high:
+            return precision
+
+
+@pytest.mark.parametrize("seed", [7, 8])
+@pytest.mark.parametrize("kind", ["real", "complex"])
+def test_a_random_dense_precision_converges_within_a_tenth_of_a_sigma(seed, kind):
+    """The second review replayed the gap test's rule on 4618 such
+    precisions and found false certificates up to 0.32 sigma at ``|f| =
+    5e3``, about this ``N``, and 1.33 sigma at ``|f| = 5e5``. Here they run
+    as real plans, one conjugate block per latent, started 30 sigma off: a
+    verdict must be within 0.1 sigma. Measured: 0.074 to 0.082 sigma for the
+    slow real ones, which stop just inside the threshold as they should."""
+    data_precision = _gauss_seidel_precision(seed, kind)
+    design, observed, exact, precision = _dense_case(data_precision, seed)
+    start = np.random.default_rng(seed).standard_normal(len(exact))
+    estimate = None
+    try:
+        estimate, got = _dense_run(design, observed, exact + 30.0 * start,
+                                   max_iter=20000)
+    except ParameterSpaceError as refusal:
+        assert "did not converge" in str(refusal)
+    _check(estimate, None if estimate is None else got, exact, precision, True,
+           f"seed {seed}, {kind} leading eigenvalue")
+
+
+def _float64_basis_model():
+    """``test_plan.py``'s bilinear basis model, built in float64.
+
+    That module's constants are arrays made at import, and it is imported in
+    the suite's float32; executing a fresh copy while this module's fixture
+    holds x64 on makes every one of them float64.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "_basis_model_float64", Path(__file__).with_name("test_plan.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("noise", [0.30, 0.32])
+def test_an_inexact_inner_solve_is_tightened_until_the_decrement_certifies(noise):
+    """The second review's MEDIUM: at the default ``solve_tol = 1e-6`` the
+    basis model's sweep has a fixed point 0.113 (noise 0.30) and 0.106 (0.32)
+    posterior sigma from the MAP, measured by the reviewer in float64, so no
+    stop there can be certified. The run tightens the conjugate solves when
+    the objective rises or the decrement refuses, and converges; measured at
+    ``solve_tol = 1e-8``, 0.002 sigma off. Without the tightening both runs
+    refuse after 3000 sweeps."""
+    basis = _float64_basis_model()
+    space, pipeline = basis.basis_space(), basis.make_pipeline()
+    observed = basis.observed_of(space, pipeline, basis.TRUTH)
+    exact, precision = basis._basis_map(observed, sigma=noise)
+    estimate = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+        pipeline, basis.make_state(), observed, noise=noise, max_iter=3000,
+        solve_guard=None,
+    )
+    assert estimate.values["gain"].dtype == jnp.float64
+    diagnostics = estimate.diagnostics
+    assert diagnostics.converged is True
+    distance = basis._posterior_sigmas_from(estimate, exact, precision)
+    assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
+    assert diagnostics.solve_tol < 1e-6
