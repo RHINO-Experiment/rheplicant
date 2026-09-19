@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import socket
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -193,3 +196,111 @@ def test_serve_allows_localhost_without_acknowledgement(monkeypatch) -> None:
 
     launcher.serve(host="localhost", port=8000, log_level="info")
     assert len(calls) == 1
+
+
+GUI_SERVER_MISSING = "The GUI server is not installed. Install `rheplicant[gui]`."
+GUI_DEPENDENCIES_MISSING = (
+    "The GUI dependencies are not installed. Install `rheplicant[gui]`."
+)
+
+
+def test_main_exits_with_the_message_when_the_server_is_not_installed(monkeypatch) -> None:
+    """Without the `gui` extra the console script used to end in a RuntimeError
+    traceback. The message was already right; the exit is now a SystemExit
+    carrying it, which Python prints without a traceback."""
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
+    with pytest.raises(SystemExit) as excinfo:
+        launcher.main([])
+    assert excinfo.value.code == GUI_SERVER_MISSING
+
+
+def test_main_exits_with_the_message_when_the_api_stack_is_not_installed(monkeypatch) -> None:
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[object] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    monkeypatch.delitem(sys.modules, "rheplicant.gui.api", raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        launcher.main([])
+    assert excinfo.value.code == GUI_DEPENDENCIES_MISSING
+    assert calls == []
+
+
+def test_the_console_script_prints_no_traceback_without_the_gui_extra() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['uvicorn'] = None; "
+            "from rheplicant.gui.launcher import main; raise SystemExit(main([]))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 1
+    assert "Traceback" not in completed.stderr
+    assert completed.stderr.strip() == GUI_SERVER_MISSING
+
+
+def _resolves_to(monkeypatch, *addresses: str) -> None:
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        assert host.casefold() == "localhost"
+        return [
+            (
+                socket.AF_INET6 if ":" in address else socket.AF_INET,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                (address, 0),
+            )
+            for address in addresses
+        ]
+
+    monkeypatch.setattr(launcher.socket, "getaddrinfo", fake_getaddrinfo)
+
+
+def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
+    monkeypatch,
+) -> None:
+    """"localhost" used to be accepted by name. It is now resolved, and a
+    hosts file that points it anywhere else needs --allow-remote like any
+    other non-loopback bind."""
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[object] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append(args))
+
+    _resolves_to(monkeypatch, "127.0.0.1", "203.0.113.7")
+    with pytest.raises(RuntimeError, match="--allow-remote"):
+        launcher.serve(host="localhost", port=8000, log_level="info")
+    with pytest.raises(SystemExit, match="--allow-remote"):
+        launcher.main(["--host", "LOCALHOST"])
+
+    _resolves_to(monkeypatch)
+    with pytest.raises(RuntimeError, match="--allow-remote"):
+        launcher.serve(host="localhost", port=8000, log_level="info")
+    assert calls == []
+
+    _resolves_to(monkeypatch, "127.0.0.1", "::1")
+    launcher.serve(host="localhost", port=8000, log_level="info")
+    assert len(calls) == 1
+
+
+def test_localhost_that_does_not_resolve_is_not_a_loopback_bind(monkeypatch) -> None:
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    calls: list[object] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append(args))
+
+    def unresolvable(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
+
+    monkeypatch.setattr(launcher.socket, "getaddrinfo", unresolvable)
+    with pytest.raises(SystemExit, match="--allow-remote"):
+        launcher.main(["--host", "localhost"])
+    assert calls == []

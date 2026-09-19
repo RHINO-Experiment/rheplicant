@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import re
+import socket
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -31,11 +32,19 @@ _HOST_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 _PORT_SUFFIX = re.compile(r"(?::[0-9]{1,5})?")
 
 
+class _MissingInstall(RuntimeError):
+    """The GUI extra or the packaged frontend is not installed.
+
+    ``main`` reports this as a one-line exit rather than a traceback: the
+    message already says what to install, and nothing in the stack helps.
+    """
+
+
 def frontend_directory() -> Path:
     """Return the installed, immutable production frontend directory."""
     root = Path(__file__).resolve().with_name("static")
     if not (root / "index.html").is_file():
-        raise RuntimeError(
+        raise _MissingInstall(
             "The packaged GUI frontend is missing. Reinstall rheplicant from a "
             "wheel or rebuild the frontend assets."
         )
@@ -171,7 +180,7 @@ def create_editor_app(*, allowed_hosts: Iterable[str] = ()):
         from rheplicant.gui.api import create_app
     except ModuleNotFoundError as error:
         if error.name in {"fastapi", "pydantic", "starlette"}:
-            raise RuntimeError(
+            raise _MissingInstall(
                 "The GUI dependencies are not installed. Install `rheplicant[gui]`."
             ) from error
         raise
@@ -183,9 +192,28 @@ def create_editor_app(*, allowed_hosts: Iterable[str] = ()):
 def _is_loopback(host: str) -> bool:
     candidate = host.strip().removeprefix("[").removesuffix("]")
     if candidate.casefold() == "localhost":
-        return True
+        return _resolves_to_loopback_only(candidate)
     try:
         return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolves_to_loopback_only(name: str) -> bool:
+    """Whether every address ``name`` resolves to is a loopback address.
+
+    ``localhost`` is a name, and the bind goes to whatever the resolver
+    returns for it; a hosts file can point it at an external interface.
+    """
+    try:
+        found = socket.getaddrinfo(name, None)
+    except (OSError, UnicodeError):
+        return False
+    addresses = {entry[4][0] for entry in found}
+    try:
+        return bool(addresses) and all(
+            ipaddress.ip_address(address).is_loopback for address in addresses
+        )
     except ValueError:
         return False
 
@@ -238,7 +266,7 @@ def serve(
     try:
         import uvicorn
     except ModuleNotFoundError as error:
-        raise RuntimeError(
+        raise _MissingInstall(
             "The GUI server is not installed. Install `rheplicant[gui]`."
         ) from error
     app = create_editor_app(allowed_hosts=(*allowed_hosts, *_bind_host_names(host)))
@@ -295,13 +323,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # too, but main() does not depend on that to give CLI users a prompt
         # SystemExit instead of an unhandled RuntimeError.
         raise SystemExit(str(error)) from error
-    serve(
-        host=arguments.host,
-        port=arguments.port,
-        log_level=arguments.log_level,
-        allow_remote=arguments.allow_remote,
-        allowed_hosts=allowed_hosts,
-    )
+    try:
+        serve(
+            host=arguments.host,
+            port=arguments.port,
+            log_level=arguments.log_level,
+            allow_remote=arguments.allow_remote,
+            allowed_hosts=allowed_hosts,
+        )
+    except _MissingInstall as error:
+        raise SystemExit(str(error)) from error
     return 0
 
 
