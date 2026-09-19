@@ -41,6 +41,7 @@ from rheplicant.radio.instrument.calibration import (
     MIN_CEILING_IN_CHANNELS,
     MIN_WIDTH_IN_CHANNELS,
     WIDTH_FLOOR_RTOL,
+    width_floor_rtol,
 )
 from tests.config.inflight_helpers import (
     axis_facts,
@@ -216,18 +217,19 @@ def assert_a13_narrow(message: str) -> None:
     assert message == a13_narrow_message(_quoted_spacing(message))
 
 
-def assert_a13_just_under_the_floor(message: str) -> None:
+def assert_a13_just_under_the_floor(message: str, rtol: float) -> None:
     """The same message for a width one tolerance BELOW the floor.
 
     Two platform-dependent numbers here rather than one: the spacing, and the
-    width, which is ``floor * (1 - 2 * WIDTH_FLOOR_RTOL)`` of it and so carries
-    the spacing's digits into a second slot. It was pinned as a literal
+    width, which is ``floor * (1 - 2 * rtol)`` of it and so carries the
+    spacing's digits into a second slot. It was pinned as a literal
     ``A13_JUST_UNDER_THE_FLOOR_MESSAGE`` until 2026-08-28 -- the one assertion
     in this module that the spacing-derivation above was not applied to, which
     is why it was the one that went red on CI while its siblings passed.
+    ``rtol`` is the grid's own, ``width_floor_rtol(freq, spacing)`` (A5-5).
     """
     spacing = _quoted_spacing(message)
-    width = f"{spacing * (1.0 - 2.0 * WIDTH_FLOOR_RTOL):.6g}"
+    width = f"{spacing * (1.0 - 2.0 * rtol):.6g}"
     assert message == a13_narrow_message(spacing, width)
 
 def a13_wide_message(spacing: float) -> str:
@@ -608,15 +610,18 @@ class TestA13sWidthLegs:
         INSIDE the tolerance -- below the floor, and accepted by
         ``calibration.py``'s own comparison, which is the one this restates.
         """
-        spacing = float(_median_gap(axis_facts(narrow(400.0)).context.freq,
-                                    name="channel_spacing",
+        freq = axis_facts(narrow(400.0)).context.freq
+        spacing = float(_median_gap(freq, name="channel_spacing",
                                     axis_name="frequency"))
         floor = MIN_WIDTH_IN_CHANNELS["sinc2"] * spacing
-        assert WIDTH_FLOOR_RTOL > 0.0, "nothing to discriminate if it is zero"
-        assert silent_here(narrow(floor * (1.0 - 0.5 * WIDTH_FLOOR_RTOL)))
+        # The grid's own slack (A5-5): 4 channels over 1 kHz at 70 MHz are
+        # stored on an 8 Hz float32 grid, so it is far above the 1e-5 floor.
+        rtol = width_floor_rtol(freq, spacing)
+        assert rtol >= WIDTH_FLOOR_RTOL > 0.0, "nothing to discriminate if it is zero"
+        assert silent_here(narrow(floor * (1.0 - 0.5 * rtol)))
         assert silent_here(narrow(floor)), "and a width AT the floor, likewise"
         assert_a13_just_under_the_floor(
-            axis_only(narrow(floor * (1.0 - 2.0 * WIDTH_FLOOR_RTOL)), "A13").message
+            axis_only(narrow(floor * (1.0 - 2.0 * rtol)), "A13").message, rtol
         )
 
     def test_no_pinned_message_in_this_module_spells_the_spacing_as_a_literal(

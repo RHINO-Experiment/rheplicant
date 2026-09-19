@@ -141,13 +141,13 @@ LINESHAPES = ("sinc2", "gaussian")
 #: unwindowed FFT's 0.886, so nothing below it is a channel response.
 MIN_WIDTH_IN_CHANNELS = {"sinc2": 1.0, "gaussian": 0.25}
 
-#: Slack on the width floor, because both sides of it are float32 arithmetic.
-#:
-#: The canonical ``sinc2`` width is exactly one channel, and the natural way to
-#: say that is ``float(freq[1] - freq[0])`` — which on a float32 grid differs
-#: from this module's ``median(diff(freq))`` in the seventh digit. Refusing the
-#: one width the convention names, over 1e-7, would be absurd. 1e-5 is many
-#: orders of magnitude below any width difference that changes a lineshape.
+#: Smallest slack on the width floor; the slack in force is
+#: :func:`width_floor_rtol`, which widens it to the grid's own rounding. A fixed
+#: 1e-5 refused one-channel widths on float32 grids: ``median(diff(freq))`` of
+#: ``jnp.linspace(60e6, 85e6, N)`` differs from ``25e6 / (N - 1)`` by up to
+#: 7.9e-5 of a channel for N <= 599 and 1.1e-3 by N = 8192 (A5-5), and
+#: ``freq[1] - freq[0]`` from the median by up to 2.5e-3, not in the seventh
+#: digit. 1e-5 stays the floor for a grid that resolves its channels finely.
 WIDTH_FLOOR_RTOL = 1e-5
 
 #: Widest line, as a fraction of the observed band, that is still a LINE.
@@ -520,7 +520,7 @@ class CWCalibrationOperator(AbstractOperator):
         if channels.size > 1:
             spacing = float(np.median(np.abs(np.diff(channels))))
             floor = MIN_WIDTH_IN_CHANNELS[self.lineshape] * spacing
-            if self.line_width < floor * (1.0 - WIDTH_FLOOR_RTOL):
+            if self.line_width < floor * (1.0 - width_floor_rtol(channels, spacing)):
                 raise StateValidationError(
                     f"line_width {self.line_width:.6g} Hz is narrower than the "
                     f"channel response this {self.lineshape!r} grid can carry "
@@ -643,6 +643,39 @@ class CWCalibrationOperator(AbstractOperator):
             "measured from the start of the run, or enable float64 "
             "(JAX_ENABLE_X64=1, or jax.config.update('jax_enable_x64', True))."
         )
+
+
+def width_floor_rtol(freq, spacing: float) -> float:
+    """Relative slack on the ``line_width`` floor for this channel grid.
+
+    ``max(WIDTH_FLOOR_RTOL, 4 * eps * max|freq| / spacing)``, where ``eps`` is
+    the machine epsilon of the grid's STORED dtype and ``spacing`` the median
+    channel gap the floor is measured in. One definition for the two places the
+    floor is checked: :meth:`CWCalibrationOperator._validate_over_the_run` and
+    the config layer's in-flight grid check, A13.
+
+    Each stored channel is rounded by at most half a unit in the last place,
+    and a unit in the last place is at most ``eps * max|freq|``, so a stored
+    gap can be off by one such unit and the grid's own evaluation (a float32
+    ``linspace``) adds a fraction more. The floor cannot resolve a width to
+    better than that. Measured over ``jnp.linspace(60e6, 85e6, N)`` for N in
+    3..8192, the ideal width ``25e6 / (N - 1)`` sits at most 0.35
+    ``eps * max|freq|`` below the median gap and ``freq[1] - freq[0]`` at most
+    0.79, so the factor 4 leaves a margin of five. In float32 at 85 MHz that
+    unit is 10 Hz: the slack is 3.2e-6 of a 12.5 MHz channel (so the 1e-5
+    floor applies), 6.6e-4 of the RHINO 61035.15625 Hz channel, and 1.3e-2 of
+    a 3052 Hz channel at N = 8192. In float64 the 1e-5 floor applies at every
+    grid in this package.
+
+    An integer grid represents its channels exactly and keeps the 1e-5 floor,
+    as does a grid with no positive spacing, whose floor is zero anyway.
+    """
+    channels = np.asarray(freq)
+    if not np.issubdtype(channels.dtype, np.inexact) or not spacing > 0.0:
+        return WIDTH_FLOOR_RTOL
+    eps = float(np.finfo(channels.dtype).eps)
+    peak = float(np.abs(channels).max())
+    return max(WIDTH_FLOOR_RTOL, 4.0 * eps * peak / spacing)
 
 
 class CalLoadOperator(AbstractOperator):
