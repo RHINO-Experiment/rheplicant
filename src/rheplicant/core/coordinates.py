@@ -65,6 +65,27 @@ from rheplicant.core.errors import StateValidationError
 #: keeping its own copy.
 MAX_TIME_RESOLUTION_IN_SAMPLES = 1e-2
 
+#: Finest sample interval ``coords.time`` is taken to carry [s]; the one
+#: absolute time scale in this module.
+#:
+#: It decides one case only: an axis whose ``n > 1`` samples are all
+#: IDENTICAL. That axis has no distinct gap for
+#: :data:`MAX_TIME_RESOLUTION_IN_SAMPLES` to measure, and it is either a genuine
+#: repeat (``zeros(n)``, a model with no time dependence) or an axis whose
+#: every sample rounded onto one stored value (A5-4). Two samples ``c`` apart
+#: can round onto one value only where the stored spacing exceeds ``c``, so
+#: where the spacing is at most this, a collapse would need a sub-millisecond
+#: cadence and the repeat is taken as genuine; above it the axis is refused.
+#: In float32 the cut is at ``|t| = 2**14`` s: below it the spacing is
+#: ``2**-10`` s (9.8e-4 s), above it ``2**-9`` s (1.95e-3 s). So a repeated
+#: value within 4.5 hours of zero is accepted and a repeated unix epoch
+#: (spacing 128 s) is not. In float64 the same cut sits at ``2**43`` s.
+#:
+#: Unlike the ratio above, this is a statement in SECONDS: an MJD axis in days
+#: is judged as if its unit were seconds, which makes it stricter for MJD by a
+#: factor of 86400.
+FINEST_CADENCE_S = 1e-3
+
 
 def as_array_or_none(value: Any) -> jax.Array | None:
     """Converter: pass ``None`` through, coerce everything else to a jax array."""
@@ -115,14 +136,23 @@ def _refuse_a_time_axis_the_stored_dtype_cannot_carry(times: jax.Array) -> None:
     counts a zero gap as a refusal, because it subtracts times and a collapsed
     pair silently stops its tone drifting. A container cannot tell a genuine
     repeated timestamp from a collision, and refusing every repeat would make
-    it reject data it has no business judging. Nothing is lost on the defect
-    this exists for: rounding makes every surviving gap a multiple of the
-    representable spacing, so a uniformly quantised axis that has collided
-    still shows a smallest distinct gap of one or two grid steps and is refused
-    here anyway. What does escape is an axis where one isolated close pair
-    merged while the rest stayed coarse — the pre-conversion values are gone by
-    the time this runs, and only float64 or a relative axis defends against
-    that.
+    it reject data it has no business judging. Rounding makes every surviving
+    gap a multiple of the representable spacing, so an axis that has PARTLY
+    collided still shows a smallest distinct gap of one or two grid steps and
+    is refused by the ratio.
+
+    An axis that has collided ENTIRELY shows no distinct gap at all, and the
+    ratio has nothing to measure. Before A5-4 that case returned early:
+    4096 samples 1 ms apart at unix 1.75e9 stored as one float32 value, were
+    accepted, and ``BackendOperator`` then reported chunk times wrong by up to
+    4063 cadences. An all-identical axis with ``n > 1`` is therefore judged on
+    the stored spacing at its value, against :data:`FINEST_CADENCE_S`: coarser
+    than that, a collapse of any cadence the package carries is possible and
+    the axis is refused; finer, as for ``zeros(n)``, the repeat is accepted.
+
+    What still escapes is an axis where one isolated close pair merged while
+    the rest stayed coarse — the pre-conversion values are gone by the time
+    this runs, and only float64 or a relative axis defends against that.
 
     Traced arrays are stepped over rather than forced: under jit / vmap / grad
     there are no values to compare, and calling ``np.asarray`` on a tracer is
@@ -150,20 +180,46 @@ def _refuse_a_time_axis_the_stored_dtype_cannot_carry(times: jax.Array) -> None:
 
     gaps = np.abs(np.diff(values))
     distinct = gaps[gaps > 0]
-    if distinct.size == 0:
-        return  # one sample, or one repeated timestamp: no sampling to resolve
-
     peak = np.abs(values).max()
-    resolution = float(np.spacing(peak))
+    # At the dtype's largest finite value the next number up is inf, so the
+    # spacing is inf -- which compares as "coarser than anything", the right
+    # reading -- and numpy's overflow warning about it is noise.
+    with np.errstate(over="ignore"):
+        resolution = float(np.spacing(peak))
+    if distinct.size == 0:
+        # One sample has no interval to lose. n identical samples are a genuine
+        # repeat only where the stored grid is fine enough that no cadence the
+        # package carries could have collapsed onto it.
+        if values.size == 1 or resolution <= FINEST_CADENCE_S:
+            return
+        raise _cannot_carry(
+            values.dtype, peak, resolution,
+            f"all {values.size} samples on this axis hold that one value. An axis "
+            "of identical samples is accepted only where that spacing is at most "
+            f"{FINEST_CADENCE_S:g} s, the finest cadence coords.time is taken to "
+            "carry, because any coarser grid can have merged a real axis into "
+            "one value.",
+        )
+
     cadence = float(distinct.min())
     if resolution <= MAX_TIME_RESOLUTION_IN_SAMPLES * cadence:
         return
-    raise StateValidationError(
-        f"coords.time is stored as {values.dtype} and reaches {float(peak):.9g}, "
-        f"where consecutive representable numbers are {resolution:.6g} apart — but "
+    raise _cannot_carry(
+        values.dtype, peak, resolution,
         f"the closest two distinct samples on this axis are {cadence:.6g} apart, "
         f"and coords.time must resolve its own sampling to at most "
-        f"{MAX_TIME_RESOLUTION_IN_SAMPLES:g} of that. The rounding happens when the "
+        f"{MAX_TIME_RESOLUTION_IN_SAMPLES:g} of that.",
+    )
+
+
+def _cannot_carry(
+    dtype: Any, peak: Any, resolution: float, finding: str
+) -> StateValidationError:
+    """The refusal both branches above raise, with the finding in the middle."""
+    return StateValidationError(
+        f"coords.time is stored as {dtype} and reaches {float(peak):.9g}, "
+        f"where consecutive representable numbers are {resolution:.6g} apart — but "
+        f"{finding} The rounding happens when the "
         "axis is STORED, so no later subtraction recovers it: samples merge, and "
         "every consumer that does arithmetic on the values then reads the rounded "
         "ones — BackendOperator averages merged times into chunk timestamps wrong "

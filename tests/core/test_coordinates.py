@@ -6,8 +6,10 @@ import numpy as np
 import pytest
 
 from rheplicant.core.coordinates import (
+    FINEST_CADENCE_S,
     MAX_TIME_RESOLUTION_IN_SAMPLES,
     Coordinates,
+    _refuse_a_time_axis_the_stored_dtype_cannot_carry,
 )
 from rheplicant.core.environment import Environment
 from rheplicant.core.errors import StateValidationError
@@ -290,6 +292,124 @@ class TestATimeAxisTheStoredDtypeCannotCarry:
         good = Coordinates(time=np.arange(4.0) * 100.0)
         with pytest.raises(StateValidationError, match="representable"):
             good.replace(time=self.UNIX)
+
+
+class TestAnAxisCollapsedToOneValue:
+    """A5-4: an axis whose every sample rounded onto ONE stored value.
+
+    Such an axis has no distinct gap, so the ratio above has nothing to
+    measure, and before this class it returned early. Measured: 4096 samples
+    1 ms apart at unix 1.75e9 store as one float32 value, and
+    ``BackendOperator(n_chunk=64)`` then reports chunk times wrong by up to
+    4063 cadences. The ruling: refuse an all-identical axis with ``n > 1``
+    where the stored spacing exceeds :data:`FINEST_CADENCE_S`, and keep
+    ``zeros(n)`` and other repeats the dtype resolves finely.
+    """
+
+    EPOCH = 1_750_000_000.0  # a multiple of 128, so the float32 cell is [EPOCH, EPOCH + 128)
+    CELL = 128.0  # np.spacing(np.float32(EPOCH))
+    #: Offsets into the float32 cell: both ends, the round-half point and its
+    #: neighbours, and a regular sweep between them.
+    OFFSETS = sorted({*np.arange(0.0, 128.0, 8.0).tolist(), 0.001, 63.999, 64.0,
+                      64.001, 127.0, 127.999})
+
+    @pytest.mark.parametrize(
+        ("cadence", "n_samples"),
+        [pytest.param(1e-3, 4096, id="1ms-x4096"), pytest.param(1.0, 64, id="1s-x64")],
+    )
+    def test_the_measured_cases_are_refused(self, cadence, n_samples):
+        times = self.EPOCH + cadence * np.arange(n_samples)
+        assert np.unique(np.asarray(times, np.float32)).size == 1  # the collapse is real
+        with pytest.raises(StateValidationError) as excinfo:
+            Coordinates(time=times)
+        message = str(excinfo.value)
+        assert "representable" in message
+        assert f"all {n_samples} samples" in message
+        assert "start of the run" in message and "JAX_ENABLE_X64" in message
+
+    @pytest.mark.parametrize("cadence", [1e-3, 1.0])
+    @pytest.mark.parametrize("span", [4.0, 63.0, 127.0, 129.0])
+    def test_every_offset_across_a_float32_cell_is_refused(self, cadence, span):
+        """The start swept across one 128 s cell, for spans below, near and
+        above the cell width. Spans under 64 s collapse to one value at most
+        offsets and to two where they straddle the round-half point; 127 s
+        straddles it at almost every offset; 129 s always spans two cells. The
+        one-value cases are this class's; the two-value cases are the ratio's.
+        Refused at every point either way."""
+        n_samples = int(round(span / cadence)) + 1
+        accepted = []
+        for offset in self.OFFSETS:
+            times = self.EPOCH + offset + cadence * np.arange(n_samples)
+            try:
+                Coordinates(time=times)
+            except StateValidationError:
+                continue
+            accepted.append(offset)
+        assert accepted == []
+
+    @pytest.mark.parametrize("cadence", [1e-3, 1.0])
+    @pytest.mark.parametrize("span", [4.0, 63.0, 127.0, 129.0])
+    def test_the_same_axes_in_float64_are_accepted(self, cadence, span):
+        """The control: float64 resolves 2.4e-7 s at 1.75e9, so every one of the
+        axes above is carried. Called on the check itself with a float64 array,
+        because this session stores through float32."""
+        n_samples = int(round(span / cadence)) + 1
+        for offset in self.OFFSETS:
+            times = self.EPOCH + offset + cadence * np.arange(n_samples)
+            _refuse_a_time_axis_the_stored_dtype_cannot_carry(times)
+
+    @pytest.mark.parametrize(
+        ("cadence", "span"),
+        [(1e-3, 4.0), (1e-3, 63.0), (1e-3, 127.0),
+         (1.0, 4.0), (1.0, 63.0), (1.0, 127.0), (1.0, 129.0)],
+    )
+    def test_the_same_axes_measured_from_their_start_are_accepted(self, cadence, span):
+        """The remedy the refusal names, run: a relative axis in float32.
+
+        Not at 1 ms over 129 s: that is 129001 samples, past the ~1e5-sample
+        limit of a relative float32 axis, and the ratio refuses it -- see
+        ``test_a_relative_float32_axis_runs_out_at_order_1e5_samples``."""
+        n_samples = int(round(span / cadence)) + 1
+        times = cadence * np.arange(n_samples)
+        assert Coordinates(time=times).time.shape == (n_samples,)
+
+    @pytest.mark.parametrize("n_samples", [2, 7, 4096])
+    def test_zeros_are_accepted(self, n_samples):
+        """``zeros(n)``: np.spacing(0) is the smallest subnormal, and a repeat
+        there is a repeat."""
+        assert Coordinates(time=np.zeros(n_samples)).time.shape == (n_samples,)
+
+    @pytest.mark.parametrize(
+        ("dtype", "fine", "coarse"),
+        [
+            # float32: spacing 2**-10 s = 9.8e-4 s below 2**14, 2**-9 s above
+            pytest.param(np.float32, 2.0**14 - 1.0, 2.0**14, id="float32"),
+            # float64: the same two spacings sit at 2**42 and 2**43
+            pytest.param(np.float64, 2.0**43 - 2.0**-10, 2.0**43, id="float64"),
+        ],
+    )
+    @pytest.mark.parametrize("sign", [1.0, -1.0])
+    def test_the_threshold_is_pinned_from_both_sides(self, dtype, fine, coarse, sign):
+        """Both sides of :data:`FINEST_CADENCE_S`, in each dtype and on both
+        sides of zero, one representable step apart."""
+        assert np.spacing(dtype(fine)) <= FINEST_CADENCE_S < np.spacing(dtype(coarse))
+        _refuse_a_time_axis_the_stored_dtype_cannot_carry(
+            np.full(4, sign * fine, dtype=dtype)
+        )
+        with pytest.raises(StateValidationError, match="representable"):
+            _refuse_a_time_axis_the_stored_dtype_cannot_carry(
+                np.full(4, sign * coarse, dtype=dtype)
+            )
+
+    def test_the_largest_float32_is_refused(self):
+        """The extreme: a repeated value at the top of the float32 range."""
+        biggest = float(np.finfo(np.float32).max)
+        with pytest.raises(StateValidationError, match="representable"):
+            Coordinates(time=np.full(3, biggest))
+
+    def test_a_single_sample_at_the_epoch_is_still_accepted(self):
+        """``n > 1`` is part of the ruling: one sample has no interval to lose."""
+        assert Coordinates(time=np.array([self.EPOCH])).time.shape == (1,)
 
 
 class TestEnvironment:
