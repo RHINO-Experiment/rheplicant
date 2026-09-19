@@ -124,12 +124,13 @@ def test_a_non_editable_install_inside_a_work_tree_records_no_commit(
     software.validate_software({**software.collect_software(), "rheplicant": facts})
 
 
+@pytest.mark.parametrize("authority", ["", "localhost"], ids=["file-uri", "file-localhost"])
 def test_an_editable_install_records_the_commit_of_its_checkout(
-    monkeypatch, tmp_path, repository
+    monkeypatch, tmp_path, repository, authority
 ) -> None:
     distribution = _dist_info(
         tmp_path / "venv" / "site-packages",
-        {"url": repository.as_uri(), "dir_info": {"editable": True}},
+        {"url": f"file://{authority}{repository.as_posix()}", "dir_info": {"editable": True}},
     )
     _present(monkeypatch, distribution, repository / "src" / "rheplicant")
 
@@ -177,3 +178,28 @@ def test_editable_metadata_without_a_local_checkout_records_no_commit(
     _present(monkeypatch, distribution, repository / "src" / "rheplicant")
 
     _assert_no_git_facts(software._project_facts())
+
+
+def test_an_editable_checkout_on_another_host_records_no_commit(
+    monkeypatch, tmp_path, repository
+) -> None:
+    """``file://fileserver/path`` names a path on another machine. Read as a
+    local path it would be this repository, which is not what it names."""
+    distribution = _dist_info(
+        tmp_path / "venv" / "site-packages",
+        {
+            "url": f"file://fileserver{repository.as_posix()}",
+            "dir_info": {"editable": True},
+        },
+    )
+    _present(monkeypatch, distribution, repository / "src" / "rheplicant")
+
+    _assert_no_git_facts(software._project_facts())
+
+
+def test_the_package_directory_is_where_rheplicant_is_imported_from() -> None:
+    """The one test that runs ``_package_directory`` itself; the others
+    replace it to point into their throwaway repository."""
+    import rheplicant
+
+    assert software._package_directory() == Path(rheplicant.__file__).parent
