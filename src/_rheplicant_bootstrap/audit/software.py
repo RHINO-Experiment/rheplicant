@@ -126,14 +126,15 @@ def _package_directory() -> Path | None:
     return Path(locations[0]) if len(locations) == 1 else None
 
 
-def _git_root() -> tuple[Path | None, str]:
+def _git_root() -> tuple[Path, None] | tuple[None, str]:
     """Return the work tree whose commit describes the running code.
 
     That is the top level of an editable install's checkout, and only when
     it contains the directory the package is imported from: the checkout the
     metadata names is not the running code when, for example, ``PYTHONPATH``
-    points at another work tree. The reason is the one every git fact
-    carries when there is no such work tree.
+    points at another work tree. The result is ``(root, None)``, or
+    ``(None, reason)`` with the reason every git fact carries when there is
+    no such work tree.
     """
     checkout = _editable_checkout()
     package = _package_directory()
@@ -149,7 +150,7 @@ def _git_root() -> tuple[Path | None, str]:
         return None, "not_a_git_checkout"
     if not source.is_relative_to(git_root):
         return None, "not_a_git_checkout"
-    return git_root, "not_a_git_checkout"
+    return git_root, None
 
 
 def _project_facts() -> Mapping[str, JsonValue]:

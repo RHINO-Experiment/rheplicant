@@ -134,6 +134,7 @@ def test_an_editable_install_records_the_commit_of_its_checkout(
     )
     _present(monkeypatch, distribution, repository / "src" / "rheplicant")
 
+    assert software._git_root() == (repository.resolve(), None)
     facts = software._project_facts()
 
     assert facts["git_commit"] == _git(repository, "rev-parse", "HEAD")
@@ -159,6 +160,7 @@ def test_an_editable_install_running_code_from_elsewhere_records_no_commit(
     elsewhere.mkdir(parents=True)
     _present(monkeypatch, distribution, elsewhere)
 
+    assert software._git_root() == (None, "not_a_git_checkout")
     _assert_no_git_facts(software._project_facts())
 
 
