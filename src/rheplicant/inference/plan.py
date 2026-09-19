@@ -480,6 +480,17 @@ _SOLVE_TOL_STEP: float = 1e-2
 _SOLVE_TOL_FLOOR: dict[int, float] = {4: 2.4e-7, 8: 1e-12}
 
 
+def _solve_tol_floor(objective: jax.Array) -> float:
+    """How far the closed-form blocks' CG tolerance may be tightened.
+
+    :data:`_SOLVE_TOL_FLOOR` for the precisions this package runs in, and two
+    machine epsilons for any other — a table lookup would raise on it, and a
+    run should not fail because its dtype is unusual.
+    """
+    precision = jnp.finfo(jnp.result_type(objective))
+    return _SOLVE_TOL_FLOOR.get(precision.dtype.itemsize, 2.0 * float(precision.eps))
+
+
 @dataclasses.dataclass(frozen=True)
 class _Attempt:
     """One Newton-decrement certificate: what it measured and its verdict.
@@ -1557,7 +1568,7 @@ class SamplingPlan:
         chi2 = [float(chi2_now)]
         objective = [float(objective_now)]
         effective = None if tol is None else _effective_tol(tol, objective_now)
-        gap_state, certified, gap, rho, resolution = _GapState(), False, None, None, None
+        gap_state, gap, rho, resolution = _GapState(), None, None, None
         measured, last_rise, changed = None, None, False
         attempt, attempts, wait, backoff = None, 0, 0, 1
         tightened = solve_tol
@@ -1583,15 +1594,12 @@ class SamplingPlan:
             decrease, resolution = float(decrease), float(resolution)
             chi2.append(float(chi2_now))
             objective.append(float(objective_now))
-            gap_state, certified, gap, rho = _gap_step(
+            gap_state, screened, gap, rho = _gap_step(
                 gap_state, decrease, resolution, gap_tol
             )
-            # The first decrease is from the starting values, which are not a
-            # sweep's output: it feeds the contraction and certifies nothing.
-            certified = certified and sweep >= 2
             if gap_state.contraction is not None:
                 measured = gap_state.contraction
-            floor = _SOLVE_TOL_FLOOR[jnp.dtype(jnp.result_type(objective_now)).itemsize]
+            floor = _solve_tol_floor(objective_now)
             if decrease < -resolution:
                 last_rise = (sweep, -decrease)
                 # An exact block update cannot raise the objective, so a rise
@@ -1605,8 +1613,10 @@ class SamplingPlan:
             changed = effective is not None and _settled(objective[1:], effective)
             # The schedule: the change settled, and the gap pre-screen passed
             # or the decrease sank below what the arithmetic resolves (a rise
-            # it resolves is neither).
-            quiet = sweep >= 2 and (certified or abs(decrease) <= resolution)
+            # it resolves is neither). The first decrease is measured from the
+            # starting values, which are not a sweep's output, so it seeds the
+            # contraction and schedules nothing.
+            quiet = sweep >= 2 and (screened or abs(decrease) <= resolution)
             if not (changed and sweep >= min_sweeps and quiet):
                 continue
             if wait > 0:
