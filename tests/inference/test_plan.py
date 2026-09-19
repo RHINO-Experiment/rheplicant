@@ -52,6 +52,7 @@ from rheplicant.inference.noise import (
 from rheplicant.inference.plan import (
     CHECK_EACH_SWEEP,
     CHECK_ONCE,
+    EARLIEST_CONVERGED_SWEEP,
     MIN_DRAWS,
     MIN_SWEEPS,
     OBJECTIVE_FLOOR_EPS,
@@ -943,7 +944,7 @@ class TestConvergence:
             early = plan.estimate(pipeline, state, observed, min_sweeps=min_sweeps,
                                   **common)
             assert early.diagnostics.converged is True
-            assert early.diagnostics.sweeps == 3, (
+            assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP == 3, (
                 min_sweeps, early.diagnostics.objective
             )
         floored = plan.estimate(pipeline, state, observed, min_sweeps=8, **common)
@@ -1598,6 +1599,19 @@ class TestTheDefaultsTheConfigLayerQUOTES:
         from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
 
         assert MIN_SWEEPS <= DEFAULT_MAX_ITER
+
+    def test_the_earliest_verdict_is_the_sweep_the_A25_message_quotes(self):
+        """Pinned beside its declaration, like the two above: pre-flight A25
+        refuses a ``max_iter`` below it and quotes it, and derives nothing
+        from it but the comparison. The stop rule counts two changes between
+        sweep outputs, so it is 3; the default cap must leave room for it."""
+        from rheplicant.inference.plan import (
+            DEFAULT_MAX_ITER,
+            EARLIEST_CONVERGED_SWEEP,
+        )
+
+        assert EARLIEST_CONVERGED_SWEEP == 3
+        assert EARLIEST_CONVERGED_SWEEP <= DEFAULT_MAX_ITER
 
     def test_min_draws_is_the_smallest_a_split_rhat_is_defined_on(self):
         """``MIN_DRAWS`` is derived rather than chosen, so it is pinned that

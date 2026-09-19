@@ -356,8 +356,10 @@ going nowhere.
 ```
 
 The changes counted are between sweep outputs, never from the starting values,
-so the earliest verdict is at sweep 3 whatever `min_sweeps` says below that, and
-`max_iter` of 1 or 2 with a `tol` always refuses.
+so the earliest verdict is at sweep 3 (`EARLIEST_CONVERGED_SWEEP`) whatever
+`min_sweeps` says below that, and `max_iter` of 1 or 2 with a `tol` always
+refuses. A config document that asks for that is refused before it runs, by
+pre-flight check A25.
 
 The joint χ² is still recorded (`PlanDiagnostics.chi2`) and is no longer the
 test. It was until T-002, as a *decrease*: any sweep that did not lower χ² counted

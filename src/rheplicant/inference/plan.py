@@ -304,6 +304,18 @@ MIN_SWEEPS: int = 3
 #: 89, 0.13 sigma. In float64 the floor is 1.4e-14 and ``tol`` governs.
 OBJECTIVE_FLOOR_EPS: int = 64
 
+#: How many consecutive sweep-to-sweep changes of the objective the stop rule
+#: needs within the effective tolerance. See :func:`_settled`.
+_SETTLED_CHANGES: int = 2
+
+#: The first sweep at which :meth:`SamplingPlan.estimate` can report
+#: converged, whatever ``min_sweeps`` says below it. The changes are counted
+#: between sweep OUTPUTS, never from the starting values, so
+#: :data:`_SETTLED_CHANGES` changes need one more sweep than that. A run with
+#: a ``tol`` and a ``max_iter`` below this always refuses; the config
+#: layer's pre-flight check A25 refuses such a document before it runs.
+EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
+
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather
 #: than the modern 1.01 because this is ``r_hat`` of a single scalar summary of
 #: a single chain, where 1.01 is noise-dominated at the draw counts a Gibbs
@@ -324,17 +336,18 @@ def _settled(trace: list[float], tol: float) -> bool:
 
     ``trace`` holds the objective after each sweep, NOT at the starting
     values: the first change counted is sweep 2 against sweep 1, so the
-    earliest a trace can settle is at sweep 3. Each change is measured in
-    both directions, ``|f[k] - f[k-1]|``, against ``tol * max(|f[k]|, 1)``, so
-    a rise larger than that is never settled. Two changes rather than one, so
-    a sweep that happens to land at the same value from the other side of a
-    minimum is not read as a fixed point.
+    earliest a trace can settle is at :data:`EARLIEST_CONVERGED_SWEEP`. Each
+    change is measured in both directions, ``|f[k] - f[k-1]|``, against
+    ``tol * max(|f[k]|, 1)``, so a rise larger than that is never settled.
+    :data:`_SETTLED_CHANGES` (two) changes rather than one, so a sweep that
+    happens to land at the same value from the other side of a minimum is not
+    read as a fixed point.
     """
-    if len(trace) < 3:
+    if len(trace) < _SETTLED_CHANGES + 1:
         return False
     return all(
         abs(trace[-k] - trace[-k - 1]) <= tol * max(abs(trace[-k]), 1.0)
-        for k in (1, 2)
+        for k in range(1, _SETTLED_CHANGES + 1)
     )
 
 
@@ -1133,9 +1146,10 @@ class SamplingPlan:
             noise: a :class:`~rheplicant.inference.noise.NoiseModel`, or a bare
                 sigma (wrapped as
                 :class:`~rheplicant.inference.noise.HomoscedasticNoise`).
-            max_iter: sweep cap. With a ``tol``, a verdict needs three sweeps
-                (see ``min_sweeps``), so ``max_iter`` of 1 or 2 can never
-                converge and always refuses.
+            max_iter: sweep cap. With a ``tol``, a verdict needs
+                :data:`EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
+                ``min_sweeps``), so ``max_iter`` of 1 or 2 can never converge
+                and always refuses.
             tol: relative change in the joint negative log posterior below
                 which the run has converged, required on two consecutive
                 sweep-to-sweep changes — see :data:`DEFAULT_CHI2_TOL`. It is
@@ -1147,8 +1161,9 @@ class SamplingPlan:
             min_sweeps: sweeps taken before the test is consulted. The test
                 compares sweep 2 with sweep 1 and sweep 3 with sweep 2 at the
                 earliest (the starting values are not a sweep's output), so
-                the earliest verdict is at sweep ``max(min_sweeps, 3)``:
-                ``min_sweeps`` of 1, 2 and 3 behave alike.
+                the earliest verdict is at sweep ``max(min_sweeps,
+                EARLIEST_CONVERGED_SWEEP)``: ``min_sweeps`` of 1, 2 and 3
+                behave alike.
             check_identifiability: ``"once"``, ``"each_sweep"`` or ``False``. See
                 the module docstring; a point estimate is the exit that needs it
                 most, because it has no other diagnostic.
@@ -1185,7 +1200,7 @@ class SamplingPlan:
                 f"estimate() needs 1 <= min_sweeps <= max_iter, got {min_sweeps!r} and "
                 f"{max_iter!r}. A min_sweeps above the cap means the test is never "
                 "consulted, so the run always exhausts max_iter and always refuses — "
-                "including on a model it converged on at sweep two."
+                "including on a model that had already settled."
             )
         cond, values = self._prepare(
             pipeline, state_template, observed, noise, check_identifiability,
@@ -1397,6 +1412,7 @@ __all__ = [
     "DEFAULT_CHI2_TOL",
     "DEFAULT_MAX_ITER",
     "DEFAULT_RHAT_MAX",
+    "EARLIEST_CONVERGED_SWEEP",
     "MIN_DRAWS",
     "MIN_SWEEPS",
     "OBJECTIVE_FLOOR_EPS",

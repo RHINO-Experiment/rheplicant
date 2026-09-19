@@ -1236,6 +1236,16 @@ _T9_MIN_DRAWS: int = 4
 _T9_MIN_SWEEPS: int = 3
 _T9_DEFAULT_MAX_ITER: int = 100
 
+#: ``EARLIEST_CONVERGED_SWEEP`` from ``inference/plan.py``, the first sweep at
+#: which ``SamplingPlan.estimate`` can report converged: its stop rule needs
+#: two consecutive sweep-to-sweep changes within tol, and the first change is
+#: sweep 2 against sweep 1 (T-002 A5-1). Written out for the same measured
+#: reason as the three above, and held to the package's value by the same
+#: test, ``test_the_three_plan_counts_are_the_packages_own``;
+#: ``test_no_name_from_the_inference_layer_is_imported_at_all`` refuses the
+#: deferred import that would otherwise spell it.
+_T9_EARLIEST_CONVERGED_SWEEP: int = 3
+
 #: What ``check_identifiability:`` takes, in the package's own order.
 #:
 #: **A TUPLE and not a frozenset, and neither reason is style.**  ``x in
@@ -1451,27 +1461,50 @@ def _a25_bounds(where: str, name: str, prefix: str,
 
 def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
                       floor: int, cap: int) -> str:
-    """A25's ``1 <= min_sweeps <= max_iter`` refusal, naming only what the
-    document actually wrote.
+    """A25's sweep-count refusal, naming only what the document actually wrote.
 
-    Either half may be the PACKAGE's default, and a message that spelled a
-    default as though the user had typed it is the "hard-coded value the user
-    never wrote" shape Task 7 shipped: ``max_iter: 1`` with no ``min_sweeps``
-    would otherwise read *"min_sweeps: 3 is above max_iter: 1"* and send the
-    reader looking for a key that is not in their document.  The fix clause
-    says "declare a lower min_sweeps" rather than "lower min_sweeps" for the
-    same reason -- there may be nothing there to lower.
+    Two clauses, one finding. ``1 <= min_sweeps <= max_iter`` is the package's
+    own guard; ``max_iter >= EARLIEST_CONVERGED_SWEEP`` is what its stop rule
+    needs to be able to pass at all (T-002 A5-1). A document can break
+    either or both, and when it breaks both it gets one message that names
+    both and one piece of advice that satisfies both: raise ``max_iter`` to
+    the larger of the two floors.
+
+    Either half of the pair may be the PACKAGE's default, and a message that
+    spelled a default as though the user had typed it is the "hard-coded
+    value the user never wrote" shape Task 7 shipped: ``max_iter: 1`` with no
+    ``min_sweeps`` would otherwise read *"min_sweeps: 3 is above max_iter: 1"*
+    and send the reader looking for a key that is not in their document.  The
+    fix clause says "declare a lower min_sweeps" rather than "lower
+    min_sweeps" for the same reason -- there may be nothing there to lower.
+    The cap in the second clause is always written, since the default is
+    far above the earliest verdict.
     """
     floor_said = (f"{prefix}min_sweeps: {floor}" if "min_sweeps" in spec
                   else f"min_sweeps, which defaults to {floor},")
     cap_said = (f"{prefix}max_iter: {cap}" if "max_iter" in spec
                 else f"max_iter, which defaults to {cap}")
+    earliest = _T9_EARLIEST_CONVERGED_SWEEP
+    clauses = []
+    if floor > cap:
+        clauses.append(f"{floor_said} is above {cap_said}, so the convergence "
+                       "test is never consulted")
+    if cap < earliest:
+        clauses.append(
+            f"{cap_said} is below {earliest}, the earliest sweep at which a "
+            "verdict can come: the test needs two consecutive sweep-to-sweep "
+            "changes within tol, and the first is sweep 2 against sweep 1")
+    if cap < earliest:
+        advice = (f"Raise max_iter to at least {max(floor, earliest)}, or "
+                  f"declare {prefix}tol: null")
+    else:
+        advice = ("Declare a lower min_sweeps, raise max_iter, or declare "
+                  f"{prefix}tol: null")
     return (
-        f"{named}: {floor_said} is above {cap_said}, so the convergence test "
-        "is never consulted -- the run always exhausts max_iter and always "
-        "refuses, including on a model it converged on at sweep two. Declare "
-        f"a lower min_sweeps, raise max_iter, or declare {prefix}tol: null to "
-        "run a fixed number of sweeps with no verdict (check A25).")
+        f"{named}: " + "; and ".join(clauses) + " -- the run always exhausts "
+        "max_iter and always refuses, including on a model that had already "
+        f"settled. {advice} to run a fixed number of sweeps with no verdict "
+        "(check A25).")
 
 
 def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
@@ -1673,12 +1706,18 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # 43 modules into the first call and takes this pass from
                 # 1.6 ms to 23 ms -- see `_T9_MIN_DRAWS`, which carries the
                 # measurement and the test that keeps the three honest.
+                #
+                # The second clause is the stop rule's own floor: with a tol
+                # no run converges before `_T9_EARLIEST_CONVERGED_SWEEP`, so
+                # a cap below it always exhausts and refuses at P3, whatever
+                # `min_sweeps` says. Same gate, same site, ONE finding.
                 floor = spec.get("min_sweeps", _T9_MIN_SWEEPS)
                 cap = spec.get("max_iter", _T9_DEFAULT_MAX_ITER)
                 if (spec.get("tol", 1) is not None
                         and _t9_whole_number(floor)
                         and _t9_whole_number(cap)
-                        and floor > cap):
+                        and (floor > cap
+                             or cap < _T9_EARLIEST_CONVERGED_SWEEP)):
                     yield refuse("A25", site,
                                  _a25_pair_message(named, prefix, spec,
                                                    floor, cap))
