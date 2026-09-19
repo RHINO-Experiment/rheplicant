@@ -53,7 +53,9 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.scipy.sparse.linalg
 from jax import lax
+from jax.flatten_util import ravel_pytree
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
@@ -101,6 +103,25 @@ DEFAULT_GRADIENT_STEPS: int = 25
 #: absolute step cannot serve a beam width near 12 degrees and a log-gain near
 #: 0.1 at once; a relative one can.
 DEFAULT_LEARNING_RATE: float = 1e-2
+
+#: Newton iterations a gradient block's point estimate takes after its Adam
+#: steps, every sweep. See :func:`_newton_polish` for why they are there.
+_POLISH_ITERATIONS: int = 3
+
+#: Conjugate-gradient iterations per Newton iteration, at most. A block with
+#: at most this many flattened elements gets a full Newton step (in exact
+#: arithmetic CG terminates within ``n`` iterations on an ``n``-dimensional
+#: positive-definite system); a larger, ill-conditioned block may get a
+#: truncated one, which the acceptance test in :func:`_newton_polish` still
+#: keeps from making anything worse.
+_POLISH_CG_MAXITER: int = 50
+
+#: The tag that keeps a cached estimate transition's key apart from every other
+#: key in a plan's ``programs`` dict. :func:`gradient_draw` keys on
+#: ``(names, steps, adapting)`` and :func:`_conjugate_update` on a 6-tuple of
+#: ``names`` and solver settings; a 4-tuple opening with this string cannot
+#: equal either.
+_ESTIMATE_TAG: str = "estimate"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -568,6 +589,100 @@ def _adam(
     return fitted
 
 
+def _newton_polish(
+    potential: Callable[[dict[str, jax.Array]], jax.Array],
+    x0: dict[str, jax.Array],
+    iterations: int,
+) -> dict[str, jax.Array]:
+    """Newton steps on the block's conditional potential, each kept only if it helps.
+
+    Adam alone has a precision floor at a sweep's granularity, and the floor
+    is set by the step size rather than by the problem. :func:`_adam` starts
+    from zeroed moments every sweep, so its first bias-corrected step is
+    ``step_size * sign(gradient)`` however small the gradient is, and the
+    ``steps``-step map then has a fixed point about 0.19 step sizes from the
+    optimum. Measured by the T-002 verifier (A5-2): a spectral index over 4096
+    channels at 0.01 K landed 4.7e-3 from its MAP, 2881 posterior sigma, at
+    every sweep count; the offset scaled with ``learning_rate`` and shrank only
+    with more inner steps.
+
+    A Newton step uses the curvature, so its length goes to zero with the
+    gradient and the block lands on its conditional optimum wherever Adam
+    left it. The linear system is solved by conjugate gradients on
+    Hessian-vector products, so no Hessian is formed and the memory is that
+    of a gradient. A step is accepted only when it leaves the potential finite
+    and not larger, so a non-convex or badly conditioned conditional keeps
+    Adam's point rather than a worse one.
+
+    A complex block is returned unchanged: its potential is real, and the
+    Hessian-vector product of a real function of complex arguments is not the
+    operator this Newton step needs.
+    """
+    flat0, unravel = ravel_pytree(x0)
+    if not jnp.issubdtype(flat0.dtype, jnp.floating):
+        return x0
+
+    def objective(flat: jax.Array) -> jax.Array:
+        return potential(unravel(flat))
+
+    slope_of = jax.grad(objective)
+
+    def iterate(flat: jax.Array, _: Any) -> tuple[jax.Array, None]:
+        slope = slope_of(flat)
+
+        def curvature(direction: jax.Array) -> jax.Array:
+            return jax.jvp(slope_of, (flat,), (direction,))[1]
+
+        step, _ = jax.scipy.sparse.linalg.cg(
+            curvature, -slope, maxiter=_POLISH_CG_MAXITER
+        )
+        trial = flat + step
+        after = objective(trial)
+        accept = jnp.isfinite(after) & (after <= objective(flat))
+        return jnp.where(accept, trial, flat), None
+
+    polished, _ = lax.scan(iterate, flat0, None, length=iterations)
+    return unravel(polished)
+
+
+def _estimate_transition(
+    cond: Conditioning,
+    names: Sequence[str],
+    *,
+    steps: int,
+    learning_rate: float,
+) -> Callable[..., tuple[dict[str, jax.Array], jax.Array]]:
+    """One jittable gradient-block estimate: ``(others, x0) -> (x, potential)``.
+
+    The estimate-side twin of :func:`_gradient_transition`, and the same
+    repair. :func:`gradient_estimate` used to build a fresh
+    :func:`conditional_potential` closure every sweep and run it unjitted, so
+    every ``jax.jit`` beneath it saw a function it had never seen: measured by
+    the T-002 verifier (A10-1), ``sweeps + 2`` compilations per run, 98
+    identical ones at 100 sweeps and 84 % of the wall clock. The neighbours
+    are a traced argument here, so a run compiles this once per block.
+
+    The step sizes are Python floats fixed at build time from the latents'
+    declared magnitudes, which is why they may be closed over; see
+    :func:`~rheplicant.inference.linear._magnitude`.
+    """
+    potential_of = _potential_of(cond, names)
+    step_sizes = {
+        name: learning_rate * _magnitude(cond.space.latent(name)) for name in names
+    }
+
+    @eqx.filter_jit
+    def transition(others, x0):
+        def potential(x):
+            return potential_of(others, x)
+
+        descended = _adam(potential, x0, steps, step_sizes)
+        fitted = _newton_polish(potential, descended, _POLISH_ITERATIONS)
+        return fitted, potential(fitted)
+
+    return transition
+
+
 def gradient_estimate(
     cond: Conditioning,
     names: tuple[str, ...],
@@ -575,22 +690,38 @@ def gradient_estimate(
     *,
     steps: int,
     learning_rate: float = DEFAULT_LEARNING_RATE,
+    programs: dict[Any, Any] | None = None,
     **_ignored,
 ) -> tuple[dict[str, jax.Array], jax.Array]:
-    """Descend the block's conditional potential for ``steps`` Adam steps.
+    """Descend the block's conditional potential: ``steps`` Adam steps, then Newton.
+
+    The Adam steps do the travelling and the Newton steps
+    (:func:`_newton_polish`) remove Adam's step-size floor, so the block ends
+    each sweep at its conditional optimum rather than a fixed fraction of a
+    step away from it.
 
     Returns the updated values and the potential reached, which stands in the
     residual's place in the conjugate engine's return — a number to record,
-    never a convergence verdict. The verdict is the joint chi-squared, one level
-    up.
+    never a convergence verdict. The verdict is taken one level up, on a joint
+    quantity.
+
+    ``programs`` is the caller's compiled-transition cache, as for
+    :func:`gradient_draw`, and for the same reasons it is keyed without the
+    conditioning. The key opens with a tag so it cannot equal a draw's or a
+    conjugate block's key in the same dict.
     """
-    potential = conditional_potential(cond, names, values)
+    key_for = (_ESTIMATE_TAG, tuple(names), steps, learning_rate)
+    transition = None if programs is None else programs.get(key_for)
+    if transition is None:
+        transition = _estimate_transition(
+            cond, names, steps=steps, learning_rate=learning_rate
+        )
+        if programs is not None:
+            programs[key_for] = transition
+    others = {key: value for key, value in values.items() if key not in names}
     x0 = {name: values[name] for name in names}
-    step_sizes = {
-        name: learning_rate * _magnitude(cond.space.latent(name)) for name in names
-    }
-    fitted = _adam(potential, x0, steps, step_sizes)
-    return {**values, **fitted}, potential(fitted)
+    fitted, potential = transition(others, x0)
+    return {**values, **fitted}, potential
 
 
 def _require_numpyro():

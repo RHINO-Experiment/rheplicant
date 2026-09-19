@@ -255,6 +255,58 @@ def make_line_pipeline() -> Pipeline:
     )
 
 
+def _line_map(observed, *, sigma):
+    """The line model's exact joint MAP and the posterior precision there.
+
+    Newton on ``0.5 chi2 - log prior`` over ``(amp, centre)``, in NumPy float64
+    with the derivatives of :class:`GaussianLine` written out by hand, so the
+    reference shares no code with the estimate it judges and does not touch
+    the process-global x64 flag. Returns ``({name: array}, precision)`` with
+    the precision over ``amp`` then ``centre``, flattened.
+    """
+    data = np.asarray(observed, np.float64)
+    x = np.linspace(-1.0, 1.0, N_FREQ)
+    width = GaussianLine(amp=jnp.zeros(N_TIME), centre=jnp.array(0.0)).width
+    amp_loc = np.broadcast_to(np.asarray(AMP_PRIOR.loc, np.float64), (N_TIME,))
+    amp_scale = np.broadcast_to(np.asarray(AMP_PRIOR.scale, np.float64), (N_TIME,))
+    centre_loc = float(CENTRE_PRIOR.loc)
+    centre_scale = float(CENTRE_PRIOR.scale)
+
+    def derivatives(amp, centre):
+        u = (x - centre) / width**2
+        profile = np.exp(-0.5 * ((x - centre) / width) ** 2)
+        slope = profile * u                        # d profile / d centre
+        bend = profile * (u**2 - 1.0 / width**2)   # d2 profile / d centre2
+        residual = (data - amp[:, None] * profile[None, :]) / sigma
+        gradient = np.concatenate([
+            -residual @ profile / sigma + (amp - amp_loc) / amp_scale**2,
+            [-np.sum(residual * amp[:, None] * slope[None, :]) / sigma
+             + (centre - centre_loc) / centre_scale**2],
+        ])
+        hessian = np.zeros((N_TIME + 1, N_TIME + 1))
+        hessian[:N_TIME, :N_TIME] = np.diag(
+            np.sum(profile**2) / sigma**2 + 1.0 / amp_scale**2
+        )
+        cross = amp * np.sum(profile * slope) / sigma**2 - residual @ slope / sigma
+        hessian[:N_TIME, N_TIME] = hessian[N_TIME, :N_TIME] = cross
+        hessian[N_TIME, N_TIME] = (
+            np.sum(amp**2) * np.sum(slope**2) / sigma**2
+            - np.sum(residual * amp[:, None] * bend[None, :]) / sigma
+            + 1.0 / centre_scale**2
+        )
+        return gradient, hessian
+
+    flat = np.concatenate([np.asarray(LINE_TRUTH["amp"], np.float64),
+                           [float(LINE_TRUTH["centre"])]])
+    for _ in range(30):
+        gradient, hessian = derivatives(flat[:N_TIME], flat[N_TIME])
+        flat = flat - np.linalg.solve(hessian, gradient)
+    gradient, precision = derivatives(flat[:N_TIME], flat[N_TIME])
+    step = np.linalg.solve(precision, gradient)
+    assert np.sqrt(step @ precision @ step) < 1e-8, "reference Newton stalled"
+    return {"amp": flat[:N_TIME], "centre": flat[N_TIME]}, precision
+
+
 # ------------------------------------------------------------ Block declaring --
 
 
@@ -1216,17 +1268,33 @@ class TestGradientEngine:
         assert float(declared - without) == pytest.approx(float(expected), rel=1e-3)
         assert float(expected) != 0.0, "the fixture's prior must actually bite"
 
-    def test_a_mixed_plan_estimates_both_blocks(self, line_setup, state):
+    @pytest.mark.parametrize("steps", [None, 200])
+    def test_a_mixed_plan_estimates_both_blocks(self, line_setup, state, steps):
+        """Both blocks land on the exact joint MAP, within 0.1 posterior sigma.
+
+        This compared against the TRUTH with an absolute 5e-3 on ``centre``,
+        whose posterior sigma is 1.5e-4, so neither T-002 estimate defect could
+        fail it. It also ran only ``steps=200``, where Adam's restart floor is
+        already small; at the default step count the same plan used to land
+        0.66 posterior sigma from the MAP and report converged. The reference
+        here is the MAP itself, by float64 Newton on the joint objective, and
+        the distance is Mahalanobis under the posterior precision there.
+        """
         space, pipeline, observed = line_setup
-        plan = SamplingPlan(space, Block("amp"), Block("centre", steps=200))
+        block = Block("centre") if steps is None else Block("centre", steps=steps)
+        plan = SamplingPlan(space, Block("amp"), block)
         est = plan.estimate(
             pipeline, state, observed, noise=0.05, max_iter=60, tol=1e-6,
             solve_guard=None,
         )
         assert plan.engines == {("amp",): CONJUGATE, ("centre",): GRADIENT}
-        assert float(jnp.abs(est.values["centre"] - LINE_TRUTH["centre"])) < 5e-3, (
-            est.values["centre"]
+        exact, precision = _line_map(observed, sigma=0.05)
+        got = np.concatenate(
+            [np.ravel(np.asarray(est.values[name], np.float64)) for name in exact]
         )
+        residual = got - np.concatenate([np.ravel(value) for value in exact.values()])
+        distance = float(np.sqrt(residual @ precision @ residual))
+        assert distance < 0.1, (distance, est.values, exact)
         # the amps are all different from each other, so a solve that returned
         # one number broadcast across the block would fail here
         assert jnp.allclose(est.values["amp"], LINE_TRUTH["amp"], rtol=2e-2), (
@@ -1279,25 +1347,46 @@ class TestGradientEngine:
         )
         assert seen == [True, True, True, False, False, False, False, False, False], seen
 
-    def test_the_gradient_block_uses_its_declared_step_count(self, line_setup, state):
-        """``steps`` is a statistical assumption for a draw and a real budget
-        for an estimate; either way it must reach the engine. One Adam step
-        cannot travel as far as two hundred."""
+    def test_the_gradient_block_uses_its_declared_step_count(
+        self, line_setup, state, monkeypatch
+    ):
+        """``steps`` is a statistical assumption for a draw and a budget of
+        Adam steps for an estimate; either way it must reach the engine.
+
+        This compared how far one Adam step and four hundred travelled. The
+        Newton steps that now follow Adam (T-002 A5-2) put the block on its
+        conditional optimum either way, so the distance no longer depends on
+        the count, and the plumbing is read off the optimiser's own argument.
+        The last assertion is that independence; before the repair the two
+        counts ended more than twenty times apart in distance travelled.
+        """
+        import rheplicant.inference.engines as engines_module
+
         space, pipeline, observed = line_setup
         common = {
             "noise": 0.05, "max_iter": 3, "tol": None, "solve_guard": None,
             "check_identifiability": False,
         }
+        seen: list[int] = []
+        real = engines_module._adam
+
+        def spy(potential, x0, steps, step_sizes):
+            seen.append(steps)
+            return real(potential, x0, steps, step_sizes)
+
+        monkeypatch.setattr(engines_module, "_adam", spy)
         stingy = SamplingPlan(space, Block("amp"), Block("centre", steps=1)).estimate(
             pipeline, state, observed, **common
         )
+        assert set(seen) == {1}, seen
+        seen.clear()
         generous = SamplingPlan(
             space, Block("amp"), Block("centre", steps=400)
         ).estimate(pipeline, state, observed, **common)
-        start = float(space.latent("centre").init)
-        moved_little = abs(float(stingy.values["centre"]) - start)
-        moved_far = abs(float(generous.values["centre"]) - start)
-        assert moved_far > 20.0 * moved_little, (moved_little, moved_far)
+        assert set(seen) == {400}, seen
+        assert float(stingy.values["centre"]) == pytest.approx(
+            float(generous.values["centre"]), rel=1e-6
+        )
 
 
 class TestTheDefaultsTheConfigLayerQUOTES:

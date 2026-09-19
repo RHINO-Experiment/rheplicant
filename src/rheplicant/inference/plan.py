@@ -391,6 +391,9 @@ class Block:
             :meth:`SamplingPlan.estimate`, as a fraction of ``max|init|``.
             ``None`` takes
             :data:`~rheplicant.inference.engines.DEFAULT_LEARNING_RATE`.
+            It sets how far the Adam steps travel in a sweep; the Newton steps
+            that follow them set the precision, so the answer does not carry
+            a floor proportional to it.
             It has no meaning at :meth:`SamplingPlan.sample`, where NUTS adapts
             its own step size, and none for a conjugate block, which has no
             iterate to step. Giving it to a conjugate block is an error rather
@@ -992,7 +995,7 @@ class SamplingPlan:
                     )
                 else:
                     values, potential = gradient_estimate(
-                        cond, block.names, values, steps=steps,
+                        cond, block.names, values, steps=steps, programs=programs,
                         **({} if block.learning_rate is None
                            else {"learning_rate": block.learning_rate}),
                     )
@@ -1018,8 +1021,10 @@ class SamplingPlan:
         """Best fit: block-coordinate descent to a fixed point of the whole model.
 
         Every block is updated to its conditional best — a Wiener solve for a
-        conjugate block, Adam on the conditional posterior for a gradient one —
-        and the sweep repeats until the **joint** chi-squared stops moving.
+        conjugate block; for a gradient one, Adam on the conditional posterior
+        followed by Newton steps that remove Adam's step-size floor (see
+        :func:`~rheplicant.inference.engines.gradient_estimate`) — and the
+        sweep repeats until the **joint** chi-squared stops moving.
 
         Args:
             pipeline: the forward model.
