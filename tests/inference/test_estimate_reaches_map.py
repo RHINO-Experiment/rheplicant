@@ -238,3 +238,23 @@ def test_a_power_law_reaches_the_joint_map(n_freq, sigma, learning_rate, steps):
     )
     label = f"n_freq {n_freq}, sigma {sigma}, lr {learning_rate}, steps {steps}"
     _check(estimate, got, exact, precision, True, label)
+
+
+def test_a_newton_step_that_raises_the_potential_is_refused():
+    """The Newton steps after Adam are kept only when the potential does not rise.
+
+    ``-cos(x)`` has negative curvature at ``x = 2``, where the Newton step
+    heads past the maximum at ``pi`` to 4.19 and the potential goes up from
+    0.42 to 0.50: refused, so the point Adam left is returned unchanged. From
+    ``x = 0.5``, inside the convex basin, the same three steps reach the
+    minimum at 0.
+    """
+    from rheplicant.inference.engines import _newton_polish
+
+    def potential(x):
+        return -jnp.cos(x["x"])
+
+    stuck = _newton_polish(potential, {"x": jnp.array(2.0)}, 3)
+    assert float(stuck["x"]) == 2.0
+    settled = _newton_polish(potential, {"x": jnp.array(0.5)}, 3)
+    assert abs(float(settled["x"])) < 1e-6
