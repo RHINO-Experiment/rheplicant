@@ -743,13 +743,15 @@ def _reject_a_foreign_stack(
     **What is compared.** Not the arrays: ``_square_block`` re-triangularises,
     so a stored block never equals its epoch's factor. The quadratic form does
     survive, so ``(A, b, c)`` from :func:`_quadratic_form` is compared on each
-    side, against ``sqrt(eps)`` times the epoch's own largest coefficient --
-    relative, for the reason
-    :func:`~rheplicant.inference.sqrtinfo.marginalise` gives about pivots, and
-    the same ``sqrt(eps)`` band. Measured over ``chain_bank``'s six epochs the
-    worst honest disagreement is 1.4e-16 of the block's scale against a band of
-    1.5e-8, and pairing ``e0``'s block with ``e1``'s term disagrees by 3.1e-01.
-    Eight orders of headroom either way.
+    side, each coefficient against ``sqrt(eps)`` times its own scale -- relative,
+    for the reason :func:`~rheplicant.inference.sqrtinfo.marginalise` gives
+    about pivots, and the same ``sqrt(eps)`` band. Measured over
+    ``chain_bank``'s six epochs the worst honest disagreement is 1.4e-16 of the
+    block's scale against a band of 1.5e-8, and pairing ``e0``'s block with
+    ``e1``'s term disagrees by 3.1e-01. Eight orders of headroom either way.
+    The scale was once shared, ``max(|A|, |b|, |c|)``, which let a constant of
+    7.2e11 (one RHINO night's time-bandwidth product) wave through two nights
+    swapped in the stack; see :func:`_reject_a_foreign_block`.
 
     **What it costs.** O(N) small numpy products per construction, so O(N^2)
     over a campaign built one night at a time -- the same order section 6
@@ -826,24 +828,38 @@ def _reject_a_foreign_block(
         term.info.offset,
         [column for name in order for column in columns[name]],
     )
-    scale = max(float(np.max(np.abs(part))) for part in expected[:2])
-    scale = max(scale, abs(expected[2]))
+    # One band PER COEFFICIENT, each against the scale of what it is made of
+    # and never looser than the shared `max(|A|, |b|, |c|)` it replaced. The
+    # shared band let the largest coefficient set it for the other two: under
+    # RadiometerNoise `c` carries the time-bandwidth product (~7.2e11 for one
+    # RHINO night), the band became ~1e4 in every coefficient, and two nights
+    # of one design swapped in the stack were accepted. `max|A|` bounds the
+    # Gram's roundoff; `sqrt(max|A| z.z)` bounds the cross term's, by
+    # Cauchy-Schwarz on `b = R^T z`; the constant keeps the shared scale.
+    # Measured in tests/evidence/test_chain_foreign_block_band.py.
+    gram = float(np.max(np.abs(expected[0])))
+    shared = max(gram, float(np.max(np.abs(expected[1]))), abs(expected[2]))
+    target = np.asarray(term.info.target, dtype=float)
+    cross = min(shared, float(np.sqrt(gram * float(target @ target))))
     # `not (difference <= tolerance)`, and `isfinite(tolerance)` beside it: NaN
     # loses both comparisons, so the plain `>` form would wave a poisoned block
     # through, and an epoch whose own coefficients are inf makes the tolerance
     # inf, which admits every block there is. Both ends, because a guard written
     # NaN-safely can still be defeated from the other one.
-    difference = max(
-        float(np.max(np.abs(found[0] - expected[0]))),
-        float(np.max(np.abs(found[1] - expected[1]))),
-        abs(found[2] - expected[2]),
+    legs = (
+        ("Gram", float(np.max(np.abs(found[0] - expected[0]))), root_eps * gram),
+        ("cross term", float(np.max(np.abs(found[1] - expected[1]))), root_eps * cross),
+        ("constant", abs(found[2] - expected[2]), root_eps * shared),
     )
-    tolerance = root_eps * scale
-    if not (np.isfinite(tolerance) and difference <= tolerance):
+    failed = [
+        leg for leg in legs if not (np.isfinite(leg[2]) and leg[1] <= leg[2])
+    ]
+    if failed:
+        label, difference, tolerance = failed[0]
         raise StateValidationError(
             f"Block {index} does not come from epoch {term.epoch_id!r}: their "
-            f"quadratic forms differ by {difference:.3e}, against a band of "
-            f"{tolerance:.3e} at this epoch's scale. The stack is what the "
+            f"quadratic forms differ by {difference:.3e} in the {label}, against "
+            f"a band of {tolerance:.3e} at this epoch's scale. The stack is what the "
             "recursion reads and the archive is what names it, so a block "
             "paired with the wrong epoch is either a different model reported "
             "under these ids or this model reported under the wrong ones, and "
