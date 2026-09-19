@@ -375,7 +375,13 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
         )
         resolved = resolve_value(node, context, destination=destination)
         maps = jnp.asarray(resolved.value, dtype=context.dtype)
-        record_resolved_delivery(context, destination, resolved.unit)
+        # The document writes `path:`, not `maps:` -- the node above is
+        # built here -- so the maps carry the origin of `path:`. Looking up
+        # `<beam>.maps` refused every npy/npz beam on the command line with
+        # "audit: no origin for 'resources.beams.<name>.maps'".
+        record_resolved_delivery(
+            context, destination, resolved.unit, authority=f"{name}.path"
+        )
         return maps
     if fmt == "inline":
         if "maps" not in spec:
