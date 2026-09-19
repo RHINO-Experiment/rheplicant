@@ -433,13 +433,17 @@ def _document_path_segments(document_path: str) -> tuple[str | int, ...]:
 
 
 def _origin_lookup_for(document: Mapping[str, object], origins: OriginNode) -> OriginLookup:
-    """Bind concrete value paths to the authority of their payload form."""
+    """Bind concrete value paths to the authority of their payload form.
+
+    A ``resources.<kind>.<name>`` value the entry does not write itself is
+    one it inherits through ``extends:`` (``resources._resolved_spec`` merges
+    the parent in before the builder runs), so its authority is the nearest
+    ancestor that writes it.  Stopping at the child refused every such
+    document on the command line with "audit: no origin for ...".
+    """
     from rheplicant.config.values import VALUE_FORMS
 
-    def lookup(document_path: str, /) -> Origin | None:
-        segments = _document_path_segments(document_path)
-        if not segments:
-            return None
+    def written(segments: tuple[str | int, ...]) -> Origin | None:
         value: object = document
         try:
             for segment in segments:
@@ -455,6 +459,34 @@ def _origin_lookup_for(document: Mapping[str, object], origins: OriginNode) -> O
             return origins_at(origins, authority)
         except ConfigError:
             return None
+
+    def inherited(segments: tuple[str | int, ...]) -> Origin | None:
+        if len(segments) < 4 or segments[0] != "resources":
+            return None
+        _, kind, name, *rest = segments
+        resources = document.get("resources")
+        entries = resources.get(kind) if isinstance(resources, Mapping) else None
+        if not isinstance(entries, Mapping):
+            return None
+        seen = {name}
+        entry = entries.get(name)
+        while isinstance(entry, Mapping):
+            parent = entry.get("extends")
+            if not isinstance(parent, str) or parent in seen:
+                return None
+            seen.add(parent)
+            origin = written(("resources", kind, parent, *rest))
+            if origin is not None:
+                return origin
+            entry = entries.get(parent)
+        return None
+
+    def lookup(document_path: str, /) -> Origin | None:
+        segments = _document_path_segments(document_path)
+        if not segments:
+            return None
+        origin = written(segments)
+        return origin if origin is not None else inherited(segments)
 
     return lookup
 

@@ -325,3 +325,52 @@ def test_the_audit_says_the_beam_maps_came_from_the_path_the_user_wrote(tmp_path
     (row,) = [one for one in audit["inputs"]
               if one["document_path"] == "resources.beams.horn.maps"]
     assert row["path"] == str(tmp_path / "beam.npy")
+
+
+@pytest.mark.parametrize("child", [
+    {"extends": "horn"},
+    {"extends": "horn", "normalize": "none"},
+], ids=["inherits-everything", "overrides-a-sibling-key"])
+def test_a_beam_inheriting_its_file_through_extends_validates(
+        tmp_path, capsys, child):
+    """A value an entry inherits through ``extends:`` has no key of its own
+    in the document, so its origin is the ancestor's that writes it.  Before,
+    the lookup stopped at the child and refused the document with
+    ``audit: no origin for 'resources.beams.child.path'``."""
+    from _rheplicant_bootstrap.cli import main
+
+    value = _npy_beam_document(tmp_path, referenced=False)
+    value["resources"]["beams"]["child"] = dict(child)
+    config = tmp_path / "config.yaml"
+    write_document(config, value)
+    assert main(["validate", str(config)]) == 0
+    assert "audit:" not in capsys.readouterr().err
+
+
+def test_an_inherited_value_carries_the_origin_of_the_entry_that_writes_it(
+        tmp_path):
+    """Two shapes the npy fix does not reach: an inline beam's ``maps:`` and
+    a gaussian beam's ``sigma_deg``, each inherited by a child."""
+    import numpy as np
+
+    from _rheplicant_bootstrap.cli import main
+
+    np.save(tmp_path / "beam.npy", np.ones((8, 192)))
+    target = tmp_path / "result"
+    value = document(output=target)
+    common = {"nside": 4, "normalize": "pixel_sum", "frame": "beam_local"}
+    value["resources"]["beams"] = {
+        "flat": {"format": "inline", **common,
+                 "maps": {"file": {"path": "beam.npy", "format": "npy"}}},
+        "flat_child": {"extends": "flat"},
+        "gauss": {"format": "gaussian", **common,
+                  "sigma_deg": {"value": 20.0, "unit": "deg"}},
+        "gauss_child": {"extends": "gauss"},
+    }
+    config = tmp_path / "config.yaml"
+    write_document(config, value)
+    assert main(["run", str(config)]) == 0
+    numeric = yaml.safe_load((target / "config.resolved.yaml").read_text())[
+        "_rheplicant_resolved"]["numeric"]
+    assert numeric["resources.beams.flat_child.maps"]["origin"] == "user"
+    assert numeric["resources.beams.gauss_child.sigma_deg"]["origin"] == "user"
