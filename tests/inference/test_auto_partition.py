@@ -45,10 +45,15 @@ from rheplicant.inference import (
 from rheplicant.inference.engines import CONJUGATE, GRADIENT, LOG_CONJUGATE
 from rheplicant.inference.loglinear import (
     FIRST_ORDER_MAX_FRACTIONAL,
+    LOG_ROUTE_REFUSALS,
     log_route_refusal,
     to_log_space,
 )
-from rheplicant.inference.noise import HomoscedasticNoise, RadiometerNoise
+from rheplicant.inference.noise import (
+    FlaggedNoise,
+    HomoscedasticNoise,
+    RadiometerNoise,
+)
 from rheplicant.inference.partition import UncheckedLogRouteWarning
 from rheplicant.radio import GainOperator
 
@@ -490,6 +495,44 @@ class TestTheNoiseIsHalfTheLogQuestion:
         assert blocks[-1].names == ("log_gain",)
         assert blocks[-1].engine is None
 
+    @pytest.mark.parametrize("fractional", [1e-5, 4.05e-3, FIRST_ORDER_MAX_FRACTIONAL])
+    @pytest.mark.parametrize("floor", [5e-324, 1e-6, 400.0, 1e30])
+    def test_a_declared_floor_means_no_log_block(
+        self, log_gain_model, state, fractional, floor
+    ):
+        """A5-3: a floored sigma is neither multiplicative nor additive.
+
+        ``sigma = f max(|mu|, floor)`` is constant where the floor binds, and
+        the log route replaces it with ``f`` everywhere. Swept over ``f`` from
+        far below to exactly at the first-order ceiling, and over floors from
+        the smallest positive double to far above any prediction, because the
+        refusal must depend on neither.
+        """
+        floored = RadiometerNoise(
+            channel_width=1.0 / fractional**2, integration_time=1.0, floor=floor
+        )
+        assert log_route_refusal(floored) == "noise_neither"
+        blocks = auto_blocks(log_gain_space(), log_gain_model, state, noise=floored)
+        assert blocks[-1].names == ("log_gain",)
+        assert blocks[-1].engine is None  # derived as gradient
+
+    @pytest.mark.parametrize("fractional", [1e-5, 4.05e-3, FIRST_ORDER_MAX_FRACTIONAL])
+    def test_a_zero_floor_keeps_the_log_block(self, log_gain_model, state, fractional):
+        """The negative control for the test above, at the same ``f`` values."""
+        unfloored = RadiometerNoise(
+            channel_width=1.0 / fractional**2, integration_time=1.0, floor=0.0
+        )
+        assert log_route_refusal(unfloored) is None
+        blocks = auto_blocks(log_gain_space(), log_gain_model, state, noise=unfloored)
+        assert blocks[-1].engine == LOG_CONJUGATE
+
+    def test_every_reason_is_one_bayesmith_names(self):
+        """The claim that this vocabulary is bayesmith's, checked rather than
+        stated."""
+        from bayesmith import NOT_LOG_LINEAR_REASONS
+
+        assert LOG_ROUTE_REFUSALS <= NOT_LOG_LINEAR_REASONS
+
     def test_omitting_the_noise_warns_rather_than_claiming_a_block(
         self, log_gain_model, state
     ):
@@ -520,6 +563,17 @@ class TestTheNoiseIsHalfTheLogQuestion:
             pytest.param(
                 RadiometerNoise(channel_width=61e3, integration_time=1.0),
                 id="radiometer",
+            ),
+            pytest.param(
+                RadiometerNoise(channel_width=61e3, integration_time=1.0, floor=1.0),
+                id="radiometer-floored",
+            ),
+            pytest.param(
+                FlaggedNoise(
+                    RadiometerNoise(channel_width=61e3, integration_time=1.0, floor=1.0),
+                    jnp.zeros(N_FREQ, bool),
+                ),
+                id="flagged-radiometer-floored",
             ),
         ],
     )

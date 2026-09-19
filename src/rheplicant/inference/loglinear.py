@@ -123,11 +123,13 @@ LOG_DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1e-2, 1e-1, 1.0)
 
 #: The named reasons a noise model has no log route.
 #:
-#: The vocabulary is deliberately the same two names bayesmith's
-#: ``NOT_LOG_LINEAR_REASONS`` uses for the same two verdicts, so a reader
-#: comparing the packages is comparing words as well as behaviour.
+#: The vocabulary is the names bayesmith's ``NOT_LOG_LINEAR_REASONS`` uses for
+#: the same verdicts, so a reader comparing the packages is comparing words as
+#: well as behaviour. ``noise_neither`` is bayesmith's name for a scale that
+#: moves with the prediction but not in proportion to it, which is what a
+#: declared ``RadiometerNoise.floor`` makes of ``sigma = f max(|mu|, floor)``.
 LOG_ROUTE_REFUSALS: frozenset[str] = frozenset(
-    {"noise_additive", "fractional_too_large"}
+    {"noise_additive", "fractional_too_large", "noise_neither"}
 )
 
 
@@ -149,6 +151,15 @@ def log_route_refusal(noise: Any) -> str | None:
     Returns a REASON rather than raising, because at partition time "no log
     route here" is a blameless verdict that routes the latent to a gradient
     block; the raise belongs where a caller asked for the transform by name.
+
+    **A declared floor is refused whatever its value** (A5-3). The declared
+    sigma is ``f max(|mu|, floor)`` and the log route uses ``f`` on every
+    sample, so the two agree only where the floor never binds. Whether it binds
+    depends on the parameter values a solve visits, which this predicate does
+    not see, so it reads the declaration: any ``floor > 0`` is
+    ``noise_neither``. Before this, the log-route estimate was bit-identical
+    for every floor; the float64 comparison against the declared likelihood is
+    ``tests/evidence/test_log_route_floor.py``.
     """
     if isinstance(noise, FlaggedNoise):
         noise = noise.base
@@ -157,6 +168,9 @@ def log_route_refusal(noise: Any) -> str | None:
         return "noise_additive"
     if float(fractional) > FIRST_ORDER_MAX_FRACTIONAL:
         return "fractional_too_large"
+    # `not <= 0` rather than `> 0`, so a NaN floor is refused and not routed.
+    if not float(getattr(noise, "floor", 0.0)) <= 0.0:
+        return "noise_neither"
     return None
 
 
@@ -167,7 +181,7 @@ def _fraction_and_flags(noise: Any) -> tuple[float, jax.Array | None]:
     for those the log transform is not a change of variables that buys
     anything — it is simply a different, wrong, likelihood.
 
-    The two refusals are decided by :func:`log_route_refusal` and only WORDED
+    The refusals are decided by :func:`log_route_refusal` and only WORDED
     here: one predicate, two consumers, so the partition-time verdict and this
     one cannot drift apart.
     """
@@ -186,6 +200,19 @@ def _fraction_and_flags(noise: Any) -> tuple[float, jax.Array | None]:
             "additive it does not simplify anything, it just states a different "
             "likelihood from the one declared. RadiometerNoise is the model this "
             "reads, optionally wrapped in FlaggedNoise."
+        )
+
+    if refusal == "noise_neither":
+        raise ParameterSpaceError(
+            f"This noise model declares floor = {float(noise.floor):.4g}, so its "
+            "sigma is f * max(|mu|, floor): proportional to the prediction above "
+            "the floor and constant below it. to_log_space() uses sigma = f on "
+            "every sample, which is the declared likelihood only where the floor "
+            "never binds, and whether it binds depends on the parameter values the "
+            "solve visits. A floored model therefore has no closed-form log route. "
+            "Use the gradient engine, which evaluates the declared likelihood with "
+            "its log-determinant, or declare floor = 0 if the prediction cannot "
+            "approach zero."
         )
 
     fractional = float(fractional)
@@ -599,8 +626,8 @@ def to_log_space(
 
     Raises:
         ParameterSpaceError: if the noise is not multiplicative; if its ``f`` is
-            above :data:`FIRST_ORDER_MAX_FRACTIONAL`; or if an unflagged sample
-            is non-positive.
+            above :data:`FIRST_ORDER_MAX_FRACTIONAL`; if it declares a
+            ``floor``; or if an unflagged sample is non-positive.
     """
     fractional, flags = _fraction_and_flags(noise)
     observed = jnp.asarray(observed)
