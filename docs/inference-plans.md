@@ -362,8 +362,11 @@ would return:
   the next one waits twice as long, so a run that never certifies pays
   `O(log max_iter)` decrements.
 
-**How the decrement is computed, and why an inexact solve is safe.** `H` is
-never formed from the model: every product is `jax.jvp` of `jax.grad` of `f`.
+**How the decrement is computed, and why an inexact solve is safe.** The
+numerics are in `rheplicant.inference.certify`, which knows nothing about
+models: it takes a callable and a pytree, and the plan supplies the joint
+objective. `H` is never formed from the model: every product is `jax.jvp` of
+`jax.grad` of `f`.
 Up to 256 latents the decrement takes `n` such products, assembles the Hessian,
 scales it by its diagonal and solves by eigendecomposition; above that it runs
 conjugate gradients on the products alone. Either way the solve is inexact, and

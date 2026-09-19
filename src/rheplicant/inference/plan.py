@@ -208,19 +208,15 @@ import numpy as np
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference import certify
 from rheplicant.inference.engines import (
     CLOSED_FORM,
     CONJUGATE,
-    DECREMENT_CONVERGED,
-    DECREMENT_NONCONVEX,
-    DECREMENT_NONFINITE,
-    DECREMENT_UNREACHED,
     DEFAULT_GRADIENT_STEPS,
     ENGINES,
     GRADIENT,
     LOG_CONJUGATE,
     Conditioning,
-    _decrement_program,
     _monitor_programs,
     conditional_potential,
     conjugate_draw,
@@ -332,15 +328,14 @@ MIN_SWEEPS: int = 3
 #: sweeps reproduce the objective to the last bit. Conjugate solves at
 #: ``solve_tol = 1e-6`` do not: on the motivating bilinear model
 #: (``tests/inference/test_plan.py``, float32, 400 sweeps recorded) the
-#: objective at its plateau moves by tens of ulps a sweep. Replaying that
-#: trace against the float64 MAP, a floor of 4 eps never stops; 64 eps stops
-#: at sweep 94, 0.079 posterior sigma from the MAP; 256 eps stops at sweep
-#: 89, 0.13 sigma. In float64 the floor is 1.4e-14 and ``tol`` governs.
-OBJECTIVE_FLOOR_EPS: int = 64
+#: objective at its plateau moves by tens of ulps a sweep, which is the trace
+#: :data:`~rheplicant.inference.certify.OBJECTIVE_FLOOR_EPS` was measured on.
+#: In float64 the floor is 1.4e-14 and ``tol`` governs.
+OBJECTIVE_FLOOR_EPS: int = certify.OBJECTIVE_FLOOR_EPS
 
 #: How many consecutive sweep-to-sweep changes of the objective the stop rule
 #: needs within the effective tolerance. See :func:`_settled`.
-_SETTLED_CHANGES: int = 2
+_SETTLED_CHANGES: int = certify.SETTLED_CHANGES
 
 #: The first sweep at which :meth:`SamplingPlan.estimate` can report
 #: converged, whatever ``min_sweeps`` says below it. The changes are counted
@@ -358,11 +353,10 @@ EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
 #:
 #: The change is taken as a sum of per-term differences, so the constant parts
 #: of ``f`` (every prior's normalizer) and the bulk of the chi-squared sum
-#: cancel term by term instead of costing ``eps * |f|``. Measured against an
-#: exactly summed float64 reference over 60 random pairs of nearby points on
-#: two collinear templates (``N = 32, 1e4, 1e6``, float32 and float64), the
-#: largest error was 0.64 of the multiple-1 estimate; 4 leaves a factor of six.
-RESOLUTION_EPS: float = 4.0
+#: cancel term by term instead of costing ``eps * |f|``. The multiple is
+#: :data:`~rheplicant.inference.certify.RESOLUTION_EPS` and was measured on
+#: this package's collinear templates.
+RESOLUTION_EPS: float = certify.RESOLUTION_EPS
 
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather
 #: than the modern 1.01 because this is ``r_hat`` of a single scalar summary of
@@ -379,85 +373,21 @@ MIN_DRAWS: int = 4
 _DIRECTIONS_SHOWN: int = 4
 
 
-def _settled(trace: list[float], tol: float) -> bool:
-    """Whether the last TWO changes of a sweep-output ``trace`` are within ``tol``.
-
-    ``trace`` holds the objective after each sweep, NOT at the starting
-    values: the first change counted is sweep 2 against sweep 1, so the
-    earliest a trace can settle is at :data:`EARLIEST_CONVERGED_SWEEP`. Each
-    change is measured in both directions, ``|f[k] - f[k-1]|``, against
-    ``tol * max(|f[k]|, 1)``, so a rise larger than that is never settled.
-    :data:`_SETTLED_CHANGES` (two) changes rather than one, so a sweep that
-    happens to land at the same value from the other side of a minimum is not
-    read as a fixed point.
-    """
-    if len(trace) < _SETTLED_CHANGES + 1:
-        return False
-    return all(
-        abs(trace[-k] - trace[-k - 1]) <= tol * max(abs(trace[-k]), 1.0)
-        for k in range(1, _SETTLED_CHANGES + 1)
-    )
+#: The stop rule's two halves, from
+#: :mod:`~rheplicant.inference.certify`: whether the objective's last
+#: :data:`_SETTLED_CHANGES` changes are within a tolerance, and that
+#: tolerance floored at the dtype's resolution. The changes counted are
+#: between sweep OUTPUTS, never from the starting values, so the earliest a
+#: trace can settle is :data:`EARLIEST_CONVERGED_SWEEP`.
+_settled = certify.settled
+_effective_tol = certify.effective_tol
 
 
-def _effective_tol(tol: float, objective: jax.Array) -> float:
-    """``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype."""
-    eps = float(jnp.finfo(jnp.asarray(objective).dtype).eps)
-    return max(tol, OBJECTIVE_FLOOR_EPS * eps)
-
-
-@dataclasses.dataclass(frozen=True)
-class _GapState:
-    """What :func:`_gap_step` carries from one sweep to the next.
-
-    Attributes:
-        contraction: the last contraction estimated from a decrease the
-            arithmetic resolved, or ``None`` when there is none (none yet, or
-            a rise since).
-        moved: whether any decrease so far exceeded its resolution.
-        decrease, resolution: the previous sweep's decrease and its
-            resolution, in nats.
-    """
-
-    contraction: float | None = None
-    moved: bool = False
-    decrease: float | None = None
-    resolution: float | None = None
-
-
-def _gap_step(
-    state: _GapState, decrease: float, resolution: float, tol: float
-) -> tuple[_GapState, bool, float | None, float | None]:
-    """One sweep of the gap PRE-SCREEN: ``(state, passed, gap, rho)``.
-
-    ``decrease`` is ``D[k] = f[k-1] - f[k]`` and ``resolution`` bounds its
-    rounding, both in nats. The contraction is ``max(D[k], 0) / D[k-1]``,
-    clipped to 1, re-estimated whenever ``D[k-1]`` exceeds its resolution
-    (the last estimate is kept otherwise, and a run that never moved beyond
-    the resolution uses 0); the gap is ``(max(D[k], 0) + resolution) /
-    (1 - rho)``, the decrease plus its geometric tail, and the sweep passes
-    when it is at most ``tol``. A rise the arithmetic resolves passes nothing
-    and forgets the contraction: an exact block update cannot raise ``f``.
-
-    This is a screen and not the certificate. The T-002 second review showed
-    why it cannot be one: the ratio reads the FASTEST mode still moving, so a
-    slow mode with a gap left under a fast one's decreases passes it (two
-    collinear pairs, 0.5 to 1.0 posterior sigma off). What certifies is the
-    Newton decrement (:func:`_certify`), which :meth:`SamplingPlan.estimate`
-    computes only on a sweep that passes this screen, so that a run pays one
-    conjugate-gradient solve per candidate stop and not one per sweep.
-    """
-    if decrease < -resolution:
-        return _GapState(None, True, decrease, resolution), False, None, None
-    contraction = state.contraction
-    if state.decrease is not None and state.decrease > state.resolution:
-        contraction = min(max(decrease, 0.0) / state.decrease, 1.0)
-    moved = state.moved or decrease > resolution
-    rho = contraction if moved else 0.0
-    following = _GapState(contraction, moved, decrease, resolution)
-    if rho is None or rho >= 1.0:
-        return following, False, None, rho
-    gap = (max(decrease, 0.0) + resolution) / (1.0 - rho)
-    return following, gap <= tol, gap, rho
+#: The gap PRE-SCREEN, from :mod:`~rheplicant.inference.certify`: it picks
+#: the sweeps at which the Newton decrement is computed and certifies
+#: nothing. :func:`_certify` is what decides.
+_GapState = certify.GapState
+_gap_step = certify.gap_step
 
 
 #: The key of a point estimate's monitor in the run's ``programs`` cache. A
@@ -469,46 +399,27 @@ _MONITOR_TAG: tuple[str] = ("monitor",)
 #: The key of the Newton decrement's program in the same cache.
 _DECREMENT_TAG: tuple[str] = ("decrement",)
 
-#: The factor a closed-form block's CG tolerance is multiplied by when the
-#: sweep shows its solves are inexact (a rise of the objective the arithmetic
-#: resolves, or a candidate stop the decrement refuses), and where that stops,
-#: by working precision (bytes). In float32 the floor is two machine epsilons,
-#: below which the solve's residual is rounding; in float64 it is 1e-12, which
-#: no fixture needed (the basis fixture's worst case certified at 1e-8). See
-#: :meth:`SamplingPlan.estimate`, ``solve_tol``.
-_SOLVE_TOL_STEP: float = 1e-2
-_SOLVE_TOL_FLOOR: dict[int, float] = {4: 2.4e-7, 8: 1e-12}
-
-
-def _solve_tol_floor(objective: jax.Array) -> float:
-    """How far the closed-form blocks' CG tolerance may be tightened.
-
-    :data:`_SOLVE_TOL_FLOOR` for the precisions this package runs in, and two
-    machine epsilons for any other — a table lookup would raise on it, and a
-    run should not fail because its dtype is unusual.
-    """
-    precision = jnp.finfo(jnp.result_type(objective))
-    return _SOLVE_TOL_FLOOR.get(precision.dtype.itemsize, 2.0 * float(precision.eps))
+#: How a closed-form block's CG tolerance is tightened when the sweep shows
+#: its solves are inexact (a rise of the objective the arithmetic resolves,
+#: or a candidate stop the decrement refuses), and where that stops, from
+#: :mod:`~rheplicant.inference.certify`. Measured here: the bilinear basis
+#: fixture's worst case certifies at 1e-8, six digits above the float64
+#: floor. See :meth:`SamplingPlan.estimate`, ``solve_tol``.
+_SOLVE_TOL_STEP = certify.SOLVE_TOL_STEP
+_solve_tol_floor = certify.solve_tol_floor
 
 
 @dataclasses.dataclass(frozen=True)
 class _Attempt:
-    """One Newton-decrement certificate: what it measured and its verdict.
+    """One certificate: the sweep it was taken at, and what it measured.
 
-    ``estimate`` is ``sqrt(lambda2)`` as the solve left it, ``distance`` the
-    upper bound on the true decrement its residual allows (``inf`` when the
-    residual is too large to bound it), both in posterior sigma; ``residual``
-    and ``kappa`` are what that bound was computed from, and ``iterations``
-    the Hessian-vector products it took.
+    ``measured`` is a :class:`~rheplicant.inference.certify.Decrement`, whose
+    ``estimate`` and ``distance`` are in posterior sigma because the Hessian
+    of the joint negative log posterior IS the posterior precision.
     """
 
     sweep: int
-    estimate: float
-    distance: float
-    iterations: int
-    status: int
-    residual: float
-    kappa: float
+    measured: Any
     certified: bool
 
 
@@ -516,46 +427,25 @@ def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
              gap_tol: float, sweep: int) -> _Attempt:
     """The Newton decrement at ``values``, and whether it certifies ``gap_tol``.
 
-    With ``spread = rho sqrt(kappa) + eps kappa`` the decrement's relative
-    error bound, the true ``g^T H^-1 g`` is at most ``lambda2 / (1 -
-    spread)``. The first term is the solve's
-    (:func:`~rheplicant.inference.engines._decrement_program` derives it); the
-    second is the working precision's, because ``g`` and every Hessian
-    product are themselves rounded, and a relative perturbation ``eps`` of
-    ``H`` moves ``g^T H^-1 g`` by up to ``eps kappa`` of itself. It is
-    negligible in float64, and in float32 it refuses any Hessian with
-    ``kappa`` near ``1 / eps``, where the decrement's digits are rounding. The point is
-    certified when the solve converged, ``spread < 1``, and that upper bound
-    is within ``2 gap_tol``: the distance ``gap_tol`` nats stands for,
-    ``sqrt(2 gap_tol)`` posterior sigma. An inexact solve can therefore only
-    make the certificate refuse, never pass.
+    The objective is :meth:`Conditioning.neg_log_posterior` over every
+    latent, so the decrement is the distance to the MAP of the model the
+    sweep is descending, in posterior sigma; ``gap_tol`` nats stands for
+    ``sqrt(2 gap_tol)`` of them. The verdict reads the upper bound the solve's
+    residual allows and never the estimate alone, so an inexact solve can
+    only make it refuse — see
+    :func:`~rheplicant.inference.certify.decrement`.
+
+    The program is built once per run and cached in ``programs`` beside the
+    block transitions, because compiling it every candidate stop would cost
+    more than the solve.
     """
     program = programs.get(_DECREMENT_TAG)
     if program is None:
-        program = programs[_DECREMENT_TAG] = _decrement_program(cond, values)
-    lambda2, rho, iterations, status, kappa = program(values)
-    eps = float(jnp.finfo(jnp.result_type(lambda2)).eps)
-    lambda2, rho, kappa = float(lambda2), float(rho), float(kappa)
-    spread = rho * math.sqrt(kappa) + eps * kappa if kappa >= 0.0 else math.nan
-    upper = lambda2 / (1.0 - spread) if spread < 1.0 else math.inf
-    estimate = math.sqrt(max(lambda2, 0.0)) if math.isfinite(lambda2) else math.inf
-    distance = math.sqrt(max(upper, 0.0)) if math.isfinite(upper) else math.inf
-    certified = (
-        int(status) == DECREMENT_CONVERGED
-        and math.isfinite(upper)
-        and upper <= 2.0 * gap_tol
-    )
-    return _Attempt(sweep, estimate, distance, int(iterations), int(status), rho,
-                    kappa, certified)
-
-
-_DECREMENT_SAID: dict[int, str] = {
-    DECREMENT_CONVERGED: "reached its residual",
-    DECREMENT_UNREACHED: "did not reach its residual within its iteration cap",
-    DECREMENT_NONCONVEX: "met a direction of non-positive curvature, so the "
-                         "point is not near a minimum",
-    DECREMENT_NONFINITE: "was not finite",
-}
+        program = programs[_DECREMENT_TAG] = certify.decrement_program(
+            cond.neg_log_posterior, values
+        )
+    measured = certify.decrement(None, values, program=program)
+    return _Attempt(sweep, measured, measured.certifies(math.sqrt(2.0 * gap_tol)))
 
 
 def _not_converged_message(
@@ -590,16 +480,19 @@ def _not_converged_message(
             "is inexact at this precision (solve_tol, or the dtype). "
         )
     if attempt is not None:
+        measured = attempt.measured
         where = (
-            f"between {attempt.estimate:.3g} and {attempt.distance:.3g}"
-            if math.isfinite(attempt.distance)
-            else f"at least {attempt.estimate:.3g} (its residual is too large to "
+            f"between {measured.estimate:.3g} and {measured.distance:.3g}"
+            if math.isfinite(measured.distance)
+            else f"at least {measured.estimate:.3g} (its residual is too large to "
             "bound it from above)"
         )
         return opening + (
             f"The last candidate stop, sweep {attempt.sweep}, was not certified: the "
-            f"Newton decrement of the joint objective {_DECREMENT_SAID[attempt.status]}"
-            f" after {attempt.iterations} iteration(s) and puts the point {where} "
+            "Newton decrement of the joint objective "
+            f"{certify.STATUS_SAID[measured.status]}"
+            f" after {measured.products} Hessian-vector product(s) and puts the "
+            f"point {where} "
             f"posterior sigma from the objective's minimum, against {limit:.3g} "
             f"(gap_tol = {gap_tol:g} nats). The sweep's fixed point "
             "is not that minimum when an inner solve is inexact (the closed-form "
@@ -1475,7 +1368,7 @@ class SamplingPlan:
         Far from quadratic, where the curvature changes over a posterior
         sigma, the decrement is a local statement. A direction of
         non-positive curvature, an iteration that does not reach its residual
-        within its cap (:data:`~rheplicant.inference.engines._DECREMENT_MAXITER`),
+        within its cap (:data:`~rheplicant.inference.certify.MAXITER`),
         or a residual too large to bound the decrement certifies nothing, and
         the run refuses at ``max_iter`` saying which. In float32 the gradient
         of ``f`` is itself rounded, so a model whose posterior sigma is small
@@ -1672,8 +1565,10 @@ class SamplingPlan:
                 objective=np.asarray(objective, dtype=np.float64),
                 effective_tol=effective,
                 contraction=rho,
-                distance_bound=None if attempt is None else attempt.distance,
-                certificate_iterations=None if attempt is None else attempt.iterations,
+                distance_bound=None if attempt is None else attempt.measured.distance,
+                certificate_iterations=(
+                    None if attempt is None else attempt.measured.products
+                ),
                 certificate_attempts=attempts,
                 solve_tol=tightened,
             ),

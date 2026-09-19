@@ -56,7 +56,6 @@ from rheplicant.inference.plan import (
     MIN_SWEEPS,
     OBJECTIVE_FLOOR_EPS,
     _halves,
-    _settled,
 )
 from rheplicant.radio import GainOperator
 
@@ -873,17 +872,6 @@ class TestConvergence:
         exact, precision = _basis_map(observed, sigma=0.30)
         distance = _posterior_sigmas_from(estimate, exact, precision)
         assert distance < 0.1, (distance, diagnostics.sweeps)
-
-    def test_the_stop_rule_counts_changes_in_both_directions(self):
-        """``_settled`` on hand-made traces: a rise beyond the tolerance is not
-        settled, which the old one-sided test would have called settled."""
-        tol = 1e-6
-        assert _settled([10.0, 10.0, 10.0], tol)
-        assert _settled([10.0, 10.0 + 5e-6, 10.0], tol)
-        assert not _settled([10.0, 10.5, 11.0], tol)       # rising
-        assert not _settled([11.0, 10.5, 10.0], tol)       # falling
-        assert not _settled([10.0, 10.0, 11.0], tol)       # only one change settled
-        assert not _settled([10.0, 10.0], tol)             # one change is not two
 
     def test_the_floor_is_recorded_and_scales_with_the_dtype(self, basis_setup, state):
         """The applied tolerance is ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``.

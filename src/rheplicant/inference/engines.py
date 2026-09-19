@@ -54,11 +54,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import lax
-from jax.flatten_util import ravel_pytree
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from rheplicant.inference import certify
 from rheplicant.inference.linear import (
     _magnitude,
     gcr_sample,
@@ -102,33 +102,6 @@ DEFAULT_GRADIENT_STEPS: int = 25
 #: absolute step cannot serve a beam width near 12 degrees and a log-gain near
 #: 0.1 at once; a relative one can.
 DEFAULT_LEARNING_RATE: float = 1e-2
-
-#: Newton iterations a gradient block's point estimate takes after its Adam
-#: steps, every sweep. See :func:`_newton_polish` for why they are there.
-_POLISH_ITERATIONS: int = 3
-
-#: Conjugate-gradient iterations per Newton iteration, at most. A block with
-#: at most this many flattened elements gets a full Newton step (in exact
-#: arithmetic CG terminates within ``n`` iterations on an ``n``-dimensional
-#: positive-definite system); a larger, ill-conditioned block may get a
-#: truncated one, which the acceptance test in :func:`_newton_polish` still
-#: keeps from making anything worse.
-_POLISH_CG_MAXITER: int = 50
-
-#: Relative residual at which a Newton step's conjugate gradients stop:
-#: ``|H p + g| <= _POLISH_CG_TOL |g|``. A step solved to this cuts a
-#: quadratic's error by the same factor, so three iterations reach 1e-15.
-_POLISH_CG_TOL: float = 1e-5
-
-#: Armijo's sufficient-decrease constant: a step ``t p`` is kept when
-#: ``f(x + t p) - f(x) <= _ARMIJO * t * g.p`` with ``g.p < 0``. The usual
-#: 1e-4; it asks for a decrease the step's own slope predicts, not merely no
-#: rise, so a jump the objective cannot resolve is refused.
-_ARMIJO: float = 1e-4
-
-#: Step halvings the Armijo search may take before the Newton iteration keeps
-#: its starting point. 2**-30 is below float32's relative resolution.
-_ARMIJO_HALVINGS: int = 30
 
 #: The tag that keeps a cached estimate transition's key apart from every other
 #: key in a plan's ``programs`` dict. :func:`gradient_draw` keys on
@@ -305,207 +278,14 @@ def _objective_terms(
     return jnp.sum(residual**2), terms, scales
 
 
-#: Relative residual at which the Newton decrement's conjugate gradients stop,
-#: by working precision (bytes). The attainable level is about ``eps *
-#: kappa``, so float32 asks for less. What the stop costs the decrement is
-#: bounded afterwards from the TRUE residual (see :func:`_decrement_program`),
-#: not assumed from this number.
-_DECREMENT_RTOL: dict[int, float] = {4: 1e-4, 8: 1e-8}
-
-#: Conjugate-gradient iterations the decrement may take: ``4 n + 20`` for
-#: ``n`` flattened latents (exact arithmetic needs ``n``; the rest absorbs
-#: lost orthogonality), capped here. A decrement that has not reached its
-#: residual at the cap certifies nothing.
-_DECREMENT_MAXITER: int = 1000
-
-#: Latents up to which the decrement forms the Hessian from ``n``
-#: Hessian-vector products, :data:`_DECREMENT_BATCH` at a time so memory
-#: stays a few forward passes, and solves it densely. Up to here that costs
-#: no more products than conjugate gradients need on a correlated model, and
-#: it gives the exact condition number the decrement's error bound needs;
-#: above it the solve is conjugate gradients and the condition number an
-#: estimate (see :func:`_decrement_program`).
-_DECREMENT_DENSE_MAX: int = 256
-_DECREMENT_BATCH: int = 16
-
-#: The status of a decrement. ``UNREACHED``: the conjugate gradients did not
-#: reach their residual within the cap. ``NONCONVEX``: a direction of
-#: non-positive curvature, so the point is not near a minimum.
-DECREMENT_CONVERGED, DECREMENT_UNREACHED, DECREMENT_NONCONVEX, DECREMENT_NONFINITE = range(4)
-
-
-def _decrement_program(cond: Conditioning, template: dict[str, jax.Array]) -> Callable:
-    """The Newton decrement of the JOINT objective, jitted once per run.
-
-    Returns ``decrement(values) -> (lambda2, rho, products, status, kappa)``.
-    ``lambda2`` is ``g^T x`` for ``x`` the computed solution of ``H x = g``,
-    ``g`` and ``H`` the gradient and Hessian of
-    :meth:`Conditioning.neg_log_posterior` over every latent, flattened (a
-    complex latent as its real and imaginary parts). For a locally quadratic
-    objective ``sqrt(g^T H^-1 g)`` is the Mahalanobis distance to its minimum
-    in posterior sigma, whatever the number of data and however the sweep's
-    modes mix, which is what a point estimate's certificate needs and what a
-    change of the objective between sweeps cannot give (T-002 second review:
-    a slow mode hidden under a fast one certified 0.5 to 1.0 sigma off).
-
-    Every Hessian product is exact, ``jax.jvp`` of ``jax.grad``. With ``n``
-    latents, up to :data:`_DECREMENT_DENSE_MAX` the Hessian is formed from
-    ``n`` products and solved by an eigendecomposition after scaling by its
-    diagonal ``M``; above it, ``H x = g`` is conjugate gradients from zero,
-    unpreconditioned (``M = I``), stopped at a relative residual of
-    :data:`_DECREMENT_RTOL` or at :data:`_DECREMENT_MAXITER` iterations.
-    ``products`` counts the Hessian-vector products either way.
-
-    **Why an inexact solve cannot flip the verdict.** Let ``r = g - H x`` be
-    the TRUE residual, recomputed with one more product (a recursive residual
-    drifts from it in finite precision), ``rho`` its size relative to ``g``
-    in the ``M^-1`` norm, and ``kappa`` the condition number of ``M^-1/2 H
-    M^-1/2``. Then ``g^T H^-1 g - lambda2 = g^T H^-1 r`` exactly, which by
-    Cauchy-Schwarz in the ``H^-1`` inner product is at most ``rho sqrt(kappa)
-    g^T H^-1 g`` in size. So ``g^T H^-1 g <= lambda2 / (1 - rho sqrt(kappa))``
-    and the caller certifies on that upper bound, never on ``lambda2``;
-    nothing here assumes the solve was exact. The bound is for ``g`` and
-    ``H`` as the working precision computes them; their own rounding is a
-    separate ``eps kappa``, which the caller adds (see
-    :func:`~rheplicant.inference.plan._certify`).
-
-    ``kappa`` is exact (to rounding) on the dense path: the ratio of the
-    scaled Hessian's extreme eigenvalues. On the conjugate-gradient path it
-    is the ratio of the extreme eigenvalues of the iteration's Lanczos matrix,
-    which lie inside the spectrum, so it can only be low; the bound is then
-    as good as that estimate. At float64's ``rtol = 1e-8`` an estimate low by
-    a factor ``F`` hides at most ``1e-8 sqrt(F kappa)`` of the decrement,
-    which stays below 1e-3 of it for ``F kappa <= 1e10``.
-
-    ``status`` is :data:`DECREMENT_CONVERGED` (the dense solve, or conjugate
-    gradients at their residual), :data:`DECREMENT_UNREACHED`,
-    :data:`DECREMENT_NONCONVEX` (``lambda2`` then means nothing) or
-    :data:`DECREMENT_NONFINITE`. Only the first can certify.
-    """
-    flat0, unravel = ravel_pytree(template)
-    complex_ = jnp.iscomplexobj(flat0)
-    size = int(flat0.size)
-
-    def to_real(flat):
-        return jnp.concatenate([flat.real, flat.imag]) if complex_ else flat
-
-    def from_real(vector):
-        if complex_:
-            return unravel(vector[:size] + 1j * vector[size:])
-        return unravel(vector)
-
-    def objective(vector):
-        return cond.neg_log_posterior(from_real(vector))
-
-    slope_of = jax.grad(objective)
-    n = 2 * size if complex_ else size
-    rtol = _DECREMENT_RTOL.get(jnp.dtype(flat0.real.dtype).itemsize, 1e-8)
-    solve = _dense_decrement if n <= _DECREMENT_DENSE_MAX else _iterative_decrement
-
-    @eqx.filter_jit
-    def decrement(values):
-        vector = to_real(ravel_pytree(values)[0])
-        slope = slope_of(vector)
-
-        def curvature(direction):
-            return jax.jvp(slope_of, (vector,), (direction,))[1]
-
-        x, scale, products, status, kappa = solve(curvature, slope, n, rtol)
-        remainder = slope - curvature(x)
-        target = jnp.sum(slope * slope / scale)
-        rho = jnp.sqrt(jnp.sum(remainder * remainder / scale)
-                       / jnp.where(target > 0.0, target, 1.0))
-        lambda2 = jnp.sum(slope * x)
-        status = jnp.where(
-            jnp.all(jnp.isfinite(slope)) & jnp.isfinite(rho) & jnp.isfinite(lambda2),
-            status, DECREMENT_NONFINITE,
-        )
-        return lambda2, rho, products + 1, status, kappa
-
-    return decrement
-
-
-def _dense_decrement(curvature: Callable, slope: jax.Array, n: int, rtol: float):
-    """``H x = g`` from ``n`` Hessian columns, scaled by the diagonal."""
-    del rtol  # the solve is direct; its residual is measured, not targeted
-    unit = jnp.eye(n, dtype=slope.dtype)
-    columns = lax.map(curvature, unit, batch_size=min(n, _DECREMENT_BATCH))
-    hessian = 0.5 * (columns + columns.T)
-    diagonal = jnp.diagonal(hessian)
-    scale = jnp.where(diagonal > 0.0, diagonal, 1.0)
-    root = jnp.sqrt(scale)
-    eigenvalues, vectors = jnp.linalg.eigh(hessian / jnp.outer(root, root))
-    lowest = eigenvalues[0]
-    convex = (lowest > 0.0) & jnp.all(diagonal > 0.0)
-    inverse = jnp.where(eigenvalues > 0.0, 1.0 / eigenvalues, 0.0)
-    x = (vectors @ (inverse * (vectors.T @ (slope / root)))) / root
-    kappa = eigenvalues[-1] / jnp.where(lowest > 0.0, lowest, jnp.nan)
-    status = jnp.where(convex, DECREMENT_CONVERGED, DECREMENT_NONCONVEX)
-    return x, scale, n, status, kappa
-
-
-def _iterative_decrement(curvature: Callable, slope: jax.Array, n: int, rtol: float):
-    """``H x = g`` by conjugate gradients from zero, with its Lanczos ``kappa``."""
-    maxiter = min(4 * n + 20, _DECREMENT_MAXITER)
-    target = jnp.sum(slope * slope)
-    zeros = jnp.zeros(maxiter, slope.dtype)
-
-    def going(carry):
-        return carry[0] < 0
-
-    def step(carry):
-        status, k, x, r, p, rr, alphas, betas = carry
-        product = curvature(p)
-        bend = jnp.sum(p * product)
-        alpha = rr / jnp.where(bend > 0.0, bend, 1.0)
-        x = x + alpha * p
-        r = r - alpha * product
-        following = jnp.sum(r * r)
-        beta = following / jnp.where(rr > 0.0, rr, 1.0)
-        status = jnp.where(
-            ~(bend > 0.0), DECREMENT_NONCONVEX,
-            jnp.where(following <= rtol**2 * target, DECREMENT_CONVERGED,
-                      jnp.where(k + 1 >= maxiter, DECREMENT_UNREACHED, -1)))
-        return (status, k + 1, x, r, r + beta * p, following,
-                alphas.at[k].set(alpha), betas.at[k].set(beta))
-
-    start = (jnp.where(target > 0.0, -1, DECREMENT_CONVERGED), jnp.asarray(0),
-             jnp.zeros_like(slope), slope, slope, target, zeros, zeros)
-    status, k, x, _, _, _, alphas, betas = lax.while_loop(going, step, start)
-    return x, jnp.ones_like(slope), k, status, _lanczos_condition(alphas, betas, k)
-
-
-def _lanczos_condition(alphas: jax.Array, betas: jax.Array, k: jax.Array) -> jax.Array:
-    """The condition number of the Lanczos matrix of ``k`` CG steps.
-
-    The tridiagonal matrix has diagonal ``1/a[j] + b[j-1]/a[j-1]`` and
-    off-diagonal ``sqrt(b[j])/a[j]`` for the steps' ``alpha`` and ``beta``;
-    its eigenvalues (Ritz values) lie inside the operator's spectrum. The
-    unused tail is padded with ``1/a[0]``, a Rayleigh quotient, so it moves
-    neither extreme.
-    """
-    live = jnp.arange(alphas.shape[0]) < k
-    safe = jnp.where(alphas != 0.0, alphas, 1.0)
-    shifted = jnp.concatenate([jnp.zeros(1, alphas.dtype), betas[:-1] / safe[:-1]])
-    diagonal = jnp.where(live, 1.0 / safe + shifted, 1.0 / safe[0])
-    off = jnp.where(live[1:] & live[:-1], jnp.sqrt(jnp.abs(betas[:-1])) / safe[:-1], 0.0)
-    ritz = jax.scipy.linalg.eigh_tridiagonal(diagonal, off, eigvals_only=True)
-    return jnp.max(ritz) / jnp.where(jnp.min(ritz) > 0.0, jnp.min(ritz), jnp.nan)
-
-
 def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callable, Callable]:
     """``(measure, change)``, jitted once per run for a point estimate's monitor.
 
-    ``measure(values) -> (chi2, objective, terms, scales)`` and
-    ``change(terms0, scales0, terms1, scales1) -> (decrease, resolution)``,
-    where ``decrease`` is ``f0 - f1`` summed term by term and ``resolution``
-    is ``resolution_eps * eps * sqrt(sum (scale0 + scale1)**2)``: the rounding
-    of each term's two evaluations, added as independent errors.
-
-    Near convergence the two evaluations of a term are within a factor of two
-    of each other, so their difference is exact in the working dtype
-    (Sterbenz), and the sum of small differences carries almost none of the
-    total's rounding.
+    ``measure(values) -> (chi2, objective, terms, scales)`` is this model's
+    half: the joint chi-squared and the objective as the per-element terms
+    :func:`_objective_terms` builds. ``change`` is
+    :func:`~rheplicant.inference.certify.change_program`'s, which differences
+    those terms and says what the arithmetic resolved.
     """
 
     @eqx.filter_jit
@@ -514,14 +294,7 @@ def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callab
         objective = sum(jnp.sum(term) for term in terms.values())
         return chi2, objective, terms, scales
 
-    @eqx.filter_jit
-    def change(terms0, scales0, terms1, scales1):
-        decrease = sum(jnp.sum(terms0[key] - terms1[key]) for key in terms1)
-        spread = sum(jnp.sum((scales0[key] + scales1[key]) ** 2) for key in scales1)
-        eps = jnp.finfo(jnp.result_type(*terms1.values())).eps
-        return decrease, resolution_eps * eps * jnp.sqrt(spread)
-
-    return measure, change
+    return measure, certify.change_program(resolution_eps)
 
 
 def _log_prior(space: ParameterSpace, names: Sequence[str], x: dict[str, jax.Array]):
@@ -884,125 +657,6 @@ def _adam(
     return fitted
 
 
-def _steihaug(curvature: Callable[[jax.Array], jax.Array], slope: jax.Array) -> jax.Array:
-    """Newton direction by conjugate gradients, stopped at negative curvature.
-
-    Solves ``H p = -g`` for ``H`` given as ``curvature(d) = H d``, and stops
-    at the first direction with ``d.H d <= 0`` (Steihaug's truncation, with
-    no trust region): the iterate reached so far is a descent direction, and
-    at the first iteration that is ``-g`` itself. Plain CG does not stop
-    there, and on an indefinite ``H`` it heads for whatever stationary point
-    the quadratic model has; the T-002 review measured a bilinear ``a b``
-    block walked onto a saddle at ``f = 1494.7`` that way, the minimum being
-    at ``-57.0``.
-    """
-    scale = jnp.sqrt(jnp.sum(slope * slope))
-
-    def going(carry):
-        index, _, residual, _, _, done = carry
-        return (~done) & (index < _POLISH_CG_MAXITER) & (
-            jnp.sqrt(jnp.sum(residual * residual)) > _POLISH_CG_TOL * scale
-        )
-
-    def step(carry):
-        index, point, residual, direction, squared, _ = carry
-        product = curvature(direction)
-        bend = jnp.sum(direction * product)
-        negative = bend <= 0.0
-        alpha = squared / jnp.where(negative, 1.0, bend)
-        moved = point + alpha * direction
-        following = residual - alpha * product
-        renewed = jnp.sum(following * following)
-        beta = renewed / jnp.where(squared > 0.0, squared, 1.0)
-        # negative curvature: keep the point reached, or -g if none yet
-        stopped = jnp.where(index == 0, direction, point)
-        return (
-            index + 1,
-            jnp.where(negative, stopped, moved),
-            jnp.where(negative, residual, following),
-            jnp.where(negative, direction, following + beta * direction),
-            jnp.where(negative, squared, renewed),
-            negative,
-        )
-
-    start = (jnp.asarray(0), jnp.zeros_like(slope), -slope, -slope,
-             jnp.sum(slope * slope), jnp.asarray(False))
-    return lax.while_loop(going, step, start)[1]
-
-
-def _newton_polish(
-    potential: Callable[[dict[str, jax.Array]], jax.Array],
-    x0: dict[str, jax.Array],
-    iterations: int,
-) -> dict[str, jax.Array]:
-    """Newton steps on the block's conditional potential, each kept only if it helps.
-
-    Adam alone has a precision floor at a sweep's granularity, and the floor
-    is set by the step size rather than by the problem. :func:`_adam` starts
-    from zeroed moments every sweep, so its first bias-corrected step is
-    ``step_size * sign(gradient)`` however small the gradient is, and the
-    ``steps``-step map then has a fixed point about 0.19 step sizes from the
-    optimum. Measured by the T-002 verifier (A5-2): a spectral index over 4096
-    channels at 0.01 K landed 4.7e-3 from its MAP, 2881 posterior sigma, at
-    every sweep count; the offset scaled with ``learning_rate`` and shrank only
-    with more inner steps.
-
-    A Newton step uses the curvature, so its length goes to zero with the
-    gradient and the block lands on its conditional optimum wherever Adam
-    left it. The direction is :func:`_steihaug`'s: conjugate gradients on
-    Hessian-vector products, no Hessian formed, stopped at negative
-    curvature. The step along it is backtracked (halved up to
-    :data:`_ARMIJO_HALVINGS` times) until Armijo's condition holds,
-    ``f(x + t p) - f(x) <= _ARMIJO * t * g.p`` with ``g.p < 0`` and the result
-    finite; otherwise the iteration keeps its point. The decrease is compared
-    as a DIFFERENCE, because ``f(x) + small`` rounds to ``f(x)`` when ``|f|``
-    is large: measured by the T-002 review, ``after <= before`` accepted a
-    float32 jump from ``y = 3`` to ``y = -97.9`` on a potential offset by
-    1e7, where no step could be resolved at all.
-
-    A complex block is returned unchanged: its potential is real, and the
-    Hessian-vector product of a real function of complex arguments is not the
-    operator this Newton step needs.
-    """
-    flat0, unravel = ravel_pytree(x0)
-    if not jnp.issubdtype(flat0.dtype, jnp.floating):
-        return x0
-
-    def objective(flat: jax.Array) -> jax.Array:
-        return potential(unravel(flat))
-
-    slope_of = jax.grad(objective)
-
-    def iterate(flat: jax.Array, _: Any) -> tuple[jax.Array, None]:
-        slope = slope_of(flat)
-
-        def curvature(direction: jax.Array) -> jax.Array:
-            return jax.jvp(slope_of, (flat,), (direction,))[1]
-
-        direction = _steihaug(curvature, slope)
-        descent = jnp.sum(slope * direction)
-        before = objective(flat)
-
-        def sufficient(length):
-            after = objective(flat + length * direction)
-            return jnp.isfinite(after) & (after - before <= _ARMIJO * length * descent)
-
-        def shorter(carry):
-            length, count, _ = carry
-            return length * 0.5, count + 1, sufficient(length * 0.5)
-
-        length, _, accepted = lax.while_loop(
-            lambda carry: (~carry[2]) & (carry[1] < _ARMIJO_HALVINGS),
-            shorter,
-            (jnp.asarray(1.0, flat.dtype), jnp.asarray(0), sufficient(1.0)),
-        )
-        keep = accepted & (descent < 0.0)
-        return jnp.where(keep, flat + length * direction, flat), None
-
-    polished, _ = lax.scan(iterate, flat0, None, length=iterations)
-    return unravel(polished)
-
-
 def _estimate_transition(
     cond: Conditioning,
     names: Sequence[str],
@@ -1035,7 +689,7 @@ def _estimate_transition(
             return potential_of(others, x)
 
         descended = _adam(potential, x0, steps, step_sizes)
-        fitted = _newton_polish(potential, descended, _POLISH_ITERATIONS)
+        fitted = certify.polish(potential, descended)[0]
         return fitted, potential(fitted)
 
     return transition
@@ -1054,9 +708,9 @@ def gradient_estimate(
     """Descend the block's conditional potential: ``steps`` Adam steps, then Newton.
 
     The Adam steps do the travelling and the Newton steps
-    (:func:`_newton_polish`) remove Adam's step-size floor, so the block ends
-    each sweep at its conditional optimum rather than a fixed fraction of a
-    step away from it.
+    (:func:`~rheplicant.inference.certify.polish`) remove Adam's step-size
+    floor, so the block ends each sweep at its conditional optimum rather
+    than a fixed fraction of a step away from it.
 
     Returns the updated values and the potential reached, which stands in the
     residual's place in the conjugate engine's return — a number to record,
