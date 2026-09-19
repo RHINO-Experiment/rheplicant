@@ -203,7 +203,7 @@ class DriftScanProjector(AbstractSkyProjector):
     freq_chunk: int | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
-        n_alm = (self.lmax + 1) * (self.lmax + 2) // 2
+        n_alm = _n_alm_on_a_band_s2fft_can_carry(self.nside, self.lmax)
         if self.beam_alms.ndim != 2 or self.beam_alms.shape[-1] != n_alm:
             raise StateValidationError(
                 f"beam_alms must be (n_freq, n_alm={n_alm}) packed alms for "
@@ -294,8 +294,8 @@ class DriftScanProjector(AbstractSkyProjector):
         if 12 * nside**2 != n_pix:
             raise StateValidationError(
                 f"beam_maps has {n_pix} pixels, which is not a valid HEALPix "
-                f"map length (12·nside²)."
-            )
+                f"map length (12·nside²).")
+        _n_alm_on_a_band_s2fft_can_carry(nside, lmax)  # before map2alm_iter runs
         ltj = _limtod_jax(bool(kwargs.get("uniform_sampling", False)))
         alms = jax.vmap(
             lambda m: ltj.map2alm_iter(m, nside=nside, lmax=lmax, iterations=iterations)
@@ -756,3 +756,33 @@ class DriftScanProjector(AbstractSkyProjector):
             horizon_mask=False,  # already applied into the cached alms
             beam_ref_lst_deg=float(ref),  # the invariant __check_init__ checks
         )
+
+
+def _n_alm_on_a_band_s2fft_can_carry(nside: int, lmax: int) -> int:
+    """The packed alm count for ``lmax``, after refusing a band s2fft cannot run.
+
+    s2fft's HEALPix transforms need ``nside >= 2`` and ``lmax + 1 >= 2 * nside``,
+    and fail below either edge with no message of their own: at nside 1 a
+    ``ValueError`` ("Need at least one array to stack"), below the lmax edge a
+    ``TypeError`` from the analysis FFT and a bare ``AssertionError`` from the
+    synthesis. Measured on every transform path of this class for nside 1-4 and
+    8 (forward and adjoint at 16 and 32): all failed below the edge and all ran
+    at and above it, with no upper edge up to ``lmax = 64`` at nside 2.
+
+    Defined after the class, not beside it, so the line numbers that
+    ``rheplicant.config`` cites into this module stay where they point.
+    """
+    if nside < 2 or lmax < 2 * nside - 1:
+        which = (
+            "nside is below 2, where no lmax works"
+            if nside < 2
+            else f"lmax is below 2 * nside - 1 = {2 * nside - 1}"
+        )
+        raise StateValidationError(
+            f"DriftScanProjector got nside={nside}, lmax={lmax}: {which}. Its "
+            "HEALPix transforms (s2fft, through limtod_jax) need nside >= 2 and "
+            "lmax >= 2 * nside - 1, and fail inside s2fft without a message "
+            "below that. There is no upper edge; lmax = 3 * nside - 1 is the "
+            "usual band limit. Raise lmax or lower nside."
+        )
+    return (lmax + 1) * (lmax + 2) // 2
