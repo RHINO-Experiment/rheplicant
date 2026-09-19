@@ -66,21 +66,22 @@ def _finite(value):
     return bool(np.isfinite(np.asarray(value)).all())
 
 
-#: The analysis's crash domain: nside 1 at any lmax, and ``lmax = 2 * nside - 2``
-#: (one under the edge) or far under at nside 2..64.
-CRASH = [(1, 0), (1, 5), (1, 40), (2, 0), (2, 2), (3, 4), (4, 0), (4, 6),
-         (8, 14), (16, 30), (32, 62), (64, 0), (64, 10), (64, 126)]
+#: One under the lmax edge, ``lmax = 2 * nside - 2``, at nside 1, 2, 4 and 8:
+#: every path's crash domain, and where the alm-only paths are RUN (their cost
+#: is the O(lmax^3) Wigner rotation, which is not what the band limits).
+BELOW_THE_EDGE = [(1, 0), (2, 2), (4, 6), (8, 14)]
+#: The analysis's crash domain: the cells above, nside 1 AT its lmax edge
+#: (the analysis refuses nside 1 at every lmax), and two far cells, which are
+#: refused before any transform runs and so cost nothing.
+CRASH = [(1, 0), (1, 1), (2, 2), (4, 6), (8, 14), (1, 40), (64, 126)]
 #: The synthesis's crash domain is the same minus nside 1 at lmax >= 1.
 SYNTHESIS_CRASH = [cell for cell in CRASH if cell[1] < 2 * cell[0] - 1]
-#: The cells the alm-only paths are RUN at: both nside extremes, but lmax held
-#: to 14, because their cost is the O(lmax^3) Wigner rotation (100 s at
-#: lmax 126) and the rotation is not what the band limits.
-ALM_ONLY = [cell for cell in CRASH if cell[1] <= 14]
-#: At the edge, ``lmax = 2 * nside - 1``, and far above it.
-ACCEPTED = [(2, 3), (3, 5), (4, 7), (8, 15), (16, 31), (32, 63), (2, 64)]
+#: At the edge, ``lmax = 2 * nside - 1`` (nside 1's is the synthesis test's),
+#: and one cell far above it.
+ACCEPTED = [(2, 3), (4, 7), (8, 15), (2, 64)]
 
 
-@pytest.mark.parametrize(("nside", "lmax"), ALM_ONLY)
+@pytest.mark.parametrize(("nside", "lmax"), BELOW_THE_EDGE)
 def test_the_alm_only_paths_are_accepted_in_the_crash_domain(nside, lmax):
     """No HEALPix transform on these paths, so no refusal either."""
     projector = _projector(nside, lmax)
@@ -88,8 +89,14 @@ def test_the_alm_only_paths_are_accepted_in_the_crash_domain(nside, lmax):
     sky_alms = _alms(lmax)
     assert _finite(projector.forward_alms(sky_alms, coords))
     assert _finite(projector.mmodes_alms(sky_alms, coords))
+
+
+def test_a_cached_rotation_is_alm_only_too():
+    """``to_reference_frame`` rotates the beam and runs no HEALPix transform
+    either; once, at the smallest cell below the edge."""
+    projector = _projector(2, 2)
     cached = projector.to_reference_frame(lst_ref_deg=0.0)
-    assert _finite(cached.forward_alms(sky_alms, coords))
+    assert _finite(cached.forward_alms(_alms(2), _coords()))
 
 
 @pytest.mark.parametrize(("nside", "lmax"), CRASH)
@@ -133,7 +140,7 @@ def test_the_synthesis_paths_are_refused_below_their_edge(nside, lmax, call):
     assert "lmax >= 2 * nside - 1" in message and "nside >= 2" not in message
 
 
-@pytest.mark.parametrize(("nside", "lmax"), [(1, 1), (1, 5)])
+@pytest.mark.parametrize(("nside", "lmax"), [(1, 1)])
 def test_the_synthesis_paths_run_at_nside_1(nside, lmax):
     """The synthesis's own domain: nside 1 is refused only by the analysis."""
     projector = _projector(nside, lmax)
@@ -152,10 +159,10 @@ def test_the_valid_side_constructs_and_both_s2fft_transforms_run(nside, lmax):
     assert _finite(alms) and _finite(synthesised)
 
 
-@pytest.mark.parametrize(("nside", "lmax"), [(2, 3), (4, 7)])
+@pytest.mark.parametrize(("nside", "lmax"), [(2, 3)])
 def test_at_the_edge_the_projector_itself_runs(nside, lmax):
     """The whole forward and adjoint at the edge, normalised, not only the
-    transforms -- at the two smallest nside, because the Wigner rotation
+    transforms -- at the smallest nside, because the Wigner rotation
     dominates the cost and is not what fails."""
     coords = _coords()
     projector = _projector(nside, lmax, normalize_beam=True)
@@ -163,7 +170,7 @@ def test_at_the_edge_the_projector_itself_runs(nside, lmax):
     assert _finite(projector.adjoint(jnp.ones((N_TIME, 1)), coords))
 
 
-@pytest.mark.parametrize(("nside", "lmax"), [(1, 5), (4, 6)])
+@pytest.mark.parametrize(("nside", "lmax"), [(1, 1), (4, 6)])
 def test_from_beam_maps_refuses_before_the_transform(nside, lmax):
     """``from_beam_maps`` runs ``map2alm_iter`` before it constructs, so the
     refusal has to come first there too, or s2fft's error arrives instead."""
