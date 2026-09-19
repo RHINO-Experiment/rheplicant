@@ -83,10 +83,10 @@ def test_the_0_3_surface_is_reachable():
                "failed"}
     missing = payload - set(inspect.signature(AffinityRefused).parameters)
     assert not missing, (
-        f"AffinityRefused is missing {sorted(missing)}, so the installed "
-        "bayesmith carries the name without the structured payload -- which "
-        "is exactly the 0.2-install failure the >=0.3 half of the floor exists "
-        "to turn into a resolution error rather than a TypeError at the call"
+        f"AffinityRefused is missing {sorted(missing)}: the installed bayesmith "
+        "defines the class without the structured payload graph_bridge.py "
+        "passes. No tagged release does that: 0.2 has no AffinityRefused at "
+        "all, and every release from 0.3.0 to 0.9.0 has the full payload"
     )
 
 
