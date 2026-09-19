@@ -530,12 +530,14 @@ class TestBeamAnalysisBandLimit:
         This is the measurement the refusal encodes, kept executable so the
         constant cannot drift away from limTOD underneath it: one below the
         floor the package raises, at the floor it returns the alm vector the
-        healpy packing predicts.
+        healpy packing predicts. The error's type and text are pinned, so a
+        call that fails for another reason, such as a renamed keyword, does
+        not pass for the cliff.
         """
         ltj = _ltj()
         floor = 2 * nside - 1
         maps = jax.random.normal(jax.random.key(2), (12 * nside ** 2,))
-        with pytest.raises(Exception):  # noqa: B017 - text is not pinned
+        with pytest.raises(TypeError, match="Cannot concatenate arrays with shapes that differ"):
             ltj.map2alm_iter(maps, nside=nside, lmax=floor - 1)
         at_floor = ltj.map2alm_iter(maps, nside=nside, lmax=floor)
         assert at_floor.shape == ((floor + 1) * (floor + 2) // 2,)
@@ -630,7 +632,7 @@ class TestBeamAnalysisBandLimit:
         ltj = _ltj()
         maps = jax.random.normal(jax.random.key(3), (12,))
         for lmax in range(0, 6):
-            with pytest.raises(Exception):  # noqa: B017 - text is not pinned
+            with pytest.raises(ValueError, match="Need at least one array to stack"):
                 ltj.map2alm_iter(maps, nside=1, lmax=lmax)
 
     def test_nside_one_is_refused_in_the_layers_own_voice(self):
