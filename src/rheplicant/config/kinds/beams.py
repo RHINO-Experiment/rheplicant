@@ -703,8 +703,61 @@ def _horizon_angle(
     return value
 
 
+def _horizon_keys(keys: list[str]) -> str:
+    return " and ".join(f"horizon.{key}" for key in keys)
+
+
+def _unread_angle_remedy(
+    written: list[str], inherited: Mapping[str, str] | None
+) -> str:
+    """Where to delete the unread angles, as far as the caller can tell.
+
+    ``None`` is ``build_beam``'s answer: it sees the spec after ``extends:``
+    has merged it and cannot tell a written key from an inherited one, so it
+    names both places.  A mapping is the text pass's: it read both the
+    written and the resolved entry, and names the entry each inherited key
+    comes from.
+    """
+
+    def forms(keys: list[str]) -> tuple[str, str]:
+        return ("it", "is") if len(keys) == 1 else ("them", "are")
+
+    def tilde(keys: list[str]) -> str:
+        return " and ".join(f"~{key}: null" for key in keys)
+
+    if inherited is None:
+        pronoun, verb = forms(written)
+        subject = "it" if len(written) == 1 else "they"
+        return (
+            f"Delete {pronoun} from this entry, or, if {subject} {verb} "
+            f"inherited through extends:, write {tilde(written)} under this "
+            f"entry's horizon: to drop {pronoun} here."
+        )
+    local = [key for key in written if key not in inherited]
+    parents: dict[str, list[str]] = {}
+    for key in written:
+        if key in inherited:
+            parents.setdefault(inherited[key], []).append(key)
+    sentences = []
+    if local:
+        subject = forms(local)[0] if not parents else _horizon_keys(local)
+        sentences.append(f"Delete {subject} here.")
+    for parent, keys in parents.items():
+        pronoun, verb = forms(keys)
+        sentences.append(
+            f"{_horizon_keys(keys)} {verb} inherited from {parent} through "
+            f"extends:; delete {pronoun} there, or write {tilde(keys)} under "
+            f"this entry's horizon: to drop {pronoun} from this entry alone."
+        )
+    return " ".join(sentences)
+
+
 def _unread_horizon_angles(
-    name: str, horizon: Mapping[str, Any], mode: Any
+    name: str,
+    horizon: Mapping[str, Any],
+    mode: Any,
+    *,
+    inherited: Mapping[str, str] | None = None,
 ) -> str | None:
     """``horizon.el_deg``/``apod_deg`` under a mode that never reads them.
 
@@ -721,8 +774,14 @@ def _unread_horizon_angles(
     question of the text before the beam is read; the sentence lives here.
 
     Args:
+        horizon: the entry's ``horizon`` AFTER ``extends:``, which is what the
+            build reads -- a ``truncate_map`` parent's ``el_deg`` reaches a
+            ``projector_mask`` child this way.
         mode: the effective mode -- the written one, or ``"none"`` when the
             key is absent.
+        inherited: angle -> the entry it is inherited from, when the caller
+            can tell (see :func:`_unread_angle_remedy`); ``None`` when it
+            cannot.
 
     Returns:
         The refusal, or ``None`` when the entry is fine.
@@ -732,24 +791,24 @@ def _unread_horizon_angles(
     written = [key for key in ("el_deg", "apod_deg") if key in horizon]
     if not written:
         return None
-    keys = " and ".join(f"horizon.{key}" for key in written)
-    verb, pronoun = ("is", "it") if len(written) == 1 else ("are", "them")
+    verb = "is" if len(written) == 1 else "are"
     if mode == "projector_mask":
-        remedy = (
+        why = (
             "Under projector_mask the cut is the projector's: its "
             "horizon_mask: true applies it at the projector's own el_deg and "
-            "apodises it by the projector's own apod_deg. Delete "
-            f"{pronoun} here, and set apod_deg on the projector for a taper."
+            "apodises it by the projector's own apod_deg."
         )
+        tip = "For a taper, set apod_deg on the projector."
     else:
-        remedy = (
+        why = (
             "Under horizon.mode: none, which is also the default, nothing "
-            f"cuts this beam. Delete {pronoun}, or set horizon.mode: "
-            "truncate_map to cut the beam map at the horizon."
+            "cuts this beam."
         )
+        tip = "To cut the beam instead, set horizon.mode: truncate_map."
     return (
-        f"{name}: {keys} {verb} read only by horizon.mode: truncate_map, which "
-        f"cuts the beam map itself. {remedy}"
+        f"{name}: {_horizon_keys(written)} {verb} read only by horizon.mode: "
+        f"truncate_map, which cuts the beam map itself. {why} "
+        f"{_unread_angle_remedy(written, inherited)} {tip}"
     )
 
 

@@ -289,15 +289,18 @@ class TestHorizonTruncation:
          "truncate_map, which cuts the beam map itself. Under projector_mask "
          "the cut is the projector's: its horizon_mask: true applies it at the "
          "projector's own el_deg and apodises it by the projector's own "
-         "apod_deg. Delete it here, and set apod_deg on the projector for a "
-         "taper."),
+         "apod_deg. Delete it from this entry, or, if it is inherited through "
+         "extends:, write ~el_deg: null under this entry's horizon: to drop "
+         "it here. For a taper, set apod_deg on the projector."),
         ({"el_deg": 90.0, "apod_deg": 5.0},
          "resources.beams.horn: horizon.el_deg and horizon.apod_deg are read "
          "only by horizon.mode: truncate_map, which cuts the beam map itself. "
          "Under projector_mask the cut is the projector's: its horizon_mask: "
          "true applies it at the projector's own el_deg and apodises it by "
-         "the projector's own apod_deg. Delete them here, and set apod_deg on "
-         "the projector for a taper."),
+         "the projector's own apod_deg. Delete them from this entry, or, if "
+         "they are inherited through extends:, write ~el_deg: null and "
+         "~apod_deg: null under this entry's horizon: to drop them here. For "
+         "a taper, set apod_deg on the projector."),
     ], ids=["el_deg", "both"])
     def test_projector_mask_refuses_the_two_angles_it_never_reads(
             self, context, written, expected):
@@ -323,9 +326,34 @@ class TestHorizonTruncation:
             "resources.beams.horn: horizon.apod_deg is read only by "
             "horizon.mode: truncate_map, which cuts the beam map itself. "
             "Under horizon.mode: none, which is also the default, nothing "
-            "cuts this beam. Delete it, or set horizon.mode: truncate_map to "
-            "cut the beam map at the horizon."
+            "cuts this beam. Delete it from this entry, or, if it is inherited "
+            "through extends:, write ~apod_deg: null under this entry's "
+            "horizon: to drop it here. To cut the beam instead, set "
+            "horizon.mode: truncate_map."
         )
+
+    def test_an_inherited_angle_is_refused_and_the_tilde_remedy_builds(
+            self, context):
+        """``extends:`` merges the parent's ``horizon`` into the child's, so a
+        ``projector_mask`` child of a ``truncate_map`` parent carries the
+        parent's ``el_deg``.  ``build_beam`` sees only the merged spec and
+        cannot tell where the key came from, so its sentence names both
+        places; ``~el_deg: null`` under the child's ``horizon:`` is the edit
+        that leaves the parent alone."""
+        parent = _beam(horizon={"mode": "truncate_map", "el_deg": 90.0})
+        spec = parent["beams"]["horn"]
+        child = {"extends": "horn", "horizon": {"mode": "projector_mask"}}
+        with pytest.raises(ConfigError) as excinfo:
+            build_resources({"beams": {"horn": spec, "child": child}}, context)
+        assert str(excinfo.value).startswith(
+            "resources.beams.child: horizon.el_deg is read only by")
+        assert "if it is inherited through extends:" in str(excinfo.value)
+        fixed = {"extends": "horn",
+                 "horizon": {"mode": "projector_mask", "~el_deg": None}}
+        pytest.importorskip("limtod_jax")
+        built = build_resources({"beams": {"horn": spec, "child": fixed}},
+                                context)
+        assert "resources.beams.child" in built.resources
 
     def test_projector_mask_without_the_angles_builds(self, context):
         built = build_resources(_beam(horizon={"mode": "projector_mask"}), context)

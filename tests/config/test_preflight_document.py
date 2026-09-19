@@ -515,7 +515,7 @@ class TestProjectorMaskAngles:
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
         assert found[0].message == _unread_horizon_angles(
             "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0},
-            "projector_mask")
+            "projector_mask", inherited={})
         assert "is read only by horizon.mode: truncate_map" in found[0].message
 
     def test_it_pre_empts_the_number_check_on_the_same_key(self):
@@ -541,8 +541,42 @@ class TestProjectorMaskAngles:
         found = _findings(preflight_document(resources=section), "A1")
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
         assert found[0].message == _unread_horizon_angles(
-            "resources.beams.horn", horizon, "none")
+            "resources.beams.horn", horizon, "none", inherited={})
         assert "Under horizon.mode: none" in found[0].message
+
+    @staticmethod
+    def _extending(child_horizon):
+        section = _a_beam(el_deg=90.0)
+        section["beams"]["child"] = {"extends": "horn",
+                                     "horizon": child_horizon}
+        return preflight_document(resources=section)
+
+    def test_an_inherited_angle_is_read_off_the_resolved_spec(self):
+        """The child writes no angle; its ``truncate_map`` parent does, and
+        ``extends:`` hands it down.  Reading the raw entry missed it, and the
+        build then told the reader to "delete it here" from an entry that
+        does not contain it."""
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
+
+        found = _findings(self._extending({"mode": "projector_mask"}), "A1")
+        assert [f.where for f in found] == ["resources.beams.child.horizon"]
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.child",
+            {"mode": "projector_mask", "el_deg": 90.0}, "projector_mask",
+            inherited={"el_deg": "resources.beams.horn"})
+        assert ("horizon.el_deg is inherited from resources.beams.horn through "
+                "extends:; delete it there, or write ~el_deg: null under this "
+                "entry's horizon: to drop it from this entry alone."
+                ) in found[0].message
+
+    def test_the_tilde_remedy_clears_it(self):
+        assert _findings(self._extending(
+            {"mode": "projector_mask", "~el_deg": None}), "A1") == []
+
+    def test_a_written_angle_is_still_deleted_here(self):
+        found = _findings(self._masked(apod_deg=5.0), "A1")
+        assert "Delete it here." in found[0].message
+        assert "inherited" not in found[0].message
 
     def test_an_unknown_mode_is_left_to_the_builders_mode_refusal(self):
         """The fault there is the mode, and the builder names the three."""
