@@ -78,6 +78,33 @@ _ENGINES: frozenset[str] = frozenset(
     {_T7_CONJUGATE, _T7_LOG_CONJUGATE, _T7_GRADIENT}
 )
 
+#: The ``log_route_refusal`` reasons (``inference/loglinear.py``) that a
+#: noise's TEXT can decide, spelled as ``LOG_ROUTE_REFUSALS`` spells them.
+#: Written out because this module may not import that package; what keeps
+#: the copy honest is ``tests/config/test_preflight_log_route.py``, which
+#: builds the package's noise model for each row of a table and compares
+#: :func:`_log_route_refusal_text` with ``log_route_refusal``, and checks each
+#: word against ``LOG_ROUTE_REFUSALS``. ``noise_neither`` is the verdict T-002
+#: G4 (A5-3) gave a ``RadiometerNoise`` with a declared floor.
+#:
+#: The package's third reason, ``fractional_too_large``, is NOT here: ``f =
+#: 1 / sqrt(channel_width * integration_time)`` needs both values resolved,
+#: and their default ``{from: observation}`` reads the observation's grid.
+#: That document is still refused, by ``to_log_space`` at P3.
+_T7_NOISE_ADDITIVE: str = "noise_additive"
+_T7_NOISE_NEITHER: str = "noise_neither"
+_LOG_ROUTE_REASONS: frozenset[str] = frozenset(
+    {_T7_NOISE_ADDITIVE, _T7_NOISE_NEITHER})
+
+#: ``inference.noise.kind`` values whose sigma does not scale with the
+#: prediction. ``homoscedastic`` is a ``HomoscedasticNoise``; a
+#: ``radiometer_frozen`` sigma is DECIDED into an array once
+#: (``sections/noise.py::freeze_sigma``) and a plan wraps a bare sigma as a
+#: ``HomoscedasticNoise`` -- additive either way, and ``log_route_refusal``
+#: says ``noise_additive`` for both.
+_T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic",
+                                                "radiometer_frozen"})
+
 #: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py:165``), copied
 #: for the same reason :data:`_ENGINES` is: reaching it means importing
 #: ``sections/exits``, which foot-imports ``conjugate``, ``diagnostics``,
@@ -136,6 +163,72 @@ def _latents(document: Mapping[str, Any]) -> dict[str, Any]:
         return {}
     return {name: (body if isinstance(body, Mapping) else {})
             for name, body in parameters.items() if isinstance(name, str)}
+
+
+def _log_route_refusal_text(noise: Any) -> str | None:
+    """``log_route_refusal``'s verdict on ``inference.noise``, from its TEXT.
+
+    ``None`` means either "the log route exists" or "the text cannot say";
+    both let the block through, and the package decides the second at P3.
+
+    * ``kind:`` in :data:`_T7_ADDITIVE_KINDS` -> ``noise_additive``.
+    * ``kind: radiometer`` with a ``floor:`` whose number the text carries and
+      which is not ``<= 0`` -> ``noise_neither``. ``not <= 0`` rather than
+      ``> 0``, as G4 writes it in the package, so a NaN floor is refused and
+      not routed. The number is read by ``preflight/instrument.py``'s
+      :func:`_text_number`, which APPLIES the unit: ``celsius`` is affine, and
+      ``{value: 0, unit: celsius}`` is a floor of 273.15 K.
+    * Anything else -- no noise, ``kind: none``, an unknown kind, a floor
+      written as ``{ref: ...}`` -- stands down. Those are other checks' and
+      ``build_noise``'s to refuse, and a second voice here would give one
+      fault two refusals.
+
+    ``flags:`` does not enter: ``log_route_refusal`` unwraps a
+    ``FlaggedNoise`` and judges the base model.
+    """
+    from rheplicant.config.preflight.instrument import _text_number
+
+    if not isinstance(noise, Mapping):
+        return None
+    kind = noise.get("kind")
+    if not isinstance(kind, str):
+        return None
+    if kind in _T7_ADDITIVE_KINDS:
+        return _T7_NOISE_ADDITIVE
+    if kind != "radiometer" or "floor" not in noise:
+        return None
+    floor = _text_number(noise["floor"])
+    if floor is None:
+        return None
+    return _T7_NOISE_NEITHER if not floor <= 0.0 else None
+
+
+def _log_route_message(named: str, site: str, position: int,
+                       noise: Mapping[str, Any], reason: str) -> str:
+    """Why this ``engine: log_conjugate`` block has no log route."""
+    opening = f"{named}: {site}[{position}] asks for engine: log_conjugate, and "
+    if reason == _T7_NOISE_NEITHER:
+        floor = noise["floor"]
+        said = (f"{floor.get('value')} {floor.get('unit', '')}".strip()
+                if isinstance(floor, Mapping) else repr(floor))
+        return (
+            opening + f"inference.noise.floor declares {said} on kind: "
+            "radiometer, so sigma = f * max(|mu|, floor): proportional to the "
+            "prediction above the floor and constant below it. The log route "
+            "uses sigma = f on every sample, which is the declared likelihood "
+            "only where the floor never binds, so a floored noise has no "
+            "closed-form log route (log_route_refusal: noise_neither). Declare "
+            "engine: gradient for this block, which evaluates the declared "
+            "likelihood, or drop inference.noise.floor if the prediction cannot "
+            "approach zero (check A19).")
+    return (
+        opening + f"inference.noise is kind: {noise.get('kind')}, whose sigma "
+        "does not scale with the prediction. The log route solves against "
+        "log(data) under a multiplicative noise d = mu (1 + f w); applied to a "
+        "noise that is already additive it states a different likelihood from "
+        "the one declared (log_route_refusal: noise_additive). Declare another "
+        "engine for this block, or inference.noise.kind: radiometer if the "
+        "noise is multiplicative (check A19).")
 
 
 def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
@@ -532,7 +625,8 @@ def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
 def _t7_engines(named: str, listed: str, site: str,
                 entries: tuple[Mapping[str, Any], ...],
                 latents: Mapping[str, Any], *,
-                derive: bool) -> Iterable[Finding]:
+                derive: bool,
+                noise: Any = None) -> Iterable[Finding]:
     """A17, A18, A19 and the engine enum, in the order ``plan.py`` decides them.
 
     **``derive`` is False when the partition is wrong, and only the ENUM runs
@@ -577,6 +671,26 @@ def _t7_engines(named: str, listed: str, site: str,
                 "it is derived from linear: true on each member, which is the "
                 "normal case -- an explicit engine is an override.")
             continue
+
+        # The log route, which reads the block's declared engine and the
+        # noise and no latent, so it runs whether or not the partition is
+        # right, as the enum does. `to_log_space` refuses the same noises at
+        # P3 through `log_route_refusal`; before this, such a document passed
+        # `rheplicant validate` and failed `rheplicant run` with a traceback.
+        #
+        # Filed under A19 -- an engine override whose precondition the
+        # declaration does not meet -- and NOT id-less like the enum above:
+        # measured, an id-less finding reaches `rheplicant validate` as
+        # "finding.check must be a non-empty string." from the audit trace
+        # (`_rheplicant_bootstrap/audit/trace.py`), exit 2 with the message
+        # lost, which is what `engine: banana` does today.
+        if declared == _T7_LOG_CONJUGATE:
+            reason = _log_route_refusal_text(noise)
+            if reason is not None:
+                yield refuse("A19", block_where,
+                             _log_route_message(named, site, position,
+                                                noise, reason))
+                continue
         if not derive:
             continue
 
@@ -657,6 +771,8 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
     this one's.
     """
     latents = _latents(document)
+    inference = document.get("inference")
+    noise = inference.get("noise") if isinstance(inference, Mapping) else None
     for index, run in enumerate(_runs(document)):
         kind = run.get("kind")
         if not (isinstance(kind, str) and kind.startswith("plan.")):
@@ -673,7 +789,7 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
                                             latents))
             yield from partition
             yield from _t7_engines(named, listed, site, entries, latents,
-                                   derive=not partition)
+                                   derive=not partition, noise=noise)
 
 
 # --- Task 8: the prior gates, and the seed asymmetry ------------------------
