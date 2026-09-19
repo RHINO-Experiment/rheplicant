@@ -317,6 +317,40 @@ class TestExits:
         `runs:` entry may legally name."""
         assert json_schema()["exits"] == list(_EXIT_KINDS)
 
+    def test_every_published_exit_has_a_registered_handler(self):
+        """The exit list is what the executor registry runs, and not empty.
+
+        ``_KINDS`` is what ``parse_runs`` accepts and ``EXECUTORS`` is what
+        ``handler_for`` dispatches to; a schema naming a kind with no handler
+        would send an agent to a run that cannot execute.
+        """
+        import rheplicant.config.sections.exits  # noqa: F401 -- registers every kind
+        from rheplicant.config.sections.exit_support import EXECUTORS
+
+        exits = json_schema()["exits"]
+        assert exits
+        assert set(exits) == set(EXECUTORS)
+
+    @pytest.mark.parametrize("module, table", [
+        ("rheplicant.config.sections.runs", "_KINDS"),
+        ("rheplicant.config.dimensions", "_FORMULA_REGISTRY"),
+    ], ids=["exits", "transforms"])
+    def test_a_table_that_cannot_be_read_raises_instead_of_publishing_empty(
+            self, monkeypatch, module, table):
+        """No empty list shipped in silence.
+
+        ``json_schema()`` is served verbatim to rheplicant-agent, and an
+        empty ``exits`` there reads as "this layer runs nothing" rather than
+        as a fault. The table each list comes from is a module constant of
+        this package, so failing to read it is a defect to surface, not a
+        case to paper over.
+        """
+        import importlib
+
+        monkeypatch.delattr(importlib.import_module(module), table)
+        with pytest.raises(AttributeError, match=table):
+            json_schema()
+
 
 class TestVocabularies:
     @pytest.mark.parametrize("key", ["operators", "transforms"])
