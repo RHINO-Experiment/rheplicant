@@ -1,12 +1,14 @@
 """Form 3: a drawn value whose operands retain destination and seed authority."""
 
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 import pytest
 
 from rheplicant.config import ConfigError
 from rheplicant.config.context import ResolutionContext
-from rheplicant.config.draws import seed_for
+from rheplicant.config.draws import _digest, seed_for
 from rheplicant.config.values import resolve_value
 
 
@@ -315,6 +317,45 @@ class TestTheReportedSeedIsTheSeedThatDrew:
         assert not jnp.array_equal(
             self._uniform(context, "jitter", low=0.0, high=1.0),
             self._uniform(context, "gain_ripple", low=0.0, high=1.0),
+        )
+
+
+class TestTheRootSeedEntersTheDerivedSeed:
+    """``seed_for`` derives an undeclared name as ``_digest(name) ^ seed``.
+
+    The shared fixture's root seed is 0, the identity for XOR, so every other
+    case in this file passes with the root seed dropped from the derivation.
+    Under that bug every run derives the same unnamed seeds whatever its
+    ``runtime.seed`` says. These cases use nonzero roots.
+    """
+
+    ROOTS = (1, 20260919)
+    NAMES = ("jitter", "gain_ripple")
+
+    @pytest.mark.parametrize("root", ROOTS)
+    @pytest.mark.parametrize("name", NAMES)
+    def test_the_derived_seed_is_the_digest_xor_the_root(self, context, name, root):
+        rooted = dataclasses.replace(context, seed=root)
+        assert seed_for(name, rooted) == _digest(name) ^ root
+        assert seed_for(name, rooted) != seed_for(name, context)
+
+    @pytest.mark.parametrize("root", ROOTS)
+    def test_a_declared_seed_ignores_the_root(self, context, root):
+        rooted = dataclasses.replace(context, seed=root)
+        assert seed_for("sky_structure", rooted) == 7
+
+    def test_a_different_root_draws_a_different_array(self, context):
+        node = {
+            "uniform": {
+                "shape": ["n_time"],
+                "low": 0.0,
+                "high": 1.0,
+                "seed": {"from": "runtime.seeds.jitter"},
+            }
+        }
+        rooted = dataclasses.replace(context, seed=1)
+        assert not jnp.array_equal(
+            resolve_value(node, context).value, resolve_value(node, rooted).value
         )
 
 
