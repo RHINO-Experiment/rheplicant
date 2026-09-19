@@ -371,7 +371,9 @@ estimate to 0.1 posterior σ of the exact MAP.
 
 The floor exists because float32 cannot resolve `tol = 1e-8`: its epsilon is
 1.19e-7, and conjugate solves at `solve_tol = 1e-6` move the objective at its
-plateau by tens of ulps a sweep. On the fixture above, with the trace replayed
+plateau by tens of ulps a sweep — the inner-solver floor
+[`iterative_gls`](inference-linear.md#when-the-covariance-is-not-given) documents
+for its own `reweight_tol`. On the fixture above, with the trace replayed
 against the float64 MAP, a floor of 4 ε never stops, 64 ε stops at sweep 94 and
 0.079 posterior σ, and 256 ε at sweep 89 and 0.13 σ. In float64 the floor is
 1.4e-14 and `tol` governs; the same fixture stops at sweep 139, 0.034 σ.
