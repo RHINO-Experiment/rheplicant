@@ -13,8 +13,8 @@ The static value route is also one of Task 12's destination-censused producers.
 The discriminating documents in this module are narrow ones, and that is
 measured rather than stylistic.  On RHINO's own 60-85 MHz band schema §6's
 A13 ceiling and ``calibration.py``'s differ by only 14 %, and on a band with
-enough channels they coincide exactly; on 70.000-70.001 MHz over 4 channels
-they are **250 Hz and 672 Hz**.  A test built only on the shipped band cannot
+enough channels they coincide exactly; on 70-71 MHz over 4 channels
+they are **250 kHz and 667 kHz**.  A test built only on the shipped band cannot
 tell the two implementations apart.
 """
 
@@ -82,16 +82,22 @@ def tone(**over):
     return preflight_document(model={**BASE_MODEL, "cw_tone": node})
 
 
-#: 70.000-70.001 MHz over 4 channels: the band on which schema §6's A13
-#: ceiling (0.25 x band = 250 Hz) and the code's (the larger of that and
-#: 2 x the 336 Hz channel spacing = 672 Hz) are far apart.
-NARROW_FREQ = {"grid": {"linspace": {"start": 70.0, "stop": 70.001, "num": 4,
+#: 70-71 MHz over 4 channels: the band on which schema §6's A13 ceiling
+#: (0.25 x band = 250 kHz) and the code's (the larger of that and 2 x the
+#: 333 kHz channel spacing = 667 kHz) are far apart.
+#:
+#: It was 70.000-70.001 MHz, with every width 1000 times smaller, until the
+#: width floor's slack was capped (A5-5): float32 rounds each channel there by
+#: 8 Hz, which is 0.099 of a 333 Hz channel, so that grid now earns the "cannot
+#: be checked" refusal and could no longer tell a floor from a ceiling. At 1 MHz
+#: the same 8 Hz is 1e-4 of a channel.
+NARROW_FREQ = {"grid": {"linspace": {"start": 70.0, "stop": 71.0, "num": 4,
                                      "endpoint": True}, "unit": "MHz"}}
 
 
 def narrow(width_hz, lineshape=None):
     node = {"amplitude": {"value": 5000.0, "unit": "K"},
-            "tone_freq": {"value": 70.0005, "unit": "MHz"},
+            "tone_freq": {"value": 70.5, "unit": "MHz"},
             "line_width": width_hz}
     if lineshape is not None:
         node["lineshape"] = lineshape
@@ -179,12 +185,13 @@ _A13_TAIL = (
 )
 
 #: **The channel spacing is not a portable number, and this fixture is where
-#: that bites hardest.** ``NARROW_FREQ`` is 70.000 to 70.001 MHz over FOUR
-#: channels, so the true spacing is 333.33 Hz -- and float32's ulp at 70 MHz is
-#: exactly 8 Hz, so no axis can express it. Every gap is 328 or 336, there are
+#: that bites hardest.** ``NARROW_FREQ`` is 70 to 71 MHz over FOUR channels,
+#: so the true spacing is 333333.33 Hz -- and float32's ulp at 70 MHz is exactly
+#: 8 Hz, so no axis can express it. Every gap is 333328 or 333336, there are
 #: only three of them, and which one the median lands on is decided by where
-#: `linspace` rounds. Measured 336 on arm64 macOS and 328 on x86_64 Linux: two
-#: correct readings of an axis that cannot say 333.
+#: `linspace` rounds (333336 on arm64 macOS). On the fixture's earlier 1 kHz
+#: band the same rounding gave 336 there and 328 on x86_64 Linux: two correct
+#: readings of an axis that cannot say 333.
 #:
 #: So these are built from the spacing the message itself quotes, and what is
 #: asserted is every other character plus the ARITHMETIC -- the floor is one
@@ -195,7 +202,7 @@ def _assert_equals(message: str, expected: str) -> None:
     assert message == expected
 
 
-def a13_narrow_message(spacing: float, width: str = "300") -> str:
+def a13_narrow_message(spacing: float, width: str = "300000") -> str:
     return (
         f"model.cw_tone.line_width: {width} Hz is narrower than the channel response "
         f"this 'sinc2' grid can carry (1 x the {spacing:.6g} Hz median channel "
@@ -234,8 +241,8 @@ def assert_a13_just_under_the_floor(message: str, rtol: float) -> None:
 
 def a13_wide_message(spacing: float) -> str:
     return (
-    "model.cw_tone.line_width: 700 Hz is wider than a LINE on this band -- "
-    f"the limit is {2 * spacing:.6g} Hz, the larger of 0.25 x the 1000 Hz band "
+    "model.cw_tone.line_width: 700000 Hz is wider than a LINE on this band -- "
+    f"the limit is {2 * spacing:.6g} Hz, the larger of 0.25 x the 1e+06 Hz band "
     f"and 2 x the "
     f"{spacing:.6g} Hz channel spacing. Note the second term: on a narrow or coarse band "
     "it is the operative one, and a reading of schema §6's A13 row that stops "
@@ -360,7 +367,7 @@ class TestTheRegistry:
         looks up.  Subset-shaped, with the slot name asserted ABSENT: an
         ``== {"A13"}`` carries the same property today and goes red the day
         any wave-1 check fires on a too-narrow line."""
-        found = ids_of(narrow(300.0))
+        found = ids_of(narrow(300e3))
         assert "A13" in found
         assert "A13.grid" not in found
 
@@ -526,19 +533,19 @@ class TestA13sWidthLegs:
     """The floor and the ceiling, on a band that can tell them apart."""
 
     def test_the_narrow_message(self):
-        assert_a13_narrow(axis_only(narrow(300.0), "A13").message)
+        assert_a13_narrow(axis_only(narrow(300e3), "A13").message)
 
     def test_the_wide_message(self):
-        assert_a13_wide(axis_only(narrow(700.0), "A13").message)
+        assert_a13_wide(axis_only(narrow(700e3), "A13").message)
 
     def test_the_ceiling_is_the_CODES_and_not_the_schema_rows(self):
         """**The measured trap, as a command.**  Schema §6's A13 row says
         ``line_width <= 0.25 * band``; ``calibration.py`` says the LARGER of
         that and ``MIN_CEILING_IN_CHANNELS * spacing``.  On this band those
-        are 250 Hz and 672 Hz, so a width between them is accepted by the code
+        are 250 kHz and 667 kHz, so a width between them is accepted by the code
         and refused by the schema's reading -- and every number below is
         derived from the package's own constants rather than written down."""
-        facts = axis_facts(narrow(400.0))
+        facts = axis_facts(narrow(400e3))
         freq = facts.context.freq
         spacing = float(_median_gap(freq, name="channel_spacing",
                                     axis_name="frequency"))
@@ -555,7 +562,7 @@ class TestA13sWidthLegs:
         A check that read it as a single number would refuse a legal gaussian
         line four times narrower than a sinc2 one, and the default is read off
         the class rather than assumed."""
-        facts = axis_facts(narrow(400.0))
+        facts = axis_facts(narrow(400e3))
         spacing = float(_median_gap(facts.context.freq,
                                     name="channel_spacing",
                                     axis_name="frequency"))
@@ -567,8 +574,8 @@ class TestA13sWidthLegs:
     def test_the_default_lineshape_comes_from_the_class(self):
         """A document that writes ``lineshape:`` explicitly and one that does
         not must be decided the same way, because the class defaults it."""
-        explicit = axis_only(narrow(300.0, "sinc2"), "A13").message
-        defaulted = axis_only(narrow(300.0), "A13").message
+        explicit = axis_only(narrow(300e3, "sinc2"), "A13").message
+        defaulted = axis_only(narrow(300e3), "A13").message
         assert explicit == defaulted
         assert_a13_narrow(defaulted)
 
@@ -590,7 +597,7 @@ class TestA13sWidthLegs:
 
         assert _tone_default("lineshape") == CWCalibrationOperator.lineshape
 
-        spacing = float(_median_gap(axis_facts(narrow(400.0)).context.freq,
+        spacing = float(_median_gap(axis_facts(narrow(400e3)).context.freq,
                                     name="channel_spacing",
                                     axis_name="frequency"))
         half = 0.5 * spacing            # under sinc2's floor, over gaussian's
@@ -610,12 +617,13 @@ class TestA13sWidthLegs:
         INSIDE the tolerance -- below the floor, and accepted by
         ``calibration.py``'s own comparison, which is the one this restates.
         """
-        freq = axis_facts(narrow(400.0)).context.freq
+        freq = axis_facts(narrow(400e3)).context.freq
         spacing = float(_median_gap(freq, name="channel_spacing",
                                     axis_name="frequency"))
         floor = MIN_WIDTH_IN_CHANNELS["sinc2"] * spacing
-        # The grid's own slack (A5-5): 4 channels over 1 kHz at 70 MHz are
-        # stored on an 8 Hz float32 grid, so it is far above the 1e-5 floor.
+        # The grid's own slack (A5-5): 4 channels over 1 MHz at 70 MHz are
+        # stored on an 8 Hz float32 grid, 1e-4 of a channel -- above the 1e-5
+        # floor and below the 2e-2 cap.
         rtol = width_floor_rtol(freq, spacing)
         assert rtol >= WIDTH_FLOOR_RTOL > 0.0, "nothing to discriminate if it is zero"
         assert silent_here(narrow(floor * (1.0 - 0.5 * rtol)))
@@ -655,7 +663,7 @@ class TestA13sWidthLegs:
         }
         assert not offenders, (
             "these pinned messages spell the channel spacing as a literal, and "
-            "this band's spacing is 333.33 Hz against a float32 ulp of 8 Hz, so "
+            "this band's spacing is 333333.33 Hz against a float32 ulp of 8 Hz, so "
             "the digit is decided by where linspace rounds: "
             f"{sorted(offenders)}. Build them with a13_narrow_message/"
             "a13_wide_message and assert through the matching assert_* helper."
@@ -680,12 +688,12 @@ class TestA13sWidthLegs:
         comfortably fine."""
         descending = preflight_document(
             observation={"freq": {"grid": {"linspace": {
-                "start": 70.001, "stop": 70.0, "num": 4, "endpoint": True},
+                "start": 71.0, "stop": 70.0, "num": 4, "endpoint": True},
                 "unit": "MHz"}}},
             model={**BASE_MODEL, "cw_tone": {
                 "amplitude": {"value": 5000.0, "unit": "K"},
-                "tone_freq": {"value": 70.0005, "unit": "MHz"},
-                "line_width": 300.0}})
+                "tone_freq": {"value": 70.5, "unit": "MHz"},
+                "line_width": 300e3}})
         assert "A13" in ids_of(descending)
 
     def test_the_worked_bands_own_width_is_accepted(self):
@@ -1017,7 +1025,7 @@ class TestThePhaseProperty:
         (preflight_document(model={**BASE_MODEL, "filters": [sidereal(5)]},
                             resources=UNREADABLE_BEAM),
          lambda message: _assert_equals(message, C8_DAYS_MESSAGE)),
-        (narrow(700.0), assert_a13_wide),
+        (narrow(700e3), assert_a13_wide),
     ], ids=["C8", "A13"])
     def test_the_violation_beats_an_unreadable_beam(self, document, check):
         # A CHECKER rather than an expected string: A13's message quotes a
