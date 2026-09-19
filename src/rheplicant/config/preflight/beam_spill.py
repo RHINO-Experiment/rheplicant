@@ -287,6 +287,7 @@ def _b2_unmasked(beam: str, unmasked: list[tuple[str, Any]]) -> str:
     """The whole sentence: a projector_mask beam read by a projector that
     does not mask."""
     masking = [name for name, engine in unmasked if engine == _B2_MASKING_ENGINE]
+    others = [name for name, engine in unmasked if engine != _B2_MASKING_ENGINE]
     parts = [
         f"{beam}.horizon.mode: projector_mask cuts nothing itself; it leaves "
         f"the horizon cut to each projector that reads {beam}."
@@ -301,9 +302,18 @@ def _b2_unmasked(beam: str, unmasked: list[tuple[str, Any]]) -> str:
     parts.append(
         "A projector that does not mask projects the sky below the horizon "
         "through the beam's lower half, and nothing raises.")
-    remedy = (f"Set horizon_mask: true on {_b2_listed(masking)}" if masking
-              else "Read this beam through a driftscan projector with "
-                   "horizon_mask: true")
+    # Every reader named gets its own edit in this one sentence: naming only
+    # the driftscan half sent a reader round twice, the second time about a
+    # projector that cannot take the edit the first message offered.
+    if masking and others:
+        remedy = (f"Set horizon_mask: true on {_b2_listed(masking)} and give "
+                  f"{_b2_listed(others)} a beam cut with horizon.mode: "
+                  f"truncate_map (an entry that extends {beam} will do)")
+    elif masking:
+        remedy = f"Set horizon_mask: true on {_b2_listed(masking)}"
+    else:
+        remedy = ("Read this beam through a driftscan projector with "
+                  "horizon_mask: true")
     parts.append(f"{remedy}, or cut the beam map itself with horizon.mode: "
                  "truncate_map (check A50).")
     return " ".join(parts)

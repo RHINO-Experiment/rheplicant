@@ -715,6 +715,45 @@ class TestAProjectorMaskNeedsAMaskingProjector:
         assert ("Read this beam through a driftscan projector with "
                 "horizon_mask: true, or cut the beam map itself") in found.message
 
+    GENERAL = {"engine": "general_pointing",
+               "beam": {"ref": "resources.beams.horn"}, "lmax": 8,
+               "nside": 4, "lat_deg": {"value": 53.2367, "unit": "deg"},
+               "normalize_beam": True, "acknowledge_float32_sky": True}
+
+    def _both(self, *, drift=DRIFTSCAN, general=None, beams=None):
+        return preflight_document(
+            observation={**BASE_OBSERVATION, "pointing": POINTING},
+            resources={"beams": beams or {"horn": self.MASKED},
+                       "projectors": {"drift": drift,
+                                      "wide": general or self.GENERAL}},
+            model=BASE_MODEL)
+
+    def test_both_kinds_of_unmasked_reader_get_both_remedies_at_once(self):
+        """An unmasked driftscan projector and a general_pointing one on the
+        same beam.  The remedy used to name horizon_mask for the first only,
+        so taking it earned a second refusal about the second."""
+        assert only(self._both(), "A50").message == (
+            "resources.beams.horn.horizon.mode: projector_mask cuts nothing "
+            "itself; it leaves the horizon cut to each projector that reads "
+            "resources.beams.horn. resources.projectors.drift does not set "
+            "horizon_mask: true. resources.projectors.wide is engine: "
+            "general_pointing, which has no horizon mask. A projector that "
+            "does not mask projects the sky below the horizon through the "
+            "beam's lower half, and nothing raises. Set horizon_mask: true on "
+            "resources.projectors.drift and give resources.projectors.wide a "
+            "beam cut with horizon.mode: truncate_map (an entry that extends "
+            "resources.beams.horn will do), or cut the beam map itself with "
+            "horizon.mode: truncate_map (check A50)."
+        )
+
+    def test_taking_both_named_remedies_leaves_the_document_passing(self):
+        cut = {"extends": "horn", "horizon": {"mode": "truncate_map"}}
+        document = self._both(
+            drift={**DRIFTSCAN, "horizon_mask": True},
+            general={**self.GENERAL, "beam": {"ref": "resources.beams.cut"}},
+            beams={"horn": self.MASKED, "cut": cut})
+        assert ids(document) & MINE == frozenset()
+
     def test_load_document_refuses_it_before_the_beam_is_read(self):
         """``UNREADABLE_BEAM`` names a file that does not exist, so a refusal
         that arrives at all arrived before ``build_resources``."""
