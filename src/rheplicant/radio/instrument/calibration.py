@@ -645,12 +645,20 @@ class CWCalibrationOperator(AbstractOperator):
         )
 
 
+#: Units of ``eps * max|freq|`` the stored channel grid may be off by, in
+#: :func:`width_floor_rtol`. Defined here rather than beside
+#: :data:`WIDTH_FLOOR_RTOL` so that the line numbers ``rheplicant.config``
+#: cites into this module stay where they point.
+WIDTH_FLOOR_ULPS = 4.0
+
+
 def width_floor_rtol(freq, spacing: float) -> float:
     """Relative slack on the ``line_width`` floor for this channel grid.
 
-    ``max(WIDTH_FLOOR_RTOL, 4 * eps * max|freq| / spacing)``, where ``eps`` is
-    the machine epsilon of the grid's STORED dtype and ``spacing`` the median
-    channel gap the floor is measured in. One definition for the two places the
+    ``max(WIDTH_FLOOR_RTOL, WIDTH_FLOOR_ULPS * eps * max|freq| / spacing)``,
+    with ``WIDTH_FLOOR_ULPS = 4``, where ``eps`` is the machine epsilon of the
+    grid's STORED dtype and ``spacing`` the median channel gap the floor is
+    measured in. One definition for the two places the
     floor is checked: :meth:`CWCalibrationOperator._validate_over_the_run` and
     the config layer's in-flight grid check, A13.
 
@@ -667,6 +675,9 @@ def width_floor_rtol(freq, spacing: float) -> float:
     a 3052 Hz channel at N = 8192. In float64 the 1e-5 floor applies at every
     grid in this package.
 
+    **The slack is not capped.** On a float32 60-85 MHz grid it passes 2e-2 near
+    N = 12346 and reaches 1 near N = 617000, where any positive width passes.
+
     An integer grid represents its channels exactly and keeps the 1e-5 floor,
     as does a grid with no positive spacing, whose floor is zero anyway.
     """
@@ -675,7 +686,7 @@ def width_floor_rtol(freq, spacing: float) -> float:
         return WIDTH_FLOOR_RTOL
     eps = float(np.finfo(channels.dtype).eps)
     peak = float(np.abs(channels).max())
-    return max(WIDTH_FLOOR_RTOL, 4.0 * eps * peak / spacing)
+    return max(WIDTH_FLOOR_RTOL, WIDTH_FLOOR_ULPS * eps * peak / spacing)
 
 
 class CalLoadOperator(AbstractOperator):

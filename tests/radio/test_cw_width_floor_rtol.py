@@ -30,6 +30,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.radio import CWCalibrationOperator
 from rheplicant.radio.instrument.calibration import (
     WIDTH_FLOOR_RTOL,
+    WIDTH_FLOOR_ULPS,
     width_floor_rtol,
 )
 
@@ -113,6 +114,16 @@ def test_the_float32_cut_for_a_thousandth_is_between_617_and_618():
     assert width_floor_rtol(above, _spacing(above)) >= 1e-3
 
 
+def test_the_rounding_factor_is_pinned_by_a_verdict():
+    """The same cut, read off the operator's verdict rather than the function:
+    a width 1e-3 under one channel is refused at N = 617 and accepted at 618.
+    With ``WIDTH_FLOOR_ULPS`` at 1 the cut would sit near N = 2470 and 618
+    would refuse; at 8, near 309 and 617 would accept."""
+    below, above = _grid(617, np.float32), _grid(618, np.float32)
+    assert not _accepts(below, (1.0 - 1e-3) * _spacing(below))
+    assert _accepts(above, (1.0 - 1e-3) * _spacing(above))
+
+
 @pytest.mark.parametrize(
     ("dtype", "last"),
     [pytest.param(np.float32, 599, id="float32"), pytest.param(np.float64, 8192, id="float64")],
@@ -155,7 +166,8 @@ class TestTheDefinition:
     def test_float32_scales_with_the_grid_resolution(self):
         freq = _grid(8192, np.float32)
         spacing = _spacing(freq)
-        expected = 4.0 * float(np.finfo(np.float32).eps) * HIGH / spacing
+        expected = WIDTH_FLOOR_ULPS * float(np.finfo(np.float32).eps) * HIGH / spacing
+        assert expected > WIDTH_FLOOR_RTOL
         assert width_floor_rtol(freq, spacing) == pytest.approx(expected, rel=1e-6)
 
     def test_a_coarse_float32_grid_keeps_the_lower_bound(self):
