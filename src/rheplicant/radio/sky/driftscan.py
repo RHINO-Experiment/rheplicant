@@ -203,7 +203,7 @@ class DriftScanProjector(AbstractSkyProjector):
     freq_chunk: int | None = eqx.field(static=True, default=None)
 
     def __check_init__(self):
-        n_alm = _n_alm_on_a_band_s2fft_can_carry(self.nside, self.lmax)
+        n_alm = _n_alm_checked(self)
         if self.beam_alms.ndim != 2 or self.beam_alms.shape[-1] != n_alm:
             raise StateValidationError(
                 f"beam_alms must be (n_freq, n_alm={n_alm}) packed alms for "
@@ -295,7 +295,7 @@ class DriftScanProjector(AbstractSkyProjector):
             raise StateValidationError(
                 f"beam_maps has {n_pix} pixels, which is not a valid HEALPix "
                 f"map length (12·nside²).")
-        _n_alm_on_a_band_s2fft_can_carry(nside, lmax)  # before map2alm_iter runs
+        _refuse_a_band_s2fft_cannot_carry(nside, lmax, "from_beam_maps()")
         ltj = _limtod_jax(bool(kwargs.get("uniform_sampling", False)))
         alms = jax.vmap(
             lambda m: ltj.map2alm_iter(m, nside=nside, lmax=lmax, iterations=iterations)
@@ -352,7 +352,7 @@ class DriftScanProjector(AbstractSkyProjector):
                 "no longer recoverable. Call horizon_fraction() on the "
                 "local-frame projector, then call to_reference_frame()."
             )
-        ltj = _limtod_jax(self.uniform_sampling)
+        ltj = _s2fft_limtod(self, "horizon_fraction()", analysis=False)
         if not hasattr(ltj, "horizon_beam_fraction"):
             raise StateValidationError(
                 "DriftScanProjector.horizon_fraction() needs limTOD >= 1.9, "
@@ -541,7 +541,7 @@ class DriftScanProjector(AbstractSkyProjector):
         """
         if not self.normalize_beam:
             return None
-        return self._quadrature_ones(ltj)
+        return self._quadrature_ones(_s2fft_limtod(self, "normalize_beam=True"))
 
     def _quadrature_ones(self, ltj) -> jax.Array:
         """The ones-map quadrature alms themselves, computed at trace time."""
@@ -601,7 +601,7 @@ class DriftScanProjector(AbstractSkyProjector):
         line in the docstring telling you which to call.
         """
         self._validate_sky(sky)
-        ltj = _limtod_jax(self.uniform_sampling)
+        ltj = _s2fft_limtod(self, "sky_to_alms(), which forward() and mmodes() call,")
         return jax.vmap(
             lambda m: ltj.map2alm_quad(m, nside=self.nside, lmax=self.lmax)
         )(sky)
@@ -645,7 +645,7 @@ class DriftScanProjector(AbstractSkyProjector):
             raise StateValidationError(
                 f"tod must be (n_time={n_time}, n_freq={n_freq}), got {tod.shape}."
             )
-        ltj = _limtod_jax(self.uniform_sampling)
+        ltj = _s2fft_limtod(self, "adjoint()", analysis=False)
         dphi, ref = self._dphi_and_ref(coords)
         beam_refs = self._beam_ref_alms(ltj, ref)
         ones_alm = self._ones_alm(ltj)
@@ -758,31 +758,67 @@ class DriftScanProjector(AbstractSkyProjector):
         )
 
 
-def _n_alm_on_a_band_s2fft_can_carry(nside: int, lmax: int) -> int:
-    """The packed alm count for ``lmax``, after refusing a band s2fft cannot run.
+def _n_alm_checked(projector: DriftScanProjector) -> int:
+    """The packed alm count, after refusing a band a flag makes unusable.
 
-    s2fft's HEALPix transforms need ``nside >= 2`` and ``lmax + 1 >= 2 * nside``,
-    and fail below either edge with no message of their own: at nside 1 a
-    ``ValueError`` ("Need at least one array to stack"), below the lmax edge a
-    ``TypeError`` from the analysis FFT and a bare ``AssertionError`` from the
-    synthesis. Measured on every transform path of this class for nside 1-4 and
-    8 (forward and adjoint at 16 and 32): all failed below the edge and all ran
-    at and above it, with no upper edge up to ``lmax = 64`` at nside 2.
+    ``normalize_beam`` runs an s2fft analysis (the ones map) on every forward
+    and adjoint, and ``horizon_mask`` one (the mask re-analysis) on every call
+    of any kind, so a projector with either set cannot run at all below the
+    analysis's edge; refused here, before a call is attempted. Without them,
+    :meth:`DriftScanProjector.forward_alms` and
+    :meth:`~DriftScanProjector.mmodes_alms` run no HEALPix transform and work
+    at every band, so the plain projector is left to the call sites.
+    """
+    for flag in ("normalize_beam", "horizon_mask"):
+        if getattr(projector, flag):
+            _refuse_a_band_s2fft_cannot_carry(
+                projector.nside, projector.lmax,
+                f"with {flag}=True, which runs one on every call,",
+            )
+    return (projector.lmax + 1) * (projector.lmax + 2) // 2
+
+
+def _s2fft_limtod(projector: DriftScanProjector, operation: str, *, analysis: bool = True):
+    """``limtod_jax``, for a call about to run an s2fft transform on this band."""
+    _refuse_a_band_s2fft_cannot_carry(
+        projector.nside, projector.lmax, operation, analysis=analysis
+    )
+    return _limtod_jax(projector.uniform_sampling)
+
+
+def _refuse_a_band_s2fft_cannot_carry(
+    nside: int, lmax: int, operation: str, *, analysis: bool = True
+) -> None:
+    """Refuse a band s2fft's HEALPix transform cannot run, naming the call.
+
+    The analysis (map to alm) needs ``nside >= 2`` and ``lmax + 1 >= 2 * nside``;
+    the synthesis (alm to map) only the second. Below the edge each fails inside
+    s2fft with no message of its own: at nside 1 the analysis raises
+    ``ValueError`` ("Need at least one array to stack"), below the lmax edge the
+    analysis a ``TypeError`` and the synthesis a bare ``AssertionError``.
+    Measured on every transform path of the class for nside 1-4, 8, 16, 32 and
+    64: all failed below their edge and ran at and above it, with no upper edge
+    up to ``lmax = 64`` at nside 2. ``nside`` and ``lmax`` are static, so this
+    runs at trace time.
 
     Defined after the class, not beside it, so the line numbers that
     ``rheplicant.config`` cites into this module stay where they point.
     """
-    if nside < 2 or lmax < 2 * nside - 1:
-        which = (
-            "nside is below 2, where no lmax works"
-            if nside < 2
-            else f"lmax is below 2 * nside - 1 = {2 * nside - 1}"
-        )
-        raise StateValidationError(
-            f"DriftScanProjector got nside={nside}, lmax={lmax}: {which}. Its "
-            "HEALPix transforms (s2fft, through limtod_jax) need nside >= 2 and "
-            "lmax >= 2 * nside - 1, and fail inside s2fft without a message "
-            "below that. There is no upper edge; lmax = 3 * nside - 1 is the "
-            "usual band limit. Raise lmax or lower nside."
-        )
-    return (lmax + 1) * (lmax + 2) // 2
+    floor = 2 * nside - 1
+    if analysis and nside < 2:
+        which = "nside is below 2, where the analysis fails at every lmax"
+    elif lmax < floor:
+        which = f"lmax is below 2 * nside - 1 = {floor}"
+    else:
+        return
+    kind = "analysis (map to alm)" if analysis else "synthesis (alm to map)"
+    need = "nside >= 2 and lmax >= 2 * nside - 1" if analysis else "lmax >= 2 * nside - 1"
+    raise StateValidationError(
+        f"DriftScanProjector {operation} runs an s2fft HEALPix {kind}, and got "
+        f"nside={nside}, lmax={lmax}: {which}. That transform needs {need} and "
+        "fails inside s2fft without a message below it. forward_alms() and "
+        "mmodes_alms() on a projector with normalize_beam=False and "
+        "horizon_mask=False run no HEALPix transform and accept this band; "
+        "otherwise raise lmax or lower nside (lmax = 3 * nside - 1 is the usual "
+        "band limit)."
+    )
