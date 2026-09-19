@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import socket
 import subprocess
@@ -19,14 +21,19 @@ from _rheplicant_bootstrap import gui_child
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UV = "uv"
 
-#: The sibling checkout the core dependency `bayesmith>=0.2` resolves from
-#: until 0.2.0 is on PyPI (the index still carries 0.1.0, which predates the
-#: `first_fit`/`exact.loglinear` surface rheplicant imports). The fresh-venv
-#: installs below build one wheel from it per test session and hand the
-#: resolver a `--find-links`; with the checkout absent they SKIP, loudly --
-#: the same complete-environment contract CLAUDE.md states for the package
-#: itself, and a skip here is a thinner environment, never a pass.
+#: The sibling checkout whose local release the core dependency on bayesmith
+#: resolves from, because the range `pyproject.toml` declares is not on PyPI
+#: (0.9.0 is a local release; see CLAUDE.md's complete-environment section).
+#: The fresh-venv installs below hand the resolver a `--find-links` to the
+#: release directory after checking every artefact against the release
+#: manifest, so they install the same hash-checked wheel the checkout's own
+#: venv holds, not a build of whatever the sibling working tree contains. With
+#: the release absent they SKIP, loudly -- the same complete-environment
+#: contract CLAUDE.md states for the package itself, and a skip here is a
+#: thinner environment, never a pass.
 BAYESMITH_CHECKOUT = PROJECT_ROOT.parent / "bayesmith"
+BAYESMITH_RELEASE = BAYESMITH_CHECKOUT / "runs" / "t002" / "unpublished-0.9.0"
+BAYESMITH_MANIFEST = BAYESMITH_CHECKOUT / "runs" / "t002" / "release-manifest.json"
 
 
 CommandArgument = str | os.PathLike[str]
@@ -124,25 +131,30 @@ class InstallFactory(Protocol):
 
 
 def _sibling_wheels(tmp_path: Path) -> Path:
-    """A directory holding a bayesmith wheel built from the sibling checkout.
+    """The bayesmith release directory, after checking it against its manifest.
 
-    Built once per factory rather than once per install: `uv build` is the
-    slow half of a fresh-venv test, and the wheel cannot change between two
-    installs of one test.
+    Every artefact the manifest names must be present with its recorded
+    sha256; a directory that disagrees fails rather than skips, because it
+    would install a bayesmith other than the one this checkout is tested
+    against. `tmp_path` is unused and kept for the factory's signature.
     """
-    if not BAYESMITH_CHECKOUT.exists():
+    del tmp_path
+    if not BAYESMITH_MANIFEST.exists():
         pytest.skip(
-            "the fresh-venv installs need a bayesmith wheel that satisfies "
-            "rheplicant's `bayesmith>=0.2` floor, and PyPI's 0.1.0 does not; "
-            f"it is built from the sibling checkout at {BAYESMITH_CHECKOUT}, "
-            "which this machine does not have. This is a thinner environment, "
-            "not a pass -- see CLAUDE.md's complete-environment section."
+            "the fresh-venv installs need a bayesmith wheel in rheplicant's "
+            "declared range, and PyPI does not carry one; they install the "
+            f"local release under {BAYESMITH_RELEASE}, which this machine does "
+            "not have. This is a thinner environment, not a pass -- see "
+            "CLAUDE.md's complete-environment section."
         )
-    wheels = tmp_path / "sibling-wheels"
-    wheels.mkdir(parents=True, exist_ok=True)
-    _run([UV, "build", "--wheel", "--out-dir", os.fspath(wheels)],
-         cwd=BAYESMITH_CHECKOUT)
-    return wheels
+    manifest = json.loads(BAYESMITH_MANIFEST.read_text())
+    for name, record in manifest["artifacts"].items():
+        digest = hashlib.sha256((BAYESMITH_RELEASE / name).read_bytes()).hexdigest()
+        assert digest == record["sha256"], (
+            f"{name} in {BAYESMITH_RELEASE} does not match the release manifest "
+            f"({digest} != {record['sha256']})"
+        )
+    return BAYESMITH_RELEASE
 
 
 def fresh_install_factory(tmp_path: Path) -> InstallFactory:

@@ -82,8 +82,12 @@ access or running a document from another person.
 git clone https://github.com/RHINO-Experiment/rheplicant
 cd rheplicant
 uv venv
-uv pip install -e . --group dev
+uv pip install -e . --group dev --find-links ../bayesmith/runs/t002/unpublished-0.9.0
 ```
+
+The `--find-links` is there because rheplicant declares `bayesmith>=0.9,<0.10`
+and bayesmith 0.9.0 is, for now, a local release rather than a PyPI one. It
+expects a bayesmith checkout beside this one holding that release.
 
 :::{warning}
 **Neither `uv sync` nor `uv run` works in this project — with `--frozen` or

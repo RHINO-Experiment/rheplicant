@@ -1,38 +1,40 @@
-"""The declared ``bayesmith>=0.5`` floor, checked by CAPABILITY not by version.
+"""The declared bayesmith range, checked by capability and by policy, not by version.
 
-**Written because the floor cannot be checked the obvious way here, and that
-is not a temporary accident.** ``pyproject.toml`` declares ``bayesmith>=0.5``,
-and a resolver installing from PyPI would enforce it. This checkout does not
-go through a resolver: ``CLAUDE.md`` records that bayesmith is held **editable
-from ``../bayesmith`` with ``--no-deps``**, deliberately, because the two
-repositories are developed against each other and a released pin would freeze
-the seam mid-programme.
+``pyproject.toml`` declares ``bayesmith>=0.9,<0.10``, and that range holds two
+numbers which this file keeps apart.
 
-The consequence, measured 2026-08-28: ``bayesmith.__version__`` reports
-**0.2.0** while ``../bayesmith/pyproject.toml`` says **0.5.0**. The metadata
-was written when the editable install was made and no version bump since has
-refreshed it. The CODE is 0.5's code -- an editable install is the working
-tree -- so nothing is broken, but the label is two releases stale and any
-guard reading it would be reading fiction. Nothing in ``src/`` or ``tests/``
-does read it, which is how this went unnoticed.
+* The **capability floor**, :data:`CAPABILITY_FLOOR`, is the highest release
+  whose surface this package uses. Each level has one case below asking
+  whether what that level bought is reachable: a name, a signature, or for 0.6
+  a behaviour. ``CLAUDE.md`` states what each level buys; the cases turn those
+  statements into assertions, so a floor that silently drops a name anywhere
+  below the top fails here rather than at a call site three modules away.
+* The **declared range** starts at 0.9 although the code needs nothing newer
+  than 0.6, because the stable baseline relies on bayesmith 0.9's stability
+  contract and is tested only against 0.9. It is closed at the next minor,
+  because a pre-1.0 minor may move the deep module paths this package imports.
 
-So the floor is asserted the only way that is true in every environment: by
-asking whether the surface each level was raised FOR is actually reachable.
-``CLAUDE.md`` states what each level buys, and those statements are what this
-file turns into assertions -- one per level, so a floor that silently drops
-names anywhere below the top still fails here rather than at some call site
-three modules away.
-
-This is the second of the two closing questions the migration handover asks --
-"what does this green guard depend on that you have never varied?" -- answered
-for the dependency itself. What was never varied was the installed bayesmith.
+**No case reads the installed version.** For most of this file's history
+bayesmith was installed editable from ``../bayesmith``, and an editable install
+reports the version its metadata was written with: 0.2.0 against 0.5.0 source
+on 2026-08-28, and still 0.2.0 against 0.9.0 source on 2026-09-19. The
+checkout now installs bayesmith from its local 0.9.0 wheel, where the metadata
+is right, but a guard that holds in one kind of environment only is what this
+file replaced. Whether a capability is reachable holds in every environment.
 """
 
 from __future__ import annotations
 
 import inspect
+import pathlib
+import re
 
 import pytest
+
+#: The highest bayesmith release whose surface this package uses. Raise it, and
+#: add the matching ``test_the_<level>_surface_is_reachable`` case, in the same
+#: commit that starts relying on something a later release added.
+CAPABILITY_FLOOR = "0.6"
 
 bayesmith = pytest.importorskip("bayesmith", reason="bayesmith not installed")
 
@@ -105,22 +107,116 @@ def test_the_0_5_surface_is_reachable():
 
     assert "priors" in inspect.signature(local_block).parameters, (
         "local_block has no `priors` parameter, so the installed bayesmith is "
-        "below the declared >=0.5 floor however its metadata is labelled"
+        "below the 0.5 level however its metadata is labelled"
     )
 
 
-def test_the_declared_floor_and_this_file_name_the_same_level():
-    """A floor raised in ``pyproject.toml`` without a case here would be a
-    number nothing checks -- which is the state this file was written to end.
-    """
-    import pathlib
-    import re
+def _frozen_chain_mean(process_std):
+    """``marginal.chain.smooth`` on a frozen (``phi = 1``) chain, in float32.
 
+    Synthetic blocks rather than ``tests/evidence/chain_bank``: the bank builds
+    its blocks through ``compress_linear``, which refuses float32 by design,
+    and this file runs in the default float32 session.
+    """
+    import jax.numpy as jnp
+    import numpy as np
+    from bayesmith.marginal.chain import smooth
+
+    from rheplicant.inference.chain import LinearGaussianTransition
+
+    rng = np.random.default_rng(0)
+    n_epochs, width = 16, 3  # two theta columns and one chain column
+    factor = np.triu(rng.normal(size=(n_epochs, width, width))) + 3.0 * np.eye(width)
+    blocks = (
+        jnp.asarray(factor, jnp.float32),
+        jnp.asarray(rng.normal(size=(n_epochs, width)), jnp.float32),
+        jnp.zeros((n_epochs,), jnp.float32),
+    )
+    transition = LinearGaussianTransition(
+        phi=jnp.eye(1, dtype=jnp.float32),
+        process_std=jnp.full((1,), process_std, jnp.float32),
+        initial_std=jnp.ones(1, jnp.float32),
+    )
+    theta = {"a": jnp.float32(0.4), "b": jnp.float32(-1.1)}
+    mean, variance = smooth(blocks, transition, theta, ("a", "b"), ((), ()))
+    return np.asarray(mean), np.asarray(variance)
+
+
+def test_the_0_6_surface_is_reachable():
+    """``marginal.chain.smooth`` assembled as a square root -- what
+    ``inference.chain.smooth`` delegates to.
+
+    No name arrived in 0.6, so the case asks for the behaviour. Up to 0.5 the
+    far smoother inverted the explicit precision and paid ``kappa(F)`` where a
+    square root pays ``sqrt(kappa(F))``. Measured in float32 on these blocks:
+    at ``process_std = 1e-5`` the 0.5 source returns ``nan`` while 0.6.0 and
+    0.9.0 return the same finite answer. A 0.5 install imports ``smooth`` fine.
+
+    The convergence bound is 0.1 posterior std, not tighter, because in
+    float32 most of the shift between 1e-4 and 1e-5 is roundoff: 2e-3 std on
+    these blocks, and up to 1.7e-2 std across 200 random block sets (about
+    1e-5 in float64). The ``isfinite`` assertion is what separates 0.5.
+    """
+    import numpy as np
+
+    loose_mean, loose_variance = _frozen_chain_mean(1e-4)
+    stiff_mean, stiff_variance = _frozen_chain_mean(1e-5)
+    for label, values in (("mean", stiff_mean), ("variance", stiff_variance)):
+        assert np.all(np.isfinite(values)), (
+            f"smooth returned a non-finite {label} on a frozen chain at "
+            "process_std=1e-5, which is the explicit-precision spelling bayesmith "
+            "replaced in 0.6; the installed bayesmith is below the 0.6 level"
+        )
+    assert np.all(stiff_variance > 0.0)
+    scale = float(np.sqrt(loose_variance.min()))
+    shift = float(np.abs(stiff_mean - loose_mean).max())
+    assert shift < 0.1 * scale, (
+        f"the smoothed mean moved {shift:.3e} (posterior std {scale:.3e}) between "
+        "process_std 1e-4 and 1e-5, where a frozen chain has converged"
+    )
+
+
+def _levels_with_a_case():
+    pattern = re.compile(r"test_the_(\d+)_(\d+)_surface_is_reachable")
+    return sorted(
+        (int(match.group(1)), int(match.group(2)))
+        for match in map(pattern.fullmatch, globals())
+        if match
+    )
+
+
+def _declared_range():
     text = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
-    found = re.search(r'"bayesmith>=([0-9.]+)"', text)
-    assert found, "pyproject.toml no longer declares a bayesmith floor"
-    declared = found.group(1)
-    assert f"test_the_{declared.replace('.', '_')}_surface_is_reachable" in globals(), (
-        f"pyproject declares bayesmith>={declared} and this file has no case "
-        f"for that level; add one naming what the level buys"
+    found = re.findall(r'"bayesmith>=(\d+)\.(\d+)(?:\.\d+)?,<(\d+)\.(\d+)"', text)
+    assert len(found) == 1, (
+        "pyproject.toml must declare bayesmith exactly once, as a closed range "
+        f"'bayesmith>=X.Y,<X.Z'; found {found!r}"
+    )
+    low_major, low_minor, high_major, high_minor = map(int, found[0])
+    return (low_major, low_minor), (high_major, high_minor)
+
+
+def test_the_capability_floor_is_the_highest_level_with_a_case():
+    """A level with a case above the recorded floor, or a floor with no case,
+    is a number nothing checks -- the state this file was written to end."""
+    floor = tuple(int(part) for part in CAPABILITY_FLOOR.split("."))
+    levels = _levels_with_a_case()
+    assert levels, "no capability case found"
+    assert levels[-1] == floor, (
+        f"CAPABILITY_FLOOR is {CAPABILITY_FLOOR} but the highest level with a case "
+        f"is {'.'.join(map(str, levels[-1]))}; raise the floor with its case"
+    )
+
+
+def test_the_declared_range_covers_the_floor_and_closes_at_the_next_minor():
+    floor = tuple(int(part) for part in CAPABILITY_FLOOR.split("."))
+    low, high = _declared_range()
+    assert low >= floor, (
+        f"pyproject admits bayesmith {low[0]}.{low[1]}, below the capability "
+        f"floor {CAPABILITY_FLOOR} this package's code needs"
+    )
+    assert high == (low[0], low[1] + 1), (
+        f"the range should close at the next minor after {low[0]}.{low[1]}, "
+        f"not at {high[0]}.{high[1]}: a pre-1.0 bayesmith minor may move the "
+        "deep module paths this package imports"
     )

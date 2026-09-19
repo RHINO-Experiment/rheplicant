@@ -69,6 +69,7 @@ import jax.numpy as jnp
 import numpy as np
 from bayesmith.errors import StructureError as _FarStructureError
 from bayesmith.marginal.chain import chain_marginal as _far_chain_marginal
+from bayesmith.marginal.chain import smooth as _far_smooth
 
 from rheplicant.core.errors import StateValidationError
 from rheplicant.inference.sqrtinfo import SqrtInfo
@@ -549,6 +550,24 @@ def smooth(
     answers is "given this receiver model, what did the drift do?", and
     marginalising theta would answer a different one with the same shapes.
 
+    **Delegated, and it was the last of the six G3 names to go.** The far
+    implementation inverted the explicit precision -- paying ``kappa(F)`` where
+    a square root pays ``sqrt(kappa(F))`` -- and on a frozen chain returned
+    exactly twice the right answer and then ``nan``. That is fixed upstream as
+    of ``bayesmith`` 0.6.0, which assembles the information square root the way
+    this package always did; measured after the repair, the two agree
+    **bitwise** at every stiffness from 1e-1 down to 1e-9.
+    ``tests/evidence/test_chain_smoother_conditioning.py`` is what would notice
+    a regression, and it asserts properties -- positive variances, and the
+    limit a freezing chain must reach -- rather than comparing the two sides,
+    so it keeps its teeth now that only one implementation is left.
+
+    :func:`_zeta_joint` stays because :func:`_joint_covariance` still uses it
+    and the far side has no counterpart to that. Both are checked against
+    ``chain_bank``'s dense oracle rather than against each other, so the
+    remaining near-side copy is a reference the tests hold, not a second
+    answer in the shipping path.
+
     **How, and why not the classical backward pass.** Section 6 names an RTS
     smoother. What this computes is the same quantity -- the exact smoothed
     marginals -- by assembling the block-tridiagonal joint information form over
@@ -581,15 +600,13 @@ def smooth(
         are in there; they are not returned, though the joint form has them and
         ``_joint_covariance`` is where the tests get at them.
     """
-    triangular, rhs, n_epochs, n_zeta = _zeta_joint(
-        blocks, transition, values, names, shapes
-    )
-    total = n_epochs * n_zeta
-    mean = jax.scipy.linalg.solve_triangular(triangular, rhs, lower=False)
-    inverse = jax.scipy.linalg.solve_triangular(triangular, jnp.eye(total), lower=False)
-    # var = diag((R^T R)^-1) = the row norms of R^-1, without forming R^-1 R^-T.
-    variance = jnp.sum(inverse**2, axis=1)
-    return mean.reshape(n_epochs, n_zeta), variance.reshape(n_epochs, n_zeta)
+    try:
+        return _far_smooth(blocks, transition, values, names, shapes)
+    except _FarStructureError as exc:
+        # `_check_block_width` is the only refusal on this path and the two
+        # sides' messages are byte-identical, so preserving `str(exc)`
+        # reproduces this package's text exactly. Only the class translates.
+        raise StateValidationError(str(exc)) from None
 
 
 #: What a chain can do about an ``epoch_id`` it already holds, which is not what

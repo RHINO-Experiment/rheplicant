@@ -200,28 +200,43 @@ Several test modules stand down behind a module-level `pytest.importorskip`,
 so a thinner virtualenv silently collects fewer tests of the same suite.
 Complete means the dev group plus **`h5py`**, **`rhino-cal-jax`** (not on
 PyPI; install it editable from its own checkout, and install `editables`
-alongside it, which its editable hook needs), **`bayesmith`** at the
-`>=0.5` surface, and the **`gui-react`** extra — which is in this list because
+alongside it, which its editable hook needs), **`bayesmith`** in the declared
+range below, and the **`gui-react`** extra — which is in this list because
 CI did not have it and nothing said so: its `httpx2` is what
 `tests/gui/test_session_api.py` skips on, and its absence cost 118 statements
-of GUI coverage without a single test failing. The floor moved from 0.2 on 2026-08-27 and the halves are
-worth telling apart: 0.2 named `first_fit` and `exact.loglinear`, which
-`partition.py` and `loglinear.py` import; 0.3 names `AffinityRefused`'s
-structured payload and `ComplexNormal`, which `graph_bridge.py` needs. A 0.2
-install satisfies the import statements of the second pair and then fails at
-the call. 0.4 names `observed_mask`, which is how the adapter presents a
-`FlaggedNoise`. **0.5 names `local_block(..., priors=True)`** -- G15's third
-block constructor, which `uncertainty.fisher_information(space=...)` now
-delegates its prior curvature to instead of spelling it. A 0.4 install
-imports fine and raises `TypeError: unexpected keyword argument 'priors'`
-at the call, which is the shape a floor exists to turn into a resolution
-error. **0.5.0 is on PyPI as of 2026-08-28**, so
-`uv pip install 'bayesmith>=0.5'` resolves; this checkout nevertheless holds
-it **editable from `../bayesmith` with `--no-deps`**, because the two
-repositories are developed against each other and a released version would
-freeze the seam mid-programme. Its runtime deps (jax, equinox, numpy,
-numpyro) are already here. Without it `rheplicant.inference` does not import at all, so this one
-fails loudly rather than as silent skips.
+of GUI coverage without a single test failing.
+
+**bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
+capability floor is 0.6, the highest release whose surface this package uses:
+0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
+payload and `ComplexNormal`; 0.4 `observed_mask`; 0.5
+`local_block(..., priors=True)`; 0.6 `marginal.chain.smooth` assembled as a
+square root, whose 0.5 spelling returns `nan` on a stiff chain. An install
+below a level satisfies the import statements and fails at the call, so
+`tests/test_bayesmith_floor.py` asserts each level by capability, not by
+version. The range starts at 0.9 because the stable baseline relies on
+bayesmith 0.9's stability contract and is tested only against it, and it is
+closed at 0.10 because a pre-1.0 minor may move the deep module paths this
+package imports.
+
+**0.9.0 is a local release and not on PyPI** (2026-09-19; the index stops at
+0.8.0). Check the wheel's sha256 against
+`../bayesmith/runs/t002/release-manifest.json`, then
+
+```bash
+uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t002/unpublished-0.9.0/bayesmith-0.9.0-py3-none-any.whl
+```
+
+Any install that resolves this package's dependencies needs
+`--find-links ../bayesmith/runs/t002/unpublished-0.9.0`. The wheel replaces
+the editable install from `../bayesmith` this checkout used while the two
+repositories were developed against each other: an editable install runs
+whatever the sibling working tree holds and reports the version its metadata
+was written with (0.2.0 against 0.9.0 source, measured 2026-09-19), so a
+seam result could not say which bayesmith it tested. Record the wheel's
+sha256 beside seam results. bayesmith's runtime dependencies, including its
+`numpyro>=0.15,<0.22`, are already here. Without it `rheplicant.inference`
+does not import at all, so this one fails loudly rather than as silent skips.
 
 **There are two pytest sessions that need `JAX_ENABLE_X64=1`, not one.**
 `tests/evidence/` is the older; `tests/seam/` is the adapter's acceptance
