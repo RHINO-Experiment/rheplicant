@@ -64,9 +64,14 @@ nowhere left to move.
 Two things here can notice, and both are on by default.
 :func:`~rheplicant.inference.identifiability.identifiability` sees across
 blocks and refuses the model before a sweep runs, naming the degenerate
-directions by latent; and the convergence monitor is the **joint** chi-squared
-at the current parameter tuple across sweeps, never a per-block residual — which
+directions by latent; and the convergence monitor is a **joint** quantity at
+the current parameter tuple across sweeps, never a per-block residual — which
 is precisely the number that read ~1e-7 on an answer thousands of kelvin wrong.
+For :meth:`SamplingPlan.estimate` that quantity is the joint negative log
+posterior (:meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`),
+the objective every block update descends; the joint chi-squared is recorded
+beside it, and :meth:`SamplingPlan.sample` tests its mixing on the chi-squared
+trace.
 
 **The identifiability check costs a dense Jacobian and a dense SVD**, ``n_data x
 n_par`` float64 words, so ``check_identifiability=`` is the caller's explicit
@@ -134,9 +139,11 @@ be discovered.
 ``0.5 * chi2 + log_determinant``, and both potential builders take it -- the
 single-argument one the optimiser gets and the lifted one NUTS gets, since
 fixing one alone would have rebuilt the same two-targets defect a layer down.
-``chi2`` itself is deliberately unchanged: it is the convergence monitor, and
-a monitor that changed units the moment a noise model started reading its
-argument would be worse than the omission it replaced.
+``chi2`` itself is deliberately unchanged: it is reported goodness of fit and
+the sampler's mixing trace, and a number that changed units the moment a
+noise model started reading its argument would be worse than the omission it
+replaced. The point estimate's stop rule reads the full objective, log
+determinant included, since T-002 (A5-1).
 
 The gradient block moved from **6.248269** to **5.004059** on the fixture
 below, against an unbiased closed form of 5.104641 -- so onto the unbiased
@@ -236,19 +243,38 @@ CHECK_EACH_SWEEP: str = "each_sweep"
 #: Sweep cap for :meth:`SamplingPlan.estimate`.
 DEFAULT_MAX_ITER: int = 100
 
-#: Relative PROGRESS in the JOINT chi-squared below which a point estimate has
-#: converged — ``chi2[k-1] - chi2[k]``, relative to ``max(|chi2|, 1)``.
+#: Relative CHANGE in the JOINT negative log posterior below which a point
+#: estimate has converged, where ``f`` is
+#: :meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`. The
+#: test is ``|f[k] - f[k-1]| <= t * max(|f[k]|, 1)`` on two consecutive
+#: sweep-to-sweep changes, with ``t = max(tol, OBJECTIVE_FLOOR_EPS * eps)`` and
+#: ``eps`` the machine epsilon of the objective's dtype (see
+#: :data:`OBJECTIVE_FLOOR_EPS`). The name predates this rule; until T-002 it was
+#: a tolerance on the DECREASE of the joint chi-squared.
 #:
-#: A decrease rather than a change, and that is the whole design of the test.
-#: Block-coordinate descent cannot increase the objective, so once a sweep stops
-#: reducing it there is nothing left to reach. Testing ``|chi2[k] - chi2[k-1]|``
-#: instead walks into the trap
-#: :func:`~rheplicant.inference.gls.iterative_gls` documents for its own
-#: ``reweight_tol``: consecutive sweeps differ by roughly the inner solver's own
-#: noise whatever the outer iteration is doing, so a threshold below that floor
-#: measures CG and never passes. Measured on the motivating model in float32:
-#: the plateau sits at chi2 = 2.7e-3 and jitters by 1.2e-3 a sweep, so a
-#: converged run would have been refused for 300 sweeps and counting.
+#: **Why the objective and not chi-squared.** A block update minimises its
+#: conditional of ``f``, so ``f`` is what a sweep descends. Chi-squared is not:
+#: with a prior the MAP is not the chi-squared minimum, and a sweep that moves
+#: towards the MAP raises chi-squared. The old rule read any such rise as
+#: convergence; the T-002 verifier (A5-1) measured runs certified 1 to 15
+#: posterior sigma from the exact MAP that way, including a plan of two
+#: conjugate blocks with no gradient block.
+#:
+#: **Why a change in both directions.** For Gaussian noise that does not
+#: depend on the prediction every block update is an exact conditional
+#: minimisation, so ``f`` cannot rise beyond the arithmetic's noise; a larger
+#: rise means a block did not do what its engine says, or the noise is
+#: prediction-dependent and the conjugate engine's frozen-sigma solve has a
+#: fixed point that is not a minimum of ``f`` (see the module docstring).
+#: Neither is convergence.
+#:
+#: **What this cannot see.** A change is a certificate of distance only when
+#: the sweep makes progress. For two blocks with posterior correlation ``r``
+#: a sweep shrinks the objective gap by about ``r**4``, so a tolerance on the
+#: change bounds the Mahalanobis distance to the MAP by about
+#: ``sqrt(2 t |f| / (1 - r**4))``: 0.005 posterior sigma at ``r = 0.9965`` in
+#: float64 (``tests/inference/test_estimate_reaches_map.py``), and unbounded as
+#: ``r -> 1``. The float32 floor below raises ``t`` and the bound with it.
 DEFAULT_CHI2_TOL: float = 1e-8
 
 #: Sweeps taken before the convergence test is consulted at all. The first
@@ -263,6 +289,21 @@ DEFAULT_CHI2_TOL: float = 1e-8
 #: than a reweight and so fewer of them are spent before asking.
 MIN_SWEEPS: int = 3
 
+#: The floor under a point estimate's relative tolerance, in units of the
+#: objective's machine epsilon: the stop rule uses
+#: ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``.
+#:
+#: Without it the default ``tol = 1e-8`` sits below float32's epsilon
+#: (1.19e-7), and a float32 run can pass the test only if two consecutive
+#: sweeps reproduce the objective to the last bit. Conjugate solves at
+#: ``solve_tol = 1e-6`` do not: on the motivating bilinear model
+#: (``tests/inference/test_plan.py``, float32, 400 sweeps recorded) the
+#: objective at its plateau moves by tens of ulps a sweep. Replaying that
+#: trace against the float64 MAP, a floor of 4 eps never stops; 64 eps stops
+#: at sweep 94, 0.079 posterior sigma from the MAP; 256 eps stops at sweep
+#: 89, 0.13 sigma. In float64 the floor is 1.4e-14 and ``tol`` governs.
+OBJECTIVE_FLOOR_EPS: int = 64
+
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather
 #: than the modern 1.01 because this is ``r_hat`` of a single scalar summary of
 #: a single chain, where 1.01 is noise-dominated at the draw counts a Gibbs
@@ -276,6 +317,31 @@ MIN_DRAWS: int = 4
 #: Null directions named in a refusal before it says "and N more". Enough to see
 #: the pattern, few enough to read.
 _DIRECTIONS_SHOWN: int = 4
+
+
+def _settled(trace: list[float], tol: float) -> bool:
+    """Whether the last TWO changes of a sweep-output ``trace`` are within ``tol``.
+
+    ``trace`` holds the objective after each sweep, NOT at the starting
+    values: the first change counted is sweep 2 against sweep 1, so the
+    earliest a trace can settle is at sweep 3. Each change is measured in
+    both directions, ``|f[k] - f[k-1]|``, against ``tol * max(|f[k]|, 1)``, so
+    a rise larger than that is never settled. Two changes rather than one, so
+    a sweep that happens to land at the same value from the other side of a
+    minimum is not read as a fixed point.
+    """
+    if len(trace) < 3:
+        return False
+    return all(
+        abs(trace[-k] - trace[-k - 1]) <= tol * max(abs(trace[-k]), 1.0)
+        for k in (1, 2)
+    )
+
+
+def _effective_tol(tol: float, objective: jax.Array) -> float:
+    """``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype."""
+    eps = float(jnp.finfo(jnp.asarray(objective).dtype).eps)
+    return max(tol, OBJECTIVE_FLOOR_EPS * eps)
 
 
 def _halves(values: np.ndarray) -> np.ndarray:
@@ -482,16 +548,19 @@ class PlanDiagnostics:
     """What a run measured, shared by both exits.
 
     Attributes:
-        chi2: the JOINT chi-squared, one entry per sweep — the monitored
-            quantity. For :meth:`SamplingPlan.estimate` it decreases towards a
-            fixed point; for :meth:`SamplingPlan.sample` it fluctuates around a
-            stationary value, which is what :attr:`rhat` tests.
+        chi2: the JOINT chi-squared, one entry per sweep, the first at the
+            starting values. For :meth:`SamplingPlan.estimate` it is reported
+            data and not the stop rule: with a prior it can RISE as the run
+            approaches the MAP. For :meth:`SamplingPlan.sample` it fluctuates
+            around a stationary value, which is what :attr:`rhat` tests.
         sweeps: sweeps actually run.
-        converged: for a point estimate, whether the joint chi-squared settled
-            within ``tol`` (``None`` when the test was disabled). For a draw,
+        converged: for a point estimate, whether :attr:`objective` settled
+            within :attr:`effective_tol` on two consecutive sweep-to-sweep
+            changes (``None`` when the test was disabled). For a draw,
             whether :attr:`rhat` came in under the caller's threshold. **False
-            here means the answer is not what it looks like** — the same reading
-            as :attr:`~rheplicant.inference.gls.GLSResult.converged`.
+            here means the answer is not what it looks like** — the same
+            reading as
+            :attr:`~rheplicant.inference.gls.GLSResult.converged`.
         engines: which engine each block took, keyed by the block's ``names``.
         block_residuals: each conjugate block's last relative CG residual, and
             each gradient block's last conditional potential. Recorded because
@@ -508,6 +577,19 @@ class PlanDiagnostics:
             estimate).
         rhat: split-``r_hat`` of the post-warmup joint chi-squared (``None`` for
             a point estimate).
+        objective: the JOINT negative log posterior (up to a constant), one
+            entry per sweep aligned with :attr:`chi2`, the first at the
+            starting values — the quantity a point estimate's stop rule tests.
+            ``None`` for a draw.
+        effective_tol: the relative tolerance the stop rule applied,
+            ``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype
+            (see :data:`OBJECTIVE_FLOOR_EPS`). ``None`` for a draw and for a
+            point estimate run with ``tol=None``.
+
+    :attr:`objective` and :attr:`effective_tol` are not among the fields the
+    config layer copies into a run's diagnostics record
+    (``config/products/extractors.py::DIAGNOSTIC_FIELDS``), so that record's
+    format is unchanged by them.
     """
 
     chi2: np.ndarray
@@ -519,6 +601,8 @@ class PlanDiagnostics:
     noise_depends_on_prediction: bool
     warmup: int | None = None
     rhat: float | None = None
+    objective: np.ndarray | None = None
+    effective_tol: float | None = None
 
 
 class PlanResult(Protocol):
@@ -1024,7 +1108,22 @@ class SamplingPlan:
         conjugate block; for a gradient one, Adam on the conditional posterior
         followed by Newton steps that remove Adam's step-size floor (see
         :func:`~rheplicant.inference.engines.gradient_estimate`) — and the
-        sweep repeats until the **joint** chi-squared stops moving.
+        sweep repeats until the **joint** negative log posterior stops moving:
+        two consecutive sweep-to-sweep changes each within the effective
+        tolerance, ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``. That is the
+        objective each block update descends, so its fixed point is the MAP;
+        the joint chi-squared is recorded but not tested, because with a prior
+        it can rise while the run approaches the MAP. A rise of the objective
+        larger than the effective tolerance is never convergence.
+
+        A small change is evidence of arrival only while the sweep still makes
+        progress: it bounds the distance to the MAP for a moderately
+        correlated posterior (0.005 posterior sigma at a block correlation of
+        0.9965 in float64, measured), and along a near-degenerate direction a
+        run can stop early. The float32 floor loosens the bound: the bilinear
+        test fixture with a gain prior of width 0.01 stops 0.74 posterior
+        sigma from its MAP in float32 and 0.043 in float64. No curvature-based
+        check (a Newton decrement) is made.
 
         Args:
             pipeline: the forward model.
@@ -1034,13 +1133,22 @@ class SamplingPlan:
             noise: a :class:`~rheplicant.inference.noise.NoiseModel`, or a bare
                 sigma (wrapped as
                 :class:`~rheplicant.inference.noise.HomoscedasticNoise`).
-            max_iter: sweep cap.
-            tol: relative PROGRESS in the joint chi-squared below which the run
-                has converged — see :data:`DEFAULT_CHI2_TOL` for why it is a
-                decrease and not a change. ``None`` runs exactly ``max_iter``
-                sweeps and makes no convergence claim at all — the only way to
-                get an answer back without one.
-            min_sweeps: sweeps taken before the test is consulted.
+            max_iter: sweep cap. With a ``tol``, a verdict needs three sweeps
+                (see ``min_sweeps``), so ``max_iter`` of 1 or 2 can never
+                converge and always refuses.
+            tol: relative change in the joint negative log posterior below
+                which the run has converged, required on two consecutive
+                sweep-to-sweep changes — see :data:`DEFAULT_CHI2_TOL`. It is
+                floored at :data:`OBJECTIVE_FLOOR_EPS` machine epsilons of the
+                objective's dtype, and the value applied is recorded as
+                :attr:`PlanDiagnostics.effective_tol`. ``None`` runs exactly
+                ``max_iter`` sweeps and makes no convergence claim at all — the
+                only way to get an answer back without one.
+            min_sweeps: sweeps taken before the test is consulted. The test
+                compares sweep 2 with sweep 1 and sweep 3 with sweep 2 at the
+                earliest (the starting values are not a sweep's output), so
+                the earliest verdict is at sweep ``max(min_sweeps, 3)``:
+                ``min_sweeps`` of 1, 2 and 3 behave alike.
             check_identifiability: ``"once"``, ``"each_sweep"`` or ``False``. See
                 the module docstring; a point estimate is the exit that needs it
                 most, because it has no other diagnostic.
@@ -1055,8 +1163,8 @@ class SamplingPlan:
 
         Raises:
             ParameterSpaceError: if the model is not identified; if ``observed``
-                is mis-shaped; or if the joint chi-squared has not converged
-                within ``max_iter`` sweeps. That last one is an error rather
+                is mis-shaped; or if the joint negative log posterior has not
+                settled within ``max_iter`` sweeps. That last one is an error rather
                 than a flag *here* and a flag rather than an error at
                 :meth:`sample`, and the asymmetry is deliberate: a chain has
                 ``r_hat`` to scream with, and a point estimate has nothing.
@@ -1087,6 +1195,9 @@ class SamplingPlan:
         residuals: dict[tuple[str, ...], float] = {}
         programs: dict[Any, Any] = {}
         chi2 = [float(cond.chi2(values))]
+        start = cond.neg_log_posterior(values)
+        objective = [float(start)]
+        effective = None if tol is None else _effective_tol(tol, start)
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1103,11 +1214,11 @@ class SamplingPlan:
                 tuning={}, residuals=residuals, programs=programs,
             )
             chi2.append(float(cond.chi2(values)))
-            progress = chi2[-2] - chi2[-1]
+            objective.append(float(cond.neg_log_posterior(values)))
             if (
-                tol is not None
+                effective is not None
                 and sweep >= min_sweeps
-                and progress <= tol * max(abs(chi2[-1]), 1.0)
+                and _settled(objective[1:], effective)
             ):
                 converged = True
                 break
@@ -1128,9 +1239,13 @@ class SamplingPlan:
             )
             raise ParameterSpaceError(
                 f"SamplingPlan.estimate did not converge: after {max_iter} sweeps the "
-                f"JOINT chi-squared is still falling by "
-                f"{chi2[-2] - chi2[-1]:.6g} per sweep (chi2 = {chi2[-1]:.6g}), which "
-                f"is above tol={tol:g}. " + hidden + "Slow convergence here "
+                f"JOINT negative log posterior is still changing by "
+                f"{objective[-1] - objective[-2]:.6g} per sweep (objective = "
+                f"{objective[-1]:.6g}, chi2 = {chi2[-1]:.6g}), and a verdict needs two "
+                f"consecutive sweep-to-sweep changes each within {effective:.3g} of it, "
+                f"relative (tol={tol:g}, floored at {OBJECTIVE_FLOOR_EPS} machine "
+                "epsilons of the objective's dtype). "
+                + hidden + "Slow convergence here "
                 "means the blocks are correlated — group the correlated latents into ONE "
                 "Block, which resolves them in a single solve, or raise max_iter. "
                 "identifiability(space, pipeline, state, names=...) reports how much the "
@@ -1147,6 +1262,8 @@ class SamplingPlan:
                 block_residuals=dict(residuals),
                 identifiability=report,
                 noise_depends_on_prediction=bool(cond.noise.depends_on_prediction),
+                objective=np.asarray(objective, dtype=np.float64),
+                effective_tol=effective,
             ),
         )
 
@@ -1282,6 +1399,7 @@ __all__ = [
     "DEFAULT_RHAT_MAX",
     "MIN_DRAWS",
     "MIN_SWEEPS",
+    "OBJECTIVE_FLOOR_EPS",
     "Block",
     "Draws",
     "Estimate",

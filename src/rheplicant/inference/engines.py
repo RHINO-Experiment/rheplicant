@@ -220,12 +220,31 @@ class Conditioning:
         is absent, deliberately and at measured cost -- see that function.
 
         :meth:`chi2` is deliberately NOT extended to include this. It is the
-        convergence monitor, and a monitor that silently changed units the
+        reported goodness of fit, and a number that silently changed units the
         moment a noise model started reading its argument would be worse than
         the omission this replaces.
         """
         return 0.5 * self.chi2(values) + log_determinant(
             self.noise, self.forward(values)
+        )
+
+    def neg_log_posterior(self, values: dict[str, jax.Array]) -> jax.Array:
+        """``-log p(values | data)`` up to a constant, over EVERY latent.
+
+        :meth:`neg_log_likelihood` minus the declared log prior of each latent
+        (zero for a prior-free one). Every block's conditional potential is
+        this function with the other blocks held fixed, so it is the one
+        objective that a sweep of conditional updates descends, and it is what
+        :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` monitors for
+        convergence.
+
+        :meth:`chi2` is not that objective. With a prior, the MAP is not the
+        chi-squared minimum, and a sweep that moves towards the MAP can raise
+        chi-squared; a stop rule on chi-squared read such a rise as
+        convergence, 1 to 15 posterior sigma from the MAP (T-002 A5-1).
+        """
+        return self.neg_log_likelihood(values) - _log_prior(
+            self.space, self.space.names, values
         )
 
 
@@ -702,8 +721,8 @@ def gradient_estimate(
 
     Returns the updated values and the potential reached, which stands in the
     residual's place in the conjugate engine's return — a number to record,
-    never a convergence verdict. The verdict is taken one level up, on a joint
-    quantity.
+    never a convergence verdict. The verdict is the joint objective,
+    :meth:`Conditioning.neg_log_posterior`, one level up.
 
     ``programs`` is the caller's compiled-transition cache, as for
     :func:`gradient_draw`, and for the same reasons it is keyed without the

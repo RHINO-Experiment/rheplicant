@@ -53,7 +53,10 @@ from rheplicant.inference.plan import (
     CHECK_EACH_SWEEP,
     CHECK_ONCE,
     MIN_DRAWS,
+    MIN_SWEEPS,
+    OBJECTIVE_FLOOR_EPS,
     _halves,
+    _settled,
 )
 from rheplicant.radio import GainOperator
 
@@ -307,6 +310,87 @@ def _line_map(observed, *, sigma):
     return {"amp": flat[:N_TIME], "centre": flat[N_TIME]}, precision
 
 
+def _basis_map(observed, *, sigma, gain_prior=GAIN_PRIOR, coeff_prior=COEFF_PRIOR):
+    """The basis model's exact joint MAP and the posterior precision there.
+
+    ``mu[t, f] = gain[t] * (T[t, f] + tone[f])`` with ``T = TIME_BASIS @ c @
+    FREQ_BASIS.T``, bilinear, so its derivatives are written out by hand and
+    Newton is run in NumPy float64 from the truth, with step halving. Shares no
+    code with the plan and leaves the process-global x64 flag alone. Returns
+    ``({name: array}, precision)``, the precision over ``gain`` then the
+    row-major ``t_coeff``.
+    """
+    data = np.asarray(observed, np.float64)
+    time_basis = np.asarray(TIME_BASIS, np.float64)
+    freq_basis = np.asarray(FREQ_BASIS, np.float64)
+    tone = np.zeros(N_FREQ)
+    tone[TONE_CHANNEL] = TONE_KELVIN
+    shape = np.shape(COEFF0)
+    n_gain = N_TIME
+
+    def normal(prior, size):
+        loc = np.broadcast_to(np.asarray(prior.loc, np.float64), prior.batch_shape)
+        scale = np.broadcast_to(np.asarray(prior.scale, np.float64), prior.batch_shape)
+        return loc.reshape(size), scale.reshape(size)
+
+    gain_loc, gain_scale = normal(gain_prior, n_gain)
+    coeff_loc, coeff_scale = normal(coeff_prior, int(np.prod(shape)))
+    loc = np.concatenate([gain_loc, coeff_loc])
+    prior_precision = 1.0 / np.concatenate([gain_scale, coeff_scale]) ** 2
+    # d T[t, f] / d c[i, j] = TIME_BASIS[t, i] * FREQ_BASIS[f, j], as (t, f, i*j)
+    basis = np.einsum("ti,fj->tfij", time_basis, freq_basis).reshape(
+        N_TIME, N_FREQ, -1
+    )
+
+    def objective(theta):
+        gain, coeff = theta[:n_gain], theta[n_gain:].reshape(shape)
+        signal = time_basis @ coeff @ freq_basis.T + tone[None, :]
+        residual = (data - gain[:, None] * signal) / sigma
+        return 0.5 * (np.sum(residual**2) + np.sum(prior_precision * (theta - loc) ** 2))
+
+    def derivatives(theta):
+        gain, coeff = theta[:n_gain], theta[n_gain:].reshape(shape)
+        signal = time_basis @ coeff @ freq_basis.T + tone[None, :]
+        residual = (data - gain[:, None] * signal) / sigma
+        jacobian = np.zeros((N_TIME, N_FREQ, theta.size))
+        jacobian[np.arange(N_TIME), :, np.arange(N_TIME)] = signal
+        jacobian[:, :, n_gain:] = gain[:, None, None] * basis
+        jacobian = jacobian.reshape(N_TIME * N_FREQ, theta.size)
+        gradient = (
+            -jacobian.T @ residual.ravel() / sigma + prior_precision * (theta - loc)
+        )
+        hessian = jacobian.T @ jacobian / sigma**2 + np.diag(prior_precision)
+        # d2 mu[t, f] / d gain[t] d c[i, j] = basis[t, f, ij]
+        cross = -np.einsum("tf,tfk->tk", residual, basis) / sigma
+        hessian[:n_gain, n_gain:] += cross
+        hessian[n_gain:, :n_gain] += cross.T
+        return gradient, hessian
+
+    theta = np.concatenate([np.asarray(GAIN0, np.float64),
+                            np.asarray(COEFF0, np.float64).ravel()])
+    for _ in range(100):
+        gradient, hessian = derivatives(theta)
+        step = -np.linalg.solve(hessian, gradient)
+        length = 1.0
+        while objective(theta + length * step) > objective(theta) and length > 1e-8:
+            length /= 2.0
+        theta = theta + length * step
+    gradient, precision = derivatives(theta)
+    step = np.linalg.solve(precision, gradient)
+    assert np.sqrt(step @ precision @ step) < 1e-6, "reference Newton stalled"
+    return {"gain": theta[:n_gain], "t_coeff": theta[n_gain:].reshape(shape)}, precision
+
+
+def _posterior_sigmas_from(estimate, exact, precision):
+    """Mahalanobis distance of ``estimate.values`` from ``exact``, in posterior sigma."""
+    got = np.concatenate(
+        [np.ravel(np.asarray(estimate.values[name], np.float64)) for name in exact]
+    )
+    want = np.concatenate([np.ravel(value) for value in exact.values()])
+    residual = got - want
+    return float(np.sqrt(residual @ precision @ residual))
+
+
 # ------------------------------------------------------------ Block declaring --
 
 
@@ -541,6 +625,10 @@ class TestTheMotivatingCase:
         millions while EVERY block's own CG residual has been converged since
         sweep one. A per-block residual is computed from the block; it cannot
         see across the partition, and this is what that costs.
+
+        The verdict is taken on the joint negative log posterior, the quantity
+        the sweep minimises (T-002 A5-1); the refusal names it and still
+        reports the joint chi-squared beside it.
         """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
@@ -551,7 +639,8 @@ class TestTheMotivatingCase:
             )
         message = str(caught.value)
         assert "did not converge" in message
-        assert "JOINT chi-squared is still falling" in message, message
+        assert "JOINT negative log posterior is still changing" in message, message
+        assert "chi2 = " in message, message
 
         # and the counter-evidence, in the message itself: the per-block number
         # that reads converged the whole way down
@@ -724,13 +813,85 @@ class TestConvergence:
         assert est.diagnostics.sweeps == 2
         assert est.diagnostics.chi2.shape == (3,)
 
-    def test_the_test_is_a_DECREASE_not_a_CHANGE(self, basis_setup, state):
-        """The trap iterative_gls documents for its own reweight_tol: at the
-        fixed point consecutive sweeps differ by the inner solver's own noise,
-        so |chi2[k] - chi2[k-1]| never falls below it and a converged run is
-        refused forever. Measured here: the plateau's sweep-to-sweep jitter is
-        far above the default tol, and the run still converges — which it could
-        not if the test were on the absolute change.
+    def test_an_increase_beyond_the_floor_is_never_convergence(self, state):
+        """The test is a CHANGE of the joint objective, in both directions.
+
+        Until T-002 the rule was a DECREASE of the joint chi-squared, so any
+        sweep on which chi-squared rose counted as converged. Here a tight
+        prior pulls the gain away from the truth, and chi-squared rises by
+        half its value at sweep 58 while the objective is still falling: the
+        old rule stopped there, 3.6 posterior sigma from the MAP (measured).
+        The objective rule must run past that rise and stop only on two
+        consecutive changes inside the effective tolerance.
+        """
+        space = basis_space(gain_prior=dist.Normal(jnp.ones(N_TIME), 0.01))
+        pipeline = make_pipeline()
+        observed = observed_of(space, pipeline, TRUTH)
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        est = plan.estimate(
+            pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
+        )
+        diagnostics = est.diagnostics
+        assert diagnostics.converged is True
+        relative = diagnostics.effective_tol
+        chi2, objective = diagnostics.chi2, diagnostics.objective
+
+        rise = np.diff(chi2) / np.maximum(np.abs(chi2[1:]), 1.0)
+        rose = [sweep for sweep in range(MIN_SWEEPS, diagnostics.sweeps + 1)
+                if rise[sweep - 1] > relative]
+        assert rose, "the fixture must make chi-squared rise, or this test is vacuous"
+        assert rose[0] < diagnostics.sweeps, (
+            f"stopped at sweep {diagnostics.sweeps}, where chi-squared rose; a rise "
+            "is what the old one-sided rule read as convergence"
+        )
+        # the objective was still moving where chi-squared first rose ...
+        assert objective[rose[0]] - objective[-1] > relative * abs(objective[-1])
+        # ... and the stop is two sub-tolerance changes, in both directions
+        for k in (1, 2):
+            change = abs(objective[-k] - objective[-k - 1])
+            assert change <= relative * max(abs(objective[-k]), 1.0), objective[-4:]
+
+    def test_the_stop_rule_counts_changes_in_both_directions(self):
+        """``_settled`` on hand-made traces: a rise beyond the tolerance is not
+        settled, which the old one-sided test would have called settled."""
+        tol = 1e-6
+        assert _settled([10.0, 10.0, 10.0], tol)
+        assert _settled([10.0, 10.0 + 5e-6, 10.0], tol)
+        assert not _settled([10.0, 10.5, 11.0], tol)       # rising
+        assert not _settled([11.0, 10.5, 10.0], tol)       # falling
+        assert not _settled([10.0, 10.0, 11.0], tol)       # only one change settled
+        assert not _settled([10.0, 10.0], tol)             # one change is not two
+
+    def test_the_floor_is_recorded_and_scales_with_the_dtype(self, basis_setup, state):
+        """The applied tolerance is ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``.
+
+        This module runs in float32, where the default ``tol = 1e-8`` is below
+        the objective's epsilon; the floor is what lets a float32 run stop at
+        all (see :data:`OBJECTIVE_FLOOR_EPS`). A ``tol`` above the floor is
+        applied as given.
+        """
+        space, pipeline, observed = basis_setup
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "max_iter": 200, "solve_guard": None}
+        floored = plan.estimate(pipeline, state, observed, **common)
+        eps = float(np.finfo(np.float32).eps)
+        assert floored.diagnostics.effective_tol == OBJECTIVE_FLOOR_EPS * eps
+        loose = plan.estimate(pipeline, state, observed, tol=1e-3, **common)
+        assert loose.diagnostics.effective_tol == 1e-3
+        free = plan.estimate(pipeline, state, observed, tol=None, max_iter=2,
+                             noise=NOISE, solve_guard=None)
+        assert free.diagnostics.effective_tol is None
+
+    def test_the_float32_basis_model_converges_onto_the_float64_map(
+        self, basis_setup, state
+    ):
+        """The motivating model, in this module's float32, within 0.1 posterior
+        sigma of its MAP computed in float64.
+
+        Measured: the run stops at sweep 94, 0.079 sigma from the MAP. Without
+        the floor it never stops (the objective's plateau moves by tens of
+        float32 ulps a sweep); with the old chi-squared rule it stopped at
+        sweep 95, 0.080 sigma.
         """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
@@ -738,22 +899,26 @@ class TestConvergence:
             pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
         )
         assert est.diagnostics.converged is True
-        trace = est.diagnostics.chi2
-        # the last step made no progress (that is why it stopped) ...
-        assert trace[-2] - trace[-1] <= 1e-8 * max(abs(trace[-1]), 1.0)
-        # ... while the plateau it stopped on is jittering by far more than that
-        plateau = trace[-min(10, trace.size) :]
-        assert float(np.max(np.abs(np.diff(plateau)))) > 1e-8, plateau
+        exact, precision = _basis_map(observed, sigma=NOISE)
+        distance = _posterior_sigmas_from(est, exact, precision)
+        assert distance < 0.1, (distance, est.diagnostics.sweeps)
 
-    def test_min_sweeps_keeps_a_stationary_first_step_from_ending_the_run(self, state):
-        """The reason iterative_gls has a min_reweights: the first steps of a
-        fixed-point iteration can be nearly stationary without being anywhere
-        near the fixed point.
+    def test_convergence_needs_two_sub_tolerance_changes_so_the_earliest_stop_is_sweep_three(
+        self, state
+    ):
+        """Started AT the answer, every change is below the tolerance from the
+        first sweep on.
 
-        Started AT the answer, the very first sweep makes no progress — so
-        min_sweeps is the only thing standing between the run and a
-        one-sweep "converged". The two settings must give different sweep
-        counts, or the floor is doing nothing.
+        The verdict still needs two sweep-to-sweep changes between sweep
+        OUTPUTS (sweep 2 against 1, sweep 3 against 2; the starting values are
+        not an output), so the earliest stop is sweep 3 whatever ``min_sweeps``
+        says below that, ``min_sweeps`` above it is the floor, and a cap of two
+        sweeps can never converge.
+
+        ``tol=1e-4`` rather than the default because this module runs in
+        float32, where the objective at the answer still moves by up to 2.3e-3
+        a sweep (relative 1.6e-5, above the float32 floor of 7.6e-6); the
+        default would measure that jitter instead of the counting.
         """
         space = ParameterSpace(
             latents=[
@@ -772,13 +937,24 @@ class TestConvergence:
         pipeline = make_pipeline()
         observed = observed_of(space, pipeline, TRUTH)
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        common = {"noise": NOISE, "max_iter": 30, "solve_guard": None}
+        common = {"noise": NOISE, "max_iter": 30, "tol": 1e-4, "solve_guard": None}
 
-        immediate = plan.estimate(pipeline, state, observed, min_sweeps=1, **common)
+        for min_sweeps in (1, 2, 3):
+            early = plan.estimate(pipeline, state, observed, min_sweeps=min_sweeps,
+                                  **common)
+            assert early.diagnostics.converged is True
+            assert early.diagnostics.sweeps == 3, (
+                min_sweeps, early.diagnostics.objective
+            )
         floored = plan.estimate(pipeline, state, observed, min_sweeps=8, **common)
-        assert immediate.diagnostics.sweeps == 1, immediate.diagnostics.chi2
-        assert floored.diagnostics.sweeps >= 8, floored.diagnostics.chi2
-        assert immediate.diagnostics.converged is floored.diagnostics.converged is True
+        assert floored.diagnostics.converged is True
+        assert floored.diagnostics.sweeps == 8, floored.diagnostics.objective
+        # the refusal sentence is the one test_the_JOINT_chi2_sees_... pins; it
+        # is asserted the same way here, so the refusal census is unchanged
+        with pytest.raises(ParameterSpaceError) as capped:
+            plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=2,
+                          min_sweeps=1, tol=1e-4, solve_guard=None)
+        assert "did not converge" in str(capped.value)
 
     def test_a_min_sweeps_above_the_cap_is_refused(self, basis_setup, state):
         """It would make the test unreachable, so every run would exhaust

@@ -7,7 +7,11 @@ answer is not what it looks like". A gradient block's estimate broke that
 sweep, and the first bias-corrected step is ``learning_rate * max|init|``
 whatever the gradient, so the sweep map had a fixed point about 0.19 of that
 step from the optimum. A spectral index over 4096 channels at 0.01 K landed
--2881 posterior sigma from its MAP, reported converged.
+-2881 posterior sigma from its MAP, reported converged. And the stop rule
+(A5-1) accepted any sweep whose JOINT chi-squared did not fall, so a rise
+counted as convergence. A prior raises chi-squared while the posterior
+improves, and runs certified convergence 1 to 15 posterior sigma from the
+exact MAP, including plans of conjugate blocks with no gradient block.
 
 Every case below asserts the same contract. A run that returns has
 ``converged=True`` and lands within :data:`MAHALANOBIS_MAX` of the exact MAP,
@@ -16,12 +20,15 @@ cannot must raise the "did not converge" refusal. Cases flagged
 ``must_converge`` also require the return, so the file cannot pass by
 refusing everything.
 
-The exact MAP is closed form for the linear model and a float64 Newton solve
+The exact MAP is closed form for the two linear models and a float64 Newton solve
 for the power law. The module runs in float64 because 0.1 sigma of the
 spectral index at 4096 channels and 0.01 K is 1.7e-7, finer than float32
 resolves a number near 2.55.
 """
 
+from typing import ClassVar
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -29,6 +36,7 @@ import pytest
 
 from rheplicant import Coordinates, State
 from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import (
     Bind,
@@ -140,8 +148,9 @@ def test_a_quadratic_gradient_block_stops_at_exactly_min_sweeps():
     """One block on a quadratic potential is solved in the first sweep.
 
     Adam's steps leave it short of the optimum and one Newton step lands on
-    it, so the verdict is due the first time it is consulted: the run must
-    return at exactly ``MIN_SWEEPS``, at the MAP.
+    it. The verdict needs the objective settled over two consecutive sweeps
+    and is consulted from ``MIN_SWEEPS`` on, so the run must return at
+    exactly ``MIN_SWEEPS``, at the MAP.
     """
     observed, mle, tau, exact, precision = _sky_case(30.0)
     space = ParameterSpace(
@@ -159,7 +168,96 @@ def test_a_quadratic_gradient_block_stops_at_exactly_min_sweeps():
     assert _mahalanobis(got, [exact], precision) < MAHALANOBIS_MAX
 
 
-# ------------------------------ (ii) power law: conjugate A + gradient beta --
+# ---------------------------------- (ii) two collinear CONJUGATE blocks only --
+
+TEMPLATE_SHAPE = (4, 8)
+TEMPLATE_SIGMA = 1.0
+TEMPLATE_TRUTH = np.array([3.0, 2.0])
+
+
+class _TwoTemplates(AbstractOperator):
+    """``data[t, f] = a + b * (1 + eps * x_f)``: two templates, nearly collinear."""
+
+    requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+    a: jax.Array
+    b: jax.Array
+    eps: float = eqx.field(static=True)
+
+    def __call__(self, state: State) -> State:
+        n_time, n_freq = state.coords.time.shape[0], state.coords.freq.shape[0]
+        x = jnp.linspace(-1.0, 1.0, n_freq)
+        profile = self.a + self.b * (1.0 + self.eps * x)
+        return state.with_data(jnp.broadcast_to(profile[None, :], (n_time, n_freq)))
+
+
+def _template_case(eps: float, tau: float, seed: int):
+    n_time, n_freq = TEMPLATE_SHAPE
+    x = np.linspace(-1.0, 1.0, n_freq)
+    design = np.tile(np.stack([np.ones(n_freq), 1.0 + eps * x], axis=1), (n_time, 1))
+    noise = np.random.default_rng(seed).standard_normal(TEMPLATE_SHAPE)
+    observed = (design @ TEMPLATE_TRUTH).reshape(TEMPLATE_SHAPE) + TEMPLATE_SIGMA * noise
+    fisher = design.T @ design / TEMPLATE_SIGMA**2
+    projected = design.T @ observed.ravel() / TEMPLATE_SIGMA**2
+    precision = fisher + np.eye(2) / tau**2
+    return observed, np.linalg.solve(fisher, projected), np.linalg.solve(
+        precision, projected
+    ), precision
+
+
+#: Enough sweeps for every cell but the slowest pair to converge. At
+#: ``eps = 0.01, tau = 3`` the two blocks' posterior correlation is 0.9965, a
+#: sweep shrinks the error by 0.993, and a verdict takes 577 to 1166 sweeps
+#: (measured), so those cells must refuse here. Before the repair seed 12 and
+#: 13 of that pair reported converged at 34 and 40 sweeps, 12 and 15 sigma
+#: from the MAP.
+TEMPLATE_MAX_ITER = 300
+
+
+@pytest.mark.parametrize("eps", [0.2, 0.01])
+@pytest.mark.parametrize("tau", [1.0, 3.0])
+@pytest.mark.parametrize("seed", [11, 12, 13])
+@pytest.mark.parametrize("start", ["mle", "reflected", "map"])
+def test_two_collinear_conjugate_blocks(eps, tau, seed, start):
+    """No gradient block anywhere, so no Adam: the stop rule alone decides.
+
+    ``reflected`` starts on the other side of the MAP from the MLE. ``map``
+    starts at the exact answer, where every sweep reproduces it, so the run
+    must return at exactly ``MIN_SWEEPS``.
+    """
+    slowest = eps == 0.01 and tau == 3.0
+    observed, mle, exact, precision = _template_case(eps, tau, seed)
+    init = {"mle": mle, "reflected": 2.0 * exact - mle, "map": exact}[start]
+    space = ParameterSpace(
+        latents=[
+            Latent("a", init=jnp.array(init[0]), prior=dist.Normal(0.0, tau), linear=True),
+            Latent("b", init=jnp.array(init[1]), prior=dist.Normal(0.0, tau), linear=True),
+        ],
+        bindings=[
+            Bind("a", into=lambda p: p["tt"].a),
+            Bind("b", into=lambda p: p["tt"].b),
+        ],
+    )
+    pipeline = Pipeline(
+        _TwoTemplates(a=jnp.array(0.0), b=jnp.array(0.0), eps=eps), names=("tt",)
+    )
+    estimate = _estimate_or_refusal(
+        SamplingPlan(space, Block("a"), Block("b")), pipeline,
+        _grid_state(*TEMPLATE_SHAPE), jnp.asarray(observed),
+        HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)),
+        max_iter=TEMPLATE_MAX_ITER,
+    )
+    got = (
+        None if estimate is None
+        else [float(estimate.values["a"]), float(estimate.values["b"])]
+    )
+    label = f"eps {eps}, tau {tau}, seed {seed}, start {start}"
+    _check(estimate, got, exact, precision, start == "map" or not slowest, label)
+    if start == "map":
+        assert estimate.diagnostics.sweeps == MIN_SWEEPS, label
+
+
+# ----------------------------- (iii) power law: conjugate A + gradient beta --
 
 REF_FREQ = 70e6
 A_TRUE, BETA_TRUE = 1000.0, 2.55

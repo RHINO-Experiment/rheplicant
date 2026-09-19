@@ -247,16 +247,19 @@ against `Estimate` or `Draws` when it genuinely needs the values or the chain.
 Both exits on the fixture above, at `HomoscedasticNoise(1.0)`:
 
 ```text
-plan.estimate   sweeps 93   converged True   chi2 1.16085e+08 -> 0.0136245
-                block residuals {('gain',): 7.56e-07, ('t_coeff',): 1.03e-06}
-                max |T_ant - truth| = 0.0332 K
+plan.estimate   sweeps 94   converged True   objective 5.80427e+07 -> 140.936
+                chi2 1.16085e+08 -> 0.0063203   effective_tol 7.63e-06
+                block residuals {('gain',): 7.61e-07, ('t_coeff',): 4.02e-07}
+                max |T_ant - truth| = 0.0252 K, 0.079 posterior σ from the MAP
 
 plan.sample     n_sweeps  60   kept  30   rhat 1.434   converged False
                 n_sweeps 200   kept 100   rhat 0.99    converged True
                 n_sweeps 600   kept 300   rhat 1.001   converged True
 ```
 
-The 93 sweeps and the `rhat = 1.434` are the same fact seen twice: these two
+The estimate runs in float32, so its tolerance is the float32 floor rather than
+the default `tol = 1e-8` (see the monitoring section below). The 94 sweeps and
+the `rhat = 1.434` are the same fact seen twice: these two
 blocks are strongly correlated, so the alternation moves slowly, and 30 kept
 draws are nowhere near stationarity. Neither exit hides it — `converged` is
 `False` on the short run and `PlanDiagnostics.rhat` says by how much.
@@ -331,26 +334,57 @@ Iterating is not one either: five sweeps and two hundred agree to four figures,
 because the solve reaches the solution manifold at once and then has nowhere
 left to move.
 
-So the monitored quantity is the **joint** χ² at the current parameter tuple,
-across sweeps. When it has not settled, the refusal says so and names what the
-per-block numbers were doing at the time:
+So the monitored quantity is a **joint** one at the current parameter tuple,
+across sweeps. For `plan.estimate` it is the joint negative log posterior `f`,
+`Conditioning.neg_log_posterior` — the objective every block update descends.
+The run has converged when two consecutive sweep-to-sweep changes are each at
+most `t × max(|f|, 1)`, where `t = max(tol, 64 ε)` and `ε` is the machine
+epsilon of the objective's dtype (`OBJECTIVE_FLOOR_EPS = 64`). The `t` applied
+is recorded as `PlanDiagnostics.effective_tol`, beside the trace
+`PlanDiagnostics.objective`. When it has not settled, the refusal says so and
+names what the per-block numbers were doing at the time:
 
 ```text
-SamplingPlan.estimate did not converge: after 4 sweeps the JOINT chi-squared is
-still falling by 728774 per sweep (chi2 = 2.31316e+06), which is above
-tol=1e-08. Note what this does NOT show up in: every conjugate block's own CG
-residual is 4.18e-07 or better, because a per-block residual is computed from
-the block and converges at every sweep of an alternation that is going nowhere.
+SamplingPlan.estimate did not converge: after 4 sweeps the JOINT negative log
+posterior is still changing by -364387 per sweep (objective = 1.15674e+06, chi2
+= 2.31319e+06), and a verdict needs two consecutive sweep-to-sweep changes each
+within 7.63e-06 of it, relative (tol=1e-08, floored at 64 machine epsilons of
+the objective's dtype). Note what this does NOT show up in: every conjugate
+block's own CG residual is 5.56e-07 or better, because a per-block residual is
+computed from the block and converges at every sweep of an alternation that is
+going nowhere.
 ```
 
-It is a *decrease* that is tested, not a change: block-coordinate descent cannot
-increase the objective, so once a sweep stops reducing it there is nothing left
-to reach. Testing `|χ²[k] − χ²[k−1]|` instead walks into the floor
-[`iterative_gls`](inference-linear.md#when-the-covariance-is-not-given) documents for its own
-`reweight_tol` — consecutive sweeps differ by roughly the inner solver's noise
-whatever the outer iteration does. Measured in float32 on the motivating model,
-the plateau sits at χ² = 2.7e-3 and jitters by 1.2e-3 a sweep, so a converged run
-would have been refused for 300 sweeps and counting.
+The changes counted are between sweep outputs, never from the starting values,
+so the earliest verdict is at sweep 3 whatever `min_sweeps` says below that, and
+`max_iter` of 1 or 2 with a `tol` always refuses.
+
+The joint χ² is still recorded (`PlanDiagnostics.chi2`) and is no longer the
+test. It was until T-002, as a *decrease*: any sweep that did not lower χ² counted
+as converged. With a prior the MAP is not the χ² minimum, so a sweep moving
+towards the MAP raises χ², and the rule read that rise as convergence — measured
+1 to 15 posterior σ from the exact MAP, including a plan of two conjugate blocks
+and no gradient block. An exact conditional update cannot raise `f` beyond the
+arithmetic's noise, so a rise larger than `t` is never convergence.
+`tests/inference/test_estimate_reaches_map.py` holds every converged float64
+estimate to 0.1 posterior σ of the exact MAP.
+
+The floor exists because float32 cannot resolve `tol = 1e-8`: its epsilon is
+1.19e-7, and conjugate solves at `solve_tol = 1e-6` move the objective at its
+plateau by tens of ulps a sweep. On the fixture above, with the trace replayed
+against the float64 MAP, a floor of 4 ε never stops, 64 ε stops at sweep 94 and
+0.079 posterior σ, and 256 ε at sweep 89 and 0.13 σ. In float64 the floor is
+1.4e-14 and `tol` governs; the same fixture stops at sweep 139, 0.034 σ.
+
+What a change cannot certify is a slow partition. With two blocks whose posterior
+correlation is `r`, a sweep shrinks the objective gap by about `r⁴`, so a
+tolerance on the change bounds the distance to the MAP by about
+`sqrt(2 t |f| / (1 − r⁴))` posterior σ: 0.005 at `r = 0.9965` in float64, where a
+verdict takes 577 to 1166 sweeps, and unbounded as `r → 1`. The float32 floor
+makes `t` larger, and the bound with it: the same fixture with a gain prior of
+width 0.01 stops 0.74 σ from its MAP in float32 and 0.043 σ in float64. No
+curvature check (a Newton decrement) is made. Grouping the correlated latents
+into one `Block` removes the slowness rather than the symptom.
 
 :::{important}
 **The joint χ² catches a slow partition, not a degenerate one.** Running the
