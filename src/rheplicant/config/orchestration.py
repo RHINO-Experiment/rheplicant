@@ -241,7 +241,8 @@ def canonical_layers(
     (whose refusals predate the first boundary and so carry ``report=None``).
     The integration route supplies the bootstrap's own layers with their
     matching evidence maps; supplied objects are used AS THEY ARE, so the
-    audit trail's origin trees keep their identity.
+    audit trail's origin trees keep their identity.  Its base layer passes
+    the same structural gate, with the same ``report=None`` refusals.
     """
     if supplied is None:
         if layer_origins is not None or layer_deletions is not None:
@@ -279,6 +280,13 @@ def canonical_layers(
             "supplied layer_origins/layer_deletions must cover every "
             "canonical layer identity exactly once."
         )
+    # The base gets the mapping route's structural gate, and at the same
+    # point: before any check runs.  Without it the text pass only gated
+    # VARIANT layers, so a misspelled base section reached the registered
+    # checks and surfaced as passes.py's internal where-guard sentence, and a
+    # missing or reserved base section was voiced as "what selecting this
+    # variant would raise" on a document that declares no variant.
+    _structural(layers[0].mutable_document())
     return _Canonical(layers=layers, origins=layer_origins, deletions=layer_deletions)
 
 

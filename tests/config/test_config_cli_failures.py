@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tests.config.test_config_cli import document, write_document
 
 
@@ -101,3 +103,69 @@ def test_help_still_exits_rather_than_refusing():
     with pytest.raises(SystemExit) as caught:
         _parser().parse_args(["--help"])
     assert caught.value.code == 0
+
+
+_SECTIONS_SENTENCE = (
+    "This document declares ['observations']; the sections are "
+    "['schema_version', 'defaults', 'plugins', 'runtime', 'observation', "
+    "'resources', 'model', 'variants', 'inference', 'runs', 'outputs', "
+    "'campaign']."
+)
+
+
+def _misspelled_observation(value):
+    value["observations"] = value.pop("observation")
+    return value
+
+
+def _without_model(value):
+    del value["model"]
+    return value
+
+
+def _with_campaign(value):
+    value["campaign"] = {}
+    return value
+
+
+@pytest.mark.parametrize(("edit", "expected"), [
+    (_misspelled_observation, _SECTIONS_SENTENCE),
+    (_without_model,
+     "This document is missing ['model']; schema_version, runtime, "
+     "observation, model and runs are required."),
+    (_with_campaign,
+     "campaign: is reserved with capability 4 (streaming evidence, "
+     "schema §8.2) and refused in v1."),
+], ids=["observations-typo", "missing-model", "campaign"])
+def test_a_malformed_base_is_refused_in_load_documents_own_words(
+        tmp_path, capsys, edit, expected):
+    """A3-1: the command line gates the BASE layer the way the mapping route
+    does, before any check runs.
+
+    It used to run ``_structural`` on variant layers only, so a misspelled
+    base section reached the registered checks and came back as the
+    internal guard's "pre-flight check 'A1.variants' emitted
+    where='observations'" sentence, and a missing or reserved base section
+    was told "That is what selecting this variant would raise" about a
+    document that declares no variants at all.
+    """
+    from _rheplicant_bootstrap.cli import main
+
+    config = tmp_path / "config.yaml"
+    write_document(config, edit(document()))
+    assert main(["validate", str(config)]) == 2
+    assert capsys.readouterr().err == expected + "\n"
+
+
+def test_a_malformed_base_on_run_publishes_a_refused_audit(tmp_path, capsys):
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, _misspelled_observation(document(output=target)))
+    assert main(["run", str(config)]) == 2
+    err = capsys.readouterr().err
+    assert _SECTIONS_SENTENCE + "\n" in err
+    assert "selecting this variant" not in err
+    assert "A1.variants" not in err
+    assert len(tuple(tmp_path.glob("result.refused-*"))) == 1
