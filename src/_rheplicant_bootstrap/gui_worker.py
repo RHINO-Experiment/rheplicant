@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from io import StringIO
 
 from _rheplicant_bootstrap.audit import AuditTrace
-from _rheplicant_bootstrap.errors import ConfigError
+from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
 from _rheplicant_bootstrap.execution_environment import (
     prepare_execution_environment,
 )
@@ -437,7 +437,9 @@ def _framed_job(kind: str) -> int:
         else:
             result = _run_formal(yaml_text)
         frame = {"status": "ok", "result": bounded_result(result)}
-    except ConfigError as error:
+    except REFUSALS as error:
+        # The command line's classification, read from the same tuple, so a
+        # document the CLI refuses with exit 2 is "refused" here too.
         frame = {"status": "refused", "message": bounded_text(error)}
     except Exception as error:  # noqa: BLE001 -- one bounded terminal frame
         frame = {
