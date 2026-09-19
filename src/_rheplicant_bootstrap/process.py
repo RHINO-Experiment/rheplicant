@@ -58,12 +58,9 @@ class RawProcessEntry:
             raw_outputs = object.__getattribute__(self, "outputs")
         except Exception:
             raise ConfigError("raw process entry is malformed.") from None
-        if (
-            static_isinstance(raw_schema_version, bool)
-            or not static_isinstance(raw_schema_version, int)
-            or int.__int__(raw_schema_version) != 1
-        ):
-            raise ConfigError("schema_version: 1 is required at the process entry point.")
+        problem = schema_version_problem(raw_schema_version)
+        if problem is not None:
+            raise ConfigError(problem)
         if static_isinstance(raw_defaults, (str, bytes)) or not static_isinstance(
             raw_defaults, Sequence
         ):
@@ -388,13 +385,9 @@ def parse_raw_process_mapping(
 ) -> RawProcessEntry:
     """Validate only facts needed before package preset layering."""
     top = _top_level(document)
-    version = top.get("schema_version")
-    if (
-        static_isinstance(version, bool)
-        or not static_isinstance(version, int)
-        or int.__int__(version) != 1
-    ):
-        raise ConfigError("schema_version: 1 is required at the process entry point.")
+    problem = schema_version_problem(top.get("schema_version"))
+    if problem is not None:
+        raise ConfigError(problem)
     defaults = _parse_defaults(top["defaults"]) if "defaults" in top else ()
     plugins = _parse_plugins(top["plugins"]) if "plugins" in top else ()
     if "runtime" in top:
@@ -707,6 +700,43 @@ def validate_variant_process_sections(
                 )
 
 
+def schema_version_problem(version: object) -> str | None:
+    """Why a document's ``schema_version`` is refused, or ``None`` for 1.
+
+    The one predicate both routes read: this process-entry parse and the
+    mapping route's ``rheplicant.config.preflight._structural``. It is
+    type-exact, so ``True`` and the float ``1.0`` are refused like any other
+    non-integer; the mapping route used to compare with ``!=`` and accepted
+    the ``1.0`` that the command line refused. Another integer is told which
+    side of 1 it is on, because "newer" asks for a later rheplicant and
+    "older" for an edit.
+
+    The first sentence is ``_structural``'s own, moved here verbatim, which
+    ``test_config_preflight.py::TestNoMovedMessageWasReworded`` holds it to.
+    The value is rendered by :func:`_runtime_render`, which is bounded and
+    calls no foreign hook, since it arrives from a document.
+    """
+    if static_isinstance(version, bool) or not static_isinstance(version, int):
+        return (
+            f"schema_version: 1 is required (got {_runtime_render(version)}); "
+            "it is what lets a later loader read an older document on "
+            "purpose rather than by luck."
+        )
+    number = int.__int__(version)
+    if number == 1:
+        return None
+    if number > 1:
+        return (
+            f"schema_version: {_runtime_render(number)} is newer than this "
+            "rheplicant reads; it reads schema_version 1. A later rheplicant "
+            "is needed to read this document."
+        )
+    return (
+        f"schema_version: {_runtime_render(number)} is older than any version "
+        "this rheplicant reads; it reads schema_version 1, the first."
+    )
+
+
 def _render_runtime_value(field: str, value: object) -> str:
     if field == "jax_enable_x64":
         return "true" if value is True else "false"
@@ -855,5 +885,6 @@ __all__ = [
     "parse_effective_process_mapping",
     "parse_raw_process_mapping",
     "parse_runtime",
+    "schema_version_problem",
     "validate_variant_process_sections",
 ]

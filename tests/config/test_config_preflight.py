@@ -733,8 +733,9 @@ class TestTheStructuralSweepMoved:
          "line -- importing a plugin belongs to the process entry point, not "
          "to a mapping."),
         ({"schema_version": 2},
-         "schema_version: 1 is required (got 2); it is what lets a later "
-         "loader read an older document on purpose rather than by luck."),
+         "schema_version: 2 is newer than this rheplicant reads; it reads "
+         "schema_version 1. A later rheplicant is needed to read this "
+         "document."),
         ({"schema_version": True},
          "schema_version: 1 is required (got True); it is what lets a later "
          "loader read an older document on purpose rather than by luck."),
@@ -825,6 +826,80 @@ class TestTheStructuralSweepMoved:
         assert not hasattr(document_module, "_SECTIONS")
         assert not hasattr(document_module, "_NOT_YET")
         assert not hasattr(document_module, "_REQUIRED")
+
+
+class TestSchemaVersionIsTheIntegerOne:
+    """``schema_version`` is type-exact on both routes, and says which way a
+    wrong integer is wrong.
+
+    The mapping route compared with ``!=``, so ``load_document`` accepted
+    ``schema_version: 1.0`` while the command line refused it: one document,
+    two verdicts, depending on the door it came in by.
+    """
+
+    NOT_ONE = ("schema_version: 1 is required (got {}); it is what lets a "
+               "later loader read an older document on purpose rather than "
+               "by luck.")
+
+    @pytest.mark.parametrize(("version", "expected"), [
+        (1.0, NOT_ONE.format("1.0")),
+        (True, NOT_ONE.format("True")),
+        ("1", NOT_ONE.format("'1'")),
+        (None, NOT_ONE.format("None")),
+        (2, "schema_version: 2 is newer than this rheplicant reads; it reads "
+            "schema_version 1. A later rheplicant is needed to read this "
+            "document."),
+        (0, "schema_version: 0 is older than any version this rheplicant "
+            "reads; it reads schema_version 1, the first."),
+        (-3, "schema_version: -3 is older than any version this rheplicant "
+             "reads; it reads schema_version 1, the first."),
+    ], ids=["float", "bool", "string", "null", "newer", "zero", "negative"])
+    def test_the_mapping_route_refuses_with_the_whole_sentence(
+            self, version, expected):
+        with pytest.raises(ConfigError) as caught:
+            _structural(preflight_document(schema_version=version))
+        assert str(caught.value) == expected
+
+    def test_load_document_refuses_the_float_the_cli_refuses(self):
+        with pytest.raises(ConfigError, match=r"\(got 1\.0\)"):
+            load_document({**preflight_document(), "schema_version": 1.0})
+
+    @pytest.mark.parametrize("version", [1.0, True, "1", None, 2, 0, -3])
+    def test_both_routes_say_the_same_sentence(self, version):
+        """One predicate, one message: the command line's process-entry parse
+        and the mapping route's ``_structural`` read the same function."""
+        from _rheplicant_bootstrap.process import parse_raw_process_mapping
+
+        with pytest.raises(ConfigError) as mapping_route:
+            _structural(preflight_document(schema_version=version))
+        with pytest.raises(ConfigError) as command_line:
+            parse_raw_process_mapping({"schema_version": version},
+                                      parse_outputs=lambda raw: ())
+        assert str(command_line.value) == str(mapping_route.value)
+
+    def test_the_integer_one_is_accepted_on_both_routes(self):
+        from _rheplicant_bootstrap.process import parse_raw_process_mapping
+
+        _structural(preflight_document(schema_version=1))
+        entry = parse_raw_process_mapping({"schema_version": 1},
+                                          parse_outputs=lambda raw: ())
+        assert entry.schema_version == 1
+
+    @pytest.mark.parametrize(("text", "expected"), [
+        ("1.0", "(got 1.0)"),
+        ("2", "schema_version: 2 is newer than this rheplicant reads"),
+        ("0", "schema_version: 0 is older than any version"),
+    ])
+    def test_the_command_line_exits_two_with_the_sentence(
+            self, tmp_path, capsys, text, expected):
+        from _rheplicant_bootstrap.cli import main
+
+        config = tmp_path / "config.yaml"
+        config.write_text(f"schema_version: {text}\n")
+        assert main(["validate", str(config)]) == 2
+        err = capsys.readouterr().err
+        assert expected in err
+        assert "Traceback" not in err
 
 
 class TestTheRegistry:

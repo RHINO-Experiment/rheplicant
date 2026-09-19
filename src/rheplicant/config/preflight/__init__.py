@@ -56,6 +56,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from _rheplicant_bootstrap.layering import initial_merge
+from _rheplicant_bootstrap.process import schema_version_problem
 from _rheplicant_bootstrap.types import Origin
 from _rheplicant_bootstrap.variants import LayerAttributor, enumerate_layers_once
 from rheplicant.config.errors import ConfigError
@@ -211,13 +212,12 @@ def _structural(document: Mapping[str, Any]) -> None:
     for section in _NOT_YET:
         if section in document:
             raise ConfigError(f"{section}: {deferred_clause(section)}")
-    version = document.get("schema_version")
-    if version != 1 or isinstance(version, bool):
-        raise ConfigError(
-            f"schema_version: 1 is required (got {version!r}); it is what "
-            "lets a later loader read an older document on purpose rather "
-            "than by luck."
-        )
+    # The command line's process-entry parse reads the same function, so the
+    # two routes cannot disagree about `1.0` again (they did: this clause was
+    # `version != 1`, which accepts the float).
+    problem = schema_version_problem(document.get("schema_version"))
+    if problem is not None:
+        raise ConfigError(problem)
     missing = [section for section in _REQUIRED if section not in document]
     if missing:
         raise ConfigError(
