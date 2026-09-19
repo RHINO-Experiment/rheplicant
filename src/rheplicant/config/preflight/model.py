@@ -916,6 +916,20 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     Data is declared by a non-null ``observation.data`` or by
     ``observation.from_file``, whose recording becomes ``state.data``.
+
+    **It does not read ``runs:``, and that is a declared false positive.**
+    ``mmodes`` and ``compare`` never evaluate the twin (``_run_mmodes``
+    reads resources and ``built.state.coords``; ``_run_compare`` reads
+    earlier runs' products), so a transform-only model declaring only those
+    kinds, and no ``inference.observed: {from: simulation}``, would run and
+    is refused here.  Scoping the check needs a per-kind "evaluates the
+    twin" property, and the exit registry (``sections/exit_support.
+    register``) carries none: adding one is a fifth atomically bound table
+    and a measured classification of all 18 registrations across seven
+    modules, and a run-kind property alone would still miss
+    ``inference.observed: {from: simulation}``, which evaluates the twin
+    while the document is built.  ``test_the_run_kinds_are_not_read`` pins
+    this scope, so narrowing it is a decision a test records.
     """
     section = document.get("observation")
     if not isinstance(section, Mapping):

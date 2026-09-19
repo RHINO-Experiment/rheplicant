@@ -2077,6 +2077,19 @@ class TestAModelWithNoSourceAndNoData:
         assert _t5_refused(document, "A2") != []
         assert _t5_refused(document, "A31") == []
 
+    def test_the_run_kinds_are_not_read(self):
+        """The check's declared scope: it refuses on the model and the data
+        alone.  ``mmodes`` never evaluates the twin, so this document would
+        run, and it is refused all the same -- the exit registry carries no
+        "evaluates the twin" property to scope by.  If that property is
+        added and the check narrowed, this is the test to turn round."""
+        document = _model_only({"gain": GAIN})
+        del document["inference"]
+        document["runs"] = [{"kind": "mmodes"}]
+        found = [one for one in _t5_refused(document, "A31")
+                 if one.where == "model"]
+        assert len(found) == 1
+
     def test_the_rhino_preset_document_is_refused_by_the_command_line(
             self, tmp_path, capsys):
         """The reported document, end to end: exit 2, the sentence, no
