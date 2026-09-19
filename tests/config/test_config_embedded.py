@@ -121,3 +121,33 @@ def test_embedded_entry_refuses_an_invocation_write_against_an_asking_document(t
         outputs_write=("draws",),
     ) == 2
     assert "the document already requests products" in capsys.readouterr().err
+
+
+def test_embedded_entry_refuses_a_model_the_fold_cannot_assemble(tmp_path, capsys):
+    """A published script is the command line's twin, and exits the same way:
+    an ``AssemblyError`` is one of ``REFUSALS``, so the fold refusing the
+    document's operator set is exit 2 with a refused sibling, never exit 1
+    with a traceback."""
+    source_path = tmp_path / "config.yaml"
+    target = tmp_path / "embedded"
+    value = document(output=target)
+    value["model"] = {
+        "atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}},
+        "beam_spill": {"sky_fraction": {"value": 0.95, "unit": "dimensionless"},
+                       "t_ground": {"value": 290.0, "unit": "K"}},
+    }
+    payload = write_document(source_path, value)
+    assert run_embedded_config(
+        input_bytes_b64=base64.b64encode(payload).decode("ascii"),
+        source_path=str(source_path),
+        source_realpath=str(source_path),
+        source_name=str(source_path),
+        base_dir=str(tmp_path),
+        presets=(),
+    ) == 2
+    err = capsys.readouterr().err
+    assert "feeds junction 't_ant_sum' with no live source upstream" in err
+    assert "Traceback" not in err
+    (sibling,) = tuple(tmp_path.glob("embedded.refused-*"))
+    assert f"refused audit: {sibling}\n" in err
+    assert not target.exists()
