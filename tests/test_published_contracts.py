@@ -159,6 +159,25 @@ def _published_exceptions() -> dict[str, type]:
     }
 
 
+#: Each published exception's builtin base, read from its MRO on 2026-09-19.
+#: The sweep above still finds the classes; this table records which builtin
+#: ``except`` clause each one answers to, which a consumer may already have
+#: written. A class the sweep finds and this table lacks fails below, so a new
+#: exception states its builtin base when it is added.
+BUILTIN_BASE = {
+    "AmbiguousNodeError": ValueError,
+    "AssemblyError": ValueError,
+    "DataIngestionError": ValueError,
+    "DirtError": Exception,
+    "LinearityRefused": ValueError,
+    "LogSpaceUnavailable": ValueError,
+    "MissingKeyError": RuntimeError,
+    "ParameterSpaceError": ValueError,
+    "PipelineError": ValueError,
+    "StateValidationError": ValueError,
+}
+
+
 class TestTheExceptionClassesKeepTheirIdentity:
     def test_the_sweep_actually_sees_the_module(self):
         """A sweep that found nothing would pass every assertion below.
@@ -177,14 +196,28 @@ class TestTheExceptionClassesKeepTheirIdentity:
 
         ``DirtError`` is the family catch the class docstring promises. The
         builtin base is the other half: a generic ``except ValueError`` in
-        consumer code keeps working only while these keep deriving from one.
-        ``DirtError`` itself is the root and derives from ``Exception``, which
-        is why it is asked only for the first property.
+        consumer code keeps working only while the class keeps deriving from
+        ``ValueError``. The builtin classes in the MRO are compared as a set
+        against the pinned base's own MRO, so a class that moves from
+        ``ValueError`` to ``RuntimeError``, or gains the other as a second
+        base, fails; asking only for one of the two, as this case used to,
+        passed both.
         """
         klass = _published_exceptions()[name]
         assert issubclass(klass, core_errors.DirtError)
-        if klass is not core_errors.DirtError:
-            assert issubclass(klass, (ValueError, RuntimeError)), klass.__mro__
+        assert name in BUILTIN_BASE, (
+            f"{name} is a new published exception; add its builtin base to "
+            "BUILTIN_BASE in this file"
+        )
+        builtins_in_mro = {base for base in klass.__mro__ if base.__module__ == "builtins"}
+        assert builtins_in_mro == set(BUILTIN_BASE[name].__mro__), (
+            f"{name} derives from {sorted(b.__name__ for b in builtins_in_mro)}, "
+            f"but its published builtin base is {BUILTIN_BASE[name].__name__}"
+        )
+
+    def test_the_builtin_base_table_names_only_published_classes(self):
+        stale = set(BUILTIN_BASE) - set(_published_exceptions())
+        assert not stale, f"BUILTIN_BASE names classes core.errors no longer defines: {stale}"
 
     @pytest.mark.parametrize("name", sorted(_published_exceptions()))
     def test_a_root_re_export_is_the_same_object_and_not_a_copy(self, name):
