@@ -53,7 +53,6 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import jax.scipy.sparse.linalg
 from jax import lax
 from jax.flatten_util import ravel_pytree
 
@@ -115,6 +114,21 @@ _POLISH_ITERATIONS: int = 3
 #: truncated one, which the acceptance test in :func:`_newton_polish` still
 #: keeps from making anything worse.
 _POLISH_CG_MAXITER: int = 50
+
+#: Relative residual at which a Newton step's conjugate gradients stop:
+#: ``|H p + g| <= _POLISH_CG_TOL |g|``. A step solved to this cuts a
+#: quadratic's error by the same factor, so three iterations reach 1e-15.
+_POLISH_CG_TOL: float = 1e-5
+
+#: Armijo's sufficient-decrease constant: a step ``t p`` is kept when
+#: ``f(x + t p) - f(x) <= _ARMIJO * t * g.p`` with ``g.p < 0``. The usual
+#: 1e-4; it asks for a decrease the step's own slope predicts, not merely no
+#: rise, so a jump the objective cannot resolve is refused.
+_ARMIJO: float = 1e-4
+
+#: Step halvings the Armijo search may take before the Newton iteration keeps
+#: its starting point. 2**-30 is below float32's relative resolution.
+_ARMIJO_HALVINGS: int = 30
 
 #: The tag that keeps a cached estimate transition's key apart from every other
 #: key in a plan's ``programs`` dict. :func:`gradient_draw` keys on
@@ -682,6 +696,52 @@ def _adam(
     return fitted
 
 
+def _steihaug(curvature: Callable[[jax.Array], jax.Array], slope: jax.Array) -> jax.Array:
+    """Newton direction by conjugate gradients, stopped at negative curvature.
+
+    Solves ``H p = -g`` for ``H`` given as ``curvature(d) = H d``, and stops
+    at the first direction with ``d.H d <= 0`` (Steihaug's truncation, with
+    no trust region): the iterate reached so far is a descent direction, and
+    at the first iteration that is ``-g`` itself. Plain CG does not stop
+    there, and on an indefinite ``H`` it heads for whatever stationary point
+    the quadratic model has; the T-002 review measured a bilinear ``a b``
+    block walked onto a saddle at ``f = 1494.7`` that way, the minimum being
+    at ``-57.0``.
+    """
+    scale = jnp.sqrt(jnp.sum(slope * slope))
+
+    def going(carry):
+        index, _, residual, _, _, done = carry
+        return (~done) & (index < _POLISH_CG_MAXITER) & (
+            jnp.sqrt(jnp.sum(residual * residual)) > _POLISH_CG_TOL * scale
+        )
+
+    def step(carry):
+        index, point, residual, direction, squared, _ = carry
+        product = curvature(direction)
+        bend = jnp.sum(direction * product)
+        negative = bend <= 0.0
+        alpha = squared / jnp.where(negative, 1.0, bend)
+        moved = point + alpha * direction
+        following = residual - alpha * product
+        renewed = jnp.sum(following * following)
+        beta = renewed / jnp.where(squared > 0.0, squared, 1.0)
+        # negative curvature: keep the point reached, or -g if none yet
+        stopped = jnp.where(index == 0, direction, point)
+        return (
+            index + 1,
+            jnp.where(negative, stopped, moved),
+            jnp.where(negative, residual, following),
+            jnp.where(negative, direction, following + beta * direction),
+            jnp.where(negative, squared, renewed),
+            negative,
+        )
+
+    start = (jnp.asarray(0), jnp.zeros_like(slope), -slope, -slope,
+             jnp.sum(slope * slope), jnp.asarray(False))
+    return lax.while_loop(going, step, start)[1]
+
+
 def _newton_polish(
     potential: Callable[[dict[str, jax.Array]], jax.Array],
     x0: dict[str, jax.Array],
@@ -701,11 +761,16 @@ def _newton_polish(
 
     A Newton step uses the curvature, so its length goes to zero with the
     gradient and the block lands on its conditional optimum wherever Adam
-    left it. The linear system is solved by conjugate gradients on
-    Hessian-vector products, so no Hessian is formed and the memory is that
-    of a gradient. A step is accepted only when it leaves the potential finite
-    and not larger, so a non-convex or badly conditioned conditional keeps
-    Adam's point rather than a worse one.
+    left it. The direction is :func:`_steihaug`'s: conjugate gradients on
+    Hessian-vector products, no Hessian formed, stopped at negative
+    curvature. The step along it is backtracked (halved up to
+    :data:`_ARMIJO_HALVINGS` times) until Armijo's condition holds,
+    ``f(x + t p) - f(x) <= _ARMIJO * t * g.p`` with ``g.p < 0`` and the result
+    finite; otherwise the iteration keeps its point. The decrease is compared
+    as a DIFFERENCE, because ``f(x) + small`` rounds to ``f(x)`` when ``|f|``
+    is large: measured by the T-002 review, ``after <= before`` accepted a
+    float32 jump from ``y = 3`` to ``y = -97.9`` on a potential offset by
+    1e7, where no step could be resolved at all.
 
     A complex block is returned unchanged: its potential is real, and the
     Hessian-vector product of a real function of complex arguments is not the
@@ -726,13 +791,25 @@ def _newton_polish(
         def curvature(direction: jax.Array) -> jax.Array:
             return jax.jvp(slope_of, (flat,), (direction,))[1]
 
-        step, _ = jax.scipy.sparse.linalg.cg(
-            curvature, -slope, maxiter=_POLISH_CG_MAXITER
+        direction = _steihaug(curvature, slope)
+        descent = jnp.sum(slope * direction)
+        before = objective(flat)
+
+        def sufficient(length):
+            after = objective(flat + length * direction)
+            return jnp.isfinite(after) & (after - before <= _ARMIJO * length * descent)
+
+        def shorter(carry):
+            length, count, _ = carry
+            return length * 0.5, count + 1, sufficient(length * 0.5)
+
+        length, _, accepted = lax.while_loop(
+            lambda carry: (~carry[2]) & (carry[1] < _ARMIJO_HALVINGS),
+            shorter,
+            (jnp.asarray(1.0, flat.dtype), jnp.asarray(0), sufficient(1.0)),
         )
-        trial = flat + step
-        after = objective(trial)
-        accept = jnp.isfinite(after) & (after <= objective(flat))
-        return jnp.where(accept, trial, flat), None
+        keep = accepted & (descent < 0.0)
+        return jnp.where(keep, flat + length * direction, flat), None
 
     polished, _ = lax.scan(iterate, flat0, None, length=iterations)
     return unravel(polished)

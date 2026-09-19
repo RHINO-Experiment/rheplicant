@@ -506,21 +506,66 @@ def test_a_power_law_reaches_the_joint_map(n_freq, sigma, learning_rate, steps):
     _check(estimate, got, exact, precision, True, label)
 
 
-def test_a_newton_step_that_raises_the_potential_is_refused():
-    """The Newton steps after Adam are kept only when the potential does not rise.
+class TestTheNewtonPolish:
+    """``engines._newton_polish``: Steihaug-truncated CG and an Armijo search.
 
-    ``-cos(x)`` has negative curvature at ``x = 2``, where the Newton step
-    heads past the maximum at ``pi`` to 4.19 and the potential goes up from
-    0.42 to 0.50: refused, so the point Adam left is returned unchanged. From
-    ``x = 0.5``, inside the convex basin, the same three steps reach the
-    minimum at 0.
+    Each case is one the T-002 reviews measured going wrong, or one a mutant
+    of the acceptance test survived.
     """
-    from rheplicant.inference.engines import _newton_polish
 
-    def potential(x):
-        return -jnp.cos(x["x"])
+    @staticmethod
+    def _polish(potential, x, iterations=3, dtype=None):
+        from rheplicant.inference.engines import _newton_polish
 
-    stuck = _newton_polish(potential, {"x": jnp.array(2.0)}, 3)
-    assert float(stuck["x"]) == 2.0
-    settled = _newton_polish(potential, {"x": jnp.array(0.5)}, 3)
-    assert abs(float(settled["x"])) < 1e-6
+        start = {"x": jnp.asarray(x) if dtype is None else jnp.asarray(x, dtype)}
+        return float(_newton_polish(potential, start, iterations)["x"])
+
+    def test_negative_curvature_is_descended_and_never_climbed(self):
+        # -cos(x) at x = 2: plain Newton heads past the maximum at pi to 4.19,
+        # where the potential is HIGHER (0.42 -> 0.50). Steihaug stops at the
+        # negative curvature and takes the gradient direction, so the three
+        # iterations go downhill, towards the minimum at 0.
+        def potential(x):
+            return -jnp.cos(x["x"])
+
+        polished = self._polish(potential, 2.0)
+        assert abs(polished) < 2.0 and -np.cos(polished) < -np.cos(2.0)
+        assert abs(self._polish(potential, 0.5)) < 1e-6  # the convex basin
+
+    def test_a_saddle_is_not_where_the_step_goes(self):
+        # f = (x y - 1)**2 / 2 + (x**2 + y**2) / 200 at (0.8, -0.3): the full
+        # Newton step of plain CG lands near the stationary point at the
+        # origin, a saddle. Steihaug with Armijo must leave f lower and away
+        # from it.
+        from rheplicant.inference.engines import _newton_polish
+
+        def potential(v):
+            x, y = v["x"], v["y"]
+            return 0.5 * (x * y - 1.0) ** 2 + (x**2 + y**2) / 200.0
+
+        start = {"x": jnp.asarray(0.8), "y": jnp.asarray(-0.3)}
+        out = _newton_polish(potential, start, 3)
+        assert float(potential(out)) < float(potential(start))
+        assert float(jnp.hypot(out["x"], out["y"])) > 0.3
+
+    def test_a_step_the_objective_cannot_resolve_is_refused(self):
+        # The review's case: a tail of 1e-3 * logcosh(y) on an offset of 1e7,
+        # in float32. No change of y moves the float32 sum, so no step can
+        # satisfy Armijo's decrease; ``after <= before`` accepted a jump from
+        # y = 3 to y = -97.9.
+        def potential(x):
+            y = x["x"]
+            tail = jnp.abs(y) + jnp.log1p(jnp.exp(-2.0 * jnp.abs(y))) - jnp.log(2.0)
+            return jnp.asarray(1e7, jnp.float32) + 1e-3 * tail
+
+        assert self._polish(potential, 3.0, dtype=jnp.float32) == 3.0
+
+    def test_a_non_finite_trial_is_backtracked_not_taken(self):
+        # x**2 above 0.25, -inf below: from x = 1 the full Newton step lands on
+        # 0, where the potential is -inf and "lower"; the finite test refuses
+        # it and one halving lands on 0.5.
+        def potential(x):
+            y = x["x"]
+            return jnp.where(y > 0.25, y**2, -jnp.inf)
+
+        assert self._polish(potential, 1.0, iterations=1) == 0.5
