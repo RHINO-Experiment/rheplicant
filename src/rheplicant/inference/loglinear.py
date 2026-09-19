@@ -128,6 +128,10 @@ LOG_DEFAULT_SCALES: tuple[float, ...] = (1e-3, 1e-2, 1e-1, 1.0)
 #: well as behaviour. ``noise_neither`` is bayesmith's name for a scale that
 #: moves with the prediction but not in proportion to it, which is what a
 #: declared ``RadiometerNoise.floor`` makes of ``sigma = f max(|mu|, floor)``.
+#: The word is shared and the test is not: rheplicant decides it from the
+#: DECLARATION (any ``floor > 0``), while bayesmith measures ``scale / loc`` at
+#: two points of the latents' priors, so a floor that binds at neither point
+#: passes bayesmith's probe.
 LOG_ROUTE_REFUSALS: frozenset[str] = frozenset(
     {"noise_additive", "fractional_too_large", "noise_neither"}
 )
