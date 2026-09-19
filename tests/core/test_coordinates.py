@@ -325,6 +325,7 @@ class TestAnAxisCollapsedToOneValue:
         message = str(excinfo.value)
         assert "representable" in message
         assert f"all {n_samples} samples" in message
+        assert "read as seconds" in message
         assert "start of the run" in message and "JAX_ENABLE_X64" in message
 
     @pytest.mark.parametrize("cadence", [1e-3, 1.0])
@@ -400,6 +401,18 @@ class TestAnAxisCollapsedToOneValue:
             _refuse_a_time_axis_the_stored_dtype_cannot_carry(
                 np.full(4, sign * coarse, dtype=dtype)
             )
+
+    def test_a_repeated_float32_mjd_axis_is_refused_and_says_seconds(self):
+        """The threshold reads the values as SECONDS, the unit ``Coordinates.time``
+        declares, and the message says so. For an MJD axis in days that is
+        86400 times stricter, and the verdict is still right: float32 spacing
+        at MJD 60000 is 3.9e-3 d (337 s), so an axis stored as one repeated
+        MJD value has collapsed."""
+        with pytest.raises(StateValidationError) as excinfo:
+            Coordinates(time=np.full(8, 60000.0))
+        message = str(excinfo.value)
+        assert "read as seconds" in message
+        assert "0.001 s" in message
 
     def test_the_largest_float32_is_refused(self):
         """The extreme: a repeated value at the top of the float32 range."""

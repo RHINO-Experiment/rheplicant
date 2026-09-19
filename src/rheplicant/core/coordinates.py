@@ -81,9 +81,13 @@ MAX_TIME_RESOLUTION_IN_SAMPLES = 1e-2
 #: value within 4.5 hours of zero is accepted and a repeated unix epoch
 #: (spacing 128 s) is not. In float64 the same cut sits at ``2**43`` s.
 #:
-#: Unlike the ratio above, this is a statement in SECONDS: an MJD axis in days
-#: is judged as if its unit were seconds, which makes it stricter for MJD by a
-#: factor of 86400.
+#: Unlike the ratio above, this is a statement in SECONDS, and the container
+#: does not know an axis's unit: it reads the values as seconds, the unit
+#: :class:`Coordinates` documents for ``time``, and the refusal says so. An
+#: MJD axis in days is therefore judged 86400 times more strictly, and a
+#: repeated float32 MJD value is refused; that verdict is right, because
+#: float32 spacing at MJD 60000 is 3.9e-3 d (337 s), so such an axis has
+#: collapsed.
 FINEST_CADENCE_S = 1e-3
 
 
@@ -196,8 +200,9 @@ def _refuse_a_time_axis_the_stored_dtype_cannot_carry(times: jax.Array) -> None:
             values.dtype, peak, resolution,
             f"all {values.size} samples on this axis hold that one value. An axis "
             "of identical samples is accepted only where that spacing is at most "
-            f"{FINEST_CADENCE_S:g} s, the finest cadence coords.time is taken to "
-            "carry, because any coarser grid can have merged a real axis into "
+            f"{FINEST_CADENCE_S:g} s (values read as seconds, the unit "
+            "Coordinates.time declares), the finest cadence coords.time is taken "
+            "to carry, because any coarser grid can have merged a real axis into "
             "one value.",
         )
 

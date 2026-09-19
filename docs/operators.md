@@ -145,17 +145,30 @@ refusal quotes the two resolutions and is reproduced, with the reading of it, in
 [ingestion](ingestion.md#coordstime-is-relative) — which is also where you find
 why a freshly ingested RHINO recording no longer produces such an axis.
 
-The tone keeps a second, stricter check of its own: the smallest gap
-**including zero**. The container cannot tell a genuinely repeated timestamp
-from a collision and has no business refusing the first; this operator can,
-because it subtracts times, so two samples sharing an elapsed value means the
-tone silently stops drifting across them — which is precisely its named failure.
+The container accepts a repeated timestamp next to distinct ones, because it
+cannot tell a genuine repeat from a collision. An axis whose samples are **all**
+one value has no distinct gap to measure, so it is judged on the stored spacing
+instead: refused where that spacing exceeds `FINEST_CADENCE_S` = 1e-3 s, since
+any coarser grid can have merged a real axis into one value, and accepted where
+it is finer, as for `zeros(n)`. In float32 that cut sits at |t| = 2¹⁴ s, so a
+repeated unix epoch (128 s spacing) is refused. 4096 samples 1 ms apart at
+unix 1.75e9 used to store as one value and pass.
 
-**The guard is unit-agnostic, which means MJD is not exempt.** It compares
-stored resolution against the axis's own smallest distinct gap, so it judges a
-cadence rather than a convention: MJD 60000 at daily samples is accepted, and
-MJD 60000 at a 100 s cadence is refused for exactly the same reason unix
-seconds are — the float32 grid there is 3.9e-3 d, or 337 s.
+The tone keeps a second, stricter check of its own: the smallest gap
+**including zero**. The container refuses no repeat whose spacing it resolves;
+this operator does, because it subtracts times, so two samples sharing an
+elapsed value means the tone silently stops drifting across them — which is
+precisely its named failure.
+
+**The resolution ratio is unit-agnostic, which means MJD is not exempt.** It
+compares stored resolution against the axis's own smallest distinct gap, so it
+judges a cadence rather than a convention: MJD 60000 at daily samples is
+accepted, and MJD 60000 at a 100 s cadence is refused for exactly the same
+reason unix seconds are — the float32 grid there is 3.9e-3 d, or 337 s. The
+all-identical check is not unit-agnostic: the container does not know the
+unit, so it reads the values as seconds, the unit `Coordinates.time` documents,
+and says so in the refusal. A repeated float32 MJD value is refused by it,
+which is right, since at 337 s spacing such an axis has collapsed.
 
 Making the axis relative buys about five decimal orders, not unlimited range.
 A float32 relative axis carries of order 1e5 uniform samples (exactly
