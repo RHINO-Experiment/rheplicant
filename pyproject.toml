@@ -87,9 +87,16 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# The range bayesmith 0.9 declares for itself: NumPyro 0.22 breaks its
-# validation and Gibbs interfaces, and this package imports numpyro directly.
-numpyro = ["numpyro>=0.15,<0.22"]
+# The upper bound is bayesmith 0.9's own: NumPyro 0.22 breaks its validation
+# and Gibbs interfaces, and this package imports numpyro directly. The floor
+# was measured on 2026-09-19 in a clean Python 3.12 venv holding jax 0.11.0 and
+# the bayesmith 0.9.0 wheel, over every numpyro release from 0.15.0 to 0.21.0.
+# `import numpyro` fails on 0.15.0 to 0.15.2 (jax.experimental.host_callback),
+# on 0.15.3 to 0.18.0 (pjit_p) and on 0.19.0 to 0.20.1 (xla_pmap_p). 0.21.0
+# imports and passes tests/inference/test_numpyro_bridge.py and
+# test_graph_bridge.py, 74 tests. 0.21 requires jax>=0.7, which the jax>=0.5
+# above admits, and lies inside bayesmith's own numpyro>=0.15,<0.22.
+numpyro = ["numpyro>=0.21,<0.22"]
 # NoiseWaveOperator is an adapter over rhino_cal_jax, the JAX implementation of
 # the noise-wave receiver model (D15). The physics has a life outside this
 # framework, so the dependency runs one way and stays optional: everything
@@ -178,8 +185,9 @@ dev = [
     # what a dev group is for: without it `pytest` stops at collection with five
     # ImportErrors, and the install page's own "run the suite" command cannot
     # run. Measured 2026-08-09.
-    # Ranged as the `numpyro` extra is, and for the same reason.
-    "numpyro>=0.15,<0.22",
+    # Ranged as the `numpyro` extra is, and for the same reasons; the floor's
+    # measurement is recorded there.
+    "numpyro>=0.21,<0.22",
     # The suite is not slow because it is large. Measured 2026-08-09: the four
     # heaviest items account for 249 s of a 692 s serial run, while the other
     # ~2700 tests together come to about 290 s -- a tenth of a second each. So
