@@ -632,14 +632,12 @@ class TestA13sWidthLegs:
             axis_only(narrow(floor * (1.0 - 2.0 * rtol)), "A13").message, rtol
         )
 
-    @pytest.mark.parametrize("width", [300.0, 400.0, 700.0])
-    def test_a_grid_float32_cannot_resolve_is_refused_as_such(self, width):
+    @staticmethod
+    def _on_the_unresolvable_band(width):
         """The fixture's former band, 70.000-70.001 MHz over 4 channels:
         float32 rounds each channel by 8 Hz, 0.099 of the 333 Hz spacing,
-        above ``WIDTH_FLOOR_RTOL_MAX``. A13 refuses the GRID, whatever the
-        width (under, over and past the ceiling), with the operator's sentence
-        and its remedy."""
-        document = preflight_document(
+        above ``WIDTH_FLOOR_RTOL_MAX``."""
+        return preflight_document(
             observation={"freq": {"grid": {"linspace": {
                 "start": 70.0, "stop": 70.001, "num": 4, "endpoint": True},
                 "unit": "MHz"}}},
@@ -647,12 +645,31 @@ class TestA13sWidthLegs:
                 "amplitude": {"value": 5000.0, "unit": "K"},
                 "tone_freq": {"value": 70.0005, "unit": "MHz"},
                 "line_width": width}})
-        message = axis_only(document, "A13").message
-        assert message.startswith(
-            "model.cw_tone.line_width cannot be checked: the channel grid is "
-            "stored as float32")
+
+    @pytest.mark.parametrize("width", [310.0, 333.0, 355.0])
+    def test_a_width_the_rounding_decides_is_refused_as_unresolved(self, width):
+        """Inside ``floor (1 +/- raw)`` on either platform's spacing (328 or
+        336 Hz, raw 0.102 or 0.099), with the operator's sentence and its
+        remedy. The raw slack is matched, not pinned: its digits are the
+        platform's, as the spacing's are."""
+        message = axis_only(self._on_the_unresolvable_band(width), "A13").message
+        assert re.match(
+            rf"model\.cw_tone\.line_width cannot be checked: {width:.6g} Hz is "
+            r"within 0\.\d+ of the \d+ Hz floor", message), message
         assert "float64" in message and "relative" in message
         assert message.endswith(" (check A13).")
+
+    def test_a_width_far_below_is_still_narrow(self):
+        message = axis_only(self._on_the_unresolvable_band(150.0), "A13").message
+        assert message.startswith(
+            "model.cw_tone.line_width: 150 Hz is narrower than the channel")
+
+    def test_a_width_clear_above_is_still_judged_by_the_ceiling(self):
+        """450 Hz clears the floor band and sits under the 2-channel ceiling;
+        700 Hz is past the ceiling and is refused as wide, as before."""
+        assert silent_here(self._on_the_unresolvable_band(450.0))
+        message = axis_only(self._on_the_unresolvable_band(700.0), "A13").message
+        assert "is wider than a LINE on this band" in message
 
     def test_no_pinned_message_in_this_module_spells_the_spacing_as_a_literal(
         self,

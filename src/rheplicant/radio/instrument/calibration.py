@@ -520,7 +520,7 @@ class CWCalibrationOperator(AbstractOperator):
         if channels.size > 1:
             spacing = float(np.median(np.abs(np.diff(channels))))
             floor = MIN_WIDTH_IN_CHANNELS[self.lineshape] * spacing
-            coarse = unresolved_channel_grid(channels, spacing)
+            coarse = width_floor_unresolved(channels, spacing, self.line_width, floor)
             if coarse is not None:
                 raise StateValidationError(f"line_width cannot be checked: {coarse}")
             if self.line_width < floor * (1.0 - width_floor_rtol(channels, spacing)):
@@ -654,9 +654,9 @@ class CWCalibrationOperator(AbstractOperator):
 #: cites into this module stay where they point.
 WIDTH_FLOOR_ULPS = 4.0
 
-#: Largest relative slack the width floor is given. A grid whose own rounding
-#: needs more cannot hold ``line_width`` to a channel, and is refused by
-#: :func:`unresolved_channel_grid` rather than given the slack.
+#: Largest relative slack the width floor is given. Where a grid's own rounding
+#: needs more, a width close enough to the floor for that rounding to decide it
+#: is refused by :func:`width_floor_unresolved` rather than given the slack.
 WIDTH_FLOOR_RTOL_MAX = 2e-2
 
 
@@ -685,8 +685,9 @@ def width_floor_rtol(freq, spacing: float) -> float:
 
     **Capped at** :data:`WIDTH_FLOOR_RTOL_MAX`. Uncapped, the slack on a float32
     60-85 MHz grid passes 2e-2 at N = 12332 and reaches 1 near N = 617000,
-    where any positive width passes; a grid that needs more than the cap is
-    refused by :func:`unresolved_channel_grid` before this is read.
+    where any positive width passes. On a grid that needs more than the cap, a
+    width within the uncapped slack of the floor is refused by
+    :func:`width_floor_unresolved` before this is read.
 
     An integer grid represents its channels exactly and keeps the 1e-5 floor,
     as does a grid with no positive spacing, whose floor is zero anyway.
@@ -700,18 +701,24 @@ def width_floor_rtol(freq, spacing: float) -> float:
     return min(max(WIDTH_FLOOR_RTOL, raw), WIDTH_FLOOR_RTOL_MAX)
 
 
-def unresolved_channel_grid(freq, spacing: float) -> str | None:
-    """Why this grid cannot hold ``line_width`` to a channel, or ``None``.
+def width_floor_unresolved(
+    freq, spacing: float, width: float, floor: float
+) -> str | None:
+    """Why this grid cannot say whether ``width`` clears ``floor``, or ``None``.
 
-    The grid is refused where :func:`width_floor_rtol`'s uncapped slack
-    exceeds :data:`WIDTH_FLOOR_RTOL_MAX`. Such a grid could only accept its
-    own one-channel width by also accepting widths more than 2 % under it, and
-    capping the slack alone would refuse honest widths: the ideal width sits
-    below the median gap by up to about 0.35 ``eps * max|freq|``, which at
-    ``jnp.linspace(60e6, 85e6, 200000)`` is 2.3 % of a channel. On a float32
-    60-85 MHz grid the refusal starts between N = 12331 and 12332. Read by the
-    same two callers as :func:`width_floor_rtol`; ``None`` means judge the
-    width.
+    Only past :data:`WIDTH_FLOOR_RTOL_MAX`, and only for a width inside
+    ``floor * (1 +/- raw)``, where ``raw`` is :func:`width_floor_rtol`'s
+    UNCAPPED slack: there the grid's own rounding decides the verdict. A width
+    above that band clears the floor however the channels rounded, and one
+    below it is narrow however they rounded, so both are judged as on any
+    other grid. Capping the slack alone would refuse honest widths inside the
+    band -- the ideal width sits below the median gap by up to about 0.35
+    ``eps * max|freq|``, which at ``jnp.linspace(60e6, 85e6, 200000)`` is 2.3 %
+    of a channel -- and refusing the grid whatever the width refused lines of
+    2, 5 and 20 channels at N = 16384. On a float32 60-85 MHz grid the band
+    exists from N = 12332; at N = 1e6 its lower edge is below zero, so no
+    positive width is clearly narrow. Read by the same two callers as
+    :func:`width_floor_rtol`; ``None`` means judge the width.
     """
     channels = np.asarray(freq)
     if not np.issubdtype(channels.dtype, np.inexact) or not spacing > 0.0:
@@ -721,14 +728,18 @@ def unresolved_channel_grid(freq, spacing: float) -> str | None:
     raw = WIDTH_FLOOR_ULPS * unit / spacing
     if raw <= WIDTH_FLOOR_RTOL_MAX:
         return None
+    if not floor * (1.0 - raw) <= width < floor * (1.0 + raw):
+        return None
     return (
+        f"{width:.6g} Hz is within {raw:.3g} of the {floor:.6g} Hz floor, and "
         f"the channel grid is stored as {channels.dtype} and reaches {peak:.6g} "
         f"Hz, where {WIDTH_FLOOR_ULPS:g} units of its rounding ({unit:.3g} Hz "
         f"each) are {raw:.3g} of the {spacing:.6g} Hz median channel spacing, "
-        f"above the {WIDTH_FLOOR_RTOL_MAX:g} the width floor allows, so a line "
-        "narrower than one channel cannot be told from one that is not. Store the "
-        "grid in float64 (JAX_ENABLE_X64=1), or make the frequency axis relative "
-        "(measured from the band's lower edge, with tone_freq on the same axis)."
+        f"above the {WIDTH_FLOOR_RTOL_MAX:g} the width floor allows: whether this "
+        "line clears the floor depends on how the channels rounded. Store the "
+        "grid in float64 (JAX_ENABLE_X64=1), make the frequency axis relative "
+        "(measured from the band's lower edge, with tone_freq on the same axis), "
+        "or choose a width clear of that band."
     )
 
 
