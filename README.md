@@ -187,7 +187,10 @@ revision/digest boundary.
 The launcher serves packaged React assets and the FastAPI boundary from one
 origin and binds to loopback by default. It has no authentication, tenant
 isolation or sandbox and refuses a non-loopback bind unless `--allow-remote`
-is explicit. That flag is acknowledgement, not protection: plugins,
+is given together with at least one `--allowed-host NAME`. It answers only to
+loopback host names and the listed names, and refuses a state-changing request
+whose `Origin` is not its own, so a DNS-rebinding page under any other name
+cannot drive it. Those flags are acknowledgement, not protection: plugins,
 `python:` targets, server paths and jobs retain the server account's authority.
 Read the
 [GUI security and trust boundaries](https://rheplicant.readthedocs.io/en/latest/config-gui.html)

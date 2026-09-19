@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import json
 import platform
 import subprocess
 import sys
@@ -10,6 +12,8 @@ from collections.abc import Mapping
 from importlib import metadata
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import freeze_evidence, static_isinstance
@@ -79,47 +83,109 @@ def _git(root: Path, *arguments: str) -> tuple[bytes | None, str | None]:
     return completed.stdout, None
 
 
+def _editable_checkout() -> Path | None:
+    """Return the project directory of an editable ``rheplicant`` install.
+
+    Read from the distribution's ``direct_url.json`` (PEP 610): only an entry
+    with ``dir_info.editable`` exactly ``true`` and a local ``file:`` URL
+    names a checkout. A wheel has no such entry, and its location says
+    nothing about any repository that happens to enclose the environment.
+    """
+    try:
+        text = metadata.distribution("rheplicant").read_text("direct_url.json")
+        direct_url = json.loads(text) if text else None
+    except Exception:
+        return None
+    if not isinstance(direct_url, Mapping):
+        return None
+    dir_info = direct_url.get("dir_info")
+    url = direct_url.get("url")
+    if (
+        not isinstance(dir_info, Mapping)
+        or dir_info.get("editable") is not True
+        or not isinstance(url, str)
+    ):
+        return None
+    parts = urlsplit(url)
+    if parts.scheme != "file" or parts.netloc not in {"", "localhost"}:
+        return None
+    return Path(url2pathname(parts.path))
+
+
+def _package_directory() -> Path | None:
+    """Return the directory the ``rheplicant`` package is imported from.
+
+    Found without importing the package, which would import its scientific
+    dependencies.
+    """
+    try:
+        spec = importlib.util.find_spec("rheplicant")
+    except (ImportError, ValueError):
+        return None
+    locations = () if spec is None else tuple(spec.submodule_search_locations or ())
+    return Path(locations[0]) if len(locations) == 1 else None
+
+
+def _git_root() -> tuple[Path, None] | tuple[None, str]:
+    """Return the work tree whose commit describes the running code.
+
+    That is the top level of an editable install's checkout, and only when
+    it contains the directory the package is imported from: the checkout the
+    metadata names is not the running code when, for example, ``PYTHONPATH``
+    points at another work tree. The result is ``(root, None)``, or
+    ``(None, reason)`` with the reason every git fact carries when there is
+    no such work tree.
+    """
+    checkout = _editable_checkout()
+    package = _package_directory()
+    if checkout is None or package is None:
+        return None, "not_a_git_checkout"
+    top, top_reason = _git(checkout, "rev-parse", "--show-toplevel")
+    if top is None:
+        return None, "timeout" if top_reason == "timeout" else "not_a_git_checkout"
+    try:
+        git_root = Path(top.decode("utf-8", "strict").strip()).resolve(strict=True)
+        source = package.resolve(strict=True)
+    except (UnicodeError, OSError):
+        return None, "not_a_git_checkout"
+    if not source.is_relative_to(git_root):
+        return None, "not_a_git_checkout"
+    return git_root, None
+
+
 def _project_facts() -> Mapping[str, JsonValue]:
     version, version_reason = _version("rheplicant")
     root, root_reason = _source_root()
+    git_root, absent_reason = _git_root()
     commit = None
-    commit_reason = "not_a_git_checkout"
+    commit_reason = absent_reason
     dirty = None
-    dirty_reason = "not_a_git_checkout"
+    dirty_reason = absent_reason
     diff_hash = None
-    diff_reason = "not_a_git_checkout"
-    if root is not None:
-        top, top_reason = _git(root, "rev-parse", "--show-toplevel")
-        if top is not None:
+    diff_reason = absent_reason
+    if git_root is not None:
+        raw_commit, commit_reason = _git(git_root, "rev-parse", "HEAD")
+        if raw_commit is not None:
             try:
-                git_root = Path(top.decode("utf-8", "strict").strip()).resolve(strict=True)
-            except (UnicodeError, OSError):
-                git_root = None
-            if git_root is not None:
-                raw_commit, commit_reason = _git(git_root, "rev-parse", "HEAD")
-                if raw_commit is not None:
-                    try:
-                        commit = raw_commit.decode("ascii", "strict").strip()
-                    except UnicodeError:
-                        commit = None
-                        commit_reason = "command_failed"
-                    else:
-                        commit_reason = None
-                status, dirty_reason = _git(git_root, "status", "--porcelain")
-                if status is not None:
-                    dirty = bool(status)
-                    dirty_reason = None
-                diff, diff_reason = _git(
-                    git_root,
-                    "diff",
-                    "--no-ext-diff",
-                    "--binary",
-                )
-                if diff is not None:
-                    diff_hash = hashlib.sha256(diff).hexdigest()
-                    diff_reason = None
-        elif top_reason == "timeout":
-            commit_reason = dirty_reason = diff_reason = "timeout"
+                commit = raw_commit.decode("ascii", "strict").strip()
+            except UnicodeError:
+                commit = None
+                commit_reason = "command_failed"
+            else:
+                commit_reason = None
+        status, dirty_reason = _git(git_root, "status", "--porcelain")
+        if status is not None:
+            dirty = bool(status)
+            dirty_reason = None
+        diff, diff_reason = _git(
+            git_root,
+            "diff",
+            "--no-ext-diff",
+            "--binary",
+        )
+        if diff is not None:
+            diff_hash = hashlib.sha256(diff).hexdigest()
+            diff_reason = None
     return {
         "version": version,
         "version_reason": version_reason,

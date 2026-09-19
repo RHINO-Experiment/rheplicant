@@ -170,12 +170,13 @@ def test_parent_worker_adapter_preserves_exact_job_bytes(monkeypatch):
     jobs._run_isolated_job("run", exact_yaml)
     assert captured == [
         (
-            [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", "validate"],
+            [sys.executable, "-P", "-m", "_rheplicant_bootstrap.gui_worker", "validate"],
             exact_yaml.encode("utf-8", "strict"),
         ),
         (
             [
                 sys.executable,
+                "-P",
                 "-m",
                 "_rheplicant_bootstrap.gui_worker",
                 "preview_forward",
@@ -183,7 +184,7 @@ def test_parent_worker_adapter_preserves_exact_job_bytes(monkeypatch):
             preview.encode("utf-8", "strict"),
         ),
         (
-            [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", "run"],
+            [sys.executable, "-P", "-m", "_rheplicant_bootstrap.gui_worker", "run"],
             exact_yaml.encode("utf-8", "strict"),
         ),
     ]
