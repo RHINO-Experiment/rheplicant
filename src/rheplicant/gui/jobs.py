@@ -620,7 +620,11 @@ def _run_isolated_job(
     errors = _StreamTail(limit=MAX_STREAM_BYTES)
     try:
         completed = _drained_run(
-            [sys.executable, "-m", "_rheplicant_bootstrap.gui_worker", kind],
+            # ``-P`` keeps the server's current directory off the worker's
+            # ``sys.path``: ``-m`` alone puts it first, where a stray module
+            # file would shadow the installed module a document's
+            # ``plugins:`` or ``python:`` target names.
+            [sys.executable, "-P", "-m", "_rheplicant_bootstrap.gui_worker", kind],
             input_bytes=yaml_text.encode("utf-8", "strict"),
             stdout=frames,
             stderr=errors,
