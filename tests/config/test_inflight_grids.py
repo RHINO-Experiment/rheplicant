@@ -632,6 +632,28 @@ class TestA13sWidthLegs:
             axis_only(narrow(floor * (1.0 - 2.0 * rtol)), "A13").message, rtol
         )
 
+    @pytest.mark.parametrize("width", [300.0, 400.0, 700.0])
+    def test_a_grid_float32_cannot_resolve_is_refused_as_such(self, width):
+        """The fixture's former band, 70.000-70.001 MHz over 4 channels:
+        float32 rounds each channel by 8 Hz, 0.099 of the 333 Hz spacing,
+        above ``WIDTH_FLOOR_RTOL_MAX``. A13 refuses the GRID, whatever the
+        width (under, over and past the ceiling), with the operator's sentence
+        and its remedy."""
+        document = preflight_document(
+            observation={"freq": {"grid": {"linspace": {
+                "start": 70.0, "stop": 70.001, "num": 4, "endpoint": True},
+                "unit": "MHz"}}},
+            model={**BASE_MODEL, "cw_tone": {
+                "amplitude": {"value": 5000.0, "unit": "K"},
+                "tone_freq": {"value": 70.0005, "unit": "MHz"},
+                "line_width": width}})
+        message = axis_only(document, "A13").message
+        assert message.startswith(
+            "model.cw_tone.line_width cannot be checked: the channel grid is "
+            "stored as float32")
+        assert "float64" in message and "relative" in message
+        assert message.endswith(" (check A13).")
+
     def test_no_pinned_message_in_this_module_spells_the_spacing_as_a_literal(
         self,
     ):

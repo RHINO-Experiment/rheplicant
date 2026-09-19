@@ -334,6 +334,7 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         MAX_WIDTH_IN_BAND_FRACTION,
         MIN_CEILING_IN_CHANNELS,
         MIN_WIDTH_IN_CHANNELS,
+        unresolved_channel_grid,
         width_floor_rtol,
     )
 
@@ -376,7 +377,11 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
             floor = MIN_WIDTH_IN_CHANNELS[lineshape] * spacing
             ceiling = max(MAX_WIDTH_IN_BAND_FRACTION * (high - low),
                           MIN_CEILING_IN_CHANNELS * spacing)
-            if width < floor * (1.0 - width_floor_rtol(freq, spacing)):
+            coarse = unresolved_channel_grid(freq, spacing)
+            if coarse is not None:
+                yield refuse("A13", where, f"{where}.line_width cannot be checked: "
+                             f"{coarse} (check A13).")
+            elif width < floor * (1.0 - width_floor_rtol(freq, spacing)):
                 yield refuse(
                     "A13", where,
                     f"{where}.line_width: {width:.6g} Hz is narrower than the "

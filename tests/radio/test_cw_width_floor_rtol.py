@@ -30,6 +30,7 @@ from rheplicant.core.errors import StateValidationError
 from rheplicant.radio import CWCalibrationOperator
 from rheplicant.radio.instrument.calibration import (
     WIDTH_FLOOR_RTOL,
+    WIDTH_FLOOR_RTOL_MAX,
     WIDTH_FLOOR_ULPS,
     width_floor_rtol,
 )
@@ -112,6 +113,62 @@ def test_the_float32_cut_for_a_thousandth_is_between_617_and_618():
     below, above = _grid(617, np.float32), _grid(618, np.float32)
     assert width_floor_rtol(below, _spacing(below)) < 1e-3
     assert width_floor_rtol(above, _spacing(above)) >= 1e-3
+
+
+def _refused_as_unresolved(freq, width):
+    """True when the operator refuses the GRID rather than judging the width."""
+    op = CWCalibrationOperator(
+        amplitude=1.0, tone_freq=float(freq[len(freq) // 2]), line_width=width,
+    )
+    try:
+        op._validate_over_the_run(freq, TIME)
+    except StateValidationError as error:
+        message = str(error)
+        assert "line_width cannot be checked" in message
+        assert "float64" in message and "relative" in message
+        return True
+    return False
+
+
+#: Float32 60-85 MHz grids past the cap: the raw slack ``4 eps 85e6 / spacing``
+#: passes 2e-2 between N = 12331 and 12332 and reaches 1 near N = 617000.
+PAST_THE_CAP = [12332, 20000, 200000, 617000]
+
+
+@pytest.mark.parametrize("n", PAST_THE_CAP)
+def test_the_slack_is_capped(n):
+    freq = _grid(n, np.float32)
+    assert width_floor_rtol(freq, _spacing(freq)) == WIDTH_FLOOR_RTOL_MAX
+
+
+@pytest.mark.parametrize("n", PAST_THE_CAP)
+def test_a_grid_past_the_cap_is_refused_whatever_the_width(n):
+    """Uncapped, a width 2 % under one channel was accepted from N = 12332
+    and a 1e-6 Hz line at N = 617000. Capped without this refusal, the ideal
+    width would be refused at N = 200000, where it sits 2.3 % below the
+    median gap. So the grid is refused, with the remedy."""
+    freq = _grid(n, np.float32)
+    for width in ((HIGH - LOW) / (n - 1), 0.975 * _spacing(freq), 1e-6):
+        assert _refused_as_unresolved(freq, width)
+
+
+def test_the_same_fine_grid_in_float64_is_judged_normally():
+    """The remedy the refusal names, run at N = 200000."""
+    freq = _grid(200000, np.float64)
+    assert not _refused_as_unresolved(freq, (HIGH - LOW) / 199999)
+    assert _accepts(freq, (HIGH - LOW) / 199999)
+
+
+@pytest.mark.parametrize("n", [12000, 12331])
+def test_a_grid_inside_the_cap_is_judged_normally(n):
+    """N = 12000 (raw slack 1.9e-2) and 12331, the last N under the cap: the
+    ideal width is accepted, and a width 2.5 % under the channel is still
+    refused as narrow, not as unresolved."""
+    freq = _grid(n, np.float32)
+    spacing = _spacing(freq)
+    assert width_floor_rtol(freq, spacing) < WIDTH_FLOOR_RTOL_MAX
+    assert _accepts(freq, (HIGH - LOW) / (n - 1))
+    assert not _accepts(freq, 0.975 * spacing)
 
 
 def test_the_rounding_factor_is_pinned_by_a_verdict():

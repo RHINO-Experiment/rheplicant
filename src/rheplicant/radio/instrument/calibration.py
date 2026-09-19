@@ -520,6 +520,9 @@ class CWCalibrationOperator(AbstractOperator):
         if channels.size > 1:
             spacing = float(np.median(np.abs(np.diff(channels))))
             floor = MIN_WIDTH_IN_CHANNELS[self.lineshape] * spacing
+            coarse = unresolved_channel_grid(channels, spacing)
+            if coarse is not None:
+                raise StateValidationError(f"line_width cannot be checked: {coarse}")
             if self.line_width < floor * (1.0 - width_floor_rtol(channels, spacing)):
                 raise StateValidationError(
                     f"line_width {self.line_width:.6g} Hz is narrower than the "
@@ -651,6 +654,11 @@ class CWCalibrationOperator(AbstractOperator):
 #: cites into this module stay where they point.
 WIDTH_FLOOR_ULPS = 4.0
 
+#: Largest relative slack the width floor is given. A grid whose own rounding
+#: needs more cannot hold ``line_width`` to a channel, and is refused by
+#: :func:`unresolved_channel_grid` rather than given the slack.
+WIDTH_FLOOR_RTOL_MAX = 2e-2
+
 
 def width_floor_rtol(freq, spacing: float) -> float:
     """Relative slack on the ``line_width`` floor for this channel grid.
@@ -675,8 +683,10 @@ def width_floor_rtol(freq, spacing: float) -> float:
     a 3052 Hz channel at N = 8192. In float64 the 1e-5 floor applies at every
     grid in this package.
 
-    **The slack is not capped.** On a float32 60-85 MHz grid it passes 2e-2 near
-    N = 12346 and reaches 1 near N = 617000, where any positive width passes.
+    **Capped at** :data:`WIDTH_FLOOR_RTOL_MAX`. Uncapped, the slack on a float32
+    60-85 MHz grid passes 2e-2 at N = 12332 and reaches 1 near N = 617000,
+    where any positive width passes; a grid that needs more than the cap is
+    refused by :func:`unresolved_channel_grid` before this is read.
 
     An integer grid represents its channels exactly and keeps the 1e-5 floor,
     as does a grid with no positive spacing, whose floor is zero anyway.
@@ -686,7 +696,40 @@ def width_floor_rtol(freq, spacing: float) -> float:
         return WIDTH_FLOOR_RTOL
     eps = float(np.finfo(channels.dtype).eps)
     peak = float(np.abs(channels).max())
-    return max(WIDTH_FLOOR_RTOL, WIDTH_FLOOR_ULPS * eps * peak / spacing)
+    raw = WIDTH_FLOOR_ULPS * eps * peak / spacing
+    return min(max(WIDTH_FLOOR_RTOL, raw), WIDTH_FLOOR_RTOL_MAX)
+
+
+def unresolved_channel_grid(freq, spacing: float) -> str | None:
+    """Why this grid cannot hold ``line_width`` to a channel, or ``None``.
+
+    The grid is refused where :func:`width_floor_rtol`'s uncapped slack
+    exceeds :data:`WIDTH_FLOOR_RTOL_MAX`. Such a grid could only accept its
+    own one-channel width by also accepting widths more than 2 % under it, and
+    capping the slack alone would refuse honest widths: the ideal width sits
+    below the median gap by up to about 0.35 ``eps * max|freq|``, which at
+    ``jnp.linspace(60e6, 85e6, 200000)`` is 2.3 % of a channel. On a float32
+    60-85 MHz grid the refusal starts between N = 12331 and 12332. Read by the
+    same two callers as :func:`width_floor_rtol`; ``None`` means judge the
+    width.
+    """
+    channels = np.asarray(freq)
+    if not np.issubdtype(channels.dtype, np.inexact) or not spacing > 0.0:
+        return None
+    peak = float(np.abs(channels).max())
+    unit = float(np.finfo(channels.dtype).eps) * peak
+    raw = WIDTH_FLOOR_ULPS * unit / spacing
+    if raw <= WIDTH_FLOOR_RTOL_MAX:
+        return None
+    return (
+        f"the channel grid is stored as {channels.dtype} and reaches {peak:.6g} "
+        f"Hz, where {WIDTH_FLOOR_ULPS:g} units of its rounding ({unit:.3g} Hz "
+        f"each) are {raw:.3g} of the {spacing:.6g} Hz median channel spacing, "
+        f"above the {WIDTH_FLOOR_RTOL_MAX:g} the width floor allows, so a line "
+        "narrower than one channel cannot be told from one that is not. Store the "
+        "grid in float64 (JAX_ENABLE_X64=1), or make the frequency axis relative "
+        "(measured from the band's lower edge, with tone_freq on the same axis)."
+    )
 
 
 class CalLoadOperator(AbstractOperator):
