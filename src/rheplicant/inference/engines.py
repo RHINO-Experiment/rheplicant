@@ -174,10 +174,12 @@ class Conditioning:
     def chi2(self, values: dict[str, jax.Array]) -> jax.Array:
         """The JOINT chi-squared at the current parameter tuple.
 
-        The quantity a plan monitors for convergence, and the reason it is here
-        rather than in a block: it is computed from the whole parameter tuple
-        against the whole data set, so it is the one number in a Gibbs scheme
-        that no partition can hide anything from. A per-block CG residual read
+        Reported by both exits, and the trace :meth:`SamplingPlan.sample`
+        tests mixing on; a point estimate's stop rule reads
+        :meth:`neg_log_posterior` instead (T-002 A5-1). It is here rather than
+        in a block because it is computed from the whole parameter tuple
+        against the whole data set, so it is a number in a Gibbs scheme that
+        no partition can hide anything from. A per-block CG residual read
         ~1e-7 on an answer thousands of kelvin wrong — and read the SAME
         ~1e-7 on the run that was right, which is the sharper complaint.
         It was not lying; it simply cannot see across the partition it is
@@ -246,6 +248,78 @@ class Conditioning:
         return self.neg_log_likelihood(values) - _log_prior(
             self.space, self.space.names, values
         )
+
+
+def _objective_terms(
+    cond: Conditioning, values: dict[str, jax.Array]
+) -> tuple[jax.Array, dict[str, jax.Array], dict[str, jax.Array]]:
+    """:meth:`Conditioning.neg_log_posterior` as per-element TERMS, and chi2.
+
+    Returns ``(chi2, terms, scales)``. ``terms`` holds the likelihood per data
+    sample (``0.5 r**2 + log sigma``, zero for an unobserved one) and the
+    negative log prior per latent; their sum is the objective, which
+    ``tests/inference/test_estimate_reaches_map.py`` pins to
+    :meth:`Conditioning.neg_log_posterior`. ``scales`` holds each term's
+    rounding magnitude: the term itself, plus ``|r| |mu| / sigma`` for a
+    data term, which is how far a rounding of the prediction moves it.
+
+    Written per term so that :meth:`SamplingPlan.estimate` can take the
+    change between two sweeps as a sum of per-term differences. The
+    difference of two totals is resolved only to ``eps * |f|``, and ``|f|``
+    grows with the number of samples and with every prior's normalizing
+    constant, none of which the change contains.
+
+    The ``seen``/``safe`` rule is :meth:`Conditioning.chi2`'s and
+    :func:`~rheplicant.inference.noise.log_determinant`'s, restated per
+    sample because both of those return sums.
+    """
+    prediction = cond.forward(values)
+    sigma = cond.noise.std(prediction)
+    seen = jnp.isfinite(sigma)
+    safe = jnp.where(seen, sigma, 1.0)
+    residual = jnp.where(seen, (cond.observed - prediction) / safe, 0.0)
+    likelihood = 0.5 * residual**2 + jnp.where(seen, jnp.log(safe), 0.0)
+    moved = jnp.where(seen, jnp.abs(prediction) / safe, 0.0)
+    terms = {"likelihood": likelihood}
+    scales = {"likelihood": jnp.abs(likelihood) + jnp.abs(residual) * moved}
+    for name in cond.space.names:
+        prior = cond.space.latent(name).prior
+        if prior is not None:
+            term = -jnp.asarray(prior.log_prob(values[name]))
+            terms[name] = term
+            scales[name] = jnp.abs(term)
+    return jnp.sum(residual**2), terms, scales
+
+
+def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callable, Callable]:
+    """``(measure, change)``, jitted once per run for a point estimate's monitor.
+
+    ``measure(values) -> (chi2, objective, terms, scales)`` and
+    ``change(terms0, scales0, terms1, scales1) -> (decrease, resolution)``,
+    where ``decrease`` is ``f0 - f1`` summed term by term and ``resolution``
+    is ``resolution_eps * eps * sqrt(sum (scale0 + scale1)**2)``: the rounding
+    of each term's two evaluations, added as independent errors.
+
+    Near convergence the two evaluations of a term are within a factor of two
+    of each other, so their difference is exact in the working dtype
+    (Sterbenz), and the sum of small differences carries almost none of the
+    total's rounding.
+    """
+
+    @eqx.filter_jit
+    def measure(values):
+        chi2, terms, scales = _objective_terms(cond, values)
+        objective = sum(jnp.sum(term) for term in terms.values())
+        return chi2, objective, terms, scales
+
+    @eqx.filter_jit
+    def change(terms0, scales0, terms1, scales1):
+        decrease = sum(jnp.sum(terms0[key] - terms1[key]) for key in terms1)
+        spread = sum(jnp.sum((scales0[key] + scales1[key]) ** 2) for key in scales1)
+        eps = jnp.finfo(jnp.result_type(*terms1.values())).eps
+        return decrease, resolution_eps * eps * jnp.sqrt(spread)
+
+    return measure, change
 
 
 def _log_prior(space: ParameterSpace, names: Sequence[str], x: dict[str, jax.Array]):

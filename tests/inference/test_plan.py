@@ -52,7 +52,6 @@ from rheplicant.inference.noise import (
 from rheplicant.inference.plan import (
     CHECK_EACH_SWEEP,
     CHECK_ONCE,
-    EARLIEST_CONVERGED_SWEEP,
     MIN_DRAWS,
     MIN_SWEEPS,
     OBJECTIVE_FLOOR_EPS,
@@ -815,42 +814,41 @@ class TestConvergence:
         assert est.diagnostics.chi2.shape == (3,)
 
     def test_an_increase_beyond_the_floor_is_never_convergence(self, state):
-        """The test is a CHANGE of the joint objective, in both directions.
+        """A chi-squared rise is not a stop, and in float32 this run cannot stop.
 
         Until T-002 the rule was a DECREASE of the joint chi-squared, so any
         sweep on which chi-squared rose counted as converged. Here a tight
         prior pulls the gain away from the truth, and chi-squared rises by
         half its value at sweep 58 while the objective is still falling: the
         old rule stopped there, 3.6 posterior sigma from the MAP (measured).
-        The objective rule must run past that rise and stop only on two
-        consecutive changes inside the effective tolerance.
+
+        The relative change test then stopped at sweep 73, 0.74 sigma from
+        the MAP in this module's float32. The gap certificate refuses
+        instead: the prior terms are ~1e4 nats, so a decrease is resolved
+        only to ~0.04 nats, above what 0.1 sigma needs at this contraction.
+        In float64 the same plan converges at sweep 106, 0.04 sigma off.
         """
         space = basis_space(gain_prior=dist.Normal(jnp.ones(N_TIME), 0.01))
         pipeline = make_pipeline()
         observed = observed_of(space, pipeline, TRUTH)
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
-        )
-        diagnostics = est.diagnostics
-        assert diagnostics.converged is True
-        relative = diagnostics.effective_tol
-        chi2, objective = diagnostics.chi2, diagnostics.objective
+        common = {"noise": NOISE, "max_iter": 200, "solve_guard": None}
 
+        free = plan.estimate(pipeline, state, observed, tol=None, **common)
+        chi2, objective = free.diagnostics.chi2, free.diagnostics.objective
         rise = np.diff(chi2) / np.maximum(np.abs(chi2[1:]), 1.0)
-        rose = [sweep for sweep in range(MIN_SWEEPS, diagnostics.sweeps + 1)
-                if rise[sweep - 1] > relative]
+        rose = [sweep for sweep in range(MIN_SWEEPS, 200) if rise[sweep - 1] > 0.1]
         assert rose, "the fixture must make chi-squared rise, or this test is vacuous"
-        assert rose[0] < diagnostics.sweeps, (
-            f"stopped at sweep {diagnostics.sweeps}, where chi-squared rose; a rise "
-            "is what the old one-sided rule read as convergence"
-        )
-        # the objective was still moving where chi-squared first rose ...
-        assert objective[rose[0]] - objective[-1] > relative * abs(objective[-1])
-        # ... and the stop is two sub-tolerance changes, in both directions
-        for k in (1, 2):
-            change = abs(objective[-k] - objective[-k - 1])
-            assert change <= relative * max(abs(objective[-k]), 1.0), objective[-4:]
+        # the objective was still falling where chi-squared first rose
+        assert objective[rose[0] - 1] - objective[rose[0]] > 1.0, objective[rose[0]]
+
+        # The refusal sentence is the one test_the_JOINT_chi2_sees_... pins,
+        # asserted the same way, so the refusal census is unchanged.
+        with pytest.raises(ParameterSpaceError) as refused:
+            plan.estimate(pipeline, state, observed, **common)
+        message = str(refused.value)
+        assert "did not converge" in message
+        assert "resolved only to" in message and "JAX_ENABLE_X64=1" in message
 
     def test_the_stop_rule_counts_changes_in_both_directions(self):
         """``_settled`` on hand-made traces: a rise beyond the tolerance is not
@@ -903,59 +901,6 @@ class TestConvergence:
         exact, precision = _basis_map(observed, sigma=NOISE)
         distance = _posterior_sigmas_from(est, exact, precision)
         assert distance < 0.1, (distance, est.diagnostics.sweeps)
-
-    def test_convergence_needs_two_sub_tolerance_changes_so_the_earliest_stop_is_sweep_three(
-        self, state
-    ):
-        """Started AT the answer, every change is below the tolerance from the
-        first sweep on.
-
-        The verdict still needs two sweep-to-sweep changes between sweep
-        OUTPUTS (sweep 2 against 1, sweep 3 against 2; the starting values are
-        not an output), so the earliest stop is sweep 3 whatever ``min_sweeps``
-        says below that, ``min_sweeps`` above it is the floor, and a cap of two
-        sweeps can never converge.
-
-        ``tol=1e-4`` rather than the default because this module runs in
-        float32, where the objective at the answer still moves by up to 2.3e-3
-        a sweep (relative 1.6e-5, above the float32 floor of 7.6e-6); the
-        default would measure that jitter instead of the counting.
-        """
-        space = ParameterSpace(
-            latents=[
-                Latent("gain", init=GAIN0, prior=GAIN_PRIOR, linear=True),
-                Latent("t_coeff", init=COEFF0, prior=COEFF_PRIOR, linear=True),
-            ],
-            bindings=[
-                Bind("gain", into=lambda p: p["gain"].gain),
-                Bind(
-                    "t_coeff",
-                    into=lambda p: p["t_ant"].t_ant,
-                    fn=lambda c: TIME_BASIS @ c @ FREQ_BASIS.T,
-                ),
-            ],
-        )
-        pipeline = make_pipeline()
-        observed = observed_of(space, pipeline, TRUTH)
-        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        common = {"noise": NOISE, "max_iter": 30, "tol": 1e-4, "solve_guard": None}
-
-        for min_sweeps in (1, 2, 3):
-            early = plan.estimate(pipeline, state, observed, min_sweeps=min_sweeps,
-                                  **common)
-            assert early.diagnostics.converged is True
-            assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP == 3, (
-                min_sweeps, early.diagnostics.objective
-            )
-        floored = plan.estimate(pipeline, state, observed, min_sweeps=8, **common)
-        assert floored.diagnostics.converged is True
-        assert floored.diagnostics.sweeps == 8, floored.diagnostics.objective
-        # the refusal sentence is the one test_the_JOINT_chi2_sees_... pins; it
-        # is asserted the same way here, so the refusal census is unchanged
-        with pytest.raises(ParameterSpaceError) as capped:
-            plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=2,
-                          min_sweeps=1, tol=1e-4, solve_guard=None)
-        assert "did not converge" in str(capped.value)
 
     def test_a_min_sweeps_above_the_cap_is_refused(self, basis_setup, state):
         """It would make the test unreachable, so every run would exhaust

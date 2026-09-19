@@ -46,7 +46,7 @@ from rheplicant.inference import (
     ParameterSpace,
     SamplingPlan,
 )
-from rheplicant.inference.plan import MIN_SWEEPS
+from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP, MIN_SWEEPS
 from rheplicant.radio import ForegroundOperator, SkyOperator
 
 dist = pytest.importorskip("numpyro.distributions", reason="numpyro not installed")
@@ -191,18 +191,27 @@ class _TwoTemplates(AbstractOperator):
         return state.with_data(jnp.broadcast_to(profile[None, :], (n_time, n_freq)))
 
 
-def _template_case(eps: float, tau: float, seed: int):
-    n_time, n_freq = TEMPLATE_SHAPE
+def _template_design(eps: float, shape) -> np.ndarray:
+    n_time, n_freq = shape
     x = np.linspace(-1.0, 1.0, n_freq)
-    design = np.tile(np.stack([np.ones(n_freq), 1.0 + eps * x], axis=1), (n_time, 1))
-    noise = np.random.default_rng(seed).standard_normal(TEMPLATE_SHAPE)
-    observed = (design @ TEMPLATE_TRUTH).reshape(TEMPLATE_SHAPE) + TEMPLATE_SIGMA * noise
+    return np.tile(np.stack([np.ones(n_freq), 1.0 + eps * x], axis=1), (n_time, 1))
+
+
+def _template_map(observed, eps: float, tau: float):
+    """``(mle, map, precision)`` of ``observed`` exactly as given, in float64."""
+    design = _template_design(eps, np.shape(observed))
     fisher = design.T @ design / TEMPLATE_SIGMA**2
-    projected = design.T @ observed.ravel() / TEMPLATE_SIGMA**2
+    projected = design.T @ np.asarray(observed, np.float64).ravel() / TEMPLATE_SIGMA**2
     precision = fisher + np.eye(2) / tau**2
-    return observed, np.linalg.solve(fisher, projected), np.linalg.solve(
-        precision, projected
-    ), precision
+    return (np.linalg.solve(fisher, projected), np.linalg.solve(precision, projected),
+            precision)
+
+
+def _template_case(eps: float, tau: float, seed: int, shape=TEMPLATE_SHAPE):
+    design = _template_design(eps, shape)
+    noise = np.random.default_rng(seed).standard_normal(shape)
+    observed = (design @ TEMPLATE_TRUTH).reshape(shape) + TEMPLATE_SIGMA * noise
+    return (observed, *_template_map(observed, eps, tau))
 
 
 #: Enough sweeps for every cell but the slowest pair to converge. At
@@ -257,7 +266,166 @@ def test_two_collinear_conjugate_blocks(eps, tau, seed, start):
         assert estimate.diagnostics.sweeps == MIN_SWEEPS, label
 
 
-# ----------------------------- (iii) power law: conjugate A + gradient beta --
+def _template_plan(eps, tau, init, dtype=None):
+    """Two one-latent conjugate blocks over :class:`_TwoTemplates`."""
+    def array(value):
+        return jnp.array(value) if dtype is None else jnp.array(value, dtype)
+
+    space = ParameterSpace(
+        latents=[
+            Latent("a", init=array(init[0]), prior=dist.Normal(0.0, tau), linear=True),
+            Latent("b", init=array(init[1]), prior=dist.Normal(0.0, tau), linear=True),
+        ],
+        bindings=[
+            Bind("a", into=lambda p: p["tt"].a),
+            Bind("b", into=lambda p: p["tt"].b),
+        ],
+    )
+    pipeline = Pipeline(
+        _TwoTemplates(a=array(0.0), b=array(0.0), eps=eps), names=("tt",)
+    )
+    return SamplingPlan(space, Block("a"), Block("b")), pipeline
+
+
+def test_the_earliest_stop_is_sweep_three_whatever_min_sweeps_says():
+    """Started AT the MAP, no sweep moves the objective beyond its resolution.
+
+    Both certificates hold from sweep 2 on (a run that never moved uses a
+    contraction of 0), and the first certifiable decrease is sweep 2 against
+    sweep 1, so the earliest stop is sweep 3 for ``min_sweeps`` of 1, 2 and 3;
+    ``min_sweeps`` above that is the floor; and a cap of two sweeps can
+    never converge. Moved here from ``test_plan.py``'s float32 basis model,
+    whose start at the answer is not a fixed point in float32: its conjugate
+    solves move the objective by up to 2.3e-3 nats a sweep there, which the
+    gap certificate reads as the rises they are.
+    """
+    observed, _, exact, _ = _template_case(0.2, 3.0, 11)
+    plan, pipeline = _template_plan(0.2, 3.0, exact)
+    common = {"noise": HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)),
+              "max_iter": 30}
+    state, data = _grid_state(*TEMPLATE_SHAPE), jnp.asarray(observed)
+    for min_sweeps in (1, 2, 3):
+        early = plan.estimate(pipeline, state, data, min_sweeps=min_sweeps, **common)
+        assert early.diagnostics.converged is True
+        assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP == 3, min_sweeps
+    floored = plan.estimate(pipeline, state, data, min_sweeps=8, **common)
+    assert floored.diagnostics.sweeps == 8
+    with pytest.raises(ParameterSpaceError) as capped:
+        plan.estimate(pipeline, state, data, min_sweeps=1,
+                      **{**common, "max_iter": 2})
+    assert "did not converge" in str(capped.value)
+
+
+# ----------------------------------------- (iii) the certificate at large N --
+
+#: ``(n_time, n_freq)``: 1e4 and 1e5 samples. The review's measurements went
+#: to 1e6 (see the report); 1e5 keeps this file inside its runtime budget.
+LARGE_N = [(100, 100), (250, 400)]
+
+
+@pytest.mark.parametrize("shape", LARGE_N, ids=["N=1e4", "N=1e5"])
+@pytest.mark.parametrize("eps", [1.0, 0.5, 0.2], ids=["r=0.86", "r=0.96", "r=0.993"])
+def test_a_large_n_collinear_pair_is_certified_within_a_tenth_of_a_sigma(shape, eps):
+    """The T-002 review's HIGH: the relative change test certified a distance
+    that grows as ``sqrt(N)``. Measured by the reviewer on this model, float64,
+    ``converged=True`` at 0.059 sigma (``N = 1e4``, r = 0.993) and 0.60 sigma
+    (``N = 1e6``, r = 0.993); at ``N = 1e5`` it would be ~0.2. The gap
+    certificate is in nats, so the same 0.1 sigma holds at every ``N``.
+
+    Started 20 posterior sigma off along both axes. Every cell must converge
+    in float64, within 0.1 sigma, and report a distance bound that covers it.
+    """
+    observed, _, exact, precision = _template_case(eps, 3.0, 21, shape=shape)
+    sd = np.sqrt(np.diag(np.linalg.inv(precision)))
+    plan, pipeline = _template_plan(eps, 3.0, exact + 20.0 * sd)
+    estimate = plan.estimate(
+        pipeline, _grid_state(*shape), jnp.asarray(observed),
+        noise=HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)), max_iter=1000,
+    )
+    got = [float(estimate.values["a"]), float(estimate.values["b"])]
+    distance = _mahalanobis(got, exact, precision)
+    diagnostics = estimate.diagnostics
+    assert diagnostics.converged is True
+    assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
+    assert diagnostics.distance_bound <= MAHALANOBIS_MAX
+    assert 0.0 <= diagnostics.contraction < 1.0
+
+
+def test_the_monitor_terms_sum_to_the_objective():
+    """The certificate reads the objective term by term; the terms must be the
+    objective. Pinned against ``Conditioning.neg_log_posterior`` for an
+    additive and a prediction-dependent noise, flagged and not, since the
+    per-sample ``log sigma`` and the flag rule are restated there."""
+    from rheplicant.inference.engines import Conditioning, _objective_terms
+    from rheplicant.inference.noise import FlaggedNoise, RadiometerNoise
+
+    observed, _, exact, _ = _template_case(0.5, 3.0, 7)
+    plan, pipeline = _template_plan(0.5, 3.0, exact)
+    forward, values = plan.space.forward_fn(pipeline, _grid_state(*TEMPLATE_SHAPE))
+    flags = jnp.zeros(TEMPLATE_SHAPE, bool).at[1, 2].set(True)
+    for noise in (HomoscedasticNoise(sigma=jnp.array(0.7)),
+                  RadiometerNoise(1e3, 1.0, 0.5),
+                  FlaggedNoise(RadiometerNoise(1e3, 1.0), flags)):
+        cond = Conditioning(space=plan.space, pipeline=pipeline,
+                            state_template=_grid_state(*TEMPLATE_SHAPE),
+                            observed=jnp.asarray(observed), noise=noise,
+                            forward=forward)
+        chi2, terms, _ = _objective_terms(cond, values)
+        total = sum(float(jnp.sum(term)) for term in terms.values())
+        assert total == pytest.approx(float(cond.neg_log_posterior(values)), rel=1e-12)
+        assert float(chi2) == pytest.approx(float(cond.chi2(values)), rel=1e-12)
+
+
+class TestTheGapCertificate:
+    """``plan._gap_step`` on hand-made decreases, in nats, tol = 0.005."""
+
+    @staticmethod
+    def _run(decreases, resolution=1e-9, tol=0.005):
+        from rheplicant.inference.plan import _gap_step, _GapState
+
+        state, out = _GapState(), []
+        for decrease in decreases:
+            state, certified, gap, rho = _gap_step(state, decrease, resolution, tol)
+            out.append((certified, gap, rho))
+        return out
+
+    def test_a_geometric_run_certifies_once_its_tail_is_inside_tol(self):
+        # D[k] = 0.5**k: the gap after D is (D + resolution) / (1 - 0.5).
+        out = self._run([0.5**k for k in range(1, 12)])
+        for (certified, gap, rho), k in zip(out[1:], range(2, 12), strict=True):
+            assert rho == pytest.approx(0.5)
+            assert gap == pytest.approx(2 * (0.5**k + 1e-9), rel=1e-12)
+            assert certified is (gap <= 0.005)
+        assert [certified for certified, _, _ in out].index(True) == 8  # 2**-9
+
+    def test_a_slow_contraction_is_not_certified_by_a_small_step(self):
+        # D = 1e-4 per sweep at rho = 0.999: the tail is 0.1 nats, 20x tol.
+        out = self._run([1e-4 * 0.999**k for k in range(10)])
+        assert not any(certified for certified, _, _ in out)
+
+    def test_a_rise_certifies_nothing_and_forgets_the_contraction(self):
+        out = self._run([1e-3, 5e-4, -1e-3, 1e-6])
+        assert out[2] == (False, None, None)
+        assert out[3][0] is False and out[3][2] is None
+
+    def test_a_stall_below_the_resolution_keeps_the_last_contraction(self):
+        # A long valley stalled on rounding: resolvable decreases contracting
+        # at 0.9999, then nothing the arithmetic can see.
+        out = self._run([1e-3 * 0.9999**k for k in range(5)] + [0.0] * 5,
+                        resolution=1e-8)
+        assert not any(certified for certified, _, _ in out)
+        assert out[-1][2] == pytest.approx(0.9999, rel=1e-6)
+        # ... and reads the vanished decrease at the size that contraction
+        # predicts: the tail is still ~10 nats, not the resolution.
+        assert out[-1][1] > 1.0
+
+    def test_a_run_that_never_moved_uses_a_contraction_of_zero(self):
+        out = self._run([0.0, 0.0, 0.0], resolution=1e-9)
+        assert [certified for certified, _, _ in out] == [True, True, True]
+        assert out[-1][2] == 0.0
+
+
+# ----------------------------- (iv) power law: conjugate A + gradient beta --
 
 REF_FREQ = 70e6
 A_TRUE, BETA_TRUE = 1000.0, 2.55

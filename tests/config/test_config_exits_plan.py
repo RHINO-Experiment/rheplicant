@@ -264,9 +264,18 @@ class TestAPlanRefusesTheGLSDeclaration:
         with pytest.raises(ConfigError, match="include_logdet: false is not available"):
             run_document(doc)
 
-    @pytest.mark.parametrize("run", [ESTIMATE, SAMPLE], ids=["estimate", "sample"])
+    @pytest.mark.parametrize("run", [{**ESTIMATE, "tol": None}, SAMPLE],
+                             ids=["estimate", "sample"])
     def test_true_is_not(self, run):
-        """The anti-vacuity twin: the same document with ``true`` must run."""
+        """The anti-vacuity twin: the same document with ``true`` must run.
+
+        ``tol: null`` on the estimate, because its subject is the declaration
+        and not convergence: the data are drawn at 0.05 K and the likelihood
+        says ``f |mu|`` with ``f = 3.7e-4``, so chi2 is ~4e9 and no float32 run
+        can certify 0.1 posterior sigma of that (T-002's gap certificate
+        refuses it by name). With no convergence test the exit runs its sweeps
+        and returns, which is what "must run" asks.
+        """
         doc = document(run)
         doc["inference"]["noise"] = _radiometer(True)
         run_document(doc)

@@ -198,6 +198,7 @@ point estimate at all.
 """
 
 import dataclasses
+import math
 from typing import Any, Protocol
 
 import jax
@@ -215,6 +216,7 @@ from rheplicant.inference.engines import (
     GRADIENT,
     LOG_CONJUGATE,
     Conditioning,
+    _monitor_programs,
     conditional_potential,
     conjugate_draw,
     conjugate_estimate,
@@ -272,10 +274,32 @@ DEFAULT_MAX_ITER: int = 100
 #: the sweep makes progress. For two blocks with posterior correlation ``r``
 #: a sweep shrinks the objective gap by about ``r**4``, so a tolerance on the
 #: change bounds the Mahalanobis distance to the MAP by about
-#: ``sqrt(2 t |f| / (1 - r**4))``: 0.005 posterior sigma at ``r = 0.9965`` in
-#: float64 (``tests/inference/test_estimate_reaches_map.py``), and unbounded as
-#: ``r -> 1``. The float32 floor below raises ``t`` and the bound with it.
+#: ``sqrt(2 t |f| / (1 - r**4))``, and ``|f|`` is about ``N / 2`` for ``N``
+#: data: the T-002 review measured two conjugate blocks passing this test 0.6
+#: posterior sigma from the MAP at ``N = 1e6`` in float64 and 16.5 sigma in
+#: float32. So this test alone no longer certifies anything: a point estimate
+#: converges only when the GAP certificate (:data:`DEFAULT_GAP_TOL`) holds
+#: as well, and that one does not grow with ``N``.
 DEFAULT_CHI2_TOL: float = 1e-8
+
+#: A point estimate's GAP tolerance, in nats of the joint objective ``f``:
+#: ``converged=True`` needs two consecutive sweeps each certifying that the
+#: gap between their ``f`` and the sweep's fixed point is at most this, in
+#: addition to the ``tol`` test above (T-002 review, HIGH).
+#:
+#: **Nats and sigma.** Near a minimum ``f`` is locally quadratic,
+#: ``f - f* = d**2 / 2`` with ``d`` the Mahalanobis distance under the
+#: posterior precision (the Hessian of ``f``). So ``0.5 * 0.1**2 = 0.005``
+#: nats is 0.1 posterior sigma, and ``gap_tol = g`` certifies ``sqrt(2 g)``
+#: sigma, whatever the number of data.
+#:
+#: **How the gap is estimated.** With ``D[k] = f[k-1] - f[k]`` the decrease
+#: over sweep ``k``, a coordinate descent converging linearly at rate ``rho``
+#: has ``D[k] = rho D[k-1]``, and the gap left after sweep ``k`` is the tail
+#: of that series, ``D[k] rho / (1 - rho)``. The certificate estimates
+#: ``rho`` from two consecutive decreases and bounds ``D[k] / (1 - rho)``;
+#: :func:`_gap_step` has the rule and how the arithmetic's resolution enters.
+DEFAULT_GAP_TOL: float = 0.5 * 0.1**2
 
 #: Sweeps taken before the convergence test is consulted at all. The first
 #: steps of a coordinate descent can be nearly stationary without being near the
@@ -316,6 +340,19 @@ _SETTLED_CHANGES: int = 2
 #: layer's pre-flight check A25 refuses such a document before it runs.
 EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
 
+#: The resolution of a sweep-to-sweep change of the objective, in units of
+#: machine epsilon: ``RESOLUTION_EPS * eps * sqrt(sum (s0 + s1)**2)`` over the
+#: objective's terms, where ``s`` is each term's rounding magnitude (see
+#: :func:`~rheplicant.inference.engines._monitor_programs`).
+#:
+#: The change is taken as a sum of per-term differences, so the constant parts
+#: of ``f`` (every prior's normalizer) and the bulk of the chi-squared sum
+#: cancel term by term instead of costing ``eps * |f|``. Measured against an
+#: exactly summed float64 reference over 60 random pairs of nearby points on
+#: two collinear templates (``N = 32, 1e4, 1e6``, float32 and float64), the
+#: largest error was 0.64 of the multiple-1 estimate; 4 leaves a factor of six.
+RESOLUTION_EPS: float = 4.0
+
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather
 #: than the modern 1.01 because this is ``r_hat`` of a single scalar summary of
 #: a single chain, where 1.01 is noise-dominated at the draw counts a Gibbs
@@ -355,6 +392,176 @@ def _effective_tol(tol: float, objective: jax.Array) -> float:
     """``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype."""
     eps = float(jnp.finfo(jnp.asarray(objective).dtype).eps)
     return max(tol, OBJECTIVE_FLOOR_EPS * eps)
+
+
+@dataclasses.dataclass(frozen=True)
+class _GapState:
+    """What :func:`_gap_step` carries from one sweep to the next.
+
+    Attributes:
+        contraction: the contraction last measured, or ``None`` when there is
+            none (none yet, or a rise since).
+        moved: whether any decrease so far exceeded its resolution.
+        decrease, resolution: the previous sweep's decrease and its
+            resolution, in nats.
+        last: the last decrease the arithmetic resolved, and ``since`` the
+            sweeps after it.
+    """
+
+    contraction: float | None = None
+    moved: bool = False
+    decrease: float | None = None
+    resolution: float | None = None
+    last: float | None = None
+    since: int = 0
+
+
+def _gap_step(
+    state: _GapState, decrease: float, resolution: float, tol: float
+) -> tuple[_GapState, bool, float | None, float | None]:
+    """One sweep of the gap certificate: ``(state, certified, gap, rho)``.
+
+    ``decrease`` is ``D[k] = f[k-1] - f[k]`` and ``resolution`` bounds its
+    rounding, both in nats; ``rho`` is the contraction the gap was computed
+    with. A decrease is RESOLVED when it exceeds its resolution. The rule:
+
+    * **A rise the arithmetic resolves** (``D < -resolution``) certifies
+      nothing and forgets the contraction. Every block update minimises its
+      conditional of ``f``, so ``f`` rises only through an inner solver's
+      inexactness or a noise model the conjugate engine freezes; neither is
+      convergence.
+    * **The contraction** is ``D[k] / D[k-1]``, clipped to 1, when both
+      decreases are resolved: the point estimate the T-002 ruling specifies.
+      A decrease that is not resolved never LOWERS a contraction already
+      measured. Only a run with none yet, whose resolved step is followed by
+      one it cannot see, takes the upper bound ``(D[k]+ + resolution) /
+      D[k-1]`` (a conjugate block solved exactly in one sweep does this); a
+      run that never moved beyond the resolution uses 0.
+    * **The gap** is ``(max(D[k]+, P[k]) + resolution) / (1 - rho)``: the
+      decrease plus its geometric tail ``D rho / (1 - rho)``. ``P[k]`` is the
+      last resolved decrease carried forward at ``rho``, so a decrease that
+      falls to nothing (a coordinate descent stalled on float rounding along
+      a long valley, whose float map stopped while the exact one had not) is
+      read at the size the measured contraction predicts, not as arrival.
+      The sweep certifies when the gap is at most ``tol``; a contraction of
+      1, or none, certifies nothing.
+
+    The interval bound ``(D[k] + res) / (D[k-1] - res)`` for every pair was
+    tried and refused a float32 run whose decreases contracted cleanly by
+    0.805 a sweep: its bias grows as ``res / D`` while ``tol (1 - rho)`` is
+    fixed, so it never certified.
+    """
+    if decrease < -resolution:
+        return _GapState(None, True, decrease, resolution), False, None, None
+    resolved = decrease > resolution
+    previous = state.decrease is not None and state.decrease > state.resolution
+    contraction = state.contraction
+    if previous and resolved:
+        contraction = min(decrease / state.decrease, 1.0)
+    elif previous and contraction is None:
+        contraction = min((max(decrease, 0.0) + resolution) / state.decrease, 1.0)
+    if resolved:
+        last, since = decrease, 0
+    else:
+        last, since = state.last, state.since + 1
+    moved = state.moved or resolved
+    following = _GapState(contraction, moved, decrease, resolution, last, since)
+    rho = contraction if moved else 0.0
+    if rho is None or rho >= 1.0:
+        return following, False, None, rho
+    projected = 0.0 if last is None else last * rho**since
+    gap = (max(decrease, projected, 0.0) + resolution) / (1.0 - rho)
+    return following, gap <= tol, gap, rho
+
+
+#: The key of a point estimate's monitor in the run's ``programs`` cache. A
+#: 1-tuple of a string cannot equal a gradient block's ``(names, steps,
+#: adapting)``, a conjugate block's 6-tuple or an estimate transition's
+#: ``("estimate", names, steps, learning_rate)``.
+_MONITOR_TAG: tuple[str] = ("monitor",)
+
+
+#: How many resolutions a decrease may be and still count as having reached
+#: the resolution, for the refusal's wording only. Far from its fixed point a
+#: run's terms are large and so is their resolution, but it is still making
+#: resolved progress and needs sweeps, not float64: measured on the bilinear
+#: basis fixture at sweep 4, a decrease of 3.6e5 nats against a resolution of
+#: 16.5.
+_AT_RESOLUTION: float = 4.0
+
+
+def _not_converged_message(
+    *, max_iter: int, tol: float, gap_tol: float, effective: float,
+    changed: bool, objective: list[float], chi2: list[float],
+    contraction: float | None, gap: float | None, resolution: float | None,
+    decrease: float | None, rise: tuple[int, float] | None, dtype: Any,
+    hidden: str,
+) -> str:
+    """:meth:`SamplingPlan.estimate`'s refusal at ``max_iter``.
+
+    The opening names which test failed: the ``tol`` change test
+    (``changed``) or the gap certificate. Then one of two shapes. When the
+    run has reached its resolution (the last decrease within
+    :data:`_AT_RESOLUTION` resolutions) and that resolution is coarser than
+    a certificate at the last measured contraction needs
+    (``resolution >= gap_tol (1 - rho)``), sweeping on cannot help, and the
+    message says so and names float64 as the remedy. Otherwise the partition
+    is converging slowly, and it names the contraction and the gap left.
+    Either way it names the last rise of the objective beyond its
+    resolution, if the last ten sweeps had one: that is an inner solve's
+    noise, which forgets the contraction each time.
+    """
+    rho = 0.0 if contraction is None else contraction
+    said_rho = "not estimable" if contraction is None else f"{contraction:.4g}"
+    opening = (
+        f"SamplingPlan.estimate did not converge: after {max_iter} sweeps the JOINT "
+        f"negative log posterior is still changing by "
+        f"{objective[-1] - objective[-2]:.3g} per sweep (objective = "
+        f"{objective[-1]:.6g}, chi2 = {chi2[-1]:.6g}). "
+    )
+    if changed:
+        opening += (
+            "The change passed tol, but the gap to the sweep's fixed point is not "
+            f"certified within gap_tol = {gap_tol:g} nats "
+            f"({math.sqrt(2.0 * gap_tol):.3g} posterior sigma). "
+        )
+    else:
+        opening += (
+            "A verdict needs two consecutive sweep-to-sweep changes each within "
+            f"{effective:.3g} of it, relative (tol={tol:g}, floored at "
+            f"{OBJECTIVE_FLOOR_EPS} machine epsilons of the objective's dtype), and "
+            f"the gap to the sweep's fixed point certified within gap_tol = "
+            f"{gap_tol:g} nats. "
+        )
+    if rise is not None and rise[0] > max_iter - 10:
+        opening += (
+            f"It rose by {rise[1]:.3g} nats at sweep {rise[0]}, beyond its "
+            "resolution, which an exact block update cannot do: an inner solve "
+            "is inexact at this precision (solve_tol, or the dtype). "
+        )
+    at_resolution = (
+        resolution is not None and decrease is not None
+        and abs(decrease) <= _AT_RESOLUTION * resolution
+    )
+    if at_resolution and resolution >= gap_tol * (1.0 - rho):
+        return opening + (
+            f"In {np.dtype(dtype).name} a decrease is resolved only to "
+            f"{resolution:.3g} nats at |objective| = {abs(objective[-1]):.4g}, and "
+            f"at a contraction of {said_rho} per sweep a certificate needs "
+            f"decreases below {gap_tol * (1.0 - rho):.3g}: at this precision the "
+            "plan cannot tell a converged run from a stalled one. Run in float64 "
+            "(JAX_ENABLE_X64=1), group the correlated latents into ONE Block, or "
+            "pass tol=None to accept an unconverged answer."
+        )
+    left = "" if gap is None else f", leaving a gap of about {gap:.3g} nats"
+    return opening + (
+        f"The decrease contracts by {said_rho} per sweep{left}. " + hidden
+        + "Slow convergence here means the blocks are correlated — group the "
+        "correlated latents into ONE Block, which resolves them in a single "
+        "solve, or raise max_iter. identifiability(space, pipeline, state, "
+        "names=...) reports how much the partition is costing. Pass tol=None to "
+        "accept an unconverged answer."
+    )
 
 
 def _halves(values: np.ndarray) -> np.ndarray:
@@ -569,7 +776,9 @@ class PlanDiagnostics:
         sweeps: sweeps actually run.
         converged: for a point estimate, whether :attr:`objective` settled
             within :attr:`effective_tol` on two consecutive sweep-to-sweep
-            changes (``None`` when the test was disabled). For a draw,
+            changes AND two consecutive sweeps certified the gap to the fixed
+            point within ``gap_tol`` nats (``None`` when the test was
+            disabled). For a draw,
             whether :attr:`rhat` came in under the caller's threshold. **False
             here means the answer is not what it looks like** — the same
             reading as
@@ -598,8 +807,16 @@ class PlanDiagnostics:
             ``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype
             (see :data:`OBJECTIVE_FLOOR_EPS`). ``None`` for a draw and for a
             point estimate run with ``tol=None``.
+        contraction: the per-sweep contraction of the objective's decrease the
+            gap certificate used at the last sweep (see :func:`_gap_step`), or
+            ``None`` when it had none. ``None`` for a draw.
+        distance_bound: the distance to the fixed point the gap certificate
+            estimated at the last sweep, in posterior sigma: ``sqrt(2 gap)``
+            for the gap in nats. ``None`` when the last sweep could not
+            estimate one, and for a draw.
 
-    :attr:`objective` and :attr:`effective_tol` are not among the fields the
+    :attr:`objective`, :attr:`effective_tol`, :attr:`contraction` and
+    :attr:`distance_bound` are not among the fields the
     config layer copies into a run's diagnostics record
     (``config/products/extractors.py::DIAGNOSTIC_FIELDS``), so that record's
     format is unchanged by them.
@@ -616,6 +833,8 @@ class PlanDiagnostics:
     rhat: float | None = None
     objective: np.ndarray | None = None
     effective_tol: float | None = None
+    contraction: float | None = None
+    distance_bound: float | None = None
 
 
 class PlanResult(Protocol):
@@ -1114,6 +1333,7 @@ class SamplingPlan:
         check_identifiability: Any = CHECK_ONCE,
         solve_tol: float = 1e-6,
         solve_guard: float | None = None,
+        gap_tol: float = DEFAULT_GAP_TOL,
     ) -> Estimate:
         """Best fit: block-coordinate descent to a fixed point of the whole model.
 
@@ -1121,22 +1341,40 @@ class SamplingPlan:
         conjugate block; for a gradient one, Adam on the conditional posterior
         followed by Newton steps that remove Adam's step-size floor (see
         :func:`~rheplicant.inference.engines.gradient_estimate`) — and the
-        sweep repeats until the **joint** negative log posterior stops moving:
-        two consecutive sweep-to-sweep changes each within the effective
-        tolerance, ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``. That is the
-        objective each block update descends, so its fixed point is the MAP;
-        the joint chi-squared is recorded but not tested, because with a prior
-        it can rise while the run approaches the MAP. A rise of the objective
-        larger than the effective tolerance is never convergence.
+        sweep repeats until the **joint** negative log posterior has stopped
+        moving AND its distance to the sweep's fixed point is certified. Two
+        tests, both on two consecutive sweeps:
 
-        A small change is evidence of arrival only while the sweep still makes
-        progress: it bounds the distance to the MAP for a moderately
-        correlated posterior (0.005 posterior sigma at a block correlation of
-        0.9965 in float64, measured), and along a near-degenerate direction a
-        run can stop early. The float32 floor loosens the bound: the bilinear
-        test fixture with a gain prior of width 0.01 stops 0.74 posterior
-        sigma from its MAP in float32 and 0.043 in float64. No curvature-based
-        check (a Newton decrement) is made.
+        * **the change**: each sweep-to-sweep change within the effective
+          tolerance ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``, relative to
+          ``|f|``;
+        * **the gap**: the decrease over the sweep plus its geometric tail at
+          the estimated contraction (:func:`_gap_step`) at most ``gap_tol``
+          nats, which is ``sqrt(2 gap_tol)`` posterior sigma whatever the
+          number of data (0.1 sigma by default).
+
+        The objective is what each block update descends, so its fixed point
+        is the MAP; the joint chi-squared is recorded but not tested, because
+        with a prior it can rise while the run approaches the MAP. A rise of
+        the objective beyond its resolution is never convergence.
+
+        **Migration (T-002 review).** Until the gap certificate, the change
+        test alone decided, and a tolerance relative to ``|f|`` certifies a
+        distance that grows as ``sqrt(N)``: measured, 0.6 posterior sigma at
+        ``N = 1e6`` in float64 and 16.5 in float32. ``tol`` keeps its meaning
+        and default, so a caller's ``tol`` still does what it did; what is new
+        is that it no longer suffices, and runs that used to report converged
+        may now run longer or refuse.
+
+        **What the certificate cannot see.** The contraction is estimated from
+        the decreases, so a slow mode whose decreases are still hidden under a
+        faster one's is under-weighted until it dominates. And a decrease is
+        resolved only to the objective's arithmetic (:data:`RESOLUTION_EPS`):
+        when that resolution is coarser than the certificate needs, which in
+        float32 happens at large ``N`` or slow contraction, the run cannot
+        certify and refuses at ``max_iter`` with a message naming the
+        resolution and float64 as the remedy. No curvature-based check (a
+        Newton decrement) is made.
 
         Args:
             pipeline: the forward model.
@@ -1172,6 +1410,12 @@ class SamplingPlan:
                 :func:`~rheplicant.inference.linear.wiener_solve`. ``None`` skips
                 the condition-number estimate, which is what a 10^6-coefficient
                 block wants — see that function's own note on the bargain.
+            gap_tol: the gap to the sweep's fixed point, in nats of the joint
+                negative log posterior, that two consecutive sweeps must each
+                certify — see :data:`DEFAULT_GAP_TOL`. The distance the last
+                sweep certified is recorded as
+                :attr:`PlanDiagnostics.distance_bound`. Not consulted when
+                ``tol`` is ``None``.
 
         Returns:
             An :class:`Estimate`.
@@ -1209,10 +1453,16 @@ class SamplingPlan:
         report = None
         residuals: dict[tuple[str, ...], float] = {}
         programs: dict[Any, Any] = {}
-        chi2 = [float(cond.chi2(values))]
-        start = cond.neg_log_posterior(values)
-        objective = [float(start)]
-        effective = None if tol is None else _effective_tol(tol, start)
+        monitor = programs.get(_MONITOR_TAG)
+        if monitor is None:
+            monitor = programs[_MONITOR_TAG] = _monitor_programs(cond, RESOLUTION_EPS)
+        measure, change = monitor
+        chi2_now, objective_now, terms, scales = measure(values)
+        chi2 = [float(chi2_now)]
+        objective = [float(objective_now)]
+        effective = None if tol is None else _effective_tol(tol, objective_now)
+        gap_state, certified, gap, rho, resolution = _GapState(), False, None, None, None
+        measured, last_rise, changed = None, None, False
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1228,13 +1478,25 @@ class SamplingPlan:
                 solve_tol=solve_tol, solve_guard=solve_guard,
                 tuning={}, residuals=residuals, programs=programs,
             )
-            chi2.append(float(cond.chi2(values)))
-            objective.append(float(cond.neg_log_posterior(values)))
-            if (
-                effective is not None
-                and sweep >= min_sweeps
-                and _settled(objective[1:], effective)
-            ):
+            chi2_now, objective_now, following, following_scales = measure(values)
+            decrease, resolution = change(terms, scales, following, following_scales)
+            terms, scales = following, following_scales
+            decrease, resolution = float(decrease), float(resolution)
+            chi2.append(float(chi2_now))
+            objective.append(float(objective_now))
+            previous = certified
+            gap_state, certified, gap, rho = _gap_step(
+                gap_state, decrease, resolution, gap_tol
+            )
+            # The first decrease is from the starting values, which are not a
+            # sweep's output: it feeds the contraction and certifies nothing.
+            certified = certified and sweep >= 2
+            if gap_state.contraction is not None:
+                measured = gap_state.contraction
+            if decrease < -resolution:
+                last_rise = (sweep, -decrease)
+            changed = effective is not None and _settled(objective[1:], effective)
+            if changed and sweep >= min_sweeps and certified and previous:
                 converged = True
                 break
 
@@ -1253,18 +1515,13 @@ class SamplingPlan:
                 else ""
             )
             raise ParameterSpaceError(
-                f"SamplingPlan.estimate did not converge: after {max_iter} sweeps the "
-                f"JOINT negative log posterior is still changing by "
-                f"{objective[-1] - objective[-2]:.6g} per sweep (objective = "
-                f"{objective[-1]:.6g}, chi2 = {chi2[-1]:.6g}), and a verdict needs two "
-                f"consecutive sweep-to-sweep changes each within {effective:.3g} of it, "
-                f"relative (tol={tol:g}, floored at {OBJECTIVE_FLOOR_EPS} machine "
-                "epsilons of the objective's dtype). "
-                + hidden + "Slow convergence here "
-                "means the blocks are correlated — group the correlated latents into ONE "
-                "Block, which resolves them in a single solve, or raise max_iter. "
-                "identifiability(space, pipeline, state, names=...) reports how much the "
-                "partition is costing. Pass tol=None to accept an unconverged answer."
+                _not_converged_message(
+                    max_iter=max_iter, tol=tol, gap_tol=gap_tol,
+                    effective=effective, changed=changed, objective=objective,
+                    chi2=chi2, contraction=measured, gap=gap,
+                    resolution=resolution, decrease=decrease, rise=last_rise,
+                    dtype=jnp.result_type(objective_now), hidden=hidden,
+                )
             )
 
         return Estimate(
@@ -1279,6 +1536,8 @@ class SamplingPlan:
                 noise_depends_on_prediction=bool(cond.noise.depends_on_prediction),
                 objective=np.asarray(objective, dtype=np.float64),
                 effective_tol=effective,
+                contraction=rho,
+                distance_bound=None if gap is None else math.sqrt(2.0 * gap),
             ),
         )
 
@@ -1410,12 +1669,14 @@ __all__ = [
     "CHECK_EACH_SWEEP",
     "CHECK_ONCE",
     "DEFAULT_CHI2_TOL",
+    "DEFAULT_GAP_TOL",
     "DEFAULT_MAX_ITER",
     "DEFAULT_RHAT_MAX",
     "EARLIEST_CONVERGED_SWEEP",
     "MIN_DRAWS",
     "MIN_SWEEPS",
     "OBJECTIVE_FLOOR_EPS",
+    "RESOLUTION_EPS",
     "Block",
     "Draws",
     "Estimate",
