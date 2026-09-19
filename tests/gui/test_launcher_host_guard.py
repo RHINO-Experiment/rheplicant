@@ -453,3 +453,11 @@ def test_the_allowed_host_help_warns_that_a_listed_name_can_be_rebound(capsys) -
     entry = text.rsplit("--allowed-host NAME", 1)[1]
     assert "without --allow-remote" in entry
     assert "DNS rebinding" in entry
+
+
+def test_a_malformed_allowed_host_from_the_api_names_the_keyword() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        launcher.create_editor_app(allowed_hosts=["gui.example.org:8000"])
+    message = str(excinfo.value)
+    assert message.startswith("allowed_hosts entry 'gui.example.org:8000' ")
+    assert "--allowed-host" not in message

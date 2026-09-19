@@ -113,8 +113,14 @@ def _origin(value: str) -> tuple[str, int] | None:
     return host, port
 
 
-def _allowed_host_names(names: Iterable[str]) -> frozenset[str]:
-    """Return loopback plus ``names`` in canonical spelling, or refuse one."""
+def _allowed_host_names(
+    names: Iterable[str], *, label: str = "allowed_hosts entry"
+) -> frozenset[str]:
+    """Return loopback plus ``names`` in canonical spelling, or refuse one.
+
+    ``label`` names the refused value the way its caller spelled it: the
+    keyword argument from the API, the flag from the command line.
+    """
     if isinstance(names, str):
         # A lone string would iterate as one-letter host names, all valid.
         raise TypeError("allowed_hosts is a collection of host names, not one string.")
@@ -123,7 +129,7 @@ def _allowed_host_names(names: Iterable[str]) -> frozenset[str]:
         canonical = _canonical_host(name)
         if canonical is None:
             raise ValueError(
-                f"--allowed-host {name!r} is not a host name or IP address; "
+                f"{label} {name!r} is not a host name or IP address; "
                 "give the name alone, without a scheme or port."
             )
         allowed.add(canonical)
@@ -276,7 +282,7 @@ def _assert_bind(
             "is refused, which is what stops a DNS-rebinding page."
         )
     try:
-        _allowed_host_names(allowed_hosts)
+        _allowed_host_names(allowed_hosts, label="--allowed-host")
     except ValueError as error:
         raise RuntimeError(str(error)) from None
 
