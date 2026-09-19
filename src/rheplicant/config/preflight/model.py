@@ -889,6 +889,83 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
         "it), or drop the sources to leave a transform chain (check A31).")
 
 
+@register("A31.no_source")
+def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """A31's other half: a model lighting no source, with no data to act on.
+
+    ``Assembly.__call__`` refuses both mismatches between ``has_source`` and
+    ``state.data``.  :func:`_data_with_sources` decides the first in text;
+    this decides the second, which used to reach the user as an
+    ``AssemblyError`` traceback from inside the first run -- after
+    ``rheplicant validate`` had printed "configuration valid".
+
+    The predicate is again the assembly's own, node KINDS over the placed
+    ids, and it refuses on ABSENCE, so :func:`_t5_placement`'s two
+    stand-downs are read as such rather than as "nothing placed":
+
+    * ``None`` -- a ``python:`` class this pass will not import lands where
+      that class declares, which may be a source;
+    * ``()`` -- an entry the build refuses in its own words (a disagreeing
+      ``at:``, a non-mapping spec, a class with no ``graph_node``), which a
+      "no source" sentence would pre-empt.
+
+    A model A2, A3 or A4 already refuses stands down too: a misspelled
+    ``uniform_skyy:`` is one fault, and "lights no source" would send the
+    reader after a second.  ``kind: pipeline`` is not an assembly and has no
+    ``has_source``; ``_nodes`` returns ``{}`` for it.
+
+    Data is declared by a non-null ``observation.data`` or by
+    ``observation.from_file``, whose recording becomes ``state.data``.
+
+    **It does not read ``runs:``, and that is a declared false positive.**
+    ``mmodes`` and ``compare`` never evaluate the twin (``_run_mmodes``
+    reads resources and ``built.state.coords``; ``_run_compare`` reads
+    earlier runs' products), so a transform-only model declaring only those
+    kinds, and no ``inference.observed: {from: simulation}``, would run and
+    is refused here.  Scoping the check needs a per-kind "evaluates the
+    twin" property, and the exit registry (``sections/exit_support.
+    register``) carries none: adding one is a fifth atomically bound table
+    and a measured classification of all 18 registrations across seven
+    modules, and a run-kind property alone would still miss
+    ``inference.observed: {from: simulation}``, which evaluates the twin
+    while the document is built.  ``test_the_run_kinds_are_not_read`` pins
+    this scope, so narrowing it is a decision a test records.
+    """
+    section = document.get("observation")
+    if not isinstance(section, Mapping):
+        return
+    if section.get("data") is not None or "from_file" in section:
+        return
+    specs = _nodes(document)
+    graph = _t4_graph()
+    if not specs or node_placement_problems(specs, graph):
+        return
+    placed: set[str] = set()
+    for key, spec in specs.items():
+        nodes = _t5_placement(key, spec)
+        if not nodes:
+            return
+        placed.update(nodes)
+    if any(graph.nodes[node].kind == "source" for node in placed):
+        return
+    antenna_sources = [
+        node for node, spec in graph.nodes.items()
+        if spec.kind == "source" and not spec.reserved
+        and "antenna_loss" in _t5_downstream(graph, node)
+    ]
+    choices = ", ".join(antenna_sources[:-1]) + f" or {antenna_sources[-1]}"
+    lit = [node for node in graph.nodes if node in placed]
+    yield refuse(
+        "A31", "model",
+        f"model: lights {lit} and no source node, so its twin is a pure "
+        "transform chain, and observation declares no data for it to act on. "
+        "Every run that evaluates the twin would stop with 'This assembly is "
+        "a pure transform chain (no source operators)'. Light a source on "
+        f"the antenna branch ({choices}), or declare the data the chain "
+        "transforms: observation.data, or observation.from_file for a "
+        "recording (check A31).")
+
+
 # ---------------------------------------------------------------------------
 # Task 11 -- A30 (a stochastic stage the fit twin keeps) and A33 (a bandpass
 # left free beside a gain).

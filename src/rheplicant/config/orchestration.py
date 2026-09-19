@@ -52,7 +52,7 @@ from _rheplicant_bootstrap.capture import (
     CaptureService,
     captured_input_json,
 )
-from _rheplicant_bootstrap.errors import DirtError
+from _rheplicant_bootstrap.errors import REFUSALS, DirtError
 from _rheplicant_bootstrap.layering import (
     DeletionRecord,
     OriginNode,
@@ -241,7 +241,8 @@ def canonical_layers(
     (whose refusals predate the first boundary and so carry ``report=None``).
     The integration route supplies the bootstrap's own layers with their
     matching evidence maps; supplied objects are used AS THEY ARE, so the
-    audit trail's origin trees keep their identity.
+    audit trail's origin trees keep their identity.  Its base layer passes
+    the same structural gate, with the same ``report=None`` refusals.
     """
     if supplied is None:
         if layer_origins is not None or layer_deletions is not None:
@@ -279,6 +280,13 @@ def canonical_layers(
             "supplied layer_origins/layer_deletions must cover every "
             "canonical layer identity exactly once."
         )
+    # The base gets the mapping route's structural gate, and at the same
+    # point: before any check runs.  Without it the text pass only gated
+    # VARIANT layers, so a misspelled base section reached the registered
+    # checks and surfaced as passes.py's internal where-guard sentence, and a
+    # missing or reserved base section was voiced as "what selecting this
+    # variant would raise" on a document that declares no variant.
+    _structural(layers[0].mutable_document())
     return _Canonical(layers=layers, origins=layer_origins, deletions=layer_deletions)
 
 
@@ -425,13 +433,17 @@ def _document_path_segments(document_path: str) -> tuple[str | int, ...]:
 
 
 def _origin_lookup_for(document: Mapping[str, object], origins: OriginNode) -> OriginLookup:
-    """Bind concrete value paths to the authority of their payload form."""
+    """Bind concrete value paths to the authority of their payload form.
+
+    A ``resources.<kind>.<name>`` value the entry does not write itself is
+    one it inherits through ``extends:`` (``resources._resolved_spec`` merges
+    the parent in before the builder runs), so its authority is the nearest
+    ancestor that writes it.  Stopping at the child refused every such
+    document on the command line with "audit: no origin for ...".
+    """
     from rheplicant.config.values import VALUE_FORMS
 
-    def lookup(document_path: str, /) -> Origin | None:
-        segments = _document_path_segments(document_path)
-        if not segments:
-            return None
+    def written(segments: tuple[str | int, ...]) -> Origin | None:
         value: object = document
         try:
             for segment in segments:
@@ -447,6 +459,34 @@ def _origin_lookup_for(document: Mapping[str, object], origins: OriginNode) -> O
             return origins_at(origins, authority)
         except ConfigError:
             return None
+
+    def inherited(segments: tuple[str | int, ...]) -> Origin | None:
+        if len(segments) < 4 or segments[0] != "resources":
+            return None
+        _, kind, name, *rest = segments
+        resources = document.get("resources")
+        entries = resources.get(kind) if isinstance(resources, Mapping) else None
+        if not isinstance(entries, Mapping):
+            return None
+        seen = {name}
+        entry = entries.get(name)
+        while isinstance(entry, Mapping):
+            parent = entry.get("extends")
+            if not isinstance(parent, str) or parent in seen:
+                return None
+            seen.add(parent)
+            origin = written(("resources", kind, parent, *rest))
+            if origin is not None:
+                return origin
+            entry = entries.get(parent)
+        return None
+
+    def lookup(document_path: str, /) -> Origin | None:
+        segments = _document_path_segments(document_path)
+        if not segments:
+            return None
+        origin = written(segments)
+        return origin if origin is not None else inherited(segments)
 
     return lookup
 
@@ -967,9 +1007,12 @@ def execute_one_parsed(
     The configured build is the ONE prepared layer whose identity is
     ``parsed.layer.identity`` -- an absent, duplicated or inconsistent target
     is a wiring error, and a variant-targeted run is never defaulted back to
-    the base build.  The classification is the legacy one: a captured
-    ``expect: refuse`` is a successful row with the error on the result; an
-    uncaptured ``ConfigError`` refuses; any other ``Exception`` is an error.
+    the base build.  The classification: a captured ``expect: refuse`` is a
+    successful row with the error on the result; an uncaptured
+    ``ConfigError`` or ``AssemblyError`` refuses (the bootstrap's
+    ``REFUSALS``: the assembly refusing the operator set this document
+    declared, as when a twin with sources is handed a recording); any other
+    ``Exception`` is an error.
     """
     label = parsed.layer.prefix or "base"
     matches = [layer for layer in prepared.layers if layer.layer.identity == parsed.layer.identity]
@@ -1039,7 +1082,7 @@ def execute_one_parsed(
         try:
             handler.pre_execute(parsed, handler_context, prior)
             product = handler.execute(parsed, handler_context, prior)
-        except ConfigError as caught:
+        except REFUSALS as caught:
             error = caught
             status = "refused"
         except Exception as caught:

@@ -31,7 +31,7 @@ from _rheplicant_bootstrap.audit.types import (
     AuditSnapshot,
 )
 from _rheplicant_bootstrap.capture import CaptureService
-from _rheplicant_bootstrap.errors import ConfigError
+from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
 from _rheplicant_bootstrap.execution_environment import (
     TRUSTED_CODE_WARNING,
     prepare_execution_environment,
@@ -638,7 +638,7 @@ def dispatch_request(
             trace.boundary_completed("execution")
         except Exception as original:
             failure_status: Literal["refused", "error"] = (
-                "refused" if isinstance(original, ConfigError) else "error"
+                "refused" if isinstance(original, REFUSALS) else "error"
             )
             _publish_failure_once(
                 original,
@@ -722,7 +722,7 @@ def dispatch_request(
                 additional_files["products.json"] = scientific.manifest
             except Exception as original:
                 failure_status = (
-                    "refused" if isinstance(original, ConfigError) else "error"
+                    "refused" if isinstance(original, REFUSALS) else "error"
                 )
                 _publish_failure_once(
                     original,
@@ -915,7 +915,7 @@ def run_embedded_config(
             outputs_dir=outputs_dir,
             outputs_write=outputs_write,
         )
-    except ConfigError as error:
+    except REFUSALS as error:
         return _render_exception(error, chosen_stderr, traceback_error=False)
     except Exception as error:
         return _render_exception(error, chosen_stderr, traceback_error=True)

@@ -508,3 +508,43 @@ def test_worker_error_type_reaches_the_job_store(monkeypatch):
     finished = store.get(row.job_id)
     assert finished.status == "error"
     assert finished.message == "WorkerValueError: boom"
+
+
+def test_worker_frames_an_assembly_refusal_as_refused(monkeypatch):
+    """The GUI's verdict matches the command line's: an ``AssemblyError`` is
+    the fold refusing the document's operator set, so it is one of the
+    bootstrap's ``REFUSALS`` and earns a "refused" frame, not "error"."""
+    from rheplicant.core.errors import AssemblyError
+
+    def refuse(yaml_text):
+        raise AssemblyError("Transform 'beam_spill' feeds junction 't_ant_sum'")
+
+    monkeypatch.setattr(gui_worker, "_run_validation", refuse)
+    monkeypatch.setattr(
+        gui_worker.sys, "stdin", SimpleNamespace(buffer=BytesIO(b"yaml"))
+    )
+    frames = []
+    monkeypatch.setattr(gui_worker, "_write_frame", frames.append)
+
+    assert gui_worker.main(["validate"]) == 0
+    assert frames == [{
+        "status": "refused",
+        "message": "Transform 'beam_spill' feeds junction 't_ant_sum'",
+    }]
+
+
+def test_validate_worker_refuses_a_model_the_fold_cannot_assemble():
+    """End to end through the worker process: a transform branch beside a
+    source at one junction is refused by the fold while building."""
+    document = synthetic_document()
+    document["model"] = {
+        "atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}},
+        "beam_spill": {"sky_fraction": {"value": 0.95, "unit": "dimensionless"},
+                       "t_ground": {"value": 290.0, "unit": "K"}},
+    }
+    completed, frame = _invoke_worker(
+        "validate", yaml.safe_dump(document, sort_keys=False))
+
+    assert completed.returncode == 0
+    assert frame["status"] == "refused"
+    assert "feeds junction 't_ant_sum' with no live source" in frame["message"]

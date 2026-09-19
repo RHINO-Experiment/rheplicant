@@ -28,6 +28,7 @@ def json_schema() -> dict[str, Any]:
         VALUE_FORMS,
         VALUE_MODIFIERS,
     )
+    from rheplicant.config import dimensions as _dims
     from rheplicant.config.preflight import (
         _NOT_YET,
         _REQUIRED,
@@ -36,20 +37,14 @@ def json_schema() -> dict[str, Any]:
         deferred_clause,
         reserved_clause,
     )
+    from rheplicant.config.sections import runs as _runs
 
-    exits: list[str] = []
-    try:
-        from rheplicant.config.sections import runs as _runs
-        exits = list(_runs._KINDS)
-    except Exception:  # pragma: no cover - defensive; the module is always present
-        exits = []
-
-    transforms: list[str] = []
-    try:
-        from rheplicant.config import dimensions as _dims
-        transforms = sorted(_dims._FORMULA_REGISTRY)
-    except Exception:  # pragma: no cover - defensive
-        transforms = []
+    # No fallback to an empty list. Both tables are module constants of this
+    # package, so failing to read one is a defect, and this dict is served
+    # verbatim to rheplicant-agent, where an empty `exits` reads as "this
+    # layer runs nothing" rather than as a fault.
+    exits = list(_runs._KINDS)
+    transforms = sorted(_dims._FORMULA_REGISTRY)
 
     required = set(_REQUIRED)
     # Derived, not re-spelled: `_NOT_YET` and `_RESERVED` are preflight's own

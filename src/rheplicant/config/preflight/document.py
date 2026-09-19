@@ -27,8 +27,11 @@ Three holes in A1's sweep, measured rather than inferred:
   ``:491`` are ``float(horizon.get("el_deg", 90.0))`` and
   ``float(horizon.get("apod_deg", 0.0))``: the keys are swept (``:204``) and
   the VALUES bypass the value grammar.  Measured, ``{value: 0.1, unit: rad}``
-  arrives as a bare ``TypeError`` from inside the build, and under
-  ``horizon.mode`` other than ``truncate_map`` it is never read at all.
+  arrives as a bare ``TypeError`` from inside the build.  Under
+  ``horizon.mode`` ``none`` or ``projector_mask`` neither angle is read at
+  all, and there the key itself is refused
+  (``kinds/beams.py::_unread_horizon_angles``) before its value is asked
+  about.
 
 **Every check here runs on the base document AND on each declared variant
 merged over it.**  That is the 2C shape-4 lesson: a capability key, a run
@@ -58,7 +61,9 @@ from typing import Any
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
+from rheplicant.config.kinds.beams import _unread_horizon_angles
 from rheplicant.config.preflight import register
+from rheplicant.config.resources import resolved_specs
 
 #: The eight keys schema §8 reserves at capability 3 or 4 -> (capability,
 #: schema section).  Six are reachable from a registered check; the two
@@ -226,15 +231,70 @@ def _run_option_keys(document) -> Iterable[Finding]:
     return _task3_run_options_in(document)
 
 
+def _task3_inherited_angles(
+    beams: Mapping[str, Any], name: str, horizon: Mapping[str, Any]
+) -> dict[str, str]:
+    """Angle -> the entry that writes it, for each angle ``name`` inherits.
+
+    ``horizon`` is the entry's resolved one.  An angle the entry writes itself
+    is not in the answer; one it does not is traced up its ``extends:`` chain
+    to the nearest ancestor that writes it.  The chain is acyclic here,
+    because ``resolved_specs`` drops an entry whose chain is not, and ``seen``
+    keeps a hand-built caller from looping all the same.
+    """
+    own = beams[name].get("horizon")
+    own = own if isinstance(own, Mapping) else {}
+    found: dict[str, str] = {}
+    for key in ("el_deg", "apod_deg"):
+        if key not in horizon or key in own:
+            continue
+        current, seen = beams[name], {name}
+        while True:
+            parent = current.get("extends")
+            if (not isinstance(parent, str) or parent in seen
+                    or not isinstance(beams.get(parent), Mapping)):
+                break
+            seen.add(parent)
+            current = beams[parent]
+            written = current.get("horizon")
+            if isinstance(written, Mapping) and key in written:
+                found[key] = f"resources.beams.{parent}"
+                break
+    return found
+
+
 def _task3_horizon_in(layer) -> Iterable[Finding]:
-    """A1: a horizon angle that is not a plain number, on one layer."""
+    """A1: a horizon angle that is not a plain number, on one layer.
+
+    Under ``horizon.mode`` ``none`` (also the default) or ``projector_mask``
+    either angle is refused outright, in
+    ``kinds/beams.py::_unread_horizon_angles``' words: nothing reads it, so
+    its shape is not the fault and the number check stands down.  That
+    question is asked of the RESOLVED entry (``resolved_specs``), because
+    ``extends:`` hands a ``truncate_map`` parent's angle to a
+    ``projector_mask`` child that never writes it; the number check stays on
+    the written entry, so a malformed angle is reported where it is written.
+    """
     resources = layer.get("resources")
     beams = resources.get("beams") if isinstance(resources, Mapping) else None
     if not isinstance(beams, Mapping):
         return
+    resolved = resolved_specs(resources)
     for name, spec in beams.items():
         if not isinstance(spec, Mapping):
             continue
+        dotted = f"resources.beams.{name}"
+        effective = resolved.get(dotted)
+        merged = (effective.get("horizon")
+                  if isinstance(effective, Mapping) else None)
+        if isinstance(merged, Mapping):
+            problem = _unread_horizon_angles(
+                dotted, merged, merged.get("mode", "none"),
+                inherited=_task3_inherited_angles(beams, name, merged))
+            if problem is not None:
+                yield refuse("A1", longest_legal_prefix(f"{dotted}.horizon"),
+                             problem)
+                continue
         horizon = spec.get("horizon")
         if not isinstance(horizon, Mapping):
             continue
@@ -250,8 +310,7 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
                     "kinds/beams.py hands both horizon angles straight to "
                     "float(), so the value grammar never reaches here and a "
                     "value node arrives as a bare TypeError from inside the "
-                    "build -- or, under horizon.mode other than truncate_map, "
-                    "is never read at all (check A1).")
+                    "build (check A1).")
 
 
 @register("A1.horizon")

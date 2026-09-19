@@ -496,6 +496,95 @@ class TestHorizonNumbers:
             resources=_a_beam(apod_deg=True)), "A1")) == 1
 
 
+class TestProjectorMaskAngles:
+    """``horizon.el_deg``/``apod_deg`` under ``projector_mask`` or ``none``:
+    read by nothing, so refused in the text pass with ``build_beam``'s own
+    sentence."""
+
+    @staticmethod
+    def _masked(**angles):
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = {"mode": "projector_mask",
+                                               **angles}
+        return preflight_document(resources=section)
+
+    def test_it_is_the_builders_sentence_one_phase_early(self):
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
+
+        found = _findings(self._masked(apod_deg=5.0), "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0},
+            "projector_mask", inherited={})
+        assert "is read only by horizon.mode: truncate_map" in found[0].message
+
+    def test_it_pre_empts_the_number_check_on_the_same_key(self):
+        """A value-node angle under projector_mask is one fault, not two: the
+        key should not be there at all, whatever its shape."""
+        found = _findings(self._masked(el_deg={"value": 90.0, "unit": "deg"}),
+                          "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+
+    def test_projector_mask_without_the_angles_is_silent(self):
+        assert _findings(self._masked(), "A1") == []
+
+    @pytest.mark.parametrize("horizon", [
+        {"mode": "none", "el_deg": 90.0},
+        {"el_deg": 90.0},
+    ], ids=["mode-none", "mode-defaulted"])
+    def test_mode_none_refuses_them_too(self, horizon):
+        """``none`` reads neither angle either, and it is the default."""
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
+
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = dict(horizon)
+        found = _findings(preflight_document(resources=section), "A1")
+        assert [f.where for f in found] == ["resources.beams.horn.horizon"]
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.horn", horizon, "none", inherited={})
+        assert "Under horizon.mode: none" in found[0].message
+
+    @staticmethod
+    def _extending(child_horizon):
+        section = _a_beam(el_deg=90.0)
+        section["beams"]["child"] = {"extends": "horn",
+                                     "horizon": child_horizon}
+        return preflight_document(resources=section)
+
+    def test_an_inherited_angle_is_read_off_the_resolved_spec(self):
+        """The child writes no angle; its ``truncate_map`` parent does, and
+        ``extends:`` hands it down.  Reading the raw entry missed it, and the
+        build then told the reader to "delete it here" from an entry that
+        does not contain it."""
+        from rheplicant.config.kinds.beams import _unread_horizon_angles
+
+        found = _findings(self._extending({"mode": "projector_mask"}), "A1")
+        assert [f.where for f in found] == ["resources.beams.child.horizon"]
+        assert found[0].message == _unread_horizon_angles(
+            "resources.beams.child",
+            {"mode": "projector_mask", "el_deg": 90.0}, "projector_mask",
+            inherited={"el_deg": "resources.beams.horn"})
+        assert ("horizon.el_deg is inherited from resources.beams.horn through "
+                "extends:; delete it there, or write ~el_deg: null under this "
+                "entry's horizon: to drop it from this entry alone."
+                ) in found[0].message
+
+    def test_the_tilde_remedy_clears_it(self):
+        assert _findings(self._extending(
+            {"mode": "projector_mask", "~el_deg": None}), "A1") == []
+
+    def test_a_written_angle_is_still_deleted_here(self):
+        found = _findings(self._masked(apod_deg=5.0), "A1")
+        assert "Delete it here." in found[0].message
+        assert "inherited" not in found[0].message
+
+    def test_an_unknown_mode_is_left_to_the_builders_mode_refusal(self):
+        """The fault there is the mode, and the builder names the three."""
+        section = _a_beam()
+        section["beams"]["horn"]["horizon"] = {"mode": "bogus", "el_deg": 90.0}
+        assert _findings(preflight_document(resources=section), "A1") == []
+
+
 class TestFanPresence:
     def test_two_targets_with_no_fan_are_refused_in_the_sugar_spelling(self):
         """Measured: this builds today with `Bind.fan = None`.  Kills the

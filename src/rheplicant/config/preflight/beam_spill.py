@@ -69,7 +69,10 @@ nothing for it to be bound once against.
 * It does not refuse ``horizon.mode`` on its own.  Three modes exist, the
   projector carries its own independent ``horizon_mask:``, and
   ``projector_mask`` beside ``beam_spill.from: projector`` is the CORRECT
-  combination.  Only ``truncate_map`` double-counts.
+  combination.  Only ``truncate_map`` double-counts.  What ``projector_mask``
+  does need is a projector that masks, and that is the separate slot
+  ``A50.projector_mask`` below: the mode itself cuts nothing, and
+  ``DriftScanProjector.horizon_mask`` defaults to False.
 * It follows ``model.beam_spill.projector.ref`` to
   ``resources.projectors.<p>.optimizations``, never to ``beam_frame``.  That
   key is in ``kinds/projectors.py::_NOT_WRITABLE`` and is already refused as a
@@ -218,10 +221,12 @@ def _b2_leg_a(path: str, projector: str, beam: str) -> str:
         "Measured on an nside-8 Gaussian horn at lmax 16: f_sky is 0.9510 "
         "untruncated and 0.99924 truncated, which turns a 14.7 K ground "
         f"contribution into 0.23 K. Either set {beam}'s horizon.mode to "
-        "projector_mask and keep this node as it is, or keep truncate_map and "
-        f"write sky_fraction: {{ref: {beam}.sky_fraction}} here instead of "
-        "from: projector, which is the fraction the truncation already "
-        "returned (check A50)."
+        f"projector_mask and horizon_mask: true on {projector} and on every "
+        f"other projector that reads {beam} (the mode alone masks nothing), "
+        "and keep this node as it is, or keep truncate_map and write "
+        f"sky_fraction: {{ref: {beam}.sky_fraction}} here instead of from: "
+        "projector, which is the fraction the truncation already returned "
+        "(check A50)."
     )
 
 
@@ -239,6 +244,96 @@ def _b2_leg_b(path: str, projector: str) -> str:
         "projector over the same beam without it and point this node at that "
         "one (check A50)."
     )
+
+
+#: The engines whose projectors read a beam, and the one of them that can
+#: mask it (``horizon_mask`` is in ``kinds/projectors.py::_ENGINE_KEYS``
+#: for driftscan alone; matrix reads no beam).
+_B2_BEAM_ENGINES = ("driftscan", "general_pointing")
+_B2_MASKING_ENGINE = "driftscan"
+
+
+def _b2_listed(names: list[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c``."""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def _b2_unmasked_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
+    """``A50.projector_mask`` over one layer: the cut nobody makes."""
+    specs = resolved_specs(layer.get("resources"))
+    for beam, beam_entry in specs.items():
+        if not beam.startswith(_B2_BEAMS):
+            continue
+        horizon = beam_entry.get("horizon")
+        if not isinstance(horizon, Mapping) or horizon.get("mode") != "projector_mask":
+            continue
+        unmasked = [
+            (projector, entry.get("engine"))
+            for projector, entry in specs.items()
+            if projector.startswith(_B2_PROJECTORS)
+            and entry.get("engine") in _B2_BEAM_ENGINES
+            and _b2_entry(entry.get("beam"), _B2_BEAMS) == beam
+            and not (entry.get("engine") == _B2_MASKING_ENGINE
+                     and entry.get("horizon_mask") is True)
+        ]
+        if unmasked:
+            yield refuse("A50", longest_legal_prefix(f"{beam}.horizon.mode"),
+                         _b2_unmasked(beam, unmasked))
+
+
+def _b2_unmasked(beam: str, unmasked: list[tuple[str, Any]]) -> str:
+    """The whole sentence: a projector_mask beam read by a projector that
+    does not mask."""
+    masking = [name for name, engine in unmasked if engine == _B2_MASKING_ENGINE]
+    others = [name for name, engine in unmasked if engine != _B2_MASKING_ENGINE]
+    parts = [
+        f"{beam}.horizon.mode: projector_mask cuts nothing itself; it leaves "
+        f"the horizon cut to each projector that reads {beam}."
+    ]
+    if masking:
+        verb = "does" if len(masking) == 1 else "do"
+        parts.append(f"{_b2_listed(masking)} {verb} not set horizon_mask: true.")
+    parts.extend(
+        f"{name} is engine: {engine}, which has no horizon mask."
+        for name, engine in unmasked if engine != _B2_MASKING_ENGINE
+    )
+    parts.append(
+        "A projector that does not mask projects the sky below the horizon "
+        "through the beam's lower half, and nothing raises.")
+    # Every reader named gets its own edit in this one sentence: naming only
+    # the driftscan half sent a reader round twice, the second time about a
+    # projector that cannot take the edit the first message offered.
+    if masking and others:
+        remedy = (f"Set horizon_mask: true on {_b2_listed(masking)} and give "
+                  f"{_b2_listed(others)} a beam cut with horizon.mode: "
+                  f"truncate_map (an entry that extends {beam} will do)")
+    elif masking:
+        remedy = f"Set horizon_mask: true on {_b2_listed(masking)}"
+    else:
+        remedy = ("Read this beam through a driftscan projector with "
+                  "horizon_mask: true")
+    parts.append(f"{remedy}, or cut the beam map itself with horizon.mode: "
+                 "truncate_map (check A50).")
+    return " ".join(parts)
+
+
+@register("A50.projector_mask")
+def _projector_mask_unmasked(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """Check A50, ``projector_mask`` leg: the mode with no projector masking.
+
+    ``build_beam`` passes a ``projector_mask`` beam through untouched (its
+    ``sky_fraction`` is all ones) and ``DriftScanProjector.horizon_mask``
+    defaults to False, so the mode beside a projector that does not set
+    ``horizon_mask: true`` is a beam that is never cut, with nothing raised.
+    Refused unless EVERY projector reading the beam masks: a second,
+    unmasked projector over the same beam is the same fault on the run that
+    uses it.  A general_pointing projector cannot mask at all.
+
+    A beam no projector reads is left alone: nothing projects it.
+    """
+    return _b2_unmasked_in(document)
 
 
 @register("A50")

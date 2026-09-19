@@ -1969,6 +1969,173 @@ class TestDeclaredDataAndSources:
             assert _t5_refused(document, "A31") == []
 
 
+#: A31's other half, whole, for a model lighting only ``beam_spill``.
+NO_SOURCE_MESSAGE = (
+    "model: lights ['beam_spill'] and no source node, so its twin is a pure "
+    "transform chain, and observation declares no data for it to act on. "
+    "Every run that evaluates the twin would stop with 'This assembly is a "
+    "pure transform chain (no source operators)'. Light a source on the "
+    "antenna branch (global_signal, foregrounds, point_sources, uniform_sky, "
+    "rfi_field, observed_astro_sky, ground_pickup, t_sys_extra or "
+    "atmosphere), or declare the data the chain transforms: "
+    "observation.data, or observation.from_file for a recording (check A31)."
+)
+
+
+class TestAModelWithNoSourceAndNoData:
+    """A31's other half: a transform chain with nothing to transform.
+
+    ``Assembly.__call__`` refuses both mismatches between ``has_source`` and
+    ``state.data``; :func:`_data_with_sources` decided one of them in text
+    and this decides the other.  Measured before it existed: the ``rhino_v1``
+    preset with ``model: {beam_spill: ...}`` passed ``rheplicant validate``
+    ("configuration valid") and ``rheplicant run`` then exited 1 with the
+    assembly's ``AssemblyError`` and a traceback.
+    """
+
+    def test_a_chain_with_no_data_is_refused_naming_the_model(self):
+        found = only(_model_only({"beam_spill": SPILL}), "A31")
+        assert found.where == "model"
+        assert found.message == NO_SOURCE_MESSAGE
+
+    def test_load_document_refuses_it_before_anything_is_built(self):
+        from rheplicant.config.document import load_document
+
+        with pytest.raises(ConfigError) as caught:
+            load_document(_model_only({"beam_spill": SPILL}))
+        assert NO_SOURCE_MESSAGE in str(caught.value)
+
+    @pytest.mark.parametrize("model", [
+        {"beam_spill": SPILL},
+        {"gain": GAIN},
+        {"gain": GAIN, "noise": {"type": "NoiseOperator", "sigma": SIGMA}},
+        {"global_signal": PY_GAIN},
+        {"uniform_sky": SKY},
+        {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
+        {"atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}}, "gain": GAIN},
+        {"foregrounds": [FOREGROUND], "gain": GAIN},
+        {"gain": dict(SKY, python="rheplicant.radio:SkyOperator")},
+    ], ids=["spill", "gain", "gain-noise", "gain-under-a-source-key", "sky",
+            "global-signal", "atmosphere", "foregrounds",
+            "a-source-under-a-transform-key"])
+    def test_the_refusal_is_exactly_the_assemblys_own_predicate(self, model):
+        """Refused iff the assembly the build makes has no source.
+
+        The two ``python:`` rows are the cells a key-based reading gets
+        wrong in opposite directions: a gain written under ``global_signal:``
+        lands at ``gain`` and lights no source, and a sky written under
+        ``gain:`` lands at ``uniform_sky`` and lights one.
+        """
+        twin = build_model({key: (dict(value) if isinstance(value, dict)
+                                  else value)
+                            for key, value in model.items()},
+                           BARE, switch_order=())
+        refused = _t5_refused(_model_only(model), "A31") != []
+        assert refused is (not twin.has_source)
+
+    def test_calibration_loads_alone_are_a_source(self):
+        """``cal_loads`` is a source node, so its assembly generates data and
+        the call guard does not fire.  Whether the ANTENNA branch is dark is
+        B5's question, asked after the build."""
+        document = _model_only({"cal_loads": {"ambient": LOAD, "hot": LOAD},
+                                "gain": GAIN})
+        assert _t5_refused(document, "A31") == []
+
+    def test_a_recording_is_the_data_the_chain_acts_on(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "h5py", object())
+        document = {**_model_only({"gain": GAIN}),
+                    "observation": {"meta": {"telescope": "RHINO"},
+                                    "from_file": {"format": "rhino_hdf5",
+                                                  "path": "obs.hd5f",
+                                                  "freq_unit": "MHz"}}}
+        assert _t5_refused(document, "A31") == []
+
+    def test_a_pipeline_model_is_not_an_assembly(self):
+        document = _model_only({"kind": "pipeline",
+                                "stages": [{"type": "GainOperator", **GAIN}]})
+        assert _t5_refused(document, "A31") == []
+
+    def test_an_entry_text_cannot_place_stands_the_check_down(self):
+        """A ``python:`` class this pass will not import lands wherever the
+        class declares -- possibly a source -- so absence cannot be read."""
+        document = _model_only({"gain": dict(GAIN,
+                                             python="my_package:MyGain")})
+        assert _t5_refused(document, "A31") == []
+
+    def test_an_entry_the_build_refuses_keeps_its_own_sentence(self):
+        """An ``at:`` that disagrees with its key places nothing, and
+        ``_single`` names that fault; "no source" would pre-empt it."""
+        document = _model_only({"uniform_sky": dict(
+            SKY, python="rheplicant.radio:SkyOperator", at="gain")})
+        assert _t5_refused(document, "A31") == []
+
+    def test_a_model_already_refused_for_its_node_ids_is_not_refused_twice(
+            self):
+        """A misspelled source is A2's; telling the reader it lights no
+        source as well sends them looking for a second fault."""
+        document = _model_only({"uniform_skyy": SKY, "gain": GAIN})
+        assert _t5_refused(document, "A2") != []
+        assert _t5_refused(document, "A31") == []
+
+    def test_the_run_kinds_are_not_read(self):
+        """The check's declared scope: it refuses on the model and the data
+        alone.  ``mmodes`` never evaluates the twin, so this document would
+        run, and it is refused all the same -- the exit registry carries no
+        "evaluates the twin" property to scope by.  If that property is
+        added and the check narrowed, this is the test to turn round."""
+        document = _model_only({"gain": GAIN})
+        del document["inference"]
+        document["runs"] = [{"kind": "mmodes"}]
+        found = [one for one in _t5_refused(document, "A31")
+                 if one.where == "model"]
+        assert len(found) == 1
+
+    def test_the_rhino_preset_document_is_refused_by_the_command_line(
+            self, tmp_path, capsys):
+        """The reported document, end to end: exit 2, the sentence, no
+        traceback, and no "configuration valid"."""
+        from _rheplicant_bootstrap.cli import main
+
+        config = tmp_path / "doc.yaml"
+        config.write_text(RHINO_SPILL_ONLY)
+        assert main(["validate", str(config)]) == 2
+        streams = capsys.readouterr()
+        assert streams.out == ""
+        assert "Traceback" not in streams.err
+        assert "(check A31)" in streams.err
+        assert "model: lights ['beam_spill'] and no source node" in streams.err
+
+
+#: The document N-1 was reported against, with ``jax_enable_x64`` turned
+#: off: the command line runs in this process, and this session is float32.
+RHINO_SPILL_ONLY = """\
+schema_version: 1
+defaults: [rhino_v1]
+runtime: {jax_enable_x64: false, platform: cpu, seed: 20260817}
+observation:
+  meta: {telescope: RHINO}
+  freq:
+    grid:
+      linspace: {start: 60.0, stop: 85.0, num: 8, endpoint: true}
+      unit: MHz
+  time:
+    grid:
+      arange: {start: 0.0, step: 2.0, num: 16}
+      unit: s
+  environment:
+    temperature: {value: 280.0, unit: K}
+  pointing: {materialise: []}
+model:
+  beam_spill:
+    sky_fraction: {value: 0.95, unit: dimensionless}
+    t_ground: {value: 290.0, unit: K}
+outputs:
+  dir: out_preset
+runs:
+  - {name: simulate, kind: forward}
+"""
+
+
 class TestTheReVoicedChecksInThePass:
     """Registration, attribution and the phase, for A5, A8 and A31."""
 
