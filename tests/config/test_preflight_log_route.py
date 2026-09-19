@@ -140,6 +140,15 @@ class TestTheCheck:
         found = _found(_document(_floored(1.0), warm=True))
         assert [one.where for one in found] == ["runs[0].warm_start.blocks[0]"]
 
+    def test_it_speaks_even_when_the_partition_is_wrong(self):
+        # It reads the block's engine and the noise, no latent, so a document
+        # with both faults hears about both in one round trip, as it does for
+        # the engine enum. Kills gating it on the partition.
+        document = _document(_floored(1.0))
+        document["runs"][0]["blocks"][0]["names"] = ["w", "ghost"]
+        checks = sorted(one.check for one in _found(document))
+        assert "A19" in checks and "A16" in checks, checks
+
     @pytest.mark.parametrize("floor", [
         {"ref": "resources.arrays.floor"},
         {"value": "one", "unit": "K"},
