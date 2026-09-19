@@ -707,7 +707,12 @@ class TestA13sWidthLegs:
         """``_median_gap`` takes ``abs`` BEFORE the median.  Unsigned, a
         descending grid's diffs are all negative and the spacing comes back
         negative -- which then compares below every floor and reads as
-        comfortably fine."""
+        comfortably fine.
+
+        The whole NARROW message is asserted, not only the id: with a signed
+        spacing the 300 kHz line is still refused, by the CEILING (0.25 x the
+        1 MHz band = 250 kHz), so an id-only check survived that mutant, on
+        this band and on the 1 kHz one before it."""
         descending = preflight_document(
             observation={"freq": {"grid": {"linspace": {
                 "start": 71.0, "stop": 70.0, "num": 4, "endpoint": True},
@@ -716,7 +721,7 @@ class TestA13sWidthLegs:
                 "amplitude": {"value": 5000.0, "unit": "K"},
                 "tone_freq": {"value": 70.5, "unit": "MHz"},
                 "line_width": 300e3}})
-        assert "A13" in ids_of(descending)
+        assert_a13_narrow(axis_only(descending, "A13").message)
 
     def test_the_worked_bands_own_width_is_accepted(self):
         assert silent_here(tone())
