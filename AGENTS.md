@@ -206,6 +206,28 @@ CI did not have it and nothing said so: its `httpx2` is what
 `tests/gui/test_session_api.py` skips on, and its absence cost 118 statements
 of GUI coverage without a single test failing.
 
+It also means **`pyuvdata`** (the `uvbeam` extra) and **`pygdsm`**, both on
+PyPI, which `tests/config` importorskips; **`panel`** (the `gui-panel` extra),
+which the seven GUI spike tests in `tests/gui/test_panel_spike.py` and
+`tests/gui/test_candidate_parity.py` importorskip, and which leaves with the
+spike when it is removed as scheduled; **`matplotlib`**, which rhino-cal's
+`gcr.data_processing` imports, so the three `DataHandler` comparisons in
+`tests/radio/test_ingestion_vs_reference.py` need it; and the **Node
+toolchain**, `npm` on `PATH` and `npm ci` run in
+`tools/config_gui_spike/react`, without which
+`tests/gui/test_typescript_gates.py` skips. Two sets of tests are opt-in by
+environment variable because their data is not redistributable:
+`RHEPLICANT_RHINO_BEAMS` names a directory of RHINO CST beam exports
+(`tests/radio/test_beams.py`), and `RHEPLICANT_RHINO_CAL` names a rhino-cal
+checkout (`tests/radio/test_ingestion_vs_reference.py`).
+
+**MomentRFI stays absent and is Experimental.** It declares MomentEmu, which is
+not on PyPI, so it does not install from an index; CI tries it and never
+requires it. The three `DataHandler` comparisons also reach MomentRFI through
+rhino-cal's `gcr` imports, so they skip without it even where matplotlib and
+`RHEPLICANT_RHINO_CAL` are both present (measured 2026-09-19: `No module
+named 'MomentRFI'`).
+
 **bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
 capability floor is 0.6, the highest release whose surface this package uses:
 0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
