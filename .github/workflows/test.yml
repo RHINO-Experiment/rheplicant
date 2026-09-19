@@ -31,6 +31,13 @@ concurrency:
 # steps below cannot resolve `bayesmith>=0.9,<0.10` and the suite jobs fail at
 # install. The lint job does not depend on it.
 
+env:
+  # The import names whose absence fails the Suite job's completeness report
+  # and the Coverage job's required check, spelled once for both. Each is
+  # installable on a public runner, and without one the suite skips modules
+  # and still passes. Space-separated; both checks also fail if it is empty.
+  REQUIRED_IMPORTS: h5py rhino_cal_jax limtod_jax numpyro pyuvdata pygdsm MomentRFI
+
 jobs:
   lint:
     name: Lint
@@ -73,7 +80,11 @@ jobs:
           # excludes `httpx2` because the shipped server does not need it;
           # this installs the TEST dependency rather than moving it into the
           # runtime extra. `uvbeam` brings pyuvdata, and pygdsm is on PyPI with
-          # no extra of its own; tests/config importorskips both.
+          # no extra of its own; tests/config importorskips both. pygdsm
+          # downloads its component data from the network when a test first
+          # builds a sky (gsm2016_components.h5, 303 MB, for limTOD's GSM16)
+          # into astropy's download cache; the cache step below keeps that
+          # download off later runs.
           uv pip install -e ".[rhino,numpyro,gui,gui-react,uvbeam]" --group dev
           uv pip install pygdsm
 
@@ -98,6 +109,15 @@ jobs:
           uv pip install
           "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
           "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Cache astropy downloads (pygdsm component data)
+        # pygdsm fetches through astropy.utils.data.download_file(cache=True),
+        # which writes under ~/.astropy/cache. The files are fixed releases,
+        # so a constant key is enough.
+        uses: actions/cache@v4
+        with:
+          path: ~/.astropy/cache
+          key: astropy-download-cache-pygdsm-v1
 
       # The two TypeScript typecheck guards shell out to `node_modules/.bin/tsc`
       # and raised FileNotFoundError without it -- not a skip, a crash, which
@@ -140,9 +160,10 @@ jobs:
         run: |
           status=0
           .venv/bin/python -c "
-          import importlib, sys
-          required = ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm',
-                      'MomentRFI')
+          import importlib, os, sys
+          required = os.environ['REQUIRED_IMPORTS'].split()
+          if not required:
+              sys.exit('REQUIRED_IMPORTS is empty')
           missing = []
           for name in required:
               try:
@@ -184,7 +205,11 @@ jobs:
           # excludes `httpx2` because the shipped server does not need it;
           # this installs the TEST dependency rather than moving it into the
           # runtime extra. `uvbeam` brings pyuvdata, and pygdsm is on PyPI with
-          # no extra of its own; tests/config importorskips both.
+          # no extra of its own; tests/config importorskips both. pygdsm
+          # downloads its component data from the network when a test first
+          # builds a sky (gsm2016_components.h5, 303 MB, for limTOD's GSM16)
+          # into astropy's download cache; the cache step below keeps that
+          # download off later runs.
           uv pip install -e ".[rhino,numpyro,gui,gui-react,uvbeam]" --group dev
           uv pip install pygdsm
 
@@ -201,17 +226,28 @@ jobs:
           "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
           "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 
+      - name: Cache astropy downloads (pygdsm component data)
+        # pygdsm fetches through astropy.utils.data.download_file(cache=True),
+        # which writes under ~/.astropy/cache. The files are fixed releases,
+        # so a constant key is enough.
+        uses: actions/cache@v4
+        with:
+          path: ~/.astropy/cache
+          key: astropy-download-cache-pygdsm-v1
+
       - name: Require the complete environment
-        # The Suite job's completeness report fails on the same seven names.
+        # The same REQUIRED_IMPORTS the Suite job's completeness report reads.
         # This job measures the coverage figure, and a required package that
         # did not arrive would lower it through skips rather than through
         # failures.
         run: |
           .venv/bin/python -c "
-          import importlib, sys
+          import importlib, os, sys
+          required = os.environ['REQUIRED_IMPORTS'].split()
+          if not required:
+              sys.exit('REQUIRED_IMPORTS is empty')
           missing = []
-          for name in ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'pyuvdata', 'pygdsm',
-                       'MomentRFI'):
+          for name in required:
               try:
                   importlib.import_module(name)
               except Exception as error:

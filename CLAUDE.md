@@ -237,7 +237,8 @@ its tests; without MomentRFI ten of them skip.
 
 **What CI requires.** The Suite and Coverage jobs fail when any of seven
 import names is absent: `h5py`, `rhino_cal_jax`, `limtod_jax`,
-`numpyro`, `pyuvdata`, `pygdsm` and `MomentRFI`. They also install the
+`numpyro`, `pyuvdata`, `pygdsm` and `MomentRFI`, the workflow-level
+`REQUIRED_IMPORTS` in `.github/workflows/test.yml`. They also install the
 `gui-react` extra and the Node toolchain without checking either by name.
 They install neither `panel` nor `matplotlib`, so on CI the seven spike tests
 skip, and neither opt-in variable is set.
