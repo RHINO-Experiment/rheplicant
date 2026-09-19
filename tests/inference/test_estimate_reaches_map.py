@@ -682,6 +682,36 @@ class TestTheNewtonDecrement:
         attempt = _certify({}, cond, values, 0.005, 1)
         assert attempt.estimate < 0.1 and not attempt.certified
 
+    def test_an_early_stop_cannot_turn_a_refusal_into_a_certificate(self, monkeypatch):
+        """The guarantee, made visible by stopping the solve early.
+
+        At ``rtol = 0.1`` on a condition number of 1e4 the conjugate
+        gradients leave the decrement 2 to 8 per cent low (measured), so a
+        point 0.102 posterior sigma from the minimum — outside the 0.1 the
+        default threshold stands for — has estimates that fall inside it. The
+        residual is what refuses them: it is recomputed from the iterate
+        rather than carried from the iteration, and the bound it gives covers
+        the true decrement at every seed here.
+        """
+        from rheplicant.inference import engines
+        from rheplicant.inference.plan import _certify
+
+        monkeypatch.setattr(engines, "_DECREMENT_DENSE_MAX", 0)
+        monkeypatch.setattr(engines, "_DECREMENT_RTOL", {4: 0.1, 8: 0.1})
+        eps, inside = float(np.finfo(np.float64).eps), 0
+        for seed in range(6):
+            hessian, minimum, point = _quadratic(seed, condition=1e4, distance=0.102)
+            lambda2, rho, _, _, kappa = _decrement(hessian, minimum, point)
+            slope = hessian @ (point - minimum)
+            exact = slope @ np.linalg.solve(hessian, slope)
+            spread = rho * np.sqrt(kappa) + eps * kappa
+            assert lambda2 < exact * (1 - 1e-6), "the solve must stop short here"
+            assert spread < 1.0 and exact <= lambda2 / (1.0 - spread), seed
+            cond, values = _Quadratic(hessian, minimum), {"x": jnp.asarray(point)}
+            assert not _certify({}, cond, values, 0.005, 1).certified, seed
+            inside += lambda2 <= 2 * 0.005
+        assert inside, "no seed's estimate fell inside the threshold: vacuous"
+
     @pytest.mark.parametrize(
         "lambda2, rho, kappa, dtype, status, certified",
         [
