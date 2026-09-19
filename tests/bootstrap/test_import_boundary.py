@@ -41,8 +41,14 @@ BOOTSTRAP_MODULES = _bootstrap_modules()
 
 
 def _run(program):
+    """Run ``program`` in a fresh isolated interpreter with ``src`` first on
+    the path. ``-I`` ignores every ``PYTHON*`` variable, including
+    ``PYTHONDONTWRITEBYTECODE``, so ``-B`` is passed explicitly: without it
+    each subprocess writes ``__pycache__`` into ``src/_rheplicant_bootstrap``,
+    the stale-bytecode hazard CLAUDE.md records for mutation runs."""
     return subprocess.run(
-        [sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + program],
+        [sys.executable, "-I", "-B", "-c",
+         f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + program],
         check=True,
         capture_output=True,
         text=True,
