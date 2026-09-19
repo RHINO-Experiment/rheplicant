@@ -99,3 +99,10 @@ run2.exit
 /PROPOSAL_bayesmith_bayesian.md
 /PROPOSAL_rheplicant_nonbayesian.md
 /REVIEW_REPORT.md
+
+# Local agent handoffs and installation backups
+/.agent-state/
+
+# Research run outputs (TRIS campaigns, T-002 local release artefacts): large,
+# machine-local, and outside the package's release guarantee
+/runs/
