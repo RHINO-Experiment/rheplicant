@@ -129,7 +129,16 @@ def test_loopback_hosts_are_accepted_with_any_port(client, host) -> None:
 
 @pytest.mark.parametrize(
     "origin",
-    [FOREIGN_ORIGIN, "http://evil.example", "null", "http://[::1", "file://"],
+    [
+        FOREIGN_ORIGIN,
+        "http://evil.example",
+        "null",
+        "http://[::1",
+        "file://",
+        "http://127.0.0.1:9999",
+        "http://localhost:8000",
+        "https://127.0.0.1:8000:1",
+    ],
 )
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 def test_a_foreign_origin_is_refused_on_state_changing_methods(
@@ -163,17 +172,23 @@ def test_a_foreign_origin_does_not_block_safe_methods(client) -> None:
 
 
 @pytest.mark.parametrize(
-    "origin",
+    ("host", "origin"),
     [
-        "http://127.0.0.1:8000",
-        "http://localhost:5173",
-        "http://[::1]:8765",
-        "https://LOCALHOST",
-        None,
+        ("127.0.0.1:8000", "http://127.0.0.1:8000"),
+        # The Vite dev server proxies /api without rewriting Host.
+        ("localhost:5173", "http://localhost:5173"),
+        ("[::1]:8765", "http://[::1]:8765"),
+        ("[0:0::1]:8765", "http://[::1]:8765"),
+        ("LocalHost:8000", "HTTP://LOCALHOST:8000"),
+        ("127.0.0.1", "http://127.0.0.1:80"),
+        ("127.0.0.1:80", "http://127.0.0.1"),
+        ("127.0.0.1:8000", None),
     ],
 )
-def test_a_loopback_or_missing_origin_is_accepted_on_writes(client, origin) -> None:
-    headers = {} if origin is None else {"Origin": origin}
+def test_the_request_s_own_or_a_missing_origin_is_accepted_on_writes(
+    client, host, origin
+) -> None:
+    headers = {"Host": host} if origin is None else {"Host": host, "Origin": origin}
     created = client.post(
         "/api/sessions", json={"yaml_text": STARTER_YAML}, headers=headers
     )
@@ -185,6 +200,45 @@ def test_a_loopback_or_missing_origin_is_accepted_on_writes(client, origin) -> N
         headers=headers,
     )
     assert replaced.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("host", "origin"),
+    [
+        ("127.0.0.1:8000", "http://127.0.0.1:9999"),
+        ("127.0.0.1:8000", "http://localhost:8000"),
+        ("localhost:5173", "http://localhost:8000"),
+        ("[::1]:8765", "http://[::1]:8000"),
+        ("127.0.0.1", "https://127.0.0.1"),
+        ("127.0.0.1:8000", "http://127.0.0.1"),
+    ],
+)
+def test_an_origin_on_another_port_or_loopback_name_is_refused_on_writes(
+    client, host, origin
+) -> None:
+    """A loopback Origin is not enough: another port on this machine is
+    another origin, for example a second local web server."""
+    session_id, revision = new_session(client)
+    response = client.put(
+        f"/api/sessions/{session_id}/yaml",
+        json={"yaml_text": STARTER_YAML, "expected_revision": revision},
+        headers={"Host": host, "Origin": origin},
+    )
+    assert response.status_code == 403
+    assert response.text == "Cross-origin request refused."
+
+
+def test_default_ports_follow_the_request_scheme(monkeypatch) -> None:
+    client = TestClient(served_app(monkeypatch), base_url="https://127.0.0.1")
+    for origin, status in (
+        ("https://127.0.0.1", 201),
+        ("https://127.0.0.1:443", 201),
+        ("http://127.0.0.1", 403),
+    ):
+        created = client.post(
+            "/api/sessions", json={"yaml_text": STARTER_YAML}, headers={"Origin": origin}
+        )
+        assert created.status_code == status, origin
 
 
 def test_a_websocket_under_a_foreign_host_is_closed(client) -> None:
@@ -280,7 +334,7 @@ def test_an_allowed_host_is_accepted_beside_loopback_and_nothing_else(
     created = client.post(
         "/api/sessions",
         json={"yaml_text": STARTER_YAML},
-        headers={"Origin": "https://gui.example.org"},
+        headers={"Origin": "http://gui.example.org:8000"},
     )
     assert created.status_code == 201
     for host in ("127.0.0.1:8000", "localhost", "[::1]:8000", "[fe80::1]:8000"):

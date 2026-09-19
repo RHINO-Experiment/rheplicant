@@ -9,7 +9,7 @@ domain the attacker controls can re-point that domain at 127.0.0.1 (DNS
 rebinding) and then reach the editor as a same-origin client, under its own
 host name.  The served app therefore answers only to loopback host names and
 to the names given with ``--allowed-host``, and refuses a state-changing
-request whose ``Origin`` names any other host.
+request whose ``Origin`` is not the request's own host and port.
 """
 
 from __future__ import annotations
@@ -26,8 +26,10 @@ from urllib.parse import urlsplit
 LOOPBACK_HOST_NAMES = ("127.0.0.1", "localhost", "[::1]")
 
 #: Methods no route of the editor uses to change state.  Any other method is
-#: refused when it carries an ``Origin`` outside the allowed hosts.
+#: refused when it carries an ``Origin`` other than the request's own.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+#: The port a URL or ``Host`` header without one means, by scheme.
+_DEFAULT_PORTS = {"http": 80, "ws": 80, "https": 443, "wss": 443}
 _HOST_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 _PORT_SUFFIX = re.compile(r"(?::[0-9]{1,5})?")
 
@@ -70,8 +72,12 @@ def _canonical_host(name: str) -> str | None:
     return address.compressed
 
 
-def _host_header_name(value: str) -> str | None:
-    """Return the canonical host of a ``Host`` header value, port removed."""
+def _host_header(value: str) -> tuple[str, int | None] | None:
+    """Split a ``Host`` header value into its canonical host and its port.
+
+    The port is None when the header gives none. None as a whole means the
+    value is malformed.
+    """
     if value.startswith("["):
         end = value.find("]") + 1
         if end == 0:
@@ -82,16 +88,29 @@ def _host_header_name(value: str) -> str | None:
         port = colon + rest
     if _PORT_SUFFIX.fullmatch(port) is None:
         return None
-    return _canonical_host(name)
+    canonical = _canonical_host(name)
+    if canonical is None:
+        return None
+    return canonical, int(port[1:]) if port else None
 
 
-def _origin_host_name(value: str) -> str | None:
-    """Return the canonical host an ``Origin`` header names, if it names one."""
+def _origin(value: str) -> tuple[str, int] | None:
+    """Return the canonical host and effective port an ``Origin`` names.
+
+    None for ``null``, a scheme without a default port and no explicit one,
+    or anything that does not parse as ``scheme://host[:port]``.
+    """
     try:
-        name = urlsplit(value).hostname
+        parts = urlsplit(value)
+        port = parts.port
     except ValueError:
         return None
-    return None if name is None else _canonical_host(name)
+    host = None if parts.hostname is None else _canonical_host(parts.hostname)
+    if port is None:
+        port = _DEFAULT_PORTS.get(parts.scheme)
+    if host is None or port is None:
+        return None
+    return host, port
 
 
 def _allowed_host_names(names: Iterable[str]) -> frozenset[str]:
@@ -118,7 +137,10 @@ class _HostGuard:
     that one splits the header at the first colon, so it refuses
     ``[::1]:8765`` and with it the documented ``--host ::1`` launch.  A
     missing ``Origin`` is accepted, because only browsers send one and
-    command-line clients cannot be rebound.
+    command-line clients cannot be rebound.  A present ``Origin`` must be
+    the request's own: the same host and port as ``Host``, with a missing
+    port read as the scheme's default.  A loopback ``Origin`` on another port
+    is another web server on this machine, not the editor.
     """
 
     def __init__(self, app, *, allowed: frozenset[str]) -> None:
@@ -130,11 +152,15 @@ class _HostGuard:
             await self.app(scope, receive, send)
             return
         hosts = _header_values(scope, b"host")
-        if len(hosts) != 1 or _host_header_name(hosts[0]) not in self.allowed:
+        target = _host_header(hosts[0]) if len(hosts) == 1 else None
+        if target is None or target[0] not in self.allowed:
             await _refuse(scope, send, 400, "Invalid Host header.")
             return
+        host, port = target
+        if port is None:
+            port = _DEFAULT_PORTS.get(scope.get("scheme", "http"))
         if scope.get("method", "GET") not in _SAFE_METHODS and any(
-            _origin_host_name(origin) not in self.allowed
+            _origin(origin) != (host, port)
             for origin in _header_values(scope, b"origin")
         ):
             await _refuse(scope, send, 403, "Cross-origin request refused.")

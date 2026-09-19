@@ -209,11 +209,16 @@ host name. The launcher therefore answers only to the host names `127.0.0.1`,
 `localhost` and `[::1]` (with any port), to a loopback bind address given with
 `--host`, and to each name given with `--allowed-host NAME`. A request naming
 any other host is refused with 400. A request that can change state (any
-method except GET, HEAD and OPTIONS) whose `Origin` header names a host outside
-that list is refused with 403; a request without an `Origin`, such as one from
-`curl` or a script, is accepted. `--allowed-host` is repeatable, takes a name
-or IP address without a scheme or port, and is also how a reverse proxy on the
-same machine that forwards its own host name is admitted.
+method except GET, HEAD and OPTIONS) whose `Origin` header is not the
+request's own origin is refused with 403: the `Origin` must name the same host
+and port as the `Host` header, a missing port counting as 80 for http and 443
+for https. A page served from another port on the same machine is therefore
+refused. A request without an `Origin`, such as one from `curl` or a script,
+is accepted.
+
+`--allowed-host` is repeatable, takes a name or IP address without a scheme or
+port, and is also how a reverse proxy on the same machine that forwards its own
+host name is admitted.
 
 `--allow-remote` is an acknowledgement, not a security feature, and
 `--allowed-host` limits which names reach the editor, not who does. Put an
