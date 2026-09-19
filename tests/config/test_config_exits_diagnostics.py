@@ -276,9 +276,12 @@ class TestTheSeedRunsTheOtherWay:
         """No seed at all is legal here -- and the answer is a fixed number.
 
         The package's ``key=None`` default is ``jax.random.key(0)``, so two
-        runs of the same document agree bit for bit; a config layer that
-        invented a key of its own (from the run name, from the clock, from
-        ``runtime.seed``) would make this exit's number un-quotable.
+        runs of the same document agree bit for bit. Two calls agreeing
+        catches only a key that changes between calls, such as one taken from
+        the clock. A key the layer derived deterministically, from the run
+        name or from ``runtime.seed``, would agree with itself too; the case
+        that shows the unseeded key is the package's ``key(0)`` is
+        ``test_seed_zero_reproduces_the_packages_own_default`` below.
         """
         assert 1.0e6 < kappa_of(KAPPA) < 1.0e8
         assert kappa_of(KAPPA) == kappa_of(KAPPA)
