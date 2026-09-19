@@ -280,11 +280,13 @@ high, and wrapping MomentRFI's own flags around the noise model recovers the
 truth — matching, to six digits, what flagging the contaminated channels by
 hand would have given.
 
-Install: MomentRFI is not on PyPI, so the `rheplicant[rfi]` extra names the
-requirement rather than resolving it (the same arrangement as `cal`).
+Install: neither MomentRFI nor MomentEmu, which MomentRFI declares, is on
+PyPI, so the `rheplicant[rfi]` extra names the requirement rather than
+resolving it (the same arrangement as `cal`). Install the two in one command;
+MomentRFI named alone does not resolve.
 
 ```bash
-pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
 ```
 
 ## Core combinators & utilities
