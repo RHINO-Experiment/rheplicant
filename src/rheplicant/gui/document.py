@@ -20,7 +20,7 @@ from typing import Literal
 import yaml
 
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.layering import apply_variant
+from _rheplicant_bootstrap.layering_variants import apply_variant
 from _rheplicant_bootstrap.yaml import safe_load_document
 from rheplicant.core.graph import SignalGraph
 from rheplicant.gui.form_catalog import composition_for

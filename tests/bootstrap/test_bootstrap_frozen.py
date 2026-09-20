@@ -1484,6 +1484,14 @@ def test_cleanup_mutations_do_not_live_inside_assert_statements():
     for relative in (
         "src/_rheplicant_bootstrap/frozen.py",
         "src/_rheplicant_bootstrap/layering.py",
+        # `layering.py` was split on 2026-09-20 (A1, section 3.2) and two of
+        # the three functions this census counts went with their subject:
+        # `_detach_origin_tree` to the origin record, `_merge_extends_compat`
+        # to the defensive copy. The census follows the functions, not the
+        # file -- it is about where a cleanup mutation may live, and that is a
+        # property of the function.
+        "src/_rheplicant_bootstrap/layering_origins.py",
+        "src/_rheplicant_bootstrap/layering_copy.py",
     ):
         tree = ast.parse((root / relative).read_text())
         for assertion in (node for node in ast.walk(tree) if isinstance(node, ast.Assert)):
@@ -1506,6 +1514,13 @@ def test_cleanup_mutations_do_not_live_inside_assert_statements():
     for relative in (
         "src/_rheplicant_bootstrap/frozen.py",
         "src/_rheplicant_bootstrap/layering.py",
+        # `layering.py` was split on 2026-09-20 (A1, section 3.2) and two of
+        # the three functions this census counts went with their subject:
+        # `_detach_origin_tree` to the origin record, `_merge_extends_compat`
+        # to the defensive copy. The census follows the FUNCTION, because
+        # where a cleanup mutation may live is a property of the function.
+        "src/_rheplicant_bootstrap/layering_origins.py",
+        "src/_rheplicant_bootstrap/layering_copy.py",
     ):
         tree = ast.parse((root / relative).read_text())
         for function in (

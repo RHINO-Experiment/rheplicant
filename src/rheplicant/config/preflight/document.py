@@ -11,9 +11,9 @@ Three holes in A1's sweep, measured rather than inferred:
   table (fifteen of the eighteen by importing the very object the parser
   sweeps with), so the two cannot drift; ``test_preflight_document.py``
   reads the tables back out of the PARSERS' source and compares.
-* An unselected ``variants`` entry.  ``_rheplicant_bootstrap/layering.py::_overlay_keys`` merges
-only the
-  REQUESTED variant, so SEVEN document-grammar clauses never fire for the
+* An unselected ``variants`` entry.
+  ``_rheplicant_bootstrap/layering_overlay.py::_overlay_keys``
+  merges only the REQUESTED variant, so SEVEN document-grammar clauses never fire for the
   others: three of ``apply_variant``'s six (of the other three, two are about
   a name that is not declared, which is not a state a declared name can be in,
   and the third is a ``variants:`` section that is not a mapping, which

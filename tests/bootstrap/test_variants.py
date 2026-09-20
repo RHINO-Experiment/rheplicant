@@ -13,6 +13,18 @@ import pytest
 
 from _rheplicant_bootstrap import frozen as frozen_module
 from _rheplicant_bootstrap import layering as layering_module
+
+# The origin record likewise. `layering` imports these back, so
+# `layering_module.X` still RESOLVES -- but patching it would not be seen by
+# the module that defines them, which is what several of these tests need.
+from _rheplicant_bootstrap import layering_origins as origins_module
+from _rheplicant_bootstrap import layering_overlay as overlay_module
+from _rheplicant_bootstrap import layering_probe as probe_module
+
+# `apply_variant` and the variant grammar around it moved to their own module
+# when `layering.py` was split (A1, section 3.2). The name is looked up here,
+# so a monkeypatch of it belongs here too.
+from _rheplicant_bootstrap import layering_variants as variants_grammar
 from _rheplicant_bootstrap import variants as variants_module
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import thaw
@@ -239,7 +251,7 @@ def test_public_apply_variant_keeps_cross_root_deepcopy_alias_semantics():
         "variants": {"x": {"replaced": shared}},
     }
 
-    applied = layering_module.apply_variant(document, "x")
+    applied = variants_grammar.apply_variant(document, "x")
 
     assert set(applied) == {"kept", "replaced", "variants"}
     assert applied["kept"] is applied["replaced"]
@@ -310,8 +322,8 @@ def test_trusted_overlay_preserves_delete_readd_and_replacement_order(patch, exp
 
 
 def test_overlay_builder_removes_new_keys_in_constant_time_and_keeps_order():
-    root = layering_module._trusted_overlay_root(MappingProxyType({}))
-    builder = layering_module._OverlayBuilder(root)
+    root = overlay_module._trusted_overlay_root(MappingProxyType({}))
+    builder = overlay_module._OverlayBuilder(root)
     for index in range(1_000):
         builder[f"new_{index}"] = index
     for index in reversed(range(0, 1_000, 2)):
@@ -370,8 +382,8 @@ def test_overlay_builder_rejects_hostile_lookup_keys_without_hooks():
             calls.append("eq")
             raise AssertionError("overlay lookup must validate first")
 
-    builder = layering_module._OverlayBuilder(
-        layering_module._trusted_overlay_root(MappingProxyType({"kept": 1}))
+    builder = overlay_module._OverlayBuilder(
+        overlay_module._trusted_overlay_root(MappingProxyType({"kept": 1}))
     )
     key = HostileKey()
     marker = object()
@@ -524,8 +536,8 @@ def test_overlay_subclasses_and_lookalikes_never_enter_trusted_merge_results():
         pass
 
     subclass = OverlaySubclass(MappingProxyType({}), MappingProxyType({}), frozenset(), ())
-    ledger = layering_module._DeletionLedger((), ())
-    origins = layering_module.OriginNode(None, {})
+    ledger = origins_module._DeletionLedger((), ())
+    origins = origins_module.OriginNode(None, {})
 
     with pytest.raises(ConfigError, match="trusted merge document"):
         layering_module._trusted_merge_result(subclass, origins, ledger)
@@ -539,7 +551,7 @@ def test_merge_rejects_a_forged_ledger_parent_without_overlay_roots():
     object.__setattr__(
         forged,
         "deletions",
-        layering_module._DeletionLedger((), ()),
+        origins_module._DeletionLedger((), ()),
     )
 
     with pytest.raises(ConfigError, match="trusted merge parent"):
@@ -563,7 +575,7 @@ def test_trusted_overlay_requires_the_exact_private_root_marker_without_hooks():
             raise AssertionError("trusted storage must not read this mapping")
 
     with pytest.raises(ConfigError, match="trusted overlay base"):
-        layering_module._trusted_overlay(
+        overlay_module._trusted_overlay(
             MappingProxyType(HostileBacking()),
             MappingProxyType({"x": 1}),
             frozenset(),
@@ -574,13 +586,13 @@ def test_trusted_overlay_requires_the_exact_private_root_marker_without_hooks():
 
 
 def test_trusted_overlay_noop_requires_exact_storage_before_truth_testing():
-    root = layering_module._trusted_overlay_root(MappingProxyType({}))
+    root = overlay_module._trusted_overlay_root(MappingProxyType({}))
     with pytest.raises(ConfigError, match="overlay delta"):
-        layering_module._trusted_overlay(root, {}, frozenset(), ())
+        overlay_module._trusted_overlay(root, {}, frozenset(), ())
     with pytest.raises(ConfigError, match="overlay hidden"):
-        layering_module._trusted_overlay(root, MappingProxyType({}), set(), ())
+        overlay_module._trusted_overlay(root, MappingProxyType({}), set(), ())
     with pytest.raises(ConfigError, match="overlay end"):
-        layering_module._trusted_overlay(root, MappingProxyType({}), frozenset(), [])
+        overlay_module._trusted_overlay(root, MappingProxyType({}), frozenset(), [])
 
     calls: list[str] = []
 
@@ -590,7 +602,7 @@ def test_trusted_overlay_noop_requires_exact_storage_before_truth_testing():
             raise _AbortOverlayBacking("stop")
 
     with pytest.raises(ConfigError, match="overlay delta"):
-        layering_module._trusted_overlay(root, HostileTruth(), frozenset(), ())
+        overlay_module._trusted_overlay(root, HostileTruth(), frozenset(), ())
     assert calls == []
 
     class LyingDelta(Mapping):
@@ -604,7 +616,7 @@ def test_trusted_overlay_noop_requires_exact_storage_before_truth_testing():
             return 0
 
     with pytest.raises(ConfigError, match="overlay delta replacements"):
-        layering_module._trusted_overlay(root, MappingProxyType(LyingDelta()), frozenset(), ())
+        overlay_module._trusted_overlay(root, MappingProxyType(LyingDelta()), frozenset(), ())
 
     class BrokenIteration(Mapping):
         def __init__(self, failure):
@@ -620,14 +632,14 @@ def test_trusted_overlay_noop_requires_exact_storage_before_truth_testing():
             raise AssertionError("trusted snapshot must not ask for a length")
 
     with pytest.raises(ConfigError, match="overlay delta protocol"):
-        layering_module._trusted_overlay(
+        overlay_module._trusted_overlay(
             root,
             MappingProxyType(BrokenIteration(RuntimeError("boom"))),
             frozenset(),
             (),
         )
     with pytest.raises(_AbortOverlayBacking, match="stop"):
-        layering_module._trusted_overlay(
+        overlay_module._trusted_overlay(
             root,
             MappingProxyType(BrokenIteration(_AbortOverlayBacking("stop"))),
             frozenset(),
@@ -684,7 +696,7 @@ def test_trusted_layer_records_require_overlay_roots_before_any_lookup():
 
     public = LayerRef("base", None, "", {"runtime": {}}, None)
     public_origin = layering_module.initial_merge({"runtime": {}}, origin=Origin("user")).origins
-    ledger = layering_module._DeletionLedger((), ())
+    ledger = origins_module._DeletionLedger((), ())
     with pytest.raises(ConfigError, match="trusted layer enumeration documents"):
         variants_module._trusted_layer_enumeration(
             (public,),
@@ -706,7 +718,7 @@ def test_trusted_layer_ref_rejects_hostile_identity_scalars_without_hooks():
             calls.append("abort-eq")
             raise _AbortOverlayBacking("stop")
 
-    document = layering_module._trusted_overlay_root(
+    document = overlay_module._trusted_overlay_root(
         MappingProxyType({"runtime": MappingProxyType({})})
     )
     for kind in (PretendKind(), AbortingKind()):
@@ -772,9 +784,12 @@ outcome(lambda: _OverlayMapping(
 def test_trusted_overlay_and_layer_gates_survive_optimized_python():
     code = r"""
 from types import MappingProxyType
-from _rheplicant_bootstrap.layering import (
-    MergeResult, OriginNode, _DeletionLedger, _OverlayBuilder,
-    _trusted_overlay, _trusted_overlay_root, merge_with_origins,
+from _rheplicant_bootstrap.layering import MergeResult, merge_with_origins
+from _rheplicant_bootstrap.layering_origins import (
+    OriginNode, _DeletionLedger,
+)
+from _rheplicant_bootstrap.layering_overlay import (
+    _OverlayBuilder, _trusted_overlay, _trusted_overlay_root,
 )
 from _rheplicant_bootstrap.types import Origin
 from _rheplicant_bootstrap.variants import (
@@ -839,7 +854,11 @@ def test_enumerator_scans_the_variant_index_once_not_once_per_variant(
     item_passes = 0
     variant_index_pair_passes = 0
     real_items = variants_module._variant_items
-    real_pairs = layering_module._mapping_pairs
+    # Patched on BOTH modules that look the name up: the canonicalisation is
+    # in `layering_origins` and the trusted variant apply is in
+    # `layering_variants`, and this test's claim is that the two of them
+    # together traverse the 400-entry index once.
+    real_pairs = probe_module._mapping_pairs
 
     def counting_items(layered_document):
         nonlocal item_passes
@@ -853,7 +872,8 @@ def test_enumerator_scans_the_variant_index_once_not_once_per_variant(
         yield from real_pairs(mapping, failure=failure)
 
     monkeypatch.setattr(variants_module, "_variant_items", counting_items)
-    monkeypatch.setattr(layering_module, "_mapping_pairs", counting_pairs)
+    monkeypatch.setattr(origins_module, "_mapping_pairs", counting_pairs)
+    monkeypatch.setattr(variants_grammar, "_mapping_pairs", counting_pairs)
 
     enumeration = enumerate_layers_once(parent.document, parent.origins, parent.deletions)
 
@@ -875,7 +895,7 @@ def test_empty_variant_deletion_suffixes_reuse_one_base_ledger():
         origin=Origin("user"),
     )
     base_deletions = tuple(
-        layering_module.DeletionRecord((f"already-gone-{index}",), Origin("preset", "base"))
+        origins_module.DeletionRecord((f"already-gone-{index}",), Origin("preset", "base"))
         for index in range(count)
     )
 
@@ -884,7 +904,7 @@ def test_empty_variant_deletion_suffixes_reuse_one_base_ledger():
 
     assert len(rows) == count + 1
     assert len({id(value) for value in rows}) == 1
-    assert type(rows[0]) is layering_module._DeletionLedger
+    assert type(rows[0]) is origins_module._DeletionLedger
     assert len(rows[0]) == count
 
 
@@ -903,18 +923,18 @@ def test_variant_deletion_ledgers_share_the_base_and_retain_only_tiny_suffixes(
         origin=Origin("user"),
     )
     base_deletions = tuple(
-        layering_module.DeletionRecord((f"already-gone-{index}",), Origin("preset", "base"))
+        origins_module.DeletionRecord((f"already-gone-{index}",), Origin("preset", "base"))
         for index in range(base_count)
     )
     visits = {"parent": 0, "suffix": 0}
-    real_validate = layering_module._validate_deletion_ledger_chunk
+    real_validate = origins_module._validate_deletion_ledger_chunk
 
     def counting_validate(rows, *, where):
         visits[where] += len(rows)
         return real_validate(rows, where=where)
 
     monkeypatch.setattr(
-        layering_module,
+        origins_module,
         "_validate_deletion_ledger_chunk",
         counting_validate,
     )
@@ -923,11 +943,11 @@ def test_variant_deletion_ledgers_share_the_base_and_retain_only_tiny_suffixes(
     root = enumeration.deletions[enumeration.layers[0].identity]
     variants = tuple(enumeration.deletions[layer.identity] for layer in enumeration.layers[1:])
 
-    assert type(root) is layering_module._DeletionLedger
+    assert type(root) is origins_module._DeletionLedger
     assert type(root._parent) is tuple
     assert len(root._parent) == base_count
     assert root._suffix == ()
-    assert all(type(rows) is layering_module._DeletionLedger for rows in variants)
+    assert all(type(rows) is origins_module._DeletionLedger for rows in variants)
     assert all(rows._parent is root for rows in variants)
     assert sum(len(rows._suffix) for rows in variants) == variant_count
     assert (
@@ -940,8 +960,8 @@ def test_variant_deletion_ledgers_share_the_base_and_retain_only_tiny_suffixes(
 
 def test_persistent_deletion_ledger_matches_tuple_sequence_semantics():
     inherited = (
-        layering_module.DeletionRecord(("one",), Origin("preset", "base")),
-        layering_module.DeletionRecord(("two", 0), Origin("user")),
+        origins_module.DeletionRecord(("one",), Origin("preset", "base")),
+        origins_module.DeletionRecord(("two", 0), Origin("user")),
     )
     merged = initial_merge(
         {
@@ -956,10 +976,10 @@ def test_persistent_deletion_ledger_matches_tuple_sequence_semantics():
     rows = enumeration.deletions[enumeration.layers[1].identity]
     expected = (
         *inherited,
-        layering_module.DeletionRecord(("gone",), Origin("variant", "x")),
+        origins_module.DeletionRecord(("gone",), Origin("variant", "x")),
     )
 
-    assert type(rows) is layering_module._DeletionLedger
+    assert type(rows) is origins_module._DeletionLedger
     assert tuple(rows) == expected
     assert rows == expected
     assert expected == rows
@@ -989,10 +1009,10 @@ def test_persistent_deletion_ledger_matches_tuple_sequence_semantics():
 
 
 def test_persistent_deletion_ledger_iteration_does_not_recurse():
-    rows = layering_module._DeletionLedger((), ())
+    rows = origins_module._DeletionLedger((), ())
     expected = []
     for index in range(2_000):
-        record = layering_module.DeletionRecord((f"gone-{index}",), Origin("user"))
+        record = origins_module.DeletionRecord((f"gone-{index}",), Origin("user"))
         expected.append(record)
         rows = rows.extend((record,))
 
@@ -1003,7 +1023,7 @@ def test_persistent_deletion_ledger_iteration_does_not_recurse():
 
 
 def test_persistent_deletion_ledger_subclasses_are_not_trusted_parents():
-    class LedgerSubclass(layering_module._DeletionLedger):
+    class LedgerSubclass(origins_module._DeletionLedger):
         pass
 
     class TupleSubclass(tuple):
@@ -1011,11 +1031,11 @@ def test_persistent_deletion_ledger_subclasses_are_not_trusted_parents():
 
     subclass = LedgerSubclass((), ())
     with pytest.raises(ConfigError, match="parent"):
-        layering_module._DeletionLedger(subclass, ())
+        origins_module._DeletionLedger(subclass, ())
     with pytest.raises(ConfigError, match="parent"):
-        layering_module._DeletionLedger(TupleSubclass(), ())
+        origins_module._DeletionLedger(TupleSubclass(), ())
     with pytest.raises(ConfigError, match="suffix"):
-        layering_module._DeletionLedger((), TupleSubclass())
+        origins_module._DeletionLedger((), TupleSubclass())
 
 
 def test_public_origin_merges_keep_exact_tuple_deletion_results():
@@ -1024,7 +1044,7 @@ def test_public_origin_merges_keep_exact_tuple_deletion_results():
 
     assert type(parent.deletions) is tuple
     assert type(result.deletions) is tuple
-    assert result.deletions == (layering_module.DeletionRecord(("gone",), Origin("user")),)
+    assert result.deletions == (origins_module.DeletionRecord(("gone",), Origin("user")),)
 
 
 def test_public_layer_enumeration_materializes_private_ledgers_to_tuples():
@@ -1121,7 +1141,7 @@ def test_without_variants_is_identity_when_absent_and_constant_size_when_present
 def test_private_deletion_ledger_validation_survives_optimized_python():
     code = r"""
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.layering import _DeletionLedger
+from _rheplicant_bootstrap.layering_origins import _DeletionLedger
 
 def outcome(call):
     try:
@@ -1354,14 +1374,14 @@ def test_private_canonical_wrapper_is_exact_type_and_one_shot():
     with pytest.raises(ConfigError, match="canonical variant result was not produced"):
         layering_module._take_canonical_variant_result(wrapped, object())
 
-    returned = layering_module.apply_variant(wrapped, "x")
+    returned = variants_grammar.apply_variant(wrapped, "x")
     result = layering_module._take_canonical_variant_result(wrapped, returned)
     assert result.document["runtime"]["seed"] == 2
 
     with pytest.raises(ConfigError, match="canonical variant result was already taken"):
         layering_module._take_canonical_variant_result(wrapped, returned)
     with pytest.raises(ConfigError, match="canonical variant document was already used"):
-        layering_module.apply_variant(wrapped, "x")
+        variants_grammar.apply_variant(wrapped, "x")
 
 
 def test_private_canonical_wrapper_rejects_a_nonidentical_return():
@@ -1373,7 +1393,7 @@ def test_private_canonical_wrapper_rejects_a_nonidentical_return():
         origin=Origin("user"),
     )
     wrapped = _canonical_wrapper(parent)
-    returned = layering_module.apply_variant(wrapped, "x")
+    returned = variants_grammar.apply_variant(wrapped, "x")
 
     with pytest.raises(ConfigError, match="canonical variant return identity"):
         layering_module._take_canonical_variant_result(wrapped, dict(returned))
@@ -1409,11 +1429,11 @@ def test_private_canonical_failures_leave_no_consumable_result(monkeypatch, fail
 
     monkeypatch.setattr(layering_module, "merge_with_origins", fail)
     with pytest.raises(type(failure), match=str(failure)):
-        layering_module.apply_variant(wrapped, "x")
+        variants_grammar.apply_variant(wrapped, "x")
     with pytest.raises(ConfigError, match="canonical variant result was not produced"):
         layering_module._take_canonical_variant_result(wrapped, object())
     with pytest.raises(ConfigError, match="canonical variant document was already used"):
-        layering_module.apply_variant(wrapped, "x")
+        variants_grammar.apply_variant(wrapped, "x")
 
 
 def test_private_canonical_apply_returns_an_opaque_token_without_thawing(
@@ -1432,7 +1452,7 @@ def test_private_canonical_apply_returns_an_opaque_token_without_thawing(
         raise AssertionError("trusted apply must not thaw the full document")
 
     monkeypatch.setattr(layering_module, "thaw", fail_thaw, raising=False)
-    returned = layering_module.apply_variant(wrapped, "x")
+    returned = variants_grammar.apply_variant(wrapped, "x")
     assert type(returned) is dict
     assert returned == {}
     returned["spoofed_document"] = {"runtime": {"seed": 999}}
@@ -1452,11 +1472,11 @@ def test_private_canonical_wrapper_rejects_a_different_expected_name():
     wrapped = _canonical_wrapper(parent)
 
     with pytest.raises(ConfigError, match="canonical variant name did not match"):
-        layering_module.apply_variant(wrapped, "y")
+        variants_grammar.apply_variant(wrapped, "y")
     with pytest.raises(ConfigError, match="canonical variant result was not produced"):
         layering_module._take_canonical_variant_result(wrapped, object())
     with pytest.raises(ConfigError, match="canonical variant document was already used"):
-        layering_module.apply_variant(wrapped, "x")
+        variants_grammar.apply_variant(wrapped, "x")
 
 
 def test_wrapper_subclasses_never_enter_the_trusted_branch(monkeypatch):
@@ -1491,7 +1511,7 @@ def test_wrapper_subclasses_never_enter_the_trusted_branch(monkeypatch):
         "x",
         canonical_parent.document["variants"]["x"],
     )
-    assert layering_module.apply_variant(subclass, "x") == {"legacy": True}
+    assert variants_grammar.apply_variant(subclass, "x") == {"legacy": True}
     assert compatibility_calls == 1
     assert origin_calls == 0
 
@@ -1585,17 +1605,17 @@ def test_layer_enumeration_validates_parallel_origins_and_mapping_protocols():
     with pytest.raises(ConfigError, match="origin tree"):
         LayerEnumeration(
             layers=(base,),
-            origins={base.identity: layering_module.OriginNode(None, {})},
+            origins={base.identity: origins_module.OriginNode(None, {})},
             deletions=valid_deletions,
         )
 
     children = dict(valid_origin.children)
     runtime = children["runtime"]
-    children["runtime"] = layering_module.OriginNode(None, runtime.children)
+    children["runtime"] = origins_module.OriginNode(None, runtime.children)
     with pytest.raises(ConfigError, match="concrete origins"):
         LayerEnumeration(
             layers=(base,),
-            origins={base.identity: layering_module.OriginNode(None, children)},
+            origins={base.identity: origins_module.OriginNode(None, children)},
             deletions=valid_deletions,
         )
 

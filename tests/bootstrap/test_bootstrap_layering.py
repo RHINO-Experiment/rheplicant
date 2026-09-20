@@ -7,10 +7,10 @@ from collections.abc import Mapping
 
 import pytest
 
-from _rheplicant_bootstrap import layering as layering_module
+from _rheplicant_bootstrap import layering_variants as variants_grammar
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.frozen import thaw
-from _rheplicant_bootstrap.layering import layer_presets, parse_default
+from _rheplicant_bootstrap.layering_variants import layer_presets, parse_default
 from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot
 
 _FIXTURE_BYTES = b"fixture"
@@ -186,7 +186,7 @@ def test_only_overlap_work_is_bounded_by_total_selector_segments():
     selectors = [f"resources.section_{index}.leaf" for index in range(count)]
     document = {"resources": {f"section_{index}": {"leaf": index} for index in range(count)}}
     request = parse_default({"from": "one", "only": selectors})
-    target_code = layering_module._select_only.__code__
+    target_code = variants_grammar._select_only.__code__
     line_events = 0
 
     def count_lines(frame, event, arg):

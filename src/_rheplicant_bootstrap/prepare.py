@@ -16,8 +16,12 @@ from _rheplicant_bootstrap.layering import (
     DeletionRecord,
     OriginNode,
     _DeletionLedger,
-    _OverlayMapping,
     _validate_parallel_origin_tree,
+)
+from _rheplicant_bootstrap.layering_overlay import (
+    _OverlayMapping,
+)
+from _rheplicant_bootstrap.layering_variants import (
     layer_presets,
 )
 from _rheplicant_bootstrap.presets import PresetRequest, PresetSnapshot

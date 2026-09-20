@@ -14,7 +14,7 @@ from _rheplicant_bootstrap.frozen import (
     static_isinstance,
     static_type_name,
 )
-from _rheplicant_bootstrap.layering import parse_default
+from _rheplicant_bootstrap.layering_variants import parse_default
 from _rheplicant_bootstrap.presets import PresetRequest
 
 _RUNTIME_KEYS = frozenset({"jax_enable_x64", "platform", "seed", "seeds"})

@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.layering import apply_variant
+from _rheplicant_bootstrap.layering_variants import apply_variant
 from rheplicant.gui.document import (
     _COMPOSITION_KINDS,
     EditorSnapshot,

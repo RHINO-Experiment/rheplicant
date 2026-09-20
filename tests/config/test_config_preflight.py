@@ -3326,7 +3326,8 @@ class TestNoMovedMessageWasReworded:
 
     def test_task3_compatibility_diagnostics_keep_static_whole_strings(self):
         """Pin Task 3's approved removal of callback-controlled repr text."""
-        from _rheplicant_bootstrap.layering import apply_variant, recursive_update
+        from _rheplicant_bootstrap.layering import recursive_update
+        from _rheplicant_bootstrap.layering_variants import apply_variant
 
         cases = (
             (lambda: recursive_update([], {}), "recursive_update: base is a mapping; got list."),

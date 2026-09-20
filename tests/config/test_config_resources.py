@@ -822,7 +822,7 @@ class TestExtends:
         assert backing == {"old": 1}
 
     def test_function_annotate_is_tracked_without_reading_annotations(self, monkeypatch):
-        from _rheplicant_bootstrap import layering as neutral_layering
+        from _rheplicant_bootstrap import layering_ownership as neutral_ownership
 
         backing = {"old": 1}
         annotation_reads = []
@@ -833,7 +833,7 @@ class TestExtends:
         def anchor():
             return None
 
-        original_reader = neutral_layering._compatibility_builtin_descriptor_value
+        original_reader = neutral_ownership._compatibility_builtin_descriptor_value
 
         def read_descriptor(value, owner, name):
             if value is anchor and owner is FunctionType:
@@ -845,7 +845,7 @@ class TestExtends:
             return original_reader(value, owner, name)
 
         monkeypatch.setattr(
-            neutral_layering,
+            neutral_ownership,
             "_compatibility_builtin_descriptor_value",
             read_descriptor,
         )
@@ -884,7 +884,7 @@ class TestExtends:
         assert backing == {"old": 1}
 
     def test_hidden_function_with_annotate_refuses_cached_annotations(self, monkeypatch):
-        from _rheplicant_bootstrap import layering as neutral_layering
+        from _rheplicant_bootstrap import layering_ownership as neutral_ownership
 
         backing = {"old": 1}
         annotation_reads = []
@@ -897,7 +897,7 @@ class TestExtends:
 
         function_pairs = [(anchor, annotate)]
 
-        original_reader = neutral_layering._compatibility_builtin_descriptor_value
+        original_reader = neutral_ownership._compatibility_builtin_descriptor_value
 
         def read_descriptor(value, owner, name):
             if owner is FunctionType:
@@ -911,7 +911,7 @@ class TestExtends:
             return original_reader(value, owner, name)
 
         monkeypatch.setattr(
-            neutral_layering,
+            neutral_ownership,
             "_compatibility_builtin_descriptor_value",
             read_descriptor,
         )
@@ -1621,11 +1621,11 @@ class TestExtends:
         assert Getter.calls == 0
 
     def test_property_name_is_in_the_safe_metadata_allowlist(self, monkeypatch):
-        from _rheplicant_bootstrap import layering as neutral_layering
+        from _rheplicant_bootstrap import layering_ownership as neutral_ownership
 
         backing = {"old": 1}
         descriptor = property()
-        original_reader = neutral_layering._compatibility_builtin_descriptor_value
+        original_reader = neutral_ownership._compatibility_builtin_descriptor_value
         name_reads = []
 
         def read_descriptor(value, owner, name):
@@ -1635,7 +1635,7 @@ class TestExtends:
             return original_reader(value, owner, name)
 
         monkeypatch.setattr(
-            neutral_layering,
+            neutral_ownership,
             "_compatibility_builtin_descriptor_value",
             read_descriptor,
         )
@@ -2769,9 +2769,7 @@ class TestExtends:
 
             assert type(merged["value"]) is HostileLeaf
         else:
-            from _rheplicant_bootstrap.layering import (
-                _compatibility_reaches_mapping,
-            )
+            from _rheplicant_bootstrap.layering_copy import _compatibility_reaches_mapping
 
             with pytest.raises(ConfigError) as caught:
                 _compatibility_reaches_mapping([leaf], {})
@@ -2784,9 +2782,7 @@ class TestExtends:
     @pytest.mark.parametrize("hook", ["__eq__", "__hash__"])
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
     def test_virtual_fallback_does_not_bind_metaclass_descriptors(self, hook, failure):
-        from _rheplicant_bootstrap.layering import (
-            _compatibility_has_mro_base,
-        )
+        from _rheplicant_bootstrap.layering_probe import _compatibility_has_mro_base
 
         if failure == "config":
             marker = _HostileCallbackConfigError("private descriptor marker")
@@ -2886,7 +2882,7 @@ class TestExtends:
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
     def test_compatibility_type_name_normalizes_only_exceptions(self, failure):
-        from _rheplicant_bootstrap.layering import _compatibility_type_name
+        from _rheplicant_bootstrap.layering_probe import _compatibility_type_name
 
         if failure == "config":
             marker = _HostileCallbackConfigError("private name marker")
@@ -3256,9 +3252,7 @@ class TestExtends:
             """
             import sys
 
-            from _rheplicant_bootstrap.layering import (
-                _compatibility_reaches_mapping,
-            )
+            from _rheplicant_bootstrap.layering_copy import _compatibility_reaches_mapping
 
             class HashableList(list):
                 __hash__ = object.__hash__
@@ -3298,6 +3292,7 @@ class TestExtends:
     @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
     def test_compatibility_reachability_identity_cache_handles_collisions(self, kind, monkeypatch):
         from _rheplicant_bootstrap import layering as neutral_layering
+        from _rheplicant_bootstrap import layering_copy as neutral_copy
 
         class HashableMapping(dict):
             __hash__ = object.__hash__
@@ -3320,7 +3315,7 @@ class TestExtends:
 
         monkeypatch.setattr(neutral_layering, "id", colliding_id, raising=False)
 
-        assert neutral_layering._compatibility_reaches_mapping([reaching, empty], target)
+        assert neutral_copy._compatibility_reaches_mapping([reaching, empty], target)
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
     def test_appended_traversal_normalizes_only_ordinary_exceptions(self, failure):

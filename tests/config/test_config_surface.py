@@ -299,8 +299,12 @@ class TestThePlan2ASurface:
         """Catches package-level imports preserving an obsolete wrapper."""
         import rheplicant.config as config
         from _rheplicant_bootstrap import layering as neutral
+        from _rheplicant_bootstrap import layering_variants as neutral_variants
 
-        assert config.apply_variant is neutral.apply_variant
+        # `apply_variant` moved with the variant grammar when `layering.py`
+        # was split (section 3.2). The public name is still the neutral
+        # object; only the module it is defined in moved.
+        assert config.apply_variant is neutral_variants.apply_variant
         assert config.recursive_update is neutral.recursive_update
 
     def test_importing_the_package_registers_the_object_readers(self):

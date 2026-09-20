@@ -42,12 +42,6 @@ SINGLE = "single"
 LARGE: dict[str, tuple[str, str]] = {
     # --- Stage 1's A1 audit ruled these nine should be split (evidence:
     # .agents/evidence/T-002/audit/ledger_raw.md, "Large files: 9 split").
-    "_rheplicant_bootstrap/layering.py": (
-        SPLIT,
-        "document layering, per-value origin evidence and the variant "
-        "merge are three subjects in one file; the origin record alone is a "
-        "module",
-    ),
     "rheplicant/config/preflight/fitting.py": (
         SPLIT,
         "the checks needing runs[] and inference: together, which is a "
@@ -234,13 +228,22 @@ def test_each_entry_carries_a_real_reason(name):
 def test_the_unsplit_debt_only_ever_falls():
     """A ratchet on the files A1 ruled should be split.
 
-    Ten today. The assertion is ``<=``, so splitting one is a green commit and
-    nothing has to be edited here except the entry that leaves; growing an
-    eleventh file past the limit and marking it SPLIT is a red test that says
-    the debt went up, which is the moment to argue for it rather than after.
+    NINE today, down from ten: ``_rheplicant_bootstrap/layering.py`` was split
+    on 2026-09-20 into the three subjects A1 named -- the merge itself, the
+    origin record, the variant grammar -- plus the defensive copy that
+    ``merge_extends`` takes, which came out in three pieces of its own
+    (the untrusted-read primitives, the ownership analysis, and the copy). All
+    seven are under the limit; none is re-exported through the old module,
+    because a cycle held open by import order is a worse thing to leave than
+    six updated import lines.
+
+    The assertion is ``<=``, so splitting one is a green commit and nothing
+    has to be edited here except the entry that leaves; growing a further file
+    past the limit and marking it SPLIT is a red test that says the debt went
+    up, which is the moment to argue for it rather than after.
     """
     debt = sorted(name for name, (status, _) in LARGE.items() if status == SPLIT)
-    assert len(debt) <= 10, (
+    assert len(debt) <= 9, (
         f"{len(debt)} files are marked for splitting and the recorded debt is "
-        f"10: {debt}. Lower the number here only when a file is actually split"
+        f"9: {debt}. Lower the number here only when a file is actually split"
     )

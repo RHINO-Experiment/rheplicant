@@ -15,7 +15,7 @@ from typing import Literal
 
 import rheplicant.config as public_config
 from _rheplicant_bootstrap.errors import ConfigError
-from _rheplicant_bootstrap.layering import layer_presets
+from _rheplicant_bootstrap.layering_variants import layer_presets
 from _rheplicant_bootstrap.output.manager import parse_output_grammar
 from _rheplicant_bootstrap.prepare import PreparedConfig, prepare_config
 

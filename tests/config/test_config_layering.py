@@ -12,11 +12,15 @@ from rheplicant.config.layering import apply_variant, recursive_update
 def test_public_layering_is_the_bootstrap_implementation():
     """Catches public wrappers drifting from the one neutral merge engine."""
     from _rheplicant_bootstrap import layering as neutral
+    from _rheplicant_bootstrap import layering_variants as neutral_variants
     from rheplicant.config import layering as public
     from rheplicant.config import resources
 
     assert public.recursive_update is neutral.recursive_update
-    assert public.apply_variant is neutral.apply_variant
+    # `apply_variant` moved with the variant grammar when `layering.py` was
+    # split (section 3.2). The claim is unchanged -- the public name IS the
+    # neutral implementation -- and only the module it lives in moved.
+    assert public.apply_variant is neutral_variants.apply_variant
     assert resources.merge_extends is neutral.merge_extends
 
 

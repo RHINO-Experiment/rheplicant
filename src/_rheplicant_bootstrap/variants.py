@@ -17,10 +17,14 @@ from _rheplicant_bootstrap.layering import (
     _canonical_variant_document,
     _canonical_variant_parent,
     _DeletionLedger,
-    _OverlayMapping,
     _take_canonical_variant_result,
-    _trusted_overlay_omit,
     _validate_parallel_origin_tree,
+)
+from _rheplicant_bootstrap.layering_overlay import (
+    _OverlayMapping,
+    _trusted_overlay_omit,
+)
+from _rheplicant_bootstrap.layering_variants import (
     apply_variant,
 )
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix

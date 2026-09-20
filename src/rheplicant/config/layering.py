@@ -13,6 +13,7 @@ variants of its own. That is what keeps a comparison's two halves from
 disagreeing in exactly the keys the comparison is about.
 """
 
-from _rheplicant_bootstrap.layering import apply_variant, recursive_update
+from _rheplicant_bootstrap.layering import recursive_update
+from _rheplicant_bootstrap.layering_variants import apply_variant
 
 __all__ = ["apply_variant", "recursive_update"]
