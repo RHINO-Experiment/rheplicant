@@ -208,7 +208,7 @@ import numpy as np
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
-from rheplicant.inference import certify
+from bayesmith.optimize import certify
 from rheplicant.inference.engines import (
     CLOSED_FORM,
     CONJUGATE,
@@ -329,7 +329,7 @@ MIN_SWEEPS: int = 3
 #: ``solve_tol = 1e-6`` do not: on the motivating bilinear model
 #: (``tests/inference/test_plan.py``, float32, 400 sweeps recorded) the
 #: objective at its plateau moves by tens of ulps a sweep, which is the trace
-#: :data:`~rheplicant.inference.certify.OBJECTIVE_FLOOR_EPS` was measured on.
+#: :data:`~bayesmith.optimize.certify.OBJECTIVE_FLOOR_EPS` was measured on.
 #: In float64 the floor is 1.4e-14 and ``tol`` governs.
 OBJECTIVE_FLOOR_EPS: int = certify.OBJECTIVE_FLOOR_EPS
 
@@ -354,7 +354,7 @@ EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
 #: The change is taken as a sum of per-term differences, so the constant parts
 #: of ``f`` (every prior's normalizer) and the bulk of the chi-squared sum
 #: cancel term by term instead of costing ``eps * |f|``. The multiple is
-#: :data:`~rheplicant.inference.certify.RESOLUTION_EPS` and was measured on
+#: :data:`~bayesmith.optimize.certify.RESOLUTION_EPS` and was measured on
 #: this package's collinear templates.
 RESOLUTION_EPS: float = certify.RESOLUTION_EPS
 
@@ -374,7 +374,7 @@ _DIRECTIONS_SHOWN: int = 4
 
 
 #: The stop rule's two halves, from
-#: :mod:`~rheplicant.inference.certify`: whether the objective's last
+#: :mod:`~bayesmith.optimize.certify`: whether the objective's last
 #: :data:`_SETTLED_CHANGES` changes are within a tolerance, and that
 #: tolerance floored at the dtype's resolution. The changes counted are
 #: between sweep OUTPUTS, never from the starting values, so the earliest a
@@ -383,7 +383,7 @@ _settled = certify.settled
 _effective_tol = certify.effective_tol
 
 
-#: The gap PRE-SCREEN, from :mod:`~rheplicant.inference.certify`: it picks
+#: The gap PRE-SCREEN, from :mod:`~bayesmith.optimize.certify`: it picks
 #: the sweeps at which the Newton decrement is computed and certifies
 #: nothing. :func:`_certify` is what decides.
 _GapState = certify.GapState
@@ -402,7 +402,7 @@ _DECREMENT_TAG: tuple[str] = ("decrement",)
 #: How a closed-form block's CG tolerance is tightened when the sweep shows
 #: its solves are inexact (a rise of the objective the arithmetic resolves,
 #: or a candidate stop the decrement refuses), and where that stops, from
-#: :mod:`~rheplicant.inference.certify`. Measured here: the bilinear basis
+#: :mod:`~bayesmith.optimize.certify`. Measured here: the bilinear basis
 #: fixture's worst case certifies at 1e-8, six digits above the float64
 #: floor. See :meth:`SamplingPlan.estimate`, ``solve_tol``.
 _SOLVE_TOL_STEP = certify.SOLVE_TOL_STEP
@@ -413,7 +413,7 @@ _solve_tol_floor = certify.solve_tol_floor
 class _Attempt:
     """One certificate: the sweep it was taken at, and what it measured.
 
-    ``measured`` is a :class:`~rheplicant.inference.certify.Decrement`, whose
+    ``measured`` is a :class:`~bayesmith.optimize.certify.Decrement`, whose
     ``estimate`` and ``distance`` are in posterior sigma because the Hessian
     of the joint negative log posterior IS the posterior precision.
     """
@@ -433,11 +433,11 @@ def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
     ``sqrt(2 gap_tol)`` of them. The verdict reads the upper bound the solve's
     residual and the curvature floor allow, never the estimate alone, so an
     inexact solve can only make it refuse — see
-    :func:`~rheplicant.inference.certify.decrement`.
+    :func:`~bayesmith.optimize.certify.decrement`.
 
     ``floor`` is :meth:`SamplingPlan._curvature_floor`'s, and matters only
     for a model with more latents than
-    :data:`~rheplicant.inference.certify.DENSE_MAX`, where the Hessian is not
+    :data:`~bayesmith.optimize.certify.DENSE_MAX`, where the Hessian is not
     formed and its smallest eigenvalue has to come from somewhere.
 
     The program is built once per run and cached in ``programs`` beside the
@@ -460,7 +460,7 @@ def _at_this_size(measured: Any) -> str:
     The bound divides by a lower bound on the joint Hessian's smallest
     eigenvalue, and this package certifies only where that number is a proof:
     the formed Hessian's own eigenvalue below
-    :data:`~rheplicant.inference.certify.DENSE_MAX` latents, or the prior
+    :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, or the prior
     precision where :meth:`SamplingPlan._curvature_floor`'s conditions hold.
     Above that limit and outside those conditions the floor is a Lanczos
     probe's, which is an estimate — measured, it sits ABOVE the smallest
@@ -502,7 +502,7 @@ def _not_converged_message(
 
     The headline changes for one case. A model whose decrement has no proven
     curvature floor (above
-    :data:`~rheplicant.inference.certify.DENSE_MAX` latents, outside
+    :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, outside
     :meth:`SamplingPlan._curvature_floor`'s conditions) has not failed to
     converge — nothing here can say whether it has. The refusal says that
     instead, and :func:`_at_this_size` says what would change it.
@@ -1216,7 +1216,7 @@ class SamplingPlan:
           smallest precision, which is the WIDEST scale.
 
         It is consulted only above
-        :data:`~rheplicant.inference.certify.DENSE_MAX` latents, where the
+        :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, where the
         Hessian is not formed. Returning ``None`` is not a failure: it means
         the decrement falls back to a probe, which never certifies, and the
         run says so (:func:`_at_this_size`).
@@ -1492,7 +1492,7 @@ class SamplingPlan:
         Far from quadratic, where the curvature changes over a posterior
         sigma, the decrement is a local statement. A direction of
         non-positive curvature, an iteration that does not reach its residual
-        within its cap (:data:`~rheplicant.inference.certify.MAXITER`),
+        within its cap (:data:`~bayesmith.optimize.certify.MAXITER`),
         or a residual too large to bound the decrement certifies nothing, and
         the run refuses at ``max_iter`` saying which. In float32 the gradient
         of ``f`` is itself rounded, so a model whose posterior sigma is small

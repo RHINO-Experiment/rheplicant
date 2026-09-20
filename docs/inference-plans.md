@@ -365,9 +365,13 @@ would return:
   `O(log max_iter)` decrements.
 
 **How the decrement is computed, and why an inexact solve is safe.** The
-numerics are in `rheplicant.inference.certify`, which knows nothing about
-models: it takes a callable and a pytree, and the plan supplies the joint
-objective. `H` is never formed from the model: every product is `jax.jvp` of
+numerics are in `bayesmith.optimize.certify`, upstream rather than here. They
+know nothing about models: the module takes a callable and a pytree, and the
+plan supplies the joint objective. Knowing nothing about models is also why it
+moved. It was written in this package and lifted into bayesmith byte for byte
+in bayesmith 0.10.0, with its 50 unit tests; the acceptance test that drives a
+whole estimate to its MAP stayed here, because that one does need this
+package's models. `H` is never formed from the model: every product is `jax.jvp` of
 `jax.grad` of `f`. Up to 1024 latents the decrement takes `n` such products,
 assembles the Hessian, scales it by its diagonal and solves by
 eigendecomposition; above that it runs conjugate gradients on the products

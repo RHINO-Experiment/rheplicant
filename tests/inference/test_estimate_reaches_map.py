@@ -781,7 +781,7 @@ def _wide_plan(seed=3, blocks=1, scales=None):
 
 
 def test_a_block_too_wide_to_form_a_hessian_certifies_on_its_prior_floor():
-    """Above :data:`~rheplicant.inference.certify.DENSE_MAX` latents the
+    """Above :data:`~bayesmith.optimize.certify.DENSE_MAX` latents the
     decrement cannot form the Hessian, so its bound needs a lower bound on
     the smallest eigenvalue. This plan can prove one: a single conjugate
     block is linear in every latent jointly, the noise does not depend on the
@@ -815,7 +815,7 @@ def test_without_a_proof_that_block_refuses_and_says_what_would_prove_it():
     falls back to a Lanczos probe, whose floor is an estimate, so nothing is
     certified however small the distance looks. The run refuses at max_iter,
     and the refusal names the three things that would make a proof."""
-    from rheplicant.inference import certify
+    from bayesmith.optimize import certify
     from rheplicant.inference.plan import _Attempt, _not_converged_message
 
     probed = certify.Decrement(

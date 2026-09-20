@@ -16,14 +16,17 @@ numbers which this file keeps apart.
   it imports, first ships in 0.5. The 0.4 and 0.5 capabilities are keyword
   arguments on names that already existed, so taken alone each is a
   ``TypeError`` at the call on the release below. A 0.5 install imports, and
-  differs from 0.6 in behaviour only.
-* The **declared range** starts at 0.10 although the code needs nothing newer
-  than 0.6, because the stable baseline relies on bayesmith 0.10's stability
-  contract and is tested only against 0.10. It is closed at the next minor,
-  because a pre-1.0 minor may move the deep module paths this package imports.
-  0.10 moved one: ``bayesmith.optimize`` became a package. The imports here
-  survived it, which is the point of closing the range rather than evidence
-  that closing it was unnecessary.
+  differs from 0.6 in behaviour only. On 0.10 the shape returns to the 0.5
+  one: ``bayesmith.optimize.certify`` does not exist below it, so ``import
+  rheplicant.inference.plan`` fails outright there.
+* The **declared range** starts at 0.10 and the capability floor now sits at
+  the same number, which it did not before: the convergence certificate
+  ``plan.py`` stops on lives in ``bayesmith.optimize.certify``, which 0.10
+  added. The range is closed at the next minor because a pre-1.0 minor may
+  move the deep module paths this package imports. 0.10 moved one:
+  ``bayesmith.optimize`` became a package. The older imports survived it,
+  which is the point of closing the range rather than evidence that closing it
+  was unnecessary.
 
 **No case reads the installed version.** For most of this file's history
 bayesmith was installed editable from ``../bayesmith``, and an editable install
@@ -45,7 +48,7 @@ import pytest
 #: The highest bayesmith release whose surface this package uses. Raise it, and
 #: add the matching ``test_the_<level>_surface_is_reachable`` case, in the same
 #: commit that starts relying on something a later release added.
-CAPABILITY_FLOOR = "0.6"
+CAPABILITY_FLOOR = "0.10"
 
 bayesmith = pytest.importorskip("bayesmith", reason="bayesmith not installed")
 
@@ -200,6 +203,56 @@ def test_the_0_6_surface_is_reachable():
     assert shift < 0.1 * scale, (
         f"the smoothed mean moved {shift:.3e} (posterior std {scale:.3e}) between "
         "process_std 1e-4 and 1e-5, where a frozen chain has converged"
+    )
+
+
+def test_the_0_10_surface_is_reachable():
+    """``bayesmith.optimize.certify`` -- the convergence certificate
+    ``inference.plan`` stops an estimate on, and the ``certify=``/``floor=``/
+    ``polish=`` seam on ``minimize``.
+
+    This is the level that turned ``bayesmith.optimize`` from a module into a
+    package. On 0.9 it is a module with no ``certify`` submodule, so this case
+    fails at its import statement there -- and so does ``import
+    rheplicant.inference.plan``, which has no local copy to fall back on since
+    the module was lifted upstream in 0.10.
+
+    **What is asserted is the refusal rule, not the name.** The module's one
+    load-bearing property is which curvature floors a verdict may rest on:
+    ``dense`` and ``supplied`` are proven lower bounds on the smallest
+    eigenvalue, and a *probed* floor is a lower bound on nothing. A build that
+    admitted ``"probe"`` here would certify points that have not converged,
+    and ``plan.py`` would report them as converged. That cannot be seen from a
+    signature, so a signature check would pass on exactly the install this
+    package must refuse.
+
+    The set is asserted by membership rather than by equality, so a later
+    release may add a floor it has proven without failing this case. What may
+    not change is that a probe is not one.
+    """
+    from bayesmith.optimize import Fit, certify, minimize
+
+    assert "dense" in certify.PROVEN_FLOORS, (
+        f"PROVEN_FLOORS is {set(certify.PROVEN_FLOORS)!r} and does not admit "
+        "'dense': plan.py certifies small models on the assembled Hessian's "
+        "own floor, and nothing else it has would certify them"
+    )
+    assert "probe" not in certify.PROVEN_FLOORS, (
+        f"PROVEN_FLOORS is {set(certify.PROVEN_FLOORS)!r} and admits 'probe': "
+        "a probed curvature floor is an estimate, not a lower bound, so a "
+        "decrement resting on one certifies nothing. This installed bayesmith "
+        "would let SamplingPlan.estimate report unconverged points as converged"
+    )
+    taken = set(inspect.signature(minimize).parameters)
+    missing = {"certify", "floor", "polish"} - taken
+    assert not missing, (
+        f"bayesmith.optimize.minimize takes no {sorted(missing)}, so the "
+        "installed bayesmith is below the 0.10 level however it is labelled"
+    )
+    carried = {"certificate", "limit", "polished"} - set(Fit._fields)
+    assert not carried, (
+        f"bayesmith.optimize.Fit has no {sorted(carried)}, so a fit cannot "
+        "report what certified it; the installed bayesmith is below 0.10"
     )
 
 

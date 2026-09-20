@@ -58,7 +58,7 @@ from jax import lax
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
-from rheplicant.inference import certify
+from bayesmith.optimize import certify
 from rheplicant.inference.linear import (
     _magnitude,
     gcr_sample,
@@ -284,7 +284,7 @@ def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callab
     ``measure(values) -> (chi2, objective, terms, scales)`` is this model's
     half: the joint chi-squared and the objective as the per-element terms
     :func:`_objective_terms` builds. ``change`` is
-    :func:`~rheplicant.inference.certify.change_program`'s, which differences
+    :func:`~bayesmith.optimize.certify.change_program`'s, which differences
     those terms and says what the arithmetic resolved.
     """
 
@@ -708,7 +708,7 @@ def gradient_estimate(
     """Descend the block's conditional potential: ``steps`` Adam steps, then Newton.
 
     The Adam steps do the travelling and the Newton steps
-    (:func:`~rheplicant.inference.certify.polish`) remove Adam's step-size
+    (:func:`~bayesmith.optimize.certify.polish`) remove Adam's step-size
     floor, so the block ends each sweep at its conditional optimum rather
     than a fixed fraction of a step away from it.
 
