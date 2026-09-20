@@ -183,11 +183,17 @@ class TestTheNewtonDecrement:
         inside = 0
         for seed in range(6):
             hessian, minimum, point = _quadratic(seed, condition=1e4, distance=0.102)
-            measured, exact = _measure(hessian, minimum, point)
+            # the floor a caller proves: without one the probe would refuse
+            # this conditioning outright, and the early stop would not be
+            # exercised at all
+            measured, exact = _measure(hessian, minimum, point,
+                                       floor=_floor_of(hessian))
+            assert measured.status == certify.CONVERGED, seed
+            assert measured.reach > 0.0, "the residual must reach somewhere"
             assert measured.lambda2 < exact * (1 - 1e-6), "the solve must stop short"
             assert exact <= measured.distance**2, seed
             assert not measured.certifies(LIMIT), seed
-            inside += measured.estimate <= LIMIT
+            inside += 0.0 < measured.estimate <= LIMIT
         assert inside, "no seed's estimate fell inside the threshold: vacuous"
 
     @pytest.mark.parametrize(
@@ -263,6 +269,15 @@ class TestTheNewtonDecrement:
             f"{measured} reported a bound below the true {math.sqrt(exact):.4g}"
         )
         assert not measured.dense and measured.products >= certify.PROBE_STEPS
+        if dtype is jnp.float64:
+            # and not by refusing: the probe reaches under the cluster here,
+            # so the bound is a number, and it equals the true distance
+            assert measured.status == certify.CONVERGED
+            assert measured.distance == pytest.approx(math.sqrt(exact), rel=1e-3)
+        else:
+            # in float32 that spectrum is numerically singular; the probe
+            # cannot put its interval above zero and the point is refused
+            assert not measured.certifies(LIMIT)
 
     @pytest.mark.parametrize("path", ["dense", "conjugate_gradients"])
     def test_the_two_paths_agree_on_what_is_not_a_minimum(self, monkeypatch, path):
