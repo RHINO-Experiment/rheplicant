@@ -108,7 +108,7 @@ class TestWhetherItCalls:
     def test_a_callable_named_alone_is_handed_over_uncalled(self, context):
         """THE separating case. Catches both 'always call' and 'call it if it
         turns out to be callable' -- under either, this returns a float
-        timestamp instead of the function. core/operator.py:117 needs this
+        timestamp instead of the function. operator.py needs this
         one: LambdaOperator.fn is a static Callable[[State], State], and
         delivery.py records that this hatch is the only route to such a field,
         so an inferred call leaves it with no spelling at all."""

@@ -21,7 +21,7 @@ reason and the mutants that matter are different for each:
   decides whether a user hears it.
 
 **All three checks now walk the variant LAYERS** (Plan 3C Task 0), through
-``preflight/document.py::_task3_over_layers``.  ``document.py::_assemble``
+``_task3_over_layers``.  ``config/document.py::_assemble``
 applies the selected variant BEFORE it runs the pass, so the route a user
 actually takes was already guarded; what the walk adds is the reporting of
 faults in variants **nobody selected**.  The ``…unselected_variant…`` tests
@@ -32,7 +32,7 @@ still keeps its ``apply_variant(...)`` call, which is the anti-vacuity read
 proving the SELECTED route is still guarded and unprefixed.  Re-measured cold
 on the shipped guard's own document at ``0030724``, min of five fresh
 processes: **13.51 ms unlayered against 16.91 ms with these three walked**,
-both well under the 50 ms bound -- ``preflight/document.py::_task3_layers``
+both well under the 50 ms bound -- ``_task3_layers``
 memoises the layer walk per pass now, so a check added to it costs no
 additional ``apply_variant`` calls.  Walking the other **18** non-layering
 pre-flight functions the same way costs ~31 ms on the same guard, which is
@@ -86,7 +86,7 @@ h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 from tests.config.test_config_section_ingest import make_file  # noqa: E402
 
 #: The check ids this task decides.  Intersected with rather than compared to
-#: (``test_preflight_model.py:110``'s idiom): the pass runs every registered
+#: (``test_preflight_model.py``'s idiom): the pass runs every registered
 #: check, so an "and nothing else" assertion over the whole report would go red
 #: on whichever sibling task first fires on one of these documents.
 MINE = frozenset({"A10", "A45", "A46"})
@@ -373,7 +373,7 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         assert finding.message == f"variants.recorded: {A10_MESSAGE}"
 
     def test_the_selected_variant_is_still_read(self):
-        """S3's surviving half: ``document.py::_assemble`` applies the
+        """S3's surviving half: ``config/document.py::_assemble`` applies the
         variant and THEN runs the pass, so the variant a user actually
         SELECTS stays guarded on its own, unprefixed ``where`` -- this is
         the anti-vacuity read for the test above, on the same document."""
@@ -1691,7 +1691,7 @@ class TestTheCost:
         re-earned by a task that adds to it -- but this docstring's PRIOR
         number was itself stale (§0.3 D-23 / Plan 3C Task 0): it read 0.039 ms
         unlayered against 1.27 ms layered, and the 1.27 ms was measured
-        BEFORE ``preflight/document.py::_task3_layers`` was memoised.  These
+        BEFORE ``_task3_layers`` was memoised.  These
         three checks now walk every layer (Task 0's own change), so
         "unlayered" is no longer a state this test can measure at all --
         there is only the layered number, and it must be re-derived rather

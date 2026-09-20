@@ -7,7 +7,7 @@ mapping of named observations.  ``realise:`` draws with the package's own
 that seam is exactly why Plan 0 shipped ``realise`` on the Protocol.
 
 Every drawing ``realise:`` names its seed as ``{from: runtime.seeds.<name>}``;
-``seed_for`` (``config/draws.py:46``) resolves a declared name or derives one
+``seed_for`` (``draws.py``) resolves a declared name or derives one
 by blake2s fold-in, and refuses ``runtime.seed: null``.
 """
 

@@ -8,7 +8,7 @@ config layer is measured on::
 
 ``exits.py``'s foot import reaches this module from Task 5 onward, so **every
 numpyro import here sits inside a function body** -- the shipped pattern is
-``predict``'s samples route (``config/sections/diagnostics.py:771`` -- the
+``predict``'s samples route (``sections/diagnostics.py::_a39_predict_takes_no_from`` -- the
 path is qualified because this repository has TWO ``diagnostics.py`` and the
 sibling, ``inference/diagnostics.py``, is the one every other citation in
 this module resolves to).  A module-level
@@ -19,7 +19,7 @@ Three facts about the seam, each of which the obvious code gets wrong while
 still compiling:
 
 * ``to_numpyro_model(...)`` returns a **callable** ``model(observed=None)``
-  (``numpyro_bridge.py:241``) with exactly one parameter, and
+  (``numpyro_bridge.py::to_numpyro_model``) with exactly one parameter, and
   ``MCMC.run(self, rng_key, *args, **kwargs)`` forwards both straight to it --
   so ``mcmc.run(key, data)`` and ``mcmc.run(key, observed=data)`` bind the
   same argument.  The drive line below uses **the keyword** because it is
@@ -35,7 +35,8 @@ still compiling:
   family, which needs a DECIDED array, this route wants the rule: a
   prediction-dependent sigma brings its log-determinant with it, because
   ``Normal(loc, scale).log_prob`` carries ``-log scale``
-  (``numpyro_bridge.py:188``, the module's own Note).  So this executor calls
+  (``numpyro_bridge.py::_refuse_sampled_noise_std_under_a_joint_prior``, the module's own Note).  So
+  this executor calls
   ``_noise`` and must never call ``_decided_sigma``.
 
 **The memory trap.**  ``mcmc.get_samples()`` also returns the deterministic
@@ -161,7 +162,8 @@ class NutsProduct(NamedTuple):
     ``samples`` and ``n_draw`` are not free choices: 2C's shipped ``predict``
     reads a samples product as ``product.n_draw`` (an int) and
     ``product.samples`` (a mapping of latent name -> stack with a leading
-    draw axis), ``config/sections/diagnostics.py:774`` and ``:791`` -- NOT
+    draw axis), ``sections/diagnostics.py::_a39_predict_takes_no_from`` and
+    ``sections/diagnostics.py::_parse_predict`` -- NOT
     ``inference/diagnostics.py``, which contains no ``n_draw`` at all.
 
     ``samples`` carries ``space.names`` AND NOTHING ELSE -- in particular not
@@ -174,7 +176,7 @@ class NutsProduct(NamedTuple):
     refusal: the number at which it becomes fatal is a judgement this layer
     has no basis for (measured on one document at four seeds under a sloppy
     target: 200, 101, 77 and 52 out of 200), and ``expect: refuse`` discards
-    the product (``exits.py:296``), which would make the count unreachable
+    the product (``exits.py::_SAMPLE_DEFAULTS``), which would make the count unreachable
     exactly when someone wanted to ask how bad it was.
     """
 
@@ -223,7 +225,7 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     knowledge of the declaration, and on ``examples/tutorial_nuts.py``'s ring
     toy that is ``r_hat = 840`` and ``n_eff = 2`` against ``r_hat = 1.002``
     and ``n_eff = 1327`` from the identical model started at the declaration
-    (``numpyro_bridge.py:296-310``).  The schema says ``init=declared`` for
+    (``numpyro_bridge.py::to_numpyro_model``).  The schema says ``init=declared`` for
     the same reason.
 
     ``ref`` starts at each latent's ``ref:`` instead -- the first consumer
@@ -233,7 +235,7 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     invisible-wrong shape this whole effort is written against.
 
     ``ParsedLatent.ref`` reaches no ``ParameterSpace`` -- ``build_space``
-    keeps ``entry.latent`` and drops the rest (``transforms.py:402``) -- so
+    keeps ``entry.latent`` and drops the rest (``transforms.py::_joint_prior``) -- so
     this reads :attr:`~rheplicant.config.sections.inference.InferenceBuild.refs`,
     populated by ``build_inference`` where the latents are ALREADY parsed.
     It does not re-parse the section: a second ``parse_latents`` per run is a

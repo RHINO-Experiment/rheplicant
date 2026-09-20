@@ -102,7 +102,7 @@ def joint_results():
 class TestTheBank:
     def test_the_pairs_come_back_at_the_declared_size_and_shape(self):
         # thetas is (n_simulations, n_latent_values) and data is
-        # (n_simulations, *data.shape) -- npe.py:100-102.  An executor that
+        # (n_simulations, *data.shape) -- inference/npe.py::simulate_pairs.  An executor that
         # forwarded n_simulations to the wrong argument, or dropped it, cannot
         # produce a leading 64; one that banked against a state other than
         # built.state cannot produce 16 x 8.  The space comes back with them
@@ -216,7 +216,7 @@ class TestTheBank:
         # Task 8 hoists the same property to P-1 as check A23, so
         # `load_document` on a prior-free npe run now refuses before
         # `npe_built` can return -- and `expect: refuse` is the run's own way
-        # of saying the refusal is the point (`exits.py:293-303` captures it;
+        # of saying the refusal is the point (`exits.py::_ESTIMATE_DEFAULTS` captures it;
         # `_prior_gates` stands down on it for that reason).  The subject of
         # this test is unchanged: `_simulate_bank`'s route to
         # `_sampled_space`, driven directly.
@@ -263,7 +263,8 @@ class TestTheEstimator:
 
     def test_width_is_width_and_not_width_size(self):
         # create's parameter is width=; width_size= is what it passes
-        # INTERNALLY to eqx.nn.MLP at npe.py:216.  A caller that spelled it
+        # INTERNALLY to eqx.nn.MLP at inference/npe.py::NeuralPosterior.create.  A caller that
+        # spelled it
         # width_size= raises TypeError, so this test dies at the call rather
         # than at the assertion -- which is the point of writing it, because
         # 2C's carry-forward note says the opposite and is wrong about the
@@ -303,7 +304,7 @@ class TestTheEstimator:
     def test_the_embed_reaches_create_and_resizes_the_input_layer(self):
         # embed is resolved to a CALLABLE by parse_npe, and the ONLY place it
         # is observable is the network it sized: create does
-        # `features = jax.vmap(embed)(data)` (inference/npe.py:209) and takes
+        # `features = jax.vmap(embed)(data)` (inference/npe.py::NeuralPosterior.create) and takes
         # `in_size=features.shape[1]` (:214) -- the plan cited 210-212, which
         # is n_params/theta_mean/data_mean, and the citation was transcribed
         # from it verbatim.  jnp.ravel on (16, 8) is 128; jnp.diagonal is 8.
@@ -429,7 +430,7 @@ class TestTheDocumentBuilder:
 class TestTheTrainedPosterior:
     def test_the_product_carries_what_predict_reads(self):
         # samples is a MAPPING and n_draw an int, because that is what 2C's
-        # shipped predict reads off a samples product (diagnostics.py:748 and
+        # shipped predict reads off a samples product (sections/diagnostics.py::_DRAW_SOURCES and
         # :763) and Task 9 makes npe one of its sources.  posterior is the
         # trained estimator, so a caller can log_prob against it -- the
         # amortized half of what NPE is for.  best_step == 50 rather than 49

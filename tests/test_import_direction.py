@@ -14,7 +14,7 @@ also see the four prefixes inside a docstring; this does not.
 **Dynamic imports are read too, and the first version of this file did not
 read them.** It asserted that ``_rheplicant_bootstrap`` imports nothing from
 this project, and it PASSED -- while
-``execution_environment.py:82`` called
+``execution_environment.py::prepare_execution_environment`` called
 ``importlib.import_module("rheplicant.config.orchestration")``. An ``ast``
 walk over ``Import`` and ``ImportFrom`` cannot see that, so the guard was
 green about a property that was false in exactly the way it could not look.

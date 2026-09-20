@@ -86,7 +86,7 @@ paid once for an ordering assertion built on it (commit ``8bcf74d``). The
 refusal tail already tells the user there is another refusal and where:
 ``raise_if_refused`` appends ``"(This document has N more refusal(s), at
 <where>, ...)"`` (pinned verbatim by
-``tests/config/test_config_postflight.py::test_two_refusals_both_arrive``,
+``tests/config/test_config_postflight.py::TestTheHookIsPositioned.test_two_refusals_both_arrive``,
 whose fixture is this exact C12-then-C16 shape: ``"first.\n(This document
 has 1 more refusal, at model.adc.)"``) -- so a document with both faults does
 tell its own second half, in the same exception, on the very first
@@ -104,7 +104,7 @@ carries ``expect: refuse`` and whose ``linearity`` gate refuses gets a
 ``ConfigError`` out of ``load_document``, not a captured refusal.  **That is
 correct rather than a limitation**: a gate is a property of the DOCUMENT, and
 a run cannot expect a refusal of the document that configures it.
-``tests/config/test_config_postflight.py::test_expect_refuse_cannot_catch_a_priced_refusal``
+``tests/config/test_config_postflight.py::TestTheHookIsPositioned.test_expect_refuse_cannot_catch_a_priced_refusal``
 is the pin, and it spies on the executor so the claim is "never reached"
 rather than "returned no product".
 

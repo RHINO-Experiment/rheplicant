@@ -7,17 +7,17 @@ drift:
 * **The prior gate the two PACKAGE routes disagree about.**
   ``to_numpyro_model`` -> ``_require_priors`` accepts a latent with no
   ``prior:`` when the space's ``joint_prior`` covers it
-  (``numpyro_bridge.py:61-79``, ``joint.covers(name)``); ``simulate_pairs``
+  (``numpyro_bridge.py::_bayesmith_to_numpyro``, ``joint.covers(name)``); ``simulate_pairs``
   tests ``latent.prior is None`` alone and consults ``joint_prior`` not at
-  all (``npe.py:111-118``).  So one document is a posterior on one route and
+  all (``inference/npe.py::simulate_pairs``).  So one document is a posterior on one route and
   a ``ParameterSpaceError`` naming no run on the other, and
   :func:`_sampled_space` is where that becomes a refusal in this layer's
   voice.
 * **The unravel.**  ``NeuralPosterior.sample`` returns a flat
   ``(n_draws, n_params)`` array while 2C's shipped ``predict`` reads a
-  samples product as a MAPPING (``diagnostics.py:791``).
+  samples product as a MAPPING (``sections/diagnostics.py::_parse_predict``).
   :func:`_unravel` is the inverse of the layout ``simulate_pairs`` documents
-  at ``npe.py:100-102``, and getting its ORDER wrong returns finite,
+  at ``inference/npe.py::simulate_pairs``, and getting its ORDER wrong returns finite,
   correctly-shaped, wrong draws.
 * **The seed.**  ``draws.py``'s ``seed_for``/``_seed_name`` pair is the one
   place a ``{from: runtime.seeds.<name>}`` becomes a reportable integer, and

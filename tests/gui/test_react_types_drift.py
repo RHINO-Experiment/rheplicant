@@ -4,7 +4,7 @@
 projection populates but the interface omits is invisible twice over: the
 browser receives it and the compiler never mentions that nothing can read it.
 ``units`` went missing exactly that way -- declared on ``ProjectedWidget``
-(``forms.py:118``), populated on every widget (``forms.py:358``), and absent
+(``forms.py::ProjectedWidget``), populated on every widget (``forms.py::project_forms``), and absent
 from the interface, so a typed consumer was strictly less informed than the
 JSON it had just parsed.
 

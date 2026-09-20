@@ -1,6 +1,6 @@
 """The path grammar: a dotted string, the selector it compiles to, and refusal.
 
-``Bind.into`` holds **callables**, not strings (``inference/parameters.py:338``),
+``Bind.into`` holds **callables**, not strings (``inference/parameters.py::Bind``),
 and ``ParameterSpace._resolve_targets`` *invokes* them against a copy of the
 twin whose every leaf has been replaced by its own key path. So a path here
 compiles to a callable that walks the object's own accessors. Synthesising key
@@ -280,7 +280,7 @@ def refuse_aliased_target(path: str, twin: Any) -> None:
     path reaches and leave the others in the forward model, which would then
     answer as if the latent were frozen everywhere but that branch -- finite,
     correctly shaped, wrong. The package's own guard
-    (``inference/parameters.py:704-738``) is path-based rather than
+    (``inference/parameters.py::ParameterSpace._reject_aliased_targets``) is path-based rather than
     spelling-based, so naming the second copy by index is refused identically;
     this one is a pre-flight on the head and does not replace it.
     """
@@ -307,8 +307,8 @@ def refuse_misaddressed_region(config_key: str, region: Iterable[str]) -> None:
 
     ``At`` with a tuple of node ids covers a contiguous region, and the fold
     labels the covering operator with the LAST node id
-    (``core/graph.py:131-134``, implemented at ``core/fold.py:409-414`` and
-    ``core/graph.py:1071``). A config key naming any other covered node
+    (``core/graph.py::At``, implemented at ``fold.py::_fold_region`` and
+    ``core/graph.py::_placement_addresses``). A config key naming any other covered node
     resolves to nothing, and the failure is a bare ``KeyError`` rather than
     the refusal the schema promised.
     """

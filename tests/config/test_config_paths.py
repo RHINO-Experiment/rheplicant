@@ -186,7 +186,7 @@ class TestParsing:
 
 class TestCompilingToASelector:
     def test_it_produces_the_callable_Bind_actually_takes(self, twin):
-        """Bind.into holds CALLABLES, not strings (inference/parameters.py:338
+        """Bind.into holds CALLABLES, not strings (inference/parameters.py::Bind
         -- `into: tuple[Callable, ...]`), and _resolve_targets INVOKES them
         against a tagged copy. A grammar that synthesised key paths directly
         would not survive Pipeline.__getitem__'s name-to-index translation:
@@ -295,7 +295,7 @@ class TestTheSixRefusals:
 
     def test_2_an_ambiguous_many_node_reproduces_the_packages_wording(self):
         """Refusal 2. AmbiguousNodeError is raised by Assembly.__getitem__
-        (core/graph.py:458) DURING the walk, and _resolve_targets wraps it in
+        (core/graph.py::Assembly.__getitem__) DURING the walk, and _resolve_targets wraps it in
         its own template -- so the composite is what a user sees today, and it
         is the composite this layer reproduces."""
         pytest.importorskip("rheplicant.radio")
@@ -378,8 +378,8 @@ class TestTheSixRefusals:
 
     def test_6_a_region_key_that_is_not_the_last_covered_node_is_refused(self):
         """Refusal 6, check A47. At((a, b, c), op) is addressed by its LAST
-        covered node id (core/graph.py:131-134, confirmed at fold.py:409-414
-        and graph.py:1071); a config key naming any other node resolves to
+        covered node id (core/graph.py::At, confirmed at fold.py::_fold_region
+        and core/graph.py::_placement_addresses); a config key naming any other node resolves to
         nothing, and the failure is a plain KeyError rather than the message
         the schema promised."""
         from rheplicant.config.paths import refuse_misaddressed_region

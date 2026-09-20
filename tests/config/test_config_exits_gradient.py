@@ -361,7 +361,7 @@ class TestOfNamesTheLeaves:
         # than sorted(): _of_paths promises DECLARED order and _run_gradient
         # promises {declared path: gradient}, and a sorted() assertion is
         # satisfied by an executor that re-sorts either one -- which is the
-        # bug diagnostics.py:248-250 warns about for score_directions, and
+        # bug sections/diagnostics.py::_at_values warns about for score_directions, and
         # which survived the whole suite until this line stopped sorting.
         results = run_document(gradient_document(
             {"kind": "gradient", "objective": "chi2",
@@ -427,7 +427,7 @@ class TestOfNamesTheLeaves:
         assert "it takes ['at', 'objective', 'of']" in str(caught.value)
 
     def test_gradient_takes_neither_of_optimize_s_two_required_knobs(self):
-        """``optimize`` REQUIRES learning_rate and n_steps (exits.py:96-103).
+        """``optimize`` REQUIRES learning_rate and n_steps (exits.py::_run_fisher).
 
         ``gradient`` differentiates once and runs no optimiser, so both are
         swept rather than accepted-and-ignored -- which is the failure an
@@ -456,7 +456,8 @@ class TestIncludeLogdetGetsItsFirstConsumer:
 
     ``include_logdet`` has THREE states, and the third -- undeclared, which
     ``NoiseBuild`` records as None -- is reachable only under a sigma that
-    does not depend on the prediction (noise.py:104-109 requires the key for
+    does not depend on the prediction (sections/noise.py::_a26_sigma_axis_problem requires the key
+    for
     ``kind: radiometer`` and refuses it everywhere else).  There the
     log-determinant is an additive constant and no gradient can see it, so
     the None state is pinned by EVALUATING the objective rather than by

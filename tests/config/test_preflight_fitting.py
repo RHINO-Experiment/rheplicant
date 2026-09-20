@@ -15,26 +15,26 @@ this task's brief said.**  Fifteen documents were driven directly through
   ``engine: gradient`` block carrying ``steps: 5`` is ACCEPTED, which is §2.6
   item 3's decision as a measurement;
 * **``steps: 0`` does not reach A17 at all.**  ``Block._check``
-  (``plan.py:360-368``) refuses it first, as *"asks for steps=0; inner steps
+  (``plan.py``) refuses it first, as *"asks for steps=0; inner steps
   must be a positive int"*, and so it does for ``steps: True`` and
   ``steps: '5'``.  A17's *"would be silently ignored"* is therefore false of
   every value the package would not have accepted, and the refusal here says
   so rather than sending the reader to ``engine: gradient``, which would
   leave the run refused for the second reason;
 * a repeated name inside ONE block and an unknown ``engine:`` are also
-  ``Block``'s (``plan.py:344-359``), not ``SamplingPlan``'s, which is why the
+  ``Block``'s (``plan.py``), not ``SamplingPlan``'s, which is why the
   differential below builds the ``Block`` inside its own ``try``;
 * **``learning_rate:`` is NOT A17's shape**, which the first draft of this
   module said it was.  Measured: ``Block('d','a', learning_rate=0.1)`` --
   a block that DERIVES conjugate -- is **ACCEPTED**, and only the explicit
   ``engine='conjugate', learning_rate=...`` pair is refused
-  (``plan.py:369-381``), because ``Block._check`` sees the DECLARED engine
+  (``plan.py::MIN_DRAWS``), because ``Block._check`` sees the DECLARED engine
   and never the derived one.  A17 is conjugate by derivation *or* by
   declaration, so implementing ``learning_rate`` "at A17's shape" would
   have refused a document the package builds and runs.
 
 **And ``warm_start.blocks`` is the same partition, one call along.**
-``exits.py:287-288`` builds ``_blocks(f"{where}: warm_start", ...)`` and hands
+``exits.py::_ESTIMATE_DEFAULTS`` builds ``_blocks(f"{where}: warm_start", ...)`` and hands
 the result to ``SamplingPlan(space, *warm_blocks)`` -- the same constructor,
 the same space, the same four refusals, at P3 behind the same beam.  A check
 written on ``runs[].blocks`` alone would guard one route and leave its
@@ -86,7 +86,7 @@ CLEAN = [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}]
 
 #: Every id ``preflight/fitting.py`` registers -- the ids THIS module is about.
 #:
-#: The `MINE` idiom, which `test_preflight_model.py:110` shipped first and
+#: The `MINE` idiom, which `test_preflight_model.py` shipped first and
 #: which R8 requires of every "and nothing else" assertion: the pass runs
 #: every registered check, so `preflight(doc).checks() == frozenset()` written
 #: bare is a claim about the whole layer, and it goes red on whichever later
@@ -171,7 +171,7 @@ class TestBlocks:
         # A16's third leg, which schema line 1193's wording does not describe.
         # Kills an implementation that only walks `latents` and asks "is it
         # owned" -- `zzz` is in no `latents` iteration, so that direction
-        # never sees it and the run is refused at P3 by `plan.py:545-558`.
+        # never sees it and the run is refused at P3 by `plan.py::_not_converged_message`.
         found = _found(_doc([{"names": ["d", "a", "w", "zzz"]}]))
         assert [f.check for f in found] == ["A16"]
         assert "'zzz'" in found[0].message
@@ -190,7 +190,7 @@ class TestBlocks:
         # as non-linear beside the linear 'd'), and an implementation that
         # derives the engine first tells the user their block "mixes
         # declared-linear latents ['d'] with non-linear ones ['zzz']" -- about
-        # a latent that does not exist.  `plan.py:541-542` argues the order in
+        # a latent that does not exist.  `plan.py::_not_converged_message` argues the order in
         # as many words; this is that argument as an assertion.
         found = _found(_doc([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]))
         assert {f.check for f in found} == {"A16"}
@@ -198,7 +198,7 @@ class TestBlocks:
 
     def test_a_bad_engine_is_reported_even_when_the_partition_is_wrong(self):
         # Kills `if partition: yield from partition; continue`, which is the
-        # brief's own shape.  `engine:` is `Block._check`'s (plan.py:353-359)
+        # brief's own shape.  `engine:` is `Block._check`'s (plan.py)
         # and reads no latent at all, so the package refuses it on a broken
         # partition too -- measured, `Block('d','a',engine='banana')` raises
         # before `SamplingPlan` is constructed at all.  Suppressing it behind
@@ -231,7 +231,7 @@ class TestBlocks:
                              ids=["zero", "bool", "string", "float"])
     def test_a_steps_the_package_refuses_outright_still_fires_but_says_so(
             self, steps):
-        """The guard is ``steps is not None`` -- ``plan.py:673``'s own -- and
+        """The guard is ``steps is not None`` -- ``plan.py::Block``'s own -- and
         the message is not the same message.
 
         Two mutations, and the second is the one the brief shipped.  Written
@@ -240,7 +240,7 @@ class TestBlocks:
         A17's *"would be silently ignored"* is a claim about what the package
         would do, and for these four values it is **false**: measured,
         ``Block('d','a', steps=0)`` never reaches ``SamplingPlan`` at all --
-        ``plan.py:360-368`` refuses it as *"inner steps must be a positive
+        ``plan.py`` refuses it as *"inner steps must be a positive
         int"*, and so it does for ``True``, ``'5'`` and ``1.5``.  A refusal
         that told this reader to *declare engine: gradient* would name a fix
         leaving the run refused for a second reason, which is the defect
@@ -287,7 +287,7 @@ class TestBlocks:
         assert "['w']" in found[0].message
 
     def test_a_mixed_block_asking_for_conjugate_fires_A19_and_not_A17(self):
-        # The package raises A19 at `plan.py:663` and never reaches A17 at
+        # The package raises A19 at `plan.py::split_rhat` and never reaches A17 at
         # `:674` -- measured on exactly this block.  Kills an implementation
         # that collects both: two findings about one block is one error
         # described twice, and the second one names a fix (drop steps:) that
@@ -297,9 +297,9 @@ class TestBlocks:
         assert [f.check for f in found] == ["A19"]
 
     def test_an_unknown_engine_is_refused_here_and_names_them_all(self):
-        # `_BLOCK_KEYS` (exits.py:165) accepts any string, so today
+        # `_BLOCK_KEYS` (exits.py::_parse_optimize) accepts any string, so today
         # `engine: banana` reaches the user as a ParameterSpaceError from
-        # `plan.py:353-359` -- measured.  Kills deleting the enum clause:
+        # `plan.py` -- measured.  Kills deleting the enum clause:
         # without it `_engine_of` returns "banana", `engine == CONJUGATE` is
         # False, and this pass accepts a document the run refuses.
         found = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
@@ -332,7 +332,8 @@ class TestBlocks:
         that ``numpyro`` stays out of ``sys.modules``.  It does, and it is the
         wrong invariant: ``rheplicant/inference/__init__.py`` re-exports the
         layer eagerly, so reaching ``...engines`` imports
-        ``rheplicant.inference`` -- which ``test_config_exits_predict.py:1046``
+        ``rheplicant.inference`` -- which
+        ``test_config_exits_predict.py::TestAVariantMismatchIsRefused.test_a_variant_that_moves_the_layout_is_the_packages_refusal``
         forbids the config layer to do, in a fresh interpreter, by name.
         Measured at ``9ee99af``: that probe prints ``[]``, and with the head
         import it prints ``['rheplicant.inference']``.
@@ -364,7 +365,8 @@ class TestBlocks:
     def test_this_module_does_not_import_the_inference_layer(self):
         """The guard that forced the copy, as this module's own assertion.
 
-        ``test_config_exits_predict.py:1046`` imports ``rheplicant.config``
+        ``test_config_exits_predict.py::TestAVariantMismatchIsRefused.test_a_variant_that_moves_the_layout_is_the_packages_refusal``
+        imports ``rheplicant.config``
         and ``sections.exits``; this one imports the pre-flight package
         itself, which is the module that would break it, and says so where
         the copy is.  Kills "put the import back": it is a two-character edit
@@ -405,8 +407,8 @@ class TestBlocks:
                                                             blocks):
         """The differential that catches mirroring drift.
 
-        `_engine_of` mirrors `plan.py:643-682` and `_a16_partition` mirrors
-        `plan.py:544-586` (the three legs at `:545-558`, `:560-574` and
+        `_engine_of` mirrors `plan.py::split_rhat` and `_a16_partition` mirrors
+        `plan.py::_not_converged_message` (the three legs at `:545-558`, `:560-574` and
         `:576-584`).  Mirrored logic drifts, and every test above would
         stay green while the pass and the run disagreed about which engine a
         block takes -- a document refused at P-1 for a reason the run would
@@ -417,7 +419,7 @@ class TestBlocks:
 
         **`Block(...)` is inside the `try`, not before it**, and that is three
         of the thirteen rows: the unknown engine, the repeated name and
-        `steps: 0` are refused by `Block._check` (`plan.py:344-368`) and never
+        `steps: 0` are refused by `Block._check` (`plan.py`) and never
         reach `SamplingPlan` at all.  A differential that built the blocks
         outside the `try` would ERROR on those three rather than compare them,
         so the three clauses that decide them would have no differential at
@@ -433,10 +435,10 @@ class TestBlocks:
         * `steps:` that is not a positive int on a block whose engine is NOT
           conjugate -- `0`, `-1`, `True`, `'5'`, `1.5` on a derived-gradient
           block, and `engine: gradient, steps: 0` on an all-linear one.
-          `Block._check` (`plan.py:360-368`) refuses every one; A17's rule is
+          `Block._check` (`plan.py`) refuses every one; A17's rule is
           about a CONJUGATE block, so none of them is A17's. A numeric bound
           on `steps:` is A24/A25's row, not this function's;
-        * `learning_rate:` -- `0.0` on any block (`plan.py:369-374`), and any
+        * `learning_rate:` -- `0.0` on any block (`plan.py::MIN_DRAWS`), and any
           value beside an explicit `engine: conjugate` (`:375-381`).
 
         Every one is a GAP (a refusal that stays at P3, behind the beam),
@@ -491,7 +493,7 @@ class TestBlocks:
         second clause is true and the first is **false**, and the difference
         is not academic: A17 is a conjugate block **by derivation or by
         explicit `engine:`** (§2.6 item 3), while `Block._check`
-        (`plan.py:375-381`) reads `self.engine` and never the derived one.
+        (`plan.py`) reads `self.engine` and never the derived one.
         So a check written "at A17's shape" would refuse the first row below
         -- a document the package BUILDS AND RUNS.  That is the direction
         this pass may not fail in, and the class Task 5 shipped twice.
@@ -560,7 +562,7 @@ class TestBlocks:
     def test_the_prefix_is_plan_DOT_and_nothing_looser(self, kind):
         # Kills `startswith("plan")` and `"plan" in kind`, both of which
         # survive a suite whose only negative case is `fisher`.  `kind: plan`
-        # is refused by `runs.py:87` as "not an exit"; earning it an A16
+        # is refused by `runs.py::_one` as "not an exit"; earning it an A16
         # partition refusal first would send the reader to `blocks:` for a
         # fault that is in `kind:`.
         document = preflight_document(
@@ -616,7 +618,7 @@ class TestBlocks:
         # own words come back, and `no_such_beam` does NOT.
         #
         # `load_document`, never `run_document`: §2.1 measured that
-        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # `parse_runs` (runs.py::parse_runs) speaks BEFORE P-1 on the run_document
         # path, so a `runs`-shaped violation driven that way proves nothing.
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
@@ -667,7 +669,7 @@ class TestBlocks:
                                        "w": NONLINEAR_W})) == []
 
     def test_runs_does_not_mutate_the_callers_document(self):
-        # `_runs` FILLS `name` the way runs.py:115 does, and it must do it on
+        # `_runs` FILLS `name` the way runs.py::_one does, and it must do it on
         # a COPY.  Kills `run["name"] = run.get("name") or run["kind"]`
         # written against the caller's own dict -- under which P-1 edits the
         # user's document in place, every later check reads a `runs:` the
@@ -680,7 +682,8 @@ class TestBlocks:
         assert document["runs"] == [{"kind": "forward"}, {"kind": "fisher"}]
 
     def test_linear_is_the_BOOL_True_and_not_a_truthy_value(self):
-        # `parameters.py:178-180` refuses a non-bool `linear:` at P2, and
+        # `inference/parameters.py::refuse_stochastic_stages` refuses a non-bool `linear:` at P2,
+        # and
         # `Latent.linear` defaults to False -- so to the package only the
         # BOOL True is linear.  Kills `_a18_linear` written
         # `bool(body.get("linear"))` -- under which `linear: 1` derives
@@ -718,7 +721,7 @@ class TestTheMessagesNameWhoMustEdit:
     def test_an_unnamed_run_is_named_for_its_kind(self):
         # §3.1's whole reason for putting `name`-filling in `_runs`: an
         # unnamed run is `runs['plan.estimate']` to `parse_runs`
-        # (runs.py:115) and to every refusal this layer writes.  Kills
+        # (runs.py::_one) and to every refusal this layer writes.  Kills
         # `run.get("name", "")` and `run["name"] or "?"` -- both give a
         # message prefix no other refusal in this package uses.
         found = _found(preflight_document(
@@ -727,7 +730,7 @@ class TestTheMessagesNameWhoMustEdit:
         assert "runs['plan.estimate']:" in found[0].message
 
     def test_a_single_run_mapping_is_still_run_zero(self):
-        # `runs: {kind: ...}` is one run (runs.py:122-123).  Kills `_runs`
+        # `runs: {kind: ...}` is one run (runs.py::_one).  Kills `_runs`
         # written `document.get("runs") or []` -- under which a mapping is
         # iterated as its KEYS and every entry reads as malformed, so this
         # document earns nothing at all.
@@ -781,7 +784,7 @@ class TestTheMessagesNameWhoMustEdit:
 class TestTheWarmStartIsTheSamePartition:
     """`warm_start.blocks` reaches the same `SamplingPlan`, one call along.
 
-    `exits.py:287-288` -- `SamplingPlan(space, *_blocks(f"{where}: warm_start",
+    `exits.py::_ESTIMATE_DEFAULTS` -- `SamplingPlan(space, *_blocks(f"{where}: warm_start",
     warm.get("blocks")))`.  Same constructor, same space, same four refusals,
     same P3.  Every test here kills a `_blocks` that reads `run["blocks"]`
     alone, which is the shape every task in this plan so far has shipped and
@@ -820,7 +823,7 @@ class TestTheWarmStartIsTheSamePartition:
         assert "warm_start.blocks[0]" in found[0].message
 
     def test_a_warm_start_on_plan_estimate_is_left_to_A1(self):
-        # `_ESTIMATE_KEYS` (exits.py:166) has no `warm_start`, and Task 3's
+        # `_ESTIMATE_KEYS` (exits.py::_parse_optimize) has no `warm_start`, and Task 3's
         # A1 already refuses it at P-1 -- measured: "kind: plan.estimate does
         # not take ['warm_start']".  Kills reading `warm_start` on every
         # `plan.*` run: the reader would get a partition refusal about a
@@ -846,9 +849,9 @@ class TestTheWarmStartIsTheSamePartition:
     #: Every ``warm_start`` shape whose ``blocks:`` the executor never READS,
     #: each paired with the refusal the package gives instead.  Measured by
     #: reading ``_run_plan`` top to bottom: the main ``blocks:`` grammar at
-    #: ``exits.py:250``, ``warm_start.kind`` at ``:268-271``,
-    #: ``warm_start.move`` at ``:273-278``, and only then the warm
-    #: ``blocks:`` at ``:287``.
+    #: ``exits.py::_SAMPLE_KEYS``, ``warm_start.kind`` at ``exits.py::_WARM_KEYS``,
+    #: ``warm_start.move`` at ``exits.py::_ESTIMATE_PASSTHROUGH``, and only then the warm
+    #: ``blocks:`` at ``exits.py::_ESTIMATE_DEFAULTS``.
     UNREACHED = [
         ("no-blocks-at-all", {"blocks": None}),
         ("blocks-not-a-list", {"blocks": "nope"}),
@@ -912,7 +915,7 @@ class TestTheWarmStartIsTheSamePartition:
             self, dropped):
         """The other side of the gate, and why it is where it is.
 
-        `_run_plan` also refuses a missing `n_sweeps` (`exits.py:255-256`) and
+        `_run_plan` also refuses a missing `n_sweeps` (`exits.py::_SAMPLE_KEYS`) and
         an unnamed seed (`:257`) before it reads the warm blocks -- so by the
         "would the executor reach it" test alone these would be gates too.
         They are not, and the distinction is that they are independent RUN
@@ -947,10 +950,11 @@ class TestWhatThisCheckStandsDownOn:
 
     def test_a_run_that_EXPECTS_a_refusal_is_left_alone(self):
         # `expect: refuse` is an assertion ABOUT the refusal: `execute_run`
-        # (exits.py:311-321) runs the executor and captures its error as the
+        # (exits.py::_plan_default) runs the executor and captures its error as the
         # run's product.  A P-1 refusal makes the document unloadable, so the
         # assertion can never be made at all -- measured,
-        # `test_config_exits_plan.py:108-113` is exactly such a document
+        # `test_config_exits_plan.py::TestEstimate.test_noise_kind_none_is_refused` is exactly such
+        # a document
         # (`blocks: [{names: [g, ghost]}]`, `expect: refuse`) and it asserts
         # the captured error names `ghost`.  Kills a `_blocks` that reads
         # every run: that implementation turns that test red and takes
@@ -971,7 +975,7 @@ class TestWhatThisCheckStandsDownOn:
             "a-key-a-block-does-not-take-on-the-SECOND-entry"])
     def test_a_blocks_list_the_grammar_refuses_by_shape_is_left_alone(
             self, blocks):
-        """`exits._blocks` (`exits.py:181-207`) refuses each of these in its
+        """`exits._blocks` (`exits.py::_parse_optimize`) refuses each of these in its
         own words -- *"blocks: is a non-empty list of block mappings"*,
         *"blocks[0] is a mapping"*, *"blocks[0].names is a non-empty list of
         latent names"*.
@@ -990,7 +994,7 @@ class TestWhatThisCheckStandsDownOn:
         one `exits._blocks` guard the first draft of `_t7_entries` did not
         mirror: `blocks: [{names: [d], step: 5}]` passed the four and reached
         the engine derivation, so a document whose real fault is a typo'd
-        `step:` (`exits.py:192-197`, *"does not take ['step']"*) was answered
+        `step:` (`exits.py::_parse_optimize`, *"does not take ['step']"*) was answered
         with a coverage sentence instead.  The second of the two puts the bad
         key on a LATER entry, which kills a gate written to look at
         `entries[0]` alone.
@@ -1204,7 +1208,7 @@ class TestTheReadersTasksEightToElevenImport:
         at ``runs[0]``, which is not a path that document contains.  A
         reviewer read the two clauses together; the SENTENCE was what changed,
         because dropping the wrap would take every fitting check off a
-        document ``parse_runs`` (``runs.py:122-123``) wraps the same way.
+        document ``parse_runs`` (``runs.py::_one``) wraps the same way.
 
         Kills the wrap being removed (the mapping form would then find
         nothing at all) and the contract being restated as index-preserving
@@ -1274,7 +1278,7 @@ _VERBATIM = [
      "runs['fit']: warm_start.blocks: does not cover ['w']; every latent "
      "inference.parameters declares must be in exactly one block. "
      "warm_start builds a SamplingPlan of its own over the same space "
-     "(exits.py:287-288), so an omitted latent sits at its declared init "
+     "(exits.py:287), so an omitted latent sits at its declared init "
      "for the whole warm estimate, and warm_start.move: can only carry "
      "over a value that estimate produced. Add it to a block, or drop it "
      "from inference.parameters (check A16)."),
@@ -1325,7 +1329,7 @@ _VERBATIM = [
      "constrained realization -- there is no step count to tune, which is "
      "the whole advantage. Drop steps:. Moving to engine: gradient would "
      "not rescue 0 either -- inner steps are a positive int on every "
-     "engine (plan.py:360-368), so the block would be refused a second "
+     "engine (plan.py:360), so the block would be refused a second "
      "time (check A17)."),
     ('a17-on-the-WARM-start',
      _warm(CLEAN, [{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
@@ -1387,9 +1391,9 @@ class TestPriorGates:
     def test_a_joint_prior_beside_a_plan_run_is_refused(self):
         # Measured at P3 today: ParameterSpaceError, "This space declares
         # JeffreysPrior(over=['d', 'a']) ..., and no block would step it at
-        # all", from `plan.py:631` -- after every beam.  Kills an
+        # all", from `plan.py::split_rhat` -- after every beam.  Kills an
         # implementation gated on the partition SPLITTING the joint prior:
-        # `_refuse_split_joint_prior` is unconditional (`plan.py:624-629`
+        # `_refuse_split_joint_prior` is unconditional (`plan.py::split_rhat`
         # chooses only the wording) and the un-split case is the silent one.
         found = _gates(preflight_document(
             inference={"parameters": COVERED, "joint_prior": JOINT},
@@ -1423,9 +1427,9 @@ class TestPriorGates:
         assert [f.check for f in found] == ["A21"]
 
     def test_fisher_WITHOUT_space_true_is_not_refused(self):
-        # `_run_fisher` (`exits.py:58-59`) passes `space=space if use_space
+        # `_run_fisher` (`exits.py::_run_forward`) passes `space=space if use_space
         # else None`, and `fisher_information` refuses a joint prior on the
-        # `space=` leg alone (`uncertainty.py:313`).  Kills a gate on
+        # `space=` leg alone (`uncertainty.py::_declared_gaussian_priors`).  Kills a gate on
         # `kind == "fisher"` by itself, which would refuse a document that
         # runs.
         for run in ({"name": "f", "kind": "fisher"},
@@ -1439,7 +1443,8 @@ class TestPriorGates:
         shapes that used to escape it are the point of this test.
 
         ``transforms._joint_prior`` ends ``JeffreysPrior(over=tuple(
-        body["over"]), **kwargs)`` (``:320``).  Measured through
+        body["over"]), **kwargs)`` (``uncertainty.py::_declared_gaussian_priors``).  Measured
+        through
         ``run_document``: ``over: da`` and ``over: {d: 1, a: 2}`` build a real
         prior and reach ``ParameterSpaceError: ... no block would step it at
         all`` -- BEHIND THE BEAM, which is the one thing A20 exists to
@@ -1580,7 +1585,7 @@ class TestPriorGates:
 
     def test_a_space_that_is_not_a_BOOL_is_left_to_the_executors_own_check(
             self):
-        # `_run_fisher` (`exits.py:55-57`) refuses a non-bool `space:` by
+        # `_run_fisher` (`exits.py`) refuses a non-bool `space:` by
         # name -- "space: is a bool; got 'true'" -- and that is the fault the
         # reader has.  Kills `run.get("space") is True` weakened to
         # `run.get("space")`: under it a YAML-quoted `space: "true"` earns
@@ -1640,8 +1645,8 @@ class TestPriorGates:
     def test_nuts_counts_joint_prior_coverage_and_npe_does_not(self):
         # The asymmetry `_sampled_space` encodes, re-decided from text.
         # Kills one rule for both routes: measured, `to_numpyro_model` accepts
-        # a covered latent (numpyro_bridge.py:66-79) and `simulate_pairs`
-        # does not (npe.py:111-118), and the shipped suite has a document
+        # a covered latent (numpyro_bridge.py::_bayesmith_to_numpyro) and `simulate_pairs`
+        # does not (inference/npe.py::simulate_pairs), and the shipped suite has a document
         # (`joint_prior_document`) that runs one and refuses the other.
         document = preflight_document(
             inference={"parameters": COVERED, "joint_prior": JOINT},
@@ -1665,7 +1670,7 @@ class TestPriorGates:
 
     def test_a_gradient_block_of_plan_sample_needs_a_prior_on_every_member(
             self):
-        # Measured at P3: ParameterSpaceError from `engines.py:462-470`,
+        # Measured at P3: ParameterSpaceError from `engines.py::_conjugate_transition`,
         # "Block ... is stepped by the gradient engine, and sampling it needs
         # a prior on every member".  Kills a whole-space reading: only the
         # GRADIENT block's members need one.
@@ -1681,7 +1686,7 @@ class TestPriorGates:
 
     def test_a_conjugate_block_of_plan_sample_needs_no_prior(self):
         # `require_priors` is called only for GRADIENT blocks
-        # (`plan.py:1064-1066`).  Kills "every latent of a plan.sample needs a
+        # (`plan.py::SamplingPlan._partition`).  Kills "every latent of a plan.sample needs a
         # prior", which would refuse a document the package runs.
         assert _gates(preflight_document(
             inference={"parameters": {"d": LINEAR_D, "a": LINEAR_A}},
@@ -1700,11 +1705,12 @@ class TestPriorGates:
 
     def test_the_warm_start_of_a_plan_sample_needs_no_prior_either(self):
         # THE TWIN, measured and standing DOWN rather than guarded.  Task 7's
-        # A16-A19 read `warm_start.blocks` because `exits.py:288` hands them
+        # A16-A19 read `warm_start.blocks` because `exits.py::_ESTIMATE_DEFAULTS` hands them
         # to the same `SamplingPlan`; A23 must not, because that plan is
         # `.estimate()`d and `require_priors` is called from `.sample()`
-        # alone (`plan.py:1064-1066`) -- and `_WARM_KEYS` (`exits.py:172`)
-        # plus `exits.py:268-271` allow no `kind:` there but `plan.estimate`.
+        # alone (`plan.py::SamplingPlan._partition`) -- and `_WARM_KEYS`
+        # (`exits.py::_parse_optimize`)
+        # plus `exits.py::_WARM_KEYS` allow no `kind:` there but `plan.estimate`.
         # Kills copying Task 7's `_t7_sites` walk into this check: that
         # refuses a document the package runs.
         assert _gates(preflight_document(
@@ -1719,7 +1725,7 @@ class TestPriorGates:
                                               "engine": "gradient"}]}}])) == []
 
     def test_fisher_space_true_needs_a_prior_on_every_latent(self):
-        # Measured at P3: `rheplicant/inference/uncertainty.py:346-357`
+        # Measured at P3: `uncertainty.py::_declared_gaussian_priors`
         # (`inference/`, not `config/sections/`), "latent 'w' declares no
         # prior, so what it returns would be a posterior precision for every
         # latent but that one".
@@ -1736,8 +1742,8 @@ class TestPriorGates:
         decision is inherited rather than rediscovered.
 
         ``fisher_information(space=...)`` has TWO callers under ``config/``:
-        ``exits.py:61`` (``kind: fisher`` with ``space: true``, which A21 and
-        A23's fisher leg guard) and ``conjugate.py:195``, where
+        ``exits.py`` (``kind: fisher`` with ``space: true``, which A21 and
+        A23's fisher leg guard) and ``conjugate.py::_gaussian_width``, where
         ``width: fisher`` on a ``kind: conjugate.wiener`` run passes
         ``space=`` UNCONDITIONALLY.  Measured through ``run_document`` this
         session, on a two-latent block that IS the whole space:
@@ -1746,10 +1752,11 @@ class TestPriorGates:
           better -- ``wiener_solve needs a prior_std for ['d', 'a']`` from the
           conjugate solve, which is the fault the reader actually has;
         * with ``prior_std: {d: 1.0, a: 5.0}`` declared, the joint-prior
-          document reaches ``uncertainty.py:313`` verbatim (*"fisher_
+          document reaches ``uncertainty.py::_declared_gaussian_priors`` verbatim (*"fisher_
           information was given space= a ParameterSpace declaring
           JeffreysPrior(over=['d', 'a'])"*) and the prior-free one reaches
-          ``:347-357`` (*"latent 'a' declares no prior"*) -- both after every
+          ``uncertainty.py::_declared_gaussian_priors`` (*"latent 'a' declares no prior"*) -- both
+          after every
           beam.
 
         **Not closed, deliberately, and the reason is P-1's own boundary.**
@@ -1773,7 +1780,7 @@ class TestPriorGates:
                    "names": ["w"], "width": "fisher"}])) == []
 
     def test_a_declared_but_MALFORMED_prior_is_still_a_declared_prior(self):
-        # `_parse_prior` (`parameters.py:71-72`) returns None for an ABSENT
+        # `_parse_prior` (`sections/parameters.py::_require_numpyro`) returns None for an ABSENT
         # `prior:` and for nothing else; anything present is refused in its
         # own words ("is a mapping naming one family").  Kills
         # `.get("prior") is None` weakened to `not .get("prior")`: an empty
@@ -1808,8 +1815,8 @@ class TestPriorGates:
         so ``results['amortized'].error`` could never exist: measured, without
         this guard that class goes red naming a check it was never about.
         Task 7's ``_blocks`` stands down for the same reason (``execute_run``
-        at ``exits.py:301`` captures the executor's error as the run's
-        product at ``:314-316``).
+        at ``exits.py::_SAMPLE_DEFAULTS`` captures the executor's error as the run's
+        product at ``exits.py::_plan_default``).
         """
         from tests.config.posterior_helpers import joint_prior_document
 
@@ -2232,7 +2239,7 @@ class TestA23AgreesWithTheGATEItRunsInFrontOf:
 
     ``posterior_support._sampled_space`` decides the same question from a
     BUILT space, and A23 may not call it -- its first line is ``space =
-    _space(run, built)`` (``:77``), which P-1 has nothing to build from.  So
+    _space(run, built)`` (``exits.py::_parse_fisher``), which P-1 has nothing to build from.  So
     the rule is re-derived from text, and this task therefore ships the shape
     the plan warns about: two functions deciding one property, in two
     voices.  ``_sampled_space`` is not dead -- a run declaring ``expect:
@@ -2385,7 +2392,8 @@ class TestSeeds:
         assert "'seed' is required and has no default" in found[0].message
 
     def test_conjugate_gcr_requires_one_and_still_says_a29(self):
-        # `test_config_exits_gcr.py:216` matches on "A29" and on
+        # `test_config_exits_gcr.py::TestGcrDraws.test_the_compiled_prior_reaches_the_draw` matches
+        # on "A29" and on
         # "conjugate.wiener".  Kills dropping either from the moved message:
         # that test drives `run_document`, which after Task 2's hook reaches
         # THIS refusal first.
@@ -2402,7 +2410,7 @@ class TestSeeds:
     def test_a_nuts_run_with_no_seed_is_refused_from_the_text(self):
         # RENAMED.  It was `test_nuts_requires_one_BEFORE_to_numpyro_model_
         # would_be_built`, and it asserted no such thing -- only that A29
-        # fires.  The phase claim is real (`nuts.py:300` reads the seed after
+        # fires.  The phase claim is real (`nuts.py::_parse_nuts` reads the seed after
         # `:287` builds `to_numpyro_model`) but it belongs to
         # `test_a_missing_seed_wins_against_a_beam_that_cannot_be_read`,
         # which drives `load_document`, and to Task 2's import-time
@@ -2433,7 +2441,7 @@ class TestSeeds:
         assert found[1].where == "inference.npe.train"
         assert "'seed' is required and has no default" in found[1].message
         # the per-subsection message wears the subsection's own prefix, which
-        # is what `_seeded` (`npe.py:257`) passes -- a reader told
+        # is what `_seeded` (`sections/npe.py::_positive`) passes -- a reader told
         # `runs['amortized']:` would go and edit the run the FIRST finding
         # told them to strip a seed from.
         assert found[1].message.startswith("inference.npe.train: ")
@@ -2463,10 +2471,11 @@ class TestSeeds:
 
         It read ``or "npe" not in _kinds(document)`` and its comment said
         ``inference.npe:`` "may sit on a document whose runs do not use it".
-        It may -- and the seed is read anyway.  ``sections/inference.py:204``
+        It may -- and the seed is read anyway.  ``inference.py::build_inference``
         is ``npe = parse_npe(section["npe"], context) if "npe" in section else
         None``, unconditional on ``runs:``, and ``build_inference``
-        (``document.py:108``) runs AFTER ``build_resources`` (``:75``).
+        (``config/document.py::_attach``) runs AFTER ``build_resources``
+        (``config/document.py::ConfiguredRun``).
         Measured on an ``inference.npe:`` complete but for one seed, beside
         ``runs: [{kind: forward}]``: this check was silent and ``_seeded``
         refused at P2 -- and with an unreadable beam in the same document the
@@ -2519,9 +2528,9 @@ class TestSeeds:
         assert "no_such_beam" not in str(caught.value)
 
     def test_the_embed_subsection_is_not_swept_for_a_seed(self):
-        # `inference.npe.embed:` is a member of `_NPE_KEYS` (`npe.py:108`,
+        # `inference.npe.embed:` is a member of `_NPE_KEYS` (`sections/npe.py`,
         # where it is written second -- and a frozenset orders nothing) and
-        # it declares NO seed: measured, `_seeded` is called at `npe.py:270`,
+        # it declares NO seed: measured, `_seeded` is called at `sections/npe.py::_positive`,
         # `:281`, `:293` and `:313`, all four of them a subsection this check
         # lists, and never for `embed`.  Kills a loop over the section's OWN
         # keys instead of `_A29_NPE_SUBSECTIONS`: that refuses a document the
@@ -2548,7 +2557,7 @@ class TestSeeds:
             runs=[{"name": "amortized", "kind": "npe"}])) == []
 
     def test_condition_is_OUTSIDE_a29(self):
-        # `_CONDITION_KEYS` (`conjugate.py:108`) carries `seed`, and
+        # `_CONDITION_KEYS` (`conjugate.py`) carries `seed`, and
         # `_run_condition` reads it only `if "seed" in run.options`
         # (`:685-690`), so it is OPTIONAL -- `condition_estimate`'s `key`
         # defaults internally, which that executor's docstring argues at
@@ -2564,7 +2573,7 @@ class TestSeeds:
         # Measured: `seed: 3` on a plan.sample is refused with "seed must NAME
         # an entry of runtime.seeds -- {from: runtime.seeds.<name>} -- and got
         # 3".  Kills a presence-only check (`"seed" in options`), which passes
-        # on this document and lets the run reach `draws.py:107` at P3.
+        # on this document and lets the run reach `draws.py::_seed_name` at P3.
         found = _seedings(preflight_document(
             inference={"parameters": THREE},
             runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
@@ -2578,7 +2587,7 @@ class TestSeeds:
         # `_seed_name` decides FORM.  Kills `gated` widened to "skip
         # `_seed_name` whenever a gate exists for this kind", under which a
         # `seed: {from: nowhere.x}` on a gcr run passes P-1 and dies at
-        # `draws.py:115-120`, behind the beam.
+        # `draws.py::_seed_name`, behind the beam.
         found = _seedings(preflight_document(
             inference={"parameters": THREE},
             runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4,
@@ -2595,7 +2604,7 @@ class TestSeeds:
         # is narrower than an earlier version of this comment claimed -- a
         # sixth `_RUN_KEYS` member changes what reaches `_seed_name` only if
         # it is literally named `seed`, and what this pin actually buys is
-        # that the pass and `RunSpec.options` (`runs.py:113-114`) go on
+        # that the pass and `RunSpec.options` (`runs.py::_one`) go on
         # agreeing about which keys are the RUN's rather than the exit's.
         from rheplicant.config.sections.runs import _RUN_KEYS
 
@@ -2652,10 +2661,10 @@ class TestSeeds:
                    "blocks": [{"names": ["d", "a", "w"]}]}]))) == 1
 
     def test_a_warm_starts_seed_is_left_to_the_key_sweep(self):
-        # THE TWIN of `plan.estimate refuses a seed`: `exits.py:287-288`
+        # THE TWIN of `plan.estimate refuses a seed`: `exits.py::_ESTIMATE_DEFAULTS`
         # builds a SECOND plan and `.estimate()`s it, from `warm_start:`,
-        # whose own `kind:` must be `plan.estimate` (`exits.py:268-271`).  It
-        # is NOT A29's, because `_WARM_KEYS` (`exits.py:172`) has no `seed`
+        # whose own `kind:` must be `plan.estimate` (`exits.py::_WARM_KEYS`).  It
+        # is NOT A29's, because `_WARM_KEYS` (`exits.py::_parse_optimize`) has no `seed`
         # at all, so the
         # unknown-key sweep already says "warm_start does not take ['seed']"
         # -- a more specific sentence, and Task 3's `A1.runs` reaches the run
@@ -2736,7 +2745,7 @@ class TestSeeds:
         # own words come back, and `no_such_beam` does NOT.
         #
         # `load_document`, never `run_document`: §2.1 measured that
-        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # `parse_runs` (runs.py::parse_runs) speaks BEFORE P-1 on the run_document
         # path, so a `runs`-shaped violation driven that way proves nothing.
         #
         # `startswith` and not `in`: the refusal must be FIRST, which is what
@@ -2899,8 +2908,8 @@ def _warmed(**warm):
     start is the only subject.  All four gates ``_t7_warm_start`` applies are
     satisfied -- the run's own ``kind: plan.sample``, a mapping, the warm
     ``kind: plan.estimate``, and a usable ``move:`` -- because
-    ``exits.py:259-285`` refuses the run outright when any of them is not and
-    the passthrough at ``:288-290`` is then never reached.
+    ``exits.py::_WARM_KEYS`` refuses the run outright when any of them is not and
+    the passthrough at ``exits.py::_ESTIMATE_DEFAULTS`` is then never reached.
     """
     return _sample(n_sweeps=12,
                    warm_start={"kind": "plan.estimate", "move": ["d"],
@@ -2918,8 +2927,8 @@ def _chain(**options):
 class TestCounts:
     @pytest.mark.parametrize("value", [0, -3])
     def test_n_sweeps_below_one_is_refused(self, value):
-        # `exits.py:297` calls `_number(..., kind=int)` with NO `minimum=`,
-        # so today this reaches the package: `plan.py:1043-1045`, "sample()
+        # `exits.py::_SAMPLE_DEFAULTS` calls `_number(..., kind=int)` with NO `minimum=`,
+        # so today this reaches the package: `plan.py::SamplingPlan._partition`, "sample()
         # needs n_sweeps >= 1", at P3 behind the beam.  Kills deleting the
         # `("n_sweeps", int, 1)` row from `_A25_KNOBS`.
         #
@@ -2932,7 +2941,7 @@ class TestCounts:
         assert "n_sweeps: must be >= 1" in found[0].message
 
     def test_a_count_that_is_not_whole_is_told_it_is_not_whole(self):
-        # The message this task FIXES, not merely moves.  `plan.py:900-902`
+        # The message this task FIXES, not merely moves.  `plan.py::Estimate`
         # tests `not isinstance(max_iter, int) or max_iter < 1` and reports
         # only the second half, so `max_iter: 2.5` reaches the user as
         # "estimate() needs max_iter >= 1, got 2.5" -- a false sentence,
@@ -2966,17 +2975,17 @@ class TestCounts:
         assert found[0].message.startswith("runs['fit']: max_iter:")
 
     def test_min_sweeps_above_max_iter_is_refused_only_when_tol_is_live(self):
-        # BOTH directions in one test.  `plan.py:909` gates the pair on
+        # BOTH directions in one test.  `plan.py::Estimate.names` gates the pair on
         # `tol is not None`, and `:943-946` short-circuits the same way, so
         # with `tol: null` the pair is never consulted.  Kills an ungated
         # pair check, which refuses a document the package runs, and kills
         # dropping the check, which lets `min_sweeps: 9, max_iter: 2` reach
-        # `plan.py:913` at P3.
+        # `plan.py` at P3.
         found = _counted(_estimate(min_sweeps=9, max_iter=2))
         assert [f.check for f in found] == ["A25"]
         assert "min_sweeps: 9 is above max_iter: 2" in found[0].message
         assert _counted(_estimate(min_sweeps=9, max_iter=2, tol=None)) == []
-        # THE BOUNDARY, both sides.  `plan.py:910` reads
+        # THE BOUNDARY, both sides.  `plan.py::Estimate.names` reads
         # `not 1 <= min_sweeps <= max_iter`, so EQUALITY is legal and only
         # `floor > cap` is not.  Kills the guard written `floor >= cap` --
         # which refuses a document the package runs and which `9 > 2` cannot
@@ -3040,7 +3049,7 @@ class TestCounts:
     ])
     def test_the_pair_uses_the_packages_defaults_when_a_half_is_absent(
             self, options, said):
-        # `plan.py:909-910` compares against MIN_SWEEPS and DEFAULT_MAX_ITER,
+        # `plan.py::Estimate.names` compares against MIN_SWEEPS and DEFAULT_MAX_ITER,
         # so `max_iter: 1` with no `min_sweeps` IS refused there -- and a
         # clause that fired only when both keys were written, which is what
         # shipped, misses one of the four clauses A25's own schema row names.
@@ -3077,7 +3086,7 @@ class TestCounts:
         assert _counted(_estimate(min_sweeps=DEFAULT_MAX_ITER)) == []
 
     def test_the_tol_gate_is_read_off_the_SITE_and_not_off_the_run(self):
-        # `tol` is not a `_SAMPLE_KEYS` member (`exits.py:169-171`), so on a
+        # `tol` is not a `_SAMPLE_KEYS` member (`exits.py::_parse_optimize`), so on a
         # `plan.sample` carrying a warm start the run has no `tol` at all and
         # the warm one decides.  Kills `live = True if prefix else ...` and
         # kills reading `run.get("tol", 1)` in the pair clause: both accept
@@ -3092,10 +3101,10 @@ class TestCounts:
                 _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
 
     def test_a_null_tol_stands_down_the_min_sweeps_clause_and_NOTHING_else(self):
-        # `plan.py:909` gates only the `min_sweeps` clause; `max_iter` is
+        # `plan.py::Estimate.names` gates only the `min_sweeps` clause; `max_iter` is
         # refused unconditionally at `:900`.  Kills gating any other row on
         # the live `tol`, under which `max_iter: 2.5` beside `tol: null` goes
-        # unchecked and reaches the user as `plan.py:900`'s FALSE "needs
+        # unchecked and reaches the user as `plan.py::Estimate`'s FALSE "needs
         # max_iter >= 1, got 2.5" -- the very message this task's headline
         # claims to fix.
         #
@@ -3131,7 +3140,7 @@ class TestCounts:
     def test_an_unselected_variant_is_not_walked(self):
         # A scope decision `_counts`' docstring states and nothing pinned.
         # `load_document` calls the pass on the variant-APPLIED document
-        # (`document.py:68`), so a selected variant IS read; an unselected
+        # (`config/document.py::__all__`), so a selected variant IS read; an unselected
         # one is Task 3's `_variant_text`, which re-runs `_structural` per
         # layer and nothing else.  Kills a `_counts` that walked
         # `document["variants"]` -- which would refuse a document that runs.
@@ -3148,7 +3157,7 @@ class TestCounts:
     def test_the_min_sweeps_ROW_is_gated_on_tol_as_well_as_the_pair(self):
         # The plan's own measurement table says `min_sweeps: 0` with
         # `tol: null` earns NO REFUSAL from the package, and reading
-        # `plan.py:909` and `:943-946` says why: both are `tol is not None
+        # `plan.py::Estimate.names` and `:943-946` says why: both are `tol is not None
         # and ...`, so a `min_sweeps` beside `tol: null` is forwarded,
         # validated by nothing and consulted by nothing.  Kills the
         # ungated `("min_sweeps", int, 1)` row the task body shipped, which
@@ -3162,7 +3171,7 @@ class TestCounts:
             _estimate(min_sweeps=2.5))[0].message
 
     def test_warmup_below_zero_is_refused_and_a_fractional_one_by_type(self):
-        # `plan.py:1048-1050` tests `not isinstance(warmup, int) or warmup <
+        # `plan.py::SamplingPlan._partition` tests `not isinstance(warmup, int) or warmup <
         # 0` and reports only the second half, so BOTH reach the user as
         # "sample() needs warmup >= 0, got -1" and "... got 2.5" -- the
         # second sentence being false.
@@ -3178,11 +3187,11 @@ class TestCounts:
     def test_the_default_warmup_boundary_is_exactly_MIN_DRAWS(self, sweeps,
                                                               kept, refused):
         # Boundary-validated on BOTH sides rather than at one point:
-        # `plan.py:1047` is `n_sweeps // 2 if warmup is None`, and `:1055` is
+        # `plan.py::SamplingPlan._partition` is `n_sweeps // 2 if warmup is None`, and `:1055` is
         # `n_draw < MIN_DRAWS`, so 6 keeps 3 and refuses, 7 keeps 4 and runs.
         # Kills `> MIN_DRAWS` (which refuses n_sweeps: 7, a document the
         # package runs) and kills `>= MIN_DRAWS - 1` (which accepts
-        # n_sweeps: 6, which the package refuses at `plan.py:1055`).
+        # n_sweeps: 6, which the package refuses at `plan.py::SamplingPlan._partition`).
         found = _counted(_sample(n_sweeps=sweeps))
         assert bool(found) is refused
         if refused:
@@ -3201,7 +3210,7 @@ class TestCounts:
                               (12, 9, True)])
     def test_an_explicit_warmup_replaces_the_default_at_the_same_boundary(
             self, sweeps, warmup, refused):
-        # All four cells against `plan.py:1047`'s `if warmup is None` arm.
+        # All four cells against `plan.py::SamplingPlan._partition`'s `if warmup is None` arm.
         # Kills an implementation that always uses `n_sweeps // 2`: at
         # (12, 9) that reads 6 kept and accepts a document the package
         # refuses, and at (8, 5) likewise.
@@ -3212,7 +3221,7 @@ class TestCounts:
             assert f"minus {warmup} warmup)" in found[0].message
 
     def test_an_explicit_null_warmup_is_the_default_and_says_so(self):
-        # `plan.py:1047` reads `warmup is None`, not `"warmup" in options`,
+        # `plan.py::SamplingPlan._partition` reads `warmup is None`, not `"warmup" in options`,
         # so `warmup: null` TAKES the default rather than overriding it.
         # Kills the message clause written `"warmup" in run`, which on this
         # document reports "minus 3 warmup" as if the user had written 3.
@@ -3248,7 +3257,7 @@ class TestCounts:
         # that widening `_A25_KNOBS['nuts']` is a deliberate change to a
         # red test rather than a silent one.  `num_chains`, `thinning`
         # and `target_accept_prob` are outside A25's schema row and are
-        # already checked by `_number` at `nuts.py:230-238` -- at P3,
+        # already checked by `_number` at `nuts.py::_init_strategy` -- at P3,
         # behind the beam.  Applying the CORRECT (wider) implementation
         # as a mutant is the cheapest discriminator there is, and
         # without this the wider one passes the whole module.
@@ -3273,7 +3282,7 @@ class TestCounts:
         # The reader on its own, because `_counts` suppresses A24 whenever
         # A25 refused one of the two counts, so every wrong answer this
         # function could give on a bad value is invisible through the check.
-        # `plan.py:1047` and `:1054` are the two lines it mirrors.
+        # `plan.py::SamplingPlan._partition` and `:1054` are the two lines it mirrors.
         from rheplicant.config.preflight.fitting import _a24_kept_draws
 
         assert _a24_kept_draws({"n_sweeps": 6}) == (3, 3)
@@ -3394,7 +3403,7 @@ class TestCounts:
         assert "warmup is None" in lines[0]
 
     def test_a_tolerance_that_is_not_a_number_is_refused_here(self):
-        # `plan.py:946` is `progress <= tol * max(abs(chi2[-1]), 1.0)`, so
+        # `plan.py::Draws.std` is `progress <= tol * max(abs(chi2[-1]), 1.0)`, so
         # `tol: "banana"` reaches the user as a bare `TypeError: can't
         # multiply sequence by non-int of type 'float'` naming no run and no
         # key.  Kills dropping the three tolerance rows from `_A25_KNOBS`.
@@ -3408,18 +3417,18 @@ class TestCounts:
         # bound.  None of the three is refused anywhere in `config/` today:
         # grepped, `solve_tol`, `solve_guard` and `rhat_max` occur only
         # inside `_ESTIMATE_KEYS`, `_SAMPLE_KEYS`, `_WARM_KEYS` and the two
-        # passthrough tuples (`exits.py:166-178`) and nowhere else.  So a
+        # passthrough tuples (`exits.py::_parse_optimize`) and nowhere else.  So a
         # negative one is forwarded raw -- `tol: -1.0` into a comparison the
         # run can never satisfy, the other two into a solver whose bound is
-        # the `eqx.error_if` at `linear.py:1504`, inside jit, at P3, behind
-        # the beam.  (`engines.py:284-288` is the DOCSTRING describing how
+        # the `eqx.error_if` at `linear.py::wiener_solve`, inside jit, at P3, behind
+        # the beam.  (`engines.py::_monitor_programs` is the DOCSTRING describing how
         # that surfaces, not the guard.)
         found = _counted(_estimate(**{key: -1.0}))
         assert [f.check for f in found] == ["A25"]
         assert f"{key}: must be >= 0" in found[0].message
         if key != "tol":
             # `solve_tol` and `solve_guard` are in BOTH key sets
-            # (`exits.py:166-171`) and both passthrough tuples (`:175-178`),
+            # (`exits.py::_parse_optimize`) and both passthrough tuples (`:175-178`),
             # so a row present on `plan.estimate` and missing from
             # `plan.sample` is a hole no estimate-only test can see.  `tol`
             # is excluded because it is not a `_SAMPLE_KEYS` member: Task 3's
@@ -3429,7 +3438,7 @@ class TestCounts:
             assert f"{key}: must be >= 0" in sampled[0].message
 
     def test_solve_guard_null_stays_legal(self):
-        # `plan.py:884-887`: `solve_guard=None` skips the condition-number
+        # `plan.py::PlanResult`: `solve_guard=None` skips the condition-number
         # estimate, which is what a 10^6-coefficient block wants.  Kills
         # `if key in run:` without the `is None` arm, which would refuse a
         # document that works and take the package's own "turn the guard
@@ -3452,7 +3461,8 @@ class TestCounts:
         # The residue this task first RECORDED and now closes.  Its earlier
         # justification -- "on the rest it is a typo the package refuses in
         # its own voice" -- is false of two of these seven, and those two are
-        # the worst: `rhat_max: null` reaches `plan.py:1102`'s `bool(rhat <=
+        # the worst: `rhat_max: null` reaches `plan.py::SamplingPlan._refuse_split_joint_prior`'s
+        # `bool(rhat <=
         # rhat_max)` as a bare TypeError AFTER the whole chain has been
         # drawn, and `solve_tol: null` reaches the solver.  Kills skipping
         # every `None`, which is what shipped.
@@ -3509,7 +3519,7 @@ class TestCounts:
     def test_a_non_finite_count_is_refused_and_does_not_RAISE(
             self, document_of, key, value):
         # `_number`'s whole-number refusal formats `kind(value)`
-        # (`exit_support.py:90`) to show what the count rounds to, and
+        # (`exit_support.py::ParsedRun`) to show what the count rounds to, and
         # `int(float('inf'))` raises OverflowError while `int(float('nan'))`
         # raises ValueError -- neither a ConfigError, so neither was caught.
         # Kills deleting the finite guard, on every int row and both sites.
@@ -3553,7 +3563,7 @@ class TestCounts:
 
     def test_check_identifiability_is_a_closed_enum_read_from_the_package(
             self):
-        # Kills a hand-written set: `plan.py:708` accepts exactly False,
+        # Kills a hand-written set: `plan.py::Block` accepts exactly False,
         # 'once' and 'each_sweep', and a fourth mode shipping there would be
         # refused here while the package ran it.
         from rheplicant.config.preflight.fitting import _A25_CHECK_MODES
@@ -3566,7 +3576,7 @@ class TestCounts:
         assert [f.check for f in found] == ["A25"]
         assert "'banana'" in found[0].message
         # BOTH plan kinds.  `check_identifiability` is a `_SAMPLE_KEYS`
-        # member (`exits.py:169-171`) and a `_SAMPLE_PASSTHROUGH` one
+        # member (`exits.py::_parse_optimize`) and a `_SAMPLE_PASSTHROUGH` one
         # (`:177-178`), so a clause gated on `plan.estimate` alone would
         # leave `plan.sample`'s open -- and every other assertion in this
         # class drives an estimate, so nothing else could see it.
@@ -3592,7 +3602,7 @@ class TestCounts:
                          "(CHECK_ONCE, CHECK_EACH_SWEEP):"], lines
 
     def test_a_check_identifiability_the_package_refuses_by_IDENTITY(self):
-        # `plan.py:708` reads `check is not False`, an IDENTITY test, so
+        # `plan.py::Block` reads `check is not False`, an IDENTITY test, so
         # `check_identifiability: 0` is refused there.  A frozenset carrying
         # `False` cannot see that: `hash(0) == hash(False)` and `0 == False`,
         # so `0 in frozenset({False, ...})` is True -- measured -- and the
@@ -3613,7 +3623,7 @@ class TestCounts:
         assert "['once']" in found[0].message
 
     def test_nuts_is_not_asked_about_check_identifiability(self):
-        # `_NUTS_KEYS` (`nuts.py:103-108`) does not carry the key at all, so
+        # `_NUTS_KEYS` (`nuts.py`) does not carry the key at all, so
         # Task 3's `A1.runs` already refuses it by name -- "kind: nuts does
         # not take ['check_identifiability']".  Answering here too would give
         # the user two refusals for one typo, in two voices.  Kills the
@@ -3627,7 +3637,7 @@ class TestCounts:
         # The one residue this task names in its own docstring, as an
         # assertion so that closing it later is a deliberate change to a red
         # test rather than a silent widening.  `_number`'s `minimum=` is
-        # inclusive (`exit_support.py:93`: `not value >= minimum`), and a
+        # inclusive (`exit_support.py::ParsedRun`: `not value >= minimum`), and a
         # strictly-positive floor written here would be a second validator
         # for a bound `_number` owns.  §6 carries it.
         assert _counted(_sample(n_sweeps=12, rhat_max=0.0)) == []
@@ -3658,10 +3668,10 @@ class TestCounts:
 
     def test_the_npe_counts_are_read_with_no_npe_RUN_declared(self):
         # NOT gated on `"npe" in _kinds(document)`, and the gate that shipped
-        # rested on a claim that is false.  `sections/inference.py:204` is
+        # rested on a claim that is false.  `inference.py::build_inference` is
         # `npe = parse_npe(section["npe"], context) if "npe" in section else
         # None` -- unconditional on `runs:` -- so the count IS read, at P2,
-        # and `build_inference` (`document.py:108`) runs AFTER
+        # and `build_inference` (`config/document.py::_attach`) runs AFTER
         # `build_resources` (`:75`).  Kills restoring the gate.
         found = _counted(preflight_document(
             inference={"parameters": PRIORED,
@@ -3698,7 +3708,7 @@ class TestCounts:
 
     def test_the_npe_counts_are_the_two_REQUIRED_ones_and_no_more(self):
         # `_whole` guards SEVEN whole-number knobs in `inference.npe:`
-        # (`npe.py:265`, `:301`, `:304`, `:316`); `_A25_NPE_COUNTS` carries
+        # (`sections/npe.py::_positive`, `:301`, `:304`, `:316`); `_A25_NPE_COUNTS` carries
         # the two `npe._count` (`:261-265`) makes REQUIRED.  Widening it with
         # `train.n_steps` or `create.width` is the correct-implementation
         # mutant, and without this it passes the whole module.  The other
@@ -3712,7 +3722,7 @@ class TestCounts:
             runs=[{"name": "amortized", "kind": "npe"}])) == []
 
     def test_plan_estimate_gets_no_A24_and_nuts_gets_no_A24(self):
-        # A24 is `sample()`'s (`plan.py:1054-1063`); `estimate()` keeps every
+        # A24 is `sample()`'s (`plan.py::SamplingPlan._partition`); `estimate()` keeps every
         # sweep and `nuts` counts warmup and samples separately.  Kills a
         # kept-draws computation applied to every kind, which would refuse a
         # `max_iter: 2` estimate for keeping too few draws it never had.
@@ -3742,10 +3752,10 @@ class TestCounts:
         # NOT the stand-down `_blocks` and `_prior_gates` carry, and the
         # difference is measured rather than stylistic.  Those two stand down
         # because a REAL document loses the assertion it exists to make
-        # (`test_config_exits_plan.py:108-113`,
+        # (`test_config_exits_plan.py::TestEstimate.test_noise_kind_none_is_refused`,
         # `posterior_helpers.joint_prior_document`).  No document in this
         # repository expects a count refusal, and the layer's own policy test
-        # -- `test_config_section_runs.py:88-110`,
+        # -- `test_config_section_runs.py::TestRunDocument`,
         # `test_a_text_decidable_refusal_is_not_a_runs_to_expect` -- says a
         # P-1 refusal raising out of `run_document` rather than being
         # captured is "the correct shape".  Kills adding the clause for
@@ -3755,9 +3765,9 @@ class TestCounts:
 
 
 class TestTheWarmStartIsTheSameEstimateOneCallAlong:
-    """``exits.py:288-290`` forwards the warm knobs to the same method.
+    """``exits.py::_ESTIMATE_DEFAULTS`` forwards the warm knobs to the same method.
 
-    ``_passthrough(warm, _ESTIMATE_PASSTHROUGH)`` (``exit_support.py:223``)
+    ``_passthrough(warm, _ESTIMATE_PASSTHROUGH)`` (``exit_support.py::_legacy_freeze_parse``)
     reads ``max_iter``, ``tol``, ``min_sweeps``, ``check_identifiability``,
     ``solve_tol`` and ``solve_guard`` off the WARM mapping and hands them to
     ``SamplingPlan.estimate`` -- the same method, the same guards, at the
@@ -3793,7 +3803,7 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
         assert fragment in found[0].message
         # The `where` is the warm start, not the run.  `runs[0]` would send
         # the reader to a `plan.sample` that declares none of these three
-        # keys -- `_SAMPLE_KEYS` (`exits.py:169-171`) has no `max_iter`, no
+        # keys -- `_SAMPLE_KEYS` (`exits.py::_parse_optimize`) has no `max_iter`, no
         # `tol` and no `min_sweeps` -- so there would be nothing there to
         # edit.  Kills `site = where`.
         assert found[0].where == "runs[0].warm_start"
@@ -3808,13 +3818,13 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
         assert "warm_start.check_identifiability:" in mode[0].message
 
     def test_the_warm_start_gets_no_A24_of_its_own(self):
-        # `warm_start` is `.estimate()`d (`exits.py:288-290`), which keeps every
+        # `warm_start` is `.estimate()`d (`exits.py::_ESTIMATE_DEFAULTS`), which keeps every
         # sweep, and `n_sweeps` is not a `_WARM_KEYS` member at all.  Kills
         # applying the kept-draws arithmetic per SITE rather than per run.
         assert _counted(_warmed()) == []
 
     def test_a_warm_start_the_executor_never_reaches_is_left_alone(self):
-        # `exits.py:259-285` refuses the run outright when `warm_start.kind`
+        # `exits.py::_WARM_KEYS` refuses the run outright when `warm_start.kind`
         # is not `plan.estimate` or `move:` is missing, and the passthrough
         # at `:288-290` is never evaluated.  A25 about a mapping the package
         # discards would be the only sentence the reader gets, for a knob
@@ -4011,7 +4021,7 @@ class TestTheCountsAreRegisteredAndReachTheUser:
         # `no_such_beam` does NOT.
         #
         # `load_document`, never `run_document`: §2.1 measured that
-        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # `parse_runs` (runs.py::parse_runs) speaks BEFORE P-1 on the run_document
         # path, so a `runs`-shaped violation driven that way proves nothing.
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
@@ -4262,7 +4272,7 @@ class TestTheDecidedTable:
     own.**  Measured before this task, a ``conjugate.wiener`` run with NO
     ``width:`` on a radiometer noise refused with *"width: is required ..."*
     and said nothing about A27 -- ``_run_conjugate`` refuses the missing
-    width at ``conjugate.py:127`` before ``_conjugate_block`` resolves a
+    width at ``conjugate.py::_width`` before ``_conjugate_block`` resolves a
     sigma.  The static pass fixes that as a side effect.  A test of it lives
     where it can discriminate -- ``test_config_exits_conjugate.py``'s
     ``test_the_undecidable_sigma_is_now_heard_before_the_missing_width``,
@@ -4291,7 +4301,9 @@ class TestTheDecidedTable:
         # Kills: _T10_DECIDES_SIGMA shrunk to {"conjugate.wiener"}.  condition
         # is the OTHER member of conjugate_support._DECIDES_SIGMA_HERE, and
         # test_check_A27_fires_under_kind_condition_too
-        # (test_config_conjugate_shared.py:216) records what a missing
+        # (
+        # test_config_conjugate_shared.py::test_condition_is_the_other_kind_that_decides_its_sigma_here)  # noqa: E501
+        # records what a missing
         # condition costs at P3: a package TypeError instead of the refusal.
         [found] = _t10_decided(
             _t10_document(RADIOMETER, _T10_RUN["condition"]))
@@ -4302,7 +4314,8 @@ class TestTheDecidedTable:
         # Kills: gcr falling into wiener's branch.  Both sentences carry
         # "check A27" and "radiometer_frozen", so those two literals cannot
         # tell them apart -- `noise_from: gls` is the word that can, and
-        # test_config_exits_gcr.py:309 matches on exactly it.  A gcr user sent
+        # test_config_exits_gcr.py::test_the_gls_diagnostics_come_back_as_python_scalars
+        # matches on exactly it.  A gcr user sent
         # to `kind: conjugate.gls` is being told to change exits when one key
         # would do.
         [found] = _t10_decided(
@@ -4316,7 +4329,8 @@ class TestTheDecidedTable:
             self):
         # Kills: the check firing on gcr unconditionally.  Measured, that
         # document RUNS today -- test_gls_closes_the_radiometer_dead_end
-        # (test_config_exits_gcr.py:267) pins its numbers -- so an
+        # (test_config_exits_gcr.py::TestGcrGrammar.test_noise_from_is_declared_or_gls) pins its
+        # numbers -- so an
         # unconditional gcr branch is a regression on a passing suite, and a
         # test that only asserted the positive case would not see it.
         assert _t10_decided(_t10_document(
@@ -4327,7 +4341,7 @@ class TestTheDecidedTable:
             self):
         # The other half of the branch, and the one an implementation reading
         # `entry.get("noise_from") != "gls"` gets right by accident: the
-        # package's default is the WORD `declared` (conjugate.py:380), so a
+        # package's default is the WORD `declared` (conjugate.py::_wiener_plan), so a
         # document that writes it out must be refused exactly as one that
         # leaves it out is.  Kills `if "noise_from" in entry`.
         [found] = _t10_decided(_t10_document(
@@ -4352,7 +4366,8 @@ class TestTheDecidedTable:
     def test_npe_on_a_frozen_sigma_is_told_something_true_of_npe(self):
         # THE test for the defect this task fixes.  Kills: npe sharing
         # conjugate.gls's sentence -- which is what shipped, and which
-        # test_config_exits_npe.py:139 could not see because it matches only
+        # test_config_exits_npe.py::TestTheBank.test_the_bank_key_is_runtime_seeds_bank_and_not_another_subsection  # noqa: E501
+        # could not see because it matches only
         # on `radiometer_frozen`, the half true for every caller.  The two
         # NEGATIVE assertions are the whole discrimination: an implementation
         # that reused the gls branch satisfies every positive one.
@@ -4458,7 +4473,8 @@ class TestTheDecidedTable:
         # document declaring NO sigma that it "decides its sigma into an
         # array".  That is the exact substitution
         # test_noise_kind_none_keeps_the_shared_refusal
-        # (test_config_conjugate_shared.py:483) exists to prevent, one phase
+        # (test_config_conjugate_shared.py::test_a_decided_array_is_refused_naming_conjugate_wiener)
+        # exists to prevent, one phase
         # earlier.  Both ids, because `absent` is adjacent to both rows.
         for kind in ("conjugate.wiener", "conjugate.gls", "npe"):
             assert _t10_decided(_t10_document({"kind": "none"},
@@ -4468,7 +4484,8 @@ class TestTheDecidedTable:
         # Kills: `_T10_NOISE_SHAPE[kind]` unguarded.  A check that RAISES
         # aborts the pass and hides every later finding (plan §2.3's TRAP),
         # and a KeyError is not even a refusal a user can read.  `build_noise`
-        # (noise.py:112-116) names the vocabulary; this stands down for it.
+        # (sections/noise.py::_a26_sigma_axis_problem) names the vocabulary; this stands down for
+        # it.
         assert _t10_decided(_t10_document(
             {"kind": "banana"}, _T10_RUN["conjugate.wiener"])) == []
 
@@ -4523,8 +4540,10 @@ class TestTheDecidedTable:
 
     def test_the_run_name_is_the_one_the_executors_use(self):
         # Kills: the index form, and kills re-deriving the name here rather
-        # than reading the one `_runs` filled.  runs.py:115 names an unnamed
-        # run after its kind, and test_config_exits_gls.py:422 asserts the
+        # than reading the one `_runs` filled.  runs.py::_one names an unnamed
+        # run after its kind, and
+        # test_config_exits_gls.py::TestWhatReachesTheLoop.test_the_solver_knobs_reach_the_loop
+        # asserts the
         # executor's prefix literally -- a pass that wrote runs[0] would put
         # two different spellings of the same run in front of one user.
         [unnamed] = _t10_decided(
@@ -4592,12 +4611,15 @@ class TestTheDecidedTable:
         document in this repository would otherwise lose the assertion it
         exists to make.  Measured for A27/A28, there is no such document:
         ``grep -rn "expect.*refuse" tests/config/`` finds five, at
-        ``test_config_exits_gls.py:244``, ``test_config_exits_nuts.py:360``,
-        ``test_config_exits_plan.py:110``, ``test_config_exits_predict.py:709``
-        and ``posterior_helpers.py:435``, and not one of them is A27/A28
+        ``test_config_exits_gls.py::TestTheConvergenceGate.test_reweight_tol_reaches_the_solver_exactly_as_written``,
+        ``test_config_exits_nuts.py::TestTheStartMoves.test_a_ref_on_only_SOME_latents_is_refused_by_name``,
+        ``test_config_exits_plan.py::TestEstimate.test_noise_kind_none_is_refused``,
+        ``test_config_exits_predict.py::TestTheReuseGrammar.test_reusing_a_refused_run_is_refused``
+        and ``posterior_helpers.py::joint_prior_document``, and not one of them is A27/A28
         shaped.  The layer's own policy test says the general shape is this
         way round: ``test_config_section_runs.py``'s
-        ``test_a_text_decidable_refusal_is_not_a_runs_to_expect`` (``:88``)
+        ``test_a_text_decidable_refusal_is_not_a_runs_to_expect``
+        (``posterior_helpers.py::nuts_document``)
         records that a P-1 refusal raising out of ``run_document`` rather
         than being captured is CORRECT, because ``expect: refuse`` is for a
         run that fails when it RUNS.
@@ -4633,11 +4655,12 @@ class TestTheDecidedTable:
         # inner model's `depends_on_prediction`, and that claim carried no
         # test: the two ClassVars above are readable off the class, but
         # `FlaggedNoise.depends_on_prediction` is a `@property`
-        # (`inference/noise.py:221-223`), so reading it off the class gives
+        # (`inference/noise.py::FlaggedNoise.depends_on_prediction`), so reading it off the class
+        # gives
         # the property OBJECT and says nothing.  It has to be constructed.
         #
         # Kills: `flags:` given a row of its own in the table.  Every kind
-        # but `radiometer_frozen` takes `flags:` (`noise.py:34-41`), so if
+        # but `radiometer_frozen` takes `flags:` (`sections/noise.py`), so if
         # wrapping moved a row, `kind: homoscedastic` with `flags:` would be
         # `iterated` and this pass would refuse every flagged conjugate
         # document the suite runs.
@@ -4986,7 +5009,7 @@ class TestTheDecidedTableIsRegisteredAndReachesTheUser:
         # `no_such_beam` does NOT.
         #
         # `load_document`, never `run_document`: §2.1 measured that
-        # `parse_runs` (runs.py:149) speaks BEFORE P-1 on the run_document
+        # `parse_runs` (runs.py::parse_runs) speaks BEFORE P-1 on the run_document
         # path, so a `runs`-shaped violation driven that way proves nothing.
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
@@ -5101,7 +5124,7 @@ class TestTheDecidedModelAccessor:
     def test_the_npe_caller_supplies_its_own_and_it_is_exactly_this(self):
         # The accessor's own sentence, WHOLE, through the real call site --
         # `_simulate_bank` hands `noise=` to `simulate_pairs` and is where
-        # npe reaches `_decided_model` (npe.py:475-480).  Kills every reword
+        # npe reaches `_decided_model` (sections/npe.py::parse_npe).  Kills every reword
         # of the npe clauses, and the `(check A28).` mid-sentence position,
         # which is the accessor's own frame rather than a Finding's.
         from rheplicant.config.errors import ConfigError

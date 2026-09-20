@@ -47,7 +47,7 @@ class TestTheAtomicAlphabet:
         assert unit.canonical == canonical
 
     def test_the_lookup_is_case_insensitive(self):
-        """radio/rhino.py:130 lower-cases and radio/touchstone.py:137
+        """rhino.py::_frequencies_in_hz lower-cases and touchstone.py::_parse_option_line
         upper-cases; the two readers disagree, so this layer accepts either
         rather than inventing a third convention that contradicts one of them."""
         assert canonical_unit("mhz").canonical == "Hz"

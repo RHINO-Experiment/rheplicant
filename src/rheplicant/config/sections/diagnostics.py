@@ -7,8 +7,8 @@ sweep so few keys.
 
 The two package entry points have OPPOSITE calling conventions and the
 difference is not cosmetic: ``identifiability`` puts ``names``/``at``/``rtol``
-behind a bare ``*`` (identifiability.py:418-426), while ``score_directions``
-takes ``names`` and ``at`` positional-or-keyword (reduced_basis.py:102-108).
+behind a bare ``*`` (identifiability.py::identifiability), while ``score_directions``
+takes ``names`` and ``at`` positional-or-keyword (reduced_basis.py::score_directions).
 Both are called by keyword here so that neither call shape can be copied onto
 the other.
 
@@ -20,7 +20,7 @@ Both executors differentiate ``built.inference.fit_twin``, never
 ``built.twin``: the fit twin is the model twin with ``inference.twin:``
 applied, and the repair that section exists for -- ``without: [noise]`` -- is
 exactly what makes the model differentiable at all
-(``refuse_stochastic_stages``, ``inference/parameters.py:125``).  The two are
+(``refuse_stochastic_stages``, ``inference/parameters.py::refuse_stochastic_stages``).  The two are
 the same object whenever a document declares no ``inference.twin:``, which is
 why the tests build one that does.
 
@@ -77,7 +77,7 @@ _IDENTIFIABILITY_KEYS = frozenset({"names", "at", "rtol"})
 _SCORE_KEYS = frozenset({"names", "at"})
 
 #: Measured against ``identifiability``'s own signature
-#: (``identifiability.py:425``, ``rtol=DEFAULT_RANK_RTOL``), so an explicit
+#: (``identifiability.py::identifiability``, ``rtol=DEFAULT_RANK_RTOL``), so an explicit
 #: keyword is byte-identical to today's omission.
 _IDENTIFIABILITY_DEFAULTS = {"rtol": 1e-8}
 
@@ -124,11 +124,12 @@ def _run_identifiability(run: ParsedRun, built: Any, previous: Any = None) -> An
     """``kind: identifiability`` -> the package's IdentifiabilityReport.
 
     The report holds numpy arrays and Python ints and cannot be jitted
-    (identifiability.py:255-267), so this executor drives the call plainly.
+    (identifiability.py::IdentifiabilityReport), so this executor drives the call plainly.
     Nor does it need an x64 document: ``identifiability`` forces x64 on for
-    its own duration and casts the selected latents (``:481``, ``:408``), so
+    its own duration and casts the selected latents (``identifiability.py::_widened``,
+    ``identifiability.py::identifiability``), so
     an ordinary float32 config run LANDS -- its "even with x64" refusal
-    (``:501-509``) is for a model that pins its output dtype.
+    (``identifiability.py::_graph_for_rank``) is for a model that pins its output dtype.
     """
     from rheplicant.inference import identifiability
 
@@ -151,7 +152,7 @@ def _run_score_directions(run: ParsedRun, built: Any, previous: Any = None) -> A
     Returned exactly as the package built it.  The order is the caller's,
     deliberately: jax rebuilds a dict from its flattened, sorted form, so
     re-keying or re-sorting this product hands back alphabetical names and
-    reintroduces the bug reduced_basis.py:159-168 is named after.
+    reintroduces the bug reduced_basis.py::score_directions is named after.
     """
     from rheplicant.inference import score_directions
 
@@ -174,10 +175,10 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
     another on ``score_directions``.  Measured, with the guard bypassed:
 
     * a bare string -- ``identifiability`` reads it as a group of one, by an
-      explicit ``isinstance(names, str)`` (``identifiability.py:180``, in
-      prose at ``:174-176``), so ``names: gd`` asks for one latent called
+      explicit ``isinstance(names, str)`` (``identifiability.py::_check_at``, in
+      prose at ``identifiability.py::_check_at``), so ``names: gd`` asks for one latent called
       ``gd``; ``score_directions`` does a plain ``tuple(names)``
-      (``reduced_basis.py:152``) and reads the same document as ``g`` and
+      (``reduced_basis.py::score_directions``) and reads the same document as ``g`` and
       ``d``, two rows.  In YAML a bare ``names: g`` is far more often a typo
       than an intention, and ``[g]`` says one thing to both.
     * an empty list -- ``identifiability`` refuses it by name;
@@ -191,7 +192,7 @@ def _names(run: RunSpec) -> tuple[str, ...] | None:
       ``score_directions`` silently returns ONE key for the two-name ask, so
       ``names: [g, d, g]`` hands back a 2-key product for a 3-name list and
       a caller zipping the two is off by one.  That is the permutation bug
-      ``reduced_basis.py:159-168`` is named after, reached from the far side.
+      ``reduced_basis.py::score_directions`` is named after, reached from the far side.
 
     Which latents the space actually declares is NOT checked here: that
     refusal is the package's own on both kinds, and it names the declared
@@ -322,13 +323,13 @@ def _chi2(run: RunSpec, built: Any) -> Any:
     is ``false`` that removes it, not silence.  This is spelled with the
     package's likelihood rather than open-coded: the log-determinant belongs
     to a sigma that may depend on the prediction, and
-    inference/noise.py:382-383 is where its sign and factor are already
+    inference/noise.py::log_determinant is where its sign and factor are already
     right.
 
     ``inference.noise.include_logdet`` has three states.  Undeclared it is
     None and nothing is passed, so the package's own default stands; True and
     False are passed through.  The None state is reachable only under a sigma
-    that does NOT depend on the prediction -- noise.py:156-159 requires the
+    that does NOT depend on the prediction -- sections/noise.py::NoiseBuild requires the
     key for ``kind: radiometer`` and refuses it everywhere else -- and there
     the log-determinant is an additive constant no GRADIENT can see.  It is
     still not the same objective, so it is pinned by evaluating this closure
@@ -486,7 +487,7 @@ def _of_paths(run: RunSpec) -> tuple[str, ...]:
 
     The order is the caller's and is kept, for the reason
     :func:`_run_score_directions` gives: a product re-keyed into JAX's sorted
-    order is the bug ``reduced_basis.py:159-168`` is named after.
+    order is the bug ``reduced_basis.py::score_directions`` is named after.
 
     A repeat is refused, for the reason :func:`_names` gives about
     ``names:``.  Measured before this guard: ``of: [gain.gain, gain.gain]``
@@ -664,7 +665,7 @@ def _parse_mmodes(options, context):
     # Off the BUILT object, never off the spec: a {ref} may name a projector
     # declared anywhere in resources:, and optimizations: [cache_beam_rotation]
     # REPLACES that object with to_reference_frame()'s return
-    # (projectors.py:240-241), which keeps normalize_beam and changes the
+    # (projectors.py::_angle), which keeps normalize_beam and changes the
     # frame.
     if projector.normalize_beam:
         raise ConfigError(
@@ -696,10 +697,11 @@ def _run_mmodes(run: ParsedRun, built: Any, previous: Any = None) -> Any:
 
     Two references and nothing else.  The beam is the projector's own traced
     ``beam_alms`` -- ``mmodes(sky, coords)`` has no ``beam=`` argument to give
-    it (driftscan.py:663) -- and the coords come off ``built.state`` because
+    it (driftscan.py::DriftScanProjector.adjoint) -- and the coords come off ``built.state`` because
     ``mmodes`` reads ``coords.extra["lst_deg"]`` and cross-checks
     ``coords.pointing`` against the projector's fixed az/el itself
-    (driftscan.py:387-436).  That cross-check's refusal is the package's and
+    (driftscan.py::DriftScanProjector.uniform_lst_grid).  That cross-check's refusal is the
+    package's and
     is left alone: it names the disagreement, and nothing this layer could
     say about it would be more specific.
 
@@ -714,7 +716,8 @@ def _run_mmodes(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     sky_model = run.options["sky"]
     coords = built.state.coords
     maps = sky_model(coords.freq)
-    # `shape` and not the extents: `_validate_sky` (driftscan.py:551-557)
+    # `shape` and not the extents: `_validate_sky`
+    # (driftscan.py::DriftScanProjector._quadrature_ones)
     # already names n_freq, n_pix AND the nside they follow from, and says it
     # better than this layer could.  What it cannot survive is an argument
     # with no `shape` at all, which is where it reaches first -- so this
@@ -743,7 +746,7 @@ _PREDICT_KEYS = frozenset({"n_draw"})
 #: ``get_samples()`` has already dropped it, ``npe`` has no warmup at all.
 #: The dispatch is on the KIND -- never on ``hasattr(product, "samples")``,
 #: which ``conjugate.wiener`` with ``width: fisher`` already defeats on the
-#: covariance side (conjugate.py:195, :392) and which would let any future
+#: covariance side (conjugate.py::_gaussian_width, :392) and which would let any future
 #: kind carrying a ``.samples`` in past this table.
 _DRAW_SOURCES = {
     "plan.sample": "plan.sample discards its warmup before returning",
@@ -862,7 +865,7 @@ def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     * a ``plan.sample``, ``nuts`` or ``npe`` run carries draws, and
       :func:`~rheplicant.inference.predict_from_samples` runs the pipeline
       over them.  **Those predictions are NOISELESS** -- the likelihood's own
-      scatter is not added back (numpyro_bridge.py:337-338).  "Predictive"
+      scatter is not added back (numpyro_bridge.py::to_numpyro_model).  "Predictive"
       usually means the opposite, so it is said here in full.
 
     ``n_draw:`` keeps the LAST draws on all three, and on a multi-chain
@@ -874,7 +877,7 @@ def _run_predict(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     finite, correctly shaped and silent about which chain it came from.
 
     :func:`~rheplicant.inference.push_forward` is neither route.  It is a
-    ``jax.vmap`` over a SAMPLES pytree (uncertainty.py:577) and takes no
+    ``jax.vmap`` over a SAMPLES pytree (uncertainty.py::fisher_information) and takes no
     covariance at all, so routing a fisher product to it would mean this layer
     inventing a Cholesky, an unflatten and a seed to manufacture draws the
     package never asked for; and on the samples side it is

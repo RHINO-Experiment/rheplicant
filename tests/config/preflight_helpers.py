@@ -39,8 +39,8 @@ from tests.config.exit_helpers import (
 )
 
 #: A ``resources:`` patch whose beam file does not exist.  Loading a document
-#: carrying it reaches ``build_resources`` (``document.py:75``, measured at
-#: Task 3; ``:104`` before Task 2 put the hook above it) and refuses
+#: carrying it reaches ``build_resources`` (``config/document.py::ConfiguredRun``, measured at
+#: Task 3; ``config/document.py::_attach`` before Task 2 put the hook above it) and refuses
 #: with ``No file at 'no_such_beam.npy'.`` -- measured, 0.115 s to that
 #: refusal.  It is what the phase guard puts in front of the pass: a document
 #: that is expensive-and-broken in a way that has nothing to do with the
@@ -94,9 +94,9 @@ def _base() -> dict:
 
 #: The base document's ``model:`` and ``observation:`` sections, so a test can
 #: write ``model={**BASE_MODEL, "noise": NOISE}``.  Named BASE_* rather than
-#: MODEL/OBSERVATION because ``tests/config/inference_helpers.py:20`` already
+#: MODEL/OBSERVATION because ``inference_helpers.py::MODEL`` already
 #: binds a MODEL with different contents, and a second one under
-#: ``tests/config/`` is the shadowing ``exit_helpers.py:54-58`` named its own
+#: ``tests/config/`` is the shadowing ``exit_helpers.py`` named its own
 #: CONJUGATE_MODEL to avoid.
 BASE_MODEL = dict(_base()["model"])
 BASE_OBSERVATION = dict(_base()["observation"])
@@ -545,7 +545,7 @@ T4_NO_OBSERVED_INFERENCE = {key: value
                             if key != "observed"}
 
 #: The base document's inference block with its ONE observation replaced by
-#: TWO named ones, neither called ``primary``.  ``sections/observed.py:266-271``
+#: TWO named ones, neither called ``primary``.  ``observed.py::build_observed``
 #: names a ``primary`` entry, falls back to the single entry when there is
 #: exactly one, and otherwise leaves ``ObservedBuild.primary`` **None** -- so
 #: this is the shape on which ``observed`` is not ``None`` and its ``primary``
@@ -564,7 +564,7 @@ T4_TWO_NAMED_OBSERVATIONS = {
 }
 
 #: An ``inference:`` PATCH turning the noise off.  ``decided_noise`` returns
-#: ``None`` for ``kind: none`` (``sections/noise.py:318``) and
+#: ``None`` for ``kind: none`` (``sections/noise.py::build_noise``) and
 #: ``as_noise_model(None, ...)`` is a ``TypeError`` out of the package, so C19
 #: stands down here rather than handing it over.  A patch and not a block: the
 #: one-level merge keeps the base's ``g``, its priors and its observed data, so
@@ -572,7 +572,7 @@ T4_TWO_NAMED_OBSERVATIONS = {
 T4_NOISE_NONE = {"noise": {"kind": "none"}}
 
 #: An ``inference:`` patch whose latent asks for a COMPLEX init.  It is
-#: **accepted**, and that is the whole point: ``sections/parameters.py:162``
+#: **accepted**, and that is the whole point: ``sections/parameters.py::parse_latents``
 #: casts every ``init`` to ``context.dtype``, which ``RuntimeFacts.dtype``
 #: restricts to ``float32``/``float64``, so the complex value arrives as a
 #: ``float32`` latent with a ``ComplexWarning`` and nothing downstream ever

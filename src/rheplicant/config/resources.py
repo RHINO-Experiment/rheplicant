@@ -303,7 +303,7 @@ def resolved_specs(section: Mapping[str, Any] | None) -> dict[str, dict]:
     **It reads ONE LAYER.**  A check must not call it once on
     ``document["resources"]`` and stop -- that closes the base route and leaves
     the ``variants:`` twin open.  Walk the layers with
-    ``preflight/document.py::_task3_over_layers`` and call this per layer::
+    ``_task3_over_layers`` and call this per layer::
 
         return _task3_over_layers(document, lambda layer: _per_layer(
             resolved_specs(layer.get("resources"))))

@@ -9,7 +9,7 @@ too -- they read numbers. Nothing read a sentence.
 
 Most of a sentence still cannot be read. What CAN be read is the part of it
 that is a code name: ``Finding.check``, ``bias_tolerance=``,
-``examples/gls_gcr.py``, ``tests/config/test_config_surface.py::TestX``. When
+``examples/gls_gcr.py``, ``TestX``. When
 the code renames one of those, the sentence around it becomes false in a way
 that is invisible to a reader and to every other guard here. That is the class
 this module closes, and it is deliberately narrower than "the docs are true".

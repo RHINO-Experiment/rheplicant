@@ -12,7 +12,7 @@ are simply not able to tell right from wrong on their own.
 branches register checks that run on these same documents, so ``ids(doc) ==
 frozenset({...})`` is green here and red after the merge.  Every "and nothing
 else" statement is scoped to :data:`MINE` through :func:`silent_here`, which
-is ``test_preflight_model.py:110``'s idiom.
+is ``test_preflight_model.py``'s idiom.
 
 **The build is still asked too.**  A hoist has three parts and the third is
 that the section keeps calling the same function at build time (plan §2.2), so
@@ -264,7 +264,7 @@ class TestA26TheOneDSigma:
     def test_the_build_says_the_same_sentence(self):
         """The hoist's third part (§2.2): the section keeps calling it.
 
-        ``test_config_section_noise.py::test_a_1d_sigma_without_axis_is_check
+        ``test_config_section_noise.py::TestAxis.test_a_1d_sigma_without_axis_is_check_a26
         _a26`` still pins this with ``match="axis"`` and is unchanged; this is
         the equality the ``match=`` cannot express.
         """

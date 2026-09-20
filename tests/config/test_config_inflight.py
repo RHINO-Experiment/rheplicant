@@ -1335,7 +1335,7 @@ class TestTheImportBlockCannotRot:
         would already have the decorators run and would answer "wired" for a
         module the package never imports -- which is precisely how the guard
         that did notice
-        (``test_config_surface.py::test_every_check_plan_3b_claims_is_registered``)
+        (``test_config_surface.py::TestTheCountsProseStatesAboutThisLayer.test_every_check_plan_3b_claims_is_registered``)
         was disarmed in a full session and went red only when run alone.
         """
         unwired = _unwired(

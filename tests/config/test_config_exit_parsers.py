@@ -1268,7 +1268,8 @@ class TestConjugateOptionRefusalsHappenAtParse:
     def test_a_decided_sigma_is_a28_for_gls(self, frozen_configured):
         """A28 is statically decidable, but ``_decided_model``'s caller set
         is pinned whole by an unowned call-graph test
-        (``test_preflight_fitting.py:4553``), so the model-noise refusal stays
+        (``test_preflight_fitting.py::TestTheDecidedTable.test_each_run_is_blamed_by_its_own_index_and_its_own_name``),
+        so the model-noise refusal stays
         at execute with its old message -- the plan Step 2 fallback shape."""
         parsed = _parse_conjugate("conjugate.gls", frozen_configured,
                                   names=["g"])

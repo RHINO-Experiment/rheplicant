@@ -104,7 +104,8 @@ def nuts_document(run=None, **kwargs):
     ``**options`` at Task 8 and why this went the same way.  What replaces
     it: :func:`nuts_spec` for a refusal read straight off the executor, and
     ``del document["runs"][0][key]`` for one read through ``run_document`` --
-    the idiom ``test_config_exits_gcr.py:215`` already uses for exactly this.
+    the idiom ``test_config_exits_gcr.py::TestGcrDraws.test_the_compiled_prior_reaches_the_draw``
+    already uses for exactly this.
     """
     merged = {**NUTS, **(run or {})}
     kwargs.setdefault("seeds", {"chain": 3})
@@ -133,7 +134,7 @@ def nuts_spec(drop=(), **options):
     the correction outlived the thing it corrected to.  The route it named is
     still open and needs no parameter: a test that wants the DOCUMENT to be
     missing a key builds one and deletes the key, the way
-    ``test_config_exits_gcr.py:215`` does.
+    ``test_config_exits_gcr.py::TestGcrDraws.test_the_compiled_prior_reaches_the_draw`` does.
     """
     body = {key: value for key, value in NUTS.items()
             if key not in ("name", "kind") and key not in drop}
@@ -205,7 +206,7 @@ NPE_SEEDS = {"bank": 11, "create": 12, "train": 13, "sample": 14}
 #:
 #: ``n_components: 1`` is DECLARED and not defaulted.  The package's default is
 #: 4 and its own tuning table says 4 over-fits -- both
-#: ``tests/inference/test_npe.py:145`` and the shipped example pass 1 -- and
+#: ``test_npe.py::trained`` and the shipped example pass 1 -- and
 #: the config layer restates no package default, so a document that wants 1
 #: says 1.  ``min_scale`` is left unwritten precisely so that one key in this
 #: section demonstrates the package's own default arriving untouched, and

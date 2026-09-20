@@ -9,7 +9,7 @@ recompute by hand.
 A13 requires ``cw_tone.line_width`` to be written with no default, and it must
 lie above ``MIN_WIDTH_IN_CHANNELS[lineshape] * median(|diff(freq)|)`` -- note
 that ``MIN_WIDTH_IN_CHANNELS`` is a per-lineshape *dict*
-(``radio/instrument/calibration.py:142``, ``{"sinc2": 1.0, "gaussian": 0.25}``),
+(``calibration.py``, ``{"sinc2": 1.0, "gaussian": 0.25}``),
 not one number. The arithmetic v0 handed the user was
 ``25e6 / (N_FREQ - 1) = 806451.6129032258``; rounding that to 0.8 MHz is
 refused at trace time and rounding the other way silently mis-sizes the
@@ -43,7 +43,7 @@ from rheplicant.config.values import (
 #: name -> (function, accepted argument keys, keys routed to the function so
 #: it may refuse them by name). Paired deliberately: a derivation added to one
 #: half and forgotten in the other is exactly the bug
-#: inference/uncertainty.py:85-87 argues a single table prevents.
+#: uncertainty.py argues a single table prevents.
 #:
 #: ``refused`` is separate from ``arguments`` rather than folded into it
 #: because the two say opposite things to a reader of a refusal. ``n`` on
@@ -75,7 +75,7 @@ def _package_guard(name: str, controls: str):
 
     The wrapper :func:`rheplicant.config.files._read` applies to a reader, for
     the same reason. The function's own message is the authority on what it
-    refused -- ``core/basis.py:206`` lists the live ``BASIS_KINDS`` and argues
+    refused -- ``basis.py::basis_matrix`` lists the live ``BASIS_KINDS`` and argues
     why the nearest-sounding name is not a safe guess, which is better than any
     restatement here and, being quoted rather than copied, cannot drift from
     the alphabet it quotes -- but it knows nothing about the document, so it
@@ -208,7 +208,7 @@ def _basis_matrix(node, context, modifiers, target):
 
 @register_derivation("unit_mean_free", frozenset({"bandpass"}))
 def _unit_mean_free(node, context, modifiers, target):
-    """``receiver.py:103``: ``(bandpass / mean(bandpass))[:-1]``.
+    """``receiver.py``: ``(bandpass / mean(bandpass))[:-1]``.
 
     The result is one element SHORTER than the bandpass it came from, and that
     is the function's whole point rather than an accident to be smoothed over

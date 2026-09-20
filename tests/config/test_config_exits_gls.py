@@ -131,7 +131,7 @@ class TestTheProduct:
 
     def test_the_jax_diagnostics_arrive_as_python_scalars(self):
         # gls.py builds iterations/delta/converged as jax.Arrays, and
-        # examples/gls_gcr.py:150-152 casts all three.  `type(...) is` rather
+        # gls_gcr.py casts all three.  `type(...) is` rather
         # than isinstance: bool is a subclass of int, so an `iterations` cast
         # with bool() would satisfy isinstance(..., int).  And `is True` is
         # the assertion a raw jax.Array fails -- bool(x) is truthy but
@@ -181,7 +181,7 @@ class TestTheProduct:
 class TestTheConvergenceGate:
     """``GLSResult.converged is False`` is the one gate the package leaves us.
 
-    gls.py:89-91 says a covariance that is not a fixed point is still a
+    gls.py::GLSResult says a covariance that is not a fixed point is still a
     number, and that everything conditioned on it inherits that.  This exit
     refuses the product rather than reporting it.
     """
@@ -360,7 +360,7 @@ class TestWhatReachesTheLoop:
     and the same on the ``g = 1.2`` twin and the tight-prior one.  Measuring
     that and calling the knob benign would have been the wrong conclusion: it
     says the FIXTURE has no lever, not that the exit has none.  The pair in
-    :func:`gls_pair_product` has one, and ``test_config_exits_gcr.py:395``
+    :func:`gls_pair_product` has one, and ``test_config_exits_gcr.py::TestNoiseFromGls``
     named this obligation for this task in as many words.
     """
 
@@ -587,7 +587,7 @@ class TestGlsGrammar:
         #   * reweight_tol: null stops being an error and quietly becomes the
         #     package's derived default, max(8 * eps, tol) -- a declared
         #     tolerance that decides nothing;
-        #   * min_reweights: null reaches gls.py:198's `1 <= min_reweights` as
+        #   * min_reweights: null reaches gls.py::iterative_gls's `1 <= min_reweights` as
         #     `1 <= None`, a bare TypeError from inside the package about an
         #     argument the document never wrote that way, which is the exact
         #     substitution this layer exists to prevent.

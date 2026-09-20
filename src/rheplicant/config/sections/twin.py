@@ -1,9 +1,9 @@
 """inference.twin: the fit twin is the model twin, repaired (schema §4.7).
 
 ``without:`` is the supported repair for the stochastic-stage refusal --
-``refuse_stochastic_stages`` (``inference/parameters.py:125``) names
+``refuse_stochastic_stages`` (``inference/parameters.py::refuse_stochastic_stages``) names
 ``Assembly.without`` itself.  ``replace:`` swaps one node's operator for a
-declared one through ``Assembly.replace_node`` (``core/graph.py:473``), whose
+declared one through ``Assembly.replace_node`` (``core/graph.py::Assembly.replace_node``), whose
 named refusals -- aliased node, materialized junction, ``None`` -- speak for
 themselves and are not restated here.  A replacement value is a §4.5.1 node
 spec handed to the model section's own ``build_node_operator``, so a

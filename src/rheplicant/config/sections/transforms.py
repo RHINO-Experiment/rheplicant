@@ -1,7 +1,7 @@
 """The transform registry, and bindings -> ParameterSpace (schema §4.7.2-3).
 
-``Bind.into`` holds callables (``inference/parameters.py:338``);
-``resolve_path_on`` (``config/paths.py:167``) compiles a dotted path into one
+``Bind.into`` holds callables (``inference/parameters.py::Bind``);
+``resolve_path_on`` (``config/paths.py::resolve_path_on``) compiles a dotted path into one
 and refuses anything that is not an array leaf.  The registry is closed for
 the same reason the derivation registry is: every entry names a callable this
 package already ships, so a transform is a reference rather than arithmetic.
@@ -156,7 +156,7 @@ def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
 
     The transform that makes a beam-map gradient the quantity the document
     meant.  A ``DriftScanProjector``'s only non-static field is ``beam_alms``
-    (``radio/sky/driftscan.py:189-203``), so without this the only binding a
+    (``driftscan.py::DriftScanProjector``), so without this the only binding a
     document can write is ``into: ...projector.beam_alms``, and what comes
     back is d(chi2)/d(alm) rather than d(chi2)/d(map) -- a different quantity
     in a different basis, finite and correctly shaped either way.
@@ -164,17 +164,19 @@ def _beam_analysis(where: str, body: Mapping) -> tuple[Any, str]:
     ``map2alm_iter``, not ``map2alm_quad``: the two differ by ``npix/4pi`` and
     are not interchangeable.  ``_iter`` returns true (healpy-convention) alms
     and is what ``from_beam_maps`` feeds into ``beam_alms``
-    (``driftscan.py:301``); ``_quad`` returns quadrature alms and is the
-    *sky*'s transform (``sky_to_alms``, ``driftscan.py:605-606``).  Picking
+    (``driftscan.py::DriftScanProjector.from_beam_maps``); ``_quad`` returns quadrature alms and is
+    the
+    *sky*'s transform (``sky_to_alms``, ``driftscan.py::DriftScanProjector.sky_to_alms``).  Picking
     the visible one "silently rescales the beam by npix/4pi"
-    (``driftscan.py:269``) -- measured 15.06x against npix/4pi = 15.28 at
+    (``driftscan.py::DriftScanProjector.from_beam_maps``) -- measured 15.06x against npix/4pi =
+    15.28 at
     nside=4, finite and correctly shaped and wrong.
 
     ``map2alm_iter`` is a single-map function -- ``nside``, ``lmax``,
     ``iterations`` and ``npol`` all sit behind a bare ``*``, and ``nside`` and
     ``lmax`` have no defaults -- so the ``(n_freq, n_pix) -> (n_freq, n_alm)``
     shape of the schema's table is the ``jax.vmap``'s, not the function's.
-    This is ``driftscan.py:300-302`` verbatim.
+    This is ``driftscan.py::DriftScanProjector.from_beam_maps`` verbatim.
 
     limTOD is imported only after the grammar has been checked, so a
     malformed ``beam_analysis:`` is refused in this layer's voice on an

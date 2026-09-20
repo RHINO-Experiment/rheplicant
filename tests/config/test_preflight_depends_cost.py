@@ -165,7 +165,7 @@ def child():
 class TestTheCostAndTheImportInvariant:
     """§0.3 E.2(8): neither shipped guard covers the pass's own RUN-TIME imports.
 
-    ``test_config_preflight.py::test_importing_the_pass_drags_in_no_optional_
+    ``test_config_preflight.py::TestTheCostAndTheBoundary.test_importing_the_pass_drags_in_no_optional_dependency
     dependency`` asserts the invariant for ``import rheplicant.config.preflight``
     and says nothing about what a CHECK does when it runs; the cold-budget
     guard runs a document with no ``resources:`` at all, so it lights none of

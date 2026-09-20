@@ -53,7 +53,7 @@ class TestTheConfigLayerOwnsItsOwnVocabulary:
 
 class TestLiveNames:
     def test_it_reflects_a_registry_that_grew_after_it_was_built(self):
-        """The whole point. core/graph.py:350's registry lists its known keys
+        """The whole point. core/graph.py::_GRAPHS's registry lists its known keys
         in the refusal; a module-level tuple snapshot of a registry that four
         plans fill would list whatever was registered when it was imported."""
         from rheplicant.config.registry import LiveNames

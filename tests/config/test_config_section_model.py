@@ -111,7 +111,7 @@ class TestFieldDelivery:
                 context)
 
     # No wrong-suffix test here: the suffix table (`_NAME_SUFFIX_DIMENSION`,
-    # units.py:65) holds only `_deg`/`_m`, and no shipped operator field ends
+    # units.py) holds only `_deg`/`_m`, and no shipped operator field ends
     # in either -- the `check_field_name_unit` call in `_field_value` is
     # future-proofing, exercised by the units module's own tests.
 
@@ -375,7 +375,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         """0.3 E.10, closed for C7 rather than recorded as a false negative.
 
         ``inference.twin.replace.<node>`` reaches ``build_node_operator``
-        (``sections/twin.py:69``), which is the route ``preflight/model.py``'s
+        (``sections/twin.py::build_fit_twin``), which is the route ``preflight/model.py``'s
         ``model_nodes()`` cannot see and the hole that ruling is about.  This fix
         does not walk ``model:`` as text -- it sits INSIDE ``_from_route``,
         below ``build_node_operator`` -- so both routes are covered by

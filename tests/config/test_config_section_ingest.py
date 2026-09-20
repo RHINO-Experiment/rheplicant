@@ -16,7 +16,7 @@ TIME_S = np.arange(0.0, 12.0, 1.0) + 1000.0
 
 def make_file(path):
     """The minimal /sdr + /switches + /temperatures schema rhino.py reads
-    (the full builder lives in tests/radio/test_rhino.py:37-86)."""
+    (the full builder lives in test_rhino.py::make_file)."""
     with h5py.File(path, "w") as handle:
         handle["/sdr/sdr_freqs"] = FREQ_MHZ
         handle["/sdr/sdr_times"] = TIME_S

@@ -106,7 +106,8 @@ def test_key_order_is_part_of_the_document_and_sorting_would_change_every_digest
     A bare ``sorted()`` in ``_mapping_keys`` does NOT reach this assertion:
     the encoder already cross-checks its key order against the origins tree,
     and ``_origin_children`` raises "resolved YAML origin shape differs"
-    first (``yaml.py:120``). That guard was there before this test and is the
+    first (``audit/yaml.py::ResolvedYamlEncoder._origin_children``). That guard was there before
+    this test and is the
     better one, because it fires on the spot.
 
     What it does not see is a CONSISTENT sort -- keys sorted and the origins

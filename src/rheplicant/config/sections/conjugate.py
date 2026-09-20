@@ -362,7 +362,7 @@ def _gls_record(found: Any) -> dict:
     """GLSResult's diagnostics as the Python scalars a product can carry.
 
     ``iterations``, ``delta`` and ``converged`` are jax.Arrays -- the casts
-    are ``examples/gls_gcr.py:150-152``'s, and without them a product that
+    are ``gls_gcr.py``'s, and without them a product that
     says ``converged`` carries a truthy-but-untyped array into a report.  The
     three keys are exactly the GLSResult fields of the same names (measured:
     ``GLSResult._fields == ('noise_std', 'solution', 'residual', 'iterations',
@@ -400,7 +400,7 @@ def _a29_gcr_needs_a_seed(where: str, options: Mapping[str, Any]) -> None:
 
     PRESENCE only.  The FORM of the declaration -- a literal, or a name
     outside ``runtime.seeds.`` -- is ``draws._seed_name``'s, which
-    :func:`_gcr_product` reaches at ``:503`` and which the pass calls
+    :func:`_gcr_product` reaches at ``gls_gcr.py`` and which the pass calls
     separately.  Splitting them that way is what lets a seedless run be
     described once, in this voice, rather than twice in two.
     """
@@ -535,7 +535,7 @@ def _wiener_product(
     if width == "fisher":
         _require_the_whole_space(where, space, block)
     solution, residual = wiener_solve(block, observed, noise_std=sigma, **prior, **solve)
-    # as_dict is the idempotent wrap (linear.py:184): the product's shape is
+    # as_dict is the idempotent wrap (linear.py::LinearBlock.names): the product's shape is
     # the mapping six downstream consumers read, whichever spelling built the
     # block.  Over a GROUPED block -- the only one this layer compiles -- it
     # is a no-op, so no test can distinguish it from `solution`; it is here
@@ -594,7 +594,7 @@ def _gcr_product(
     draws, residual = jax.vmap(
         lambda one: gcr_sample(block, observed, noise_std=sigma, key=one, **prior, **solve)
     )(keys)
-    # as_dict is the idempotent wrap (linear.py:184), here for the same reason
+    # as_dict is the idempotent wrap (linear.py::LinearBlock.names), here for the same reason
     # as in :func:`_wiener_product` and just as unobservable: over a GROUPED
     # block -- the only one this layer compiles -- gcr_sample already returns
     # the mapping, so no test can distinguish this from `draws` (measured: the
@@ -826,10 +826,10 @@ def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
         where=where,
         clauses=_A28_GLS_CLAUSES,
     )
-    # iterations/delta/converged are jax.Arrays on the way out (gls.py:97-99);
+    # iterations/delta/converged are jax.Arrays on the way out (gls.py::iterative_gls);
     # _gls_record casts all three, so neither a report nor diagnostics.json
-    # ever sees a traced value -- examples/gls_gcr.py:150-152 is the idiom.
-    # as_dict is the idempotent wrap (linear.py:184), here for the same reason
+    # ever sees a traced value -- gls_gcr.py is the idiom.
+    # as_dict is the idempotent wrap (linear.py::LinearBlock.names), here for the same reason
     # as in _wiener_product and just as unobservable: over a GROUPED block --
     # the only one this layer compiles -- the solution already IS the mapping,
     # so no test can distinguish this from `found.solution` (measured: the
@@ -841,7 +841,7 @@ def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
 def _run_condition(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """kappa for the block a conjugate exit would solve -- and no data at all.
 
-    ``condition_estimate`` (linear.py:1337) takes no ``observed`` and no
+    ``condition_estimate`` (linear.py::_per_member) takes no ``observed`` and no
     ``prior_mean``, and never calls ``_check_solve_arguments``: a block and a
     decided sigma are the whole input, which is why :func:`_conjugate_block`
     runs with ``needs_observed=False`` -- this is its one caller that does.  It

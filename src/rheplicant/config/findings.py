@@ -40,11 +40,11 @@ line every user reads, so there is none.  **The zeros are what a later plan must
 re-measure if it starts anchoring**; the 442 and the 444 will drift on their own
 and mean nothing when they do.
 
-**Three severities, not four.**  ``sections/inference.py:43`` parses
+**Three severities, not four.**  ``inference.py::_INFERENCE_KEYS`` parses
 ``_MODES = ("refuse", "warn", "report", "skip")`` and it is tempting to mirror
 all four here.  ``skip`` is not a verdict.  It is a MODE a DOCUMENT declares
 about a named check -- "do not run this one on me" -- and it carries its own
-``reason:`` (``sections/inference.py:103-108``, which is check A37).  A check
+``reason:`` (``inference.py::_checks``, which is check A37).  A check
 that has been skipped emits nothing at all, so there is no finding whose
 severity is ``"skip"``, and a fourth member here would invite one.
 :meth:`Report.of` refuses the token by name for exactly that reason: the
@@ -79,7 +79,7 @@ WARN: str = "warn"
 #: Worth recording next to the run; not worth interrupting anyone over.
 REPORT: str = "report"
 
-#: The three verdicts a check may reach.  NOT ``sections/inference.py:43``'s
+#: The three verdicts a check may reach.  NOT ``inference.py::_INFERENCE_KEYS``'s
 #: ``_MODES`` -- see this module's docstring for why ``skip`` is absent.
 SEVERITIES: tuple[str, ...] = (REFUSE, WARN, REPORT)
 
@@ -224,7 +224,7 @@ class Report:
         """Say the warnings out loud, one ``warnings.warn`` each, as
         :class:`ConfigWarning`.
 
-        ``stacklevel=3`` and not the ``2`` at ``sections/parameters.py:176``,
+        ``stacklevel=3`` and not the ``2`` at ``sections/parameters.py::parse_latents``,
         because the frame counts differ and the target is the same.  That call
         sits one frame from its caller; this one sits two -- the chain this
         aims at is ``user -> load_document -> emit_warnings ->

@@ -4,7 +4,7 @@ There is no package constructor behind this kind and there is nothing to
 mirror -- ``find src -name "*array*"`` returns nothing. It exists because the
 value grammar deliberately has no expression language, and a schema that
 cannot say ``f(g(x), y)`` cannot express the seven reflection coefficients
-``examples/gibbs_plan.py:112-119`` builds by nested ``rhino_cal_jax`` calls.
+``gibbs_plan.py::gamma_rec`` builds by nested ``rhino_cal_jax`` calls.
 
 Naming is the answer: bind the inner call to a name, reference it from the
 outer one. It is a let-binding, not an expression -- there is no operator, no

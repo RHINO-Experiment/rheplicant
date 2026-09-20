@@ -32,7 +32,7 @@ def context():
 
 class TestRefIsIdentityNotACopy:
     def test_it_returns_the_same_object(self, context):
-        """radio/instrument/beam_spill.py:89 from_projector is 'the one call
+        """instrument/beam_spill.py::BeamSpillOperator from_projector is 'the one call
         that cannot get the weight and the sky average out of step'. Two
         projectors that nominally share a beam must share the ARRAY; a loader
         that reconstructs each reference passes every shape check and silently
@@ -46,7 +46,7 @@ class TestRefIsIdentityNotACopy:
         assert first is second
 
     def test_a_named_sub_value_is_reachable(self, context):
-        """radio/beams.py:150 horizon_truncated_beam returns
+        """radio/beams.py::horizon_truncated_beam horizon_truncated_beam returns
         (truncated_maps, sky_fraction) -- one call, two products -- and
         sky_fraction is exactly what BeamSpillOperator(sky_fraction=) wants.
         v0 consumed the maps and dropped the fraction, leaving the user with
@@ -199,7 +199,7 @@ class TestFromSwitchOrder:
     def test_it_matches_by_name_not_by_position(self, context):
         """noise_wave.gamma_src's row order is fixed by switching.order, and a
         transposition there is shape-legal and costs tens of kelvin
-        (radio/instrument/noise_wave.py:83-86). Matching by name is what makes
+        (noise_wave.py). Matching by name is what makes
         check A15 a structural consequence rather than a separate guard."""
         got = resolve_value(
             {"from_switch_order": {"resource": "resources.s_params", "part": "re"}}, context

@@ -109,7 +109,7 @@ class TestTheChainComesBack:
     def test_the_shapes_are_the_predict_contract(self):
         """`n_draw` is the count RETURNED, not the count asked for.
 
-        2C's shipped predict reads `product.n_draw` (diagnostics.py:748) and
+        2C's shipped predict reads `product.n_draw` (sections/diagnostics.py::_DRAW_SOURCES) and
         gates its `keep > available` refusal on it (:753), so an `n_draw`
         that names some other number of the chain's is a wrong refusal in
         Task 9 rather than a wrong shape here.
@@ -144,7 +144,7 @@ class TestTheNoiseModelGoesInWhole:
 
         `inference.noise.kind: radiometer` makes sigma a function of the
         prediction, which every conjugate exit refuses by name (check A27,
-        exit_support.py:225).  An executor that reached for `_decided_sigma`
+        exit_support.py::_legacy_freeze_parse).  An executor that reached for `_decided_sigma`
         would raise that refusal here; this run must produce a posterior
         instead.  Measured: g mean 1.500005.
         """
@@ -580,7 +580,7 @@ class TestTheKnobsAreCHECKED:
     The precedent cuts both ways and it was weighed: ``_SAMPLE_PASSTHROUGH``
     already forwards ``warmup``/``max_iter`` unvalidated, so this is not a
     regression -- but ``conjugate.gcr`` DOES validate its own optional count
-    (``_number(run, "n_draws", ..., kind=int, minimum=1)``, conjugate.py:325),
+    (``_number(run, "n_draws", ..., kind=int, minimum=1)``, conjugate.py::_gls_result),
     and a NEW knob is where a layer decides which precedent it is following.
     """
 

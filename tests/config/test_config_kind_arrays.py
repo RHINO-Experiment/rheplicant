@@ -25,7 +25,7 @@ class TestANamedValueNode:
     def test_a_named_python_call_may_take_another_named_entry_as_an_argument(self, context):
         """This is v1's whole answer to 'the schema cannot express f(g(x), y)':
         composition is by naming, not by nesting. It unblocks
-        examples/gibbs_plan.py:112-119 and sky_to_noise_wave.py:158-165, seven
+        gibbs_plan.py::gamma_rec and sky_to_noise_wave.py, seven
         reflection coefficients built by nested rhino_cal_jax calls.
 
         DEVIATION from the plan's text: the plan's example target is
@@ -34,7 +34,7 @@ class TestANamedValueNode:
         signature is ``(*args, out=None, where=None)`` -- it takes no keyword
         named ``x1``/``x2`` at all (confirmed against plain ``numpy`` too), so
         it cannot be reached through ``hatch._call``, which calls
-        ``attribute(**keywords)`` (``src/rheplicant/config/hatch.py:164``).
+        ``attribute(**keywords)`` (``hatch.py::_call``).
         ``jax.numpy:dot`` is a plain Python-level function with real keyword
         parameters ``a``/``b`` and gives the identical result for a vector
         times a scalar, so it stands in for the plan's example without

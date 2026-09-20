@@ -58,7 +58,7 @@ class TestTheEngines:
         assert projector.nside == 4  # inferred by the classmethod, not written
 
     def test_general_pointing_can_share_the_drift_engines_alms(self, context):
-        """examples/driftscan_mmode.py:84 hands drift.beam_alms to the general
+        """driftscan_mmode.py hands drift.beam_alms to the general
         engine so both see the SAME analysis. Re-analysing the beam with a
         different transform destroys the 2e-16 agreement the comparison
         exists to demonstrate."""
@@ -140,7 +140,7 @@ class TestNormalizeBeam:
 
 class TestCheckA44:
     def test_a_real_sky_engine_in_float32_needs_an_acknowledgement(self, tmp_path):
-        """radio/sky/general_pointing.py:28-32 -- 'the map/alm steps carry
+        """general_pointing.py -- 'the map/alm steps carry
         O(10%) errors in float32'. A 10% error on the beam-weighted sky is
         larger than every effect normalize_beam, phi0_deg and phi_sense are
         required keys for, and it is invisible: the maps come back finite,

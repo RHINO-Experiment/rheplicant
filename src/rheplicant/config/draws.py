@@ -1,8 +1,8 @@
 """Form 3: a value drawn from a distribution, with its seed named in one place.
 
 Three of the five stress-ported example scripts were blocked without this
-(``driftscan_mmode.py:61``, ``sky_to_noise_wave.py:109``,
-``three_ways_to_a_posterior.py:76``): their skies are *drawn*, not read, and
+(``driftscan_mmode.py::freq``, ``sky_to_noise_wave.py``,
+``three_ways_to_a_posterior.py::observed``): their skies are *drawn*, not read, and
 the alternative -- ship a binary blob whose provenance the config cannot state
 -- defeats the whole argument for a resolved-config artefact.
 

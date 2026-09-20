@@ -22,7 +22,8 @@ matcher stops matching.
 
 **What this module deliberately does NOT test.**  The receiver name of the
 fourth hook in ``document.py`` (``priced_report``) is pinned by
-``test_config_inflight.py::test_all_four_hooks_are_present_and_named``, whose
+``test_config_inflight.py::TestEachSlotRaisesBeforeItWarns.test_all_four_hooks_are_present_and_named``,
+whose
 set this task widens to four.  A second copy here would be a second binding of
 one contract, and the two would drift.
 """
@@ -333,7 +334,8 @@ class TestThePayload:
         """The REAL registry -- deliberately no clearing fixture.
 
         3B ships exactly this for its two passes
-        (``test_config_inflight.py:552``) and says why: a base that is itself
+        (``test_config_inflight.py::TestThePassesCollect.test_a_check_may_hand_back_any_iterable``)
+        and says why: a base that is itself
         a finding makes every later task's "and nothing else" assertion
         inherit an extra id, with nothing recording it.  Vacuous while
         ``CHECKS`` is empty and load-bearing from Task 4 on -- which is when a
@@ -541,8 +543,8 @@ class TestTheRegistry:
         syntactically a path; ``'beam'`` is simply not one of
         :data:`~rheplicant.config.postflight._DOCUMENT_SECTIONS`'s twelve
         names.  The two sibling passes pin this branch whole
-        (``test_config_preflight.py::test_a_where_whose_head_is_not_a_section``,
-        ``test_config_inflight.py::test_a_where_whose_head_is_not_a_section``);
+        (``test_config_preflight.py::TestEveryRefusalOfThisPassIsPinnedWHOLE.test_a_where_whose_head_is_not_a_section``,
+        ``test_config_inflight.py::TestEveryRefusalOfTHESEPassesIsPinnedWHOLE.test_a_where_whose_head_is_not_a_section``);
         this is this pass's own copy.
         """
         register("C12")(lambda payload: (
@@ -581,8 +583,9 @@ class TestTheRegistry:
         **exit 0** while telling a Task 4/5/6 drafter to write
         ``@register_built``, which binds the check into the BUILT registry in
         silence.  The other three passes pin their own word the same way --
-        ``test_config_preflight.py:1044``, ``test_config_inflight.py:356``
-        and ``:367``.
+        ``test_config_preflight.py::TestTheRegistry``,
+        ``test_config_inflight.py::TestEveryRefusalOfTHESEPassesIsPinnedWHOLE``
+        and ``test_config_inflight.py::TestEveryRefusalOfTHESEPassesIsPinnedWHOLE``.
         """
         with pytest.raises(ConfigError) as raised:
             register()
@@ -876,10 +879,11 @@ def _uncontributing(directory: pathlib.Path,
 class TestTheScopeOfThisPackage:
     """The invariant this package's own docstring states and nothing checked.
 
-    ``preflight`` has ``test_config_preflight.py::test_importing_the_pass_
+    ``preflight`` has
+    ``test_config_preflight.py::TestTheCostAndTheBoundary.test_importing_the_pass_drags_in_no_optional_dependency
     drags_in_no_optional_dependency``; ``inflight`` has
-    ``test_config_inflight.py::test_the_package_imports_no_optional_
-    dependency``.  This package had neither, while being the one whose three
+    ``test_config_inflight.py::TestTheInFlightBoundary.test_the_package_imports_no_optional_dependency``.
+    This package had neither, while being the one whose three
     consumer tasks exist in order to take a Jacobian and run a Newton solve.
     """
 
@@ -892,7 +896,7 @@ class TestTheScopeOfThisPackage:
         A SUBPROCESS and not ``inflight``'s static AST ban, deliberately: a
         priced check MAY import an optional dependency **inside a function**
         -- that is how ``prior_sensitivity`` reaches numpyro at all, and
-        ``config/sections/noise.py:195`` is the shipped precedent -- and a
+        ``sections/noise.py::_fact`` is the shipped precedent -- and a
         walk over every ``ast.Import`` node forbids exactly that.  The child
         answers the question the invariant actually asks.
         """

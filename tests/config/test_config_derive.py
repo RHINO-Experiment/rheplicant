@@ -127,7 +127,7 @@ class TestBasisMatrix:
         assert got.value.shape == (64, 3)
 
     def test_an_unknown_kind_is_refused_by_the_package_s_own_guard(self, context):
-        """Catches a wrapper that restates core/basis.py:206 instead of
+        """Catches a wrapper that restates basis.py::basis_matrix instead of
         quoting it -- a second copy of the alphabet in this layer goes stale
         the first time BASIS_KINDS gains an entry."""
         with pytest.raises(ConfigError) as excinfo:
@@ -201,7 +201,7 @@ class TestBasisMatrix:
 
 class TestUnitMeanFree:
     def test_it_calls_the_package_function(self, context):
-        """receiver.py:103 returns (bandpass / mean(bandpass))[:-1] -- one
+        """receiver.py returns (bandpass / mean(bandpass))[:-1] -- one
         element SHORTER, because the dropped element is the constraint that
         pins the mean at one. Catches the derivation returning its input
         unchanged (which gives [1, 2, 3]), normalising without dropping (which

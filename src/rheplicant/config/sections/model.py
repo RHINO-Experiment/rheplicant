@@ -53,7 +53,7 @@ def operator_table() -> dict[str, tuple[type, ...]]:
     """Node id -> the shipped operator classes that register there.
 
     Discovered live off ``rheplicant.radio.__all__`` (the same walk
-    ``radio/graph.py:214-224`` validates at import), so a class added to the
+    ``radio/graph.py::_validate_registrations`` validates at import), so a class added to the
     package's surface is addressable from a document with no second table to
     update."""
     import rheplicant.radio as radio

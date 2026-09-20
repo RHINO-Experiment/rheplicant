@@ -97,7 +97,8 @@ class TestTheGrammarMatchesTheSignatures:
     two commits and a whole executor away from the line that introduced it.
     Checking the two by eye is how ``width_size:`` gets written down: 2C's
     own notes say "create's width=64 maps to equinox's width_size=", which is
-    true of what ``create`` does INTERNALLY (npe.py:216) and false as an
+    true of what ``create`` does INTERNALLY (inference/npe.py::NeuralPosterior.create) and false as
+    an
     instruction to its caller.
 
     Kills: any grammar key that is not a parameter of its call; a rename the
@@ -542,7 +543,7 @@ class TestTheOptionalNumbers:
 
     def test_validation_fraction_zero_is_accepted(self):
         # The package's own guard is `0.0 <= x < 1.0` and 0.0 is the
-        # documented "train on everything" setting (npe.py:328-331). A
+        # documented "train on everything" setting (inference/npe.py::train_posterior). A
         # config layer that refused it would reject the faster path the
         # package offers on purpose.
         assert parsed(train={"validation_fraction": 0.0}
@@ -595,7 +596,8 @@ class TestTheEmbedding:
     """``embed:`` resolves to a callable HERE, and that is the whole point.
 
     A ``{python:}`` the process cannot import, or cannot call the way
-    ``jax.vmap(embed)(data)`` calls it (npe.py:209), is refused when the
+    ``jax.vmap(embed)(data)`` calls it (inference/npe.py::NeuralPosterior.create), is refused when
+    the
     document is read -- not after ``simulate_pairs`` has spent the run's
     entire budget building a bank the estimator will never see.
     """

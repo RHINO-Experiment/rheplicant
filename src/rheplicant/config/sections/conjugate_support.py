@@ -30,7 +30,7 @@ Two rules this half exists to keep:
   -- check A51.
 
   Both of the references above name a FUNCTION rather than a line range. The
-  second used to read ``linear.py:963-973`` and the function was at 1321,
+  second used to read ``linear.py::linear_operator`` and the function was at 1321,
   having moved twice since; a line number is a second copy of a fact with
   nothing rendering it beside the first, so it goes stale unread.
 
@@ -130,7 +130,7 @@ def _conjugate_block(run: Any, built: Any, where: str, *,
 
     ``needs_observed`` says whether this exit's solve reads data:
     ``condition`` estimates kappa from the operator alone
-    (``linear.py:1337`` takes no ``observed``), while the three solves do.
+    (``linear.py::_per_member`` takes no ``observed``), while the three solves do.
     Where it is True the missing-observation refusal fires BEFORE the
     operator is built, so a document with no ``inference.observed`` hears
     about the data it did not declare rather than about its latents; where it
@@ -203,7 +203,7 @@ def _prior_kwargs(run: Any, built: Any, block: Any,
     """The ``prior_std=``/``prior_mean=`` keywords the solve should take.
 
     Absent keys are absent from the result: the package then reads each
-    latent's own ``Latent(prior=...)`` (``linear.py:928-931``), which is the
+    latent's own ``Latent(prior=...)`` (``linear.py::linear_operator``), which is the
     standing decision that config never restates a package default.
 
     The ParameterSpace is derived HERE, from ``built``.  Callers pass

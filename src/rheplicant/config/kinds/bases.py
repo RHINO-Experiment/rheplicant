@@ -10,7 +10,7 @@ refusal, because a copied ``built_for:`` provenance block is exactly what a
 copied basis comes with.
 
 One orientation hazard the package states and nothing can catch
-(``core/basis.py:63-77``): ``T = time @ coeff @ freq.T``, so with
+(``basis.py``): ``T = time @ coeff @ freq.T``, so with
 ``n_time == n_freq`` and ``n_k == n_j`` a swapped pair of design matrices is
 shape-legal and returns the transpose of the intended field. Writing the two
 axes under their own keys is the only protection there is.
@@ -111,7 +111,7 @@ def _basis_fit(
 ) -> ResolvedValue:
     """Least-squares coefficients of a field on a named basis.
 
-    ``SeparableBasis.fit`` is the package's own solver (``core/basis.py:381``),
+    ``SeparableBasis.fit`` is the package's own solver (``basis.py::SeparableBasis.fit``),
     so the coefficients this returns are the ones ``BasisTemperatureOperator``
     would have to be given to reproduce the field.
     """

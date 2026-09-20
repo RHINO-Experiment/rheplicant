@@ -57,7 +57,7 @@ class TestTheFormats:
         assert built.resources["resources.beams.horn"].maps.shape == (4, 192)
 
     def test_inline_takes_a_value_node(self, context):
-        """driftscan_mmode.py:57-60 and sky_to_noise_wave.py:104-107 both build
+        """driftscan_mmode.py::drift and sky_to_noise_wave.py both build
         the beam analytically and are designed to run without the unpublished
         CST dataset. v0 excluded beams from the python: hatch, so BOTH scripts
         died before step 1 -- the first thing a new user does is run a shipped
@@ -215,7 +215,7 @@ class TestNormalisationIsApplied:
 
 class TestHorizonTruncation:
     def test_it_exposes_both_products(self, context):
-        """radio/beams.py:150 horizon_truncated_beam returns (maps, fraction)
+        """radio/beams.py::horizon_truncated_beam horizon_truncated_beam returns (maps, fraction)
         -- one call, two products -- and the fraction is exactly what
         BeamSpillOperator(sky_fraction=) wants. v0 consumed the maps and
         dropped the fraction, leaving the user with from: projector, which on

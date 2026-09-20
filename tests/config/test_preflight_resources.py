@@ -1055,7 +1055,7 @@ class TestTheRouteThisModuleDoesNotWalk:
         ``document["resources"]`` on any layer, so there is nothing for
         ``resolved_specs`` to find and nothing to stand down on.
 
-        The refusal half calls the sweep ``sections/twin.py:44`` calls, with
+        The refusal half calls the sweep ``sections/twin.py::build_fit_twin`` calls, with
         the arguments it calls it with, rather than reaching it through
         ``load_document``.  That is not a re-implementation -- it is the same
         function on the same inputs -- and it is what keeps the assertion

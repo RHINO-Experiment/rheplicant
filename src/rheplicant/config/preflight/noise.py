@@ -27,7 +27,7 @@ not 1-D interpolates ``tuple(sigma.shape)`` -- the resolved extents, which are
 the AXES slot's inputs and not a text pass's -- so the mirror leg is not
 verbatim-hoistable and is not hoisted.  The 1-D expansion needs the array
 itself.  Plan §0.2 C-4 rules on the third piece: ``check_noise_std_axis``
-(``inference/noise.py:264``) is never called on this route at all -- measured,
+(``inference/noise.py::check_noise_std_axis``) is never called on this route at all -- measured,
 ``grep -rn "check_noise_std_axis(" src/rheplicant/config/`` has no hits -- so
 what is hoisted is the refusal ``build_noise`` writes, not the package guard
 §6 cites.
@@ -64,7 +64,7 @@ neither carry ``include_logdet:`` nor set ``inference.noise.axis``;
 rather than this paragraph.
 
 **Both checks walk ``variants:``**, through
-``preflight/document.py::_task3_over_layers`` -- the same walker 3A's
+``_task3_over_layers`` -- the same walker 3A's
 ``A1.horizon`` uses over ``resources.beams``.  A variant that patches
 ``inference.noise`` is a different document (§2.1) and the refusal it earns is
 one nobody sees until that variant is selected.  :func:`_b6_is_layered`
@@ -155,7 +155,7 @@ def _a26_operands_are_scalar(form: str, spec: Mapping[str, Any]) -> bool:
     **A ``shape:`` is not the last word on a draw's rank**, and reading it as
     one was a live REGRESSION: ``draws.py`` builds a normal as
     ``loc + scale * jax.random.normal(key, shape)`` -- plain arithmetic, which
-    broadcasts -- and ``_resolve_operand`` (``draws.py:124-131``) accepts a
+    broadcasts -- and ``_resolve_operand`` (``draws.py``) accepts a
     whole value node for either operand.  Measured at ``ea4839b``,
 
         sigma: {normal: {shape: [n_freq], seed: {from: runtime.seeds.a},

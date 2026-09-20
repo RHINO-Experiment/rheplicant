@@ -7,7 +7,7 @@ instead of a contradiction.
 
 The alphabet is deliberately small. Every token is either a canonical unit the
 schema names, or a spelling one of the package's two existing readers already
-accepts (``radio/rhino.py:70`` ``{"hz", "mhz"}``; ``radio/touchstone.py:40``
+accepts (``rhino.py::_FREQ_UNIT_HZ`` ``{"hz", "mhz"}``; ``touchstone.py::_FREQ_MULTIPLIER``
 ``{"HZ", "KHZ", "MHZ", "GHZ"}``). A wider table is a place to be quietly
 wrong: an unconvertible unit is better refused by name than passed through,
 because a factor of 1e6 on a frequency grid produces a finite,

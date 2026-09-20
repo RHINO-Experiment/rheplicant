@@ -188,7 +188,7 @@ class TestGcrDraws:
         # dropping the keywords from the call changes nothing at all; on a
         # PRIOR_FREE document the package refuses the bare draw outright
         # (`linear._require_prior_std` -- named, not line-cited; the citation
-        # here read linear.py:1009 and the function had moved), so this is the
+        # here read linear.py and the function had moved), so this is the
         # one test that can watch the compiled mapping travel.
         #
         # prior_std: 0.01 / prior_mean: 1.0 is TIGHT written as run keys.  What

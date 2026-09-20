@@ -232,7 +232,7 @@ class TestA41ALiteralThatShadowsAGridLength:
     def test_a_one_is_never_reported(self):
         """``literal_shadowing_a_symbol`` guards on ``value > 1`` so that
         n_source == 1 -- the default for every non-switching run -- does not
-        make every ``[1]`` a finding (symbols.py:172-176).  Kills a
+        make every ``[1]`` a finding (symbols.py::literal_shadowing_a_symbol).  Kills a
         re-implementation of the predicate instead of a call to it, which is
         the §2.5 rule this check exists inside."""
         doc = preflight_document(resources={"arrays": {"one": {"ones": [1]}}})
@@ -464,7 +464,7 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
 
         It does NOT distinguish ``spec.get("twin", "full")`` from
         ``spec.get("twin")``; measured, no test can, because both answer "not
-        fit".  The mirror of ``observed.py:132``'s spelling is a readability
+        fit".  The mirror of ``observed.py::_realise``'s spelling is a readability
         choice and is claimed as one in that function's docstring, not here.
         """
         doc = preflight_document(
@@ -506,7 +506,7 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         written from the schema alone ships.
 
         Measured: ``build_fit_twin`` returns the twin unchanged when the
-        section is absent (twin.py:37-38), so ``built.twin is
+        section is absent (sections/twin.py::build_fit_twin), so ``built.twin is
         built.inference.fit_twin`` is True and the data is byte-identical to
         ``twin: full``'s.  Kills the two-condition implementation the
         schema's sentence describes.
@@ -838,7 +838,7 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
             # text: a reference, a file, a scalar, a callable, a derived grid,
             # a restacking, a basis fit, and the switch-order sugar.  There is
             # no DELIBERATE omission left -- `modulo` was one until the
-            # measurement went the other way (`arrays.py:121` is
+            # measurement went the other way (`config/arrays.py::_linspace` is
             # `jnp.arange(num) % period`, so `num` IS the axis length, and a
             # `{modulo: {num: 6, period: 3}}` freq grid builds `n_freq == 6`),
             # and it is now walked.
@@ -901,7 +901,7 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
     def test_a_projector_reference_with_no_pointing_section_is_refused(self):
         """Measured: this document builds today, returning a
         ``ConfiguredRun``.  ``pointing`` absent IS ``{mode: none}``
-        (pointing.py:134), so a check that only reads a written ``mode:``
+        (pointing.py::_lst), so a check that only reads a written ``mode:``
         misses the commonest spelling of the error."""
         doc = preflight_document(
             resources={"projectors": {"p": PROJECTOR}},

@@ -176,7 +176,7 @@ REVERSED_LOADS = {"hot": LOADS["hot"], "ambient": LOAD}
 
 #: A shipped class relocated by ``python:`` -- the ONLY document route to a
 #: relocation at all.  Measured: ``at:`` on an entry with no ``python:`` is
-#: refused first, at ``compose.py:296-301`` ("at: places an operator that
+#: refused first, at ``compose.py::cal_load_order_problem`` ("at: places an operator that
 #: declares no graph node of its own -- a python: operator"), so a
 #: ``cw_tone:`` key carrying the shipped class cannot be moved and a check
 #: keyed on ``model.cw_tone.at`` would guard a key no document can contain.
@@ -776,7 +776,7 @@ class TestTheReadersEveryModelCheckStartsFrom:
         declares no graph_node and no At(...) wrapper was given``), so nothing
         is placed and lighting the key reports a placement nobody makes; and a
         string ``at:`` disagreeing with its key is ``_single``'s own refusal
-        (``compose.py:303-308``), not check A5's.  The one-element LIST is the
+        (``compose.py::cal_load_order_problem``), not check A5's.  The one-element LIST is the
         twin that shows the restatement rule is the STRING spelling's alone:
         ``refuse_misaddressed_region`` returns early below two nodes.
 
@@ -836,7 +836,7 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
     """A14's late leg -- §3.2 (i)'s, and it reads as Task 6's.
 
     Measured for this task: ``declared_order``
-    (``sections/switching.py:36-55``) runs inside ``build_observation``, which
+    (``switching.py``) runs inside ``build_observation``, which
     ``document.py`` calls BEFORE ``build_resources``, so A14's first two legs
     already precede the beam and Task 6 hoists neither.  The one late leg is
     the comparison between ``model.cal_loads``' keys and
@@ -927,7 +927,7 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
         test_the_document_threads_the_recording_to_the_model_build`` rather
         than by reading: an ingested run declares ``switching: {order: [...]}``
         with **no** ``mode:``, because the recording carries the cycle
-        (``observation.py:336-348``); every other run reaches
+        (``observation.py::_data``); every other run reaches
         ``compile_switching``, where an absent ``mode:`` means ``none`` and an
         ``order:`` beside it is an unknown key.  A single reading answers
         "declared without an observation.switching order" to a run whose order
@@ -946,7 +946,7 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
 
     def test_an_ingested_run_that_declares_a_mode_is_someone_elses_refusal(
             self):
-        # `observation.py:337-344`: an ingested run declares `order:` only,
+        # `observation.py::_data`: an ingested run declares `order:` only,
         # and anything else is that clause's refusal -- which fires in
         # `build_observation`, before the beam.  A check that read the order
         # anyway would answer A14 about a document already refused for a
@@ -1163,7 +1163,8 @@ class TestASecondOperatorAtOneNode:
         """The shape nothing refuses until the assembly.
 
         ``refuse_misaddressed_region`` returns early for a list shorter than
-        two (``paths.py:318-319``), so a one-element ``at:`` naming another
+        two (``config/paths.py::refuse_misaddressed_region``), so a one-element ``at:`` naming
+        another
         node passes every config check today and arrives as an
         ``AssemblyError`` after every beam has been read.
         """
@@ -1236,7 +1237,7 @@ class TestASecondOperatorAtOneNode:
 
         Measured at ``48b359d``: ``_single`` returns ``At(node_id,
         Pipeline(SnapshotOperator, operator))`` for a spec carrying
-        ``snapshot_before:`` (``compose.py:319-326``), so a ``python:
+        ``snapshot_before:`` (``compose.py::double_count_problem``), so a ``python:
         GainOperator`` written under ``noise:`` with a snapshot lands at
         ``noise`` -- and the document BUILDS, with ``gain`` filled once.  A
         ``_t5_claims`` that read ``python:`` first credits it to ``gain``,
@@ -1251,7 +1252,7 @@ class TestASecondOperatorAtOneNode:
         assert {"gain", "noise"} <= set(twin.lit)
 
     def test_an_at_beside_a_snapshot_claims_nothing_at_all(self):
-        # `_single` refuses the PAIR outright (`compose.py:289-294`), so
+        # `_single` refuses the PAIR outright (`compose.py::cal_load_order_problem`), so
         # nothing is placed anywhere and neither the `at:` node nor the key is
         # claimed.  A check that took the `at:` answers A5 about a collision
         # the build never gets far enough to have.
@@ -1353,7 +1354,7 @@ class TestASecondOperatorAtOneNode:
     def test_the_assemblys_own_refusal_is_still_the_backstop(self):
         """This task adds a refusal; it removes none.
 
-        ``_place_at_node`` (``core/graph.py:910-917``) is what catches the
+        ``_place_at_node`` (``core/graph.py::_place_at_node``) is what catches the
         collisions text cannot see -- a ``python:`` target outside
         ``rheplicant.radio``, which this layer will not import.  Deleting it
         because "preflight covers it now" leaves those documents building two
@@ -1565,7 +1566,8 @@ class TestWhereTheToneMayGo:
         """``at:``'s twin spelling, which every other A8 cell here skips.
 
         Measured: ``refuse_misaddressed_region`` returns early below two nodes
-        (``paths.py:318-319``) and ``_single`` builds ``At(('bandpass',), op)``
+        (``config/paths.py::refuse_misaddressed_region``) and ``_single`` builds ``At(('bandpass',),
+        op)``
         -- the same placement the string form makes, and the document builds
         just as silently.  A ``_t5_claims`` reading only ``isinstance(at, str)``
         loses A8 on this whole spelling and every cell above stays green.
@@ -1608,10 +1610,10 @@ class TestWhereTheToneMayGo:
         assert "cw_tone" not in twin.lit
 
     def test_an_absent_stage_is_still_not_a_violation(self):
-        """``fold.py:271-274``'s reasoning, kept.
+        """``fold.py::_check_ordering``'s reasoning, kept.
 
         The tone at ``adc`` with neither target lit is refused by nothing --
-        here or in the package.  ``fold.py:271-274``, verbatim: "A constraint
+        here or in the package.  ``fold.py::_check_ordering``, verbatim: "A constraint
         is checked only against nodes that are LIT. An absent node contracts
         to identity, so there is no bandpass to pass through and nothing to
         violate -- refusing there would reject a sky-only assembly for the
@@ -1694,7 +1696,7 @@ class TestWhereTheToneMayGo:
 
         Measured: ``_single`` refuses this with *"at: 'noise' disagrees with
         the node key -- a single-node at: restates its own key"*
-        (``compose.py:303-308``).  A8 arriving first would say "Place it
+        (``compose.py::cal_load_order_problem``).  A8 arriving first would say "Place it
         upstream: its own node is 'cw_tone'" -- and the key already IS
         ``cw_tone``, so the reader is told to do what the document does.  The
         real fault is the ``at:``.
@@ -1844,8 +1846,8 @@ class TestDeclaredDataAndSources:
         """``data:`` with nothing after it is a document that RUNS.
 
         Measured at ``48b359d``: ``observation._data`` returns ``None`` for a
-        ``None`` node (``observation.py:277-278``) and ``Assembly.__call__``
-        refuses only ``state.data is not None`` (``core/graph.py:441-447``),
+        ``None`` node (``observation.py::_extra``) and ``Assembly.__call__``
+        refuses only ``state.data is not None`` (``core/graph.py::Assembly.__call__``),
         so ``data:`` written empty in YAML is exactly no data at all.  A check
         asking ``"data" in section`` refuses a document the package runs,
         which is the one direction this pass must never be wrong in.
@@ -1863,9 +1865,10 @@ class TestDeclaredDataAndSources:
         """``from_file`` and ``data`` together is ``build_observation``'s, and
         it already precedes the beam.
 
-        Measured: ``observation.py:315-326`` refuses the pair by name ("the
+        Measured: ``observation.py::_aux`` refuses the pair by name ("the
         recording IS the data") from ``build_observation``, which
-        ``document.py:72`` calls before ``build_resources`` at ``:75``.  A31
+        ``config/document.py::ConfiguredRun`` calls before ``build_resources`` at
+        ``config/document.py::ConfiguredRun``.  A31
         answering first would tell this reader that "the twin makes it" --
         true of a simulating document and wrong about a recording, one phase
         earlier than the sentence that is right.
@@ -1913,7 +1916,8 @@ class TestDeclaredDataAndSources:
         Measured: ``from_file`` + a source model dies with the identical
         ``AssemblyError``, at the run for ``kind: forward`` and inside
         ``load_document`` for a fitting document.  Widening A31 to reach it
-        turns ``tests/config/test_config_document.py:167-179``
+        turns
+        ``test_config_document.py::TestLaterErrorsCarryTheCompletedReport.test_a_builder_error_carries_the_completed_passes_report.explode``
         (``test_a_source_twin_against_recorded_data_is_the_assemblys_refusal``)
         red -- that test asserts ``load_document`` SUCCEEDS and pins the
         refusal as the assembly's, deliberately.
@@ -1933,7 +1937,8 @@ class TestDeclaredDataAndSources:
 
         and read ``declared[0]`` into the ``where`` and the message in place
         of the literal ``data``.  Three lines; the cost is
-        ``test_config_document.py:167-179``, which has to move with it.
+        ``test_config_document.py::TestLaterErrorsCarryTheCompletedReport.test_a_builder_error_carries_the_completed_passes_report.explode``,
+        which has to move with it.
         """
         document = {**preflight_document(
             model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
@@ -2489,7 +2494,7 @@ class TestTheStochasticFitTwin:
 
     def test_a_forward_only_document_is_not_refused(self):
         # THE design decision, and the half a positive-only test cannot see.
-        # Measured: `forward` evaluates built.twin (exits.py:38-40), never the
+        # Measured: `forward` evaluates built.twin (exits.py), never the
         # fit twin, and simulating WITH the noise is what a forward run is
         # for.  A check that fired here would refuse every simulation this
         # package exists to produce.
@@ -2542,7 +2547,7 @@ class TestTheStochasticFitTwin:
 
     def test_a_replace_is_read_rather_than_assumed_away(self):
         # The twin route.  `replace:` swaps the operator at a node
-        # (twin.py:67-69) AFTER `without:` has run, so a check that read only
+        # (inflight/twin.py::_LEGAL_SHAPES) AFTER `without:` has run, so a check that read only
         # `model:` would report the wrong class.  Measured through
         # load_document: this exact twin gives a fit twin carrying
         # RadiometerNoiseOperator at 'noise'.
@@ -2579,7 +2584,7 @@ class TestTheStochasticFitTwin:
     def test_a_replace_naming_a_node_the_model_never_lights_is_the_same(self):
         """The other face of the SAME ``KeyError``, and the one that shipped.
 
-        ``Assembly.replace_node`` (``core/graph.py:473``) looks the node up in
+        ``Assembly.replace_node`` (``core/graph.py::Assembly.replace_node``) looks the node up in
         the repaired assembly, so *"No node named 'rfi_field' in this
         assembly"* is what a ``replace:`` on an unlit node gets -- exactly
         what a ``replace:`` after a ``without:`` gets.  Measured at
@@ -2644,7 +2649,7 @@ class TestTheStochasticFitTwin:
         FALSE REFUSAL rather than a lost check.
 
         ``inference.twin.without:`` names NODE ids -- ``Assembly.without``
-        (``twin.py:59-60``) -- and a relocated entry's key is not its node.
+        (``inflight/twin.py``) -- and a relocated entry's key is not its node.
         Measured at ``0263e0f``: this document BUILDS and its fit twin is
         clean, so a check keyed on the model KEY refuses a document the
         package runs; and ``without: ['emi']`` is the one the package itself
@@ -2781,7 +2786,8 @@ class TestTheStochasticFitTwin:
         Measured at ``0263e0f``: without this stand-down A30 displaces three
         SHIPPED pins -- ``test_config_exits_diagnostics``'s two copies of
         ``test_without_parameters_it_is_refused`` and
-        ``test_config_exit_support.py:281`` -- each of which blanks
+        ``test_config_exit_support.py::TestARunResultCarriesItsVariant.test_the_expect_refuse_path_records_it_too``
+        -- each of which blanks
         ``inference:`` to reach *"inference.parameters"* on purpose.  A fit
         with no latents fits nothing, so repairing its twin is the wrong fix
         named one phase early.
@@ -2817,7 +2823,7 @@ class TestTheStochasticFitTwin:
         """§2.5 names ``stages_requiring(pipeline, RANDOMNESS)``, which reads
         ``stage.requires`` off CONSTRUCTED operators; §3.2(f) forbids
         constructing one.  They reconcile only because ``requires`` is a
-        ``ClassVar`` (``core/operator.py:85``) -- this is the assertion that
+        ``ClassVar`` (``operator.py::AbstractOperator``) -- this is the assertion that
         says so, and it goes red the day the declaration moves onto instances
         and this pass stops being able to answer A30 at all.
         """
@@ -2886,7 +2892,7 @@ class TestTheStochasticFitTwin:
         # does NOT.
         #
         # `load_document`, never `run_document`: §2.1 measured that parse_runs
-        # (runs.py:149) speaks BEFORE P-1 on the run_document path.
+        # (runs.py::parse_runs) speaks BEFORE P-1 on the run_document path.
         from rheplicant.config.document import load_document
 
         document = preflight_document(
@@ -2979,7 +2985,7 @@ class TestTheBandpassAndTheGain:
 
     def test_the_bindings_spelling_is_covered_too(self):
         # 2C's shape 4, in the one place this layer has a real twin:
-        # build_space walks parameters.<n>.into (transforms.py:344-361) AND
+        # build_space walks parameters.<n>.into (transforms.py::parse_transform) AND
         # bindings[i].into (:362-399), and a check reading one leaves the
         # other open.  Same document, second spelling -- and `where` must name
         # the bindings entry by INDEX.
@@ -3158,7 +3164,7 @@ class TestTheBandpassAndTheGain:
     def test_a_binding_whose_latents_cannot_be_read_is_dropped(self):
         """Both sides, because the stand-in was ASYMMETRIC.
 
-        ``transforms.py:369-374`` refuses ``latents: 7`` with the value the
+        ``transforms.py::_merged_fan`` refuses ``latents: 7`` with the value the
         user wrote; A33 answering first hands that reader a degeneracy lecture
         instead.  An earlier draft substituted the binding's ``where`` for its
         latent set, which counted as a difference on the gain side (so A33
@@ -3178,7 +3184,7 @@ class TestTheBandpassAndTheGain:
 
     def test_a_latent_with_no_into_binds_nothing(self):
         # `into: null` is a latent with no binding at all
-        # (transforms.py:346-352) -- it cannot be free into anything.
+        # (transforms.py::parse_transform) -- it cannot be free into anything.
         assert "A33" not in preflight(_t11_fit(
             model=BANDPASS_MODEL,
             parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
@@ -3359,7 +3365,7 @@ class TestOneClassOneAnswer:
     The defect this class exists for was measured six ways on one document
     shape and is a single root cause: the pass tested ``module !=
     "rheplicant.radio"`` while the build resolves the same ``python:`` target
-    through ``hatch.import_target`` (``sections/model.py:260``), which imports
+    through ``hatch.import_target`` (``sections/model.py::_c7_beam_spill``), which imports
     any module.  A14 refuses on ABSENCE, so it refused a document that builds;
     A5, A8, A15, A31, A52 and A30's ``replace:`` gate refuse on PRESENCE, so
     they lost their subject on the same document and said nothing.
@@ -3666,8 +3672,8 @@ class TestA5AndA8DoNotContradictEachOther:
             "the 'gain' operator. "
             f"{CWCalibrationOperator.must_precede_because} Neither backstop "
             "sees it: assemble() sees one placement at 'gain' "
-            "(core/fold.py:271-274), and check_stage_ordering compares only "
-            "stages the document gave a name: to (core/pipeline.py:129-131). "
+            "(core/fold.py:271), and check_stage_ordering compares only "
+            "stages the document gave a name: to (core/pipeline.py:129). "
             "Make it stage 0 of the cascade, or give it its own node, "
             "'cw_tone' (check A8).")
 
@@ -3701,7 +3707,7 @@ class TestA5AndA8DoNotContradictEachOther:
         ``compose: sum`` at a TRANSFORM node is ``_compose``'s own refusal --
         *"compose: sum adds source contributions, and this is a transform
         node -- transforms chain; use compose: cascade"*
-        (``compose.py:247-251``) -- and A8's sentence in front of it would
+        (``compose.py::composition_problem``) -- and A8's sentence in front of it would
         name a fix that is not the fault.  A ``sum`` has no order for "stage
         0" to mean anything about either: its branches run in parallel on the
         same input, which is why ``check_stage_ordering`` deliberately says
@@ -3731,7 +3737,7 @@ class TestA5AndA8DoNotContradictEachOther:
             "-- it replaced the stage it is there to track. "
             f"{CWCalibrationOperator.must_precede_because} assemble() cannot "
             "say this: it sees one placement, and an absent stage is "
-            "deliberately no violation there (core/fold.py:271-274), while "
+            "deliberately no violation there (core/fold.py:271), while "
             "the document still has the key and the operator apart. Give it "
             "its own node, 'cw_tone' (check A8).")
 
@@ -3777,7 +3783,7 @@ class TestWhichRunsA30IsAbout:
         template state"* -- a claim about the closure behaviour of a kind that
         does not exist.
 
-        ``parse_runs`` (``runs.py:87-90``) names the real fault on the
+        ``parse_runs`` (``runs.py::_one``) names the real fault on the
         ``run_document`` path and nothing names it on ``load_document``'s,
         which makes an invented claim worse rather than harmless.
         """

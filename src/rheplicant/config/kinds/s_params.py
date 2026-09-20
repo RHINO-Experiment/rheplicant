@@ -76,7 +76,7 @@ _TOUCHSTONE_KEYS = frozenset(
 
 @register_reader("touchstone", frozenset({"flipped"}), array=False)
 def _read_touchstone_file(path, spec: dict):
-    """``radio/touchstone.py:372`` ``read_touchstone``, into Plan 1A's table.
+    """``touchstone.py::read_touchstone`` ``read_touchstone``, into Plan 1A's table.
 
     ``array=False``: the return value is a
     :class:`~rheplicant.radio.touchstone.Touchstone`, not an array, so
@@ -311,7 +311,7 @@ def _interpolate_onto(
     modifiers,
     target: ResolutionTarget | None,
 ) -> ResolvedValue:
-    """``radio/touchstone.py:580`` ``interpolate_onto``, into Plan 1A's table.
+    """``touchstone.py::interpolate_onto`` ``interpolate_onto``, into Plan 1A's table.
 
     ``of:`` is resolved through the value grammar itself -- ``resolve_value``
     -- rather than read out as a bare ``{ref: ...}``, so a Touchstone can be

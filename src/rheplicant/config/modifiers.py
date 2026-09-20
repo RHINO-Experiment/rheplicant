@@ -35,7 +35,7 @@ NORMALIZATIONS: tuple[str, ...] = ("none", "mean1", "pixel_sum", "max1")
 DTYPES: tuple[str, ...] = ("float32", "float64", "complex64", "complex128")
 
 #: ``axis:`` -- mandatory for a 1-D noise sigma; recorded here, checked by
-#: inference/noise.py:264 check_noise_std_axis.
+#: inference/noise.py::check_noise_std_axis check_noise_std_axis.
 NOISE_AXES: tuple[str, ...] = ("time", "freq", "none")
 
 #: The members of :data:`DTYPES` that cannot hold a phase. Derived from the

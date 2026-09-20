@@ -63,7 +63,7 @@ rejected was "call it if it turns out to be callable", which reads well on
 from a property of code the document does not contain, which is the exact
 reproducibility cost this module exists to state rather than spread; and it
 leaves no spelling at all for handing over a named function, which
-``core/operator.py:117`` needs -- ``LambdaOperator.fn`` is a static
+``operator.py`` needs -- ``LambdaOperator.fn`` is a static
 ``Callable[[State], State]`` and :mod:`rheplicant.config.delivery` records
 that this hatch is the only route to a field like it. Under this rule the two
 intents are one key apart and both are visible in the document:

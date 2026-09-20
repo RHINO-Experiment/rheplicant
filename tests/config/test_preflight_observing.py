@@ -74,7 +74,8 @@ def ingested(order=("antenna", "internal_load", "heated_load"), **patch):
     ``test_preflight_model._ingested``: an ingested run declares no ``freq:``
     and no ``time:`` -- the recording carries both, and ``build_observation``
     refuses a document that declares either beside ``from_file:``.  The shape
-    is ``tests/config/test_config_document.py:133-151``'s
+    is
+    ``test_config_document.py::TestLoadDocument.test_a_variant_cannot_smuggle_a_refused_section_past_the_sweep``'s
     (``TestIngestedDocuments.make_document``): three tests build it with
     ``load_document`` and the second runs it, doubling the recorded ones. It
     carries a three-label order and no ``model.cal_loads`` anywhere, and all
@@ -195,13 +196,13 @@ class TestA14AnOrderWithNoLoadsBehindIt:
     def test_mode_none_declares_no_order_and_is_not_refused(self):
         """Kills a check that reads `order` without reading `mode`: a document
         may carry `switching: {mode: none, order: [...]}`-shaped leftovers, and
-        `check_unknown_keys` (switching.py:72) is what refuses those."""
+        `check_unknown_keys` (switching.py::compile_switching) is what refuses those."""
         doc = preflight_document(observation={**BASE_OBSERVATION,
                                               "switching": {"mode": "none"}})
         assert list(_switch_order(doc)) == []
 
     def test_no_switching_section_at_all_is_not_refused(self):
-        """The default (`switching.py:61-62`). Kills a check that treats a
+        """The default (`switching.py::compile_switching`). Kills a check that treats a
         missing section as an empty order and then as a violated one."""
         assert list(_switch_order(preflight_document())) == []
 
@@ -220,7 +221,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
 
     def test_a_key_the_mode_does_not_take_is_the_key_sweeps_own_refusal(self):
         """``{mode: cycle, order: [...], nope: 1}`` is ``check_unknown_keys``'
-        sentence inside ``compile_switching`` (``switching.py:72``), and that
+        sentence inside ``compile_switching`` (``switching.py::compile_switching``), and that
         runs in ``build_observation`` -- before the beam.
 
         Task 4's reader answers "cannot say" for it, and this pins that A14
@@ -255,13 +256,14 @@ class TestA14AnOrderWithNoLoadsBehindIt:
     def test_an_ingested_run_is_not_asked_for_cal_loads(self):
         """**The false refusal this check would otherwise ship.**
 
-        Measured: ``tests/config/test_config_document.py:133-151``
+        Measured:
+        ``test_config_document.py::TestLoadDocument.test_a_variant_cannot_smuggle_a_refused_section_past_the_sweep``
         (``TestIngestedDocuments.make_document``) is a recording with
         ``switching: {order: [antenna, internal_load, heated_load]}``, a
         ``model:`` of ``{gain: ...}`` and no ``cal_loads``
         anywhere. It loads, and ``run_forward`` doubles the recorded ones --
         three tests there pin it. The order labels the recording's own source
-        index (``document.py:85-86`` hands it to ``to_state``); there is no model
+        index (``config/document.py::ConfiguredRun`` hands it to ``to_state``); there is no model
         branch for it to fix, because the data was not simulated.
 
         Kills the implementation this task was handed, which reads the order
@@ -352,7 +354,7 @@ class TestA15TheRowCountOnEveryPath:
         assert "part: gamma_src" not in first.message
 
     def test_the_message_opens_with_the_field_the_reader_must_edit(self):
-        """`raise_if_refused` (findings.py:159-178) quotes the first
+        """`raise_if_refused` (findings.py::Report.refusals) quotes the first
         refusal's MESSAGE and names only the OTHER refusals' `where`, so a
         reader who hits A15 first sees no path unless the message carries
         one -- and there are two routes and three spellings it could be.
@@ -427,7 +429,7 @@ class TestA15TheRowCountOnEveryPath:
         assert list(_gamma_rows(doc)) == []
 
     def test_n_load_is_refused_as_the_off_by_one_it_is(self):
-        """`n_load` is `n_source - 1` (symbols.py:73-74), so
+        """`n_load` is `n_source - 1` (symbols.py::_extent), so
         `{zeros: [n_load, n_freq]}` resolves to three rows under a four-label
         order -- measured, and refused late by the switch cycle. Kills an
         implementation that treats any symbol as "correct by construction",
@@ -454,7 +456,7 @@ class TestA15TheRowCountOnEveryPath:
         ({"uniform": {"shape": [3, 8],
                       "seed": {"from": "runtime.seeds.g"}}}, 3),
         # A STRING `axis:` is the noise-sigma modifier, not stack's own
-        # argument (refs.py:120-126), so the stack is still on axis 0 and its
+        # argument (refs.py::_ref), so the stack is still on axis 0 and its
         # rows are still its entries -- measured, four such entries build at
         # (4, 8).  Kills `node.get("axis", 0) == 0`, which reads 'time' as a
         # non-zero axis and declines to count a stack it could have counted.
@@ -491,7 +493,7 @@ class TestA15TheRowCountOnEveryPath:
         {"normal": {"shape": [3, 8, 2], "seed": {"from": "runtime.seeds.g"}}},
         {"list": []},
         {"stack": []},
-        # `axis: true` and `axis: 0.0` DO stack on axis 0 (refs.py:124-126's
+        # `axis: true` and `axis: 0.0` DO stack on axis 0 (refs.py::_ref's
         # `mine` test excludes them), so counting them would be arithmetically
         # right and would still pre-empt: the modifier alphabet refuses both
         # in their own words, and a row count in front of that names a fix
@@ -512,7 +514,7 @@ class TestA15TheRowCountOnEveryPath:
         Kills a check that reaches for `shape[0]` on anything shaped like a
         list, and a check that "helpfully" resolves a ref. `from_switch_order`
         is in the list for a different reason: its row count is right by
-        construction (refs.py:169-188), and a finding there would contradict a
+        construction (refs.py::_stack), and a finding there would contradict a
         refusal the value grammar already gets right. `{zeros: [3]}` is the
         one-dimensional spelling, whose "3" is n_freq and not a row count --
         `__check_init__` refuses it by ndim, in its own words.
@@ -520,7 +522,7 @@ class TestA15TheRowCountOnEveryPath:
         `{zeros: [True, 8]}` needs saying out loud: `isinstance(True, int)` is
         True in Python, so a row-count reader written `isinstance(entry, int)`
         reads `True` as **1** and reports "declares 1 rows" for a shape
-        `resolve_extent` refuses in its own words (symbols.py:128-132). The
+        `resolve_extent` refuses in its own words (symbols.py::resolve_extent). The
         `not isinstance(x, bool)` half of the guard is what this cell defends,
         and nothing else here reaches it.
         """
@@ -585,7 +587,7 @@ class TestA15TheRowCountOnEveryPath:
     def test_the_replacement_twin_is_checked_too(self):
         """Measured: `inference.twin.replace.noise_wave` with three rows under
         a four-label order reaches `build_node_operator` through
-        `twin.py:67-69`, and `fit_twin["noise_wave"].gamma_src_re` comes back
+        `inflight/twin.py::_LEGAL_SHAPES`, and `fit_twin["noise_wave"].gamma_src_re` comes back
         at (3, 8) while the model twin is at (4, 8) -- the run then dies in the
         fit rather than in the simulation. Kills a check that reads `model:`
         only -- the same shape-4 mutation as the test above, on the route a
@@ -606,7 +608,7 @@ class TestA15TheRowCountOnEveryPath:
         """**A14's own stand-down, which A15 was missing.**
 
         Measured on this exact document: ``build_fit_twin``
-        (``twin.py:46-50``) refuses the WHOLE ``inference.twin:`` block on a
+        (``sections/twin.py::build_fit_twin``) refuses the WHOLE ``inference.twin:`` block on a
         ``kind: pipeline`` model -- *"inference.twin: repairs a graph
         assembly, and this model is kind: pipeline (Pipeline). A pipeline is
         rebuilt, not repaired"* -- so a row count inside that block answers
@@ -655,7 +657,7 @@ class TestA15TheRowCountOnEveryPath:
         and does the class it declares carry ``gamma_src``.
 
         A replacement is handed to ``build_node_operator(node_id, spec)``
-        (``twin.py:67-69``), and a ``NoiseWaveOperator`` reads
+        (``inflight/twin.py::_LEGAL_SHAPES``), and a ``NoiseWaveOperator`` reads
         ``coords.extra['receiver_input']`` wherever it sits, so its row count
         is a property of the OPERATOR and not of the node: refusing here
         cannot be a false refusal, because either the replacement assembles
@@ -712,9 +714,9 @@ class TestA15TheRowCountOnEveryPath:
         that can see it.
 
         An ingested run declares ``order:`` ALONE, with no ``mode:`` -- the
-        recording carries the cycle (``observation.py:336-348``) -- and
+        recording carries the cycle (``observation.py::_data``) -- and
         ``build_observation`` puts that order into the resolution context
-        (``observation.py:400-403``, ``switch_order=switching.order``), so
+        (``observation.py::build_observation``, ``switch_order=switching.order``), so
         ``ShapeScope.n_source`` is 3 here exactly as it is for a ``mode:
         cycle`` document with three labels.
 

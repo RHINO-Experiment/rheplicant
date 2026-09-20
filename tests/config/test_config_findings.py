@@ -73,7 +73,7 @@ class TestTheThreeSeverities:
     def test_skip_is_a_mode_a_document_declares_and_never_a_severity(self):
         """The one design decision in this module, defended three ways.
 
-        ``sections/inference.py:43`` really does parse four modes, so a reader
+        ``inference.py::_INFERENCE_KEYS`` really does parse four modes, so a reader
         who mirrors it gets a ``SEVERITIES`` of four and a ``Finding`` whose
         severity is ``"skip"`` -- which no consumer will ever route.
         """
@@ -434,11 +434,16 @@ class TestRaiseIfRefused:
         # rather than against a pin written to pass.  Verified at the commit
         # that added this file, by `grep -n 'pytest.raises(ConfigError,
         # match=' tests/config/<module>`:
-        r"\{ref:",          # test_config_section_model.py:131 -- and a regex,
-                            # so `re.search` rather than `str.__contains__` is
-                            # what the tail has to survive.
-        "capability 4",     # test_config_document.py:82
-        "schema_version",   # test_config_document.py:57
+        # from test_config_section_model.py::TestTypeSelection.test_type_picks_the_class
+        # -- and a regex, so `re.search` rather than `str.__contains__` is
+        # what the tail has to survive.
+        r"\{ref:",
+        # from test_config_document.py::TestLoadDocument
+        # .test_not_yet_owned_sections_name_where_they_are_handled
+        "capability 4",
+        # from test_config_document.py::TestLoadDocument
+        # .test_the_synthetic_document_loads
+        "schema_version",
     ], ids=["ref", "capability", "version"])
     def test_a_pinned_pattern_still_matches_through_the_tail(self, pattern):
         """§2.3's "a moved check keeps its pin", tested against real pins.

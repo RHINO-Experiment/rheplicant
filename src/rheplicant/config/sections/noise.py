@@ -7,12 +7,12 @@ Plan 3's, per ``RadiometerNoiseOperator``'s own docstring).
 
 ``radiometer_frozen`` exists nowhere in src/ on purpose: it is this layer's
 construct.  The sigma is DECIDED into an array -- the one form the conjugate
-seam accepts (``linear.py:1031``) -- from ``|observed|`` or the starting
+seam accepts (``linear.py::_as_far_block``) -- from ``|observed|`` or the starting
 prediction, once Task 6 has either in hand (:func:`freeze_sigma`).
 
 ``include_logdet`` is parsed and checked here (A49, both directions) and
 RECORDED on the build; its first consumer is 2C's likelihood-carrying exits
-(``NoiseModelLikelihood.include_logdet``, ``inference/noise.py:372``).
+(``NoiseModelLikelihood.include_logdet``, ``inference/noise.py::log_determinant``).
 
 **Three of this section's refusals are now decided one phase early**, by
 ``preflight/noise.py``, which imports :func:`_a26_sigma_axis_problem`,

@@ -354,7 +354,7 @@ class TestTheObservationFan:
         """``on: primary`` on a document whose one observation is not.
 
         ``build_observed`` calls a LONE entry the primary whatever it is
-        named (``observed.py:206-211``), so ``on:``'s default has to travel
+        named (``observed.py::_one``), so ``on:``'s default has to travel
         through that indirection -- and ``_noise`` now leans on it as hard
         as ``_observed`` always did.  The two-observation fixture above
         cannot see this: its primary IS named ``primary``, so there the
@@ -449,7 +449,7 @@ class TestACountIsAWholeNumber:
     notice.  Two things in this repository already refuse the same value --
     ``transforms._whole``, shipped one task later in the same plan, and the
     package itself (``n_steps must be a positive int``,
-    ``tests/inference/test_inference_construction_guards.py:191``) -- so the
+    ``test_inference_construction_guards.py::ADAM_SAME_SENTENCE``) -- so the
     layer held the only permissive reading of three.
 
     Reached by ``n_draw``, ``n_steps``, ``n_sweeps``, and through ``_knobs``

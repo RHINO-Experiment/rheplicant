@@ -13,7 +13,7 @@ are Tasks 3-12's, one each.
 module lands, so an assertion of the form "every id in ``CHECKS`` is a §6 id"
 is trivially true and stays trivially true if the §6 extractor breaks.  Every
 such assertion here is paired with one that fails when its matcher stops
-matching -- the shape ``test_config_fixture_contract.py:413`` uses, and the
+matching -- the shape ``test_config_fixture_contract.py::_build`` uses, and the
 shape 2C shipped without and paid for.
 """
 
@@ -1601,7 +1601,9 @@ class TestThePhaseGuard:
         """§2.1: P-1 runs on the variant-applied document and nothing else.
         Kills hooking ``preflight`` above ``apply_variant`` -- under which a
         variant could smuggle a violation past every check, which is exactly
-        the hole ``test_config_document.py:107`` closed for the sweep."""
+        the hole
+        ``test_config_document.py::TestLoadDocument.test_an_inference_section_builds_on_the_run``
+        closed for the sweep."""
         seen = []
 
         @register("A2")
@@ -1975,7 +1977,7 @@ class TestTheCostAndTheBoundary:
         guard's target list and from the import ban, so a check importing and
         calling it passed the whole module.
 
-        ``resolve_value(1.0, None)`` is ``values.py:89``'s real two-argument
+        ``resolve_value(1.0, None)`` is ``config/values.py::ResolvedValue``'s real two-argument
         signature, so the call is one a check could actually write.
         """
         @register("A2")
@@ -2702,7 +2704,8 @@ class TestCanonicalLayerEnumeration:
         R4's shape -- earn a refusal, write the remedy the message advises
         into the document, ask again -- edits a document in place between two
         ``preflight`` calls, and the suite is full of it;
-        ``test_preflight_instrument.py:970`` is one and went red against a memo
+        ``test_preflight_instrument.py::TestApplyingTheAdviceMakesTheDocumentPass.test_A13s_presence_advice_declaring_the_field``
+        is one and went red against a memo
         that outlived the pass.  ``preflight`` drops the entry at the head of
         every pass, so the second read is of the document as it is now.
 
@@ -2891,10 +2894,10 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
         "test_config_section_observed.py::"
         "test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right",
     "arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
-        "test_config_exit_support.py::test_compare_and_benchmark_are_both_live",
+        "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",
     _HOLE + ": kind: " + _HOLE
     + " arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
-        "test_config_exit_support.py::test_compare_and_benchmark_are_both_live",
+        "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",
     # The three _NOT_YET routes, reworded on purpose. They named an internal
     # plan number in a message a USER reads, and the number had gone stale: the
     # work it pointed at has shipped, so a reader was told to wait for the
@@ -2902,20 +2905,20 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
     # say where the section is handled instead, and are equality-pinned in the
     # structural sweep's own table above.
     "Plan 4 (outputs, provenance, the CLI)":
-        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
     "Plan 4 (presets are YAML files, and the CLI is where YAML "
     "first comes off disk)":
-        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
     "Plan 4 (plugin import belongs to the process entry point)":
-        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
     # Two harvested forms of one sentence: the f-string's own pieces, and the
     # hole-decorated whole. Forgiving one and not the other leaves half the
     # rewording unchecked, which is what the first two attempts at this entry
     # each did in turn.
     _HOLE + ": is not read by this layer yet -- it arrives with " + _HOLE + ".":
-        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
     ": is not read by this layer yet -- it arrives with":
-        "test_config_preflight.py::test_every_message_survived_the_move_verbatim",
+        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
     # T-002 U7 (the horizon ruling): the truncate_map el_deg refusal sent the
     # reader to `horizon.mode: projector_mask` alone, and that mode masks
     # nothing unless the projector reading the beam also sets
@@ -2934,6 +2937,30 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
         "test_config_kind_beams.py::"
         "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
 }
+
+
+def _defined_names(tree) -> set[str]:
+    """Every definition in a module, bare and class-qualified.
+
+    Both spellings, because a pin is `module.py::Class.test_case` since the
+    2026-09-20 citation migration while several pins predate it -- and
+    `tests/test_citation_census.py` now requires every citation to name
+    something that exists, which is the qualified form.
+    """
+    found: set[str] = set()
+
+    def collect(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                qualified = f"{prefix}{child.name}"
+                found.add(child.name)
+                found.add(qualified)
+                collect(child, f"{qualified}.")
+            else:
+                collect(child, prefix)
+
+    collect(tree, "")
+    return found
 
 
 class TestNoMovedMessageWasReworded:
@@ -3096,8 +3123,14 @@ class TestNoMovedMessageWasReworded:
             path = _HERE / module
             assert path.is_file(), f"{pin} names no module ({literal[:60]}...)"
             tree = ast.parse(path.read_text())
-            defined = {node.name for node in ast.walk(tree)
-                       if isinstance(node, ast.FunctionDef)}
+            # Qualified names too: a pin is `module.py::Class.test_case` since
+            # the 2026-09-20 citation migration, and a set of bare function
+            # names cannot see the class half. Both spellings are accepted --
+            # the bare one because several pins predate the migration, the
+            # qualified one because `tests/test_citation_census.py` now
+            # requires every citation to name something that exists and the
+            # qualified form is what it checks.
+            defined = _defined_names(tree)
             assert name in defined, (
                 f"{pin} is the only thing standing between this message and "
                 f"a silent rewording, and it does not exist: {literal[:60]}..."

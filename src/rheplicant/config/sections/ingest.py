@@ -5,7 +5,7 @@ value is a :class:`rheplicant.radio.rhino.RhinoObservation`, so the ``file:``
 machinery must not ``jnp.asarray`` it and must refuse modifiers -- and in
 exchange the path resolution and the sha256 digest come from ``files.py`` for
 free. ``to_state`` does NOT run here: its ``source_order`` is read off the
-assembled twin (``rhino.py:607-611``), so :mod:`rheplicant.config.document`
+assembled twin (``rhino.py::to_state``), so :mod:`rheplicant.config.document`
 finishes the State after ``model:`` is built.
 """
 
@@ -98,7 +98,7 @@ def _seconds(value: Any, key: str) -> float:
     array=False,
 )
 def _read_rhino_hdf5(path, spec: dict):
-    """``radio/rhino.py:469`` ``read_rhino_observation``, into the file table.
+    """``rhino.py::read_rhino_observation`` ``read_rhino_observation``, into the file table.
 
     ``array=False``: the return value is a ``RhinoObservation`` -- the whole
     recording with its diagnostics -- not an array.

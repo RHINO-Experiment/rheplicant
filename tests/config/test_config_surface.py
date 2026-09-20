@@ -606,7 +606,7 @@ class TestThePagesSayWhatTheLayerDoes:
         # refusal fires, and a run keeping one draw is now refused by A24
         # (`preflight/fitting.py::_counts`) before the noise check is
         # reached at all -- correctly, since the package refuses it too
-        # (`plan.py:1055`), just three phases later.  Four kept draws is
+        # (`plan.py::SamplingPlan._partition`), just three phases later.  Four kept draws is
         # `MIN_DRAWS` exactly, so the document gets past P-1 and the row
         # measures the sentence it was written to measure.
         "plan.sample": ({"blocks": [{"names": ["g"]}], "n_sweeps": 8,
@@ -1127,7 +1127,7 @@ class TestTheCountsProseStatesAboutThisLayer:
         IDENTITY (``CHECKS[id] is <fn>``, several of them through a loop over
         the ids one function claims) and Task 3's five (``A1.runs``,
         ``A1.variants``, ``A1.horizon``, ``A38``, ``A39``) by MEMBERSHIP
-        (``set(_IDS) <= set(CHECKS)``, ``test_preflight_document.py:112``).
+        (``set(_IDS) <= set(CHECKS)``, ``test_preflight_document.py::_swept_by``).
         So removing an id from the registry AND from ``PLAN_3A`` together
         still goes red there. The INFLATE direction does not:
         registering an extra id, adding it to ``PLAN_3A`` and bumping the
@@ -2821,7 +2821,7 @@ class TestThePosteriorDocumentOnThePage:
         # @classmethod is required, not stylistic: pytest raises
         # PytestRemovedIn10Warning for a class-scoped fixture defined as an
         # instance method, and this suite is otherwise warning-clean.
-        # tests/config/test_config_exits_predict.py:371 and :566 use the same
+        # test_config_exits_predict.py::TestTheNutsRoute and :566 use the same
         # form, for the same reason.
         from rheplicant.config import run_document
 

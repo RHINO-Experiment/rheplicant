@@ -43,6 +43,7 @@ numbers inside one would falsify the record rather than maintain it.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 
@@ -62,15 +63,71 @@ SKIP = (
 )
 
 #: Citations INTO a dependency. Their line numbers are that project's business
-#: and move with its releases, not with this tree.
-THIRD_PARTY = ("equinox/",)
+#: and move with its releases, not with this tree; so are their names.
+THIRD_PARTY = ("equinox/", "utils/utils.py", "cal/utils/utils.py")
+
+#: Names written to SHOW the citation form, in the docstrings of the guards
+#: that enforce it. They are examples of a shape, not references, and a guard
+#: that flagged its own illustration would be unwriteable.
+PLACEHOLDERS = frozenset({
+    "file.py", "path.py", "module.py", "some_file.py",
+})
 
 CITATION = re.compile(r"\b([\w/]+\.py):(\d+)(?:-(\d+))?\b")
 
-#: The ratchets. Measured 2026-09-20. Lower them when citations are migrated;
-#: raising one is the change this file exists to make visible.
-TOTAL_CEILING = 729
-AMBIGUOUS_CEILING = 106
+
+def _prose_only(path: pathlib.Path, text: str) -> str:
+    """The file with its RUNTIME strings blanked out.
+
+    A citation inside a refusal message is not this file's business, and the
+    distinction is not a convenience. A message is user-facing text pinned
+    VERBATIM by ``test_config_preflight.py::TestNoMovedMessageWasReworded``,
+    whose whole purpose is that nobody reword one casually; the 2026-09-20
+    migration rewrote six of them and that guard caught it, correctly.
+
+    So the two rules apply to two kinds of text. Prose -- docstrings, comments
+    and markdown -- migrates to names and may carry no line numbers. A runtime
+    message keeps what it shipped with, and changing one is a stop-and-ask.
+    Twenty-one citations in eleven modules still carry a line number for that
+    reason (counted 2026-09-20). Migrating them is a change to what a document
+    author reads and is the user's call, not this file's.
+    """
+    if path.suffix != ".py":
+        return text
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    docstrings = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)) and body:
+            first = body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+               and isinstance(first.value.value, str):
+                docstrings.add(id(first.value))
+    lines = text.split("\n")
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if id(node) in docstrings or node.end_lineno is None:
+            continue
+        for number in range(node.lineno - 1, node.end_lineno):
+            lines[number] = " " * len(lines[number])
+    return "\n".join(lines)
+
+#: The ratchets. **Both reached ZERO on 2026-09-20**, which is what the
+#: migration below was for; they stay as a floor, so a new ``file.py:<line>``
+#: written into the tree turns this red rather than starting the debt again.
+TOTAL_CEILING = 0
+AMBIGUOUS_CEILING = 0
+
+#: A citation in the form the migration produced: a path suffix, ``::``, and
+#: the qualified name of what it points at.
+NAME_CITATION = re.compile(
+    r"\b([\w/]+\.py)::([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
+)
 
 
 def _skipped(path: pathlib.Path) -> bool:
@@ -88,21 +145,24 @@ def _candidates() -> list[pathlib.Path]:
     return found
 
 
-def _citations() -> list[tuple[str, str, int, int]]:
-    """``(citing file, cited path, first line, last line)`` over live text."""
+def _sources() -> list[pathlib.Path]:
+    """Every file whose text is live prose or code."""
     sources: list[pathlib.Path] = []
     for root in CITING_ROOTS:
         sources += [
             path for path in (ROOT / root).rglob("*")
             if path.is_file() and path.suffix in (".py", ".md")
         ]
-    sources += [ROOT / name for name in CITING_FILES]
+    return sources + [ROOT / name for name in CITING_FILES]
 
+
+def _citations() -> list[tuple[str, str, int, int]]:
+    """``(citing file, cited path, first line, last line)`` over live text."""
     found = []
-    for path in sources:
+    for path in _sources():
         if _skipped(path) or not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _prose_only(path, path.read_text(encoding="utf-8", errors="replace"))
         for match in CITATION.finditer(text):
             target = match.group(1)
             if any(part in target for part in THIRD_PARTY):
@@ -207,4 +267,104 @@ def test_the_ceilings_are_not_far_above_the_truth():
     assert AMBIGUOUS_CEILING - ambiguous <= 10, (
         f"AMBIGUOUS_CEILING is {AMBIGUOUS_CEILING} and the tree has "
         f"{ambiguous}; lower the ceiling to the measurement"
+    )
+
+
+def _name_citations() -> list[tuple[str, str, str]]:
+    """``(citing file, cited path, qualname)`` over live text."""
+    found = []
+    for path in _sources():
+        if _skipped(path) or not path.exists():
+            continue
+        text = _prose_only(path, path.read_text(encoding="utf-8", errors="replace"))
+        for match in NAME_CITATION.finditer(text):
+            target = match.group(1)
+            if target in PLACEHOLDERS or any(part in target for part in THIRD_PARTY):
+                continue
+            found.append((str(path.relative_to(ROOT)), target, match.group(2)))
+    return found
+
+
+def _defined_names(path: pathlib.Path) -> set[str]:
+    """Every qualified name a module defines, plus its module-level bindings."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError):
+        return set()
+    found: set[str] = set()
+
+    def walk(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}{child.name}"
+                found.add(name)
+                walk(child, f"{name}.")
+            else:
+                walk(child, prefix)
+
+    walk(tree, "")
+    # A LEAF name counts when the module has exactly one definition with it.
+    # `file.py::TestThing.test_case` and `file.py::test_case` name the same
+    # thing when nothing else in the file is called `test_case`, and the
+    # shorter one is what fits on a line -- several of these citations are
+    # over a hundred characters with the class in front.
+    leaves: dict[str, int] = {}
+    for name in list(found):
+        leaves[name.split(".")[-1]] = leaves.get(name.split(".")[-1], 0) + 1
+    found.update(leaf for leaf, count in leaves.items() if count == 1)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            found.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            found.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # A name a module IMPORTS is a name a citation may mean. Several
+            # sentences here say "`document.py` and `validation.py` import
+            # `_same_value` from here", and the citation is about the name as
+            # those modules use it.
+            found.update(alias.asname or alias.name.split(".")[0]
+                         for alias in node.names)
+    return found
+
+
+def test_the_tree_still_cites_by_name():
+    """Guard the guard: the checks below would pass over an empty corpus."""
+    assert len(_name_citations()) > 600, len(_name_citations())
+
+
+def test_every_named_citation_resolves_to_one_file():
+    """The ambiguity the line form could only COUNT, this form cannot have.
+
+    A name is useless without a file, so the path half still has to be
+    unambiguous -- and unlike a line number, a reader following one can tell
+    whether they arrived.
+    """
+    candidates = _candidates()
+    bad = [
+        (where, f"{target}::{name}", len(_resolve(target, candidates)))
+        for where, target, name in _name_citations()
+        if len(_resolve(target, candidates)) != 1
+    ]
+    assert not bad, f"these citations name no file, or several: {bad}"
+
+
+def test_every_named_citation_names_something_that_is_there():
+    """**The check a line number could never support.**
+
+    A line citation is true of any file long enough to have that line; there is no way to ask
+    whether it still reaches what the sentence claimed, which is why 69 % of
+    them were stale and nothing said so. ``file.py::qualname`` is a claim about
+    the file's CONTENTS, so it can be checked on every run -- and a rename now
+    fails here instead of quietly pointing at whatever moved into that line.
+    """
+    candidates = _candidates()
+    missing = []
+    for where, target, name in _name_citations():
+        hits = _resolve(target, candidates)
+        if len(hits) != 1:
+            continue
+        if name not in _defined_names(hits[0]):
+            missing.append((where, f"{target}::{name}"))
+    assert not missing, (
+        f"these citations name something their file does not define: {missing}"
     )

@@ -26,7 +26,7 @@ Four measurements are the whole argument for this module.
    ``general_pointing.py`` puts the cost of getting this wrong at O(10%).
 
 The model is ``CWCalibrationOperator``'s converters
-(``radio/instrument/calibration.py:242-255``): coerce to a clean static scalar
+(``calibration.py::_static_setting``): coerce to a clean static scalar
 *before* equinox's static check runs, and refuse with a message rather than a
 warning. This module does the same thing one step earlier.
 """

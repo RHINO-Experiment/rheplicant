@@ -77,7 +77,7 @@ class TestTouchstone:
         assert not jnp.iscomplexobj(built.resources["resources.arrays.re"])
 
     def test_asking_a_one_port_file_for_s21_is_refused_by_the_packages_own_guard(self, context):
-        """touchstone.py:67-74 -- 'a zero would read as a perfectly isolated
+        """touchstone.py::Touchstone._entry -- 'a zero would read as a perfectly isolated
         port'. The refusal belongs to the reader; this layer must not swallow it."""
         from rheplicant.core.errors import DataIngestionError
 

@@ -42,7 +42,7 @@ its mapping is one this pass **stands down on**.
 
 **And it is called once per LAYER.**  ``resolved_specs`` takes a section, not
 a document, and the walk belongs to the caller:
-``preflight/document.py::_task3_over_layers`` is what makes a ``variants:``
+``_task3_over_layers`` is what makes a ``variants:``
 copy of a bad beam earn the same sentence, prefixed with the variant that
 introduced it.  A check reading ``document["resources"]`` closes one route and
 leaves that twin wide open, which is why 3A's ``A1.horizon`` already walks
@@ -119,7 +119,7 @@ def _b2_dtype(layer: Mapping[str, Any]) -> str | None:
     reads ``jax_enable_x64`` and nothing else (measured), so the placeholders
     cannot reach the answer; what they buy is that the day the mapping from
     the flag to the dtype changes, it changes in one place.
-    ``test_preflight_resources.py::test_the_dtype_this_pass_reads_is_the_one_
+    ``test_preflight_resources.py::TestA44FiresByDefault.test_the_dtype_this_pass_reads_is_the_one_build_runtime_reports
     build_runtime_reports`` is the guard on that claim.
     """
     runtime = layer.get("runtime")

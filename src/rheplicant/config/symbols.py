@@ -1,6 +1,6 @@
 """Shape symbols: a closed table, an integer offset, and nothing more.
 
-``examples/radio_digital_twin.py:71-78`` writes the frequency grid length by
+``radio_digital_twin.py::twin`` writes the frequency grid length by
 hand five times in one 90-line script with nothing tying the copies together.
 A symbol table fixes that without opening the door a value grammar closes:
 there is no operator, no precedence and no evaluation order here, only a name,

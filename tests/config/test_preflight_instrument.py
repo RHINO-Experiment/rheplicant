@@ -52,12 +52,12 @@ TONE = {"amplitude": 5000.0,
         "line_width": {"value": 5.0, "unit": "MHz"}}
 
 #: A well-formed array-producing value node.  ``endpoint:`` is required and has
-#: no default (``arrays.py:81``), so omitting it earns ``linspace``'s own
+#: no default (``config/arrays.py::_ones``), so omitting it earns ``linspace``'s own
 #: refusal instead of A40's.
 LINSPACE = {"linspace": {"start": 1.0, "stop": 2.0, "num": 4, "endpoint": True}}
 
 #: The ``python:`` spelling of a shipped class, which is what makes an ``at:``
-#: legal at all (``compose.py:296-301``).
+#: legal at all (``compose.py::cal_load_order_problem``).
 PY_GAIN = {"python": "rheplicant.radio:GainOperator"}
 
 #: The ``python:`` spelling of the tone, which places a ``CWCalibrationOperator``
@@ -102,7 +102,7 @@ def variant_document(section, patch):
     **The variant twin has two halves and only one of them is the layer
     walk's**, measured rather than taken from plan §0.3 F.5(1)'s wording:
 
-    * ``load_document(doc, variant="twin_route")`` -- ``document.py:77``
+    * ``load_document(doc, variant="twin_route")`` -- ``config/document.py::ConfiguredRun``
       applies the SELECTED variant BEFORE ``preflight(doc)`` runs, so a check
       reading ``document[...]`` already sees the merged mapping.  This half
       needs no layer walk and would pass without one.
@@ -190,7 +190,7 @@ A40 = (
     "(check A40)."
 )
 
-#: ``paths.py::refuse_misaddressed_region``'s whole sentence.
+#: ``config/paths.py::refuse_misaddressed_region``'s whole sentence.
 A47_PATHS = (
     "A multi-node at: region covering ['gain', 'noise'] is written under the "
     "key 'bandpass', but a region is addressed in the assembly by its LAST "
@@ -418,7 +418,8 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
 
     def test_a_protect_floor_of_exactly_one_is_legal(self):
         """``0 < x <= 1``, and 1.0 is the SHIPPED default's legal extreme --
-        ``tests/radio/test_cw_lineshape.py:334`` constructs one.  A check
+        ``test_cw_lineshape.py::TestTheProtectionFloorIsAFraction.test_a_floor_of_exactly_one_protects_only_the_peak``
+        constructs one.  A check
         written ``0 < x < 1`` refuses a document the package builds, which is
         the one direction a pre-flight pass must never be wrong in."""
         assert "A13" not in ids(tone_document(protect_floor=1.0))
@@ -560,7 +561,7 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         """The other half, which the layer walk does NOT buy, driven so the
         two are not confused for one another.
 
-        ``document.py:77`` applies the requested variant and only then calls
+        ``config/document.py::ConfiguredRun`` applies the requested variant and only then calls
         ``preflight(doc)``, so this document is refused by the BASE layer's
         own walk -- the sentence carries no ``variants.`` prefix.  Measured;
         an earlier reading of plan §0.3 F.5(1) had the layer walk buying both.
@@ -828,7 +829,8 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
 
     def test_a_one_element_at_list_is_legal_and_stays_so(self):
         """``refuse_misaddressed_region`` returns early below two nodes
-        (``paths.py:318-319``), so ``{python: ..., at: ['gain']}`` BUILDS --
+        (``config/paths.py::refuse_misaddressed_region``), so ``{python: ..., at: ['gain']}`` BUILDS
+        --
         measured in ``test_preflight_model.py``'s own A5 cases.  A check
         written ``config_key != at[-1]`` without the length guard refuses it."""
         doc = preflight_document(model={"bandpass": dict(PY_GAIN, at=["gain"])})
@@ -849,7 +851,7 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
     def test_an_at_region_under_twin_replace_is_not_A47_at_all(self):
         """§0.3 E.10 for A47: a NON-route, not a false negative.
 
-        ``sections/twin.py:67`` calls ``build_node_operator`` directly,
+        ``sections/twin.py::build_fit_twin`` calls ``build_node_operator`` directly,
         bypassing ``compose._single`` -- the only place ``at:`` is honoured --
         so on this route ``at:`` is an unknown constructor field.  Measured:
         the document below is refused with ``_construct``'s *"does not take
@@ -871,7 +873,7 @@ class TestTheStandDowns:
 
     def test_an_unknown_key_beside_a_missing_required_one_is_not_A13(self):
         """``_construct`` sweeps unknown keys BEFORE it looks for missing ones
-        (``sections/model.py:151-162``), so the reader sees *"does not take
+        (``sections/model.py::_field_value``), so the reader sees *"does not take
         ['nope']"* today.  A13 arriving one phase earlier with *"declares
         ['line_width'] nowhere"* would answer a question the user has not got
         to yet.  Kills ``_unknown_field`` deleted."""
@@ -883,7 +885,7 @@ class TestTheStandDowns:
             self):
         """The route flag, and the advice loop it exists to stop.
 
-        ``sections/twin.py:67`` calls ``build_node_operator`` directly, so on
+        ``sections/twin.py::build_fit_twin`` calls ``build_node_operator`` directly, so on
         the replace route ``at:`` is an unknown constructor field and
         ``_construct`` answers *"does not take ['at']"* — the key the user
         actually wrote.  With the ``{at, snapshot_before}`` exemption applied
@@ -915,7 +917,7 @@ class TestTheStandDowns:
         """The other polarity, and the one a blanket "never exempt" breaks.
 
         ``compose._single`` pops ``at:`` and ``snapshot_before:`` BEFORE
-        ``_construct`` sees the spec (``compose.py:287-288``), so on this route
+        ``_construct`` sees the spec (``compose.py::cal_load_order_problem``), so on this route
         they are not unknown keys and the entry must still be read.  Measured:
         this document is refused by ``_construct``'s *"requires ['line_width']"*
         at `ea4839b`, which is exactly the row A13.text moves.
@@ -933,7 +935,7 @@ class TestTheStandDowns:
 
     @pytest.mark.parametrize("declared", ["traced", "banana"])
     def test_an_as_the_field_contradicts_is_not_pre_empted_by_A40(self, declared):
-        """``deliver`` reads ``as:`` FIRST (``delivery.py:187-204``), so a
+        """``deliver`` reads ``as:`` FIRST (``delivery.py::mode_of``), so a
         document making a claim about its own delivery mode is answered about
         that claim: *"This value declares as='traced', but field 'line_width'
         is 'static_float'"*, and *"as='banana' is not a delivery mode"*.  A40
@@ -952,7 +954,7 @@ class TestTheStandDowns:
     def test_a_negative_tone_freq_is_left_to_the_grid_leg_that_names_the_band(self):
         """The stand-down §0.3 E.8 does not name and this task measured.
 
-        ``calibration.py:373`` guards ``tone_freq > 0``, but no document
+        ``calibration.py::CWCalibrationOperator`` guards ``tone_freq > 0``, but no document
         reaches it: ``A13.grid`` answers first with *"the tone centre spans
         [...] outside this run's observed band [6e+07, 8.5e+07] Hz"*, which
         tells the reader the interval to write in.  A P-1 sign leg would run

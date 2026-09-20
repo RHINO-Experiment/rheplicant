@@ -292,7 +292,8 @@ def _writes(tree: ast.Module) -> list[tuple[str, str, int, bool]]:
     Four kinds, because there are four ways in this repository's own idiom to
     put an ``inference:`` block somewhere: assignment (at any nesting depth),
     deletion, a ``{**base, "inference": ...}`` literal -- which
-    ``test_config_document.py:91`` already uses -- and ``dict.update``.
+    ``test_config_document.py::TestLoadDocument.test_not_yet_owned_sections_name_where_they_are_handled``
+    already uses -- and ``dict.update``.
     """
     found = []
     for node, where in _sites(tree):
@@ -356,9 +357,12 @@ def _rolls_its_own(path: pathlib.Path) -> list[str]:
 
     * a NESTED write (``doc["inference"]["twin"] = ...``) edits inside the
       repaired block rather than replacing it, and flagging it would be
-      backwards: ``test_config_exits_estimators.py:88`` is that shape and it
+      backwards:
+      ``test_config_exits_estimators.py::TestFisher.test_fisher_evaluates_the_repaired_fit_twin`` is
+      that shape and it
       exists to BUY the discrimination BACK, while
-      ``test_config_exits_conjugate.py:407`` and four sites in
+      ``test_config_exits_conjugate.py::TestWidth.test_width_fisher_under_check_false_on_a_curved_latent``
+      and four sites in
       ``test_config_exits_npe.py`` use it to reach a refusal.
     * ``doc["inference"] = {}`` blanks the block to reach the "no
       inference.parameters" refusal -- both copies of
@@ -406,7 +410,7 @@ def _build(builder) -> object:
 
     **The order matters, and it is measured.**  Five builders take ``run=None``
     and merge what they are given OVER their own default -- ``gcr_document``
-    is ``conjugate_document({**GCR, **(run or {})})`` (``exit_helpers.py:414``)
+    is ``conjugate_document({**GCR, **(run or {})})`` (``exit_helpers.py::PRIOR_SIGMA``)
     -- so ``builder(_FORWARD)`` overrides only ``kind:`` and leaves ``names:``
     and ``seed:`` behind, producing ``kind: forward`` carrying two options a
     forward run does not take.  That document built fine while nothing swept a
@@ -435,7 +439,8 @@ class TestOnlyOnePlaceBuildsADocument:
         renamed, the write form changed, a module moved out of the glob --
         makes all of them true and this module a green no-op.  2C's
         ``test_the_kind_tables_are_pairwise_disjoint`` carries the same guard
-        as ``len(tables) >= 2`` (``test_config_exit_support.py:83``).
+        as ``len(tables) >= 2``
+        (``test_config_exit_support.py::TestTheRegistryIsComplete.test_the_kind_tables_are_pairwise_disjoint``).
 
         The two sanctioned builders are the anchor, and NOT the offender
         count: Plan 3 retires the four, and an anti-vacuity assertion that

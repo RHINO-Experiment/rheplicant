@@ -44,7 +44,7 @@ class TestTheFourKinds:
         assert type(sky.ref_freq) is float  # static, and a static array corrupts the jit key
 
     def test_maps_from_a_value_node(self, context):
-        """The maps in driftscan_mmode.py:61 and sky_to_noise_wave.py:109-112
+        """The maps in driftscan_mmode.py::freq and sky_to_noise_wave.py
         are DRAWN, not read, and will never be on disk -- which is why MapSky
         ships with a value-node constructor as well as a file one."""
         built = build_resources(

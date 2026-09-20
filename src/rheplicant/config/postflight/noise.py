@@ -534,7 +534,7 @@ def _t6_radiometer_fractional(kind: str, weighed: Any) -> float:
     and its ``.fractional`` is read the same way, rather than re-writing
     ``1 / sqrt(dnu * tau)`` a fourth time.
 
-    Imported at function scope, matching ``config/sections/noise.py:195``'s
+    Imported at function scope, matching ``sections/noise.py::_fact``'s
     own precedent for this exact class.
     """
     from rheplicant.inference import RadiometerNoise

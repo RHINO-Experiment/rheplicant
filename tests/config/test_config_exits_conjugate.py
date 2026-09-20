@@ -449,7 +449,7 @@ class TestTheNoiseSeam:
     def test_radiometer_frozen_is_the_route_that_works(self):
         # Measured: g = 1.5 against the injected 1.5.  A frozen radiometer
         # sigma is per-sample, so this also proves an ARRAY reached
-        # noise_std= and not a NoiseModel, which linear.py:1031 refuses.
+        # noise_std= and not a NoiseModel, which linear.py::_as_far_block refuses.
         product = run_product(wiener_document(WIENER, noise=FROZEN))
         assert float(product["mean"]["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
 
@@ -478,7 +478,7 @@ class TestThePrior:
         # demanded -- but the package requires the mapping for a grouped
         # block, so the broadcast has to happen somewhere, and this is where.
         # PRIOR_FREE is what makes the width OBSERVABLE: against a latent
-        # that declares its own prior:, _reconcile (linear.py:872) refuses a
+        # that declares its own prior:, _reconcile (linear.py::check_linearity) refuses a
         # disagreeing keyword and accepts an agreeing one in silence.
         product = run_product(wiener_document(
             {**WIENER, "prior_std": 10.0}, parameters=PRIOR_FREE))
@@ -584,7 +584,7 @@ class TestTheCheapChecksComeFirst:
         """The order this document gets REVERSED with Plan 3A, deliberately.
 
         Until the pre-flight pass existed, ``_run_conjugate`` refused the
-        missing ``width:`` at ``conjugate.py:127`` and A27 was never reached
+        missing ``width:`` at ``conjugate.py::_width`` and A27 was never reached
         on a doubly-wrong document -- measured, the refusal named the width
         and said nothing about the sigma.  Both are real, and the sigma is
         the one the user cannot fix by reading the message they were given:

@@ -112,7 +112,7 @@ class Built:
     **The field names and their order are** :class:`ConfiguredRun`'s, exactly,
     so that ``Built(*run)`` is the whole constructor and no test keeps two
     field lists in step by hand.
-    ``test_config_inflight.py::test_the_two_field_tuples_are_equal`` pins the
+    ``test_config_inflight.py::TestThePayloads.test_the_two_field_tuples_are_equal`` pins the
     two tuples; the day ``ConfiguredRun`` grows a field, that test names it
     rather than a positional argument landing in the wrong slot in silence.
     ``ConfiguredRun`` is a ``NamedTuple``, so the pin reads ``._fields`` --

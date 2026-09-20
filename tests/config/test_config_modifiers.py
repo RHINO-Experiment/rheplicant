@@ -267,7 +267,7 @@ class TestPartImAfterAWideningDtype:
 class TestColumn:
     def test_it_turns_n_into_n_by_one(self, context):
         """CalLoadOperator.t_load reads (n, 1) as per-sample and (n,) as
-        per-frequency (radio/instrument/calibration.py:716-722). On a square
+        per-frequency (calibration.py::width_floor_unresolved). On a square
         grid the two are indistinguishable by shape, which is why the key
         exists rather than being inferred. n_freq is 8 here and not 1, so
         array[None, :] -- the other one-line way to add an axis -- is a

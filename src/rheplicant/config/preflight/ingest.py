@@ -51,9 +51,9 @@ the reader's own ``DataIngestionError``.  A10 walks it by walking every
 section that is not ``variants:``.
 
 **All three now walk the variant LAYERS** (Plan 3C Task 0).
-``document.py::_assemble`` applies the selected variant and THEN runs this
+``config/document.py::_assemble`` applies the selected variant and THEN runs this
 pass, so the route a user actually takes was always read on the merged
-mapping; what ``preflight/document.py::_task3_over_layers`` adds is the
+mapping; what ``_task3_over_layers`` adds is the
 reporting of faults in variants **nobody selected** -- a fault a user wrote
 into a variant they did not choose used to be accepted at load and refused
 only on the day they passed ``--variant <name>``.  Measured before this task,
@@ -78,7 +78,7 @@ variants), this module's docstring used to read 22.3 ms unlayered against
 37.8 ms layered -- both under §5's 50 ms bound -- and the walk was still
 dropped for the WAVE's arithmetic (+15 ms of a budget with ~22 ms already
 spent and five sibling branches landing into the same registry), not for a
-breach.  ``preflight/document.py::_task3_layers`` was then memoised: one
+breach.  ``_task3_layers`` was then memoised: one
 document's layers are built once per pass and shared by every check that
 walks them, so a check ADDED to the walk after the memo landed costs zero
 additional ``apply_variant`` calls, only its own per-layer read.  Re-measured
@@ -413,7 +413,7 @@ def _freq_unit(document: Mapping[str, Any]) -> Iterable[Finding]:
     in, over every layer (Plan 3C Task 0).
 
     ``_task3_over_layers`` is CALLED and not re-implemented
-    (``preflight/noise.py::_b6_over_layers`` is the precedent): the base
+    (``_b6_over_layers`` is the precedent): the base
     document's own fault is said once, unprefixed, and each declared
     variant's is said once more with its own name in front, so a fault in a
     variant nobody has selected yet is no longer accepted at load and
@@ -494,7 +494,7 @@ def _switch_key(document: Mapping[str, Any]) -> Iterable[Finding]:
     carry, over every layer (Plan 3C Task 0).
 
     ``_task3_over_layers`` is CALLED and not re-implemented
-    (``preflight/noise.py::_b6_over_layers`` is the precedent).
+    (``_b6_over_layers`` is the precedent).
     """
     return _a45_in(document)
 
@@ -578,6 +578,6 @@ def _thermistor_columns(document: Mapping[str, Any]) -> Iterable[Finding]:
     every layer (Plan 3C Task 0).
 
     ``_task3_over_layers`` is CALLED and not re-implemented
-    (``preflight/noise.py::_b6_over_layers`` is the precedent).
+    (``_b6_over_layers`` is the precedent).
     """
     return _a46_in(document)

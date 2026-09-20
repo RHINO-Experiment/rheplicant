@@ -194,7 +194,7 @@ class TestBeamAnalysis:
 
     The transform exists to make a beam-map gradient the quantity the user
     meant.  A DriftScanProjector's only non-static field is ``beam_alms``
-    (radio/sky/driftscan.py:189-203), so without this the only binding a
+    (driftscan.py::DriftScanProjector), so without this the only binding a
     document can write is ``into: ...projector.beam_alms``, whose gradient is
     d(chi2)/d(alm) -- finite, correctly shaped, and a different quantity in a
     different basis from the d(chi2)/d(map) the user was computing by hand.
@@ -283,7 +283,7 @@ class TestBeamAnalysis:
         """Each frequency is transformed on its own, as its own map.
 
         map2alm_iter is a single-map function; the frequency axis is the
-        vmap's, exactly as radio/sky/driftscan.py:300-302 writes it.  Scaling
+        vmap's, exactly as driftscan.py::DriftScanProjector.from_beam_maps writes it.  Scaling
         one row must scale that row's alms and leave the others alone -- an
         implementation that flattens the stack, or that transforms row 0 and
         broadcasts it, disagrees on both counts.
@@ -309,11 +309,13 @@ class TestBeamAnalysis:
         """The two are not interchangeable: they differ by npix/4pi.
 
         map2alm_iter returns true (healpy-convention) alms and is what the
-        BEAM needs (from_beam_maps, driftscan.py:301); map2alm_quad returns
+        BEAM needs (from_beam_maps, driftscan.py::DriftScanProjector.from_beam_maps); map2alm_quad
+        returns
         quadrature alms and is what the SKY needs (sky_to_alms, :605-606).
         Both have the same shape and the same dtype, so only the numbers can
         tell them apart -- picking the visible one "silently rescales the
-        beam by npix/4pi" (driftscan.py:269).  The ratio is pinned against
+        beam by npix/4pi" (driftscan.py::DriftScanProjector.from_beam_maps).  The ratio is pinned
+        against
         npix/4pi itself rather than a wide band, so the assertion identifies
         the factor instead of merely noticing that two arrays differ:
         measured 15.065 here against npix/4pi = 15.279 at nside=4.

@@ -12,7 +12,8 @@ Two keys are NOT their parameter's name and the executor translates them:
 ``seed:`` becomes ``key=`` and ``n_draws:`` becomes ``n_samples=``.  Nothing
 else is renamed -- in particular the key is ``width:``, because
 ``NeuralPosterior.create`` takes ``width=`` and passes it to equinox as
-``width_size=`` itself (``npe.py:216``); a grammar that spelled the key
+``width_size=`` itself (``inference/npe.py::NeuralPosterior.create``); a grammar that spelled the
+key
 ``width_size:`` would ``TypeError`` on the first document that used it.
 
 **Four independent named seeds.**  ``simulate_pairs``, ``create``,
@@ -23,7 +24,8 @@ nowhere -- a key is a draw and belongs to the run, not to the document read.
 
 **``embed:`` resolves to a callable at parse time**, so a
 ``{python: "mod:fn"}`` that cannot be imported, or cannot be called with the
-one argument ``jax.vmap(embed)(data)`` passes it (``npe.py:209``), is refused
+one argument ``jax.vmap(embed)(data)`` passes it (``inference/npe.py::NeuralPosterior.create``), is
+refused
 when the document is READ rather than after the bank has been simulated.
 
 Nothing in this module may import ``rheplicant.inference`` at module scope.
@@ -31,10 +33,10 @@ Nothing in this module may import ``rheplicant.inference`` at module scope.
 this module is loaded by every process that reads a document; measured after
 ``import rheplicant.config``, ``rheplicant.inference`` is absent from
 ``sys.modules`` and ``numpyro`` with it.  (``equinox`` is already present --
-``config/paths.py:30`` imports it and so does much of ``core`` -- so it is
+``config/paths.py`` imports it and so does much of ``core`` -- so it is
 not what the invariant is about.)  The executor's own imports go inside its
 body, which is what ``predict``'s samples route already does
-(``diagnostics.py:771``).
+(``sections/diagnostics.py::_a39_predict_takes_no_from``).
 
 **THREE TASKS APPEND TO THIS ONE MODULE, so every module-level name is
 owned.**  Task 3 (the parser) binds, and no later task may rebind: every
@@ -123,7 +125,8 @@ _NPE_KEYS = frozenset({"bank", "embed", "create", "train", "sample"})
 #: implies" and was offered ``kind: conjugate.wiener``.  Measured on
 #: ``posterior_helpers.npe_document(noise=FROZEN)``, both were false: this
 #: exit hands ``noise=`` to ``simulate_pairs``, which DRAWS from the rule
-#: (``:475-480``), and no conjugate exit produces an amortized posterior.
+# : (``sections/diagnostics.py::_objective.imported``), and no conjugate exit produces an amortized
+# posterior.
 #: ``_decided_model`` takes both keyword-only and REQUIRED, so a third caller
 #: has no default left to inherit -- which is exactly how this defect
 #: arrived.
@@ -214,7 +217,7 @@ class NpeSpec(NamedTuple):
     the five carry their own seed and a flat mapping cannot say which seed
     belongs to which call.  Each dict holds ``seed`` as the RAW
     ``{from: runtime.seeds.<name>}`` declaration -- the executor resolves it
-    to a key at run time through ``draws.seed_for`` (``config/draws.py:46``)
+    to a key at run time through ``draws.seed_for`` (``draws.py``)
     and needs the declaration, not a key -- beside only the keys the
     document actually declared, so the package's own default applies to
     every key it did not.  (The shared helper that will wrap that resolution,
@@ -534,7 +537,7 @@ def _simulate_bank(run: Any, built: Any, spec: Any) -> tuple:
 
     The space is returned ALONGSIDE the pairs rather than fetched again by the
     caller, because ``thetas``' columns are laid out in THAT space's ``names``
-    order (``inference/npe.py:100-102``) and Task 8 unravels the draws back
+    order (``inference/npe.py::simulate_pairs``) and Task 8 unravels the draws back
     through the same object.  Two separate lookups are two chances to check
     one space and unravel against another.
 
@@ -577,12 +580,12 @@ def _estimator(run: Any, built: Any, spec: Any, thetas: Any, data: Any) -> Any:
     Everything else travels through ``_passthrough``, so an undeclared key
     gets the package's default rather than one restated here.  That matters
     most for ``n_components``: the package's default is 4 and its own tuning
-    table says 4 over-fits (``tests/inference/test_npe.py:145`` and the
+    table says 4 over-fits (``test_npe.py::trained`` and the
     shipped example both pass 1).  The layer documents that and defaults
     nothing -- a warning is Plan 3's, on its ledger.
 
     ``width=``, never ``width_size=``.  ``create`` takes ``width`` and passes
-    it to equinox as ``width_size`` itself (``inference/npe.py:216``); 2C's
+    it to equinox as ``width_size`` itself (``inference/npe.py::NeuralPosterior.create``); 2C's
     carry-forward note reads that fact as an instruction to the caller and is
     wrong about the caller, and the wrong spelling is a ``TypeError`` on the
     first call.
@@ -625,8 +628,9 @@ class NpeProduct(NamedTuple):
     contract :class:`~rheplicant.config.sections.nuts.NutsProduct` does, for
     the same reason: 2C's shipped ``predict`` reads a samples product as
     ``product.n_draw`` (an int) and ``product.samples`` (a mapping of latent
-    name -> stack with a leading draw axis), ``diagnostics.py:774`` and
-    ``:791``, and Task 9 makes ``npe`` one of its sources.
+    name -> stack with a leading draw axis), ``sections/diagnostics.py::_a39_predict_takes_no_from``
+    and
+    ``sections/diagnostics.py::_parse_predict``, and Task 9 makes ``npe`` one of its sources.
     ``NeuralPosterior.sample`` returns a FLAT ``(n_draws, n_params)`` array,
     so :func:`~rheplicant.config.sections.posterior_support._unravel` is what
     gets it to a mapping, in ``space.names`` DECLARATION order.

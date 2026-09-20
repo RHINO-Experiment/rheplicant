@@ -68,7 +68,7 @@ Check = Callable[[Any], Iterable[Finding]]
 Registry = dict[str, Check]
 
 #: A registry SLOT: a schema §6 id, optionally with a dotted suffix.  Moved
-#: from ``preflight/__init__.py::_T2_SLOT`` unchanged.  It already admits ``B``
+#: from ``_T2_SLOT`` unchanged.  It already admits ``B``
 #: and ``C`` ids, which is why the two new passes need no widening of it --
 #: measured, ``"C1"``, ``"C2.time"`` and ``"A13.grid"`` all ``fullmatch`` and
 #: ``"A12a"`` does not (a bare letter suffix is not a dotted slot).
@@ -104,7 +104,7 @@ def binder(registry: Registry, *checks: str, label: str,
     Plan 3A's ``preflight.register``, with the registry and the two words as
     arguments.  Raises ``ConfigError`` -- never an ``assert``, which
     ``python -O`` strips.  That is the ledger item closed at
-    ``sections/exit_support.py:31``, where the strip was measured to let the
+    ``exit_support.py``, where the strip was measured to let the
     second registration win in silence.
 
     A SLOT is a schema §6 id, optionally with a dotted suffix (``"A1.runs"``,
@@ -249,7 +249,7 @@ def check_where(label: str, check: str, finding: Finding,
 
     Not a test, because a ``where`` is often computed from the document and a
     test on a fixed set of documents cannot see the branch that builds a bad
-    one.  ``parse_path`` (``config/paths.py:38``) is the layer's own path
+    one.  ``parse_path`` (``config/paths.py::parse_path``) is the layer's own path
     grammar and already refuses a source path: measured,
     ``parse_path('src/rheplicant/config/model.py')`` raises and
     ``parse_path('runs[2].blocks[0]')`` returns ``('runs', 2, 'blocks', 0)``,

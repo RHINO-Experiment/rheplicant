@@ -823,7 +823,7 @@ class TestTheTwins:
 
     def test_inference_twin_replace_reaches_the_same_builder(self, monkeypatch):
         """§0.3 E.10, and it is a real candidate rather than a formality:
-        ``twin.py:69`` sends ``replace.<node>`` into ``build_node_operator``,
+        ``inflight/twin.py::_LEGAL_SHAPES`` sends ``replace.<node>`` into ``build_node_operator``,
         the same function ``model.<node>`` reaches, and
         ``sections/compose.py::model_nodes`` cannot see it.  The message names
         the section it FOUND, which a verbatim hoist of A13's
@@ -841,7 +841,7 @@ class TestTheTwins:
     def test_a_file_value_node_is_the_from_file_twin(self, monkeypatch):
         """A10's twin is A35's too: ``observation.from_file`` is not the only
         h5py route.  ``parse_from_file`` resolves ``{"file": dict(spec)}``
-        itself (``sections/ingest.py:113``), so ANY value node writing
+        itself (``sections/ingest.py::_read_rhino_hdf5``), so ANY value node writing
         ``{file: {format: rhino_hdf5}}`` reaches the same reader -- measured
         at ``resources.arrays.<n>``, which is where this one writes it."""
         blocked(monkeypatch, "h5py")
@@ -855,8 +855,8 @@ class TestTheTwins:
             self, monkeypatch):
         """``parse_transform`` has two call sites, not one.
 
-        ``sections/transforms.py:354`` reads a LATENT's own ``transform:`` and
-        ``:393`` reads a BINDING entry's, and ``{beam_analysis: ...}`` under
+        ``transforms.py::parse_transform`` reads a LATENT's own ``transform:`` and
+        ``transforms.py::_joint_prior`` reads a BINDING entry's, and ``{beam_analysis: ...}`` under
         either reaches ``limtod_jax.map2alm_iter``.  The module docstring
         claims both; until this test only the parameters site was driven, and
         deleting the bindings walk survived everything.
@@ -887,7 +887,7 @@ class TestTheTwins:
         assert finding.message.startswith("runs[0].at.g: format: rhino_hdf5 needs ")
 
     def test_a_single_run_written_as_a_MAPPING_is_walked(self, monkeypatch):
-        """``parse_runs`` accepts one exit as a bare mapping (``runs.py:122``:
+        """``parse_runs`` accepts one exit as a bare mapping (``runs.py::_one``:
         ``if isinstance(section, Mapping): section = [section]``), so a walk
         that only handled a list would miss every single-run document written
         that way -- and the schema's own pages use the form."""
@@ -997,7 +997,7 @@ class TestNoHostileDocumentCanAbortA35:
     ``_requirements`` does ``_FEATURES.get((token, value))`` -- a dict lookup
     on a tuple one of whose members is copied straight out of the user's
     document.  A list or a mapping there raises ``TypeError: unhashable type``,
-    which ``passes.py:207`` turns into *"pre-flight check 'A35' RAISED
+    which ``passes.py::sweep`` turns into *"pre-flight check 'A35' RAISED
     TypeError"*: **the pass aborts and every later finding is discarded.**  A35
     runs first, so it discards all of them.
 

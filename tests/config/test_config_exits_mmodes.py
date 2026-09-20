@@ -74,7 +74,8 @@ def document(run, *, normalize_beam=False, optimizations=None,
 
     ``pointing.mode: drift`` is what writes ``coords.extra["lst_deg"]``, and
     its az/el are the projector's own so ``_reject_disagreeing_pointing``
-    (driftscan.py:398-436, 1e-3 deg) has nothing to object to.  ``el_deg``,
+    (driftscan.py::DriftScanProjector._validate_coords, 1e-3 deg) has nothing to object to.
+    ``el_deg``,
     ``materialise`` and ``lst`` are parameters only so the pointing tests
     below can make the track disagree, make it absent, and take the LST grid
     away entirely.
@@ -104,7 +105,7 @@ def document(run, *, normalize_beam=False, optimizations=None,
     drift = _projector("horn", LMAX, normalize_beam=normalize_beam)
     if optimizations is not None:
         # cache_beam_rotation is refused without lst_ref_deg
-        # (projectors.py:178-185): to_reference_frame() raises without one.
+        # (projectors.py::_a48_lst_ref): to_reference_frame() raises without one.
         drift["optimizations"] = optimizations
         drift["lst_ref_deg"] = {"value": 0.0, "unit": "deg"}
     doc["resources"] = {
@@ -245,7 +246,7 @@ class TestTheProduct:
         """What the kind is NAMED after, and the one thing shape cannot say.
 
         An m-mode is the Fourier coefficient of the sidereal-day-periodic
-        TOD (driftscan.py:663-671).  So the product must equal
+        TOD (driftscan.py::DriftScanProjector.adjoint).  So the product must equal
         ``rfft(forward(same sky, same coords), axis=0) / n_time``, bin for
         bin, and it does -- on the ``mottled`` sky, whose per-pixel
         amplitude gives the m > 0 bins real signal instead of pixelisation
@@ -273,7 +274,8 @@ class TestTheProduct:
         """coords come off built.state, and the anchor is visible in them.
 
         ``mmodes`` measures its phases from the reference LST, which with no
-        ``lst_ref_deg`` is the grid's FIRST sample (driftscan.py:476-479).
+        ``lst_ref_deg`` is the grid's FIRST sample
+        (driftscan.py::DriftScanProjector._validate_uniform_grid).
         This document starts its turn at 30 deg rather than 0, and that is
         deliberate: MEASURED on the mottled sky, m=1 at channel 0 moves from
         -0.1344+2.6142j to -1.4235+2.1968j -- same magnitude, a rotated
@@ -297,7 +299,8 @@ class TestThePackagesOwnPointingRefusal:
 
         ``pointing.el_deg: 45`` writes a per-sample track the projector
         would silently ignore, and DriftScanProjector refuses it at 1e-3 deg
-        (driftscan.py:398-436).  That refusal is the package's -- it names
+        (driftscan.py::DriftScanProjector._validate_coords).  That refusal is the package's -- it
+        names
         the disagreement and this layer neither duplicates nor swallows it,
         so it must arrive as a StateValidationError and NOT as a ConfigError.
         """
@@ -322,7 +325,8 @@ class TestThePackagesOwnPointingRefusal:
         """The half of the trap that is about what mmodes DOES read.
 
         Drop ``pointing.lst:`` and coords.extra carries no "lst_deg", which
-        is the one entry mmodes requires (driftscan.py:387-393).  This layer
+        is the one entry mmodes requires (driftscan.py::DriftScanProjector.uniform_lst_grid).  This
+        layer
         adds no check of its own there either: the package's message names
         the missing key AND says in the same breath that coords.pointing is
         ignored, which is the whole confusion a config-layer paraphrase
@@ -340,12 +344,12 @@ class TestTheNormalizeBeamRefusal:
     def test_it_speaks_in_the_config_layers_voice_quoting_the_source(self):
         """ConfigError, not the package's StateValidationError.
 
-        The package refuses this pairing too (driftscan.py:687-697), but as
+        The package refuses this pairing too (driftscan.py::DriftScanProjector), but as
         a StateValidationError -- a SIBLING of ConfigError under DirtError,
         not a subclass -- and only once the beam has been read and analysed.
         pytest.raises(ConfigError) therefore does not catch the package's
         version, and the type assertion says so out loud.  The regex is the
-        SOURCE's spelling of the measurement (driftscan.py:676): ASCII
+        SOURCE's spelling of the measurement (driftscan.py::DriftScanProjector.mmodes): ASCII
         lowercase x, no space.
         """
         with pytest.raises(ConfigError, match=r"measured ~18x off") as caught:
@@ -361,7 +365,7 @@ class TestTheNormalizeBeamRefusal:
         merely about "something raised": StateValidationError is not a
         subclass of ConfigError, and its message does not contain the
         source's own 'measured ~18x off' -- that phrase lives in the mmodes()
-        DOCSTRING (driftscan.py:676), not in the exception text.
+        DOCSTRING (driftscan.py::DriftScanProjector.mmodes), not in the exception text.
 
         The built object comes from ``built_run`` -- the payload route, with
         no handler parse -- because Task 10's orchestration refuses this
@@ -387,7 +391,7 @@ class TestTheNormalizeBeamRefusal:
         """normalize_beam is read off the BUILT object, not off the spec.
 
         optimizations: [cache_beam_rotation] swaps the projector for
-        to_reference_frame()'s return (projectors.py:240-241), which is a
+        to_reference_frame()'s return (projectors.py::_angle), which is a
         different instance carrying beam_frame="reference".  MEASURED: it
         keeps normalize_beam=True and it is NOT the object the spec
         described, so the refusal must still fire -- an executor that keyed
@@ -519,7 +523,8 @@ class TestTheGrammar:
         """The other end of the same callable: right arity, wrong product.
 
         ``repr`` takes one argument and returns a str.  _validate_sky
-        (driftscan.py:551-557) reaches for ``.shape`` first and would raise
+        (driftscan.py::DriftScanProjector._quadrature_ones) reaches for ``.shape`` first and would
+        raise
         a bare AttributeError; the extents themselves are still left to it,
         because its message names the nside they follow from.
         """

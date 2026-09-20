@@ -265,7 +265,7 @@ class TestTheConditionalRequirement:
     """The one requirement a value cannot decide on its own.
 
     ``DriftScanProjector.from_beam_maps`` calls ``_limtod_jax(uniform_sampling)``
-    (``radio/sky/driftscan.py:299``) and only the ``uniform=True`` branch asks
+    (``driftscan.py::DriftScanProjector.from_beam_maps``) and only the ``uniform=True`` branch asks
     for ``check_uniform_grid``.
     """
 

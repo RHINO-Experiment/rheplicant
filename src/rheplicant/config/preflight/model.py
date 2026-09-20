@@ -65,7 +65,7 @@ def _t4_graph():
 
     ``compose.py``'s own convention.  Measured, it costs nothing at call time
     -- ``import rheplicant.config`` already imports ``rheplicant.radio``
-    through ``config/kinds/projectors.py:44``, a module-scope ``from
+    through ``projectors.py``, a module-scope ``from
     rheplicant.radio import ...`` -- and deferring it means this module is not
     the one that pins that, should it ever stop being true.
     """
@@ -370,7 +370,7 @@ def _t4_switch_order(document: Mapping[str, Any]) -> tuple[str, ...] | None:
     ``test_config_section_model.py``'s thermistor document rather than by
     reading: an INGESTED run (``observation.from_file``) declares ``order:``
     ALONE and no ``mode:`` at all, because the recording carries the cycle
-    (``observation.py:336-348``), while every other run goes through
+    (``observation.py::_data``), while every other run goes through
     ``compile_switching``, where a missing ``mode:`` means ``none``.  A
     single reading calls that run's three-label order "no switch cycle" and
     tells it to declare the cycle it has already declared.
@@ -446,7 +446,7 @@ def _t5_radio_class(spec: Any):
 
     **The class, not the spelling.**  Until this commit the module test was
     ``module != "rheplicant.radio"``, and the build resolves the same target
-    through ``hatch.import_target`` (``sections/model.py:260``), which imports
+    through ``hatch.import_target`` (``sections/model.py::_c7_beam_spill``), which imports
     **any** module -- so the two spellings of ONE class object diverged, and
     six checks read the divergence.  Measured: ``import_target
     ('rheplicant.radio.instrument.calibration:CalLoadOperator') is
@@ -455,7 +455,7 @@ def _t5_radio_class(spec: Any):
     which A14 refuses **on absence**, so a document that BUILDS was refused,
     and A5, A15, A31, A52 and A30's ``replace:`` gate each lost their subject
     on the same document.  Task 12 had recorded the hole for A42 alone
-    (``preflight/values.py:283-303``: *"two different resolvers, and only one
+    (``preflight/values.py::_a42_removed``: *"two different resolvers, and only one
     of them is P-1's"*); it was never A42's.
 
     **The widening imports NOTHING**, which is what keeps §2.4 and §0 intact.
@@ -467,7 +467,7 @@ def _t5_radio_class(spec: Any):
     other three (``RADIO_GRAPH``, ``rhino_to_state`` and one more) are names
     ``import_target`` also refuses at that spelling, so the two agree there
     too.  ``rheplicant.radio`` is imported by ``import rheplicant.config``
-    already (``config/kinds/projectors.py:44``), so every module defining an
+    already (``projectors.py``), so every module defining an
     exported class is in ``sys.modules`` before the pass runs.
 
     A module ``sys.modules`` does not carry is a **decline**, never a guess:
@@ -534,7 +534,7 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
       a region's overlaps, in their own words); :func:`_lit` lights every node
       it covers.
 
-    **This mirrors ``_single`` (``compose.py:270-327``) clause for clause**,
+    **This mirrors ``_single`` (``compose.py::compose_shape_problem``) clause for clause**,
     and every clause below is pinned by a test that drives ``build_model`` as
     well as the pass.  The draft this replaces had none of them, and measured
     it invented a collision at ``gain`` on a ``snapshot_before:`` document
@@ -551,17 +551,17 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
     * **``at:`` is honoured only where ``_single`` honours it**, and ``_single``
       refuses three shapes MORE PRECISELY than either check here could.
       Without ``python:`` it is *"at: places an operator that declares no
-      graph node of its own"* (``compose.py:296-301``); beside
+      graph node of its own"* (``compose.py::cal_load_order_problem``); beside
       ``snapshot_before:`` it is *"at: and snapshot_before: together are not a
-      combination this layer writes"* (``compose.py:289-294``); and in the
+      combination this layer writes"* (``compose.py::cal_load_order_problem``); and in the
       STRING spelling it must restate its own key
-      (``compose.py:303-308``).  Answering ``()`` for those three is what
+      (``compose.py::cal_load_order_problem``).  Answering ``()`` for those three is what
       stops A5 and A8 pre-empting the sentence that names the real fault with
       one that names a no-op -- ``cw_tone: {python: ...CWCalibrationOperator,
       at: 'noise'}`` would otherwise be told to give the tone its own node
       ``cw_tone``, which is the key it is already written under.  A LIST of
       one is NOT held to the restatement rule: ``refuse_misaddressed_region``
-      returns early below two nodes (``paths.py:318-319``) and, measured,
+      returns early below two nodes (``config/paths.py::refuse_misaddressed_region``) and, measured,
       ``bandpass: {python: ...GainOperator, at: ['gain']}`` builds with the
       operator at ``gain``;
     * ``at: null`` is no ``at:`` at all -- ``_single`` pops it and tests ``is
@@ -569,7 +569,7 @@ def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
       ``snapshot_before: null`` beside ``at: ['gain']`` really does place at
       ``gain``: the assembly answers "Two operators provided for node 'gain'";
     * ``snapshot_before:`` wraps the operator in ``At(node_id, ...)``
-      (``compose.py:319-326``), which OVERRIDES a ``python:`` class's own
+      (``compose.py::double_count_problem``), which OVERRIDES a ``python:`` class's own
       ``graph_node`` -- measured, ``noise: {python: ...GainOperator,
       snapshot_before: tap}`` builds with the operator at ``noise``.
     """
@@ -647,7 +647,7 @@ def _t5_downstream(graph, node: str) -> set[str]:
     """Every node the signal leaving ``node`` reaches.
 
     ``core/fold._descendants`` itself, not a second breadth-first walk:
-    reachability IS ``_check_ordering``'s rule (``fold.py:290``) and a copy of
+    reachability IS ``_check_ordering``'s rule (``fold.py::_check_ordering``) and a copy of
     it here is a second definition of "after" that can drift from the one the
     assembly enforces.
     """
@@ -661,7 +661,7 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
     """Check A5: two operators claim one node that holds a single instance.
 
     ``compose:`` is the document's spelling of the ``At(...)`` route
-    ``core/graph.py:910-917`` names, so this message ends where that one does.
+    ``core/graph.py::_place_at_node`` names, so this message ends where that one does.
     A ``many`` node is skipped: several operators there is what ``many``
     MEANS, and so is a REGION -- an entry claiming two or more nodes is
     ``_check_disjoint_claims``' and check A47's, in their own words.
@@ -760,7 +760,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     **The only document route to a RELOCATED tone is ``python:``.**  Measured:
     ``at:`` on an entry with no ``python:`` is refused first, at
-    ``compose.py:296-301``, so a tone written the ordinary way -- a
+    ``compose.py::cal_load_order_problem``, so a tone written the ordinary way -- a
     ``cw_tone:`` key and no ``python:`` -- cannot be moved at all.  It does
     NOT follow that ``model.cw_tone.at`` is a key no document can contain, and
     an earlier draft of this paragraph said so and was wrong: measured,
@@ -774,8 +774,8 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
     Two refusals, because they name two fixes.  A tone placed where a LIT
     target is unreachable is the assembly's own rule, arriving earlier.  A
     tone placed AT a target is not a violation the assembly can see -- it
-    skips ``target in path``, and ``fold.py:271-274`` and
-    ``pipeline.py:94-102`` argue at length that an absent stage is nothing to
+    skips ``target in path``, and ``fold.py::_check_ordering`` and
+    ``pipeline.py::check_stage_ordering`` argue at length that an absent stage is nothing to
     pass through.  That reasoning is right and this does not touch it: what
     the document has and the assembly does not is the key, written down,
     saying the stage is there.
@@ -793,10 +793,10 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     **Stage 0 of a cascade is not a violation**, and that is the rule rather
     than a concession: ``compose: cascade`` builds ``Pipeline(*stages)``
-    (``compose.py:265``), which applies them in order at one node, so an
+    (``compose.py::compose_shape_problem``), which applies them in order at one node, so an
     operator written first has every other stage at that node downstream of
     it -- the node's own included.  ``check_stage_ordering``
-    (``core/pipeline.py:129-131``) enforces the same relation one phase later
+    (``pipeline.py::check_stage_ordering``) enforces the same relation one phase later
     and only between stages the document gave a ``name:`` to, which is the
     second backstop a cascade naming none of them escapes.
     """
@@ -823,12 +823,12 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
         if composing and not cascade:
             # `compose: sum` at a transform node, and every other spelling,
             # are `_compose`'s own refusals in their own words
-            # (``compose.py:237-252``) -- and this check's sentence in front
+            # (``compose.py::composition_problem``) -- and this check's sentence in front
             # of one would name a fix that is not the fault (Task 5's rule).
             # A `sum` has no order for "stage 0" to mean anything about
             # either: its branches run in parallel on the same input, which
             # is why ``check_stage_ordering`` deliberately says nothing about
-            # a ``SumOperator`` (``core/pipeline.py:117-120``).
+            # a ``SumOperator`` (``pipeline.py::check_stage_ordering``).
             continue
         for index, (where, entry) in enumerate(
                 _t4_entries(key, spec, many=graph.nodes[key].many)):
@@ -849,10 +849,10 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                         f"injected after stage {index - 1} rather than before "
                         f"the {node!r} operator. {cls.must_precede_because} "
                         f"Neither backstop sees it: assemble() sees one "
-                        f"placement at {node!r} (core/fold.py:271-274), and "
+                        f"placement at {node!r} (core/fold.py:271), and "
                         f"check_stage_ordering compares only stages the "
                         f"document gave a name: to "
-                        f"(core/pipeline.py:129-131). Make it stage 0 of the "
+                        f"(core/pipeline.py:129). Make it stage 0 of the "
                         f"cascade, or give it its own node, "
                         f"{cls.graph_node!r} (check A8).")
                     continue
@@ -869,7 +869,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     f"there to track. {cls.must_precede_because} assemble() "
                     f"cannot say this: it sees one placement, and an absent "
                     f"stage is deliberately no violation there "
-                    f"(core/fold.py:271-274), while the document still has "
+                    f"(core/fold.py:271), while the document still has "
                     f"the key and the operator apart. Give it its own node, "
                     f"{cls.graph_node!r} (check A8).")
                 continue
@@ -892,7 +892,7 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
     """Check A31: ``observation.data`` while ``model`` lights a source node.
 
     The predicate is ``Assembly.has_source``' own -- node KINDS, not operators
-    (``core/graph.py:411-417``) -- evaluated statically over the lit ids.
+    (``core/graph.py::Assembly``) -- evaluated statically over the lit ids.
     ``test_the_static_source_predicate_is_the_assemblys_own`` holds the
     package's own ``has_source`` against that static reading over six models
     and they agree in all six, so this pins the PACKAGE's predicate rather
@@ -901,12 +901,12 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
     Two shapes stand down, both measured:
 
     * ``data:`` written EMPTY is no data at all -- ``_data`` returns ``None``
-      for a ``None`` node (``observation.py:277-278``) and
+      for a ``None`` node (``observation.py::_extra``) and
       ``Assembly.__call__`` refuses only ``state.data is not None`` -- so
       ``"data" in section`` would refuse a document the package runs;
     * ``from_file:`` beside ``data:`` is ``build_observation``'s own refusal
-      ("the recording IS the data", ``observation.py:315-326``), and it
-      already precedes the beam (``document.py:72`` against ``:75``).  A31
+      ("the recording IS the data", ``observation.py::_aux``), and it
+      already precedes the beam (``preflight/document.py`` against ``preflight/document.py``).  A31
       answering first would offer "the twin makes it", which is true of a
       simulating document and wrong about a recording.
 
@@ -914,7 +914,8 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
     is the same defect; it is NOT refused here.  See §3.2 (e) 1 and
     ``test_the_recording_route_is_recorded_and_not_yet_refused``, which
     carries the exact three-line widening: closing it turns
-    ``tests/config/test_config_document.py:167-179`` red, and that test pins
+    ``test_config_document.py::TestLaterErrorsCarryTheCompletedReport.test_a_builder_error_carries_the_completed_passes_report.explode``
+    red, and that test pins
     the refusal as the assembly's on purpose.
     """
     section = document.get("observation")
@@ -1023,11 +1024,11 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: Everything else in ``sections/runs._KINDS`` does -- measured one kind at a
 #: time through ``run_document`` on a ``twin: {without: []}`` document:
 #: ``forward`` RUNS (``_run_forward`` is ``return built.twin(built.state)``,
-#: ``exits.py:38-40``); thirteen kinds raise ``ParameterSpaceError`` naming
+#: ``exits.py``); thirteen kinds raise ``ParameterSpaceError`` naming
 #: *"NoiseOperator at 'noise', which declares 'key' in requires"*; ``predict``
-#: reaches ``space.forward_fn`` (``diagnostics.py:766``) and its ``reuse:``
+#: reaches ``space.forward_fn`` (``sections/diagnostics.py``) and its ``reuse:``
 #: can only name a kind that refuses first (``_DRAW_SOURCES``,
-#: ``diagnostics.py:676-682``); and ``_run_mmodes`` (``diagnostics.py:
+#: ``sections/diagnostics.py::_parse_mmodes``); and ``_run_mmodes`` (``diagnostics.py:
 #: 594-660``, its ``def`` and ``end_lineno`` by AST) contains no ``_space(``,
 #: no ``forward_fn``, no ``build_forward_fn`` and no ``fit_twin`` at all.
 #:
@@ -1062,7 +1063,7 @@ def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
     ``runs: [{kind: banana}]`` earned A30 the sentence *"This document
     declares kind: banana, and these fitting exits close the fit twin over
     ONE template state"* -- a claim about the closure behaviour
-    of a kind that does not exist.  ``parse_runs`` (``runs.py:87-90``) names
+    of a kind that does not exist.  ``parse_runs`` (``runs.py::_one``) names
     the real fault, and on the ``load_document`` path nothing names it at
     all, which makes an invented claim worse rather than harmless.  §3.2 (e)
     2's rule survives intact: a kind ADDED to ``_KINDS`` still defaults to
@@ -1097,8 +1098,8 @@ def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 #: The registry name of the identifiability convention A33 advises.
-#: ``transforms._NAMED`` holds it (``transforms.py:36``) and it resolves to
-#: ``radio.instrument.receiver.unit_mean_bandpass`` (``:175-178``).  Advising
+#: ``transforms._NAMED`` holds it (``transforms.py``) and it resolves to
+#: ``radio.instrument.receiver.unit_mean_bandpass`` (``transforms.py::_beam_analysis``).  Advising
 #: a word the registry does not hold would send a reader to a refusal quoting
 #: a vocabulary without it, so a test pins this against ``_NAMED``.
 _A33_CONVENTION: str = "unit_mean_bandpass"
@@ -1115,7 +1116,7 @@ def _a30_stochastic(node_id: Any, spec: Any, table: Mapping) -> str | None:
     §2.5 names ``stages_requiring(pipeline, RANDOMNESS)`` instead, which takes
     a CONSTRUCTED ``AbstractOperator`` and reads ``stage.requires`` off
     instances -- and §3.2 (f) forbids constructing one.  They reconcile
-    because ``requires`` is a ``ClassVar`` (``core/operator.py:85``), so the
+    because ``requires`` is a ``ClassVar`` (``operator.py::AbstractOperator``), so the
     same capability predicate applied to the class satisfies §2.5's intent
     (it still catches any operator that declares ``'key'``, and never goes
     stale on the next one) and §3.2 (f)'s no-construction rule at once.  Only
@@ -1219,7 +1220,7 @@ def _a30_placements(document: Mapping[str, Any],
     **Keyed by NODE, not by the model key**, and that is the whole reason this
     is a function rather than a dict comprehension over :func:`model_nodes`:
     ``inference.twin.without:`` names node ids -- it calls
-    ``Assembly.without`` (``core/graph.py:526``, from ``twin.py:59-60``) --
+    ``Assembly.without`` (``core/graph.py::Assembly.without``, from ``inflight/twin.py``) --
     and a ``python:`` entry lands where its class declares rather than under
     the key it is written beneath.  Measured at ``0263e0f``: ``{emi: {python:
     'rheplicant.radio:NoiseOperator', ...}}`` with ``without: [noise]`` BUILDS
@@ -1264,14 +1265,14 @@ def stochastic_nodes(document: Mapping[str, Any]) -> frozenset[str]:
     """The node ids whose declared operator class declares ``RANDOMNESS``.
 
     §3.2 (f)'s shared name: Task 11 (A30) binds it and Task 12 (A42) imports
-    it (``preflight/values.py:70``), because two private predicates for one
+    it (``preflight/values.py``), because two private predicates for one
     property is the collision §3.2 (f) calls "the likeliest remaining
     collision in the plan".  **Public because it crosses a module boundary,
     and §3.2 (f) says so outright** -- an earlier draft of this sentence
-    offered ``sections/observed.py:23`` as the precedent, which is
+    offered ``observed.py`` as the precedent, which is
     ``from rheplicant.config.draws import _seed_name, seed_for``: a PRIVATE
     name pulled across a boundary, so it is evidence against the rule rather
-    than for it.  (That module's ``__all__`` is at ``:28``.)
+    than for it.  (That module's ``__all__`` is at ``observed.py``.)
 
     Read off the CLASS (``operator_table()``, measured at 0.2 ms on its first
     call and 0.02 ms after, importing nothing on §0's forbidden list) --
@@ -1290,7 +1291,7 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     closes over ONE template state.
 
     ``inference.twin`` is applied the way ``build_fit_twin`` applies it
-    (``twin.py:59-69``): ``without:`` first, then ``replace:``.  Reading
+    (``inflight/twin.py``): ``without:`` first, then ``replace:``.  Reading
     ``replace:`` is what keeps this honest on the twin route -- measured, a
     document whose only ``twin:`` key is ``replace: {noise:
     RadiometerNoiseOperator}`` builds a fit twin that still draws, and a check
@@ -1298,7 +1299,7 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     **A ``replace:`` is read only for a node the model actually lights**, and
     the gate is one predicate for two shapes that produce the identical
-    ``KeyError``.  ``Assembly.replace_node`` (``core/graph.py:473``) looks the
+    ``KeyError``.  ``Assembly.replace_node`` (``core/graph.py::Assembly.replace_node``) looks the
     node up in the repaired assembly, so it raises *"No node named 'X' in this
     assembly"* both when ``without:`` has just dropped X and when ``model:``
     never lit it -- and ``kind: pipeline`` is the third face of the same
@@ -1415,8 +1416,8 @@ def _t11_bindings(
     """``(document path, latent NAMES, into-path HEADS, transform)`` per binding.
 
     BOTH spellings, because ``build_space`` walks two loops over one meaning:
-    ``inference.parameters.<n>.into`` (``transforms.py:344-361``) and
-    ``inference.bindings[i].into`` (``:362-399``).  Both carry ``transform:``.
+    ``inference.parameters.<n>.into`` (``transforms.py::parse_transform``) and
+    ``inference.bindings[i].into`` (``transforms.py``).  Both carry ``transform:``.
     A check that read one is 2C's shape 4 -- a hole closed on one route and
     left open on its twin -- in the one place this layer has an actual twin.
 
@@ -1430,14 +1431,14 @@ def _t11_bindings(
     with a stand-in, and a name ``inference.parameters`` does not DECLARE is
     dropped by the same rule.  Its own refusal is more specific and arrives
     with the value the user wrote -- *"inference.bindings[0]: latents: is a
-    non-empty list of latent names; got 7."* (``transforms.py:369-374``), and
+    non-empty list of latent names; got 7."* (``transforms.py::_merged_fan``), and
     *"inference.bindings[0]: 'ghost' is not a declared latent;
     inference.parameters declares ['g']."* -- and A33 answering first hands
     that reader a degeneracy lecture instead.  The membership half was
     measured LIVE: ``bindings: [{latents: ['ghost'], into:
     'bandpass.bandpass'}]`` earned A33 and was told to declare ``transform:
     unit_mean_bandpass``, which cannot help a latent that does not exist.
-    This is ``_a23_prior_free``'s rule (``fitting.py:726-732``: *"``names``
+    This is ``_a23_prior_free``'s rule (``preflight/fitting.py::_t7_engines``: *"``names``
     must already be names the document DECLARES WELL"*) applied on the side
     A33 left open -- A33's own docstring gates both path HEADS against
     ``_lit`` for exactly this shape and left the NAME ungated, which is 2C's
@@ -1515,9 +1516,9 @@ def _a33_convention(transform: Any) -> bool | None:
     this pass cannot decide: a MAPPING transform is an arbitrary callable
     (``{python: ...}``) or an affine map whose operands may be value nodes; an
     unregistered NAME is ``parse_transform``'s own refusal
-    (``transforms.py:179-182``); and every other type -- ``7``, ``[]``,
+    (``transforms.py::_beam_analysis``); and every other type -- ``7``, ``[]``,
     ``True``, ``0``, ``""`` -- is *"is a name or a mapping; got ..."*
-    (``transforms.py:183-184``).  All of them land here, not only the two the
+    (``transforms.py::_beam_analysis``).  All of them land here, not only the two the
     sentence used to name.
 
     The ``None`` answers stand A33 down rather than refusing, because the
@@ -1544,7 +1545,7 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
     27-29``) has no freeze -- so "both free" is "both bound".
 
     Pure text: the head of each ``into:`` path.  ``parse_path(path)[0]`` gives
-    it (``config/paths.py:38``) -- measured, ``parse_path('bandpass.taps[0]')``
+    it (``config/paths.py::parse_path``) -- measured, ``parse_path('bandpass.taps[0]')``
     is ``('bandpass', 'taps', 0)``, so a deeper path still counts by its node.
 
     The SHAPE half of A33 -- that ``unit_mean_bandpass`` maps ``(n,)`` to
@@ -1559,7 +1560,7 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
     refusal, and no document in ``tests/config/`` or ``docs/`` binds a latent
     into a ``bandpass.*`` path at all -- so this check refuses nothing that
     exists and its own tests are the only coverage it will have.
-    ``exit_helpers.py:521-524`` calls its ``gain`` + ``global_signal.depth``
+    ``exit_helpers.py::GLS_PAIR`` calls its ``gain`` + ``global_signal.depth``
     pair *"the schema's A33 shape"*; that is an analogy about degeneracy and
     not an A33 document, because neither latent goes into ``bandpass``.
 

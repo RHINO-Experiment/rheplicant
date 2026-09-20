@@ -3,7 +3,7 @@
 ``{ref: ...}`` returns the **same Python object**, not a copy. That is not an
 optimisation: ``BeamSpillOperator.from_projector`` is documented as "the one
 call that cannot get the weight and the sky average out of step", and
-``examples/driftscan_mmode.py:84`` hands one engine's ``beam_alms`` to another
+``driftscan_mmode.py`` hands one engine's ``beam_alms`` to another
 so that both see the same analysis -- a loader that rebuilds each reference
 passes every shape check and destroys the 2e-16 agreement the comparison
 exists to demonstrate. Identity is the contract; a test asserting ``is`` is

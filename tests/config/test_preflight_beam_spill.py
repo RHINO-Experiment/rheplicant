@@ -64,11 +64,12 @@ from tests.config.preflight_helpers import (
 #: adding checks that read those tokens, in files this one cannot see.
 #: Measured by the reviewer: registering one stand-in refusal on the real
 #: registry turns EIGHT tests in this module red without the intersection.
-#: The idiom is ``test_preflight_model.py:110``'s.
+#: The idiom is ``test_preflight_model.py``'s.
 #:
 #: The whole-report property -- that the shared base document earns nothing at
 #: all -- is asserted once, on the real registry, by
-#: ``test_config_preflight.py::test_the_base_document_earns_no_finding_of_its_own``.
+# :
+# ``test_config_preflight.py::test_the_base_document_earns_no_finding_of_its_own``.
 #: It belongs there and not here.
 MINE = frozenset({"A50"})
 
@@ -163,7 +164,7 @@ class TestTheRegistry:
 
         Scoped to :data:`MINE`.  The stronger claim, that the shared base
         document earns NO finding at all, is
-        ``test_config_preflight.py::test_the_base_document_earns_no_finding_of_its_own``'s
+        ``test_config_preflight.py::TestThePassCollects.test_the_base_document_earns_no_finding_of_its_own``'s
         and is asserted there against the real registry."""
         assert ids(_doc()) & MINE == frozenset()
 

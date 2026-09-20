@@ -80,7 +80,7 @@ _LABEL = "pre-flight"
 _DECORATOR = "register"
 
 # --- what `document._sweep` knew, moved with it -----------------------------
-# These three were `config/document.py:31-40` and are read by `_structural`
+# These three were `config/document.py` and are read by `_structural`
 # alone.  Measured before the move: nothing outside `document.py` imported any
 # of them (`grep -rn "_SECTIONS\|_NOT_YET\|_REQUIRED" src/ tests/` -> only
 # document.py), so the move is closed.  They cannot be imported back from
@@ -318,7 +318,7 @@ def _check_where(check: str, finding: Finding) -> None:
 # comment can, and did.  An earlier version said `model` "registers A2 (which
 # decides A2, A3, A4, A6 and A7)" -- false, and consequentially so: A2, A3,
 # A4, A6 and A7 are five registry SLOTS bound to one function variadically
-# (`model.py:201`), which is what stops a later function claiming one of
+# (`preflight/model.py::_graph_shape`), which is what stops a later function claiming one of
 # them.  Plan 3A's Task 13 predicted 29 slots and 27 bare ids by counting
 # from that sentence, against a measured 34 and 31.  Count from `CHECKS`:
 #

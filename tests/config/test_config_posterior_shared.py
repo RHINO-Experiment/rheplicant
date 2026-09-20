@@ -48,8 +48,8 @@ class TestTheTwoRoutesDisagreeAboutAPrior:
     """The asymmetry, tested on BOTH routes from one document.
 
     ``to_numpyro_model`` -> ``_require_priors`` accepts a latent the space's
-    ``joint_prior`` covers (``numpyro_bridge.py:72``); ``simulate_pairs``
-    tests ``latent.prior is None`` alone (``npe.py:111-118``).  Testing only
+    ``joint_prior`` covers (``numpyro_bridge.py::_require_numpyro``); ``simulate_pairs``
+    tests ``latent.prior is None`` alone (``inference/npe.py::simulate_pairs``).  Testing only
     the route the task happens to be about is 2C shape 4 -- a hole closed on
     one route and left open on its twin -- so all four cells are here.
     """

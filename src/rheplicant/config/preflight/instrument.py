@@ -17,7 +17,7 @@ operator, and all three arrive today from somewhere past ``build_resources``.
   ``deliver``, which runs per field inside ``_construct`` -- so a
   ``{linspace: ...}`` written on a static field is refused after the CST
   directory has been read.
-* **A47.**  ``paths.py::refuse_misaddressed_region`` is called by
+* **A47.**  ``config/paths.py::refuse_misaddressed_region`` is called by
   ``compose._single`` on the line AFTER ``build_node_operator(node_id, spec,
   context)``, so the operator for the very entry that is misaddressed is
   constructed first.
@@ -48,7 +48,7 @@ writing this layer's own (§2.3's "invented" act).
 The second reason is the stronger one and it is measured.  ``_construct``'s
 message hardcodes ``f"model.{node_id}: "``, and ``inference.twin.replace.
 <node>`` reaches ``build_node_operator`` down the same path
-(``sections/twin.py:69``).  Measured here: a ``replace.cw_tone`` with
+(``sections/twin.py::build_fit_twin``).  Measured here: a ``replace.cw_tone`` with
 ``line_width`` omitted is refused with *"model.cw_tone: CWCalibrationOperator
 requires ['line_width']."* -- naming a section the entry is not written in.  A
 verbatim hoist would reproduce that one phase earlier, on a route this pass
@@ -61,8 +61,8 @@ A13's grid legs, for the same reason, one task earlier.
 ``inference.twin.replace`` does not honour ``at:`` at all -- that is a
 non-route rather than a false negative, and :func:`_routes` says why.  All
 three run over the base document and over each declared variant merged on top,
-through ``preflight/document.py::_task3_over_layers``: ``load_document``
-applies no variant unless one is requested (``document.py:77``), so a
+through ``_task3_over_layers``: ``load_document``
+applies no variant unless one is requested (``config/document.py::ConfiguredRun``), so a
 ``model:`` an unselected variant patches is otherwise never read at P-1.
 """
 
@@ -119,7 +119,7 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping, bool]]:
 
     Plan §0.3 E.10: ``sections/compose.py::model_nodes`` reads ``document["model"]``
     and nothing else, but ``inference.twin.replace.<node>`` reaches the same
-    ``build_node_operator`` (``sections/twin.py:67-69``), so a check walking
+    ``build_node_operator`` (``sections/twin.py::build_fit_twin``), so a check walking
     only ``model:`` guards one route of two.
 
     **The third member is not decoration.**  The ``model:`` route goes through
@@ -132,7 +132,7 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping, bool]]:
     that never reach a constructor and could answer about one of them on a
     document refused for the composing key itself.
 
-    A ``replace:`` that is not a mapping is left alone: ``sections/twin.py:62``
+    A ``replace:`` that is not a mapping is left alone: ``sections/twin.py::build_fit_twin``
     refuses it with the shape it got, and this pass has nothing better to say.
     """
     from rheplicant.config.sections.compose import model_nodes
@@ -235,7 +235,7 @@ def _unknown_field(entry: Mapping, specs: Mapping[str, Any],
                    composed: bool) -> bool:
     """Does ``_construct`` refuse this entry for a key before it reads a value?
 
-    ``sections/model.py:151-156`` sweeps unknown keys BEFORE it looks for
+    ``sections/model.py::_field_value`` sweeps unknown keys BEFORE it looks for
     missing required ones and long before it delivers a value, so on an entry
     carrying a typo the reader gets *"does not take ['nope']"* and nothing
     from this module should pre-empt it.
@@ -243,9 +243,9 @@ def _unknown_field(entry: Mapping, specs: Mapping[str, Any],
     **``composed`` decides which keys are unknown, and getting that wrong is
     not a nicety -- it was a live advice loop in this module's first commit.**
     ``compose._single`` pops ``at:`` and ``snapshot_before:`` before
-    ``_construct`` sees the spec (``compose.py:287-288``), so on the ``model:``
+    ``_construct`` sees the spec (``compose.py::cal_load_order_problem``), so on the ``model:``
     route they are not unknown and an entry carrying one must still be read
-    here.  ``sections/twin.py:67`` calls ``build_node_operator`` DIRECTLY, so
+    here.  ``sections/twin.py::build_fit_twin`` calls ``build_node_operator`` DIRECTLY, so
     on the replace route they ARE unknown -- measured, ``replace.cw_tone: {at:
     [...]}`` is refused with *"does not take ['at']"*, naming the key the user
     wrote.  With the exemption applied unconditionally this module answered
@@ -270,7 +270,7 @@ def _tone_class():
 
     ``preflight/model.py::_t4_graph``'s convention, and for its reason:
     ``import rheplicant.config`` already imports ``rheplicant.radio``
-    (``config/kinds/projectors.py:44``), so the import costs nothing at call
+    (``projectors.py``), so the import costs nothing at call
     time, and deferring it means this module is not the one that pins that.
     """
     from rheplicant.radio.instrument.calibration import CWCalibrationOperator
@@ -419,7 +419,7 @@ def _tone_text(layer: Mapping[str, Any]) -> Iterable[Finding]:
     **Two stand-downs are load-bearing and each has a test.**
 
     ``tone_freq <= 0`` is NOT a leg here, although the operator guards it
-    (``calibration.py:373``).  Measured at ``ea4839b``, a negative
+    (``calibration.py::CWCalibrationOperator``).  Measured at ``ea4839b``, a negative
     ``tone_freq`` never reaches that guard: ``A13.grid`` answers first with
     *"the tone centre spans [...] outside this run's observed band [...]"*,
     which names the band the user has to put the line in.  A P-1 leg would run
@@ -493,7 +493,7 @@ def _array_form(node: Any) -> str | None:
 def _a40_stands_down(node: Mapping, mode: str) -> bool:
     """Does ``deliver`` refuse this value node BEFORE it reaches A40?
 
-    ``delivery.py:187-204`` reads ``as:`` first and the array-form gate
+    ``delivery.py::mode_of`` reads ``as:`` first and the array-form gate
     second, so a document that declares a delivery mode the field contradicts
     -- or one that is not a delivery mode at all -- earns a sentence about its
     own claim.  Measured, ``{linspace: ..., as: traced}`` on ``line_width``
@@ -599,7 +599,8 @@ def _region_key(layer: Mapping[str, Any]) -> Iterable[Finding]:
 
     **The string spelling cannot be guarded, and that is a stand-down rather
     than a gap.**  ``refuse_misaddressed_region`` returns early below two
-    nodes (``paths.py:318-319``), and ``_t5_claims`` answers a string ``at:``
+    nodes (``config/paths.py::refuse_misaddressed_region``), and ``_t5_claims`` answers a string
+    ``at:``
     with either ``()`` (it disagrees with its key, which is ``_single``'s own
     *"a single-node at: restates its own key"*) or a one-tuple (it agrees), so
     the shipped refusal is unreachable through a string and forcing it would
@@ -607,7 +608,7 @@ def _region_key(layer: Mapping[str, Any]) -> Iterable[Finding]:
     why ``{python: ..., at: ['gain']}`` is legal and stays so.
 
     **Walks ``model:`` only, and ``inference.twin.replace`` is a NON-route
-    rather than a false negative** (plan §0.3 E.10).  ``sections/twin.py:67``
+    rather than a false negative** (plan §0.3 E.10).  ``sections/twin.py::build_fit_twin``
     calls ``build_node_operator`` directly, bypassing ``compose._single``,
     which is the only place ``at:`` is honoured -- so on that route ``at:`` is
     an unknown constructor field and ``_construct`` refuses it by name.

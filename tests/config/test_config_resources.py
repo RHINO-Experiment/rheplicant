@@ -91,7 +91,7 @@ class TestBuildOrder:
 
 class TestEachEntryIsBuiltOnce:
     def test_two_references_get_the_same_object(self, context):
-        """radio/instrument/beam_spill.py:89 from_projector is 'the one call
+        """instrument/beam_spill.py::BeamSpillOperator from_projector is 'the one call
         that cannot get the weight and the sky average out of step', and
         check B9 asks whether two projectors nominally sharing a beam actually
         share the array. Building each reference afresh passes every shape

@@ -337,7 +337,7 @@ class TestThePriorKwargsReachTheSolve:
     Every test above asserts the returned dict against a literal, and three
     differently-shaped compilations all satisfy that comparison: a non-dict
     Mapping, a numpy scalar and a JAX scalar each `== {"g": 0.25}`.  Measured,
-    only the Mapping detonates at the solve -- `_per_member` (linear.py:963)
+    only the Mapping detonates at the solve -- `_per_member` (linear.py::linear_operator)
     tests `isinstance(value, dict)`, which a mappingproxy fails; the two
     scalar shapes solve to `g=1.4999948`, identical to the shipped float to
     the last digit.  So this class buys exactly one failure mode that the
@@ -345,7 +345,7 @@ class TestThePriorKwargsReachTheSolve:
     compiled output to the real ``wiener_solve``.
 
     They need the PRIOR-FREE documents.  Every latent in ONE_LATENT and
-    TWO_LATENTS declares a prior:, and ``_reconcile`` (linear.py:872) refuses
+    TWO_LATENTS declares a prior:, and ``_reconcile`` (linear.py::check_linearity) refuses
     a supplied prior_std= that disagrees with one -- a package refusal this
     layer deliberately does not duplicate, since it names both sides already.
     """
@@ -423,7 +423,7 @@ class TestTheDecidedSigma:
     def test_a_radiometer_document_is_check_A27(self):
         """Both routes by name, and in the layer's own voice.
 
-        The package refuses this too (linear.py:1031) but with a
+        The package refuses this too (linear.py::_as_far_block) but with a
         ParameterSpaceError, and only once a block exists; ConfigError here
         is the assertion.
         """

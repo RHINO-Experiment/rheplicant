@@ -20,7 +20,7 @@ ESTIMATE = {"name": "point", "kind": "plan.estimate",
             "blocks": [{"names": ["g"]}], "check_identifiability": False}
 OPTIMIZE = {"name": "fit", "kind": "optimize", "optimizer": "gradient",
             "learning_rate": 0.1, "n_steps": 3}
-#: The near miss that COLLIDES.  `_gaussian_width` (conjugate.py:195) returns
+#: The near miss that COLLIDES.  `_gaussian_width` (conjugate.py::_gaussian_width) returns
 #: {"fisher": ..., "covariance": ...} and `width: fisher` merges it into the
 #: wiener product (:392), so this run's product carries a "covariance" key
 #: that is NOT a kind: fisher product -- its covariance is over the CONJUGATE
@@ -212,7 +212,7 @@ class TestTheSamplesRoute:
         """data = g * signal exactly, so a noiseless pushforward reproduces
         every draw to float32 roundoff.
 
-        predict_from_samples is documented noiseless (numpyro_bridge.py:337-338)
+        predict_from_samples is documented noiseless (numpyro_bridge.py::to_numpyro_model)
         -- the likelihood's own scatter is NOT added back -- and this equality
         is the assertion that says so.  An executor that realised noise, or
         that pushed the posterior mean n times, breaks it.
@@ -396,7 +396,7 @@ class TestTheNutsRoute:
         Three wrong implementations die here: one that pushed the posterior
         MEAN n times (every row identical -- the third assertion), one that
         realised the likelihood's scatter on top (``predict_from_samples`` is
-        documented noiseless, numpyro_bridge.py:337-338 -- the ratio stops
+        documented noiseless, numpyro_bridge.py::to_numpyro_model -- the ratio stops
         being exact), and one that pushed the deterministic ``"prediction"``
         site that ``get_samples()`` also returns (wrong shape).
         """
@@ -761,7 +761,7 @@ class TestTheReuseGrammar:
         {params, losses}: three shapes that could not be mistaken for any
         route.  ``conjugate.wiener`` with ``width: fisher`` is the near miss
         that COLLIDES: `_gaussian_width` merges {"fisher", "covariance"} into
-        its product (conjugate.py:195, :392), so a predict dispatching on
+        its product (conjugate.py::_gaussian_width, :392), so a predict dispatching on
         `"covariance" in earlier.product` accepts it and returns a finite,
         correctly-shaped delta-method width computed from a covariance over
         the CONJUGATE BLOCK's latents rather than inference.parameters.
@@ -888,7 +888,7 @@ class TestAVariantMismatchIsRefused:
     What the refusal is worth is a NUMBER, and the last two tests keep it
     measured rather than asserted, by relabelling the earlier result so the
     guard lets the mixture through: the package catches a variant that moves
-    the parameter LAYOUT (uncertainty.py:533) and is silent about the rest --
+    the parameter LAYOUT (uncertainty.py::fisher_information) and is silent about the rest --
     a model-only mismatch comes back finite, correctly shaped and 1.1 %
     wrong (0.0014147 against the un-mixed 0.0014307 on the SAME variant: a
     ratio of 0.98883, 1.12 % at the worst channel).  With one latent the
@@ -1064,7 +1064,7 @@ class TestTheOptionalDependencyStaysOptional:
     def test_importing_the_config_layer_does_not_import_numpyro(self):
         """The samples route needs numpyro; importing a document must not.
 
-        predict_from_samples calls _require_numpyro (numpyro_bridge.py:340),
+        predict_from_samples calls _require_numpyro (numpyro_bridge.py::to_numpyro_model),
         which is why it is imported inside the executor body rather than at
         the head of diagnostics.py.  A module-level import would put numpyro
         on every `import rheplicant.config`, and nothing else in this file

@@ -123,7 +123,7 @@ NO_OBSERVED = {key: value for key, value in ONE_LATENT.items()
 #     conjugate_built(inference=TWO_LATENTS, parameters=PRIOR_FREE_TWO)
 #
 # With no prior anywhere, prior_std: is not merely accepted but REQUIRED --
-# _require_prior_std (linear.py:1009) is what refuses the bare solve.
+# _require_prior_std (linear.py) is what refuses the bare solve.
 PRIOR_FREE = {"g": {"init": 1.0, "linear": True, "into": "gain.gain"}}
 
 PRIOR_FREE_TWO = {
@@ -515,7 +515,7 @@ def gls_product(run=None, **kwargs):
 #: :func:`two_latent_document`'s pair, reweighted.  ``require_convergence:
 #: null`` is part of the template rather than of each caller's run: this pair
 #: is ill-conditioned enough that the package's own default guard fires on it
-#: (it compares residual x kappa, linear.py:1493), so every test that is not
+#: (it compares residual x kappa, linear.py::_check_solve_arguments), so every test that is not
 #: ABOUT the guard would otherwise spend its first line turning it off.
 GLS_PAIR = {"name": "gls", "kind": "conjugate.gls", "names": ["dep", "c"],
             "require_convergence": None}

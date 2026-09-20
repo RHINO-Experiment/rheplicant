@@ -444,7 +444,7 @@ def _number(run: Any, key: str, value: Any, *, kind: type,
         # notice.  Two things in this repository already refuse the same
         # value: `transforms._whole`, shipped one task later in this very
         # plan, and the package itself (`n_steps must be a positive int`,
-        # tests/inference/test_inference_construction_guards.py:191).  A
+        # test_inference_construction_guards.py::ADAM_SAME_SENTENCE).  A
         # count that is not an integer is a typo, and the detectable reading
         # is the one this layer takes.
         raise ConfigError(
@@ -529,8 +529,9 @@ def _noise(run: Any, built: Any) -> Any:
 
     UNCHANGED SIGNATURE: the fan is a behavioural change, not a new
     argument.  Measured, ``_noise(run, built)`` has SIX call sites in
-    ``src`` -- ``exits.py:54`` and ``:229``, ``diagnostics.py:303``,
-    ``conjugate.py:347``, and :func:`_decided_sigma`/:func:`_decided_model`
+    ``src`` -- ``exits.py`` and ``exits.py::_run_optimize``,
+    ``sections/diagnostics.py::_bounded_rtol``,
+    ``conjugate.py::_gls_result``, and :func:`_decided_sigma`/:func:`_decided_model`
     here, through which every conjugate exit reaches its own -- and a new
     parameter would mean editing all six in a task that is about none of
     them, and every conjugate caller would need it threaded through as
@@ -591,7 +592,7 @@ def _decided_sigma(run: Any, built: Any) -> Any:
 
     ``wiener_solve``, ``gcr_sample`` and ``condition_estimate`` compute
     ``1/sigma**2`` directly and refuse a NoiseModel outright
-    (``linear.py:1031``).  A constant-sigma model is decided here -- its
+    (``linear.py::_as_far_block``).  A constant-sigma model is decided here -- its
     ``std`` ignores the prediction by contract
     (``depends_on_prediction`` is False), so evaluating it on the run's own
     grid gives the full-shaped array, which is also the one shape
@@ -639,18 +640,18 @@ def _decided_model(run: Any, built: Any, *, wants: str, reads: str,
     The mirror of :func:`_decided_sigma`.  ``decided_noise`` returns either a
     NoiseModel or a frozen sigma array, and the two are not interchangeable
     at the conjugate seam: ``iterative_gls`` takes ``noise=`` (the RULE,
-    ``gls.py:102-107``) where the three conjugate solves take ``noise_std=``
+    ``gls.py::iterative_gls``) where the three conjugate solves take ``noise_std=``
     (a decided array), and passing either one where the other belongs is a
     hard ParameterSpaceError in both directions.
 
     **All FOUR clauses are REQUIRED and keyword-only, and that is the fix
     rather than an ergonomic choice.**  Until Plan 3A this function wrote ONE
-    sentence for BOTH callers -- ``conjugate.gls``'s -- so ``npe.py:477`` told
+    sentence for BOTH callers -- ``conjugate.gls``'s -- so ``sections/npe.py::parse_npe`` told
     a ``kind: npe`` run that it "solves for the covariance a
     PREDICTION-DEPENDENT sigma implies" and offered it ``kind:
     conjugate.wiener``.  Measured on
     ``posterior_helpers.npe_document(noise=FROZEN)``, both clauses were
-    false: npe simulates a bank (``npe.py:475-480`` hands ``noise=`` to
+    false: npe simulates a bank (``sections/npe.py::parse_npe`` hands ``noise=`` to
     ``simulate_pairs``, which draws from it) and no conjugate exit produces
     an amortized posterior.  A third caller inheriting conjugate prose is the
     same defect a third time, and a REQUIRED argument is what stops it --

@@ -76,7 +76,7 @@ word, each paired with the value the document wrote:
     transform · run · prior
 
 **``inference.twin.replace`` IS walked** (§0.3 E.10).  ``model.<n>.type`` is
-one of the ten tokens and ``twin.py:69`` sends ``replace.<node>`` down the same
+one of the ten tokens and ``inflight/twin.py::_LEGAL_SHAPES`` sends ``replace.<node>`` down the same
 ``build_node_operator`` path, so a ``replace: {noise_wave: {type:
 NoiseWaveOperator}}`` earns the same finding with ``where =
 inference.twin.replace.noise_wave.type``.  The message is BUILT from the token
@@ -85,7 +85,7 @@ shipped literal, which hardcodes ``f"model.{node_id}: "``.
 
 **Every layer, not just the base** (§0.3 F.5(1)).  ``variants:`` can introduce
 ``format: uvbeam`` into a document whose base has no beam at all, so the walk
-goes through ``preflight/document.py::_task3_over_layers`` and reads each
+goes through ``_task3_over_layers`` and reads each
 layer's ``resources:`` through ``config/resources.py::resolved_specs`` -- which
 is TOTAL and drops a malformed entry rather than raising.  An entry that does
 not resolve is one this check stands down on; ``build_resources`` says the
@@ -192,7 +192,7 @@ _FEATURES: dict[tuple[str, str], tuple[Requirement, ...]] = {
 #:
 #: One route needs a requirement that its own value cannot decide:
 #: ``DriftScanProjector.from_beam_maps`` calls ``_limtod_jax(uniform_sampling)``
-#: (``radio/sky/driftscan.py:299``) and the ``uniform=True`` branch demands
+#: (``driftscan.py::DriftScanProjector.from_beam_maps``) and the ``uniform=True`` branch demands
 #: ``limtod_jax.check_uniform_grid``, the FFT fast path added in limTOD 1.7.
 #: A document without ``uniform_sampling:`` never reaches it, so folding this
 #: into :data:`_FEATURES` would refuse installs that run the document fine.
@@ -369,7 +369,7 @@ def _file_nodes(value: Any, path: str) -> Iterable[tuple[str, Mapping]]:
 
     The walk is what closes A35's own twin: ``observation.from_file`` is not
     the only h5py route -- ``parse_from_file`` itself resolves
-    ``{"file": dict(spec)}`` (``sections/ingest.py:113``), and any value node
+    ``{"file": dict(spec)}`` (``sections/ingest.py::_read_rhino_hdf5``), and any value node
     anywhere may write ``{file: {format: rhino_hdf5}}`` and reach the same
     reader.  A walk that read ``observation.from_file`` alone would guard one
     of them.
@@ -527,8 +527,9 @@ def _routes(layer: Mapping[str, Any]) -> Iterable[tuple[str, str, Any, Any]]:
 def _transforms(where: str, spec: Mapping) -> Iterable[tuple[str, str, Any, Any]]:
     """The ``transform:`` block's own words -- both places one may be written.
 
-    ``parse_transform`` is called from two sites (``sections/transforms.py:354``
-    for a latent's own ``transform:`` and ``:393`` for a binding entry's), and
+    ``parse_transform`` is called from two sites (``transforms.py::parse_transform``
+    for a latent's own ``transform:`` and ``transforms.py::_joint_prior`` for a binding entry's),
+    and
     ``{beam_analysis: ...}`` is the only spelling of it that imports anything.
     """
     block = spec.get("transform")

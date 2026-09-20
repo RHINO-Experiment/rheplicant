@@ -198,7 +198,7 @@ class TestRunOptionKeys:
             runs=[{"kind": "nuts", "num_samples": 4}]), "A1") == []
 
     def test_a_single_mapping_runs_section_is_swept_too(self):
-        """`runs:` may be one mapping (parse_runs wraps it, runs.py:122-123).
+        """`runs:` may be one mapping (parse_runs wraps it, runs.py::_one).
         Kills a check written `for entry in document["runs"]`, which iterates
         that mapping's KEYS and finds nothing."""
         found = _findings(preflight_document(
@@ -249,7 +249,7 @@ class TestRunOptionKeys:
         assert by_name == 15
 
     def test_a_key_its_executor_refuses_by_name_is_left_to_that_executor(self):
-        """`condition` + `prior_mean:` is the shape `conjugate.py:580-582`
+        """`condition` + `prior_mean:` is the shape `conjugate.py::_gcr_product`
         argues about by name: the bespoke refusal runs "BEFORE the sweep on
         purpose: the sweep would fire first with the generic 'does not take
         [...]' and the reader would fix the symptom by deleting a key they had
@@ -277,7 +277,8 @@ class TestRunOptionKeys:
         dropping only the spoken-for key from the options P-1 sweeps and
         sweeping the rest.
 
-        Measured -- that form turns `test_config_exits_diagnostics.py:324`
+        Measured -- that form turns
+        `test_config_exits_diagnostics.py::TestWhatItRefuses.test_prior_mean_is_refused_because_kappa_has_no_centre`
         red.  That test declares `prior_mean:` AND `tol:` on one `condition`
         run and pins the CENTRE refusal as the one heard, because "a message
         with no `tol` in it is proof of which check ran first"; a P-1 that
@@ -398,7 +399,7 @@ class TestUnselectedVariants:
         assert "good" not in str(caught.value)
 
     def test_a_variant_deleting_a_required_section_is_caught(self):
-        """`~model: null` is the delete form (layering.py:26-38).  Kills a
+        """`~model: null` is the delete form (_rheplicant_bootstrap/layering.py).  Kills a
         check that only looks at the patch's own keys and never merges."""
         found = _findings(preflight_document(
             variants={"nomodel": {"~model": None}}), "A1")
@@ -448,7 +449,7 @@ class TestHorizonNumbers:
             "resources.beams.horn.horizon.apod_deg"]
 
     def test_el_deg_is_the_twin_and_is_refused_the_same_way(self):
-        """Shape 4.  `beams.py:482` is `float(horizon.get("el_deg", 90.0))` --
+        """Shape 4.  `kinds/beams.py::_uvbeam_maps` is `float(horizon.get("el_deg", 90.0))` --
         the same line, one key over -- and the survey named only `apod_deg`.
         A check written for one key alone passes every apod_deg test."""
         found = _findings(preflight_document(
@@ -589,7 +590,7 @@ class TestFanPresence:
     def test_two_targets_with_no_fan_are_refused_in_the_sugar_spelling(self):
         """Measured: this builds today with `Bind.fan = None`.  Kills the
         whole presence half; the registry-consistency half already exists at
-        transforms.py:269-276 and is untouched."""
+        transforms.py::parse_transform and is untouched."""
         found = _findings(preflight_document(inference={
             "twin": {"without": ["noise"]},
             "parameters": {"d": {"init": 0.5, "into": ["global_signal.depth",
@@ -628,7 +629,7 @@ class TestFanPresence:
 
     def test_one_target_written_as_a_list_is_not_refused(self):
         """§4.7.2 words the trigger as "req iff `into` is a list"; §2.2 words
-        it as "more than one entry".  `parameters.py:114 _names` collapses
+        it as "more than one entry".  `sections/parameters.py::_parse_prior _names` collapses
         `"a"` and `["a"]` to the same `("a",)`, so the §4.7.2 reading cannot
         be implemented without changing `_names` -- §2.6 item 5 decides for
         §2.2's.  This test is that decision, and it goes red if someone
@@ -647,7 +648,9 @@ class TestFanPresence:
         it -- so there is no guess left to refuse.  Kills a literal
         `len(into) > 1` with no transform clause, which would refuse
         `split_rows` (the one transform whose whole purpose is two targets)
-        and turn tests/config/test_config_transforms.py:591 red."""
+        and turn
+        test_config_transforms.py::TestBeamAnalysisBandLimit.test_an_lmax_above_the_band_limit_is_legal
+        red."""
         assert _findings(preflight_document(inference={
             "twin": {"without": ["noise"]},
             "parameters": {"d": {"init": 0.5, "transform": transform,
@@ -823,7 +826,7 @@ class TestCapabilityKeys:
         capability 4.
 
         **What this test does NOT claim.** The typo still reaches the user as
-        a capability-4 sentence -- `sections/parameters.py:151` refuses ANY
+        a capability-4 sentence -- `sections/parameters.py::parse_latents` refuses ANY
         unknown `scope:` by naming capability 4, measured.  All this assertion
         buys is that P-1 does not add a second voice saying the same wrong
         thing one phase earlier; the wrong thing itself is unchanged and is
@@ -886,7 +889,7 @@ class TestTheVariantRoute:
 
     def test_a_run_option_typo_inside_an_unselected_variant_is_refused(self):
         """The same twin for A1.  A variant patching `runs:` never changes
-        which runs execute (runs.py:10-12), but it does change what
+        which runs execute (runs.py), but it does change what
         `load_document(variant=...)` accepts -- so the typo is real and today
         nothing sees it at all."""
         found = _findings(preflight_document(
@@ -895,7 +898,7 @@ class TestTheVariantRoute:
 
     def test_a_variant_layer_finding_says_so_in_its_own_sentence(self):
         """`raise_if_refused` quotes the MESSAGE, not the `where`
-        (findings.py:170) -- so a finding whose sentence says only
+        (findings.py::Report.warnings) -- so a finding whose sentence says only
         `inference.transitions:` sends a reader to grep a base document that
         does not contain the key at all.
 
@@ -944,7 +947,7 @@ class TestTheVariantRoute:
         ...}` and `parameters: {d-1: ...}` both load today -- apply_variant
         and parse_latents validate no name -- while `Finding.where` must
         parse: `preflight._check_where` calls `parse_path`, whose segment
-        grammar (`paths.py:35`) admits no hyphen, and it raises OUTSIDE the
+        grammar (`config/paths.py`) admits no hyphen, and it raises OUTSIDE the
         per-check try, so the whole pass dies naming the check rather than
         reporting the violation.
 
@@ -1103,7 +1106,7 @@ class TestThePhase:
         tree BEFORE the pass existed: with a missing beam file and a run-key
         typo in the same document, `load_document` reports the beam --
         "No file at 'no_such_beam.npy'" -- because `build_resources`
-        (`document.py:75` since Task 2 moved the head of that function;
+        (`config/document.py::ConfiguredRun` since Task 2 moved the head of that function;
         `:104` before it) runs before anything reads `runs:`.  Kills a hook
         placed after `build_resources`, which every other test in this module
         would pass."""

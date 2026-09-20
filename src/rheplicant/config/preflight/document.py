@@ -2,7 +2,7 @@
 
 Three holes in A1's sweep, measured rather than inferred:
 
-* ``runs[i]`` option keys.  ``runs.py:113-114`` puts every unrecognised key
+* ``runs[i]`` option keys.  ``runs.py::_one`` puts every unrecognised key
   into ``RunSpec.options`` and the kind's registered PARSER sweeps them
   (Tasks 7-9 moved the sweep out of the executor); Task 10's orchestration
   runs every parse before the first execute, so the cost of a late typo is
@@ -11,7 +11,8 @@ Three holes in A1's sweep, measured rather than inferred:
   table (fifteen of the eighteen by importing the very object the parser
   sweeps with), so the two cannot drift; ``test_preflight_document.py``
   reads the tables back out of the PARSERS' source and compares.
-* An unselected ``variants`` entry.  ``layering.py:41-85`` merges only the
+* An unselected ``variants`` entry.  ``_rheplicant_bootstrap/layering.py::_overlay_keys`` merges
+only the
   REQUESTED variant, so SEVEN document-grammar clauses never fire for the
   others: three of ``apply_variant``'s six (of the other three, two are about
   a name that is not declared, which is not a state a declared name can be in,
@@ -23,9 +24,10 @@ Three holes in A1's sweep, measured rather than inferred:
   carries ``campaign:``, ``outputs:``, nested ``variants:``, a rewritten
   ``schema_version``, a non-mapping patch or a deleted required section loads
   clean -- six for six.
-* ``resources.beams.<n>.horizon``'s two angles.  ``kinds/beams.py:482`` and
-  ``:491`` are ``float(horizon.get("el_deg", 90.0))`` and
-  ``float(horizon.get("apod_deg", 0.0))``: the keys are swept (``:204``) and
+* ``resources.beams.<n>.horizon``'s two angles.  ``kinds/beams.py::_uvbeam_maps`` and
+  ``kinds/beams.py::_uvbeam_maps.read`` are ``float(horizon.get("el_deg", 90.0))`` and
+  ``float(horizon.get("apod_deg", 0.0))``: the keys are swept (``kinds/beams.py::_a11_chart_keys``)
+  and
   the VALUES bypass the value grammar.  Measured, ``{value: 0.1, unit: rad}``
   arrives as a bare ``TypeError`` from inside the build.  Under
   ``horizon.mode`` ``none`` or ``projector_mask`` neither angle is read at
@@ -40,7 +42,7 @@ through the base, and a check reading ``document[...]`` closes one route and
 leaves its twin open.  A finding the base document already produces is not
 repeated per layer, and a finding a variant layer produces says which layer
 in its own sentence -- ``Report.raise_if_refused`` quotes the MESSAGE
-(``findings.py:170``), so a sentence that named only the inner path would
+(``findings.py::Report.warnings``), so a sentence that named only the inner path would
 send a reader to grep a base document that does not contain it.
 
 **Every import of a ``sections/`` module is function-local, deliberately.**
@@ -105,7 +107,9 @@ _TASK3_SCOPES_RESERVED = ("per_epoch", "linked")
 #: **The stand-down is for the whole RUN, not for the key alone, and that is
 #: measured rather than chosen.**  Dropping only the spoken-for key and
 #: sweeping the rest looks strictly better and is not:
-#: ``test_config_exits_diagnostics.py:324`` declares ``prior_mean:`` AND
+# :
+# ``test_config_exits_diagnostics.py::test_prior_mean_is_refused_because_kappa_has_no_centre``
+# declares ``prior_mean:`` AND
 #: ``tol:`` on one ``condition`` run and pins that the CENTRE refusal is the
 #: one heard -- "a message with no ``tol`` in it is proof of which check ran
 #: first".  A P-1 that swept the rest of that run answers "does not take
@@ -200,7 +204,8 @@ def _task3_run_options_in(layer) -> Iterable[Finding]:
         return
     for index, run in enumerate(runs):
         # Unreachable, and deliberately kept: `set(_KINDS) == set(EXECUTORS)`
-        # is pinned both ways at `tests/config/test_config_exit_support.py:56`
+        # is pinned both ways at
+        # `test_config_exit_support.py::test_every_declared_kind_has_an_executor`
         # and `:60`, and `parse_runs` refuses a kind outside `_KINDS`, so this
         # never fires today.  It is here so that a kind added to one table and
         # not to `_task3_allowed_run_options` is an unswept run rather than a
@@ -363,7 +368,7 @@ def _variant_text(document) -> Iterable[Finding]:
 
 
 def _task3_targets(where: str, into: Any) -> tuple[str, ...]:
-    """``into:``'s targets, counted the way ``parameters.py:114`` counts them.
+    """``into:``'s targets, counted the way ``sections/parameters.py::_parse_prior`` counts them.
 
     ``_names`` collapses ``"a"`` and ``["a"]`` to the same ``("a",)``, which is
     why §4.7.2's "req iff ``into`` is a list" is unimplementable without
@@ -382,7 +387,7 @@ def _task3_fan_one(where: str, spec: Mapping) -> Iterable[Finding]:
     """A38: one latent or one binding, in either spelling.
 
     The transform clause is load-bearing and is exactly the predicate
-    ``sections/inference.py:177-178`` already uses: ``parse_transform``
+    ``inference.py::_derive_truth`` already uses: ``parse_transform``
     returns a non-``None`` canonical fan for every form except ``None`` and
     ``"identity"``, and ``_merged_fan(None, canonical)`` returns it -- so with
     a transform there is no guess left to refuse, and a literal
@@ -403,15 +408,17 @@ def _task3_fan_one(where: str, spec: Mapping) -> Iterable[Finding]:
         "absent the only thing that decides is whether what the binding "
         "produced is a JAX array or a Python container -- measured on two "
         "scalar leaves, the same [2, 5] gives 4.0 one way and 10.0 the other "
-        "(inference/parameters.py:299-303). Write fan: broadcast or fan: "
+        "(inference/parameters.py:299). Write fan: broadcast or fan: "
         "distribute (check A38).")
 
 
 def _task3_fan_in(layer) -> Iterable[Finding]:
     """A38 over both spellings on one layer.
 
-    ``transforms.py`` calls ``_merged_fan`` from TWO loops (``:356``, the
-    ``parameters.into`` sugar, and ``:395``, the ``bindings[]`` longhand), so
+    ``transforms.py`` calls ``_merged_fan`` from TWO loops
+    (``inference/parameters.py::Bind.__check_init__``, the
+    ``parameters.into`` sugar, and ``inference/parameters.py::Bind.evaluate``, the ``bindings[]``
+    longhand), so
     a check written over ``inference.parameters`` alone closes one route and
     leaves its twin open -- measured, the longhand builds too.
     """

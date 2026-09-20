@@ -6,10 +6,10 @@ places where fixing them is not enforced:
 
 * **A14** -- an order that names calibration loads while the model places
   none.  The other two directions are enforced already and are deliberately
-  not copied here: ``declared_order`` (``sections/switching.py:36-55``)
+  not copied here: ``declared_order`` (``switching.py``)
   refuses ``order[0] != "antenna"`` and a repeated label, and it runs inside
-  ``build_observation`` (``document.py:72``), which is BEFORE
-  ``build_resources`` (``:75``) -- measured, a document with a missing beam
+  ``build_observation`` (``preflight/document.py``), which is BEFORE
+  ``build_resources`` (``preflight/document.py``) -- measured, a document with a missing beam
   directory and ``order: [ambient, hot]`` reports the order.  The
   ``model.cal_loads`` key ORDER is late and is **Task 4's**, registered as the
   dotted slot ``A14.cal_loads`` in ``preflight/model.py`` against
@@ -20,7 +20,7 @@ places where fixing them is not enforced:
   ``from_switch_order`` matched by name") and which is really a property:
   ``noise_wave.gamma_src`` has exactly ``n_source`` rows, where ``n_source``
   is ``len(order) or 1`` -- the same expression
-  ``ResolutionContext.shape_scope`` uses at ``context.py:55-57``.  That makes
+  ``ResolutionContext.shape_scope`` uses at ``context.py::using_resolution_audit``.  That makes
   §4.1.5's "``mode: none`` requires exactly one row" the same rule at
   ``n_source == 1``, so it is emitted under the same check id with a message
   that cites §4.1.5 (§3.2 (h) 1).
@@ -49,15 +49,15 @@ beam.  That is what these two checks move.
 
 **The order is read through Task 4's ``_t4_switch_order``, not re-read here.**
 ``switching:`` has two grammars -- an ingested run (``observation.from_file``)
-declares ``order:`` alone with no ``mode:`` (``observation.py:336-348``),
+declares ``order:`` alone with no ``mode:`` (``observation.py::_data``),
 everything else goes through ``compile_switching``, where an absent ``mode:``
 means ``none`` -- and a second reader of it is the two-validators shape this
 layer has paid for.  §3.1 binds ``_switch_order`` and ``_gamma_rows`` here and
 the order reader there; this module imports it, the way
-``sections/observed.py:23`` imports ``draws._seed_name``.
+``observed.py`` imports ``draws._seed_name``.
 
 ``from_switch_order`` is never second-guessed: it stacks over
-``context.switch_order`` (``refs.py:169-188``), so its row count cannot be
+``context.switch_order`` (``refs.py::_stack``), so its row count cannot be
 wrong.  Every other form is checked when -- and only when -- the document's
 own text says how many rows it has.  A ``{ref:}``, a ``{file:}`` and an
 arithmetic extent such as ``"2 * n_source"`` say nothing this pass may
@@ -70,7 +70,7 @@ foot import is what registers them, and no test in
 ``observing`` itself, so deleting the foot import leaves all of them green
 (measured).  The guard is
 ``test_config_preflight.py::TestTheFootImportCannotRot::
-test_every_module_under_preflight_is_imported_at_the_foot`` (``:1559``), and
+test_every_module_under_preflight_is_imported_at_the_foot`` (``refs.py``), and
 the task body's claim that the two registry tests here are "this task's guard
 against the whole module being dead code" is false.
 """
@@ -115,7 +115,7 @@ def _a15_extent(entry: Any, n_source: int) -> int | None:
 
     Three spellings and no more: a literal integer, the symbol ``n_source``
     (which is right by construction) and the symbol ``n_load``, which is
-    ``n_source - 1`` (``symbols.py:73-74``) and is the off-by-one this field
+    ``n_source - 1`` (``symbols.py::_extent``) and is the off-by-one this field
     invites -- a document that wrote the number of LOADS where the number of
     SOURCES belongs.  Every other position -- ``"2 * n_source"``, ``"n_freq"``
     -- is ``resolve_extent``'s and needs a ``ShapeScope``, which needs the
@@ -126,7 +126,7 @@ def _a15_extent(entry: Any, n_source: int) -> int | None:
     ``bool`` is excluded before ``int``, and that is not defensive tidiness:
     ``isinstance(True, int)`` is True in Python, so the obvious spelling reads
     ``{zeros: [True, 8]}`` as one row and reports a count for a shape
-    ``resolve_extent`` refuses in its own words (``symbols.py:128-132``).
+    ``resolve_extent`` refuses in its own words (``symbols.py::resolve_extent``).
     """
     if isinstance(entry, bool):
         return None
@@ -142,11 +142,11 @@ def _a15_extent(entry: Any, n_source: int) -> int | None:
 
 
 def _a15_stacks_on_axis_zero(node: Mapping[str, Any]) -> bool:
-    """Are this ``stack``'s rows its entries?  ``refs.py:120-126``'s rule.
+    """Are this ``stack``'s rows its entries?  ``refs.py::_ref``'s rule.
 
     Three spellings say yes: no ``axis:`` at all, an integer ``0`` (stack's
     own argument), and one of ``NOISE_AXES`` -- ``'time'``/``'freq'``/
-    ``'none'`` (``modifiers.py:34``) -- which is the noise-sigma MODIFIER and
+    ``'none'`` (``modifiers.py``) -- which is the noise-sigma MODIFIER and
     leaves the stack on axis 0.  Measured: four entries under ``axis: 'time'``
     build at ``(4, 8)``, so reading ``node.get("axis", 0) == 0`` declines to
     count a stack it could have counted.
@@ -180,13 +180,13 @@ def _a15_declared_rows(node: Any, n_source: int) -> int | None:
     **A shape the text says is not two-dimensional declares no row count.**
     ``gamma_src`` is ``(n_source, n_freq)``, and ``{zeros: [3]}`` is a
     document whose fault is its ndim -- ``__check_init__`` refuses that one by
-    name (``noise_wave.py:217-221``), and "write 4 rows in switch order" would
+    name (``noise_wave.py::NoiseWaveOperator``), and "write 4 rows in switch order" would
     be a row-count sentence in front of it naming a fix that does not fix it.
     Only the shape FORMS can be asked this: a ``list`` or a ``stack`` says how
     many rows it has and nothing about how deep they are.
 
     An empty ``list``/``stack`` declares nothing either: both are the value
-    grammar's own refusals (``refs.py:113-119`` says a stack is "a container,
+    grammar's own refusals (``refs.py::_ref`` says a stack is "a container,
     not a computation"), and answering "0 rows" here would do the same thing.
     """
     if not isinstance(node, Mapping):
@@ -211,7 +211,7 @@ def _a15_declared_class(node_id: Any, spec: Mapping[str, Any],
                         table: Mapping[str, tuple[type, ...]]) -> Any:
     """The operator class this entry declares, when the text names exactly one.
 
-    ``build_node_operator``'s own dispatch order (``model.py:317-336``),
+    ``build_node_operator``'s own dispatch order (``sections/model.py::_from_route``),
     read once: ``python:`` first, then ``from:``, then the node's registered
     classes through :func:`~rheplicant.config.sections.model._pick_class` --
     which is CALLED rather than re-implemented, inside a ``try`` the way Task
@@ -273,7 +273,7 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
       third spelling and builds, with ``twin['noise_wave'].gamma_src_re`` at
       the rows it declared;
     * an ``inference.twin.replace.<node>`` entry, whose spec reaches the same
-      ``build_node_operator`` (``twin.py:67-69``).  Measured, a replacement
+      ``build_node_operator`` (``inflight/twin.py::_LEGAL_SHAPES``).  Measured, a replacement
       carrying three rows under a four-label order gives a fit twin at
       ``(3, 8)`` beside a model twin at ``(4, 8)``.  Read the SAME way as the
       model half rather than as the literal key ``noise_wave``: two readings
@@ -281,7 +281,7 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
       could tell them apart while they agreed.
 
     **The twin route needs a graph model.**  ``build_fit_twin``
-    (``twin.py:46-50``) refuses the whole ``inference.twin:`` block on a
+    (``sections/twin.py::build_fit_twin``) refuses the whole ``inference.twin:`` block on a
     ``kind: pipeline`` model -- *"A pipeline is rebuilt, not repaired"* -- so
     a row count inside a block that is about to be rejected wholesale would
     be answering about a document nobody can fix that way.  ``model_nodes``
@@ -326,13 +326,14 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
     **Three documents stand down, and each was measured rather than reasoned
     about**:
 
-    * an INGESTED run.  ``tests/config/test_config_document.py:133-151``
+    * an INGESTED run.
+    ``test_config_document.py::TestLoadDocument.test_a_variant_cannot_smuggle_a_refused_section_past_the_sweep``
       (``TestIngestedDocuments.make_document``) is a recording with
       ``switching: {order: [antenna, internal_load, heated_load]}``, a
       ``model:`` of ``{gain: ...}`` and no ``cal_loads``
       anywhere; it loads, and ``run_forward`` doubles the recorded ones.  The
       order there labels the recording's own source index
-      (``document.py:85-86`` hands it to ``to_state`` as ``source_order``)
+      (``config/document.py::ConfiguredRun`` hands it to ``to_state`` as ``source_order``)
       and there is no model branch for it to fix,
       because the data was not simulated.  Refusing it would refuse a
       document the package builds AND runs, and turn three tests red;
@@ -464,7 +465,8 @@ def _gamma_rows(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A15 and §4.1.5: ``gamma_src`` has exactly ``n_source`` rows, every path.
 
     Both halves are read, not just ``gamma_src_re``.  ``__check_init__``
-    (``noise_wave.py:222-226``) makes a disagreement BETWEEN the two halves
+    (``noise_wave.py::NoiseWaveOperator.__check_init__``) makes a disagreement BETWEEN the two
+    halves
     its own refusal, which is why two findings here are not a contradiction:
     they are two fields, each wrong against the order on its own.
     """
@@ -476,7 +478,7 @@ def _gamma_rows(document: Mapping[str, Any]) -> Iterable[Finding]:
         # `compile_switching`'s and already precedes the beam.  `()` is the
         # different answer that DOES decide: no order is one source
         # (§3.2 (h) 1), and `n_source = len(order) or 1` below is
-        # `context.py:55-57`'s own expression.
+        # `context.py::using_resolution_audit`'s own expression.
         return findings
     n_source = len(order) or 1
     for site, spec in _a15_sites(document):
@@ -496,7 +498,7 @@ def _a15_message(where: str, order: tuple[str, ...], rows: int, n_source: int,
     """The refusal, whose second half is what the PACKAGE does about it.
 
     **It opens with the field's own path**, which is not decoration:
-    ``Report.raise_if_refused`` (``findings.py:159-178``) raises the first
+    ``Report.raise_if_refused`` (``findings.py::Report.refusals``) raises the first
     refusal's MESSAGE and names only the OTHER refusals' ``where``, so a
     reader who hits this one first would otherwise be told a row count with
     no field -- and there are two routes and three spellings it could be.

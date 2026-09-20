@@ -201,7 +201,7 @@ def _tone_survives_flagging(run: Built) -> Iterable[Finding]:
     four static scalars.  §0.1 puts a Jacobian, an SVD and a real evaluation
     of the twin in Plan 3C; this reaches for none of them.
 
-    Walks the raw twin and the fit twin (``twin.py::_twins``), so a tone or a
+    Walks the raw twin and the fit twin (``inflight/twin.py::_twins``), so a tone or a
     flagger that ``inference.twin.replace`` rebuilt is compared as the FIT
     twin actually holds it.  The pair is de-duplicated by operator identity,
     which is what keeps a document with no ``replace:`` at all from hearing
@@ -344,7 +344,8 @@ def _beam_analysed_twice(run: Built) -> Iterable[Finding]:
     ``beam_alms`` are no longer even equal.
 
     **The criterion is COMPLETE for driftscan, and the mechanism is worth
-    stating rather than asserting.**  ``driftscan.py:299`` picks its backend
+    stating rather than asserting.**  ``driftscan.py::DriftScanProjector.from_beam_maps`` picks its
+    backend
     with ``ltj = _limtod_jax(bool(kwargs.get("uniform_sampling", False)))``,
     and ``_limtod_jax`` returns the same ``limtod_jax`` module on both
     branches -- it only GATES on a feature.  So

@@ -106,7 +106,7 @@ def _collected() -> dict[str, int]:
     # `ConfigWarning` from a document a test module loads at import time: the
     # summary's group header is bare `path/to/x.py:LINENO`, which the split
     # below read as "LINENO tests in path/to/x.py". Two headers reading
-    # `tests/config/exit_helpers.py:226` credited 452 phantom tests and named a
+    # `exit_helpers.py::conjugate_document` credited 452 phantom tests and named a
     # helper module as a collector -- a wrong number offered to a reader whom
     # every task brief tells to take the count from this message. Re-measured
     # at Task 12's fix commit by reverting the token below: 6189 reported

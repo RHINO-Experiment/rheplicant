@@ -6,7 +6,7 @@ emitted.  That is the point of the order they land in: ``ConfigWarning`` and
 check A41 is ABOUT -- the literal-shadows-a-symbol fact has been computed at
 every value resolution since ``7a86c91`` (and unified across the array and
 draw routes at ``b1d899d``), stored as ``ResolvedValue.modifiers["_shadowed"]``
-(``arrays.py:41,43``, ``draws.py:163``), and read by nothing under ``src/``.
+(``config/arrays.py::_finish,43``, ``draws.py``), and read by nothing under ``src/``.
 
 **A41 is decided here from the document's TEXT, and this module never touches
 that stored modifier.**  "The stored modifier now has a reader" is not what
@@ -17,7 +17,7 @@ is ask the same question of the text, through the same predicate
 earlier.
 
 The boundary is exact.  A shape spec is always literal -- ``resolve_shape``
-(``symbols.py:219``) refuses anything that is not a list or a tuple -- so what
+(``symbols.py::resolve_shape``) refuses anything that is not a list or a tuple -- so what
 may be missing is the SCOPE.
 ``n_source`` is always text; ``n_time`` and ``n_freq`` are text only when the
 grids declare an integer count.  Both or neither:
@@ -27,7 +27,7 @@ every square grid.
 
 **A42** is worded in schema §4.7.1 as "``from: simulation`` + ``twin: fit``
 while ``model`` lights a stochastic node".  Measured, that over-fires:
-``build_fit_twin`` (``twin.py:37-38``) returns the twin UNCHANGED when
+``build_fit_twin`` (``sections/twin.py::build_fit_twin``) returns the twin UNCHANGED when
 ``inference.twin:`` is absent, so ``twin: fit`` then simulates from the same
 object ``twin: full`` does and nothing has been removed from the data.  The
 condition implemented here adds the third fact -- the node is named in
@@ -84,7 +84,7 @@ from rheplicant.config.symbols import ShapeScope, literal_shadowing_a_symbol
 #: way A41 can do harm -- so a form belongs here only when ``num`` (or the
 #: list) IS the axis length with no arithmetic in between.  Measured for all
 #: four: ``jnp.linspace(..., num)``, ``start + step * jnp.arange(num)``,
-#: ``jnp.arange(num) % period`` (``arrays.py:121``) and ``jnp.asarray(list)``
+#: ``jnp.arange(num) % period`` (``config/arrays.py::_linspace``) and ``jnp.asarray(list)``
 #: each produce exactly that many samples, and a ``{modulo: {num: 6, period:
 #: 3}}`` frequency grid builds ``n_freq == 6``.
 #:
@@ -118,7 +118,7 @@ def _a41_axis_length(grid: Any) -> int | None:
     """``len(grid)`` from the text, or ``None`` when the document does not say.
 
     ``num`` must be a WRITTEN integer: it may also be a shape symbol
-    (``resolve_extent``, ``arrays.py:92``), and measured, a freq grid written
+    (``resolve_extent``, ``config/arrays.py::_full``), and measured, a freq grid written
     ``{linspace: {..., num: "n_time"}}`` resolves against a scope whose
     ``n_time`` is still 0 and builds an EMPTY frequency axis.  Reading it as
     an extent here would be guessing at a number the loader itself gets from
@@ -154,7 +154,7 @@ def _a41_scope(document: Mapping[str, Any]) -> ShapeScope | None:
     the wrong symbol is worse than none -- it is read as authoritative.
 
     ``n_source`` is ``len(order) or 1``, exactly ``ResolutionContext.
-    shape_scope``'s arithmetic (``context.py:55-57``); the override beside it
+    shape_scope``'s arithmetic (``context.py::using_resolution_audit``); the override beside it
     has no writer anywhere in ``src/`` (measured), so the two cannot disagree
     through that door.  The order comes from Task 4's
     :func:`~rheplicant.config.preflight.model._t4_switch_order`, which is the
@@ -274,7 +274,7 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
 
     Empty when ``inference.twin:`` is absent, and that is the whole correction
     to §4.7.1's wording: measured, ``twin: fit`` without that section returns
-    the model twin itself (``twin.py:37-38``), so nothing has been removed and
+    the model twin itself (``sections/twin.py::build_fit_twin``), so nothing has been removed and
     there is nothing to warn about.
 
     **A ``replace:`` counts only when the pass NAMED the replacement's class.**
@@ -383,16 +383,16 @@ def _a52_projector_refs(node: Any, where: str) -> list[str]:
 def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A41: a literal integer in a shape that equals one of this run's extents.
 
-    **Not a refusal**, for ``arrays.py:6-7``'s reason: a literal 8 may
+    **Not a refusal**, for ``config/arrays.py``'s reason: a literal 8 may
     genuinely be 8, and what it cannot be is TIED to the grid.
 
-    ``warn`` and not ``report``, though ``arrays.py:6`` and schema §6 both call
+    ``warn`` and not ``report``, though ``config/arrays.py`` and schema §6 both call
     A41 "a report", and the difference is worth stating because this layer has
     three severities where the schema has one word.  ``REPORT`` is "worth
     recording next to the run; not worth interrupting anyone over"
-    (``findings.py:74``) and **is consumed by nothing** -- it is the severity
+    (``findings.py``) and **is consumed by nothing** -- it is the severity
     ``checks.<name>.mode: report`` will read, and that gating is Plan 3C's
-    (``findings.py:53-57``).  Shipping A41 at a severity no reader has yet
+    (``findings.py``).  Shipping A41 at a severity no reader has yet
     would reproduce, at one remove, the defect A41 is about: a fact computed
     and stored for a consumer nobody wrote.  So it interrupts, once, until 3C
     gives the document a way to say it would rather it did not.
@@ -432,7 +432,7 @@ def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
 def _simulated_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A42: data simulated through a twin the randomness was taken out of.
 
-    ``spec.get("twin", "full")`` is ``sections/observed.py:132``'s own line,
+    ``spec.get("twin", "full")`` is ``observed.py::_realise``'s own line,
     character for character, so the two cannot drift apart about what an
     absent key means.  Written that way rather than as ``spec.get("twin")``,
     which no test can tell from it -- both answer "not fit" -- because a

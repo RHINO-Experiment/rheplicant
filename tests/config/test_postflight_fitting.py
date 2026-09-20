@@ -21,7 +21,7 @@ devices keep it:
 **The C14 tests are UNIT tests over a DOCTORED build, and that is a
 correction to the plan, not a shortcut.**  No document this config layer
 accepts can build a complex or a non-floating latent:
-``sections/parameters.py:162`` casts every ``init`` to ``context.dtype``,
+``sections/parameters.py::parse_latents`` casts every ``init`` to ``context.dtype``,
 which ``RuntimeFacts.dtype`` restricts to ``float32``/``float64``, and
 ``modifiers.DTYPES`` holds no integer name at all.  So the four dtype tests
 doctor a built ``ParameterSpace`` directly, and
@@ -32,9 +32,10 @@ is the end-to-end partner that goes red the day that stops being true.
 refusal shape depends on it: the space here binds its single latent DIRECTLY
 into the float leaf ``gain.gain``, so ``ParameterSpace.validate`` refuses the
 dtype KIND mismatch before ``check_linearity``'s own ``_require_inexact``
-(``linear.py:517`` runs ``_isolate`` before ``:518``'s
-``_require_inexact``; the ``names=`` branch is the second pair at ``:538``
-and ``:539``).  Measured, that refusal reads *"Bind for ('g',) produces
+(``linear.py::_probe_anchor`` runs ``_isolate`` before ``linear.py::_probe_anchor``'s
+``_require_inexact``; the ``names=`` branch is the second pair at
+``linear.py::_single_probe.probe_at``
+and ``linear.py::_single_probe.probe_at``).  Measured, that refusal reads *"Bind for ('g',) produces
 complex values for `into` selector 0, but that leaf is float."* -- a sentence
 naming neither the check nor the gate.
 """
@@ -208,9 +209,10 @@ def _stub_all(monkeypatch, counter, **options):
     ``rheplicant.config.postflight`` is reached from ``config/document.py``,
     so a module-scope import here would put the whole inference layer in every
     process that reads a config, which
-    ``test_config_exits_predict.py::test_importing_the_config_layer_does_not_
-    import_numpyro`` and ``test_config_preflight.py::test_the_cold_pass_drags_
-    in_no_part_of_the_inference_layer`` both measure.  A function-local
+    ``test_config_exits_predict.py::TestTheOptionalDependencyStaysOptional.test_importing_the_config_layer_does_not_import_numpyro
+    import_numpyro`` and
+    ``test_config_preflight.py::TestTheColdCostOnARealDocument.test_the_cold_pass_drags_in_no_part_of_the_inference_layer``
+    both measure.  A function-local
     ``from x import y`` re-reads the attribute on every call, so patching the
     source module is what reaches it.
     """
@@ -885,9 +887,9 @@ class TestC14:
         that goes RED the day the config layer admits a complex latent.
 
         Why it holds today, measured: there is exactly ONE ``Latent(``
-        construction site under ``config/`` (``sections/parameters.py:194``)
+        construction site under ``config/`` (``sections/parameters.py::parse_latents``)
         and a few lines above it ``init`` is cast to ``context.dtype``
-        (``:162``), which ``RuntimeFacts.dtype`` restricts to
+        (``sections/parameters.py::parse_latents``), which ``RuntimeFacts.dtype`` restricts to
         ``float32``/``float64``.  ``dtype: complex64`` on an ``init:`` is
         therefore ACCEPTED and silently cast, with a ``ComplexWarning`` and
         not a raise; ``dtype: int32`` is not writable at all
@@ -961,7 +963,7 @@ class TestC19:
         """The OTHER half of C19's first stand-down, and it is a document a
         user can write.
 
-        ``sections/observed.py:266-271``: a block naming two observations and
+        ``observed.py::build_observed``: a block naming two observations and
         calling neither of them ``primary`` leaves ``ObservedBuild.primary``
         **None** beside two real entries.  ``observed is None`` is false here,
         so only the second clause saves the check.

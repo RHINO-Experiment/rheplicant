@@ -124,7 +124,7 @@ _B2_BEAMS = "resources.beams."
 def _b2_entry(reference: Any, prefix: str) -> str | None:
     """``{ref: resources.<kind>.<name>...}`` -> the three-segment dotted name.
 
-    Cut to three segments the way ``resources.py::_referenced_names`` cuts,
+    Cut to three segments the way ``config/resources.py::_referenced_names`` cuts,
     so that a sub-value reference (``{ref: resources.beams.horn.maps}``)
     resolves to the ENTRY it reads out of.  ``None`` for anything that is not
     a mapping carrying a string ``ref:`` under ``prefix`` -- every one of

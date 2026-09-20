@@ -6,7 +6,7 @@ because its grids and switch order ARE the resolution context; resources
 resolve against that context; the model resolves against the context plus the
 resources; and only then can an ingested State be finished, because
 ``to_state``'s ``source_order`` is read off the assembled twin's own switch
-order (``rhino.py:607-611``).
+order (``rhino.py::to_state``).
 
 Before any of it, the pre-flight pass: every check decidable from the
 document's text, run on the variant-applied mapping and before

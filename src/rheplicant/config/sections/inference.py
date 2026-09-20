@@ -88,7 +88,7 @@ class InferenceBuild(NamedTuple):
     #: ``{latent name: its ref: as a jnp array in context.dtype}``, for
     #: every latent that declares one.  ``ParsedLatent.ref`` reaches no
     #: other build field -- ``build_space`` keeps ``entry.latent`` and drops
-    #: the rest (``transforms.py:402``) -- and ``kind: nuts``'s ``init: ref``
+    #: the rest (``transforms.py::_joint_prior``) -- and ``kind: nuts``'s ``init: ref``
     #: is its first consumer since Plan 2B parsed it.  Populated HERE, where
     #: the latents are already parsed, rather than by a second
     #: ``parse_latents`` inside the executor: two validators for one grammar

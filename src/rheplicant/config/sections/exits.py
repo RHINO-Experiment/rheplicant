@@ -361,9 +361,10 @@ def _a29_estimate_takes_no_seed(where: str, options: Mapping[str, Any]) -> None:
     ``_number``-vs-``_whole`` divergence with a new name.
 
     ``warm_start:`` is deliberately not a second caller.  It builds a
-    ``plan.estimate`` of its own (``:287-288``, and ``kind:`` there may be
-    nothing else -- ``:268-271``), but ``_WARM_KEYS`` (``:172``) carries no
-    ``seed`` at all, so the sweep at ``:264-267`` already refuses one by name
+    ``plan.estimate`` of its own (``radio_digital_twin.py``, and ``kind:`` there may be
+    nothing else -- ``radio_digital_twin.py``), but ``_WARM_KEYS`` (``radio_digital_twin.py``)
+    carries no
+    ``seed`` at all, so the sweep at ``radio_digital_twin.py`` already refuses one by name
     -- a more specific sentence than this asymmetry.
     """
     if "seed" in options:

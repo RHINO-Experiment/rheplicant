@@ -5,7 +5,7 @@ binding keys (``into``/``transform``/``fan``) that Task 3's space builder
 resolves against the fit twin.  Priors build numpyro distributions lazily --
 numpyro is an extra -- and a scalar family broadcasts to the declared init's
 shape, because ``Latent.__check_init__`` refuses ``prior.shape() !=
-init.shape`` (``inference/parameters.py:267``) and four levels of braces for
+init.shape`` (``inference/parameters.py::Latent.__check_init__``) and four levels of braces for
 ``dist.Normal(jnp.zeros(8), 400.0)`` was v0's mistake, not the user's.
 """
 

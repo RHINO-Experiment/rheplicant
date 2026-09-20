@@ -2,14 +2,14 @@
 
 No function in this layer sees both today (the plan's finding 2):
 ``parse_runs`` sees ``runs`` alone and inspects the SIX keys of
-``_RUN_KEYS`` (``runs.py:25``: ``name``, ``kind``, ``variant``, ``on``,
+``_RUN_KEYS`` (``runs.py::_RUN_KEYS``: ``name``, ``kind``, ``variant``, ``on``,
 ``reuse``, ``expect``; the plan's "five" was inherited and is wrong, and
 ``_one`` validates all six) -- every other run key travels untouched in
-``RunSpec.options`` (``runs.py:113-117``) and is
+``RunSpec.options`` (``runs.py::_one``) and is
 swept for the first time inside the executor at P3; ``build_inference`` sees
-``inference`` alone; ``run_document`` (``runs.py:138``) holds both and hands
+``inference`` alone; ``run_document`` (``runs.py::parse_runs``) holds both and hands
 them to ``load_document`` one at a time, calling ``parse_runs`` at
-``runs.py:149`` -- BEFORE the pass, which is why every test of a
+``runs.py::parse_runs`` -- BEFORE the pass, which is why every test of a
 ``runs``-shaped check here drives ``load_document`` rather than
 ``run_document`` (§2.1).
 
@@ -24,7 +24,8 @@ GRADIENT`` at the head, having measured that ``numpyro`` stays out of
 ``sys.modules``.  It does -- and that is not the invariant the repository
 actually holds this layer to.  ``rheplicant/inference/__init__.py`` re-exports
 the whole layer eagerly, so reaching ``...engines`` imports it, and
-``test_config_exits_predict.py:1046-1073`` runs ``import rheplicant.config;
+``test_config_exits_predict.py::TestAVariantMismatchIsRefused.test_a_variant_that_moves_the_layout_is_the_packages_refusal``
+runs ``import rheplicant.config;
 from rheplicant.config.sections import exits`` in a fresh interpreter and
 asserts that BOTH ``numpyro`` and ``rheplicant.inference`` are absent.
 Measured: at ``9ee99af`` that probe prints ``[]``, and with the head import
@@ -58,9 +59,9 @@ _T7_LOG_CONJUGATE: str = "log_conjugate"
 _T7_GRADIENT: str = "gradient"
 
 #: The engines a block may ask for, closed.  ``_BLOCK_KEYS``
-#: (``exits.py:165``) accepts ANY string for ``engine:``, so today
+#: (``exits.py::_parse_optimize``) accepts ANY string for ``engine:``, so today
 #: ``engine: banana`` reaches the user as a ParameterSpaceError from
-#: ``Block._check`` (``plan.py:353-359``) -- measured.
+#: ``Block._check`` (``plan.py``) -- measured.
 #:
 #: A copy of ``ENGINES``, which is the thing this plan warns against: a closed
 #: set written out stops being closed the day a third engine ships, and this
@@ -105,7 +106,7 @@ _LOG_ROUTE_REASONS: frozenset[str] = frozenset(
 _T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic",
                                                 "radiometer_frozen"})
 
-#: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py:165``), copied
+#: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py::_parse_optimize``), copied
 #: for the same reason :data:`_ENGINES` is: reaching it means importing
 #: ``sections/exits``, which foot-imports ``conjugate``, ``diagnostics``,
 #: ``npe`` and ``nuts``, and measured that adds ~30 ms to every ``import
@@ -130,7 +131,7 @@ _A16_FROZEN: dict[str, str] = {
                "declared was never inferred."),
     "warm_start.blocks": (
         "warm_start builds a SamplingPlan of its own over the same space "
-        "(exits.py:287-288), so an omitted latent sits at its declared init "
+        "(exits.py:287), so an omitted latent sits at its declared init "
         "for the whole warm estimate, and warm_start.move: can only carry "
         "over a value that estimate produced."),
 }
@@ -142,9 +143,9 @@ def _latents(document: Mapping[str, Any]) -> dict[str, Any]:
     The KEYS are the space's latent names, in declaration order -- measured
     through ``load_document``: ``tuple(document["inference"]["parameters"]) ==
     tuple(built.inference.space.names)``.  ``fan:`` and ``transform:``
-    describe the BINDING (``sections/transforms.py:357`` appends one ``Bind``
+    describe the BINDING (``transforms.py::parse_transform`` appends one ``Bind``
     per entry and creates no latent) and ``hyper:`` is refused as capability 4
-    (``sections/parameters.py:144-148``), so nothing in v1 splits one
+    (``sections/parameters.py::_names``), so nothing in v1 splits one
     declaration into two latents.  A16 rests entirely on that and
     ``test_the_space_names_are_the_declared_parameter_keys`` is what keeps it
     true.
@@ -152,7 +153,7 @@ def _latents(document: Mapping[str, Any]) -> dict[str, Any]:
     A latent whose body is not a mapping keeps its NAME and reads as ``{}``.
     Dropping it would make it look undeclared to A16, which would refuse a
     block that names it -- a wrong refusal caused by a malformed neighbour.
-    ``sections/parameters.py:140-141`` refuses the malformed body itself, at
+    ``sections/parameters.py::_names`` refuses the malformed body itself, at
     P2.
     """
     inference = document.get("inference")
@@ -237,7 +238,7 @@ def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
     Three things this does, each of which a later task would otherwise redo:
 
     * a single mapping is wrapped in a list, the way ``parse_runs``
-      (``runs.py:122-123``) does, so ``runs: {kind: forward}`` is one run here
+      (``runs.py::_one``) does, so ``runs: {kind: forward}`` is one run here
       too;
     * a malformed entry becomes ``{}`` rather than being dropped, so on the
       LIST form ``_runs(document)[i]`` is always ``runs[i]`` of the document
@@ -259,17 +260,17 @@ def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
       behaviour so the next reader inherits a decision rather than a
       discovery;
     * ``name`` is filled in by ``parse_runs``' own rule -- the entry's
-      ``name`` when it has one, else the kind (``runs.py:115``) -- because
+      ``name`` when it has one, else the kind (``runs.py::_one``) -- because
       every refusal in this layer is prefixed ``runs['<name>']:`` and three
       tasks would otherwise each re-derive it.  A NEW dict is built; the
       caller's document is never mutated.
 
-      **``runs.py:115``'s test is ``is not None``, not "is a string"**, and
+      **``runs.py::_one``'s test is ``is not None``, not "is a string"**, and
       the difference is one document: a non-string ``name:`` is REFUSED at
-      ``runs.py:101-102`` (*"name: is a string; got 7"*) rather than
+      ``runs.py::_one`` (*"name: is a string; got 7"*) rather than
       defaulted, so ``parse_runs`` has no such run to name.  This function
       does fill it -- ``name: 7`` is prefixed ``runs['<kind>']`` -- because
-      ``parse_runs`` runs only on the ``run_document`` path (``runs.py:149``)
+      ``parse_runs`` runs only on the ``run_document`` path (``runs.py::parse_runs``)
       and a ``load_document`` caller would otherwise get a check that
       declined on a document nothing else refuses.  The cost is a prefix
       naming a run the user did not write, on a document already refused for
@@ -327,7 +328,7 @@ def _kinds(document: Mapping[str, Any]) -> frozenset[str]:
 def _t7_names(entry: Mapping[str, Any]) -> tuple[str, ...] | None:
     """``names:`` when the grammar accepts it, and ``None`` when it does not.
 
-    ``exits.py:198-203``'s own three tests -- a list, non-empty, all strings
+    ``exits.py::_parse_optimize``'s own three tests -- a list, non-empty, all strings
     -- because everything else is that refusal's, in its own words: *"blocks[0]
     .names is a non-empty list of latent names"*.
 
@@ -349,11 +350,12 @@ def _t7_names(entry: Mapping[str, Any]) -> tuple[str, ...] | None:
 def _t7_entries(node: Any) -> tuple[Mapping[str, Any], ...] | None:
     """A ``blocks:`` list this check may read, or ``None`` to stand down.
 
-    ``exits._blocks`` (``exits.py:181-207``) refuses **five** shapes before a
+    ``exits._blocks`` (``exits.py::_parse_optimize``) refuses **five** shapes before a
     ``Block`` is ever built, and all five are mirrored here: a ``blocks:``
-    that is not a list and an empty one (``:184-186``), an entry that is not a
-    mapping (``:189-191``), an entry carrying a key a block does not take
-    (``:192-197``), and a malformed ``names:`` (``:198-203``).  Each has a
+    that is not a list and an empty one (``exits.py::_parse_optimize``), an entry that is not a
+    mapping (``exits.py::_parse_optimize``), an entry carrying a key a block does not take
+    (``exits.py::_parse_optimize``), and a malformed ``names:`` (``exits.py::_parse_optimize``).
+    Each has a
     sentence naming the fault; a partition answer in front of one would say
     *"blocks: does not cover ['d', 'a', 'w']"* -- true, useless, and offering
     a fix ("add it to a block") that is not the fault.
@@ -383,9 +385,10 @@ def _t7_entries(node: Any) -> tuple[Mapping[str, Any], ...] | None:
 def _a18_linear(latents: Mapping[str, Any], name: str) -> bool:
     """``Latent(linear=)`` as the document writes it.
 
-    ``sections/parameters.py:178`` reads ``spec.get("linear", False)`` and
-    ``:179-180`` refuses a non-bool, and ``Latent``'s own default is False
-    (``inference/parameters.py:255``: ``linear: bool = eqx.field(static=True,
+    ``sections/parameters.py::parse_latents`` reads ``spec.get("linear", False)`` and
+    ``sections/parameters.py::parse_latents`` refuses a non-bool, and ``Latent``'s own default is
+    False
+    (``inference/parameters.py::Latent``: ``linear: bool = eqx.field(static=True,
     default=False)``).  So a latent that declares nothing is non-linear, an
     undeclared name is non-linear, and a latent that declares ``linear: "yes"``
     is refused at P2 rather than here -- this function is not the grammar
@@ -396,25 +399,25 @@ def _a18_linear(latents: Mapping[str, Any], name: str) -> bool:
 
 
 def _engine_of(block: Mapping[str, Any], latents: Mapping[str, Any]) -> str:
-    """The engine a block takes, derived from text -- ``plan.py:643-682``.
+    """The engine a block takes, derived from text -- ``plan.py::split_rhat``.
 
     **Mirrored, line for line, from** ``SamplingPlan._engine_of``
-    (``plan.py:643-682``, verified with ``inspect.getsourcelines``):
+    (``plan.py::split_rhat``, verified with ``inspect.getsourcelines``):
 
-    * ``:645-646`` partition the names by ``Latent.linear`` -> :func:`_a18_linear`;
-    * ``:648`` ``if block.engine is None`` -> the ``declared is None`` branch;
-    * ``:649-658`` mixed-with-no-override is UNDERIVABLE -> ``""`` here,
+    * ``plan.py::split_rhat`` partition the names by ``Latent.linear`` -> :func:`_a18_linear`;
+    * ``plan.py::split_rhat`` ``if block.engine is None`` -> the ``declared is None`` branch;
+    * ``plan.py::split_rhat`` mixed-with-no-override is UNDERIVABLE -> ``""`` here,
       because the package raises there and a pre-flight check may not
       (§2.3's TRAP: a check that raises aborts the pass and hides every
       later finding);
-    * ``:659`` ``engine = CONJUGATE if linear else GRADIENT`` -> verbatim,
+    * ``plan.py::split_rhat`` ``engine = CONJUGATE if linear else GRADIENT`` -> verbatim,
       through :data:`_T7_CONJUGATE` and :data:`_T7_GRADIENT`;
-    * ``:660-661`` the override wins, unvalidated -> returned as declared, so
+    * ``plan.py::split_rhat`` the override wins, unvalidated -> returned as declared, so
       :func:`_blocks` can refuse an engine outside :data:`_ENGINES` itself;
-    * ``:662-671`` conjugate-over-non-linear is A19's and stays in
+    * ``plan.py::split_rhat`` conjugate-over-non-linear is A19's and stays in
       :func:`_blocks`, because it is a REFUSAL and this function returns a
       string;
-    * ``:673-681`` conjugate-plus-steps is A17's, same reason.
+    * ``plan.py::Block`` conjugate-plus-steps is A17's, same reason.
 
     **The risk this mirroring carries is drift**: the package can change
     ``_engine_of`` and every test written against our messages stays green
@@ -447,24 +450,24 @@ def _engine_of(block: Mapping[str, Any], latents: Mapping[str, Any]) -> str:
 def _t7_warm_start(run: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """The ``warm_start`` whose ``blocks:`` the executor would actually READ.
 
-    ``_run_plan`` reaches ``warm_start.blocks`` (``exits.py:287``) only after
+    ``_run_plan`` reaches ``warm_start.blocks`` (``exits.py::_ESTIMATE_DEFAULTS``) only after
     five earlier refusals, and three of them are this check's business.  Each
     of the three means the warm block list is **never read at all**, so a
     partition answer about it is an answer about a structure the package
     discards -- and it is the only sentence the reader gets, because none of
     the three is hoisted to P-1 by anything:
 
-    * the run's own ``blocks:`` grammar (``exits.py:250``, into
-      ``_blocks``/``:181-207``).  Measured: a ``plan.sample`` with no
+    * the run's own ``blocks:`` grammar (``exits.py::_SAMPLE_KEYS``, into
+      ``_blocks``/``exits.py::_parse_optimize``).  Measured: a ``plan.sample`` with no
       ``blocks:`` at all, and one with ``blocks: "nope"``, both used to earn
       *"runs['s']: warm_start.blocks: does not cover [...]"* -- telling a user
       who omitted a key about a different key, and never about theirs;
-    * ``warm_start.kind`` (``exits.py:268-271``): anything but
+    * ``warm_start.kind`` (``exits.py::_WARM_KEYS``): anything but
       ``plan.estimate`` and the whole warm start is refused;
-    * ``warm_start.move`` (``exits.py:273-278``): required, and without it the
+    * ``warm_start.move`` (``exits.py::_ESTIMATE_PASSTHROUGH``): required, and without it the
       warm start never runs.
 
-    **``n_sweeps`` (``exits.py:255-256``) and the seed (``:257``) are NOT
+    **``n_sweeps`` (``exits.py::_SAMPLE_KEYS``) and the seed (``exits.py::_SAMPLE_KEYS``) are NOT
     gates**, and that is the line rather than an omission.  They are
     independent run keys, not the warm start's own grammar: a document
     missing one AND carrying a broken warm partition has two faults the user
@@ -472,7 +475,7 @@ def _t7_warm_start(run: Mapping[str, Any]) -> Mapping[str, Any] | None:
     is for (§2.3).  Gating on them would trade one round trip for another.
 
     ``warm_start`` is read on ``plan.sample`` only, because ``_ESTIMATE_KEYS``
-    (``exits.py:166``) does not take it and Task 3's ``A1.runs`` already
+    (``exits.py::_parse_optimize``) does not take it and Task 3's ``A1.runs`` already
     refuses it at P-1 -- measured: *"kind: plan.estimate does not take
     ['warm_start']"*.
     """
@@ -493,7 +496,7 @@ def _t7_warm_start(run: Mapping[str, Any]) -> Mapping[str, Any] | None:
 def _t7_sites(run: Mapping[str, Any]) -> tuple[tuple[str, tuple], ...]:
     """Every ``blocks:`` list in this run that reaches a ``SamplingPlan``.
 
-    **Two, not one.**  ``exits.py:287-288`` builds ``_blocks(f"{where}:
+    **Two, not one.**  ``exits.py::_ESTIMATE_DEFAULTS`` builds ``_blocks(f"{where}:
     warm_start", warm.get("blocks"))`` and hands the result to
     ``SamplingPlan(space, *warm_blocks)`` -- the same constructor, over the
     same space, refused by the same four rules, at the same P3 behind the
@@ -520,7 +523,7 @@ def _t7_sites(run: Mapping[str, Any]) -> tuple[tuple[str, tuple], ...]:
 def _t7_step_count(steps: Any) -> bool:
     """Is this a value ``Block`` would have accepted as inner steps?
 
-    ``plan.py:360-368``'s own predicate: a positive ``int`` that is not a
+    ``plan.py``'s own predicate: a positive ``int`` that is not a
     ``bool``.  A17 needs it because its sentence is a COUNTERFACTUAL -- *"so
     steps: 5 would be silently ignored"* -- and that claim is false of every
     value the package refuses first.  Measured: ``Block('d', 'a', steps=0)``
@@ -533,15 +536,15 @@ def _t7_step_count(steps: Any) -> bool:
 def _a16_partition(named: str, listed: str, site: str,
                    entries: tuple[Mapping[str, Any], ...],
                    latents: Mapping[str, Any]) -> Iterable[Finding]:
-    """A16: the partition, in the order ``plan.py:544-586`` settles it.
+    """A16: the partition, in the order ``plan.py::_not_converged_message`` settles it.
 
     Three legs, one id.  The schema row (line 1193) describes two of them --
     "every latent appears in exactly one block" -- and the third, a block
     naming a name ``inference.parameters`` never declared, is
-    ``plan.py:545-558``'s and is refused FIRST there (the covered pair is
-    ``:560-574`` and ``:576-584``).  A fourth shape,
+    ``plan.py::_not_converged_message``'s and is refused FIRST there (the covered pair is
+    ``plan.py::_not_converged_message`` and ``plan.py::_not_converged_message``).  A fourth shape,
     one name written twice inside ONE block, is ``Block._check``'s
-    (``plan.py:344-352``) rather than the plan's and carries the same id: it
+    (``plan.py``) rather than the plan's and carries the same id: it
     is the same property (each latent in exactly one place) one level in.
     Task 13 records the wording.
 
@@ -604,7 +607,7 @@ def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
     without this check, and for a ``steps:`` the package refuses outright it
     is false -- so is the fix clause that sends the reader to ``engine:
     gradient``, which would leave the run refused for the second reason.
-    Measured, ``plan.py:360-368``: ``steps=0``, ``steps=True``, ``steps='5'``
+    Measured, ``plan.py``: ``steps=0``, ``steps=True``, ``steps='5'``
     and ``steps=1.5`` are all refused before a plan is settled at all.
     """
     head = (f"{named}: {site}[{position}] is solved by the conjugate engine, "
@@ -618,7 +621,7 @@ def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
                 "what you meant (check A17).")
     return (f"{head}{steps!r} is not a knob it has. {why}Drop steps:. Moving "
             f"to engine: gradient would not rescue {steps!r} either -- inner "
-            "steps are a positive int on every engine (plan.py:360-368), so "
+            "steps are a positive int on every engine (plan.py:360), so "
             "the block would be refused a second time (check A17).")
 
 
@@ -634,12 +637,12 @@ def _t7_engines(named: str, listed: str, site: str,
     broken partition they answer about names that do not exist -- an
     undeclared name reads as non-linear (:func:`_a18_linear` returns False for
     an absent latent) and produces an A18 *"mixes linear with non-linear"*
-    refusal naming a latent nobody declared.  That is ``plan.py:541-542``'s
+    refusal naming a latent nobody declared.  That is ``plan.py::_not_converged_message``'s
     own argument: *"a block naming an undeclared latent cannot have its engine
     derived at all, so the partition is settled first"*.
 
     The enum is not one of those.  ``engine:`` is checked by ``Block._check``
-    (``plan.py:353-359``), which the package runs on EVERY block before
+    (``plan.py``), which the package runs on EVERY block before
     ``SamplingPlan`` settles anything -- it reads the block alone and no
     latent at all.  Suppressing it behind the partition would cost a user with
     both faults a second round trip, which is what §2.3's collect-rather-than-
@@ -657,7 +660,7 @@ def _t7_engines(named: str, listed: str, site: str,
         # `_engine_of` returns a declared engine unvalidated, so without this
         # an `engine: banana` block would reach the A17 test as
         # `engine == _T7_CONJUGATE` -> False and be silently accepted by this pass
-        # while `plan.py:353-359` refuses it at P3.
+        # while `plan.py` refuses it at P3.
         #
         # `isinstance` BEFORE `in`: `_ENGINES` is a frozenset, and `["x"] in
         # frozenset` raises TypeError on the unhashable list -- which inside
@@ -755,11 +758,11 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``preflight()`` calls this function once.
 
     **A run declaring ``expect: refuse`` is left alone**, and that is not
-    politeness.  ``execute_run`` (``exits.py:311-321``) runs such a run's
+    politeness.  ``execute_run`` (``exits.py::_plan_default``) runs such a run's
     executor and CAPTURES its error as the run's product -- the run is an
     assertion ABOUT the refusal.  A P-1 refusal makes the whole document
     unloadable, so the assertion could never be made; measured,
-    ``tests/config/test_config_exits_plan.py:108-113`` is exactly that
+    ``test_config_exits_plan.py::TestEstimate.test_noise_kind_none_is_refused`` is exactly that
     document (``blocks: [{names: [g, ghost]}]`` under ``expect: refuse``) and
     it asserts the captured error names ``ghost``.
 
@@ -768,7 +771,7 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
     not A16's; refusing it here would give the user two refusals for one typo.
 
     **Variant layers are not walked.**  ``load_document`` calls the pass on
-    the variant-APPLIED document (``document.py:68``), so a selected variant
+    the variant-APPLIED document (``preflight/document.py``), so a selected variant
     is read; an unselected one is A1's row and Task 3's ``_variant_text``, not
     this one's.
     """
@@ -801,13 +804,15 @@ def _a20_joint_over(document: Mapping[str, Any]) -> tuple[str, ...]:
     """The latent names ``inference.joint_prior`` covers, or ``()``.
 
     ``{jeffreys: {over: ...}}`` is the grammar and the only one:
-    ``transforms._joint_prior`` (``:298-320``) refuses anything else, and
+    ``transforms._joint_prior`` (``preflight/document.py::_task3_horizon_in``) refuses anything
+    else, and
     ``{kind: jeffreys, names: [...]}`` is refused by name there.  So coverage
     is text in the document and nothing has to be built to read it.
 
     **``tuple(over)`` is what the package does, and this mirrors it rather
     than narrowing it.**  ``_joint_prior`` ends
-    ``JeffreysPrior(over=tuple(body["over"]), **kwargs)`` (``:320``), so FIVE
+    ``JeffreysPrior(over=tuple(body["over"]), **kwargs)``
+    (``preflight/document.py::_variant_text``), so FIVE
     shapes besides a list of strings build a real prior -- measured through
     ``run_document``: ``over: da`` and ``over: 'd'`` (a bare YAML scalar,
     split into characters), ``over: {d: 1, a: 2}`` and ``over: {d: 1}``
@@ -871,14 +876,15 @@ def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
     """The names among ``names`` that declare no prior this route accepts.
 
     ``Latent.prior`` comes from ``spec.get("prior")`` and from nowhere else
-    (``parameters.py:195``; ``_parse_prior`` returns None for a missing key at
-    ``:71-72`` and for no other value), so "does this latent declare a prior"
+    (``inference/parameters.py::refuse_stochastic_stages``; ``_parse_prior`` returns None for a
+    missing key at
+    ``inference/parameters.py`` and for no other value), so "does this latent declare a prior"
     is a text question -- and a prior that is present but malformed is a
     DECLARED prior, refused by ``_parse_prior`` in its own words.
     ``covered`` is non-empty only for the ``nuts`` route, which is the one
     route that counts ``inference.joint_prior`` coverage as a prior --
-    ``to_numpyro_model`` accepts a covered latent (``numpyro_bridge.py:68-73``)
-    and ``simulate_pairs`` does not (``npe.py:111-117``).
+    ``to_numpyro_model`` accepts a covered latent (``numpyro_bridge.py``)
+    and ``simulate_pairs`` does not (``inference/npe.py::simulate_pairs``).
 
     **``names`` must already be names the document DECLARES WELL** -- the
     keys of :func:`_a23_latents`, or a subset of them.  An absent latent reads
@@ -919,7 +925,7 @@ def _t8_traded_keys(run: Mapping[str, Any]) -> list[str]:
     plan.sample"*, that fix restored the document exactly, and ``step2 ==
     step0`` was True.
 
-    ``_RUN_KEYS`` is what ``RunSpec.options`` excludes (``runs.py:113-114``),
+    ``_RUN_KEYS`` is what ``RunSpec.options`` excludes (``runs.py::_one``),
     imported for the reason :func:`_seeds` imports it: a sixth key added
     there would otherwise read as an option here.
     """
@@ -940,7 +946,7 @@ def _a23_message(named: str, kind: str, missing: list[str], because: str,
 
     **The verb is per route.**  ``kind: fisher`` with ``space: true`` does not
     draw anything -- ``fisher_information`` computes a posterior precision
-    (``uncertainty.py:346-357``) -- so a shared *"draws a POSTERIOR"* is false
+    (``uncertainty.py::_declared_gaussian_priors``) -- so a shared *"draws a POSTERIOR"* is false
     on one of the four routes, and measured, nothing in the suite could tell.
 
     **The fix clause is the one that can send a reader into another
@@ -1014,10 +1020,10 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
     **The order inside this function is the decision §2.6 item 4 records, and
     it is structural rather than positional.**  A20 refuses
     ``inference.joint_prior`` beside ANY ``kind: plan.*``
-    (``plan.py:588-641``, unconditional -- ``_refuse_split_joint_prior``
+    (``plan.py::_halves``, unconditional -- ``_refuse_split_joint_prior``
     chooses only its wording from whether the partition splits the prior) and
     A21 refuses it beside ``fisher`` with ``space: true``
-    (``rheplicant/inference/uncertainty.py:313-326`` -- ``inference/``, not
+    (``uncertainty.py::_declared_gaussian_priors`` -- ``inference/``, not
     ``config/sections/``).  So a run refused by either ``continue``s and never
     reaches its A23 leg: the joint-prior branches of A23's
     ``plan.sample``-gradient and ``fisher(space=)`` legs are UNREACHABLE, not
@@ -1027,14 +1033,14 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
     the two refusals name different edits.
 
     ``nuts`` and ``npe`` keep their own gate at
-    ``posterior_support._sampled_space`` (``:68-150``) as the P3 second
+    ``posterior_support._sampled_space`` (``uncertainty.py::_named_spans``) as the P3 second
     opinion; this function does not call it and does not change it -- it
-    needs a BUILT space (``:77``), which P-1 may not make.
+    needs a BUILT space (``uncertainty.py::_named_spans``), which P-1 may not make.
 
     **A run declaring ``expect: refuse`` is left alone**, for the reason
     :func:`_blocks` gives and with a document to point at: ``execute_run``
-    (``exits.py:301``) runs such a run's executor and captures its error as
-    the run's product (``:314-316``), and a P-1 refusal makes the whole
+    (``exits.py::_SAMPLE_DEFAULTS``) runs such a run's executor and captures its error as
+    the run's product (``exits.py::_plan_default``), and a P-1 refusal makes the whole
     document unloadable, so the assertion could never be made.
     ``posterior_helpers.joint_prior_document`` is exactly that document --
     ``kind: npe`` under ``expect: refuse`` beside a ``kind: nuts`` that runs,
@@ -1115,7 +1121,7 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
         elif kind == "fisher" and run.get("space") is True:
             missing = _a23_prior_free(latents, latents)
             # The package's own way out, which A23 owes the reader as well as
-            # the calibrator exits: `uncertainty.py:354` says drop `space=`
+            # the calibrator exits: `uncertainty.py::_declared_gaussian_priors` says drop `space=`
             # and what comes back is exactly the likelihood matrix.
             because = ("and space: true asks for a posterior precision, which "
                        "a prior-free latent has no row of -- drop space: and "
@@ -1128,8 +1134,8 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
             # (`:181-207`) refuses in its own words.  `warm_start.blocks` is
             # NOT a site here, and that is measured rather than forgotten:
             # `require_priors` is called from `SamplingPlan.sample`
-            # (`plan.py:1064-1066`) and a warm start is `.estimate()`d
-            # (`exits.py:287-288`).
+            # (`plan.py::SamplingPlan._partition`) and a warm start is `.estimate()`d
+            # (`exits.py::_ESTIMATE_DEFAULTS`).
             #
             # `== _T7_GRADIENT` and never `!= _T7_CONJUGATE`: `_engine_of`
             # answers `""` for a block whose engine cannot be derived (A18's
@@ -1161,21 +1167,24 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
 
 #: Which ``runs[].kind`` needs a seed on the RUN.  ``npe`` is absent on
 #: purpose: it draws four times and declares its seeds per subsection in
-#: ``inference.npe:`` (``npe._seeded``, ``:246-258``), and a run-level
+#: ``inference.npe:`` (``npe._seeded``, ``exits.py::_SAMPLE_KEYS``), and a run-level
 #: ``seed:`` on it is refused rather than required.  ``condition`` is absent
-#: on purpose too: ``_CONDITION_KEYS`` (``conjugate.py:108``) carries ``seed``
+#: on purpose too: ``_CONDITION_KEYS`` (``conjugate.py``) carries ``seed``
 #: and ``_run_condition`` reads it only ``if "seed" in run.options``
-#: (``:685-690``), so it is OPTIONAL there and correctly outside A29 --
+# : (``conjugate.py::_a51_condition_takes_no_prior_mean``), so it is OPTIONAL there and correctly
+# outside A29 --
 #: ``condition_estimate``'s ``key`` defaults internally, which that function's
-#: own docstring argues at ``:645-649``.
+#: own docstring argues at ``conjugate.py::_parse_gcr``.
 _A29_SEEDED_KINDS: frozenset[str] = frozenset({"plan.sample", "conjugate.gcr",
                                                "nuts"})
 
 #: The subsections of ``inference.npe:`` that declare a seed, in the order
-#: ``parse_npe`` (``npe.py:394-398``) reads them.  ``embed:`` is the one
-#: member of ``_NPE_KEYS`` (``npe.py:108``) missing here, and it is missing
+#: ``parse_npe`` (``sections/npe.py::_train``) reads them.  ``embed:`` is the one
+#: member of ``_NPE_KEYS`` (``sections/npe.py``) missing here, and it is missing
 #: because it declares no seed -- measured, ``_seeded`` is called at
-#: ``npe.py:270``, ``:281``, ``:293`` and ``:313`` and nowhere else.  (It is
+# : ``inference/npe.py::NeuralPosterior.sample``, ``inference/npe.py``,
+# ``inference/npe.py::train_posterior`` and ``inference/npe.py::train_posterior`` and nowhere else.
+# (It is
 #: written second in that frozenset, which orders nothing; the order below is
 #: ``parse_npe``'s.)
 _A29_NPE_SUBSECTIONS: tuple[str, ...] = ("bank", "create", "train", "sample")
@@ -1191,7 +1200,7 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     lifted to module level in their own sections for exactly that purpose
     (``exits._a29_estimate_takes_no_seed``,
     ``conjugate._a29_gcr_needs_a_seed``, ``npe._a29_npe_takes_no_run_seed``),
-    and the other two through ``draws._seed_name`` (``:98-121``), which was
+    and the other two through ``draws._seed_name`` (``inference/npe.py::simulate_pairs``), which was
     already pure: it takes a dict and a prefix, refuses a missing key, a
     literal seed and a name outside ``runtime.seeds.``, and resolves nothing.
     The RESOLUTION (``seed_for``) stays where the context is.
@@ -1204,15 +1213,15 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     all 442 ``pytest.raises(ConfigError, match=...)`` assertions in
     ``tests/config/`` are searches and none is anchored with ``$``.
 
-    What moves is the phase.  ``nuts``'s seed is checked at ``nuts.py:300``,
-    i.e. AFTER ``to_numpyro_model`` is built at ``:287`` -- the most expensive
+    What moves is the phase.  ``nuts``'s seed is checked at ``nuts.py::_parse_nuts``,
+    i.e. AFTER ``to_numpyro_model`` is built at ``nuts.py::_parse_nuts`` -- the most expensive
     object that executor makes is constructed before the cheapest key on the
     run is looked at -- and all five sit behind ``build_resources``, which is
     90.9 % of ``load_document`` (§2.7).
 
     Two things are deliberately NOT A29's, both measured:
-    ``inference.observed.<name>.realise.seed`` (``observed.py:63``) and a
-    ``{normal: {seed: ...}}`` value node (``draws.py:144``) also go through
+    ``inference.observed.<name>.realise.seed`` (``observed.py::_predicted_shape``) and a
+    ``{normal: {seed: ...}}`` value node (``draws.py::_resolve_operand``) also go through
     ``_seed_name``, and neither is a ``runs[].kind`` -- schema §6's A29 row
     is about the run kinds and the npe subsections, and answering for the
     other two here would put this check in front of two grammars that own
@@ -1220,7 +1229,7 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     **And one leg of A29 is NOT hoisted, which is a hole in this plan's own
     thesis rather than a decision about wording.**  An ABSENT
-    ``inference.npe.<sub>`` is left to ``npe._subsection`` (``:230-243``),
+    ``inference.npe.<sub>`` is left to ``npe._subsection`` (``draws.py::_draw``),
     whose sentence is that the subsection is required rather than that a seed
     is missing -- but ``parse_npe`` runs inside ``build_inference``, which is
     after ``build_resources``, so that refusal still costs the beam.  Closing
@@ -1245,7 +1254,7 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
             continue
         where = f"runs[{index}]"
         named = f"runs[{run['name']!r}]"
-        # `RunSpec.options` is exactly this (`runs.py:113-114`), and
+        # `RunSpec.options` is exactly this (`runs.py::_one`), and
         # `_RUN_KEYS` is imported rather than restated -- measured, it is
         # {expect, kind, name, on, reuse, variant}, and a sixth key added
         # there would otherwise reach `_seed_name` as an option here while
@@ -1284,10 +1293,10 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
     npe = inference.get("npe") if isinstance(inference, Mapping) else None
     # NOT gated on a `kind: npe` run being declared, and the gate that was
     # here rested on the same false premise Task 9 removed from `_counts` one
-    # function down. `sections/inference.py:204` is `npe =
+    # function down. `inference.py::build_inference` is `npe =
     # parse_npe(section["npe"], context) if "npe" in section else None` --
     # unconditional on `runs:` -- so the seed IS read, at P2, and
-    # `build_inference` (`document.py:108`) runs AFTER `build_resources`
+    # `build_inference` (`preflight/document.py`) runs AFTER `build_resources`
     # (`:75`). Measured on a document whose only run is `kind: forward` and
     # whose `inference.npe:` is otherwise complete: a `train:` with no `seed`
     # was silent here and refused by `_seeded` at P2, and with UNREADABLE_BEAM
@@ -1316,19 +1325,19 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
 # --- Task 9: the counts a run declares, and the six knobs A25 never named ---
 
 
-#: ``CHECK_ONCE`` (``plan.py:148``) and ``CHECK_EACH_SWEEP`` (``:151``),
+#: ``CHECK_ONCE`` (``plan.py``) and ``CHECK_EACH_SWEEP`` (``plan.py``),
 #: written out for the reason :data:`_ENGINES` is: this module may not import
 #: ``rheplicant.inference`` at scope, and a module-level constant cannot defer
 #: an import the way a function body can.
 #: ``test_check_identifiability_is_a_closed_enum_read_from_the_package``
 #: imports both names in the TEST, and
 #: ``test_the_package_guard_this_enum_mirrors_is_still_that_guard`` reads
-#: ``plan.py:708``'s expression itself, so a third accepted mode turns those
+#: ``plan.py::Block``'s expression itself, so a third accepted mode turns those
 #: red rather than leaving this pass refusing a document the package runs.
 _T9_CHECK_ONCE: str = "once"
 _T9_CHECK_EACH_SWEEP: str = "each_sweep"
 
-#: ``MIN_DRAWS`` (``plan.py:186``), ``MIN_SWEEPS`` and ``DEFAULT_MAX_ITER``,
+#: ``MIN_DRAWS`` (``plan.py``), ``MIN_SWEEPS`` and ``DEFAULT_MAX_ITER``,
 #: written out for the same reason and against plan §2.5's *"do not write the
 #: literal"* -- **which is a COST decision, measured, not a style one.**
 #:
@@ -1371,7 +1380,7 @@ _T9_EARLIEST_CONVERGED_SWEEP: int = 3
 #: ``check_identifiability: [once]`` is a document a user can write, and
 #: inside the pass a ``TypeError`` becomes "check A25 RAISED" and discards
 #: every other finding.  And ``0 in frozenset({False, ...})`` is ``True``,
-#: because ``hash(0) == hash(False)``, while ``plan.py:708`` tests ``check is
+#: because ``hash(0) == hash(False)``, while ``plan.py::Block`` tests ``check is
 #: not False`` -- an IDENTITY -- and so refuses ``check_identifiability: 0``.
 #: A frozenset would therefore accept a document the package refuses AND
 #: crash on another.  :func:`_a25_check_mode` mirrors the package's two-part
@@ -1381,22 +1390,24 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE,
 
 #: ``(key, kind, minimum)`` per ``runs[].kind``, for every numeric knob that
 #: reaches the package.  ``sorted(set(_ESTIMATE_PASSTHROUGH) |
-#: set(_SAMPLE_PASSTHROUGH))`` (``exits.py:175-178``) is eight names --
+#: set(_SAMPLE_PASSTHROUGH))`` (``exits.py::_parse_optimize``) is eight names --
 #: ``check_identifiability``, ``max_iter``, ``min_sweeps``, ``rhat_max``,
 #: ``solve_guard``, ``solve_tol``, ``tol``, ``warmup`` -- of which A25's
 #: schema row names two, and ``n_sweeps`` is the ninth: it reaches ``_number``
-#: at ``exits.py:297`` with NO ``minimum=``, so today ``n_sweeps: 0`` is the
+#: at ``exits.py::_SAMPLE_DEFAULTS`` with NO ``minimum=``, so today ``n_sweeps: 0`` is the
 #: package's sentence at P3.  ``check_identifiability`` is the one of the
 #: eight that is not numeric, and :data:`_A25_CHECK_MODES` has it.
 #:
-#: The floors are the package's own: ``plan.py:900`` (``max_iter >= 1``),
-#: ``:909-911`` (``1 <= min_sweeps <= max_iter``), ``:1043`` (``n_sweeps >=
-#: 1``), ``:1048`` (``warmup >= 0``), ``nuts.py:282`` (both nuts counts
+#: The floors are the package's own: ``plan.py::Estimate`` (``max_iter >= 1``),
+# : ``plan.py::Estimate.names`` (``1 <= min_sweeps <= max_iter``),
+# ``plan.py::SamplingPlan._partition`` (``n_sweeps >=
+# : 1``), ``plan.py::SamplingPlan._partition`` (``warmup >= 0``), ``nuts.py::_parse_nuts`` (both
+# nuts counts
 #: ``>= 1``).  The three tolerances carry ``0.0`` because nothing in
 #: ``config/`` refuses a negative one -- grepped: ``solve_tol`` and
 #: ``solve_guard`` appear only in the key sets and the passthrough tuples --
 #: so it is forwarded raw into a solver whose bound is the ``eqx.error_if`` at
-#: ``linear.py:1504``, inside jit -- ``engines.py:284-288`` is the DOCSTRING
+#: ``linear.py::wiener_solve``, inside jit -- ``engines.py::_monitor_programs`` is the DOCSTRING
 #: that describes how that surfaces, not the guard itself.
 #: ``rhat_max`` carries ``0.0`` and NOT a strictly-positive floor: see
 #: :func:`_counts`' residues.
@@ -1411,8 +1422,8 @@ _A25_KNOBS: dict[str, tuple[tuple[str, type, float | None], ...]] = {
 }
 
 #: The one row of :data:`_A25_KNOBS` the package does not read
-#: unconditionally.  ``plan.py:909`` gates ``min_sweeps`` on ``tol is not
-#: None`` and ``:943-946`` short-circuits on the same test, so beside ``tol:
+#: unconditionally.  ``plan.py::Estimate.names`` gates ``min_sweeps`` on ``tol is not
+#: None`` and ``plan.py::Draws.std`` short-circuits on the same test, so beside ``tol:
 #: null`` a ``min_sweeps`` is forwarded, validated by nothing and consulted
 #: by nothing: ``min_sweeps: 0`` with ``tol: null`` RUNS.  Checking it anyway
 #: would refuse a document the package runs, for a knob that does nothing --
@@ -1423,15 +1434,16 @@ _A25_TOL_GATED: frozenset[str] = frozenset({"min_sweeps"})
 #: The rows where ``null`` is the package's OWN off-switch rather than a typo,
 #: DERIVED rather than judged: they are exactly the ``SamplingPlan.estimate``
 #: and ``.sample`` parameters whose annotation admits ``None`` -- ``tol:
-#: float | None`` (no convergence test at all, ``plan.py:874-878``),
-#: ``solve_guard: float | None`` (no condition-number estimate, ``:884-887``)
-#: and ``warmup: int | None`` (the ``n_sweeps // 2`` default, ``:1047``).
+#: float | None`` (no convergence test at all, ``plan.py::PlanDiagnostics``),
+#: ``solve_guard: float | None`` (no condition-number estimate, ``plan.py::PlanResult``)
+#: and ``warmup: int | None`` (the ``n_sweeps // 2`` default, ``plan.py::SamplingPlan._partition``).
 #: ``test_the_nullable_rows_are_the_packages_own_optional_parameters`` reads
 #: those signatures back out, so a fourth optional parameter turns it red.
 #:
 #: On every other row a ``null`` is REFUSED here, and the two that most needed
 #: it are the two the package handles worst: ``rhat_max`` is annotated
-#: ``float`` and reaches ``plan.py:1102``'s ``bool(rhat <= rhat_max)`` -- a
+# : ``float`` and reaches ``plan.py::SamplingPlan._refuse_split_joint_prior``'s ``bool(rhat <=
+# rhat_max)`` -- a
 #: ``TypeError`` naming no run and no key, raised AFTER the whole chain has
 #: been drawn -- and ``solve_tol`` is annotated ``float`` and reaches the CG
 #: solver as ``tol=None``.  ``max_iter``, ``min_sweeps``, ``n_sweeps`` and the
@@ -1441,11 +1453,12 @@ _A25_NULLABLE: frozenset[str] = frozenset({"tol", "solve_guard", "warmup"})
 
 #: The two counts ``inference.npe:`` REQUIRES, and the subsection each lives
 #: in.  Two of seven, not two of two: ``_whole`` guards seven whole-number
-#: knobs in that section (``npe.py:265``, ``:301``, ``:304``, ``:316``), and
-#: these are the two ``npe._count`` (``:261-265``) refuses when absent as well
+# : knobs in that section (``sections/npe.py::_positive``, ``sections/npe.py::_subsection``,
+# ``sections/npe.py``, ``sections/npe.py::_seeded``), and
+#: these are the two ``npe._count`` (``sections/npe.py::_positive``) refuses when absent as well
 #: as when out of range.  The other five are optional and are Plan 3B's row.
 #:
-#: They go through ``transforms._whole`` (``:50``), not ``_number``: that is
+#: They go through ``transforms._whole`` (``sections/npe.py``), not ``_number``: that is
 #: the binding ``npe._count`` already uses, and a second reading here would be
 #: the ``_number``-vs-``_whole`` divergence the 2C ledger names.
 _A25_NPE_COUNTS: tuple[tuple[str, str], ...] = (("bank", "n_simulations"),
@@ -1471,7 +1484,7 @@ def _t9_whole_number(value: Any) -> bool:
 
 
 def _a25_check_mode(mode: Any) -> bool:
-    """``plan.py:708``'s own test, mirrored and negated -- ``check is not
+    """``plan.py::Block``'s own test, mirrored and negated -- ``check is not
     False and check not in (CHECK_ONCE, CHECK_EACH_SWEEP)``.
 
     Identity on ``False`` and ``==`` membership over a TUPLE for the two
@@ -1486,9 +1499,10 @@ def _a25_bounded(where: str, name: str, key: str, value: Any, *,
                  kind: type, minimum: float | None) -> Finding | None:
     """``exit_support._number``, with its refusal turned into a Finding.
 
-    ``_number`` (``exit_support.py:73-98``) reads exactly one attribute off
+    ``_number`` (``exit_support.py::ParsedOptions``) reads exactly one attribute off
     the object it is handed -- ``run.name``, for the ``runs['<name>']:``
-    prefix, at ``:77``, ``:89`` and ``:95`` -- so a namespace carrying that
+    prefix, at ``exit_support.py::RunParseContext``, ``exit_support.py::ParsedRun`` and
+    ``exit_support.py::ParsedRun`` -- so a namespace carrying that
     name is the whole adapter.  **``name`` is the BARE run name, never the
     formatted ``runs['fit']``**: ``_number`` BUILDS the prefix itself, so
     handing it the finished string makes every A25 message read
@@ -1498,7 +1512,7 @@ def _a25_bounded(where: str, name: str, key: str, value: Any, *,
     for one property disagreeing, and a third written here would be that
     defect with a new name.
 
-    It also fixes a message.  ``plan.py:900`` reads ``not isinstance(
+    It also fixes a message.  ``plan.py::Estimate`` reads ``not isinstance(
     max_iter, int) or max_iter < 1`` and reports only the second half, so
     ``max_iter: 2.5`` reaches the user as *"estimate() needs max_iter >= 1,
     got 2.5"* -- false, since 2.5 IS >= 1, and the real fault is the
@@ -1508,7 +1522,7 @@ def _a25_bounded(where: str, name: str, key: str, value: Any, *,
 
     **The one value ``_number`` cannot be ASKED about, and it aborts the whole
     pass.**  That same whole-number refusal formats ``kind(value)``
-    (``exit_support.py:90``) to show what the count would round to, and
+    (``exit_support.py::ParsedRun``) to show what the count would round to, and
     ``int(float('inf'))`` raises ``OverflowError`` while ``int(float('nan'))``
     raises ``ValueError``.  Neither is a ``ConfigError``, so neither is caught
     below; inside the pass it becomes "check A24 RAISED" and **every other
@@ -1551,14 +1565,15 @@ def _a25_bounds(where: str, name: str, prefix: str,
     REFUSED everywhere else -- an earlier form skipped every ``null`` and
     justified it with "on the rest it is a typo the package refuses in its own
     voice", which is false of two of the seven: ``rhat_max: null`` is a
-    ``TypeError`` from ``plan.py:1102`` after the chain has been drawn, and
+    ``TypeError`` from ``plan.py::SamplingPlan._refuse_split_joint_prior`` after the chain has been
+    drawn, and
     ``solve_tol: null`` is a ``TypeError`` from inside the solver.  Both are
     annotated ``float`` rather than ``float | None``, which is where
     :data:`_A25_NULLABLE` comes from and why it is derived rather than judged.
 
     ``live`` is read off ``spec``, never off the run: on a warm start the two
     genuinely differ, because ``tol`` is not a ``_SAMPLE_KEYS`` member at all
-    (``exits.py:169-171``), so a ``plan.sample`` carrying a ``warm_start`` with
+    (``exits.py::_parse_optimize``), so a ``plan.sample`` carrying a ``warm_start`` with
     ``tol: null`` has a live run-``tol`` and a dead warm one.
     """
     live = spec.get("tol", 1) is not None
@@ -1628,7 +1643,7 @@ def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
 def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
     """Every mapping on this run whose counts reach a ``SamplingPlan``.
 
-    **Two, not one.**  ``exits.py:288-290`` calls ``SamplingPlan(space,
+    **Two, not one.**  ``exits.py::_ESTIMATE_DEFAULTS`` calls ``SamplingPlan(space,
     *warm_blocks).estimate(..., **_passthrough(warm, _ESTIMATE_PASSTHROUGH))``
     -- so ``max_iter``, ``tol``, ``min_sweeps``, ``check_identifiability``,
     ``solve_tol`` and ``solve_guard`` are read off the WARM mapping and meet
@@ -1645,10 +1660,11 @@ def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
     all -- IMPORTED from Task 7 rather than re-derived, because two
     independently written "would this warm start be read?" predicates is the
     two-validators shape one function over.  It implements **three of the
-    executor's five** gates (``exits.py:259-285``): a mapping (``:260``),
-    ``kind: plan.estimate`` (``:268``) and a usable ``move:`` (``:273``).  It
-    does NOT implement the unknown-key sweep (``:264-267``) or the test that
-    ``move`` names a DECLARED latent (``:280-285``), so a warm start carrying
+    executor's five** gates (``exits.py::_WARM_KEYS``): a mapping (``exits.py::_WARM_KEYS``),
+    ``kind: plan.estimate`` (``exits.py::_WARM_KEYS``) and a usable ``move:``
+    (``exits.py::_ESTIMATE_PASSTHROUGH``).  It
+    does NOT implement the unknown-key sweep (``exits.py::_WARM_KEYS``) or the test that
+    ``move`` names a DECLARED latent (``exits.py::_SAMPLE_PASSTHROUGH``), so a warm start carrying
     a typo'd key, or ``move: [ghost]``, still earns A25 here for a mapping the
     executor discards.  That is a residue rather than an oversight: the A25
     sentence is true of the value the user wrote either way, unlike a
@@ -1668,16 +1684,16 @@ def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
 def _a24_kept_draws(options: Mapping[str, Any]) -> tuple[int, int] | None:
     """``(kept, warmup)`` for a ``plan.sample`` run, or None if undecidable.
 
-    **``n_sweeps // 2`` is RESTATED from ``plan.py:1047``**, because the
+    **``n_sweeps // 2`` is RESTATED from ``plan.py::SamplingPlan._partition``**, because the
     config layer forwards ``warmup`` only when the document declares it
-    (``_passthrough``, ``exit_support.py:223``), so there is nothing to ask.
+    (``_passthrough``, ``exit_support.py::_legacy_freeze_parse``), so there is nothing to ask.
     A restated default drifts silently: were the package to change it, every
     message this pass writes would still read "N sweeps minus M warmup" with
     the wrong M, and every test here would stay green because they restate it
     too.  ``test_the_restated_default_is_still_the_packages_own`` reads the
     expression back out of the package's source and is what catches that.
 
-    ``plan.py:1047`` reads ``warmup is None`` rather than "was warmup
+    ``plan.py::SamplingPlan._partition`` reads ``warmup is None`` rather than "was warmup
     declared", so a written-out ``warmup: null`` takes the default here as
     well -- and :func:`_counts`' "the default" clause is on the same test
     rather than on ``"warmup" in run``.
@@ -1712,18 +1728,18 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A24 and A25: every count a run declares, checked where it is written.
 
     A25's schema row names four clauses and this plan's §1 adds "the six
-    passthrough keys A25 does not name".  Counted from ``exits.py:175-178``:
+    passthrough keys A25 does not name".  Counted from ``exits.py::_parse_optimize``:
     ``sorted(set(_ESTIMATE_PASSTHROUGH) | set(_SAMPLE_PASSTHROUGH))`` is
     eight names, A25's row names ``max_iter`` and ``min_sweeps``, so the six
     are ``check_identifiability``, ``rhat_max``, ``solve_guard``,
     ``solve_tol``, ``tol`` and ``warmup``.  ``n_sweeps`` is the ninth and
-    reaches ``_number`` at ``exits.py:297`` with no ``minimum=``.
+    reaches ``_number`` at ``exits.py::_SAMPLE_DEFAULTS`` with no ``minimum=``.
 
     **A run declaring ``expect: refuse`` is NOT left alone**, and that is the
     one place this check departs from :func:`_blocks` and
     :func:`_prior_gates` deliberately.  Those two stand down because a real
     document in this repository would otherwise lose the assertion it exists
-    to make (``test_config_exits_plan.py:108-113``,
+    to make (``test_config_exits_plan.py::TestEstimate.test_noise_kind_none_is_refused``,
     ``posterior_helpers.joint_prior_document``).  No document expects a count
     refusal, and the layer's own policy test says the general shape is the
     other way round: ``test_config_section_runs.py``'s
@@ -1739,7 +1755,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
       ``tol: .inf`` and ``solve_guard: .inf``.  ``rhat_max`` decides a chain's
       convergence verdict and no value of it is refused today; this check
       closes the type and the negative half, but ``0.0`` cannot be closed with
-      ``_number``, whose ``minimum=`` is inclusive (``exit_support.py:93``:
+      ``_number``, whose ``minimum=`` is inclusive (``exit_support.py::ParsedRun``:
       ``not value >= minimum``), and neither an exclusive floor nor a ceiling
       written here would be anything but a second validator for a bound
       ``_number`` owns.  A threshold nobody can fail is a warning rather than
@@ -1747,7 +1763,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     * **``nuts``'s other three numeric knobs** -- ``num_chains``,
       ``thinning`` and ``target_accept_prob`` -- are outside A25's schema row
       and outside this plan's §1 wording.  They ARE checked, by ``_number``,
-      at ``nuts.py:230-238``, which is P3 and behind the beam; hoisting them
+      at ``nuts.py::_init_strategy``, which is P3 and behind the beam; hoisting them
       is a widening rather than a hole this check leaves in a rule it states.
     * **A warm start the executor refuses for a key it cannot read** still
       earns A25 for the counts inside it -- :func:`_a25_sites` says which two
@@ -1758,9 +1774,9 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     **Variant layers are not walked**, the same way :func:`_blocks` does not.
     ``load_document`` calls the pass on the variant-APPLIED document
-    (``document.py:68``), so a SELECTED variant's counts are read here like
+    (``preflight/document.py``), so a SELECTED variant's counts are read here like
     any others.  An unselected one is not: Task 3's ``_variant_text``
-    (``preflight/document.py:343-353``) re-runs ``_structural`` per layer and
+    (``preflight/document.py::_variant_text``) re-runs ``_structural`` per layer and
     says in its own docstring that "the model interior of an unselected
     variant therefore stays open here", which is the same residue one section
     along and is §6's rather than this check's.
@@ -1785,7 +1801,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                     refused_counts = True
 
             # Only the two ``plan.*`` kinds take it.  ``_NUTS_KEYS``
-            # (``nuts.py:103-108``) does not carry the key, so Task 3's
+            # (``nuts.py``) does not carry the key, so Task 3's
             # ``A1.runs`` already refuses it there by name, and a second
             # answer here would be two refusals in two voices for one typo.
             if (rows_kind.startswith("plan.")
@@ -1804,19 +1820,19 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
             if rows_kind == "plan.estimate":
                 # Gated on ``tol``, and the gate is the package's:
-                # ``plan.py:909`` reads ``tol is not None and ...``, because
+                # ``plan.py::Estimate.names`` reads ``tol is not None and ...``, because
                 # with no convergence test there is no floor for
-                # ``min_sweeps`` to raise.  ``:910`` is ``not 1 <=
+                # ``min_sweeps`` to raise.  ``plan.py::Estimate.names`` is ``not 1 <=
                 # min_sweeps <= max_iter``, so EQUALITY is legal and only
                 # ``floor > cap`` is not.  ``spec``, never ``run``: on a warm
                 # start the two `tol`s genuinely differ, because `tol` is not
-                # a `_SAMPLE_KEYS` member (`exits.py:169-171`).
+                # a `_SAMPLE_KEYS` member (`exits.py::_parse_optimize`).
                 #
                 # THE DEFAULTS ARE THE PACKAGE'S.  An earlier form read
                 # `spec.get("min_sweeps")` and `spec.get("max_iter")` and so
                 # fired only when BOTH keys were written -- which skips
                 # `max_iter: 1` and `max_iter: 2`, ordinary documents that
-                # `plan.py:909-910` refuses against MIN_SWEEPS = 3, and
+                # `plan.py::Estimate.names` refuses against MIN_SWEEPS = 3, and
                 # `min_sweeps: 101` against DEFAULT_MAX_ITER = 100.  That is
                 # one of the four clauses A25's own schema row names.  They
                 # are WRITTEN OUT rather than deferred-imported: measured, a
@@ -1846,7 +1862,10 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # `_T9_MIN_DRAWS`, not `from rheplicant.inference import
                 # MIN_DRAWS`.  A head import is forbidden outright --
                 # `rheplicant/inference/__init__.py` re-exports the layer
-                # eagerly and `test_config_exits_predict.py:1046-1073` refuses
+                # eagerly and
+                # `
+                # test_config_exits_predict.py::test_a_variant_that_moves_the_layout_is_the_packages_refusal`  # noqa: E501
+                # refuses
                 # it by name in a fresh interpreter -- and the DEFERRED import
                 # plan §2.5 called for is what made this the one path §5's
                 # 0.05 s could not hold: 43 modules and 21 ms, on the first
@@ -1869,9 +1888,9 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     npe = inference.get("npe") if isinstance(inference, Mapping) else None
     # NOT gated on a `kind: npe` run being declared, and the earlier gate that
     # was ("a count nothing will read is not a fault") rested on a claim that
-    # is false. `sections/inference.py:204` is `npe = parse_npe(section["npe"],
+    # is false. `inference.py::build_inference` is `npe = parse_npe(section["npe"],
     # context) if "npe" in section else None` -- unconditional on `runs:` -- so
-    # the count IS read, at P2, and `build_inference` (`document.py:108`) runs
+    # the count IS read, at P2, and `build_inference` (`preflight/document.py`) runs
     # AFTER `build_resources` (`:75`). Measured: `n_simulations: 0` beside
     # `runs: [{kind: forward}]` was silent here and refused by the package, and
     # with UNREADABLE_BEAM in the same document the BEAM spoke first -- which
@@ -1881,7 +1900,8 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
     for subsection, key in _A25_NPE_COUNTS:
         body = npe.get(subsection)
         # An ABSENT or malformed subsection is ``npe._subsection``'s
-        # (``:230``) and a MISSING count is ``npe._count``'s (``:263-264``),
+        # (``preflight/document.py``) and a MISSING count is ``npe._count``'s
+        # (``preflight/document.py::_task3_horizon_in``),
         # whose sentences say the subsection or the key is required rather
         # than that a number is out of range.
         if not isinstance(body, Mapping) or key not in body:
@@ -1897,7 +1917,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
 
 #: Every ``inference.noise.kind`` ``build_noise`` accepts.  A COPY of
-#: ``sections/noise.py``'s ``_KIND_KEYS`` keys (``noise.py:34-41``), and the
+#: ``sections/noise.py``'s ``_KIND_KEYS`` keys (``sections/noise.py``), and the
 #: copy is CHECKED -- ``test_the_noise_kinds_are_the_ones_build_noise_accepts``
 #: asserts the two are equal, so a fifth kind added there and forgotten here
 #: is a red test rather than a check that silently stands down on every
@@ -1916,15 +1936,17 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 _NOISE_KINDS: frozenset[str] = frozenset(
     {"none", "homoscedastic", "radiometer", "radiometer_frozen"})
 
-#: ``inference.noise.kind`` -> what ``decided_noise`` (``noise.py:235-247``)
+#: ``inference.noise.kind`` -> what ``decided_noise`` (``sections/noise.py::build_noise``)
 #: hands an exit, decided from the WORD and nothing else.
 #:
 #: * ``absent``  -- ``kind: none``; ``decided_noise`` returns None and
-#:   ``_noise`` (``exit_support.py:205-209``) refuses in its own words.
+#:   ``_noise`` (``exit_support.py::parsed_options``) refuses in its own words.
 #:   Neither A27 nor A28 may speak here: A28's sentence would tell a document
 #:   that declares no sigma that it "decides its sigma into an array", which
 #:   is precisely what ``test_noise_kind_none_keeps_the_shared_refusal``
-#:   (``test_config_conjugate_shared.py:483``) exists to prevent.
+# :
+# (``test_config_conjugate_shared.py::test_a_decided_array_is_refused_naming_conjugate_wiener``)
+# exists to prevent.
 #: * ``decided`` -- a NoiseModel whose ``std`` ignores its argument's values
 #:   by contract, so an exit wanting an array evaluates it and an exit
 #:   wanting a rule takes it.  Refused by neither.
@@ -1934,9 +1956,11 @@ _NOISE_KINDS: frozenset[str] = frozenset(
 #:
 #: Measured: ``HomoscedasticNoise.depends_on_prediction`` is False and
 #: ``RadiometerNoise.depends_on_prediction`` is True, both as CLASS
-#: attributes (``inference/noise.py:121``, ``:157``), and ``FlaggedNoise``
+# : attributes (``inference/noise.py::HomoscedasticNoise``,
+# ``inference/noise.py::RadiometerNoise``), and ``FlaggedNoise``
 #: forwards its inner model's through a ``@property``
-#: (``inference/noise.py:221-223``) -- so a ``flags:`` entry never moves a
+# : (``inference/noise.py::FlaggedNoise.depends_on_prediction``) -- so a ``flags:`` entry never
+# moves a
 #: row.  ``test_the_shape_table_matches_the_noise_classes`` reads all THREE
 #: back rather than trusting this comment: the two class attributes
 #: directly, and the forwarding by constructing a ``FlaggedNoise`` over each
@@ -1964,10 +1988,10 @@ _T10_NOISE_SHAPE: dict[str, str] = {
 
 #: The exits that ALWAYS resolve a decided sigma array, so A27 is theirs
 #: unconditionally.  This is ``conjugate_support._DECIDES_SIGMA_HERE``'s
-#: membership (``conjugate_support.py:62``, read at ``:135``).
+#: membership (``conjugate_support.py``, read at ``conjugate_support.py::_conjugate_block``).
 #: ``conjugate.gcr`` is deliberately NOT here: it reaches ``_decided_sigma``
-#: only under ``noise_from: declared`` (``conjugate.py:380``, ``:426``,
-#: ``:435``) and has a third way out that costs it nothing, so it is branched
+#: only under ``noise_from: declared`` (``conjugate.py::_wiener_plan``, ``conjugate.py::_gcr_plan``,
+#: ``conjugate.py::_gcr_plan``) and has a third way out that costs it nothing, so it is branched
 #: on in the body and hears its own sentence.
 _T10_DECIDES_SIGMA: frozenset[str] = frozenset({"conjugate.wiener",
                                                 "condition"})
@@ -2010,22 +2034,23 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
     """A27 and A28: the ``(runs[].kind, inference.noise.kind)`` table.
 
     Two words of text decide both.  Today they are decided at P3, inside
-    ``_decided_sigma`` (``exit_support.py:227-270``) and ``_decided_model``
-    (``:273-315``), after ``build_resources`` has read and analysed every
+    ``_decided_sigma`` (``exit_support.py``) and ``_decided_model``
+    (``exit_support.py::_adapt_legacy_executor``), after ``build_resources`` has read and analysed
+    every
     beam -- which is 90.9 % of ``load_document``'s wall time on a toy
     nside-16 beam (§2.7).
 
     **The runtime refusals stay.**  They are not the same predicate: this one
     reads two strings, theirs reads ``isinstance(noise, NoiseModel)`` and
     ``depends_on_prediction`` off a BUILT object, and only the second one can
-    see a fanned ``by_observation`` mapping (``exit_support.py:201-202``) or
+    see a fanned ``by_observation`` mapping (``exit_support.py::parsed_options``) or
     a noise this layer has not finished resolving.  The two agree on every
     document v1 can express, and :data:`_T10_NOISE_SHAPE`'s own test is what
     keeps them agreeing -- so this is the second opinion plan §2.2 sanctions,
     not the copy it forbids.
 
     Returns findings and raises nothing (§2.3): an unknown ``noise.kind`` is
-    left to ``build_noise`` (``noise.py:112-116``), which names the
+    left to ``build_noise`` (``sections/noise.py::_a26_sigma_axis_problem``), which names the
     vocabulary, rather than becoming a ``KeyError`` out of this table, and
     both membership tests are guarded by ``isinstance(..., str)`` because a
     frozenset raises on an unhashable left operand.
@@ -2035,7 +2060,7 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
     real document each that would otherwise lose the assertion it exists to
     make; measured, none of the five ``expect: refuse`` documents in
     ``tests/config/`` is A27/A28 shaped, and
-    ``test_config_section_runs.py:88`` records that a P-1 refusal raising out
+    ``test_config_section_runs.py::TestRunDocument`` records that a P-1 refusal raising out
     of ``run_document`` rather than being captured is the correct shape.
 
     **``where`` names the run, not the noise, and that is a decision.**  The
@@ -2084,10 +2109,11 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
         exit_kind = entry.get("kind")
         if not isinstance(exit_kind, str):
             continue
-        # `_runs` filled `name` by `parse_runs`' own rule (`runs.py:115`: an
+        # `_runs` filled `name` by `parse_runs`' own rule (`runs.py::_one`: an
         # unnamed run is named after its kind), and every executor's message
         # spells the prefix `runs['<that name>']:`.
-        # `test_config_exits_gls.py:422` asserts startswith("runs['gls']: "),
+        # `test_config_exits_gls.py::TestWhatReachesTheLoop.test_the_solver_knobs_reach_the_loop`
+        # asserts startswith("runs['gls']: "),
         # so the INDEX form would be a red test and a message that does not
         # match the one the user gets from the executor.
         name = entry["name"]
