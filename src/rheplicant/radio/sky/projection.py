@@ -29,17 +29,24 @@ and one that takes the projection as data, defined here:
 """
 
 import abc
+from typing import ClassVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import StateValidationError
 
 
 class AbstractSkyProjector(eqx.Module):
     """Sky representation ``(n_freq, n_pix)`` -> antenna temperature ``(n_time, n_freq)``."""
+
+    # No value here, as on `AbstractOperator` and `AbstractSkyModel`: a
+    # projector is a shipped capability and the level must be declared, never
+    # inherited. See `rheplicant.core.capability.Maturity`.
+    maturity: ClassVar[Maturity]
 
     @abc.abstractmethod
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
@@ -78,6 +85,7 @@ class MatrixProjector(AbstractSkyProjector):
         matrix: ``(n_time, n_pix)`` shared across frequency (achromatic beam),
             or ``(n_freq, n_time, n_pix)`` for a chromatic beam.
     """
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     matrix: jax.Array
 

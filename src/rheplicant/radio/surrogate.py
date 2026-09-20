@@ -21,6 +21,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -41,6 +42,7 @@ class NeuralOperator(AbstractOperator):
 
     requires: ClassVar[tuple[str, ...]] = ("data", "coords.freq")
     provides: ClassVar[tuple[str, ...]] = ("data",)
+    maturity: ClassVar[Maturity] = Maturity.EXPERIMENTAL
 
     mlp: eqx.nn.MLP
     f_min: float = eqx.field(static=True)

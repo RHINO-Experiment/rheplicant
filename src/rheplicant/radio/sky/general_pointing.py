@@ -32,11 +32,14 @@ float32-stable, but the projector as a whole inherits the transform error
 (see ``limtod_jax.hpx``).
 """
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import StateValidationError
 from rheplicant.radio.sky.projection import AbstractSkyProjector
@@ -85,6 +88,7 @@ class GeneralPointingProjector(AbstractSkyProjector):
         normalize_beam: numpy limTOD's ``normalize_beam`` semantics — divide
             each sample by the rotated beam's pixel sum (static).
     """
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     beam_alms: jax.Array
     lat_deg: float = eqx.field(static=True)

@@ -29,24 +29,53 @@ would notice.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
+import rheplicant.radio as radio
 from rheplicant.config.sections.model import operator_table
 from rheplicant.core.capability import Maturity
 from rheplicant.core.operator import AbstractOperator
+from rheplicant.radio.sky.model import AbstractSkyModel
+from rheplicant.radio.sky.projection import AbstractSkyProjector
+
+#: What makes a public class a CAPABILITY rather than a record. Three bases,
+#: and the answer is derived from the type relationship rather than from a list
+#: of names -- a list would need editing every time a class is added, which is
+#: the failure this whole registry exists to end.
+CAPABILITY_BASES = (AbstractOperator, AbstractSkyModel, AbstractSkyProjector)
 
 
 def _shipped() -> dict[str, type]:
-    """Every operator class addressable from a document.
+    """Every concrete capability on the package's public radio surface.
 
-    Derived from ``operator_table()``, which is itself derived from
-    ``rheplicant.radio.__all__``, so a class added to the package surface
-    arrives here with no list to update.
+    The first version of this walked ``operator_table()`` -- the classes a
+    CONFIG DOCUMENT can address -- and that was too narrow by two. Measured
+    2026-09-20: ``NeuralOperator`` is a public operator that no document may
+    name (the config layer refuses it by design), and ``AbstractLinearFilter``
+    is a public base. Neither was reached, so neither was required to declare
+    a level, and ``NeuralOperator`` had none.
+
+    ``rheplicant.radio.__all__`` is the real public surface, so that is what is
+    walked. Two kinds of class are left out and both are derived, not listed:
+
+    * abstract ones -- the three bases and anything with unimplemented
+      abstract methods. A base must NOT carry a level; that is asserted
+      separately, in the other direction.
+    * classes that are not capabilities at all. ``Touchstone`` and
+      ``RhinoObservation`` are parsed-data records; the capability is the
+      reader that returns one, and readers are functions. They fall out of
+      the ``issubclass`` test with no name written down.
     """
     found: dict[str, type] = {}
-    for classes in operator_table().values():
-        for cls in classes:
-            found[cls.__name__] = cls
+    for name in radio.__all__:
+        obj = getattr(radio, name, None)
+        if not inspect.isclass(obj) or not issubclass(obj, CAPABILITY_BASES):
+            continue
+        if obj in CAPABILITY_BASES or inspect.isabstract(obj):
+            continue
+        found[name] = obj
     return found
 
 
@@ -88,6 +117,41 @@ def test_the_docstring_and_the_level_agree(name, cls):
             f"so: {summary!r}. A reader of the docstring would believe the "
             "numbers"
         )
+
+
+def test_every_class_a_document_can_name_is_in_the_walk():
+    """The narrower set must be inside the wider one.
+
+    ``operator_table()`` is what a config document may address. If a class
+    were registered there without being on ``radio.__all__``, this file would
+    never see it and the level it failed to declare would be invisible -- the
+    exact hole that hid ``NeuralOperator`` before the walk was widened, in the
+    other direction.
+    """
+    addressable = {
+        cls.__name__ for classes in operator_table().values() for cls in classes
+    }
+    walked = {name for name, _ in SHIPPED}
+    missed = sorted(addressable - walked)
+    assert not missed, (
+        f"{missed} can be named in a config document but is not on "
+        "rheplicant.radio.__all__, so the capability walk never reaches it"
+    )
+
+
+@pytest.mark.parametrize("base", CAPABILITY_BASES, ids=[b.__name__ for b in CAPABILITY_BASES])
+def test_an_abstract_base_carries_no_level(base):
+    """The bases annotate ``maturity``; they must not answer it.
+
+    Asserted per base rather than once, so a default added to any one of the
+    three names itself in the failure. Without this, a value on
+    ``AbstractSkyModel`` would silently label both placeholder skies as
+    whatever it said.
+    """
+    assert "maturity" not in vars(base), (
+        f"{base.__name__} carries a DEFAULT maturity, so every subclass "
+        "inherits a claim about its physics instead of declaring one"
+    )
 
 
 def test_the_base_class_has_no_default_level():

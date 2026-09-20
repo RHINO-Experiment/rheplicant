@@ -16,11 +16,13 @@ implementations; the placeholders are pixelization-agnostic (any ``n_pix``).
 """
 
 import abc
+from typing import ClassVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 
 
@@ -30,6 +32,12 @@ class AbstractSkyModel(eqx.Module):
     Differentiable sky parameters (amplitudes, spectral indices, moment
     coefficients...) are ordinary array fields of the concrete model.
     """
+
+    # Declared here for the same reason as on `AbstractOperator`, and with the
+    # same absence of a value: a sky model is a shipped capability and two of
+    # the three concrete ones are stand-ins. See
+    # `rheplicant.core.capability.Maturity`.
+    maturity: ClassVar[Maturity]
 
     @abc.abstractmethod
     def __call__(self, freq: jax.Array) -> jax.Array:
@@ -43,6 +51,7 @@ class UniformSkyModel(AbstractSkyModel):
         amplitude: brightness temperature [K] — differentiable scalar.
         n_pix: number of sky pixels (static configuration).
     """
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
     n_pix: int = eqx.field(static=True)
@@ -69,6 +78,7 @@ class PowerLawSkyModel(AbstractSkyModel):
         ref_freq: reference frequency [Hz] (static configuration).
         n_pix: number of sky pixels (static configuration).
     """
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
     spectral_index: jax.Array
@@ -109,6 +119,7 @@ class MapSky(AbstractSkyModel):
             differentiable leaf, so a sky can be inferred rather than assumed.
         freq: ``(n_freq,)`` the frequency grid the maps were built on [Hz].
     """
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     maps: jax.Array
     freq: jax.Array

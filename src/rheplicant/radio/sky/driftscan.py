@@ -72,11 +72,13 @@ steps inherit s2fft's float32 limitation; see ``limtod_jax.hpx``).
 
 import dataclasses
 import math
+from typing import ClassVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.coordinates import Coordinates
 from rheplicant.core.errors import StateValidationError
 from rheplicant.radio.sky.projection import AbstractSkyProjector
@@ -184,6 +186,7 @@ class DriftScanProjector(AbstractSkyProjector):
             what makes an attempt to re-anchor the phases against a stale
             cached rotation fail loudly instead of silently.
     """
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     beam_alms: jax.Array
     lat_deg: float = eqx.field(static=True)
